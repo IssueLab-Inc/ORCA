@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Matches, type Measure, type ReportClash, type ReportElement, type TriageVerdict } from "./api";
 import { mm } from "./ReportList";
+import { oneElement, sameWhy } from "./noClash";
 import { drawOverlay, focusSquare, readClashImage, type Box, type ClashRead } from "./clashImage";
 import { TRIAGE } from "./Triage";
 
@@ -69,16 +70,6 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
   );
 }
 
-/** Both sides resolve to the same model element (a port and its own valve, or two Navisworks parts of one door). */
-function oneElement(m: Matches[string] | undefined) {
-  const a = m?.show?.[0] ?? m?.a, b = m?.show?.[1] ?? m?.b;
-  return !!a && a === b;
-}
-
-function sameWhy(c: ReportClash) {
-  const ports = [c.a, c.b].filter((e) => /Port$/.test(e.ifc_class ?? "")).length;
-  return ports === 2 ? "two of its ports" : ports === 1 ? "a port with the element it belongs to" : "two parts of it";
-}
 
 export function Lightbox({ reportId, clash, index, onClose, onMove }: {
   reportId: string; clash: ReportClash; index: number; onClose: () => void; onMove: (index: number) => void;

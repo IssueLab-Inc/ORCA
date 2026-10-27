@@ -263,6 +263,12 @@ in-app `ReviewBlock`, name + decision, kept in localStorage per report; no login
 assigned to the acting team, comments = explanation + reviews, coloured pair and camera. Needs triage done; costs one
 proposal. HTML → PDF with WeasyPrint (Modal image apt-installs pango/harfbuzz).
 
+Not a clash (Oct 28): `web/src/noClash.ts` decides when a report clash needs no fix: same element (purple), a
+non-physical side (port, space, opening), a touch (|Navisworks| ≤ 1 mm and Sightline measures no overlap), no overlap in
+the open model, or triage by_design / non_physical. The clash panel then shows why and **Mark as not a clash**
+(a by-design review) in place of Propose fixes and Try a move ("Propose a fix anyway" overrides); list rows get a
+muted tag and cannot be ticked for Fix together. A Sightline overlap > 1 mm beats a 0 mm Navisworks touch.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

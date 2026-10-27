@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type Matches, type Report, type ReportClash, type TriageKind, type TriageVerdict } from "./api";
 import { ClashThumb } from "./ClashPanel";
 import { TRIAGE } from "./Triage";
+import { noClash } from "./noClash";
 
 /** A clash someone looked at and decided needs no model edit here. */
 export interface Review { kind: "by_design" | "author"; note: string }
@@ -62,7 +63,8 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   const linked = matches ? report.clashes.filter((c) => linkState(matches, c.id) === "both").length : null;
   const fixedCount = report.clashes.filter((c) => fixes[c.id]).length;
   const reviewedCount = report.clashes.filter((c) => !fixes[c.id] && reviewed[c.id]).length;
-  const fixable = (c: ReportClash) => linkState(matches, c.id) === "both" && !fixes[c.id] && !reviewed[c.id];
+  const fixable = (c: ReportClash) => linkState(matches, c.id) === "both" && !fixes[c.id] && !reviewed[c.id]
+    && !noClash(c, matches?.[c.id], null, triage[c.id]);
 
   return (
     <div className="report">
@@ -102,8 +104,9 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                 const link = linkState(matches, c.id);
                 const rv = !fixes[c.id] ? reviewed[c.id] : undefined;
                 const tv = triage[c.id];
+                const nc = !fixes[c.id] && !rv ? noClash(c, matches?.[c.id], null, tv) : null;
                 return (
-                  <div key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""} ${rv ? "reviewed" : ""}`} data-clash={c.id}>
+                  <div key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""} ${rv ? "reviewed" : ""} ${nc ? "noclash" : ""}`} data-clash={c.id}>
                     {matches && <input type="checkbox" aria-label={`Select ${c.name}`} checked={checked.has(c.id)} disabled={!fixable(c)}
                       onChange={(e) => onCheck([c.id], e.target.checked)} />}
                     {c.images.length > 0
@@ -116,6 +119,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                       {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : rv ? <i className="tick muted" aria-label="Reviewed">✓</i> : link ? <i className={`dot ${link}`} /> : <i />}
                       <span className="clash-name">{c.name}</span>
                       <span className="clash-pair">{short(c)}</span>
+                      {nc && !tv && <span className="tv muted" title={nc.why}>{nc.label}</span>}
                       {tv && !fixes[c.id] && !rv && <span className={`tv ${TRIAGE[tv.verdict].cls}`} title={tv.understanding || TRIAGE[tv.verdict].tip}
                         aria-label={`Triage: ${TRIAGE[tv.verdict].label}`}>{TRIAGE[tv.verdict].label}</span>}
                       {fixes[c.id] ? <span className="fixed-label">fixed</span>

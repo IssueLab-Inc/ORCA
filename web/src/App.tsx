@@ -1,4 +1,4 @@
-import { Boxes, Brain, Check, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Boxes, Brain, Check, CircleCheck, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
@@ -10,6 +10,7 @@ import { PlanPanel, type PlanRun } from "./PlanPanel";
 import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
 import { ReportList, mm, type Review } from "./ReportList";
+import { noClash } from "./noClash";
 import { Popover } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
@@ -265,6 +266,13 @@ export function App() {
       clearance: o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m), clearance_m: o.min_clearance_m ?? null,
       rationale: o.rationale, also_needs: o.also_needs, ...pics };
   }
+
+  // A selected report clash that needs no fix (one element, not physical, a touch, no overlap, by design per triage):
+  // the panel says why instead of offering a fix, unless someone asks for one anyway.
+  const [fixAnyway, setFixAnyway] = useState(false);
+  useEffect(() => { setFixAnyway(false); }, [clash]);
+  const notAClash = clash && !fixes[clash.id] && !proposal && !progress ? noClash(clash, matches?.[clash.id], measure, triage[clash.id]) : null;
+  const hideFix = !!notAClash && !fixAnyway;
 
   function review(ids: string[], kind: Review["kind"], note: string) {
     setReviewed((r) => ({ ...r, ...Object.fromEntries(ids.filter((id) => !fixes[id]).map((id) => [id, { kind, note }])) }));
@@ -822,9 +830,20 @@ export function App() {
                 <dt><i className="sw green" />B</dt><dd className="mono">{b ?? "—"}</dd>
               </dl>
             ) : <p className="hint">Pick a clash from the list, or double-click two elements in the model.</p>}
+          {hideFix && clash && (
+            <div className="noclash-card" role="status">
+              <b><CircleCheck size={15} aria-hidden /> {notAClash!.title}</b>
+              <p>{notAClash!.why}</p>
+              {reviewed[clash.id]
+                ? <p className="hint">Marked {reviewed[clash.id].kind === "by_design" ? "as by design" : "for the model's author"}.</p>
+                : <button className="btn primary" onClick={() => review([clash.id], "by_design", notAClash!.why)}>
+                  <CircleCheck size={15} aria-hidden /> Mark as not a clash</button>}
+              <button className="link" onClick={() => setFixAnyway(true)}>Propose a fix anyway</button>
+            </div>
+          )}
           <div className="actions">
-            <button className="btn primary big" disabled={!a || !b || !sceneId || !!busy || proposing} onClick={propose}>
-              {proposing ? <><i className="spinner" aria-hidden /> Working…</> : <><Sparkles size={16} aria-hidden /> Propose fixes</>}</button>
+            {!hideFix && <button className="btn primary big" disabled={!a || !b || !sceneId || !!busy || proposing} onClick={propose}>
+              {proposing ? <><i className="spinner" aria-hidden /> Working…</> : <><Sparkles size={16} aria-hidden /> Propose fixes</>}</button>}
             <button className="btn" disabled={!a && !b} onClick={focusNow}><LocateFixed size={15} aria-hidden /> Go to the clash</button>
           </div>
 
@@ -849,15 +868,15 @@ export function App() {
             </div>
           ))}
 
-          <details className="try">
+          {!hideFix && <details className="try">
             <summary><Move size={14} aria-hidden /> Try a move yourself</summary>
             <label className="field">Move A vertically (m)
               <input id="manual-dz" type="number" step="0.05" value={manualDz} onChange={(e) => setManualDz(Number(e.target.value))} />
             </label>
             <button className="btn" disabled={!a || !sceneId} onClick={checkManual}>Check this move</button>
             {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
-          </details>
-          {checked.size === 0 && report && matches && !proposal && (
+          </details>}
+          {checked.size === 0 && report && matches && !proposal && !hideFix && (
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
           )}
         </div>
