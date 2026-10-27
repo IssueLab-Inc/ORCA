@@ -16,6 +16,8 @@ export const serverPointToViewer = serverDeltaToViewer;
 type Found = { model: LoadedModel; el: LoadedElement };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[] };
+/** A fix to preview: an offset's new pieces, or a move. `before`: what it changes, as it is now. */
+export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null };
 
 /**
  * How the model is drawn around the elements in focus (a clash pair, plus pieces an accepted fix added):
@@ -329,21 +331,30 @@ export class Viewer {
 
   /** Show a proposed fix three ways: "after" (the fix in place of what it changes), "before" (the model as it is)
    * or "both" (the fix, with what it replaces as an orange ghost). Shapes are server triangles (metres, Z up). */
-  showOption(opt: { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null },
-             mode: "before" | "after" | "both", color: THREE.ColorRepresentation) {
-    this.preview([]);
-    if (mode === "before") return;
-    if (opt.kind === "offset" && opt.pieces) {
-      for (const gid of opt.moved) this.hidden.add(gid);
-      this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
-      this.applyMode();
-    } else {
-      this.preview([{ globalIds: opt.moved, deltaM: opt.deltaM }]);
+  showOption(opt: OptionShape, mode: "before" | "after" | "both", color: THREE.ColorRepresentation) {
+    this.showOptions([{ ...opt, color }], mode);
+  }
+
+  /** Several fixes at once (a plan), each in its own colour. */
+  showOptions(opts: (OptionShape & { color: THREE.ColorRepresentation })[], mode: "before" | "after" | "both") {
+    this.clearOverlay();
+    this.moved.clear();
+    if (mode !== "before") {
+      for (const opt of opts) {
+        if (opt.kind === "offset" && opt.pieces) {
+          for (const gid of opt.moved) this.hidden.add(gid);
+          this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+        } else {
+          const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(opt.deltaM));
+          for (const gid of opt.moved) this.moved.set(gid, t);
+        }
+        if (mode === "both" && opt.before) {
+          this.addMeshes(opt.before, new THREE.MeshBasicMaterial({ color: "#e67e22", transparent: true, opacity: 0.35,
+            depthWrite: false, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+        }
+      }
     }
-    if (mode === "both" && opt.before) {
-      this.addMeshes(opt.before, new THREE.MeshBasicMaterial({ color: "#e67e22", transparent: true, opacity: 0.35,
-        depthWrite: false, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
-    }
+    this.applyMode();
   }
 
   private addMeshes(meshes: Mesh[], material: THREE.Material) {

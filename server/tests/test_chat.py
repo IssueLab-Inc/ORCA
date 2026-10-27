@@ -79,3 +79,16 @@ def test_chat_endpoint_streams_a_session_then_the_answer(tmp_path, monkeypatch):
     assert events[0]["type"] == "session" and events[-1] == {"type": "done"}
     assert {"type": "ui", "action": "set_view", "mode": "xray"} in events
     assert any(e == {"type": "message", "text": "Done."} for e in events)
+
+
+def test_chat_finds_root_causes_and_builds_a_plan(tmp_path):
+    from test_plans import _setup as plan_setup
+
+    ws, sid, rid, main, beam = plan_setup(tmp_path)
+    model = Scripted([[("find_root_causes", {})], [("plan_fixes_together", {"clash_ids": ["c0001"]})], "Planned."])
+    events = []
+    chat = Chat(ws, model)
+    chat.turn(chat.session(None), "fix c0001", Context(sid, rid), events.append)
+    plan = next(e for e in events if e["type"] == "plan")
+    assert plan["kind"] == "batch" and plan["check"]["passed"]
+    assert any(e["type"] == "plan_event" for e in events)

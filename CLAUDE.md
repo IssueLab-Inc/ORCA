@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 38 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 42 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -138,7 +138,17 @@ as a user message, tool results are text only), measure, describe/find elements,
 propose_fixes (the agent; counts against proposal caps), show_clash and set_view (page actions). `POST /api/chat`
 streams NDJSON; sessions in memory. UI: right pane tab "Chat with Sightline"; chat-driven proposals fill the options
 panel and the activity table. Gotcha: Chromium's `scrollIntoView` returns a Promise; an effect that returns it
-breaks React's cleanup and blanks the panel, so effects use braces. 38 server tests.
+breaks React's cleanup and blanks the panel, so effects use braces.
+
+Plans (Oct 27): `server/sightline/plans.py`. Batch: agent per distinct pair in parallel threads (`agent.resolve(lock=)`:
+model calls overlap, geometry trials serialise on `Workspace.lock`, an RLock that every geometry operation takes),
+then `verify_together` applies all fixes in one multi-file transaction and checks each against everything incl. the
+other fixes. Root causes: hubs = elements with ≥2 real partners (physical, overlap > 1 mm, not fixed), cross-discipline
+first, plus geometry hits missing from the report; `build_root_cause` asks Muse (`domain_packs/root_cause.md`) for
+cause + strategy (move_hub / fix_partners). Northbank: girder plan with #042/#057/#061 (the last not in the report) at
+Rev04 heights, ~45-58 s. Plans cost one proposal per pair (`ProposeLimit.take_many`, all or nothing). UI pass: lucide
+icons with `data-tip` tooltips, viewer icon rail, Clash / Plan / Chat tabs, multi-select + "Fix n together" bar,
+Root causes card. 42 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

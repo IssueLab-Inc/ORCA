@@ -62,6 +62,17 @@ GlobalId (else by a unique class and name), shown with its Navisworks images, an
 check (Navisworks and IfcOpenShell report depth differently: #042 is −150 mm in Navisworks, −300 mm here).
 **Propose fixes** on a report clash sends its Navisworks images and distance to the model.
 
+### Several clashes at once, and root causes
+
+Tick clashes in the list and choose **Fix together**: Sightline runs the fix agent on every pair at once, then applies
+all the chosen fixes in one trial and checks each against the whole model, the other fixes included, swapping in a
+next-best option when two collide (`server/sightline/plans.py`). **Root causes** lists elements in several real
+clashes (cross-discipline first) and asks the geometry for clashes the report missed; **Fix** asks Muse Spark for the
+cause and a strategy (move that element, or coordinate everything crossing it) and builds one plan. On Northbank it
+finds the transfer girder, adds the cold water main Navisworks missed, and offsets all three services through the
+girder's openings at Rev04's heights, verified together. Plans preview in 3D (before / after / both) and are accepted
+in one go. The chat can do the same (`find_root_causes`, `plan_root_cause`, `plan_fixes_together`).
+
 ### Chat
 
 **Chat with Sightline** (right pane) talks to Muse Spark with tools over the open report and model

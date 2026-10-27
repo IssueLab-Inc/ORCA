@@ -348,6 +348,7 @@ def _chat_for(request: Request) -> chat.Chat:
         _chat = chat.Chat(ws)
     who = client_id(request.headers, request.client.host if request.client else None)
     _chat.propose_allowed = lambda: propose_limit.take(who)
+    _chat.propose_allowed_many = lambda n: propose_limit.take_many(who, n)
     return _chat
 
 

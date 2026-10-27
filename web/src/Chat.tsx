@@ -10,7 +10,8 @@ const VERBS: Record<string, string> = {
   look_at_clash_images: "Looked at the clash images", measure_clash: "Measured the clash",
   describe_element: "Read an element", find_elements: "Searched the model", find_openings: "Looked for openings",
   check_move: "Checked a move", check_offset: "Checked an offset", propose_fixes: "Ran the fix agent",
-  show_clash: "Showed a clash", set_view: "Changed the view",
+  show_clash: "Showed a clash", set_view: "Changed the view", find_root_causes: "Looked for root causes",
+  plan_root_cause: "Planned a root-cause fix", plan_fixes_together: "Planned fixes together",
 };
 
 function stepLabel(s: Step) {
@@ -57,7 +58,7 @@ const SUGGESTIONS = [
   "Which clashes in this report are real, and which are noise?",
   "Explain the selected clash.",
   "Fix the selected clash.",
-  "Show me the worst clash on Level 02.",
+  "Why are there so many clashes on Level 02? Fix the root cause.",
 ];
 
 export function ChatPanel({ context, onEvent, ready }: {

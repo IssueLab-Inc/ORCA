@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import edits
+from . import edits, plans
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 
@@ -72,6 +72,16 @@ TOOLS = [
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
         "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
         {"clash_id": {"type": "string"}}, ["clash_id"]),
+    _fn("find_root_causes", "Elements that are in several real clashes at once (the likely root causes), with clashes "
+        "the geometry finds that the Navisworks report missed. Use it for 'why are there so many clashes here' or "
+        "'what is the real problem'."),
+    _fn("plan_root_cause", "For one element from find_root_causes: work out the cause and build one coordinated plan "
+        "that fixes all its clashes, checked together. Shows the plan in the user's Plan tab to preview and accept. "
+        "About a minute; costs one proposal per clashing element.", {"hub": {"type": "string", "description": "GlobalId"}},
+        ["hub"]),
+    _fn("plan_fixes_together", "Fix several clashes in one plan: a fix for each, checked together so they do not "
+        "collide. Shows the plan in the user's Plan tab. Costs one proposal per distinct pair (at most 8).",
+        {"clash_ids": {"type": "array", "items": {"type": "string"}}}, ["clash_ids"]),
     _fn("show_clash", "Select a clash in the user's view and fly the camera to it.", {"clash_id": {"type": "string"}},
         ["clash_id"]),
     _fn("set_view", "Change the user's 3D view.", {
@@ -102,6 +112,7 @@ class Chat:
         self._model = model
         self.sessions: OrderedDict[str, Session] = OrderedDict()
         self.propose_allowed = propose_allowed or (lambda: None)
+        self.propose_allowed_many: Callable[[int], str | None] = lambda n: None
 
     @property
     def model(self) -> ToolModel:
@@ -305,6 +316,35 @@ class Chat:
             return ({"understanding": result["understanding"], "verified_options": summary, "failed": failed[:8],
                      "note": "The verified options are now in the user's options panel to preview and accept."},
                     f"{len(summary)} verified of {len(result['attempts'])} tried", [])
+        if name == "find_root_causes":
+            r, sid = self._report(ctx), self._scene(ctx)
+            causes = plans.root_causes(ws, sid, r.id, ctx.fixed)
+            rows = [{"hub": c["hub"]["global_id"], "element": f"{c['hub']['ifc_class']} '{c['hub']['name']}'",
+                     "level": c["hub"]["storey"], "file": c["hub"]["source"],
+                     "clashes_with": [f"{p['ifc_class']} '{p['name']}' {p['distance_m'] * 1000:+.0f} mm"
+                                      + ("" if p["in_report"] else " (NOT in the report)") for p in c["partners"]],
+                     "cross_discipline": c["cross_discipline"] > 0} for c in causes]
+            return {"root_causes": rows}, f"{len(rows)} candidate root cause(s)", []
+        if name in ("plan_root_cause", "plan_fixes_together"):
+            n = (1 + len(next((c["partners"] for c in plans.root_causes(ws, self._scene(ctx), self._report(ctx).id,
+                                                                         ctx.fixed, top=50)
+                               if c["hub"]["global_id"] == args.get("hub")), [])) if name == "plan_root_cause"
+                 else len(plans.pairs_for(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]))[0]))
+            refused = self.propose_allowed_many(max(n, 1))
+            if refused:
+                return {"error": refused}, "refused: allowance used", []
+            emit({"type": "plan_started", "kind": "root_cause" if name == "plan_root_cause" else "batch"})
+            forward = lambda e: emit({"type": "plan_event", "event": e})
+            plan = (plans.build_root_cause(ws, self._scene(ctx), self._report(ctx).id, args["hub"], ctx.fixed, forward)
+                    if name == "plan_root_cause"
+                    else plans.build_batch(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]), forward))
+            data = json.loads(plans.to_json(plan))
+            emit({"type": "plan", **data})
+            summary = {"root_cause": plan.root_cause, "strategy": plan.strategy, "verified_together": plan.check.get("passed"),
+                       "fixes": [{"pair": it.label, "fix": it.option["title"] if it.option else None, "error": it.error,
+                                  "in_report": it.in_report} for it in plan.items],
+                       "note": "The plan is in the user's Plan tab to preview and accept; you cannot accept it."}
+            return summary, f"{sum(1 for it in plan.items if it.option)} of {len(plan.items)} fixed, "                             f"{'verified together' if plan.check.get('passed') else 'not all verified'}", []
         if name == "show_clash":
             c = self._report(ctx).clash(args["clash_id"])
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})

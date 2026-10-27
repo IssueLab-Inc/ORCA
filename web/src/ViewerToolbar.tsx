@@ -1,14 +1,16 @@
+import { Box, Camera, Compass, Crop, Layers, LocateFixed, Maximize, Radar, Ruler, ScanEye, Shapes, Target } from "lucide-react";
+import { IconButton, Popover } from "./ui";
 import type { Preset, ViewMode } from "./viewer/Viewer";
 
-const MODES: { id: ViewMode; label: string; key: string; hint: string }[] = [
-  { id: "shaded", label: "Shaded", key: "", hint: "Every element in its own colour; the pair in red and green" },
-  { id: "xray", label: "X-ray", key: "X", hint: "Everything else see-through, so a clash inside the building shows" },
-  { id: "context", label: "Context", key: "C", hint: "Only elements within 2.5 m of the pair, see-through" },
-  { id: "isolate", label: "Isolate", key: "I", hint: "Only the pair" },
-];
+const MODES = [
+  { id: "shaded", icon: Box, label: "Shaded: every element in its own colour", key: "V" },
+  { id: "xray", icon: ScanEye, label: "X-ray: see the clash through the building", key: "X" },
+  { id: "context", icon: Radar, label: "Context: only what is within 2.5 m", key: "C" },
+  { id: "isolate", icon: Target, label: "Isolate: only the clashing elements", key: "I" },
+] as const;
 const VIEWS: { id: Preset; label: string; key: string }[] = [
   { id: "top", label: "Top", key: "1" }, { id: "front", label: "Front", key: "2" },
-  { id: "right", label: "Right", key: "3" }, { id: "iso", label: "Iso", key: "4" },
+  { id: "right", label: "Right", key: "3" }, { id: "iso", label: "Isometric", key: "4" },
 ];
 
 export interface ToolbarState {
@@ -19,6 +21,7 @@ export interface ToolbarState {
   hiddenModels: number[];
 }
 
+/** The viewer's tools as a vertical icon rail: modes, then tools, then camera. Every icon has a tooltip. */
 export function ViewerToolbar({ state, models, hasFocus, onMode, onToggle, onView, onFit, onFocus, onModel, onShot }: {
   state: ToolbarState; models: string[]; hasFocus: boolean;
   onMode: (m: ViewMode) => void; onToggle: (k: "edges" | "section" | "measure") => void; onView: (p: Preset) => void;
@@ -26,39 +29,33 @@ export function ViewerToolbar({ state, models, hasFocus, onMode, onToggle, onVie
 }) {
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
-    <div className="vtool" onClick={stop} onDoubleClick={stop} onPointerDown={stop}>
-      <div className="seg" role="group" aria-label="View mode">
-        {MODES.map((m) => (
-          <button key={m.id} className={state.mode === m.id ? "on" : ""} onClick={() => onMode(m.id)}
-            title={`${m.hint}${m.key ? ` (${m.key})` : ""}`} aria-pressed={state.mode === m.id}>{m.label}</button>
-        ))}
+    <nav className="rail" aria-label="Viewer tools" onClick={stop} onDoubleClick={stop} onPointerDown={stop}>
+      <div className="rail-group" role="group" aria-label="View mode">
+        {MODES.map((m) => <IconButton key={m.id} icon={m.icon} label={m.label} shortcut={m.key} active={state.mode === m.id} onClick={() => onMode(m.id)} />)}
       </div>
-      <div className="seg" role="group" aria-label="Tools">
-        <button className={state.section ? "on" : ""} onClick={() => onToggle("section")} disabled={!hasFocus && !state.section}
-          title="Section box around the clash (S)" aria-pressed={state.section}>Section</button>
-        <button className={state.edges ? "on" : ""} onClick={() => onToggle("edges")}
-          title="Outline the pair through other elements (E)" aria-pressed={state.edges}>Edges</button>
-        <button className={state.measure ? "on" : ""} onClick={() => onToggle("measure")}
-          title="Measure: click two points (M)" aria-pressed={state.measure}>Measure</button>
+      <div className="rail-group" role="group" aria-label="Tools">
+        <IconButton icon={Crop} label="Section box around the clash" shortcut="S" active={state.section} disabled={!hasFocus && !state.section} onClick={() => onToggle("section")} />
+        <IconButton icon={Shapes} label="Outline the pair through walls" shortcut="E" active={state.edges} onClick={() => onToggle("edges")} />
+        <IconButton icon={Ruler} label="Measure between two points" shortcut="M" active={state.measure} onClick={() => onToggle("measure")} />
       </div>
-      <div className="seg" role="group" aria-label="Camera">
-        <button onClick={onFocus} disabled={!hasFocus} title="Go to the clash (F)">Clash</button>
-        <button onClick={onFit} title="Fit the whole model (H)">Fit</button>
-        {VIEWS.map((v) => <button key={v.id} onClick={() => onView(v.id)} title={`${v.label} view (${v.key})`}>{v.label}</button>)}
-      </div>
-      {models.length > 0 && (
-        <details className="models vmodels">
-          <summary>Models</summary>
-          <div className="menu">
-            {models.map((name, i) => (
-              <label key={name} className="check">
+      <div className="rail-group" role="group" aria-label="Camera">
+        <IconButton icon={LocateFixed} label="Go to the clash" shortcut="F" disabled={!hasFocus} onClick={onFocus} />
+        <IconButton icon={Maximize} label="Fit the whole model" shortcut="H" onClick={onFit} />
+        <Popover icon={Compass} label="Standard views" shortcut="1-4">
+          {(close) => VIEWS.map((v) => (
+            <button key={v.id} role="menuitem" className="pop-item" onClick={() => { onView(v.id); close(); }}>
+              <span>{v.label}</span><kbd>{v.key}</kbd></button>))}
+        </Popover>
+        {models.length > 0 && (
+          <Popover icon={Layers} label="Show or hide models">
+            {() => models.map((name, i) => (
+              <label key={name} className="pop-item check">
                 <input type="checkbox" checked={!state.hiddenModels.includes(i)} onChange={(e) => onModel(i, e.target.checked)} /> {name}
-              </label>
-            ))}
-          </div>
-        </details>
-      )}
-      <button className="btn ghost-btn" onClick={onShot} title="Download a PNG of this view">Screenshot</button>
-    </div>
+              </label>))}
+          </Popover>
+        )}
+        <IconButton icon={Camera} label="Save a screenshot" onClick={onShot} />
+      </div>
+    </nav>
   );
 }

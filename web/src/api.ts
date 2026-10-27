@@ -38,6 +38,36 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+/** A plan: several fixes chosen together and checked as a whole (server: plans.py). */
+export interface PlanItem {
+  key: string; element_a: string; element_b: string; label: string; clash_ids: string[]; in_report: boolean;
+  distance_m: number | null; understanding: string; option: Option | null; alternatives: Option[]; tried: number; error: string;
+}
+export interface PlanCheck {
+  passed: boolean; items: Record<string, { passed: boolean; reason: string; min_clearance_m: number | null }>;
+  conflicts: { a: string; b: string; detail: string }[];
+}
+export interface Plan {
+  kind: "batch" | "root_cause"; title: string; root_cause: string; strategy: string; hub: RootCause | null;
+  items: PlanItem[]; check: PlanCheck; seconds: number;
+}
+export interface RootCausePartner {
+  global_id: string; ifc_class: string; name: string; source: string; storey: string | null;
+  distance_m: number; clash_ids: string[]; in_report: boolean;
+}
+export interface RootCause {
+  hub: { global_id: string; ifc_class: string; name: string; storey: string | null; source: string };
+  partners: RootCausePartner[]; cross_discipline: number; clash_ids: string[]; not_in_report: number;
+}
+export type PlanEvent =
+  | { type: "plan_items"; items: PlanItem[]; skipped: string[] }
+  | { type: "item"; key: string; status: "thinking" | "checking" | "done"; attempt?: string; passed?: boolean; ok?: boolean; title?: string }
+  | { type: "thinking"; what: string }
+  | { type: "root_cause"; root_cause: string; strategy: string; reason: string }
+  | { type: "checking_plan"; retry?: string[] }
+  | ({ type: "plan" } & Plan)
+  | { type: "error"; detail: string };
+
 /** What the chat streams while it works (server: chat.py). */
 export type ChatEvent =
   | { type: "session"; id: string }
@@ -48,6 +78,9 @@ export type ChatEvent =
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   | { type: "agent"; event: AgentEvent }
   | ({ type: "proposal"; clash_id: string; element_a: string; element_b: string } & Proposal)
+  | { type: "plan_started"; kind: "batch" | "root_cause" }
+  | { type: "plan_event"; event: PlanEvent }
+  | ({ type: "plan" } & Plan)
   | { type: "message"; text: string }
   | { type: "error"; detail: string }
   | { type: "done" };
@@ -73,6 +106,22 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 }
 
 export const api = {
+  rootCauses: (reportId: string, sceneId: string, fixed: string[]) =>
+    call<RootCause[]>(`/reports/${reportId}/root_causes/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
+  /** Build a plan (clash_ids: fix these together; hub: fix the root cause around it). Resolves with the plan. */
+  planStream: async (sceneId: string, body: { report_id: string; clash_ids?: string[]; hub?: string; fixed: string[] },
+                     onEvent: (e: PlanEvent) => void): Promise<Plan> => {
+    let plan: Plan | null = null;
+    await ndjson<PlanEvent>(`/scenes/${sceneId}/plan/stream`, body, (e) => {
+      if (e.type === "error") throw new Error(e.detail);
+      if (e.type === "plan") { plan = e; return true; }
+      onEvent(e);
+    });
+    if (!plan) throw new Error("The server stopped before the plan was ready. Try again.");
+    return plan;
+  },
+  applyPlan: (sceneId: string, options: Option[]) =>
+    call<{ files: number[]; pieces: string[][] }>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
                  clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }),

@@ -13,6 +13,9 @@ How to work:
 - When the user wants a clash fixed, call propose_fixes: it proposes moves and local offsets and verifies each one
   against the whole model; the verified options appear in the options panel for the user to preview and accept.
   You cannot accept a fix yourself.
+- When several clashes share one element, or the user asks why there are so many, call find_root_causes. For a
+  root cause, plan_root_cause explains it and builds one coordinated plan (it can include clashes Navisworks
+  missed); for a list of clashes, plan_fixes_together. Plans land in the user's Plan tab to preview and accept.
 - To try a specific idea yourself ("what if the duct goes up 400?"), use check_move or check_offset; for a run
   crossing a beam, find_openings first.
 - When you talk about a clash, show it (show_clash) so the user sees what you mean. set_view switches to x-ray,
