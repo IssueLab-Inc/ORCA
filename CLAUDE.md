@@ -186,6 +186,11 @@ Muse thinks; the result shows once the steps on screen finish. Any camera move o
 (`Viewer.onUserCamera`) is a takeover: the pilot clears what it drew and stops, the agent keeps going; the pill's
 **Let Sightline drive** resumes from the next idea. 50 server tests.
 
+Start page (Oct 27): the empty viewer shows `About.tsx` (what a clash is, what Sightline does, colour legend, glossary,
+"try it" steps; written for people new to BIM) with **Open the Northbank demo**: the sample report first (its list shows
+at once), then the default models, now including Site (all 317 report clashes link; 290 without it). The header's
+**How it works** opens the same page as a dialog. Side panels resize from their inner edge (remembered per browser).
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. Later: bends instead of square corners,

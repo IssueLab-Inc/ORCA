@@ -312,3 +312,55 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .row-thumb:hover img { transform: scale(1.12); }
 .row-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .row-thumb.none { background: var(--bg); cursor: default; }
+
+/* What Sightline is (About.tsx): the start page in the empty viewer, and the "How it works" dialog */
+.about-page { position: absolute; inset: 0; overflow: auto; background: radial-gradient(1200px 500px at 85% -10%, #dce8f4 0%, transparent 60%), var(--bg); }
+.about { --about-bg: var(--bg); position: relative; max-width: 860px; margin: 0 auto; padding: 36px 32px 28px; display: flex; flex-direction: column; gap: 26px; line-height: 1.55; }
+.about p { margin: 0; }
+.about section { display: flex; flex-direction: column; gap: 12px; }
+.about-hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 28px; align-items: center; }
+.about-hero > div { display: flex; flex-direction: column; gap: 14px; }
+.eyebrow { margin: 0; font: 600 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.about h1 { margin: 0; font-size: 28px; line-height: 1.2; letter-spacing: -.01em; text-wrap: balance; }
+.lede { font-size: 15.5px; color: #33414f; }
+.about-start { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.about-start .btn.big { padding: 10px 16px; font-size: 14.5px; }
+.about-start .hint { line-height: 1.5; }
+.before-after { margin: 0; padding: 14px 14px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
+.before-after svg { width: 100%; height: auto; display: block; }
+.before-after figcaption { font-size: 11.5px; text-align: center; }
+.ba-label { font: 600 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); }
+.ba-note { font-size: 11px; font-weight: 600; }
+.bad-note { fill: #b26a00; } .ok-note { fill: #0b7f8f; }
+.ba-tag { font-size: 9.5px; fill: var(--muted); }
+.about-h { font-size: 17px; margin: 0; letter-spacing: -.005em; }
+.disciplines { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.discipline { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.discipline span { color: var(--muted); line-height: 1.45; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.step { display: flex; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.step h3 { font-size: 14px; margin: 1px 0 4px; }
+.step p { font-size: 13px; color: #3d4a58; }
+.step-icon { position: relative; flex: none; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.step-icon span { position: absolute; right: -5px; top: -5px; width: 17px; height: 17px; border-radius: 50%; background: var(--accent); color: #fff; font: 600 10px/17px var(--mono); text-align: center; }
+.about-two { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 24px; }
+.about-two > div { display: flex; flex-direction: column; gap: 10px; }
+.legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; font-size: 13px; }
+.legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 9px; vertical-align: -2px; }
+.glossary { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+.glossary dt { font-weight: 600; }
+.glossary dd { margin: 0; color: #3d4a58; }
+.about-try { background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; }
+.about-try ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.about-try .hint svg { vertical-align: -2px; }
+.about-foot { border-top: 1px solid var(--line); padding-top: 14px; }
+.about-dialog { position: fixed; inset: 0; z-index: 40; background: rgba(10, 14, 20, .55); display: grid; place-items: center; padding: 24px; }
+.about-dialog > div { max-height: calc(100vh - 48px); width: min(920px, 100%); overflow: auto; background: var(--bg); border-radius: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
+.about-close { position: absolute; right: 14px; top: 14px; }
+.about-page, .about-dialog > div { container-type: inline-size; }
+@container (max-width: 720px) {
+  .about { padding: 24px 18px; }
+  .about-hero, .about-two { grid-template-columns: minmax(0, 1fr); }
+  .steps, .disciplines { grid-template-columns: minmax(0, 1fr); }
+}
+.about-dialog .about { padding-top: 52px; }

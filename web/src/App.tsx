@@ -1,8 +1,9 @@
-import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, Hand, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
 import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
+import { About } from "./About";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
 import { Insights } from "./Insights";
@@ -54,6 +55,7 @@ export function App() {
   const [clash, setClash] = useState<ReportClash | null>(null);
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
   // The image dialog: a clash's Navisworks views, opened from the clash panel or a row's thumbnail.
+  const [about, setAbout] = useState(false);
   const [lightbox, setLightbox] = useState<{ clash: ReportClash; index: number } | null>(null);
   useEffect(() => { setLightbox(null); }, [report]);
   const [remeasure, setRemeasure] = useState(0);
@@ -90,8 +92,8 @@ export function App() {
     v.onUserCamera = () => pilot.current?.takeOver();
     api.samples().then((list) => {
       setSamples(list);
-      // Default to the coordination set: the building disciplines, not site context, grids or a later revision.
-      const set = list.filter((f) => /(structure|mep|architecture)\.ifc$/i.test(f));
+      // Default to the building disciplines and the site (the report's site clashes need it), not the grids or a later revision.
+      const set = list.filter((f) => /(structure|mep|architecture|site)\.ifc$/i.test(f));
       setPicked(set.length ? set : list.slice(0, 1));
     }).catch((e) => setError(`Can't reach the Sightline server: ${e.message}`));
     api.reportSamples().then(setReportSamples).catch(() => undefined);
@@ -279,11 +281,18 @@ export function App() {
       const { id, files } = await api.open(picked);
       setSceneId(id);
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
-      setModelNames(files.map((f) => f.replace(/\.ifc$/i, "").replace(/^Northbank-/, "")));
+      setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setStats(await viewer.current!.load(bytes, files));
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  }
+
+  /** The start page's button: the sample clash report (its list shows at once), then the models. */
+  async function openDemo() {
+    const sample = reportSamples[0];
+    if (sample && !report) await loadReport(() => api.openReport(sample), sample);
+    await open();
   }
 
   async function loadReport(get: () => Promise<Report>, what: string) {
@@ -597,6 +606,7 @@ export function App() {
           {report && <span>· {report.title}</span>}
           {stats && <span className="stat mono" title={`${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>{stats.elements} elements</span>}
         </span>
+        <button className="btn ghost" onClick={() => setAbout(true)}><Info size={15} aria-hidden /> How it works</button>
         <span className="spacer" />
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip="Download the changed IFC files" data-tip-side="bottom">
@@ -629,11 +639,16 @@ export function App() {
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {!stats && !busy && (
-          <div className="stage-empty" onClick={(e) => e.stopPropagation()}>
-            <Boxes size={36} aria-hidden />
-            <p>Open the models to start</p>
-            <button className="btn primary" disabled={!picked.length} onClick={open}><FolderOpen size={15} aria-hidden /> Open {picked.length ? picked.map((p) => p.replace(/\.ifc$/i, "").replace(/^Northbank-/, "")).join(" + ") : "models"}</button>
-          </div>
+          <About start={{
+            label: reportSamples.length && !report ? "Open the Northbank demo" : "Open the models",
+            disabled: !picked.length,
+            onStart: openDemo,
+            details: <>
+              {reportSamples.length > 0 && !report && <>Loads the Navisworks clash report <b>{reportSamples[0]}</b>, with a picture of every
+                clash, and </>}{report ? "Loads " : ""}{picked.length} building model{picked.length === 1 ? "" : "s"}: {picked.map(shortName).join(", ")}.
+              {" "}About 15 seconds. To choose other models, use <b>Models</b> in the header.
+            </>,
+          }} />
         )}
         {tool.measure && <div className="overlay hint-bar" onClick={(e) => e.stopPropagation()}>
           {measured != null ? `Measured ${Math.round(measured * 1000)} mm. Click again to start a new measurement.` : measurePts.length ? "Click the second point." : "Click the first point to measure from."}</div>}
@@ -766,6 +781,7 @@ export function App() {
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
       </footer>
 
+      {about && <About onClose={() => setAbout(false)} />}
       {lightbox && report && lightbox.clash.images[lightbox.index] &&
         <Lightbox reportId={report.id} clash={lightbox.clash} index={lightbox.index} onClose={() => setLightbox(null)}
           onMove={(index) => setLightbox((l) => l && { ...l, index })} />}
@@ -792,3 +808,6 @@ function stored(key: string, fallback: number) {
 function remember(side: "left" | "right", w: number) {
   try { localStorage.setItem(`sightline.${side}-w`, String(w)); } catch { /* private window: not remembered */ }
 }
+
+/** "Northbank-Structure.ifc" → "Structure" */
+function shortName(file: string) { return file.replace(/\.ifc$/i, "").replace(/^Northbank-/, ""); }
