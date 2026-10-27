@@ -4,10 +4,18 @@ export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
   title: string; moved: string[]; delta_m: number[]; rationale: string; also_needs: string;
   min_clearance_m: number | null;
-  kind: "move" | "offset"; split_m: number[] | null; preview: Piece[] | null;
+  kind: "move" | "offset"; split_m: number[] | null; preview: Piece[] | null; before: Piece[] | null;
 }
 export interface Attempt { title: string; delta_m: number[]; passed: boolean; reason: string; kind: "move" | "offset"; split_m: number[] | null }
 export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[] }
+/** Progress from the agent while it works (server: agent.resolve), then the result. */
+export type AgentEvent =
+  | { type: "thinking"; round: number }
+  | { type: "ideas"; round: number; seconds: number; understanding: string; count: number }
+  | { type: "checking"; index: number; title: string; kind: string }
+  | ({ type: "attempt"; index: number } & Attempt)
+  | ({ type: "result" } & Proposal)
+  | { type: "error"; detail: string };
 
 /** One side of a clash as the Navisworks report describes it. */
 export interface ReportElement {
@@ -38,6 +46,32 @@ export const api = {
     call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
   propose: (id: string, element_a: string, element_b: string, from?: { report_id: string; clash_id: string }) =>
     call<Proposal>(`/scenes/${id}/propose`, { method: "POST", body: JSON.stringify({ element_a, element_b, ...from }) }),
+  /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. */
+  proposeStream: async (id: string, element_a: string, element_b: string, from: { report_id: string; clash_id: string } | undefined,
+                        onEvent: (e: AgentEvent) => void): Promise<Proposal> => {
+    const r = await fetch(`/api/scenes/${id}/propose/stream`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ element_a, element_b, ...from }),
+    });
+    if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+        const e = JSON.parse(line) as AgentEvent;
+        if (e.type === "error") throw new Error(e.detail);
+        if (e.type === "result") return e;
+        onEvent(e);
+      }
+      if (done) throw new Error("The server stopped before Sightline finished. Try again.");
+    }
+  },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   /** Keep a fix in the server's model; returns the indexes of the files that changed. */
   accept: (id: string, o: Option) => (o.kind === "offset"

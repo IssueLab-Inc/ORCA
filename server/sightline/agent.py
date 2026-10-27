@@ -5,6 +5,7 @@ Nothing reaches the options list without passing `verify.check`.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Callable
@@ -39,6 +40,7 @@ class Option:
     kind: str = "move"                  # "move" (delta_m on the run) or "offset" (split, middle piece by delta_m Z)
     split_m: list[float] | None = None  # offset only: split points, metres along the segment from its start
     preview: list[dict] | None = None   # offset only: world triangles of every piece, for the browser preview
+    before: list[dict] | None = None    # the changed elements as they are now (world triangles), to compare
 
 
 @dataclass
@@ -114,17 +116,34 @@ def _feedback(attempts: list[Attempt]) -> str:
 
 def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = "construction",
             max_rounds: int = 3, want: int = 3, clearance_m: float = 0.025,
-            on_step: Callable[[Attempt], None] | None = None) -> Result:
+            on_event: Callable[[dict], None] | None = None) -> Result:
+    """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
+
+    `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
+    {"type": "ideas", "round", "seconds", "understanding", "count"}, {"type": "checking", "index", "title", "kind"}
+    and {"type": "attempt", "index", **attempt}.
+    """
     system = (PACKS / f"{pack}.md").read_text()
     base = scene if isinstance(scene, IfcScene) else IfcScene(scene)
     attempts: list[Attempt] = []
     options: list[Option] = []
     understanding = ""
+    emit = on_event or (lambda e: None)
 
-    for _ in range(max_rounds):
+    def on_step(attempt: Attempt) -> None:
+        emit({"type": "attempt", "index": len(attempts) - 1, **asdict(attempt)})
+
+    for round_no in range(1, max_rounds + 1):
+        emit({"type": "thinking", "round": round_no})
+        started = time.perf_counter()
         reply = model.complete_json(system, _describe(base, clash) + _feedback(attempts), clash.images)
         understanding = understanding or reply.get("understanding", "")
-        for cand in reply.get("candidates", []):
+        candidates = reply.get("candidates", [])
+        emit({"type": "ideas", "round": round_no, "seconds": round(time.perf_counter() - started, 1),
+              "understanding": understanding, "count": len(candidates)})
+        for cand in candidates:
+            emit({"type": "checking", "index": len(attempts), "title": cand.get("title", ""),
+                  "kind": cand.get("kind", "move")})
             target = clash.element_a if cand.get("move", "A") == "A" else clash.element_b
             other = clash.element_b if target == clash.element_a else clash.element_a
             if cand.get("kind") == "offset":
@@ -153,7 +172,8 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             if v.passed:
                 _keep(options, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""),
                                       cand.get("also_needs", ""), v.min_clearance_m, placements))
-        if len(options) >= want:
+        # One round with a verified option is enough: another round costs a full model call (tens of seconds).
+        if options:
             break
 
     # Rank: options with comfortable clearance (twice the minimum, or nothing near) first, then the smallest change,
@@ -161,7 +181,13 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     def comfortable(o: Option) -> bool:
         return o.min_clearance_m is None or o.min_clearance_m >= 2 * clearance_m - 1e-6
     options.sort(key=lambda o: (not comfortable(o), sum(abs(d) for d in o.delta_m), -(o.min_clearance_m or 1.0)))
-    return Result(understanding, options[:want], attempts)
+    options = options[:want]
+    for o in options:  # what each option changes, as it is now, so the UI can show before and after together
+        try:
+            o.before = edits.meshes(base, o.moved)
+        except RuntimeError:
+            o.before = None
+    return Result(understanding, options, attempts)
 
 
 def _reason(hits: list[verify.Hit]) -> str:

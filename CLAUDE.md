@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 33 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 34 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -115,7 +115,14 @@ side), raises/lowers the middle, adds square-cornered risers (Rev04 uses bends),
 first piece and re-chains ports; tried in an IfcOpenShell transaction and undone. `edits.passages` finds openings in
 the obstacle by ray casting (Northbank's girder openings are cut into its geometry, no IfcOpeningElement). With that
 text Muse Spark's first proposal passes on #042/#057/#061 at Rev04's heights (evals/README.md). UI: offset preview,
-**Accept this fix** (server applies, browser reloads that file), re-measure. 33 server tests.
+**Accept this fix** (server applies, browser reloads that file), re-measure.
+
+UX pass (Oct 27): `POST /propose/stream` streams the agent's steps as NDJSON (thinking, ideas, checking, attempt,
+result); the UI shows a live status line and an "Agent activity" table. `META_REASONING_EFFORT=low` by default and the
+loop stops after the first round with a verified option: a proposal now takes ~17 s (was 60-100 s). Options carry
+`before` meshes: Before / After / Both (orange ghost) and a before/after summary, framed on the change. Fixed
+clashes are marked in the list (every report entry with the same pair) and the panel; accepted offset pieces stay
+with their element on later selections. 34 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

@@ -1,13 +1,16 @@
 """Web API for the browser app. Run: uv run uvicorn sightline.app:app --reload"""
 from __future__ import annotations
 
+import json
 import os
+import queue
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -111,6 +114,37 @@ def propose(scene_id: str, body: Propose, request: Request):
         _report(body.report_id)
     return ws.propose(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes,
                       report_id=body.report_id, clash_id=body.clash_id)
+
+
+@app.post("/api/scenes/{scene_id}/propose/stream")
+def propose_stream(scene_id: str, body: Propose, request: Request):
+    """The same as /propose, as newline-delimited JSON events while it works: the agent's progress
+    (see agent.resolve), then {"type": "result", ...} or {"type": "error", "detail": ...}."""
+    _scene(scene_id)
+    if body.report_id:
+        _report(body.report_id)
+    refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    if refused:
+        raise HTTPException(429, refused)
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            result = ws.propose(scene_id, body.element_a, body.element_b, body.distance_m, notes=body.notes,
+                                report_id=body.report_id, clash_id=body.clash_id, on_event=events.put)
+            events.put({"type": "result", **result})
+        except Exception as e:  # the model or the check failed: tell the browser rather than cut the stream
+            events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream():
+        while (event := events.get()) is not None:
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/scenes/{scene_id}/apply")

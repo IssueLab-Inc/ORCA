@@ -48,11 +48,12 @@ def main() -> None:
     p.add_argument("--clash", action="append", choices=list(KEY))
     p.add_argument("--runs", type=int, default=1)
     p.add_argument("--no-images", action="store_true")
+    p.add_argument("--effort", help="reasoning effort (default: META_REASONING_EFFORT, else low)")
     args = p.parse_args()
 
     scene = IfcScene([SAMPLES / f"Northbank-{n}.ifc" for n in ("Structure", "MEP", "Architecture")])
     scene.bounds()
-    model = MetaChatModel(timeout_s=240)
+    model = MetaChatModel(timeout_s=240, reasoning_effort=args.effort)
     out = ROOT / "evals" / "results.csv"
     for label in args.clash or list(KEY):
         service, ref_dz = KEY[label]
@@ -73,7 +74,8 @@ def main() -> None:
                    "yes" if first and first.passed else "no",
                    ",".join(f"{v:g}" for v in first.delta_m) if first else "",
                    f"{top.min_clearance_m * 1000:.0f}" if top and top.min_clearance_m is not None else "",
-                   f"0,0,{ref_dz:g} (offset)", f"kinds {'+'.join(kinds)}; {notes}"]
+                   f"0,0,{ref_dz:g} (offset)",
+                   f"effort {model.reasoning_effort or 'default'}; kinds {'+'.join(kinds)}; {notes}"]
             with out.open("a", newline="") as f:
                 csv.writer(f).writerow(row)
             print(label, run, f"{latency:.0f}s", f"{row[8]}/{row[7]} pass", notes, flush=True)

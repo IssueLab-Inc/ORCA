@@ -18,14 +18,15 @@ function Side({ colour, label, e, found, how }: {
   );
 }
 
-export function ClashPanel({ reportId, clash, match, measure, onImage }: {
+export function ClashPanel({ reportId, clash, match, measure, onImage, fix }: {
   reportId: string; clash: ReportClash; match: Matches[string] | undefined; measure: Measure | null | "busy";
-  onImage: (index: number) => void;
+  onImage: (index: number) => void; fix?: string;
 }) {
   return (
     <section className="clash-panel">
-      <div className="row"><h2>{clash.name}</h2>{clash.status && <span className="chip">{clash.status}</span>}</div>
+      <div className="row"><h2>{clash.name}</h2>{fix ? <span className="chip ok">✓ fixed</span> : clash.status && <span className="chip">{clash.status}</span>}</div>
       <p className="hint">{clash.test}</p>
+      {fix && <p className="fixed-note">Fixed in this session: {fix}. The Navisworks images show the clash as reported.</p>}
       {clash.images.length > 0 && (
         <div className={`thumbs n${clash.images.length}`}>
           {clash.images.map((label, i) => (

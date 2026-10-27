@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { api, type Matches, type Measure, type Option, type Proposal, type Report, type ReportClash, type Verdict } from "./api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity, statusLine, type Progress } from "./Activity";
+import { api, type AgentEvent, type Matches, type Measure, type Option, type Proposal, type Report, type ReportClash, type Verdict } from "./api";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { ReportList, mm } from "./ReportList";
 import { Viewer } from "./viewer/Viewer";
@@ -32,8 +33,14 @@ export function App() {
   const [clash, setClash] = useState<ReportClash | null>(null);
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
   const [image, setImage] = useState<number | null>(null);
-  const [accepted, setAccepted] = useState<string[]>([]);  // titles of fixes kept in the server's model
   const [remeasure, setRemeasure] = useState(0);
+  // Accepted fixes. `edits`: element GlobalId → pieces an offset added to it (shown with that element from then on).
+  // `fixes`: report clash id → the fix accepted for it.
+  const [edits, setEdits] = useState<Record<string, string[]>>({});
+  const [fixes, setFixes] = useState<Record<string, string>>({});
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const [compare, setCompare] = useState<"before" | "after" | "both">("after");
 
   useEffect(() => {
     if (!host.current) return;
@@ -59,9 +66,21 @@ export function App() {
     return () => { cancelAnimationFrame(raf); v.dispose(); };
   }, []);
 
-  // Pieces an accepted offset added, drawn with the side they belong to.
-  const [group, setGroup] = useState<Record<string, "a" | "b">>({});
+  // Pieces accepted offsets added to A or B are part of that side: coloured, and kept when isolating.
+  const group = useMemo(() => {
+    const g: Record<string, "a" | "b"> = {};
+    for (const p of (b && edits[b]) || []) g[p] = "b";
+    for (const p of (a && edits[a]) || []) g[p] = "a";
+    return g;
+  }, [a, b, edits]);
   useEffect(() => viewer.current?.highlight(a, b, isolate, group), [a, b, isolate, group]);
+
+  // A clock for the live status line while the agent works.
+  useEffect(() => {
+    if (!progress || progress.phase === "done") return;
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [progress]);
 
   // Link the report to the open model whenever either changes.
   useEffect(() => {
@@ -92,13 +111,21 @@ export function App() {
     };
   }, []);
 
+  const option = chosen == null ? null : proposal?.options[chosen] ?? null;
   useEffect(() => {
-    const opt = chosen == null ? null : proposal?.options[chosen];
-    if (opt?.kind === "offset" && opt.preview) viewer.current?.previewPieces(opt.moved, opt.preview, opt.moved[0] === a ? "#d0342c" : "#1f9d3a");
-    else viewer.current?.preview(opt ? [{ globalIds: opt.moved, deltaM: opt.delta_m }] : []);
-  }, [chosen, proposal, a]);
+    if (!option) { viewer.current?.preview([]); return; }
+    viewer.current?.showOption({ kind: option.kind, moved: option.moved, deltaM: option.delta_m, pieces: option.preview, before: option.before },
+      compare, option.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
+  }, [option, compare, a]);
 
-  function resetWork() { setProposal(null); setChosen(null); setManual(null); }
+  // Zoom to what the chosen option changes: an offset's risers and middle piece, or the moved elements.
+  useEffect(() => {
+    if (!option) return;
+    const changed = option.kind === "offset" && option.preview ? option.preview.slice(1, -1) : option.before;
+    if (changed?.length) viewer.current?.frameMeshes(changed, 1.6);
+  }, [option]);
+
+  function resetWork() { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); }
 
   async function open() {
     if (!picked.length) return;
@@ -124,7 +151,7 @@ export function App() {
   }
 
   function selectClash(c: ReportClash) {
-    setClash(c); resetWork(); setImage(null); setGroup({});
+    setClash(c); resetWork(); setImage(null);
     if (!matches) { setA(null); setB(null); }
   }
 
@@ -133,15 +160,35 @@ export function App() {
     const gid = viewer.current?.pick(ev.nativeEvent);
     if (!gid || gid === a) return;
     if (!a || (a && b)) { setA(gid); setB(null); } else setB(gid);
-    setClash(null); resetWork(); setGroup({});
+    setClash(null); resetWork();
   }
 
   async function propose() {
     if (!sceneId || !a || !b) return;
-    setBusy("Sightline is looking at the clash…"); setError(null);
+    setError(null); setChosen(null); setManual(null);
+    const t = Date.now();
+    let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
+    setProgress(p); setNow(t);
+    setProposal({ understanding: "", options: [], attempts: [] });
+    const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
+    const onEvent = (e: AgentEvent) => {
+      if (e.type === "thinking") update({ round: e.round, phase: "thinking", thinkingSince: Date.now(), checking: null });
+      if (e.type === "ideas") {
+        update({ phase: "checking", modelSeconds: [...p.modelSeconds, e.seconds], ideas: e.count });
+        setProposal((q) => q && { ...q, understanding: e.understanding });
+      }
+      if (e.type === "checking") update({ checking: { index: e.index, title: e.title, kind: e.kind } });
+      if (e.type === "attempt") {
+        const { type: _t, index: _i, ...attempt } = e;
+        setProposal((q) => q && { ...q, attempts: [...q.attempts, attempt] });
+      }
+    };
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
-    try { const p = await api.propose(sceneId, a, b, from); setProposal(p); setChosen(p.options.length ? 0 : null); }
-    catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+    try {
+      const result = await api.proposeStream(sceneId, a, b, from, onEvent);
+      setProposal(result); setChosen(result.options.length ? 0 : null);
+    } catch (e) { setError((e as Error).message); }
+    finally { update({ phase: "done", checking: null }); setNow(Date.now()); }
   }
 
   async function accept(o: Option) {
@@ -151,11 +198,17 @@ export function App() {
       const { files, pieces } = await api.accept(sceneId, o);
       viewer.current?.preview([]);
       for (const i of files) await viewer.current!.replace(i, await api.file(sceneId, i));
-      const side = o.moved[0] === a ? "a" : "b";
-      const next = { ...group, ...Object.fromEntries((pieces ?? []).map((g) => [g, side] as const)) };
-      setGroup(next);
-      viewer.current?.highlight(a, b, isolate, next);
-      setAccepted([...accepted, o.title]); resetWork(); setRemeasure(remeasure + 1);
+      if (pieces?.length) {
+        const [first, ...added] = pieces;
+        setEdits((e) => ({ ...e, [first]: [...(e[first] ?? []), ...added] }));
+      }
+      // The same pair can be reported by several tests: the fix resolves every one of them.
+      const pair = [a, b].sort().join("|");
+      const fixed = report && matches
+        ? report.clashes.filter((c) => [matches[c.id]?.a, matches[c.id]?.b].sort().join("|") === pair).map((c) => c.id)
+        : [];
+      setFixes((f) => ({ ...f, ...Object.fromEntries(fixed.map((id) => [id, o.title])) }));
+      resetWork(); setRemeasure(remeasure + 1);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
 
@@ -202,7 +255,7 @@ export function App() {
 
       <aside className="pane left">
         {report
-          ? <ReportList report={report} matches={matches} selected={clash?.id ?? null} onSelect={selectClash} />
+          ? <ReportList report={report} matches={matches} selected={clash?.id ?? null} onSelect={selectClash} fixes={fixes} />
           : <>
               <h2>Clashes</h2>
               <p className="hint">Open a Navisworks clash report from the header, or double-click element A, then element B, in the model.</p>
@@ -211,12 +264,30 @@ export function App() {
 
       <main className="stage" ref={host} onClick={onClick}>
         {busy && <div className="overlay">{busy}</div>}
+        {progress && progress.phase !== "done" && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
+        {option && (
+          <div className="compare">
+            <div className="seg" role="group" aria-label="Compare">
+              {(["before", "after", "both"] as const).map((m) => (
+                <button key={m} className={compare === m ? "on" : ""} onClick={(e) => { e.stopPropagation(); setCompare(m); }}>
+                  {m === "before" ? "Before" : m === "after" ? "After" : "Both"}</button>))}
+            </div>
+            <dl className="diff">
+              <dt>Before</dt><dd>{measure && measure !== "busy" && measure.distance_m != null ? `overlap ${mm(measure.distance_m)}` : "clashing"}</dd>
+              <dt>After</dt><dd className="ok">clear{option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}</dd>
+              <dt>Change</dt><dd>{option.kind === "offset" && option.split_m
+                ? `1 segment → ${option.preview?.length ?? 5} pieces; ${(option.split_m[1] - option.split_m[0]).toFixed(2)} m of it ${option.delta_m[2] > 0 ? "raised" : "lowered"} ${Math.abs(Math.round(option.delta_m[2] * 1000))} mm`
+                : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
+            </dl>
+            {compare === "both" && <p className="hint"><i className="sw ghost" />orange ghost: as it is now</p>}
+          </div>
+        )}
         {error && <div className="overlay error" onClick={() => setError(null)}>{error}</div>}
       </main>
 
       <aside className="pane right">
         {clash && report
-          ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={setImage} />
+          ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={setImage} fix={fixes[clash.id]} />
           : <>
               <h2>Pair</h2>
               <dl className="kv">
@@ -227,7 +298,8 @@ export function App() {
         <div className="actions">
           <label className="check"><input id="isolate" type="checkbox" checked={isolate} onChange={(e) => setIsolate(e.target.checked)} /> Isolate the pair</label>
           <button className="btn" disabled={!a || !b} onClick={() => viewer.current?.frame([a!, b!])}>Fit to pair</button>
-          <button className="btn primary" disabled={!a || !b || !sceneId || !!busy} onClick={propose}>Propose fixes</button>
+          <button className="btn primary" disabled={!a || !b || !sceneId || !!busy || (!!progress && progress.phase !== "done")} onClick={propose}>
+            {progress && progress.phase !== "done" ? "Working…" : "Propose fixes"}</button>
         </div>
 
         <details className="try">
@@ -240,9 +312,9 @@ export function App() {
         </details>
 
         <h2>Understanding</h2>
-        <p>{proposal?.understanding || "Pick a clash and ask Sightline to propose fixes."}</p>
+        <p>{proposal?.understanding || (progress && progress.phase !== "done" ? "Muse Spark is reading the clash…" : "Pick a clash and ask Sightline to propose fixes.")}</p>
         <h2>Verified options</h2>
-        {proposal && !proposal.options.length && <p className="bad">No move passed the check. This clash needs a person.</p>}
+        {proposal && progress?.phase === "done" && !proposal.options.length && <p className="bad">No fix passed the check. This clash needs a person.</p>}
         {proposal?.options.map((o, i) => (
           <div key={i} className={`card ${chosen === i ? "pick" : ""}`}>
             <button className="card-body" onClick={() => setChosen(chosen === i ? null : i)}>
@@ -257,13 +329,11 @@ export function App() {
             {chosen === i && <button className="btn primary" disabled={!!busy} onClick={() => accept(o)}>Accept this fix</button>}
           </div>
         ))}
-        {accepted.length > 0 && <p className="ok">Accepted: {accepted.join("; ")}. Export edited IFC to download.</p>}
+        {Object.keys(edits).length > 0 && !proposal && <p className="hint">Accepted fixes are in the model. Export edited IFC to download.</p>}
       </aside>
 
       <footer className="dock">
-        {proposal?.attempts.map((t, i) => (
-          <span key={i} className={`step ${t.passed ? "ok" : "fail"}`}><i>{i + 1}</i>{t.kind === "offset" ? "Offset · " : ""}{t.title}{t.passed ? "" : `: ${t.reason}`}</span>
-        )) ?? <span className="hint">The agent's steps appear here, failed attempts included.</span>}
+        <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
       </footer>
 
       {clash && report && image != null && clash.images[image] &&

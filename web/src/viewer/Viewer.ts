@@ -12,6 +12,8 @@ export function serverDeltaToViewer([dx, dy, dz]: number[]): THREE.Vector3 {
 }
 
 type Found = { model: LoadedModel; el: LoadedElement };
+/** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
+export type Mesh = { verts: number[]; faces: number[] };
 
 export class Viewer {
   readonly renderer: THREE.WebGLRenderer;
@@ -105,6 +107,10 @@ export class Viewer {
   /** Preview moves without touching the model: GlobalIds + server delta (metres, Z up). Clears any edit preview. */
   preview(moves: { globalIds: string[]; deltaM: number[] }[]) {
     this.clearOverlay();
+    this.moveInstances(moves);
+  }
+
+  private moveInstances(moves: { globalIds: string[]; deltaM: number[] }[]) {
     for (const model of this.models) for (const el of model.byGlobalId.values()) model.mesh.setMatrixAt(el.instanceId, el.baseMatrix);
     for (const m of moves) {
       const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(m.deltaM));
@@ -115,17 +121,29 @@ export class Viewer {
     }
   }
 
-  /** Preview an edit that replaces elements with new shapes: hide `replaced`, draw `pieces` (server triangles,
-   * metres, Z up) in `color`. */
-  previewPieces(replaced: string[], pieces: { verts: number[]; faces: number[] }[], color: THREE.ColorRepresentation) {
+  /** Show a proposed fix three ways: "after" (the fix in place of what it changes), "before" (the model as it is)
+   * or "both" (the fix, with what it replaces as an orange ghost). Shapes are server triangles (metres, Z up). */
+  showOption(opt: { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null },
+             mode: "before" | "after" | "both", color: THREE.ColorRepresentation) {
     this.preview([]);
-    for (const gid of replaced) {
-      const f = this.find(gid);
-      if (f) f.model.mesh.setVisibleAt(f.el.instanceId, false);
+    if (mode === "before") return;
+    if (opt.kind === "offset" && opt.pieces) {
+      for (const gid of opt.moved) {
+        const f = this.find(gid);
+        if (f) f.model.mesh.setVisibleAt(f.el.instanceId, false);
+      }
+      this.hidden = [...opt.moved];
+      this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color, roughness: 0.6, side: THREE.DoubleSide }));
+    } else {
+      this.moveInstances([{ globalIds: opt.moved, deltaM: opt.deltaM }]);
     }
-    this.hidden = [...replaced];
-    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.6, side: THREE.DoubleSide });
-    for (const p of pieces) {
+    if (mode === "both" && opt.before) {
+      this.addMeshes(opt.before, new THREE.MeshBasicMaterial({ color: "#e67e22", transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide }));
+    }
+  }
+
+  private addMeshes(meshes: Mesh[], material: THREE.Material) {
+    for (const p of meshes) {
       const pos = new Float32Array(p.verts.length);
       for (let i = 0; i < p.verts.length; i += 3) {
         pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; // IFC Z up → three.js Y up
@@ -150,6 +168,21 @@ export class Viewer {
       (mesh.material as THREE.Material).dispose();
       this.overlay.remove(mesh);
     }
+  }
+
+  /** Frame server triangles (metres, Z up): the part of the model a fix changes. */
+  frameMeshes(meshes: Mesh[], tight = 1.4) {
+    const box = new THREE.Box3();
+    for (const m of meshes) for (let i = 0; i < m.verts.length; i += 3) box.expandByPoint(new THREE.Vector3(m.verts[i], m.verts[i + 2], -m.verts[i + 1]));
+    if (box.isEmpty()) return;
+    this.frameBox(box, tight);
+  }
+
+  private frameBox(box: THREE.Box3, tight: number) {
+    const centre = box.getCenter(new THREE.Vector3());
+    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 1.5);
+    this.camera.position.copy(centre).add(new THREE.Vector3(1, 0.8, 1).normalize().multiplyScalar(size * tight));
+    this.controls.target.copy(centre);
   }
 
   frame(globalIds: string[]) {

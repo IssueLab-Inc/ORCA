@@ -19,8 +19,9 @@ const LINK_TITLE = { both: "Both elements found in the open model", one: "One el
 
 const short = (c: ReportClash) => `${c.a.ifc_class ?? "?"} × ${c.b.ifc_class ?? "?"}`;
 
-export function ReportList({ report, matches, selected, onSelect }: {
+export function ReportList({ report, matches, selected, onSelect, fixes }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
+  fixes: Record<string, string>;
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -39,6 +40,7 @@ export function ReportList({ report, matches, selected, onSelect }: {
 
   const shown = groups.reduce((n, [, cs]) => n + cs.length, 0);
   const linked = matches ? report.clashes.filter((c) => linkState(matches, c.id) === "both").length : null;
+  const fixedCount = report.clashes.filter((c) => fixes[c.id]).length;
 
   return (
     <div className="report">
@@ -47,6 +49,7 @@ export function ReportList({ report, matches, selected, onSelect }: {
         <p className="hint">
           {report.clashes.length} clashes in {new Set(report.clashes.map((c) => c.test)).size} tests
           {linked != null ? ` · ${linked} found in the model` : " · open the models to link them"}
+          {fixedCount > 0 && <> · <span className="ok">{fixedCount} fixed</span></>}
         </p>
         <input className="search" type="search" placeholder="Filter: element, class, level, test…" value={query}
           onChange={(e) => setQuery(e.target.value)} aria-label="Filter clashes" />
@@ -56,15 +59,18 @@ export function ReportList({ report, matches, selected, onSelect }: {
       <div className="groups">
         {groups.map(([test, cs]) => (
           <details key={test} open={!!query.trim() || groups.length <= 3 || cs.some((c) => c.id === selected)}>
-            <summary><span className="test">{test}</span><span className="count mono">{cs.length}</span></summary>
+            <summary><span className="test">{test}</span>
+              {cs.some((c) => fixes[c.id]) && <span className="ok count">✓ {cs.filter((c) => fixes[c.id]).length}</span>}
+              <span className="count mono">{cs.length}</span></summary>
             {cs.map((c) => {
               const link = linkState(matches, c.id);
               return (
-                <button key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""}`} onClick={() => onSelect(c)}>
-                  {link && <i className={`dot ${link}`} title={LINK_TITLE[link]} />}
+                <button key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""}`} onClick={() => onSelect(c)}
+                  title={fixes[c.id] ? `Fixed: ${fixes[c.id]}` : undefined}>
+                  {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : link && <i className={`dot ${link}`} title={LINK_TITLE[link]} />}
                   <span className="clash-name">{c.name}</span>
                   <span className="clash-pair">{short(c)}</span>
-                  <span className="mono dist">{mm(c.distance_m)}</span>
+                  {fixes[c.id] ? <span className="fixed-label">fixed</span> : <span className="mono dist">{mm(c.distance_m)}</span>}
                 </button>
               );
             })}

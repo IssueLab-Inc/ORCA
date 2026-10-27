@@ -73,7 +73,7 @@ class Workspace:
 
     def propose(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
                 images: list[str] | None = None, notes: str = "", report_id: str | None = None,
-                clash_id: str | None = None) -> dict:
+                clash_id: str | None = None, on_event=None) -> dict:
         """With a report clash, its Navisworks distance and images go to the model too (images are what let
         the model find openings and free space; spikes/README.md, spike 4)."""
         pics = [Path(p) for p in images or []]
@@ -85,7 +85,7 @@ class Workspace:
             notes = "\n".join(filter(None, [notes, f"From a Navisworks clash report: {c.test}, {c.name}. "
                                                     "Images are Navisworks views of this clash."]))
         clash = agent.Clash(element_a, element_b, distance_m, pics, notes)
-        return asdict(agent.resolve(self.scene(scene_id), clash, self.model))
+        return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event))
 
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
         s = self.scene(scene_id)

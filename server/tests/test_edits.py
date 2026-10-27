@@ -118,3 +118,24 @@ def test_ray_hits():
     tri = np.array([[[0, -1, -1], [0, 1, -1], [0, 0, 1]]], dtype=float)
     origins = np.array([[-1, 0, 0], [-1, 0, 2], [1, 0, 0]], dtype=float)
     assert edits._hits(origins, np.array([1.0, 0, 0]), tri).tolist() == [True, False, False]  # behind the ray: no hit
+
+
+def test_propose_stream_reports_progress_then_the_result(tmp_path, monkeypatch):
+    import json
+
+    class Model:
+        def complete_json(self, system, text, images=None):
+            return {"understanding": "Through the beam.", "candidates": [
+                {"title": "Up 400", "kind": "offset", "move": "A", "split_m": [2.0, 4.0], "dz_m": 0.4}]}
+
+    build_run_fixture(tmp_path / "run.ifc")
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path, model=Model()))
+    c = TestClient(app_module.app)
+    sid = c.post("/api/scenes", json={"samples": ["run.ifc"]}).json()["id"]
+    main, beam = _ids(app_module.ws.scene(sid))
+    r = c.post(f"/api/scenes/{sid}/propose/stream", json={"element_a": main, "element_b": beam})
+    events = [json.loads(line) for line in r.text.splitlines()]
+    assert [e["type"] for e in events] == ["thinking", "ideas", "checking", "attempt", "result"]
+    assert events[1]["understanding"] == "Through the beam." and events[3]["passed"]
+    [opt] = events[-1]["options"]
+    assert opt["kind"] == "offset" and len(opt["before"]) == 1 and len(opt["preview"]) == 5

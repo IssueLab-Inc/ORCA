@@ -30,6 +30,7 @@ The loop's own result (attempts until a verified option) gets its own columns on
 | 2026-10-27 | northbank-rev03 | #042 | ABC | 3 | 2/3 | 2/3 | 41.2 s |
 | 2026-10-27 | northbank-rev03, local offsets, no opening data | #042 #057 #061 | ABC, ABC, none | 3 | 0/3 | 1/3 | 33.7 s |
 | 2026-10-27 | northbank-rev03, local offsets + opening data | #042 #057 #061 | ABC, ABC, none | 3 | **3/3** | **3/3** | 34.8 s |
+| 2026-10-27 | same, `reasoning_effort=low` | #042 #057 #061 | ABC, ABC, none | 3 | **3/3** | **3/3** | **18.4 s** |
 
 Details of the first runs: `spikes/README.md`, "Spike 4 on #042".
 
@@ -39,6 +40,9 @@ Local offsets (`answer_key.py`, one round each; #061 has no Navisworks images). 
 - With the girder's openings measured on each run's line (`edits.passages`, rays through the obstacle: #042 fits at
   +0.375 to +0.425 m, #057 +0.225 to +0.275, #061 +0.252 to +0.308) the first candidate passed every time, at Rev04's
   own heights: +0.40, +0.25, +0.28 m, with 50/50/53 mm clearance.
+- Muse Spark reasons before it answers, and that is most of the wait. `reasoning_effort=low` (now the default,
+  `META_REASONING_EFFORT`) gave the same first answers in 15-19 s instead of 29-38 s. A bare prompt measured 58 s
+  default, 23 s low, 7 s minimal.
 
 ## Triage of Navisworks results
 
