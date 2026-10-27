@@ -193,3 +193,36 @@ def test_sample_exclusions_drop_whole_tests_and_renumber(tmp_path):
     assert [(c.id, c.test) for c in kept] == [("c0001", "Structure vs Ducts"), ("c0002", "Structure vs Ducts")]
     with pytest.raises(ValueError):  # Clash2 has a wall, so "Structure vs Ducts" goes too: nothing is left
         reports.load("r", tmp_path, xmls, "t", exclude=("IfcWall",))
+
+
+def _wav(seconds=0.5):
+    import io
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+        w.writeframes(b"\0\0" * int(16000 * seconds))
+    return buf.getvalue()
+
+
+def test_voice_transcribes_a_wav_biased_to_the_reports_clash_names(tmp_path, monkeypatch):
+    from sightline.limits import ProposeLimit
+    (tmp_path / "report.xml").write_text(STANDARD)
+    ws = Workspace(samples=tmp_path)
+    monkeypatch.setattr(app_module, "ws", ws)
+    seen = {}
+
+    def fake(wav, words):
+        seen["wav"], seen["words"] = wav, words
+        return {"transcript": "Fix clash one", "duration_ms": 500}
+
+    monkeypatch.setattr(app_module, "transcribe", fake)
+    monkeypatch.setattr(app_module, "voice_limit", ProposeLimit(per_client_hour=2))
+    report = ws.open_report_folder(tmp_path, "t")
+    c = TestClient(app_module.app)
+    ok = c.post("/api/transcribe", files={"audio": ("clip.wav", _wav(), "audio/wav")}, data={"report_id": report.id})
+    assert ok.status_code == 200 and ok.json()["transcript"] == "Fix clash one"
+    assert seen["wav"][:4] == b"RIFF" and "transom" in seen["words"] and "Clash1" in seen["words"]
+    assert c.post("/api/transcribe", files={"audio": ("x.webm", b"not a wav file", "audio/webm")}).status_code == 422
+    assert c.post("/api/transcribe", files={"audio": ("clip.wav", _wav(), "audio/wav")}).status_code == 200
+    assert c.post("/api/transcribe", files={"audio": ("clip.wav", _wav(), "audio/wav")}).status_code == 429  # the cap

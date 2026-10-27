@@ -434,3 +434,14 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .sw.zone { background: #ffb000; }
 .lb-key { white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .lb-zoom, .clash-thumb { transition: none; } }
+
+/* Voice (Chat.tsx + voice.ts): the mic glows with the input level while listening */
+.btn.mic { padding: 6px 10px; display: inline-flex; align-items: center; gap: 5px; }
+.btn.mic.on { --level: 0; background: #d0342c; border-color: #d0342c; color: #fff; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 calc(2px + var(--level) * 9px) rgba(208, 52, 44, .22); transition: box-shadow .08s linear; }
+.voice-note { margin: 4px 0 0; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.voice-note.live { color: #b8352a; }
+.rec { width: 8px; height: 8px; border-radius: 50%; background: #d0342c; animation: rec 1s ease-in-out infinite; }
+@keyframes rec { 50% { opacity: .3; } }
+.msg .said { vertical-align: -1px; margin-right: 5px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .rec { animation: none; } .btn.mic.on { transition: none; } }

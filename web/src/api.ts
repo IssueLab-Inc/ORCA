@@ -220,6 +220,15 @@ export const api = {
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Upload failed (${r.status})`);
     return r.json() as Promise<Report>;
   },
+  /** A spoken message (16 kHz WAV) to text, with Muse Voice Transcribe; biased to the open report's clash names. */
+  transcribe: async (wav: Blob, reportId: string | null) => {
+    const form = new FormData();
+    form.append("audio", wav, "voice.wav");
+    if (reportId) form.append("report_id", reportId);
+    const r = await fetch("/api/transcribe", { method: "POST", body: form });
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Transcription failed (${r.status})`);
+    return r.json() as Promise<{ transcript: string; duration_ms: number | null }>;
+  },
   imageUrl: (reportId: string, clashId: string, index: number) => `/api/reports/${reportId}/clashes/${clashId}/images/${index}`,
   match: (reportId: string, sceneId: string) => call<Matches>(`/reports/${reportId}/match/${sceneId}`),
   measure: (reportId: string, clashId: string, sceneId: string) => call<Measure>(`/reports/${reportId}/clashes/${clashId}/measure/${sceneId}`),

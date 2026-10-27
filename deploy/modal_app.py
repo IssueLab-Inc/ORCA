@@ -29,6 +29,8 @@ image = (
         "SIGHTLINE_UPLOAD_MAX_MB": "150",
         "SIGHTLINE_CHAT_PER_HOUR": "40",       # chat messages per visitor; each is one or more Muse Spark calls
         "SIGHTLINE_CHAT_PER_DAY": "1500",
+        "SIGHTLINE_VOICE_PER_HOUR": "60",      # spoken messages per visitor (Muse Voice Transcribe, $0.18 an audio hour)
+        "SIGHTLINE_VOICE_PER_DAY": "2000",
     })
     .add_local_dir(ROOT / "server" / "sightline", f"{APP_DIR}/server/sightline", ignore=["__pycache__"])
     .add_local_dir(ROOT / "web" / "dist", f"{APP_DIR}/web/dist")

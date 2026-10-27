@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 58 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 59 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -214,6 +214,14 @@ special-token text, `meta-sam-parser` decodes it) was tried first: on these flat
 prompts and, from point prompts, outlined 52-91% of each element and never the overlap, so colour does this job.
 SAM fits site photos and video, not Navisworks renders.
 
+Voice (Oct 27): Chat's mic button records (`web/src/voice.ts`: MediaRecorder, then decoded, mixed to mono and resampled
+to 16 kHz WAV in the browser), `POST /api/transcribe` forwards it to Muse Voice Transcribe (`POST /v1/asr/transcribe`,
+multipart: `request` JSON {model, audioEncoding "WAV", mode "PUSH_TO_TALK", keywords, languageBias} + `audio`; reply
+`transcript`), biased to BIM words and the open report's clash names, and the transcript is sent as a chat message, so
+voice drives everything chat can. Caps `SIGHTLINE_VOICE_PER_HOUR/DAY`, 60 s / 3 MB per clip. Checked end to end with a
+fake microphone (format accepted, audio duration right); recognition itself is untested here: no speech audio could be
+fetched or generated in the cloud session.
+
 Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
 some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then
 the boxes' smallest overlap. Third fix kind **trim** (`edits.butt_trim` / `apply_trim`): cut a member's end back to
@@ -230,7 +238,7 @@ Next, in order.
 3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
-5. ✅ Bulk triage, live on Muse Spark Open (Baseten). Export IFC + BCF; voice.
+5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. Export IFC + BCF.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.

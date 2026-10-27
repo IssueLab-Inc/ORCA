@@ -126,7 +126,7 @@ export function About({ start, onClose }: {
             a supply air duct running through the transfer girder, the big beam on Level 02.</li>
           <li>Press <b>Propose fixes</b> and watch Sightline try its ideas in the 3D view.</li>
         </ol>
-        <p className="hint"><MessageSquare size={13} aria-hidden /> Or ask it in <b>Chat</b>: “Which clashes are real problems?”
+        <p className="hint"><MessageSquare size={13} aria-hidden /> Or ask it in <b>Chat</b>, typed or spoken: “Which clashes are real problems?”
           · <ScanSearch size={13} aria-hidden /> <b>Triage all</b> sorts all 217 clashes in three to four minutes.</p>
       </section>
 
@@ -134,6 +134,7 @@ export function About({ start, onClose }: {
         <span className="hint">Built with</span>
         <span className="tech"><b>Muse Spark</b> understands clashes and proposes fixes</span>
         <span className="tech"><b>Muse Spark Open</b> sorts whole reports</span>
+        <span className="tech"><b>Muse Voice Transcribe</b> lets you talk to it</span>
         <span className="tech"><b>IfcOpenShell</b> edits and checks the geometry</span>
         <span className="tech"><b>three.js</b> draws the 3D view</span>
         <span className="tech"><b>IFC</b> the open model format, in and out</span>

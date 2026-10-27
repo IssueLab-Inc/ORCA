@@ -1,9 +1,11 @@
+import { Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type ChatEvent } from "./api";
+import { MAX_SECONDS, VoiceRecorder } from "./voice";
 
 /** One step the assistant took, shown under its answer. */
 export interface Step { name: string; args: Record<string, unknown>; summary?: string }
-export interface Turn { role: "user" | "assistant"; text: string; steps: Step[]; pending?: boolean; error?: string }
+export interface Turn { role: "user" | "assistant"; text: string; steps: Step[]; pending?: boolean; error?: string; voice?: boolean }
 
 const VERBS: Record<string, string> = {
   report_summary: "Read the report summary", list_clashes: "Listed clashes", get_clash: "Read a clash",
@@ -76,12 +78,56 @@ export function ChatPanel({ context, onEvent, ready }: {
 
   const patchLast = (f: (t: Turn) => Turn) => setTurns((ts) => [...ts.slice(0, -1), f(ts[ts.length - 1])]);
 
-  async function send(text: string) {
+  // Voice: record, transcribe with Muse Voice Transcribe, then send the words like a typed message.
+  const recorder = useRef<VoiceRecorder | null>(null);
+  const [voice, setVoice] = useState<{ state: "idle" | "listening" | "transcribing"; since: number; level: number; note?: string }>(
+    { state: "idle", since: 0, level: 0 });
+  const [, setTick] = useState(0);
+  useEffect(() => () => { recorder.current?.cancel(); }, []);
+  useEffect(() => {
+    if (voice.state !== "listening") return;
+    const t = setInterval(() => {
+      setTick((n) => n + 1);
+      if (Date.now() - voice.since > MAX_SECONDS * 1000) void stopListening();  // a minute at most
+    }, 250);
+    return () => { clearInterval(t); };
+  }, [voice.state, voice.since]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function startListening() {
+    if (busy || voice.state !== "idle") return;
+    const r = new VoiceRecorder();
+    try {
+      await r.start((level) => setVoice((v) => (v.state === "listening" ? { ...v, level } : v)));
+    } catch (e) {
+      const denied = (e as Error).name === "NotAllowedError";
+      setVoice({ state: "idle", since: 0, level: 0, note: denied ? "Microphone access was blocked. Allow it in the browser to talk to Sightline."
+        : "No microphone found." });
+      return;
+    }
+    recorder.current = r;
+    setVoice({ state: "listening", since: Date.now(), level: 0 });
+  }
+
+  async function stopListening() {
+    const r = recorder.current;
+    if (!r) return;
+    recorder.current = null;
+    setVoice({ state: "transcribing", since: 0, level: 0 });
+    try {
+      const { transcript } = await api.transcribe(await r.stop(), context().report_id);
+      setVoice({ state: "idle", since: 0, level: 0, note: transcript ? undefined : "Didn't catch that. Try again, a little closer to the mic." });
+      if (transcript) await send(transcript, true);
+    } catch (e) {
+      setVoice({ state: "idle", since: 0, level: 0, note: (e as Error).message });
+    }
+  }
+
+  async function send(text: string, spoken = false) {
     const message = text.trim();
     if (!message || busy) return;
     setDraft("");
     setBusy(true);
-    setTurns((ts) => [...ts, { role: "user", text: message, steps: [] }, { role: "assistant", text: "", steps: [], pending: true }]);
+    setTurns((ts) => [...ts, { role: "user", text: message, steps: [], voice: spoken }, { role: "assistant", text: "", steps: [], pending: true }]);
     try {
       await api.chat({ message, session_id: session.current, ...context() }, (e) => {
         if (e.type === "session") session.current = e.id;
@@ -110,7 +156,7 @@ export function ChatPanel({ context, onEvent, ready }: {
         {!turns.length && (
           <div className="chat-empty">
             <p className="hint">Ask Sightline about the open clash report and model. It can read clashes, look at their
-              images, measure, try fixes and show you what it means.</p>
+              images, measure, try fixes and show you what it means. Type, or press the mic and say it.</p>
             {SUGGESTIONS.map((s) => <button key={s} className="suggest" disabled={!ready} onClick={() => send(s)}>{s}</button>)}
           </div>
         )}
@@ -123,7 +169,8 @@ export function ChatPanel({ context, onEvent, ready }: {
               </details>
             )}
             {t.pending && !t.text && <p className="hint"><i className="spinner" aria-hidden /> Thinking…</p>}
-            {t.text && (t.role === "assistant" ? <Rich text={t.text} /> : <p>{t.text}</p>)}
+            {t.text && (t.role === "assistant" ? <Rich text={t.text} />
+              : <p>{t.voice && <Mic size={12} className="said" aria-label="Spoken" />}{t.text}</p>)}
             {t.error && <p className="bad">{t.error}</p>}
           </div>
         ))}
@@ -134,7 +181,17 @@ export function ChatPanel({ context, onEvent, ready }: {
           disabled={!ready} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft); } }} aria-label="Message" />
         <button className="btn primary" disabled={!ready || busy || !draft.trim()}>{busy ? "…" : "Send"}</button>
+        {VoiceRecorder.supported() && (voice.state === "listening"
+          ? <button type="button" className="btn mic on" onClick={() => void stopListening()} aria-label="Stop and send"
+              data-tip="Stop and send" data-tip-side="top" style={{ "--level": voice.level } as React.CSSProperties}>
+              <Square size={13} aria-hidden /> {Math.floor((Date.now() - voice.since) / 1000)} s</button>
+          : <button type="button" className="btn mic" onClick={() => void startListening()} disabled={!ready || busy || voice.state === "transcribing"}
+              aria-label="Speak to Sightline" data-tip="Speak to Sightline (Muse Voice Transcribe)" data-tip-side="top">
+              {voice.state === "transcribing" ? <i className="spinner" aria-hidden /> : <Mic size={15} aria-hidden />}</button>)}
       </form>
+      {voice.state === "listening" && <p className="voice-note live"><i className="rec" aria-hidden /> Listening… say what you want, then press stop.</p>}
+      {voice.state === "transcribing" && <p className="voice-note">Turning your words into text…</p>}
+      {voice.state === "idle" && voice.note && <p className="voice-note bad">{voice.note}</p>}
     </div>
   );
 }

@@ -163,6 +163,25 @@ class MetaChatModel:
         return body["choices"][0]["message"]
 
 
+def transcribe(wav: bytes, keywords: list[str] | None = None, client: httpx.Client | None = None) -> dict:
+    """Speech to text with Muse Voice Transcribe: one push-to-talk clip (mono 16-bit PCM WAV, 16 or 24 kHz) in, its
+    transcript out. `keywords` bias recognition toward jargon and names ("transom", "Clash7") without forcing them.
+
+        META_VOICE_MODEL    muse-voice-transcribe-1.0
+    """
+    load_env()
+    base = os.environ.get("META_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/")
+    settings = {"model": os.environ.get("META_VOICE_MODEL", "muse-voice-transcribe-1.0"), "audioEncoding": "WAV",
+                "mode": "PUSH_TO_TALK", "languageBias": ["English"], **({"keywords": keywords} if keywords else {})}
+    c = client or httpx.Client(timeout=60)
+    r = c.post(f"{base}/asr/transcribe", headers={"Authorization": f"Bearer {os.environ['META_API_KEY']}",
+                                                  "Accept": "application/json"},
+               files={"request": (None, json.dumps(settings), "application/json"), "audio": ("clip.wav", wav, "audio/wav")})
+    r.raise_for_status()
+    body = r.json()
+    return {"transcript": (body.get("transcript") or "").strip(), "duration_ms": body.get("audioDurationMs")}
+
+
 def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
     """The model for bulk triage and a description of it for the UI.
 

@@ -9,13 +9,14 @@ import tempfile
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import chat, edits, plans, triage
-from .meta_client import triage_model
+from .meta_client import transcribe, triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
@@ -25,6 +26,15 @@ EXPORTS = Path(tempfile.gettempdir()) / "sightline-exports"
 EXPORTS.mkdir(exist_ok=True)
 propose_limit = ProposeLimit.from_env()
 chat_limit = ProposeLimit.chat_from_env()
+voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
+                           int(os.environ.get("SIGHTLINE_VOICE_PER_DAY", "0")), noun="voice messages")
+
+MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
+# Words Muse Voice Transcribe should lean toward: what people say to Sightline about a building model.
+VOICE_WORDS = ["Sightline", "Northbank", "clash", "clashes", "duct", "ductwork", "supply air", "cable tray", "pipe",
+               "transfer girder", "girder", "beam", "column", "slab", "mullion", "transom", "curtain wall", "web opening",
+               "offset", "trim", "clearance", "Level 01", "Level 02", "Level 03", "MEP", "IFC", "BCF", "Navisworks",
+               "triage", "root cause", "x-ray", "section box", "isolate", "Muse Spark"]
 # The built web app (`cd web && npm run build`), served from the same origin when present.
 WEB_DIST = Path(os.environ.get("SIGHTLINE_WEB_DIST", Path(__file__).resolve().parents[2] / "web" / "dist"))
 
@@ -467,6 +477,27 @@ def chat_turn(body: ChatTurn, request: Request):
     return StreamingResponse(stream(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
+
+@app.post("/api/transcribe")
+async def transcribe_voice(request: Request, audio: UploadFile = File(...), report_id: str | None = Form(None)):
+    """A spoken message to Sightline (Muse Voice Transcribe): a WAV clip in, its transcript out. The browser sends the
+    transcript to the chat, so voice can do whatever the chat can. Biased toward BIM words and the open report's
+    clash names."""
+    data = await audio.read(MAX_VOICE_BYTES + 1)
+    if len(data) > MAX_VOICE_BYTES:
+        raise HTTPException(413, "That recording is too long: keep it under a minute.")
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise HTTPException(422, "Send the recording as a WAV file.")
+    refused = voice_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    if refused:
+        raise HTTPException(429, refused)
+    words = list(VOICE_WORDS)
+    if report_id and report_id in ws.reports:
+        words += sorted({c.name for c in ws.report(report_id).clashes}, key=lambda n: (len(n), n))[:40]
+    try:
+        return await run_in_threadpool(transcribe, data, words)
+    except Exception as e:  # the key, the network or the service: say so rather than fail silently
+        raise HTTPException(502, f"Transcription failed: {type(e).__name__}")
 
 # Last, so /api routes win over static files.
 if (WEB_DIST / "index.html").exists():
