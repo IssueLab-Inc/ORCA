@@ -4,6 +4,7 @@ Nothing reaches the options list without passing `verify.check`.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from dataclasses import dataclass, field, asdict
@@ -116,13 +117,17 @@ def _feedback(attempts: list[Attempt]) -> str:
 
 def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = "construction",
             max_rounds: int = 3, want: int = 3, clearance_m: float = 0.025,
-            on_event: Callable[[dict], None] | None = None) -> Result:
+            on_event: Callable[[dict], None] | None = None, lock=None) -> Result:
     """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
     {"type": "ideas", "round", "seconds", "understanding", "count"}, {"type": "checking", "index", "title", "kind"}
     and {"type": "attempt", "index", **attempt}.
+
+    `lock` serialises every use of the scene, so several clashes can be resolved at once: their model calls
+    overlap, their geometry trials (which edit the model and undo) take turns.
     """
+    lock = lock or contextlib.nullcontext()
     system = (PACKS / f"{pack}.md").read_text()
     base = scene if isinstance(scene, IfcScene) else IfcScene(scene)
     attempts: list[Attempt] = []
@@ -136,7 +141,9 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     for round_no in range(1, max_rounds + 1):
         emit({"type": "thinking", "round": round_no})
         started = time.perf_counter()
-        reply = model.complete_json(system, _describe(base, clash) + _feedback(attempts), clash.images)
+        with lock:
+            text = _describe(base, clash) + _feedback(attempts)
+        reply = model.complete_json(system, text, clash.images)
         understanding = understanding or reply.get("understanding", "")
         candidates = reply.get("candidates", [])
         emit({"type": "ideas", "round": round_no, "seconds": round(time.perf_counter() - started, 1),
@@ -146,32 +153,13 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                   "kind": cand.get("kind", "move")})
             target = clash.element_a if cand.get("move", "A") == "A" else clash.element_b
             other = clash.element_b if target == clash.element_a else clash.element_a
-            if cand.get("kind") == "offset":
-                attempt, option = _try_offset(base, cand, target, other, clearance_m)
-                attempts.append(attempt)
-                if on_step:
-                    on_step(attempt)
-                if option:
-                    _keep(options, option)
-                continue
-            run = base.connected_run(target)
-            delta = [float(v) for v in cand["delta_m"]]
-            # Try the move in place and undo it: re-serialising a large model per attempt costs seconds.
-            # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
-            neighbours = {c for g in run for c in base.element(g).connected} - set(run)
-            placements = base.translate(run, tuple(delta))
-            try:
-                v = verify.check(base, run, clearance_m=clearance_m, ignore=neighbours)
-            finally:
-                base.translate(run, tuple(-d for d in delta))
-            reason = _reason(v.hits)
-            attempt = Attempt(cand.get("title", "move"), delta, v.passed, reason)
+            with lock:
+                attempt, option = (_try_offset(base, cand, target, other, clearance_m) if cand.get("kind") == "offset"
+                                   else _try_move(base, cand, target, clearance_m))
             attempts.append(attempt)
-            if on_step:
-                on_step(attempt)
-            if v.passed:
-                _keep(options, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""),
-                                      cand.get("also_needs", ""), v.min_clearance_m, placements))
+            on_step(attempt)
+            if option:
+                _keep(options, option)
         # One round with a verified option is enough: another round costs a full model call (tens of seconds).
         if options:
             break
@@ -184,10 +172,29 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     options = options[:want]
     for o in options:  # what each option changes, as it is now, so the UI can show before and after together
         try:
-            o.before = edits.meshes(base, o.moved)
+            with lock:
+                o.before = edits.meshes(base, o.moved)
         except RuntimeError:
             o.before = None
     return Result(understanding, options, attempts)
+
+
+def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float) -> tuple[Attempt, Option | None]:
+    """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds."""
+    run = scene.connected_run(target)
+    delta = [float(v) for v in cand.get("delta_m", [0, 0, 0])]
+    # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
+    neighbours = {c for g in run for c in scene.element(g).connected} - set(run)
+    placements = scene.translate(run, tuple(delta))
+    try:
+        v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
+    finally:
+        scene.translate(run, tuple(-d for d in delta))
+    attempt = Attempt(cand.get("title", "move"), delta, v.passed, _reason(v.hits))
+    if not v.passed:
+        return attempt, None
+    return attempt, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""), cand.get("also_needs", ""),
+                           v.min_clearance_m, placements)
 
 
 def _reason(hits: list[verify.Hit]) -> str:

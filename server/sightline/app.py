@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, edits
+from . import chat, edits, plans
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
@@ -62,6 +62,17 @@ class ChatTurn(BaseModel):
     report_id: str | None = None
     clash_id: str | None = None
     fixed: list[str] = []
+
+
+class PlanRequest(BaseModel):
+    report_id: str
+    clash_ids: list[str] = []   # fix these together
+    hub: str | None = None      # or: fix the root cause around this element
+    fixed: list[str] = []
+
+
+class PlanApply(BaseModel):
+    options: list[dict]
 
 
 class OpenReport(BaseModel):
@@ -275,6 +286,57 @@ def measure(report_id: str, clash_id: str, scene_id: str):
         return ws.measure(_report(report_id), clash_id, _scene(scene_id))
     except KeyError:
         raise HTTPException(404, "No such clash in this report.")
+
+
+@app.get("/api/reports/{report_id}/root_causes/{scene_id}")
+def root_causes(report_id: str, scene_id: str, fixed: str = ""):
+    """Elements in several real clashes, with clashes the geometry finds that the report lacks."""
+    return plans.root_causes(ws, _scene(scene_id), _report(report_id), [f for f in fixed.split(",") if f])
+
+
+@app.post("/api/scenes/{scene_id}/plan/stream")
+def plan_stream(scene_id: str, body: PlanRequest, request: Request):
+    """Fix several clashes together (clash_ids), or the root cause around one element (hub). Streams progress as
+    newline-delimited JSON, then {"type": "plan", ...}. Each clash pair costs one proposal from the allowance."""
+    _scene(scene_id)
+    _report(body.report_id)
+    if body.hub:
+        n = 1 + len(next((c["partners"] for c in plans.root_causes(ws, scene_id, body.report_id, body.fixed, top=50)
+                          if c["hub"]["global_id"] == body.hub), []))
+    else:
+        if not body.clash_ids:
+            raise HTTPException(422, "Pick the clashes to fix.")
+        n = len(plans.pairs_for(ws, scene_id, body.report_id, body.clash_ids)[0][: plans.MAX_ITEMS])
+    refused = propose_limit.take_many(client_id(request.headers, request.client.host if request.client else None), max(n, 1))
+    if refused:
+        raise HTTPException(429, refused)
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            plan = (plans.build_root_cause(ws, scene_id, body.report_id, body.hub, body.fixed, events.put) if body.hub
+                    else plans.build_batch(ws, scene_id, body.report_id, body.clash_ids, events.put))
+            events.put({"type": "plan", **json.loads(plans.to_json(plan))})
+        except Exception as e:
+            events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream():
+        while (event := events.get()) is not None:
+            yield json.dumps(event, default=str) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/scenes/{scene_id}/plan/apply")
+def plan_apply(scene_id: str, body: PlanApply):
+    try:
+        return plans.apply(ws, _scene(scene_id), body.options)
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot apply the plan: {e}")
 
 
 _chat: chat.Chat | None = None

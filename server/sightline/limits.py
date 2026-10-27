@@ -45,6 +45,20 @@ class ProposeLimit:
             q.popleft()
         return q
 
+    def take_many(self, client: str, n: int) -> str | None:
+        """Count `n` at once, or none of them: a plan of several fixes is refused whole, not half-run."""
+        now = self.clock()
+        mine = self._trim(self._clients.setdefault(client, deque()), now - HOUR)
+        everyone = self._trim(self._all, now - DAY)
+        if self.per_day and len(everyone) + n > self.per_day:
+            return f"The demo has too few {self.noun} left today for {n} more. Try fewer, or run Sightline locally."
+        if self.per_client_hour and len(mine) + n > self.per_client_hour:
+            left = max(self.per_client_hour - len(mine), 0)
+            return f"That needs {n} {self.noun}; you have {left} left this hour. Pick fewer clashes or try later."
+        mine.extend([now] * n)
+        everyone.extend([now] * n)
+        return None
+
     def take(self, client: str) -> str | None:
         """Count one proposal for `client`, or return why it is refused (nothing is counted then)."""
         now = self.clock()

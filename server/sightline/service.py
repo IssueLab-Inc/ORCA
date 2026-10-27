@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 
 import ifcopenshell.util.system
 import uuid
@@ -28,6 +29,8 @@ class Workspace:
         self.scenes: dict[str, IfcScene] = {}
         self.reports: dict[str, reports.Report] = {}
         self._matches: dict[tuple[str, str], dict] = {}
+        # Geometry trials edit the model and undo; anything touching a scene's geometry holds this.
+        self.lock = threading.RLock()
         self._model = model
 
     @property
@@ -66,11 +69,12 @@ class Workspace:
     def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025) -> dict:
         """Check a move without keeping it."""
         s = self.scene(scene_id)
-        placements = s.translate(moved, tuple(delta_m))
-        try:
-            v = verify.check(s, moved, clearance_m=clearance_m)
-        finally:
-            s.translate(moved, tuple(-d for d in delta_m))
+        with self.lock:
+            placements = s.translate(moved, tuple(delta_m))
+            try:
+                v = verify.check(s, moved, clearance_m=clearance_m)
+            finally:
+                s.translate(moved, tuple(-d for d in delta_m))
         return {**asdict(v), "placements": placements}
 
     def propose(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
@@ -78,6 +82,12 @@ class Workspace:
                 clash_id: str | None = None, on_event=None) -> dict:
         """With a report clash, its Navisworks distance and images go to the model too (images are what let
         the model find openings and free space; spikes/README.md, spike 4)."""
+        clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id)
+        return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock))
+
+    def clash_for(self, element_a: str, element_b: str, distance_m: float | None = None,
+                  images: list[str] | None = None, notes: str = "", report_id: str | None = None,
+                  clash_id: str | None = None) -> agent.Clash:
         pics = [Path(p) for p in images or []]
         if report_id and clash_id:
             c = self.report(report_id).clash(clash_id)
@@ -86,19 +96,20 @@ class Workspace:
                 distance_m = c.distance_m
             notes = "\n".join(filter(None, [notes, f"From a Navisworks clash report: {c.test}, {c.name}. "
                                                     "Images are Navisworks views of this clash."]))
-        clash = agent.Clash(element_a, element_b, distance_m, pics, notes)
-        return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event))
+        return agent.Clash(element_a, element_b, distance_m, pics, notes)
 
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
         s = self.scene(scene_id)
-        placements = s.translate(moved, tuple(delta_m))
+        with self.lock:
+            placements = s.translate(moved, tuple(delta_m))
         return {"placements": placements, "files": sorted({s.index_of(g) for g in moved})}
 
     def check_offset(self, scene_id: str, element: str, other: str, split_m: list[float], dz_m: float,
                      clearance_m: float = 0.025) -> dict:
         """Try a local offset of `element` around `other` without keeping it (see edits.py)."""
-        attempt, option = agent._try_offset(self.scene(scene_id), {"split_m": split_m, "dz_m": dz_m}, element, other,
-                                            clearance_m)
+        with self.lock:
+            attempt, option = agent._try_offset(self.scene(scene_id), {"split_m": split_m, "dz_m": dz_m}, element, other,
+                                                clearance_m)
         return {"passed": attempt.passed, "reason": attempt.reason,
                 "min_clearance_m": option.min_clearance_m if option else None,
                 "preview": option.preview if option else None}
@@ -106,22 +117,25 @@ class Workspace:
     def apply_offset(self, scene_id: str, element: str, split_m: list[float], dz_m: float) -> dict:
         """Keep a local offset: the element is shortened and new pieces are added to its file."""
         s = self.scene(scene_id)
-        off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
-        s.mark_edited(element)
+        with self.lock:
+            off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
+            s.mark_edited(element)
         return {**asdict(off), "files": [s.index_of(element)]}
 
     def file(self, scene_id: str, index: int, out_dir: Path) -> Path:
         """A model file as it is now: the original on disk, or the edited model written out."""
-        s = self.scene(scene_id)
-        if index not in s._edited:
-            return s.paths[index]
-        path = out_dir / f"{scene_id}-{index}-{s.paths[index].name}"
-        s.models[index].write(str(path))
-        return path
+        with self.lock:
+            s = self.scene(scene_id)
+            if index not in s._edited:
+                return s.paths[index]
+            path = out_dir / f"{scene_id}-{index}-{s.paths[index].name}"
+            s.models[index].write(str(path))
+            return path
 
     def export(self, scene_id: str, out_dir: Path) -> list[Path]:
         """Write the edited files only; untouched discipline models are not rewritten."""
-        return self.scene(scene_id).write_edited(out_dir)
+        with self.lock:
+            return self.scene(scene_id).write_edited(out_dir)
 
     # Clash reports (Navisworks XML).
 
@@ -211,13 +225,14 @@ class Workspace:
     def measure(self, report_id: str, clash_id: str, scene_id: str) -> dict:
         """Sightline's own measure of a report clash: the signed distance between the two matched elements.
         None when they do not overlap here, or when they are joined through ports (the check skips those)."""
-        m = self.match(report_id, scene_id)[clash_id]
-        if not (m["a"] and m["b"]):
-            return {"matched": False, "physical": None, "distance_m": None}
-        scene = self.scene(scene_id)
-        physical = scene.bounds().keys()
-        if m["a"] not in physical or m["b"] not in physical:
-            return {"matched": True, "physical": False, "distance_m": None}
-        v = verify.check(scene, [m["a"]], clearance_m=0.0)
-        hit = next((h for h in v.hits if h.other == m["b"]), None)
-        return {"matched": True, "physical": True, "distance_m": hit.distance_m if hit else None}
+        with self.lock:
+            m = self.match(report_id, scene_id)[clash_id]
+            if not (m["a"] and m["b"]):
+                return {"matched": False, "physical": None, "distance_m": None}
+            scene = self.scene(scene_id)
+            physical = scene.bounds().keys()
+            if m["a"] not in physical or m["b"] not in physical:
+                return {"matched": True, "physical": False, "distance_m": None}
+            v = verify.check(scene, [m["a"]], clearance_m=0.0)
+            hit = next((h for h in v.hits if h.other == m["b"]), None)
+            return {"matched": True, "physical": True, "distance_m": hit.distance_m if hit else None}
