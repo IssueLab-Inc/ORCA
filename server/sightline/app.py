@@ -1,20 +1,26 @@
 """Web API for the browser app. Run: uv run uvicorn sightline.app:app --reload"""
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .limits import ProposeLimit, client_id
 from .service import Workspace
 
 app = FastAPI(title="ClashWise Sightline")
 ws = Workspace()
 EXPORTS = Path(tempfile.gettempdir()) / "sightline-exports"
 EXPORTS.mkdir(exist_ok=True)
+propose_limit = ProposeLimit.from_env()
+# The built web app (`cd web && npm run build`), served from the same origin when present.
+WEB_DIST = Path(os.environ.get("SIGHTLINE_WEB_DIST", Path(__file__).resolve().parents[2] / "web" / "dist"))
 
 
 class Open(BaseModel):
@@ -72,7 +78,11 @@ def verify_move(scene_id: str, body: Move):
 
 
 @app.post("/api/scenes/{scene_id}/propose")
-def propose(scene_id: str, body: Propose):
+def propose(scene_id: str, body: Propose, request: Request):
+    _scene(scene_id)
+    refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    if refused:
+        raise HTTPException(429, refused)
     return ws.propose(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes)
 
 
@@ -93,3 +103,8 @@ def export(scene_id: str):
         return FileResponse(paths[0], filename=paths[0].name, media_type="application/octet-stream")
     archive = shutil.make_archive(str(EXPORTS / f"{scene_id}-sightline"), "zip", out)
     return FileResponse(archive, filename=Path(archive).name, media_type="application/zip")
+
+
+# Last, so /api routes win over static files.
+if (WEB_DIST / "index.html").exists():
+    app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")

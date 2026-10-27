@@ -55,6 +55,21 @@ MCP server (stdio), for agents such as ClashWise's Wise:
 cd server && uv run python -m sightline.mcp_server
 ```
 
+## Deploy (public demo on Modal)
+
+One container serves the built web app and the API from the same origin
+([`deploy/modal_app.py`](deploy/modal_app.py)). Put the demo `*.ifc` files in `samples/` first.
+
+```bash
+cd web && npm ci && npm run build && cd ..
+modal secret create sightline-meta META_API_KEY=...   # once
+modal deploy deploy/modal_app.py
+```
+
+It runs one container on purpose: open models and edits live in server memory. Proposals are capped per visitor
+and per day (`SIGHTLINE_PROPOSE_PER_HOUR`, `SIGHTLINE_PROPOSE_PER_DAY`, in `server/sightline/limits.py`), because
+each one is a paid Muse Spark call; **Check this move** is not limited.
+
 ## Tests
 
 ```bash

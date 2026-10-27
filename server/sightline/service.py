@@ -1,6 +1,7 @@
 """The operations Sightline offers, shared by the web API and the MCP server so they never drift."""
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -10,11 +11,14 @@ from .meta_client import ChatModel, MetaChatModel
 from .scene import IfcScene
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
+# Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
+MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
 
 
 class Workspace:
-    def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None):
+    def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None, max_scenes: int = MAX_SCENES):
         self.samples = samples
+        self.max_scenes = max_scenes
         self.scenes: dict[str, IfcScene] = {}
         self._model = model
 
@@ -41,6 +45,8 @@ class Workspace:
         scene.bounds()  # pay the one-off triangulation now, not on the first check
         scene_id = uuid.uuid4().hex[:12]
         self.scenes[scene_id] = scene
+        while self.max_scenes and len(self.scenes) > self.max_scenes:
+            del self.scenes[next(iter(self.scenes))]  # oldest first (dicts keep insertion order)
         return scene_id
 
     def scene(self, scene_id: str) -> IfcScene:

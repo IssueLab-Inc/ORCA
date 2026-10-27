@@ -85,7 +85,9 @@ Findings (Oct 27, details in spikes/README.md):
 ## Status and next steps
 
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
-Northbank spikes 1–4. 14 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
+proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
+evals/README.md). 19 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Next, in order:
 1. ✅ Spike 4 passed with images (spikes/README.md). Feed web-opening sizes/positions as text so moves land on the
