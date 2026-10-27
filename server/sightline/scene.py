@@ -175,7 +175,8 @@ class IfcScene:
 
     def translate(self, global_ids: list[str], delta_m: tuple[float, float, float]) -> dict[str, list[float]]:
         """Move elements by `delta_m` (metres, model axes, Z up). Returns GlobalId → new 4x4 world matrix,
-        which is exactly what the browser applies to its preview meshes."""
+        which is exactly what the browser applies to its preview meshes. Trials move and move back with this, so it
+        does not mark the file edited: whoever keeps a move calls `mark_edited`."""
         moved = {}
         for gid in global_ids:
             i = self.index_of(gid)
@@ -183,7 +184,6 @@ class IfcScene:
             matrix[:3, 3] += np.asarray(delta_m, dtype=float)
             ifcopenshell.api.run("geometry.edit_object_placement", self.models[i],
                                  product=self.models[i].by_guid(gid), matrix=matrix, is_si=True)
-            self._edited.add(i)
             if self._bounds is not None and gid in self._bounds:
                 self._bounds[gid] = self._bounds[gid] + np.asarray(delta_m, dtype=float)
             moved[gid] = matrix.flatten().tolist()

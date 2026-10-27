@@ -109,6 +109,8 @@ class Workspace:
         s = self.scene(scene_id)
         with self.lock:
             placements = s.translate(moved, tuple(delta_m))
+            for g in moved:  # kept: export writes these files
+                s.mark_edited(g)
         return {"placements": placements, "files": sorted({s.index_of(g) for g in moved})}
 
     def check_offset(self, scene_id: str, element: str, other: str, split_m: list[float], dz_m: float,

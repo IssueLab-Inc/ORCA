@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 59 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 60 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -221,6 +221,12 @@ multipart: `request` JSON {model, audioEncoding "WAV", mode "PUSH_TO_TALK", keyw
 voice drives everything chat can. Caps `SIGHTLINE_VOICE_PER_HOUR/DAY`, 60 s / 3 MB per clip. Checked end to end with a
 fake microphone (format accepted, audio duration right); recognition itself is untested here: no speech audio could be
 fetched or generated in the cloud session.
+
+Export (Oct 27): edits accumulate in the scene's in-memory models (moves, offsets, trims, plans); export writes each
+edited discipline file once, with all its edits (a zip when several changed). Only kept fixes mark a file edited:
+`IfcScene.translate` no longer does (trials move and move back with it), `Workspace.apply` / `apply_offset` /
+`apply_trim` call `mark_edited`. Before, one tried move made export return an "edited" but unchanged file instead of
+409. Edits live in memory: a container restart or opening the models again starts clean.
 
 Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
 some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then

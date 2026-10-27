@@ -66,6 +66,7 @@ def test_federated_files_clash_across_disciplines(tmp_path):
     assert [h.other_class for h in verify.check(s, [gid]).hits] == ["IfcBeam"]
 
     s.translate([gid], (0, 0, -0.82))
+    s.mark_edited(gid)  # kept (trials move and move back without marking)
     v = verify.check(s, [gid])
     assert v.passed and v.min_clearance_m == pytest.approx(0.12, abs=0.005)
     written = s.write_edited(tmp_path)

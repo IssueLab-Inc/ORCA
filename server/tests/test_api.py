@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from sightline import app as app_module
@@ -42,6 +43,53 @@ def test_federated_set_exports_only_the_edited_file(tmp_path, monkeypatch):
 
     duct = app_module.ws.scene(sid).models[1].by_type("IfcDuctSegment")[0].GlobalId
     assert c.post(f"/api/scenes/{sid}/verify", json={"moved": [duct], "delta_m": [0, 0, 0]}).json()["passed"] is False
+    assert c.get(f"/api/scenes/{sid}/export").status_code == 409  # a check moves and moves back: still nothing changed
     c.post(f"/api/scenes/{sid}/apply", json={"moved": [duct], "delta_m": [0, 0, -0.8]})
     r = c.get(f"/api/scenes/{sid}/export")
     assert r.status_code == 200 and "services.sightline.ifc" in r.headers["content-disposition"]
+
+
+def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypatch):
+    """Offsets, moves and trials in one session: the exported files hold all the kept edits, and only those."""
+    import io
+    import zipfile
+
+    import ifcopenshell
+    import ifcopenshell.util.placement
+    from sightline import agent
+    from sightline.fixtures import build_run_fixture
+
+    build_run_fixture(tmp_path / "services.ifc")
+    build_clash_fixture(tmp_path / "structure.ifc", only=("beam",))
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))
+    monkeypatch.setattr(app_module, "EXPORTS", tmp_path / "out")
+    (tmp_path / "out").mkdir()
+    c = TestClient(app_module.app)
+    sid = c.post("/api/scenes", json={"samples": ["services.ifc", "structure.ifc"]}).json()["id"]
+    scene = app_module.ws.scene(sid)
+    services, structure = scene.models
+    main = next(e for e in services.by_type("IfcDuctSegment") if e.Tag == "SA-1").GlobalId
+    beam = services.by_type("IfcBeam")[0].GlobalId
+    slab = services.by_type("IfcSlab")[0].GlobalId
+    other_beam = structure.by_type("IfcBeam")[0].GlobalId
+
+    agent._try_move(scene, {"title": "tried, not kept", "delta_m": [0, 0, -1.0]}, other_beam, 0.025)
+    agent._try_offset(scene, {"split_m": [2.0, 4.0], "dz_m": 0.5}, main, beam, 0.025)
+    assert c.get(f"/api/scenes/{sid}/export").status_code == 409  # trials only
+
+    pieces = c.post(f"/api/scenes/{sid}/offset/apply", json={"element": main, "split_m": [2.0, 4.0], "dz_m": 0.4}).json()["pieces"]
+    c.post(f"/api/scenes/{sid}/apply", json={"moved": [slab], "delta_m": [0, 0, 0.1]})        # same file, second fix
+    c.post(f"/api/scenes/{sid}/apply", json={"moved": [other_beam], "delta_m": [0.5, 0, 0]})  # another discipline
+
+    r = c.get(f"/api/scenes/{sid}/export")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    files = zipfile.ZipFile(io.BytesIO(r.content))
+    assert sorted(files.namelist()) == ["services.sightline.ifc", "structure.sightline.ifc"]
+    out = ifcopenshell.file.from_string(files.read("services.sightline.ifc").decode())
+    assert all(out.by_guid(g) for g in pieces)                                   # the offset's five pieces
+    z = lambda m, g: ifcopenshell.util.placement.get_local_placement(m.by_guid(g).ObjectPlacement)[2, 3]
+    assert z(out, slab) == pytest.approx(z(services, slab))                       # the live model, moved
+    assert z(out, slab) == pytest.approx(3.5)                                     # 3.4 + 0.1
+    moved = ifcopenshell.file.from_string(files.read("structure.sightline.ifc").decode())
+    x = ifcopenshell.util.placement.get_local_placement(moved.by_guid(other_beam).ObjectPlacement)[0, 3]
+    assert x == pytest.approx(0.5)                                                # the kept move, not the tried one
