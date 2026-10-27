@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
 import type { Matches, Report, ReportClash } from "./api";
 
-export const mm = (m: number | null | undefined) => (m == null ? "—" : `${m >= 0 ? "+" : ""}${(m * 1000).toFixed(0)} mm`);
+export function mm(m: number | null | undefined) {
+  if (m == null) return "—";
+  const v = Math.round(m * 1000) || 0; // no "-0 mm" for touching elements
+  return `${v > 0 ? "+" : ""}${v} mm`;
+}
 
 /** How much of a clash the open model can show: both elements, one, or none (null before any model is open). */
 export function linkState(m: Matches | null, id: string): "both" | "one" | "none" | null {
