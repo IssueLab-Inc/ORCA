@@ -50,7 +50,9 @@ export function App() {
   const [matches, setMatches] = useState<Matches | null>(null);
   const [clash, setClash] = useState<ReportClash | null>(null);
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
-  const [image, setImage] = useState<number | null>(null);
+  // The image dialog: a clash's Navisworks views, opened from the clash panel or a row's thumbnail.
+  const [lightbox, setLightbox] = useState<{ clash: ReportClash; index: number } | null>(null);
+  useEffect(() => { setLightbox(null); }, [report]);
   const [remeasure, setRemeasure] = useState(0);
   // Accepted fixes. `edits`: element GlobalId → pieces an offset added to it (shown with that element from then on).
   // `fixes`: report clash id → the fix accepted for it.
@@ -294,7 +296,7 @@ export function App() {
   }
 
   function selectClash(c: ReportClash) {
-    if (c.id !== clash?.id) { setClash(c); resetWork(); setImage(null); }
+    if (c.id !== clash?.id) { setClash(c); resetWork(); setLightbox(null); }
     if (tab === "plan" && !planRun) setTab("clash");
     if (!matches) { setA(null); setB(null); return; }
     goToClash(c);  // every click navigates, also on the clash already selected
@@ -361,7 +363,7 @@ export function App() {
       else if (k === "s") toggle("section");
       else if (k === "e") toggle("edges");
       else if (k === "m") toggle("measure");
-      else if (k === "escape") { setMeasurePts([]); setSelected(null); setImage(null); }
+      else if (k === "escape") { setMeasurePts([]); setSelected(null); setLightbox(null); }
       else return;
       e.preventDefault();
     };
@@ -599,7 +601,7 @@ export function App() {
 
       <aside className="pane left">
         {report
-          ? <ReportList report={report} matches={matches} selected={clash?.id ?? null} onSelect={selectClash} fixes={fixes}
+          ? <ReportList report={report} matches={matches} selected={clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={triage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
@@ -684,7 +686,7 @@ export function App() {
         )}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report
-            ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={setImage} fix={fixes[clash.id]} triage={triage[clash.id]} />
+            ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash, index })} fix={fixes[clash.id]} triage={triage[clash.id]} />
             : (a || b) ? (
               <dl className="kv pair">
                 <dt><i className="sw red" />A</dt><dd className="mono">{a ?? "—"}</dd>
@@ -736,8 +738,9 @@ export function App() {
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
       </footer>
 
-      {clash && report && image != null && clash.images[image] &&
-        <Lightbox reportId={report.id} clash={clash} index={image} onClose={() => setImage(null)} onMove={setImage} />}
+      {lightbox && report && lightbox.clash.images[lightbox.index] &&
+        <Lightbox reportId={report.id} clash={lightbox.clash} index={lightbox.index} onClose={() => setLightbox(null)}
+          onMove={(index) => setLightbox((l) => l && { ...l, index })} />}
     </div>
   );
 }

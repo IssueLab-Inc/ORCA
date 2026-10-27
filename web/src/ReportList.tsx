@@ -1,6 +1,6 @@
 import { CircleCheck, Search, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { Matches, Report, ReportClash, TriageKind, TriageVerdict } from "./api";
+import { api, type Matches, type Report, type ReportClash, type TriageKind, type TriageVerdict } from "./api";
 import { TRIAGE } from "./Triage";
 
 /** A clash someone looked at and decided needs no model edit here. */
@@ -24,8 +24,9 @@ const LINK_TITLE = { both: "Both elements are in the open model", one: "One elem
 
 const short = (c: ReportClash) => `${c.a.ifc_class?.replace(/^Ifc/, "") ?? "?"} × ${c.b.ifc_class?.replace(/^Ifc/, "") ?? "?"}`;
 
-export function ReportList({ report, matches, selected, onSelect, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter }: {
+export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
+  onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
   checked: Set<string>; onCheck: (ids: string[], on: boolean) => void; onFixChecked: () => void;
   insights: React.ReactNode; busy: boolean;
@@ -104,6 +105,12 @@ export function ReportList({ report, matches, selected, onSelect, fixes, reviewe
                   <div key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""} ${rv ? "reviewed" : ""}`} data-clash={c.id}>
                     {matches && <input type="checkbox" aria-label={`Select ${c.name}`} checked={checked.has(c.id)} disabled={!fixable(c)}
                       onChange={(e) => onCheck([c.id], e.target.checked)} />}
+                    {c.images.length > 0
+                      ? <button className="row-thumb" onClick={() => onImage(c, 0)} aria-label={`Open the images of ${c.name}`}
+                          title={`${c.name}: open its ${c.images.length === 1 ? "image" : `${c.images.length} views`}`}>
+                          <img src={api.imageUrl(report.id, c.id, 0)} alt="" loading="lazy" />
+                        </button>
+                      : report.clashes.some((x) => x.images.length) && <span className="row-thumb none" aria-hidden />}
                     <button className="clash-main" onClick={() => onSelect(c)} title={fixes[c.id] ? `Fixed: ${fixes[c.id]}` : rv ? rv.note : link ? LINK_TITLE[link] : undefined}>
                       {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : rv ? <i className="tick muted" aria-label="Reviewed">✓</i> : link ? <i className={`dot ${link}`} /> : <i />}
                       <span className="clash-name">{c.name}</span>

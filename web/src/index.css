@@ -295,3 +295,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .pilot.passed { border-left-color: #12b5cb; }
 .pilot.failed { border-left-color: #e040fb; }
 .pilot.idle { border-left-color: var(--line); }
+
+/* A clash's first Navisworks view in its list row; opens the image dialog */
+.row-thumb { all: unset; flex: none; width: 34px; height: 34px; border-radius: 5px; overflow: hidden; background: #222; cursor: zoom-in; }
+.row-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s; }
+.row-thumb:hover img { transform: scale(1.12); }
+.row-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row-thumb.none { background: var(--bg); cursor: default; }
