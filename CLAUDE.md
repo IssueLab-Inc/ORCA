@@ -228,6 +228,12 @@ edited discipline file once, with all its edits (a zip when several changed). On
 `apply_trim` call `mark_edited`. Before, one tried move made export return an "edited" but unchanged file instead of
 409. Edits live in memory: a container restart or opening the models again starts clean.
 
+The view follows activity, not the tab (Oct 28): `viewPlan` in App.tsx. A plan (Fix button or chat) takes the view at
+once (old clash's highlight and marker cleared, then the plan's elements and fixes); picking a clash, proposing or the
+Clash tab gives it back; the Plan tab takes it again. A chat reply that built a plan and then points at a clash only
+selects it (`selectClash(c, keepPlan)`), and the list highlight follows the view. Before, a plan started from chat
+moved the camera but left the old clash highlighted and the plan undrawn until the Plan tab was opened.
+
 Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
 some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then
 the boxes' smallest overlap. Third fix kind **trim** (`edits.butt_trim` / `apply_trim`): cut a member's end back to

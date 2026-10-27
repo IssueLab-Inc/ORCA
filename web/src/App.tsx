@@ -69,6 +69,9 @@ export function App() {
   const [now, setNow] = useState(Date.now());
   const [compare, setCompare] = useState<"before" | "after" | "both">("after");
   const [tab, setTab] = useState<Tab>("clash");
+  // What the viewer shows: the selected clash, or the plan. It follows the latest activity, not the open tab: a plan
+  // started from Chat takes the view while the chat stays open; picking a clash or proposing gives it back.
+  const [viewPlan, setViewPlan] = useState(false);
   // Several clashes at once.
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [rootCauses, setRootCauses] = useState<RootCause[] | null>(null);
@@ -113,7 +116,7 @@ export function App() {
   }, [a, b, edits, standIns]);
   // While a plan is on screen, its elements are the focus: what moves in green, what stays in red.
   const planGroup = useMemo(() => {
-    if (!plan || tab !== "plan") return null;
+    if (!plan || !viewPlan) return null;
     const g: Record<string, "a" | "b"> = {};
     if (plan.hub) {  // the element behind the clashes in red, everything it meets in green
       g[plan.hub.hub.global_id] = "a";
@@ -125,10 +128,12 @@ export function App() {
       for (const gid of moved) g[gid] = "b";
     }
     return g;
-  }, [plan, tab]);
+  }, [plan, viewPlan]);
   useEffect(() => {
-    viewer.current?.setFocus(planGroup ? { a: null, b: null, group: planGroup } : { a, b, group });
-  }, [a, b, group, planGroup]);
+    // A plan on screen: its elements. A plan still being worked out: nothing yet (the old clash would mislead).
+    viewer.current?.setFocus(planGroup ? { a: null, b: null, group: planGroup } : viewPlan ? { a: null, b: null } : { a, b, group });
+  }, [a, b, group, planGroup, viewPlan]);
+  useEffect(() => { if (viewPlan) viewer.current?.setMarker(null); }, [viewPlan]);  // the clash's marker goes with it
   useEffect(() => { viewer.current?.setMode(tool.mode); }, [tool.mode]);
   useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
   // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
@@ -246,10 +251,10 @@ export function App() {
     if (option) {
       v.showOption({ kind: option.kind, moved: option.moved, deltaM: option.delta_m, pieces: option.preview, before: option.before },
         compare, option.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
-    } else if (plan && tab === "plan") {
+    } else if (plan && viewPlan) {
       v.showOptions(planOptions.map((o) => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m, pieces: o.preview, before: o.before, color: "#1f9d3a" })), compare);
     } else v.preview([]);
-  }, [option, plan, planOptions, compare, a, tab]);
+  }, [option, plan, planOptions, compare, a, viewPlan]);
 
   // Zoom to what the chosen option changes: an offset's risers and middle piece, or where a moved element now
   // meets the other side of the clash (not the whole moved element: a raised 16 m run would fill the screen).
@@ -310,8 +315,11 @@ export function App() {
     loadReport(() => api.uploadReport(files), `${files.length} file${files.length > 1 ? "s" : ""}`);
   }
 
-  function selectClash(c: ReportClash) {
+  /** Select a report clash and take the view to it, or (`keepPlan`) only select it while a plan stays on screen. */
+  function selectClash(c: ReportClash, keepPlan = false) {
     if (c.id !== clash?.id) { setClash(c); resetWork(); setLightbox(null); }
+    if (keepPlan) return;
+    setViewPlan(false);
     if (tab === "plan" && !planRun) setTab("clash");
     if (!matches) { setA(null); setB(null); return; }
     goToClash(c);  // every click navigates, also on the clash already selected
@@ -388,7 +396,7 @@ export function App() {
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. */
   function trackAgent() {
-    setError(null); setChosen(null); setManual(null);
+    setError(null); setChosen(null); setManual(null); setViewPlan(false);
     const t = Date.now();
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
     setProgress(p); setNow(t);
@@ -433,6 +441,7 @@ export function App() {
   /** Start showing a plan being built; returns the handler for its events and a function to call when done. */
   function trackPlan(kind: "batch" | "root_cause") {
     resetWork(); setPlan(null); setError(null); setPlanError(null);
+    setViewPlan(true);
     const t = Date.now();
     let run: PlanRun = { kind, started: t, phase: kind === "root_cause" ? "cause" : "fixing", rootCause: "", items: [], status: {} };
     setPlanRun(run); setNow(t);
@@ -502,7 +511,8 @@ export function App() {
   function onChatEvent(e: ChatEvent) {
     if (e.type === "ui" && e.action === "select_clash") {
       const c = report?.clashes.find((x) => x.id === e.clash_id);
-      if (c) selectClash(c);
+      // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
+      if (c) selectClash(c, planThisTurn.current);
     }
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
@@ -516,11 +526,13 @@ export function App() {
       (chatAgent.current ?? trackAgent()).finish(e);
       chatAgent.current = null;
     }
-    if (e.type === "plan_started") chatPlan.current = trackPlan(e.kind);
+    if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind); planThisTurn.current = true; }
+    if (e.type === "done") planThisTurn.current = false;
     if (e.type === "plan_event") chatPlan.current?.onEvent(e.event);
     if (e.type === "plan") { (chatPlan.current ?? trackPlan(e.kind)).finish(e); chatPlan.current = null; }
   }
   const chatPlan = useRef<ReturnType<typeof trackPlan> | null>(null);
+  const planThisTurn = useRef(false);
 
   async function accept(o: Option) {
     if (!sceneId) return;
@@ -551,7 +563,7 @@ export function App() {
   const startLabel = reportSamples.length && !report ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   const fixedCount = Object.keys(fixes).length;
-  const compareBar = (option || (plan && tab === "plan" && planOptions.length > 0)) && (
+  const compareBar = (option || (plan && viewPlan && planOptions.length > 0)) && (
     <div className="compare" onClick={(e) => e.stopPropagation()}>
       <div className="seg" role="group" aria-label="Compare before and after">
         {(["before", "after", "both"] as const).map((m) => (
@@ -627,7 +639,7 @@ export function App() {
 
       <aside className="pane left">
         {report
-          ? <ReportList report={report} matches={matches} selected={clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
+          ? <ReportList report={report} matches={matches} selected={viewPlan ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={triage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
@@ -700,9 +712,9 @@ export function App() {
 
       <aside className={`pane right ${tab === "chat" ? "chatting" : ""}`}>
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => setTab("clash")}>
+          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => { setTab("clash"); setViewPlan(false); }}>
             <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
-          <button role="tab" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => setTab("plan")}>
+          <button role="tab" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => { setTab("plan"); if (plan || planRun) setViewPlan(true); }}>
             <Network size={14} aria-hidden /> Plan{planning ? <i className="spinner" aria-hidden /> : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
           <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
             <MessageSquare size={14} aria-hidden /> Chat</button>
@@ -714,7 +726,7 @@ export function App() {
         {tab === "plan" && (
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
-            onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setTab("clash"); }} />
+            onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />
         )}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report
