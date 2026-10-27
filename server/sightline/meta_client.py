@@ -58,12 +58,16 @@ class MetaChatModel:
         r.raise_for_status()
         return r.json()
 
-    def complete_json(self, system: str, text: str, images: list[Path] | None = None) -> dict:
+    def complete_json(self, system: str, text: str, images: list[Path] | None = None,
+                      schema: dict | None = None) -> dict:
+        """`schema` turns on strict structured output (`json_schema`); without it the reply is any JSON object."""
         content = [{"type": "text", "text": text}] + [_image_part(p) for p in images or []]
+        response_format = ({"type": "json_schema", "json_schema": {"name": "reply", "schema": schema, "strict": True}}
+                           if schema else {"type": "json_object"})
         body = self._post({
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}],
-            "response_format": {"type": "json_object"},
+            "response_format": response_format,
             "temperature": 0.2,
         })
         raw = body["choices"][0]["message"]["content"]
