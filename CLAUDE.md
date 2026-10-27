@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 43 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 48 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -155,7 +155,17 @@ Muse call (`domain_packs/patterns.md`) → by_design (+ clash rule) / modelling_
 `as_designed` returns a plan with no edits and `advice`. UI: Insights panel (all root causes, patterns, Explain), a
 client-side `reviewed` state (by design / for author) that root causes, patterns and plans exclude like fixes.
 Northbank: 11 patterns; bolts/plates, columns/slabs, beams/columns, curtain-wall joints → by design; duplicate braces,
-low base plates → modelling error; lift pit walls vs footings → real problem. 43 server tests.
+low base plates → modelling error; lift pit walls vs footings → real problem.
+
+Bulk triage (Oct 27): `server/sightline/triage.py`. Sure rules first (non-physical class, touch ≤ 1 mm; no model
+call), then one strict-JSON call per clash, 8 workers, same prompt/schema as `evals/navisworks_triage.py`.
+`meta_client.triage_model()`: Muse Spark Open on Baseten (`TRIAGE_API_KEY`/`BASETEN_API_KEY`, `TRIAGE_API_BASE_URL`,
+`TRIAGE_MODEL`, `TRIAGE_IMAGES`) else Muse Spark; json_schema refused (400/422) → JSON mode with the schema in the
+prompt. `triage.Job` is shared per sample report (`sample:<root>`; uploads per id), replays to late subscribers; a run
+costs one proposal. `POST /api/reports/{rid}/triage/stream`, `GET /api/reports/{rid}/triage`. UI: Triage card (progress,
+verdict filter chips, Set aside / Flag), row tags, reading in the clash panel. Northbank on Muse Spark: 317 in 119 s,
+184 by rule, answer key real/high/MEP. **No open-weights key yet**: the eval's `--open` run is pending one. 48 server
+tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
@@ -164,7 +174,7 @@ Next, in order.
 3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
-5. Export IFC + BCF; voice; Muse Spark Open triage (open-weights bonus).
+5. ✅ Bulk triage, open-weights ready (needs a Baseten key to run on Muse Spark Open). Export IFC + BCF; voice.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.

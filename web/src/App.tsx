@@ -2,10 +2,11 @@ import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, LocateFixed, Messa
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
-import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type Verdict } from "./api";
+import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
 import { Insights } from "./Insights";
+import { TriageCard, type TriageRun } from "./Triage";
 import { ReportList, mm, type Review } from "./ReportList";
 import { Popover } from "./ui";
 import { Viewer, serverPointToViewer, type Preset, type ViewMode } from "./viewer/Viewer";
@@ -62,6 +63,10 @@ export function App() {
   const [verdicts, setVerdicts] = useState<Record<string, PatternVerdict> | null>(null);
   const [explaining, setExplaining] = useState(false);
   const [reviewed, setReviewed] = useState<Record<string, Review>>({});
+  // Bulk triage of the open report (shared on the server: a run someone else started is followed, not repeated).
+  const [triage, setTriage] = useState<Record<string, TriageVerdict>>({});
+  const [triageRun, setTriageRun] = useState<TriageRun | null>(null);
+  const [triageFilter, setTriageFilter] = useState<TriageKind | null>(null);
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -118,7 +123,8 @@ export function App() {
   }, [measurePts]);
 
   // A clock for the live status lines while an agent works.
-  const working = (!!progress && progress.phase !== "done") || (!!planRun && planRun.phase !== "done");
+  const working = (!!progress && progress.phase !== "done") || (!!planRun && planRun.phase !== "done")
+    || (!!triageRun && !triageRun.done);
   useEffect(() => {
     if (!working) return;
     const t = setInterval(() => setNow(Date.now()), 500);
@@ -147,6 +153,37 @@ export function App() {
     try { setVerdicts(await api.triagePatterns(report.id, sceneId, resolved)); }
     catch (e) { setError((e as Error).message); } finally { setExplaining(false); }
   }
+
+  /** Run the bulk triage, or follow the run already going for this report. */
+  async function runTriage(rerun = false) {
+    if (!report) return;
+    const rid = report.id;
+    if (rerun) { setTriage({}); setTriageFilter(null); }
+    setTriageRun((r) => r ?? { model: "", open_weights: false, total: report.clashes.length, started: Date.now(), done: false });
+    try {
+      await api.triageStream(rid, (e) => {
+        if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false });
+        else if (e.type === "clash") { const { type: _t, id, ...v } = e; setTriage((t) => ({ ...t, [id]: v })); }
+        else if (e.type === "done") setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error });
+      }, rerun);
+    } catch (e) { setError((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
+  }
+
+  // A newly opened report: pick up a triage that already exists for it (finished, or still running).
+  useEffect(() => {
+    setTriage({}); setTriageRun(null); setTriageFilter(null);
+    if (!report) return;
+    let live = true;
+    api.triage(report.id).then((s) => {
+      if (!live || !s.model) return;
+      if (s.done) {
+        setTriage(s.results);
+        setTriageRun({ model: s.model, open_weights: !!s.open_weights, note: s.note, total: s.total ?? 0, started: Date.now(), done: true, seconds: s.seconds ?? undefined, error: s.error ?? undefined });
+      } else runTriage();
+    }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report]);
 
   function review(ids: string[], kind: Review["kind"], note: string) {
     setReviewed((r) => ({ ...r, ...Object.fromEntries(ids.filter((id) => !fixes[id]).map((id) => [id, { kind, note }])) }));
@@ -535,13 +572,16 @@ export function App() {
       <aside className="pane left">
         {report
           ? <ReportList report={report} matches={matches} selected={clash?.id ?? null} onSelect={selectClash} fixes={fixes}
-              reviewed={reviewed} checked={checked} busy={planning || proposing}
+              reviewed={reviewed} checked={checked} busy={planning || proposing} triage={triage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
-              insights={<Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
+              insights={<><TriageCard run={triageRun} results={triage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+                open={report.clashes.filter((c) => !fixes[c.id] && !reviewed[c.id]).length} onRun={runTriage}
+                onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
+                onFlag={(ids) => review(ids, "author", "Triage: modelling error")} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
                 busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={explainPatterns}
                 onSelect={(ids) => setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])]))}
-                onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })} />} />
+                onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })} /></>} />
           : <div className="empty-left">
               <FileSpreadsheet size={28} aria-hidden />
               <h2>No clash report open</h2>
@@ -607,7 +647,7 @@ export function App() {
         )}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report
-            ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={setImage} fix={fixes[clash.id]} />
+            ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={setImage} fix={fixes[clash.id]} triage={triage[clash.id]} />
             : (a || b) ? (
               <dl className="kv pair">
                 <dt><i className="sw red" />A</dt><dd className="mono">{a ?? "—"}</dd>

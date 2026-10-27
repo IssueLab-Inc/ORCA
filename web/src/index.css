@@ -135,7 +135,7 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .clash-row { display: flex; align-items: center; gap: 6px; padding-left: 6px; border-radius: 6px; }
 .clash-row:hover { background: var(--bg); }
 .clash-row.pick { background: var(--accent-soft); }
-.clash-main { all: unset; cursor: pointer; flex: 1; min-width: 0; display: grid; grid-template-columns: 12px auto 1fr auto; gap: 6px; align-items: baseline; padding: 6px 6px 6px 0; font-size: 12.5px; }
+.clash-main { all: unset; cursor: pointer; flex: 1; min-width: 0; display: grid; grid-template-columns: 12px auto 1fr auto auto; gap: 6px; align-items: baseline; padding: 6px 6px 6px 0; font-size: 12.5px; }
 .clash-name { font-weight: 600; }
 .clash-pair { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .dist { font-size: 11.5px; }
@@ -266,3 +266,21 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .advice { background: var(--ok-soft); border-radius: var(--radius); padding: 10px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
 .advice b { color: var(--ok); }
 .advice p { margin: 0; line-height: 1.45; }
+
+/* Bulk triage */
+.triage { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); }
+.triage h3 { margin: 0; }
+.triage .hint { margin: 0; line-height: 1.5; }
+.triage .hint .spin { vertical-align: -2px; }
+.triage-progress { height: 4px; border-radius: 2px; background: var(--bg); overflow: hidden; }
+.triage-progress span { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.triage-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.triage-chips .chip { border: 1px solid transparent; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 600; }
+.triage-chips .chip.on { border-color: currentColor; }
+.chip.muted { opacity: .75; }
+.tv { font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 999px; background: var(--bg); color: var(--muted); white-space: nowrap; }
+.tv.bad { background: var(--fail-soft); color: var(--fail); }
+.tv.warn { background: var(--warn-soft); color: var(--warn); }
+.tv.muted { opacity: .7; }
+.triage-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px; border-radius: var(--radius); background: var(--raised); }
+.triage-note p { flex-basis: 100%; margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; }

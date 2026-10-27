@@ -1,6 +1,7 @@
 import { CircleCheck, Search, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { Matches, Report, ReportClash } from "./api";
+import type { Matches, Report, ReportClash, TriageKind, TriageVerdict } from "./api";
+import { TRIAGE } from "./Triage";
 
 /** A clash someone looked at and decided needs no model edit here. */
 export interface Review { kind: "by_design" | "author"; note: string }
@@ -23,11 +24,12 @@ const LINK_TITLE = { both: "Both elements are in the open model", one: "One elem
 
 const short = (c: ReportClash) => `${c.a.ifc_class?.replace(/^Ifc/, "") ?? "?"} × ${c.b.ifc_class?.replace(/^Ifc/, "") ?? "?"}`;
 
-export function ReportList({ report, matches, selected, onSelect, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy }: {
+export function ReportList({ report, matches, selected, onSelect, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
   checked: Set<string>; onCheck: (ids: string[], on: boolean) => void; onFixChecked: () => void;
   insights: React.ReactNode; busy: boolean;
+  triage: Record<string, TriageVerdict>; triageFilter: TriageKind | null;
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -39,12 +41,13 @@ export function ReportList({ report, matches, selected, onSelect, fixes, reviewe
     for (const c of report.clashes) {
       if (onlyLinked && linkState(matches, c.id) !== "both") continue;
       if (hideFixed && (fixes[c.id] || reviewed[c.id])) continue;
+      if (triageFilter && triage[c.id]?.verdict !== triageFilter) continue;
       const text = [c.name, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class, c.a.level, c.b.level, c.grid].join(" ").toLowerCase();
       if (q && !q.split(/\s+/).every((w) => text.includes(w))) continue;
       out.set(c.test, [...(out.get(c.test) ?? []), c]);
     }
     return [...out.entries()];
-  }, [report, matches, query, onlyLinked, hideFixed, fixes, reviewed]);
+  }, [report, matches, query, onlyLinked, hideFixed, fixes, reviewed, triage, triageFilter]);
 
   // Bring the selected clash into view, also when something else (the chat) selected it.
   useEffect(() => {
@@ -96,6 +99,7 @@ export function ReportList({ report, matches, selected, onSelect, fixes, reviewe
               {cs.map((c) => {
                 const link = linkState(matches, c.id);
                 const rv = !fixes[c.id] ? reviewed[c.id] : undefined;
+                const tv = triage[c.id];
                 return (
                   <div key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""} ${rv ? "reviewed" : ""}`} data-clash={c.id}>
                     {matches && <input type="checkbox" aria-label={`Select ${c.name}`} checked={checked.has(c.id)} disabled={!fixable(c)}
@@ -104,6 +108,8 @@ export function ReportList({ report, matches, selected, onSelect, fixes, reviewe
                       {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : rv ? <i className="tick muted" aria-label="Reviewed">✓</i> : link ? <i className={`dot ${link}`} /> : <i />}
                       <span className="clash-name">{c.name}</span>
                       <span className="clash-pair">{short(c)}</span>
+                      {tv && !fixes[c.id] && !rv && <span className={`tv ${TRIAGE[tv.verdict].cls}`} title={tv.understanding || TRIAGE[tv.verdict].tip}
+                        aria-label={`Triage: ${TRIAGE[tv.verdict].label}`}>{TRIAGE[tv.verdict].label}</span>}
                       {fixes[c.id] ? <span className="fixed-label">fixed</span>
                         : rv ? <span className={`review-label ${rv.kind}`}>{rv.kind === "by_design" ? "by design" : "for author"}</span>
                           : <span className="mono dist">{mm(c.distance_m)}</span>}

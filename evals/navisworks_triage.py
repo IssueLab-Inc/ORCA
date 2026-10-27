@@ -8,6 +8,9 @@ model as text (classes, names, levels, signed distance) plus the three images, w
     uv run python ../evals/navisworks_triage.py <package dir> --out ../evals/runs/<date>-northbank-nwf-triage
     uv run python ../evals/navisworks_triage.py <package dir> --out ... --limit 5      # smoke test first
 
+Open weights: `--open` uses the app's triage host (`meta_client.triage_model`: Muse Spark Open on Baseten when
+TRIAGE_API_KEY or BASETEN_API_KEY is set); `--base-url/--model/--api-key-env` point at any OpenAI-compatible host.
+
 Re-running with the same --out resumes (clashes already in replies.jsonl are skipped), then rescores.
 Scoring is against a reference built from the metadata alone (see `reference`), not a human review:
 non-physical classes, touching results, and the dataset's answer key. Everything else is reported, not scored.
@@ -18,6 +21,7 @@ import argparse
 import collections
 import csv
 import json
+import os
 import sys
 import threading
 import time
@@ -28,7 +32,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 from sightline import reports  # noqa: E402
-from sightline.meta_client import MetaChatModel  # noqa: E402
+from sightline import triage  # noqa: E402
+from sightline.meta_client import MetaChatModel, triage_model  # noqa: E402
 
 PROMPT = Path(__file__).resolve().parents[1] / "server/sightline/domain_packs/triage.md"
 VIEWS = ["A-transparent.png", "B-context.png", "C-alternate.png"]
@@ -40,21 +45,7 @@ TOUCH_M = 0.001  # |distance| at or under this is a touch (the tests' tolerance 
 GIRDER = "1eVHoPtl1IhAbbhivqVqb0"
 ANSWER_KEY = {"2AbvqKF25LGeR0M34N_jld": "#042", "3tQ7zxxRDMefPXL6hbHmO2": "#057", "1RHD_I4ibLDuUhW1LBAckc": "#061"}
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "understanding": {"type": "string"},
-        "verdict": {"type": "string", "enum": ["real_clash", "by_design", "non_physical", "modelling_error"]},
-        "severity": {"type": "string", "enum": ["high", "medium", "low", "none"]},
-        "responsible": {"type": "string", "enum": ["Structure", "MEP", "Architecture", "Site", "none"]},
-        "action": {"type": "string", "enum": ["move_A", "move_B", "modify_A", "modify_B", "exclude_with_rule",
-                                              "fix_model", "none"]},
-        "fix_hint": {"type": "string"},
-        "confidence": {"type": "number"},
-    },
-    "required": ["understanding", "verdict", "severity", "responsible", "action", "fix_hint", "confidence"],
-    "additionalProperties": False,
-}
+SCHEMA = triage.SCHEMA  # the app and the eval ask the same question
 
 
 def load(package: Path) -> list[dict]:
@@ -218,11 +209,22 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=6)
     p.add_argument("--no-images", action="store_true")
     p.add_argument("--score-only", action="store_true")
+    p.add_argument("--open", action="store_true", help="the app's triage host (open weights when configured)")
+    p.add_argument("--base-url")
+    p.add_argument("--model")
+    p.add_argument("--api-key-env", help="environment variable holding the host's key")
+    p.add_argument("--effort", help="reasoning_effort ('' to omit)")
     args = p.parse_args()
 
     clashes = load(args.package)[: args.limit]
     args.out.mkdir(parents=True, exist_ok=True)
-    model = MetaChatModel(timeout_s=240)
+    if args.open:
+        model, info = triage_model(timeout_s=240)
+        if not info["open_weights"]:
+            sys.exit("No open-weights host configured: set TRIAGE_API_KEY (or BASETEN_API_KEY).")
+    else:
+        key = os.environ[args.api_key_env] if args.api_key_env else None
+        model = MetaChatModel(args.base_url, key, args.model, timeout_s=240, reasoning_effort=args.effort)
     if not args.score_only:
         run(clashes, args.out, model, args.workers, not args.no_images)
     score(clashes, args.out, model.model, not args.no_images)

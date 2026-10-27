@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import { api, type Matches, type Measure, type ReportClash, type ReportElement } from "./api";
+import { api, type Matches, type Measure, type ReportClash, type ReportElement, type TriageVerdict } from "./api";
 import { mm } from "./ReportList";
+import { TRIAGE } from "./Triage";
 
 const VIEW_NAMES: Record<string, string> = { A: "A · pair", B: "B · context", C: "C · second angle" };
 
@@ -18,15 +19,25 @@ function Side({ colour, label, e, found, how }: {
   );
 }
 
-export function ClashPanel({ reportId, clash, match, measure, onImage, fix }: {
+export function ClashPanel({ reportId, clash, match, measure, onImage, fix, triage }: {
   reportId: string; clash: ReportClash; match: Matches[string] | undefined; measure: Measure | null | "busy";
-  onImage: (index: number) => void; fix?: string;
+  onImage: (index: number) => void; fix?: string; triage?: TriageVerdict;
 }) {
   return (
     <section className="clash-panel">
       <div className="row"><h2>{clash.name}</h2>{fix ? <span className="chip ok">✓ fixed</span> : clash.status && <span className="chip">{clash.status}</span>}</div>
       <p className="hint">{clash.test}</p>
       {fix && <p className="fixed-note">Fixed in this session: {fix}. The Navisworks images show the clash as reported.</p>}
+      {triage && (
+        <div className="triage-note">
+          <span className={`chip small ${TRIAGE[triage.verdict].cls}`}>{TRIAGE[triage.verdict].label}</span>
+          {triage.severity && triage.severity !== "none" && <span className="chip small">{triage.severity}</span>}
+          {triage.responsible && triage.responsible !== "none" && <span className="chip small">{triage.responsible}</span>}
+          <span className="why">{triage.source === "rule" ? "by rule" : "triage model"}</span>
+          {triage.understanding && <p>{triage.understanding}{triage.fix_hint ? <span className="why"> {triage.fix_hint}</span> : null}</p>}
+          {triage.error && <p className="bad small">{triage.error}</p>}
+        </div>
+      )}
       {clash.images.length > 0 && (
         <div className={`thumbs n${clash.images.length}`}>
           {clash.images.map((label, i) => (

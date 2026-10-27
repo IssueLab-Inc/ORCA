@@ -32,6 +32,23 @@ export interface Report { id: string; title: string; sources: string[]; clashes:
 export type Matches = Record<string, { a: string | null; b: string | null; how: (string | null)[]; show?: (string | null)[] }>;
 export interface Measure { matched: boolean; physical: boolean | null; distance_m: number | null }
 
+/** Bulk triage (server: triage.py): one verdict per report clash, by rule or by the triage model. */
+export type TriageKind = "real_clash" | "by_design" | "non_physical" | "modelling_error" | "unknown";
+export interface TriageVerdict {
+  verdict: TriageKind; severity?: "high" | "medium" | "low" | "none"; responsible?: string; action?: string;
+  understanding?: string; fix_hint?: string; confidence?: number; source: "rule" | "model"; seconds?: number; error?: string;
+}
+export interface TriageModel { model: string; open_weights: boolean; images?: boolean; note?: string }
+export type TriageEvent =
+  | ({ type: "start"; total: number } & TriageModel)
+  | ({ type: "clash"; id: string } & TriageVerdict)
+  | { type: "done"; summary: Record<string, number>; seconds: number; error?: string }
+  | { type: "ping" };
+export interface TriageState extends Partial<TriageModel> {
+  results: Record<string, TriageVerdict>; done: boolean; started?: boolean; total?: number; seconds?: number | null;
+  error?: string | null;
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...init });
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
@@ -112,6 +129,10 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 }
 
 export const api = {
+  triage: (reportId: string) => call<TriageState>(`/reports/${reportId}/triage`),
+  /** Triage every clash in the report (or follow the run already going), event by event. */
+  triageStream: (reportId: string, onEvent: (e: TriageEvent) => void, rerun = false) =>
+    ndjson<TriageEvent>(`/reports/${reportId}/triage/stream${rerun ? "?rerun=true" : ""}`, {}, (e) => { onEvent(e); return e.type === "done"; }),
   patterns: (reportId: string, sceneId: string, fixed: string[]) =>
     call<Pattern[]>(`/reports/${reportId}/patterns/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
   triagePatterns: (reportId: string, sceneId: string, fixed: string[]) =>

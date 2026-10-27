@@ -14,7 +14,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, edits, plans
+from . import chat, edits, plans, triage
+from .meta_client import triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
@@ -318,6 +319,47 @@ def triage_patterns(report_id: str, scene_id: str, body: PatternTriage, request:
 
 
 _pattern_triage: dict[tuple, dict] = {}
+_triage_jobs: dict[str, triage.Job] = {}
+_triage_lock = threading.Lock()
+
+
+def _triage_key(report) -> str:
+    """A sample report is the same files for every visitor (clash ids are positions), so its triage is shared."""
+    return report.id if report.temporary else f"sample:{report.root}"
+
+
+@app.get("/api/reports/{report_id}/triage")
+def triage_state(report_id: str):
+    """The bulk triage of this report so far ({"results": {}} when it has not been run)."""
+    job = _triage_jobs.get(_triage_key(ws.report(_report(report_id))))
+    return job.state() if job else {"results": {}, "done": False, "started": False}
+
+
+@app.post("/api/reports/{report_id}/triage/stream")
+def triage_stream(report_id: str, request: Request, rerun: bool = False):
+    """Triage every clash in the report (open-weights model when configured). Streams newline-delimited JSON:
+    start, one "clash" event per verdict, done. One run per report is shared by every visitor; starting one costs a
+    proposal, following one already started is free."""
+    report = ws.report(_report(report_id))
+    key = _triage_key(report)
+    with _triage_lock:
+        job = _triage_jobs.get(key)
+        if job is None or (rerun and job.done):
+            refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+            if refused:
+                raise HTTPException(429, refused)
+            model, info = triage_model()
+            job = _triage_jobs[key] = triage.Job(report, model, info,
+                                                 int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8"))).start()
+            while len(_triage_jobs) > 16:
+                _triage_jobs.pop(next(iter(_triage_jobs)))
+
+    def stream():
+        for event in job.follow():
+            yield json.dumps(event, default=str) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/scenes/{scene_id}/plan/stream")

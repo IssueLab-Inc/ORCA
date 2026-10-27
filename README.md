@@ -62,6 +62,26 @@ GlobalId (else by a unique class and name), shown with its Navisworks images, an
 check (Navisworks and IfcOpenShell report depth differently: #042 is −150 mm in Navisworks, −300 mm here).
 **Propose fixes** on a report clash sends its Navisworks images and distance to the model.
 
+**Triage all** gives every clash in the report a verdict (real, by design, not physical, model error) before anyone
+opens one ([`server/sightline/triage.py`](server/sightline/triage.py)). Sure cases are settled by rule with no model call
+(a space, port or opening on either side; a touch within 1 mm); the rest go to the triage model, eight at a time, with
+their images. The list shows a tag per row and filters by verdict, the clash panel shows the reading, and **Set aside**
+marks the by-design and non-physical results as reviewed. One run per sample report is shared by every visitor.
+
+The triage model is **Muse Spark Open** (open weights) on any OpenAI-compatible host when a key is set, and Muse Spark on
+Meta's API otherwise; the card says which one answered:
+
+| Variable | Default |
+|---|---|
+| `TRIAGE_API_KEY` (or `BASETEN_API_KEY`) | unset: use Muse Spark |
+| `TRIAGE_API_BASE_URL` | `https://inference.baseten.co/v1` |
+| `TRIAGE_MODEL` | `meta-models/muse-spark-open-1026` |
+| `TRIAGE_IMAGES` | `1` (`0` for a text-only host) |
+| `SIGHTLINE_TRIAGE_WORKERS` | `8` |
+
+A host without strict structured output gets JSON mode with the schema in the prompt (switched on the first 400).
+Northbank's 317 results: 184 by rule, 133 by the model, 119 s on Muse Spark with `reasoning_effort=low`.
+
 ### Several clashes at once, and root causes
 
 Tick clashes in the list and choose **Fix together**: Sightline runs the fix agent on every pair at once, then applies
@@ -111,7 +131,7 @@ reports in `samples/reports/<name>/` first.
 
 ```bash
 cd web && npm ci && npm run build && cd ..
-modal secret create sightline-meta META_API_KEY=...   # once
+modal secret create sightline-meta META_API_KEY=...   # once (add TRIAGE_API_KEY=... for open-weights triage)
 modal deploy deploy/modal_app.py
 ```
 

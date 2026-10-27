@@ -58,6 +58,11 @@ side is `non_physical`, a result within 1 mm is a touch (not a real clash), and 
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-27 | Northbank-Demo-Clean, 73 tests × ≤5 | 317 | ABC | 6/6 | 129/129 | 51/55 | 0 | 10.0 s |
 
+The app's **Triage all** uses the same prompt, schema and sure rules (`server/sightline/triage.py`). To score the
+open-weights model on the same package: `--open` (the app's triage host, needs `TRIAGE_API_KEY` or `BASETEN_API_KEY`),
+or `--base-url URL --model NAME --api-key-env VAR [--effort ""]` for any OpenAI-compatible host. Not run yet: no
+open-weights key in the environment on Oct 27.
+
 Notes on the first run (`runs/2026-10-27-northbank-nwf-triage/summary.md`):
 - The four touch misses: three task-chair parts (base, stem, seat are separate `IfcFurniture`) read as duplicated chairs
   (`modelling_error`), and a 0.5 mm tree canopy over a lighting column read as a real clash. Defensible on the tree,
