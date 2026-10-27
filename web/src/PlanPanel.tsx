@@ -20,8 +20,8 @@ const editText = (i: PlanItem) => {
     : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
 };
 
-export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned }: {
-  run: PlanRun | null; plan: Plan | null; now: number; busy: boolean;
+export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, error }: {
+  run: PlanRun | null; plan: Plan | null; now: number; busy: boolean; error?: string | null;
   onAccept: () => void; onDiscard: () => void; onFocus: (item: PlanItem) => void;
   onAsDesigned: (clashIds: string[], note: string) => void;
 }) {
@@ -48,6 +48,7 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
         run!.phase === "cause" ? "Muse Spark is working out the cause…" : run!.phase === "checking" ? "Checking every fix together…"
           : `Finding a fix for each pair… ${seconds} s`}</p>}
       {cause && <div className="cause"><b>Cause</b><p>{cause}</p></div>}
+      {error && !plan && <p className="bad" role="alert">The plan could not be built: {error}</p>}
       {plan?.strategy === "as_designed" && (
         <div className="advice">
           <b>No model change needed</b>

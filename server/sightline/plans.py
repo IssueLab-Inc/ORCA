@@ -297,7 +297,10 @@ def _describe_cluster(ws: Workspace, scene_id: str, cluster: dict) -> str:
 
 
 def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fixed: list[str] | None = None,
-                     emit: Callable[[dict], None] = lambda e: None) -> Plan:
+                     emit: Callable[[dict], None] = lambda e: None,
+                     charge: Callable[[int], str | None] = lambda n: None) -> Plan:
+    """`charge(n)` is asked before the fix agents run (one model call per pair); it returns why not, or None. The
+    cause itself costs one call, charged by the caller, so a cause that needs no edits costs no more than that."""
     started = time.perf_counter()
     cluster = next((c for c in root_causes(ws, scene_id, report_id, fixed, top=50) if c["hub"]["global_id"] == hub), None)
     if cluster is None:
@@ -326,6 +329,13 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
                       _label(ws, scene_id, p["global_id"], hub), p["clash_ids"], p["in_report"], p["distance_m"])
                  for p in cluster["partners"]][:MAX_ITEMS]
         prefer = {it.key: "Move or offset element A; element B is the hub and stays." for it in items}
+    refused = charge(len(items))
+    if refused:
+        for it in items:
+            it.error = refused
+        return Plan("root_cause", f"Root cause: {hub_el['ifc_class']} '{hub_el['name']}'", reply.get("root_cause", ""),
+                    strategy, cluster, items, {"passed": False, "items": {}, "conflicts": []},
+                    round(time.perf_counter() - started, 1), refused)
     emit({"type": "plan_items", "items": [asdict(i) for i in items], "skipped": []})
     _resolve_items(ws, scene_id, report_id, items, notes, emit, prefer)
     check = _settle(ws, scene_id, items, emit)

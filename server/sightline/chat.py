@@ -337,16 +337,15 @@ class Chat:
                      **verdicts.get(p["id"], {})} for p in pats]
             return {"patterns": rows}, f"{len(rows)} pattern(s)", []
         if name in ("plan_root_cause", "plan_fixes_together"):
-            n = (1 + len(next((c["partners"] for c in plans.root_causes(ws, self._scene(ctx), self._report(ctx).id,
-                                                                         ctx.fixed, top=50)
-                               if c["hub"]["global_id"] == args.get("hub")), [])) if name == "plan_root_cause"
+            n = (1 if name == "plan_root_cause"  # the fixes are charged later, only if the cause needs edits
                  else len(plans.pairs_for(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]))[0]))
             refused = self.propose_allowed_many(max(n, 1))
             if refused:
                 return {"error": refused}, "refused: allowance used", []
             emit({"type": "plan_started", "kind": "root_cause" if name == "plan_root_cause" else "batch"})
             forward = lambda e: emit({"type": "plan_event", "event": e})
-            plan = (plans.build_root_cause(ws, self._scene(ctx), self._report(ctx).id, args["hub"], ctx.fixed, forward)
+            plan = (plans.build_root_cause(ws, self._scene(ctx), self._report(ctx).id, args["hub"], ctx.fixed, forward,
+                                           charge=self.propose_allowed_many)
                     if name == "plan_root_cause"
                     else plans.build_batch(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]), forward))
             data = json.loads(plans.to_json(plan))

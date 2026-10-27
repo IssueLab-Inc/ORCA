@@ -64,6 +64,7 @@ export function App() {
   const [reviewed, setReviewed] = useState<Record<string, Review>>({});
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!host.current) return;
@@ -347,7 +348,7 @@ export function App() {
 
   /** Start showing a plan being built; returns the handler for its events and a function to call when done. */
   function trackPlan(kind: "batch" | "root_cause") {
-    resetWork(); setPlan(null); setError(null);
+    resetWork(); setPlan(null); setError(null); setPlanError(null);
     const t = Date.now();
     let run: PlanRun = { kind, started: t, phase: kind === "root_cause" ? "cause" : "fixing", rootCause: "", items: [], status: {} };
     setPlanRun(run); setNow(t);
@@ -371,7 +372,7 @@ export function App() {
     const { onEvent, finish } = trackPlan(body.hub ? "root_cause" : "batch");
     let p: Plan | null = null;
     try { p = await api.planStream(sceneId, { report_id: report.id, fixed: resolved, ...body }, onEvent); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setPlanError((e as Error).message); }
     finally { finish(p); }
   }
 
@@ -600,7 +601,7 @@ export function App() {
             context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
         )}
         {tab === "plan" && (
-          <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan}
+          <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
             onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setTab("clash"); }} />
         )}

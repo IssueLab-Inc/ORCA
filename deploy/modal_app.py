@@ -21,8 +21,8 @@ image = (
     modal.Image.debian_slim(python_version="3.13")
     .uv_sync(str(ROOT / "server"))
     .env({
-        "SIGHTLINE_PROPOSE_PER_HOUR": "5",     # per visitor; every proposal is a paid Muse Spark call
-        "SIGHTLINE_PROPOSE_PER_DAY": "200",    # for everyone
+        "SIGHTLINE_PROPOSE_PER_HOUR": "20",    # per visitor; every proposal is a paid Muse Spark call, a plan costs
+        "SIGHTLINE_PROPOSE_PER_DAY": "300",    # one per clash pair; for everyone
         "SIGHTLINE_TRUST_FORWARDED": "1",      # Modal's proxy sets X-Forwarded-For
         "SIGHTLINE_MAX_SCENES": "8",           # open model sets kept in memory
         "SIGHTLINE_MAX_REPORTS": "8",          # open clash reports (uploads are deleted when dropped)

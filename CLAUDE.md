@@ -146,7 +146,7 @@ then `verify_together` applies all fixes in one multi-file transaction and check
 other fixes. Root causes: hubs = elements with ≥2 real partners (physical, overlap > 1 mm, not fixed), cross-discipline
 first, plus geometry hits missing from the report; `build_root_cause` asks Muse (`domain_packs/root_cause.md`) for
 cause + strategy (move_hub / fix_partners). Northbank: girder plan with #042/#057/#061 (the last not in the report) at
-Rev04 heights, ~45-58 s. Plans cost one proposal per pair (`ProposeLimit.take_many`, all or nothing). UI pass: lucide
+Rev04 heights, ~45-58 s. Plans cost one proposal per pair (`ProposeLimit.take_many`, all or nothing); a root cause costs one for the cause and is charged for its fixes only if it needs edits (`build_root_cause(charge=)`). Demo caps: 20 proposals per visitor per hour, 300 a day. UI pass: lucide
 icons with `data-tip` tooltips, viewer icon rail, Clash / Plan / Chat tabs, multi-select + "Fix n together" bar,
 Root causes card.
 

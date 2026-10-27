@@ -93,3 +93,16 @@ def test_patterns_group_same_kind_clashes_and_triage_maps_back(tmp_path):
     ws._model = Triage()
     assert plans.triage_patterns(ws, pats)[p["id"]]["verdict"] == "by_design"
     assert plans.patterns(ws, sid, rid, fixed=["c0001", "c0002"], min_pairs=1) == []   # resolved clashes drop out
+
+
+def test_root_cause_charges_fixes_only_when_edits_are_needed(tmp_path):
+    ws, sid, rid, main, beam = _setup(tmp_path)
+    end = next(e for e in ws.scene(sid).model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    # A second pair on the beam makes it a root cause.
+    (tmp_path / "reports" / "r2").mkdir(parents=True)
+    from test_plans import _report_xml
+    (tmp_path / "reports" / "r2" / "report.xml").write_text(_report_xml([(main, beam, -0.15), (end, beam, -0.05)]))
+    rid2 = ws.open_report_sample("r2").id
+    asked = []
+    plan = plans.build_root_cause(ws, sid, rid2, beam, charge=lambda n: asked.append(n) or "no allowance left")
+    assert asked == [2] and plan.advice == "no allowance left" and all(it.error for it in plan.items)

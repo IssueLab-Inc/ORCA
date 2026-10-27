@@ -326,21 +326,22 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
     newline-delimited JSON, then {"type": "plan", ...}. Each clash pair costs one proposal from the allowance."""
     _scene(scene_id)
     _report(body.report_id)
+    who = client_id(request.headers, request.client.host if request.client else None)
     if body.hub:
-        n = 1 + len(next((c["partners"] for c in plans.root_causes(ws, scene_id, body.report_id, body.fixed, top=50)
-                          if c["hub"]["global_id"] == body.hub), []))
+        n = 1  # the cause; the fixes are charged only if the cause calls for edits (see plans.build_root_cause)
     else:
         if not body.clash_ids:
             raise HTTPException(422, "Pick the clashes to fix.")
         n = len(plans.pairs_for(ws, scene_id, body.report_id, body.clash_ids)[0][: plans.MAX_ITEMS])
-    refused = propose_limit.take_many(client_id(request.headers, request.client.host if request.client else None), max(n, 1))
+    refused = propose_limit.take_many(who, max(n, 1))
     if refused:
         raise HTTPException(429, refused)
     events: queue.Queue = queue.Queue()
 
     def work():
         try:
-            plan = (plans.build_root_cause(ws, scene_id, body.report_id, body.hub, body.fixed, events.put) if body.hub
+            plan = (plans.build_root_cause(ws, scene_id, body.report_id, body.hub, body.fixed, events.put,
+                                           charge=lambda k: propose_limit.take_many(who, k)) if body.hub
                     else plans.build_batch(ws, scene_id, body.report_id, body.clash_ids, events.put))
             events.put({"type": "plan", **json.loads(plans.to_json(plan))})
         except Exception as e:
