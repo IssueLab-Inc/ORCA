@@ -123,6 +123,14 @@ class Workspace:
             s.mark_edited(element)
         return {**asdict(off), "files": [s.index_of(element)]}
 
+    def apply_trim(self, scene_id: str, element: str, end: str, by_m: float) -> dict:
+        """Keep a trim: the element's end is cut back (see edits.apply_trim)."""
+        s = self.scene(scene_id)
+        with self.lock:
+            t = edits.apply_trim(s, element, end, by_m)
+            s.mark_edited(element)
+        return {**asdict(t), "pieces": [element], "files": [s.index_of(element)]}
+
     def file(self, scene_id: str, index: int, out_dir: Path) -> Path:
         """A model file as it is now: the original on disk, or the edited model written out."""
         with self.lock:

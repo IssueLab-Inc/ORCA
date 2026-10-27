@@ -38,10 +38,12 @@ class Option:
     also_needs: str
     min_clearance_m: float | None
     placements: dict[str, list[float]]  # GlobalId → new 4x4 world matrix, for the browser preview
-    kind: str = "move"                  # "move" (delta_m on the run) or "offset" (split, middle piece by delta_m Z)
+    kind: str = "move"                  # "move" (delta_m on the run), "offset" (split, middle piece by delta_m Z)
+                                        # or "trim" (one end cut back to butt the other element; delta_m: that end)
     split_m: list[float] | None = None  # offset only: split points, metres along the segment from its start
-    preview: list[dict] | None = None   # offset only: world triangles of every piece, for the browser preview
+    preview: list[dict] | None = None   # offset and trim: world triangles of the changed pieces, for the browser
     before: list[dict] | None = None    # the changed elements as they are now (world triangles), to compare
+    trim: dict | None = None            # trim only: {"end": "start" | "end", "by_m": metres}
 
 
 @dataclass
@@ -53,6 +55,7 @@ class Attempt:
     kind: str = "move"
     split_m: list[float] | None = None
     hit_ids: list[str] = field(default_factory=list)  # GlobalIds it hit, worst first (at most 8), for the viewer
+    trim: dict | None = None
 
 
 @dataclass
@@ -60,6 +63,7 @@ class Result:
     understanding: str
     options: list[Option]
     attempts: list[Attempt]   # every try, failures included: the UI streams these as agent steps
+    advice: str = ""          # what a person should look at or decide, in the model's words (shown when nothing passed)
 
 
 def _describe(scene: IfcScene, clash: Clash) -> str:
@@ -72,9 +76,22 @@ def _describe(scene: IfcScene, clash: Clash) -> str:
         lines.append(f"Reported signed distance: {clash.distance_m * 1000:.1f} mm (negative = overlap)")
     for label, this, other in (("A", clash.element_a, clash.element_b), ("B", clash.element_b, clash.element_a)):
         lines += _run_text(scene, label, this, other)
+    for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
+        lines += _joint_text(scene, label, this, other, name)
     if clash.notes:
         lines.append(f"Notes: {clash.notes}")
     return "\n".join(lines)
+
+
+def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: str) -> list[str]:
+    """When one element's end runs into the other, the clash is at a joint: say so, and what a trim would take."""
+    try:
+        cut = edits.butt_trim(scene, gid, other)
+    except (edits.Unsupported, KeyError, RuntimeError):
+        return []
+    return [f"Joint: element {label}'s {cut.end} runs {cut.by_m * 1000:.0f} mm into element {other_label} along its "
+            f"length. A \"trim\" of {label} cuts that end back to butt against {other_label}'s face: a connection "
+            f"fix, nothing moves."]
 
 
 def _run_text(scene: IfcScene, label: str, gid: str, other: str) -> list[str]:
@@ -136,6 +153,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     attempts: list[Attempt] = []
     options: list[Option] = []
     understanding = ""
+    advice = ""
     emit = on_event or (lambda e: None)
 
     def on_step(attempt: Attempt) -> None:
@@ -148,6 +166,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             text = _describe(base, clash) + _feedback(attempts)
         reply = model.complete_json(system, text, clash.images)
         understanding = understanding or reply.get("understanding", "")
+        advice = reply.get("advice") or advice  # the latest round knows the most
         candidates = reply.get("candidates", [])
         emit({"type": "ideas", "round": round_no, "seconds": round(time.perf_counter() - started, 1),
               "understanding": understanding, "count": len(candidates)})
@@ -157,8 +176,10 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             target = clash.element_a if cand.get("move", "A") == "A" else clash.element_b
             other = clash.element_b if target == clash.element_a else clash.element_a
             trial = (lambda shape, i=len(attempts): emit({"type": "trial", "index": i, **shape})) if on_event and trials else None
+            kind = cand.get("kind")
+            try_fix = _try_offset if kind == "offset" else _try_trim if kind == "trim" else None
             with lock:
-                attempt, option = (_try_offset(base, cand, target, other, clearance_m, trial) if cand.get("kind") == "offset"
+                attempt, option = (try_fix(base, cand, target, other, clearance_m, trial) if try_fix
                                    else _try_move(base, cand, target, clearance_m, trial))
             attempts.append(attempt)
             on_step(attempt)
@@ -180,7 +201,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 o.before = edits.meshes(base, o.moved)
         except RuntimeError:
             o.before = None
-    return Result(understanding, options, attempts)
+    return Result(understanding, options, attempts, advice)
 
 
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
@@ -265,6 +286,39 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_
         return attempt, None
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
                            v.min_clearance_m, {}, "offset", split, preview)
+
+
+def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
+              on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
+    """Cut `target`'s end back to butt against `other`, check it, undo it.
+
+    A joint is meant to touch: the trimmed end may touch `other` but not run into it. Elsewhere the member already
+    touches what it is framed into (a transom its panels and the mullion at its far end), so only contacts that are
+    new, or worse than before the trim, count against it: nothing new hit."""
+    title = cand.get("title", "trim at the joint")
+    tol = 0.002
+    try:
+        cut = edits.butt_trim(scene, target, other)
+        by = float(cand["by_m"]) if cand.get("by_m") is not None else cut.by_m
+        _, _, d, _ = edits.member_axis(scene, scene.entity(target))
+        delta = [round(float(v), 4) for v in (d * by if cut.end == "start" else -d * by)]
+        before = {h.other: h.distance_m for h in verify.check(scene, [target], clearance_m=clearance_m).hits}
+        with edits.trial(scene, target):
+            edits.apply_trim(scene, target, cut.end, by)
+            shape = edits.meshes(scene, [target])
+            if on_trial:
+                on_trial({"kind": "trim", "moved": [target], "delta_m": delta, "pieces": shape})
+            v = verify.check(scene, [target], clearance_m=clearance_m)
+    except edits.Unsupported as e:
+        return Attempt(title, [0.0, 0.0, 0.0], False, f"cannot trim this element: {e}", "trim"), None
+    hits = [h for h in v.hits
+            if (h.distance_m < -tol if h.other == other else h.other not in before or h.distance_m < before[h.other] - tol)]
+    trim = {"end": cut.end, "by_m": round(by, 4)}
+    attempt = Attempt(title, delta, not hits, _reason(hits), "trim", None, _hit_ids(hits), trim)
+    if hits:
+        return attempt, None
+    return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
+                           v.min_clearance_m, {}, "trim", None, shape, trim=trim)
 
 
 def to_json(result: Result) -> str:

@@ -86,6 +86,9 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
         return {**out, "passed": False}
     with ws.lock:
         files = {scene.index_of(g) for it in live for g in it.option["moved"]}
+        # A trimmed member already touches what it is framed into: only contacts new or worse than these count.
+        before = {it.key: {h.other: h.distance_m for h in verify.check(scene, it.option["moved"], clearance_m=clearance_m).hits}
+                  for it in live if it.option["kind"] == "trim"}
         with _trial(scene, files):
             changed: dict[str, tuple[list[str], set[str], str | None]] = {}  # key → (check these, own elements, obstacle)
             for it in live:
@@ -94,6 +97,9 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                     off = edits.apply_offset(scene, o["moved"][0], o["split_m"][0], o["split_m"][1], o["delta_m"][2])
                     other = it.element_b if o["moved"][0] == it.element_a else it.element_a
                     changed[it.key] = (off.pieces, set(off.pieces), other)
+                elif o["kind"] == "trim":
+                    edits.apply_trim(scene, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
+                    changed[it.key] = (list(o["moved"]), set(o["moved"]), None)
                 else:
                     scene.translate(o["moved"], tuple(o["delta_m"]))
                     changed[it.key] = (list(o["moved"]), set(o["moved"]), None)
@@ -108,6 +114,11 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                 else:
                     v = verify.check(scene, check_ids, clearance_m=clearance_m, ignore=ignore)
                     hits = v.hits
+                if it.key in before:  # a trim butts its partner and keeps the contacts it had
+                    partner = it.element_b if it.option["moved"][0] == it.element_a else it.element_a
+                    was = before[it.key]
+                    hits = [h for h in hits if (h.distance_m < -0.002 if h.other == partner
+                                                else h.other not in was or h.distance_m < was[h.other] - 0.002)]
                 for h in hits:
                     if h.other in owner and owner[h.other] != it.key:
                         out["conflicts"].append({"a": it.key, "b": owner[h.other],
@@ -355,6 +366,9 @@ def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
             if o["kind"] == "offset":
                 r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2])
                 pieces.append(r["pieces"])
+            elif o["kind"] == "trim":
+                r = ws.apply_trim(scene_id, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
+                pieces.append([])
             else:
                 r = ws.apply(scene_id, o["moved"], o["delta_m"])
                 pieces.append([])

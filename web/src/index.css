@@ -337,7 +337,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .disciplines { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .discipline { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .discipline span { color: var(--muted); line-height: 1.45; }
-.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.about-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .step { display: flex; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
 .step h3 { font-size: 14px; margin: 1px 0 4px; }
 .step p { font-size: 13px; color: #3d4a58; }
@@ -361,6 +361,20 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 @container (max-width: 720px) {
   .about { padding: 24px 18px; }
   .about-hero, .about-two { grid-template-columns: minmax(0, 1fr); }
-  .steps, .disciplines { grid-template-columns: minmax(0, 1fr); }
+  .about-steps, .disciplines { grid-template-columns: minmax(0, 1fr); }
 }
 .about-dialog .about { padding-top: 52px; }
+
+.badge.trim { background: #e3f4f6; color: #0b6c78; }
+
+/* When nothing passed (App.tsx NoFix) */
+.nofix { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-soft); border: 1px solid #ecd9b4; font-size: 12.5px; line-height: 1.5; }
+.nofix h3 { color: var(--warn); }
+.nofix p { margin: 0; }
+
+/* A soft glow round the viewer while Sightline drives it (pilot.ts); fades in and out */
+.pilot-glow { position: absolute; inset: 0; pointer-events: none; z-index: 3; opacity: 0; transition: opacity .7s ease;
+  box-shadow: inset 0 0 0 1.5px rgba(74, 163, 223, .55), inset 0 0 26px 4px rgba(74, 163, 223, .28), inset 0 0 70px 10px rgba(18, 181, 203, .10); }
+.pilot-glow.on { opacity: 1; animation: pilot-breathe 2.8s ease-in-out .7s infinite; }
+@keyframes pilot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .pilot-glow.on { animation: none; } }

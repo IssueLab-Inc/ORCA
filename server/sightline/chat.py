@@ -68,7 +68,7 @@ TOOLS = [
         {"element": {"type": "string"}, "obstacle": {"type": "string"},
          "split_m": {"type": "array", "items": {"type": "number"}}, "dz_m": {"type": "number"}},
         ["element", "obstacle", "split_m", "dz_m"]),
-    _fn("propose_fixes", "Run Sightline's fix agent on a clash: it proposes moves and local offsets, checks each "
+    _fn("propose_fixes", "Run Sightline's fix agent on a clash: it proposes moves, local offsets and trims at joints, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
         "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
         {"clash_id": {"type": "string"}}, ["clash_id"]),

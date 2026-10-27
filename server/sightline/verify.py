@@ -73,6 +73,17 @@ def check(scene: IfcScene, moved: list[str], clearance_m: float = 0.025,
     for c in tree.clash_intersection_many(targets, others, tolerance=0.002, check_all=True):
         o = other_of(c)
         hits[o.GlobalId] = Hit(o.GlobalId, o.is_a(), "collision", -abs(float(c.distance)))
+    # The intersection query misses some real overlaps: two boxes with flush faces (a curtain-wall transom running
+    # 30 mm into a mullion, tops level) come back as nothing, and the clearance query calls them a 0 mm gap.
+    # Collision without touching sees them; the depth is then the boxes' smallest overlap, exact for boxes.
+    for c in tree.clash_collision_many(targets, others, allow_touching=False):
+        o = other_of(c)
+        if o.GlobalId in hits:
+            continue
+        mine = c.a.GlobalId if c.a.GlobalId in moved else c.b.GlobalId
+        depth = _box_overlap(scene, mine, o.GlobalId)
+        if depth > 0.002:
+            hits[o.GlobalId] = Hit(o.GlobalId, o.is_a(), "collision", -depth)
 
     nearest = None
     for c in tree.clash_clearance_many(targets, others, clearance=SEARCH_M, check_all=True):
@@ -86,3 +97,12 @@ def check(scene: IfcScene, moved: list[str], clearance_m: float = 0.025,
 
     return Verdict(passed=not hits, hits=sorted(hits.values(), key=lambda h: h.distance_m),
                    min_clearance_m=nearest, checked_against=len(others))
+
+
+def _box_overlap(scene: IfcScene, a: str, b: str) -> float:
+    """How far two elements' world boxes overlap on their least-overlapping axis (0 when apart or touching)."""
+    boxes = scene.bounds()
+    if a not in boxes or b not in boxes:
+        return 0.0
+    (amin, amax), (bmin, bmax) = boxes[a], boxes[b]
+    return float(max(0.0, min(min(amax[k], bmax[k]) - max(amin[k], bmin[k]) for k in range(3))))

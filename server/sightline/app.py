@@ -181,6 +181,20 @@ def check_offset(scene_id: str, body: Offset):
     return ws.check_offset(_scene(scene_id), body.element, body.other, body.split_m, body.dz_m, body.clearance_m)
 
 
+class TrimBody(BaseModel):
+    element: str
+    end: str
+    by_m: float
+
+
+@app.post("/api/scenes/{scene_id}/trim/apply")
+def apply_trim(scene_id: str, body: TrimBody):
+    try:
+        return ws.apply_trim(_scene(scene_id), body.element, body.end, body.by_m)
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot trim this element: {e}")
+
+
 @app.post("/api/scenes/{scene_id}/offset/apply")
 def apply_offset(scene_id: str, body: Offset):
     try:

@@ -60,7 +60,7 @@ export function About({ start, onClose }: {
 
       <section>
         <h2 className="about-h">What Sightline does</h2>
-        <ol className="steps">
+        <ol className="about-steps">
           <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Sorts the whole report">
             Every clash gets a verdict: a real problem, by design, not a physical object, or a modelling mistake. Sure
             cases are settled by rule; the rest go to <b>Muse Spark Open</b>, an open-weights model, many at a time.
@@ -70,7 +70,7 @@ export function About({ start, onClose }: {
             which way it runs, where the openings are.
           </Step>
           <Step n={3} icon={<ShieldCheck size={18} aria-hidden />} title="Proposes fixes, and checks every one">
-            It suggests real edits, such as raising a duct through an opening in a beam. A geometry engine then tests each
+            It suggests real edits: raising a duct through an opening in a beam, or trimming a member back where it runs into another. A geometry engine then tests each
             one in the actual model: the clash is gone, there is room to spare, and nothing new is hit. Ideas that fail
             go back with the reason. <b>You only see fixes that passed.</b>
           </Step>

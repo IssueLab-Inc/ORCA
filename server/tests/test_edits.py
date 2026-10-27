@@ -155,3 +155,48 @@ def test_offset_trial_sends_the_pieces_in_place(tmp_path):
     resolve(scene, Clash(main, beam), Offset(), max_rounds=1, on_event=events.append, trials=True)
     trial = next(e for e in events if e["type"] == "trial")
     assert trial["kind"] == "offset" and trial["moved"] == [main] and len(trial["pieces"]) == 5
+
+
+def _joint(tmp_path):
+    from sightline.fixtures import build_joint_fixture
+    scene = IfcScene(build_joint_fixture(tmp_path / "joint.ifc"))
+    by_name = {e.Name: e.GlobalId for e in scene.model.by_type("IfcElement")}
+    return scene, by_name["Transom 60x120"], by_name["Mullion 60x120"], by_name["Spandrel panel"]
+
+
+def test_flush_faced_overlap_is_measured_not_missed(tmp_path):
+    # IfcOpenShell's intersection query returns nothing for these two boxes (tops flush); the check must still see
+    # the 30 mm overlap, not a 0 mm gap.
+    from sightline import verify
+    scene, transom, mullion, _ = _joint(tmp_path)
+    hit = next(h for h in verify.check(scene, [transom], clearance_m=0.0).hits if h.other == mullion)
+    assert hit.kind == "collision" and hit.distance_m == pytest.approx(-0.03, abs=1e-3)
+
+
+def test_trim_cuts_a_profile_drawn_member_back_to_the_joint_and_is_undone(tmp_path):
+    from sightline import agent
+    scene, transom, mullion, panel = _joint(tmp_path)
+    axis, start, d, length = edits.member_axis(scene, scene.entity(transom))
+    assert axis == "x" and length == pytest.approx(1.65) and d.tolist() == pytest.approx([1, 0, 0])
+    cut = edits.butt_trim(scene, transom, mullion)
+    assert (cut.end, cut.by_m) == ("end", pytest.approx(0.06))
+
+    attempt, option = agent._try_trim(scene, {"title": "Trim transom"}, transom, mullion, 0.025)
+    # Passes although it now touches the mullion (a butt joint) and still touches its panel (it did before).
+    assert attempt.passed, attempt.reason
+    assert option.kind == "trim" and option.trim == {"end": "end", "by_m": pytest.approx(0.06)}
+    assert option.delta_m == pytest.approx([-0.06, 0, 0])
+    verts = np.asarray(option.preview[0]["verts"]).reshape(-1, 3)
+    assert verts[:, 0].max() == pytest.approx(10.83, abs=1e-3)       # ends at the mullion's face
+    assert scene.bounds()[transom][1][0] == pytest.approx(10.89)       # the trial was undone
+
+    edits.apply_trim(scene, transom, "end", 0.06)                      # kept
+    assert scene.bounds()[transom][1][0] == pytest.approx(10.83)
+    assert scene.bounds()[transom][0][0] == pytest.approx(9.24)
+
+
+def test_trim_refuses_an_overlap_mid_length(tmp_path):
+    scene = IfcScene(build_clash_fixture(tmp_path / "f.ifc"))
+    duct, beam = scene.model.by_type("IfcDuctSegment")[0].GlobalId, scene.model.by_type("IfcBeam")[0].GlobalId
+    with pytest.raises(edits.Unsupported, match="not at either end"):
+        edits.butt_trim(scene, duct, beam)

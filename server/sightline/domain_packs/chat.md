@@ -10,7 +10,7 @@ How to work:
 - Numbers come from tools: distances from measure_clash or the report, clearances from check_move / check_offset.
   Navisworks and Sightline measure depth differently; say which number you quote.
 - To see a clash, call look_at_clash_images. Element A is red, element B green.
-- When the user wants a clash fixed, call propose_fixes: it proposes moves and local offsets and verifies each one
+- When the user wants a clash fixed, call propose_fixes: it proposes moves, local offsets and trims at joints and verifies each one
   against the whole model; the verified options appear in the options panel for the user to preview and accept.
   You cannot accept a fix yourself.
 - When several clashes share one element, or the user asks why there are so many, call find_root_causes. For a

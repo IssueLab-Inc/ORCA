@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 50 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 53 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -108,7 +108,7 @@ proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session'
 Navisworks clash reports (Oct 27): `server/sightline/reports.py` reads the XML (standard flat tags and the
 three-view export's grouped tags); the app opens samples from `samples/reports/<name>/` or uploads, lists clashes by
 test with their A/B/C images, matches them to the open model (Northbank: 290/317, the rest are Site elements) and
-re-measures on selection. Proposals on a report clash get its images. Muse Spark tool calling works natively on
+re-measures on selection (now 317/317 with Site). Proposals on a report clash get its images. Muse Spark tool calling works natively on
 `api.meta.ai` (OpenAI `tools`, 2 s round trip, streaming): the chat over reports + model is next (plan below).
 
 Local offsets (Oct 27): `server/sightline/edits.py` splits a straight extruded segment (profile upright or on its
@@ -190,6 +190,15 @@ Start page (Oct 27): the empty viewer shows `About.tsx` (what a clash is, what S
 "try it" steps; written for people new to BIM) with **Open the Northbank demo**: the sample report first (its list shows
 at once), then the default models, now including Site (all 317 report clashes link; 290 without it). The header's
 **How it works** opens the same page as a dialog. Side panels resize from their inner edge (remembered per browser).
+
+Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
+some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then
+the boxes' smallest overlap. Third fix kind **trim** (`edits.butt_trim` / `apply_trim`): cut a member's end back to
+butt the other's face. `edits.member_axis` finds the long axis, extrusion or rectangle profile (Northbank's transoms are
+1.65 m x 120 mm plans extruded 60 mm). A trim may touch its partner and only fails on contacts new or worse than before
+(`agent._try_trim`; plans the same). `_describe` says when a clash is at a joint. Replies carry `advice`; the UI shows
+it with what blocked the ideas when nothing passes (`NoFix`). Clash7: 86 s and 0/15 before, 13-23 s and a verified trim
+first try now. Answer key unchanged (3/3 first try, rows in results.csv). The viewer glows while the pilot drives.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

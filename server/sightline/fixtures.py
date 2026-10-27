@@ -142,3 +142,39 @@ def build_run_fixture(path: Path, millimetres: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path
+
+
+def build_joint_fixture(path: Path) -> Path:
+    """A curtain-wall corner like Northbank's Clash7: a transom whose end runs 60 mm into a mullion, tops flush.
+
+    The transom is drawn the way curtain-wall framing often is, a plan rectangle (1.65 m x 120 mm) extruded 60 mm up,
+    so its length is the profile, not the extrusion. A spandrel panel sits on the transom (a contact that is meant to
+    be there). Metres throughout.
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="Sightline joint fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 03")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+    def member(ifc_class, name, xdim, ydim, depth, centre_bottom):
+        """A profile centred on the element's axis (no profile offset), extruded `depth` up from `centre_bottom`."""
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        profile = model.create_entity("IfcRectangleProfileDef", ProfileType="AREA", XDim=xdim, YDim=ydim)
+        rep = ifcopenshell.api.run("geometry.add_profile_representation", model, context=body, profile=profile, depth=depth)
+        ifcopenshell.api.run("geometry.assign_representation", model, product=e, representation=rep)
+        m = np.eye(4)
+        m[:3, 3] = centre_bottom
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e, matrix=m, is_si=True)
+        return e
+
+    # Transom: x 9.24-10.89, y -6.45 to -6.33, z 11.94-12.00. Mullion: x 10.83-10.95, y -6.36 to -6.30, z 8-12.
+    member("IfcMember", "Transom 60x120", 1.65, 0.12, 0.06, (10.065, -6.39, 11.94))
+    member("IfcMember", "Mullion 60x120", 0.12, 0.06, 4.0, (10.89, -6.33, 8.0))
+    member("IfcPlate", "Spandrel panel", 1.4, 0.03, 0.8, (10.0, -6.39, 12.0))
+    model.write(str(path))
+    return path

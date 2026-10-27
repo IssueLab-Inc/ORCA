@@ -1,4 +1,4 @@
-"""Model edits beyond moving whole elements. Today: the local offset.
+"""Model edits beyond moving whole elements: the local offset, and trimming a member's end at a joint.
 
 A local offset is what a designer does when a straight run meets an obstacle it cannot move (a beam, say): split the
 segment either side of the obstacle, take the middle piece up or down, and join the ends with short vertical pieces.
@@ -12,6 +12,10 @@ container, system), chained port to port, with the last piece taking over the or
 
 Supported: a segment whose body is one extruded profile along a horizontal axis, offset vertically. Anything else
 raises `Unsupported` with the reason, so the agent can say why it fell back to moves.
+
+A trim is a connection fix: where one member's end runs into another (a curtain-wall transom 60 mm into the corner
+mullion, a beam end into a column), cut the end back to the other's face so the two butt. Nothing moves; the joint
+changes. Any straight extrusion can be trimmed, at either end, whatever its profile.
 """
 from __future__ import annotations
 
@@ -45,6 +49,13 @@ class Run:
     length_m: float
     depth_m: float     # the profile's vertical size: a riser's footprint along the run
     width_m: float     # the profile's horizontal size across the run
+
+
+@dataclass
+class Trim:
+    element: str
+    end: str              # "start" or "end" of the extrusion
+    by_m: float           # shortened by (positive), metres
 
 
 @dataclass
@@ -200,6 +211,96 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)
     return Offset(global_id, start_m, end_m, dz_m, gids)
+
+
+def member_axis(scene: IfcScene, element) -> tuple[str, np.ndarray, np.ndarray, float]:
+    """A member's long axis in world metres: ("depth" | "x" | "y", start point, unit direction, length).
+
+    Usually the extrusion ("depth"), but framing is often drawn the other way: Northbank's curtain-wall transoms are a
+    1.65 m x 120 mm rectangle extruded 60 mm up, so their length is the profile's X."""
+    i, _, item, origin, d, px, py = _frames(scene, element)
+    s = scene.unit_scales[i]
+    lengths = {"depth": item.Depth}
+    prof = item.SweptArea
+    centre = np.zeros(2)  # the profile's centre in the solid's XY: profiles can be offset, but not turned
+    pos = getattr(prof, "Position", None)
+    turned = pos is not None and pos.RefDirection is not None and (abs(pos.RefDirection.DirectionRatios[1]) > 1e-9
+                                                                   or pos.RefDirection.DirectionRatios[0] < 0)
+    if prof.is_a("IfcRectangleProfileDef") and not turned:
+        lengths.update(x=prof.XDim, y=prof.YDim)
+        if pos is not None:
+            centre = np.asarray(pos.Location.Coordinates[:2], dtype=float)
+    axis = max(lengths, key=lengths.get)
+    if axis == "depth":
+        return axis, origin * s, d / np.linalg.norm(d), item.Depth * s
+    u, v = (px, py) if axis == "x" else (py, px)
+    cu, cv = (centre[0], centre[1]) if axis == "x" else (centre[1], centre[0])
+    start = origin + u * (cu - lengths[axis] / 2) + v * cv
+    return axis, start * s, u / np.linalg.norm(u), lengths[axis] * s
+
+
+def butt_trim(scene: IfcScene, global_id: str, other: str) -> Trim:
+    """The trim that makes `global_id` stop at `other`'s face: which end runs into it, and by how much.
+
+    Only an end can be trimmed: the other element has to straddle that end. An overlap part-way along (a duct crossing
+    a beam) is not a joint, and raises `Unsupported`."""
+    element = scene.entity(global_id)
+    _, start, d, length = member_axis(scene, element)
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    verts = np.asarray(ifcopenshell.geom.create_shape(settings, scene.entity(other)).geometry.verts, dtype=float).reshape(-1, 3)
+    along = (verts - start) @ d
+    lo, hi = float(along.min()), float(along.max())
+    tol = 1e-4
+    if lo < length - tol and hi >= length - tol and (lo + hi) / 2 > length / 2:
+        end, by = "end", length - lo
+    elif hi > tol and lo <= tol:
+        end, by = "start", hi
+    else:
+        raise Unsupported("the other element is not at either end of it, so trimming cannot clear it")
+    if by <= 0.001:
+        raise Unsupported("its end does not run into the other element")
+    if length - by < MIN_PIECE_M:
+        raise Unsupported(f"trimming {by * 1000:.0f} mm would leave less than {MIN_PIECE_M * 1000:.0f} mm of it")
+    return Trim(global_id, end, round(by, 4))
+
+
+def apply_trim(scene: IfcScene, global_id: str, end: str, by_m: float) -> Trim:
+    """Shorten (or, with a negative `by_m`, lengthen) a member at one end of its long axis (`member_axis`). Edits the
+    model in place; wrap in `trial` to try it and undo. A port at that end moves with it."""
+    element = scene.entity(global_id)
+    i, place, item, origin, d, _, _ = _frames(scene, element)
+    model, s = scene.models[i], scene.unit_scales[i]
+    axis, _, _, length = member_axis(scene, element)
+    by = by_m / s
+    if end not in ("start", "end"):
+        raise Unsupported("say which end to trim: start or end")
+    if length / s - by < MIN_PIECE_M / s:
+        raise Unsupported(f"trimming {by_m * 1000:.0f} mm would leave less than {MIN_PIECE_M * 1000:.0f} mm of it")
+    pos = item.Position
+    local = ifcopenshell.util.placement.get_axis2placement(pos)
+    sign = 1.0 if end == "start" else -1.0
+    if axis == "depth":
+        if end == "start":  # the profile moves along the axis; a new placement, as the old one may be shared
+            item.Position = model.createIfcAxis2Placement3D(
+                _point(model, local[:3, 3] + local[:3, 2] * by), pos.Axis, pos.RefDirection)
+        item.Depth = float(item.Depth - by)
+    else:  # a shorter profile (a new one: profiles can be shared), its centre moved half the cut away from that end
+        prof = item.SweptArea
+        dims = {"x": prof.XDim, "y": prof.YDim}
+        dims[axis] -= by
+        item.SweptArea = model.createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+                                                            float(dims["x"]), float(dims["y"]))
+        shift = local[:3, 0 if axis == "x" else 1] * sign * by / 2
+        item.Position = model.createIfcAxis2Placement3D(_point(model, local[:3, 3] + shift), pos.Axis, pos.RefDirection)
+    ports = _ports(element)
+    if axis == "depth" and len(ports) >= 2:
+        if end == "start":
+            _place_port(model, ports[0], origin + d * by, s)
+        else:
+            _place_port(model, ports[-1], origin + d * item.Depth, s)
+    scene.refresh_bounds([global_id])
+    return Trim(global_id, end, by_m)
 
 
 @contextmanager

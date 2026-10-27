@@ -12,9 +12,14 @@ export interface Progress {
   checking: { index: number; title: string; kind: string } | null;
 }
 
-const editText = (t: Attempt) => t.kind === "offset" && t.split_m
+/** The edit a fix makes, in a few words: "move 0 · 0 · +400 mm", "offset 1.10–2.30 m by +400 mm", "trim one end 60 mm". */
+export const editText = (t: Pick<Attempt, "kind" | "split_m" | "delta_m" | "trim">) => t.kind === "offset" && t.split_m
   ? `offset ${t.split_m.map((v) => v.toFixed(2)).join("–")} m by ${mm(t.delta_m[2])}`
-  : `move ${t.delta_m.map((v) => mm(v)).join(" · ")}`;
+  : t.kind === "trim"
+    ? t.trim ? `trim one end ${Math.round(t.trim.by_m * 1000)} mm` : "trim at the joint"
+    : `move ${t.delta_m.map((v) => mm(v)).join(" · ")}`;
+
+export const KIND_LABEL = { move: "Move", offset: "Offset", trim: "Trim" } as const;
 
 /** "collision with IfcWall (-200 mm), collision with …" → first finding, plus how many more. */
 function firstReason(reason: string): [string, number] {
@@ -56,7 +61,7 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
             return (
               <tr key={i} className={t.passed ? "ok" : "fail"}>
                 <td className="mono">{i + 1}</td>
-                <td><span className={`badge ${t.kind}`}>{t.kind === "offset" ? "Offset" : "Move"}</span></td>
+                <td><span className={`badge ${t.kind}`}>{KIND_LABEL[t.kind] ?? t.kind}</span></td>
                 <td>{t.title}</td>
                 <td className="mono">{editText(t)}</td>
                 <td>{t.passed ? <span className="ok">✓ verified</span>
@@ -65,7 +70,7 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
             );
           })}
           {progress?.phase === "checking" && progress.checking && progress.checking.index >= attempts.length &&
-            <tr className="pending"><td className="mono">{progress.checking.index + 1}</td><td><span className={`badge ${progress.checking.kind}`}>{progress.checking.kind === "offset" ? "Offset" : "Move"}</span></td>
+            <tr className="pending"><td className="mono">{progress.checking.index + 1}</td><td><span className={`badge ${progress.checking.kind}`}>{KIND_LABEL[progress.checking.kind as keyof typeof KIND_LABEL] ?? progress.checking.kind}</span></td>
               <td>{progress.checking.title}</td><td /><td className="hint">checking…</td></tr>}
         </tbody>
       </table>

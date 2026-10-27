@@ -4,15 +4,20 @@ export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
   title: string; moved: string[]; delta_m: number[]; rationale: string; also_needs: string;
   min_clearance_m: number | null;
-  kind: "move" | "offset"; split_m: number[] | null; preview: Piece[] | null; before: Piece[] | null;
+  kind: FixKind; split_m: number[] | null; preview: Piece[] | null; before: Piece[] | null;
+  trim?: TrimCut | null;
 }
 export interface Attempt {
-  title: string; delta_m: number[]; passed: boolean; reason: string; kind: "move" | "offset"; split_m: number[] | null;
+  title: string; delta_m: number[]; passed: boolean; reason: string; kind: FixKind; split_m: number[] | null;
+  trim?: TrimCut | null;
   hit_ids?: string[];  // what it hit, worst first
 }
 /** A candidate in place while the agent checks it: a move's elements and delta, or an offset's new pieces. */
-export interface Trial { index: number; kind: "move" | "offset"; moved: string[]; delta_m: number[]; pieces: Piece[] | null }
-export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[] }
+export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m: number[]; pieces: Piece[] | null }
+/** move: shift the run; offset: split and raise or lower the middle; trim: cut one end back to butt the other element. */
+export type FixKind = "move" | "offset" | "trim";
+export interface TrimCut { end: "start" | "end"; by_m: number }
+export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[]; advice?: string }
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent =
   | { type: "thinking"; round: number }
@@ -198,7 +203,9 @@ export const api = {
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
   /** Keep a fix in the server's model; returns the indexes of the files that changed. */
-  accept: (id: string, o: Option) => (o.kind === "offset"
+  accept: (id: string, o: Option) => (o.kind === "trim" && o.trim
+    ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
+    : o.kind === "offset"
     ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
     : call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })),
 

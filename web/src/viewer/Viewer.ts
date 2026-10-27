@@ -390,7 +390,7 @@ export class Viewer {
     this.moved.clear();
     if (mode !== "before") {
       for (const opt of opts) {
-        if (opt.kind === "offset" && opt.pieces) {
+        if ((opt.kind === "offset" || opt.kind === "trim") && opt.pieces) {  // new shapes in place of the element
           for (const gid of opt.moved) this.hidden.add(gid);
           this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
         } else {

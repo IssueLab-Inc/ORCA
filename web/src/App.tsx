@@ -1,6 +1,6 @@
 import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, statusLine, type Progress } from "./Activity";
+import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
 import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
@@ -260,7 +260,7 @@ export function App() {
   useEffect(() => {
     const v = viewer.current;
     if (!v || !plan) return;
-    const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));
+    const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));  // moves and trims: their pairs
     const pairs = plan.items.flatMap((it) => it.option && it.option.kind !== "offset"
       ? movedPairs(it.option.moved, [it.element_a, it.element_b]) : []);
     if (meshes.length || pairs.length) v.frameFix(meshes, pairs);
@@ -268,6 +268,7 @@ export function App() {
   }, [planOptions, plan]);
 
   function frameFix(o: { kind: string; moved: string[]; preview: Mesh[] | null }, sides: string[]) {
+    // An offset: its risers and middle piece. A move: where it now meets the other side. A trim: the joint it changes.
     const meshes = o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : [];
     return !!viewer.current?.frameFix(meshes, o.kind === "offset" ? [] : movedPairs(o.moved, sides));
   }
@@ -553,10 +554,13 @@ export function App() {
       {option ? (
         <dl className="diff">
           <dt>Before</dt><dd>{measure && measure !== "busy" && measure.distance_m != null ? `overlap ${mm(measure.distance_m)}` : "clashing"}</dd>
-          <dt>After</dt><dd className="ok">clear{option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}</dd>
+          <dt>After</dt><dd className="ok">{option.kind === "trim" ? "clear: the two now butt at the joint"
+            : `clear${option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}`}</dd>
           <dt>Change</dt><dd>{option.kind === "offset" && option.split_m
             ? `1 segment → ${option.preview?.length ?? 5} pieces; ${(option.split_m[1] - option.split_m[0]).toFixed(2)} m of it ${option.delta_m[2] > 0 ? "raised" : "lowered"} ${Math.abs(Math.round(option.delta_m[2] * 1000))} mm`
-            : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
+            : option.kind === "trim" && option.trim
+              ? `one end cut back ${Math.round(option.trim.by_m * 1000)} mm; nothing moves`
+              : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
         </dl>
       ) : plan && (
         <dl className="diff">
@@ -672,6 +676,7 @@ export function App() {
         )}
         {busy && <div className="overlay live"><i className="spinner" aria-hidden />{busy}</div>}
         {proposing && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
+        <div className={`pilot-glow ${pilotStatus?.driving ? "on" : ""}`} aria-hidden />
         {pilotStatus && (
           <div className={`pilot ${pilotStatus.state}`} role="status">
             {pilotStatus.driving ? <Navigation size={14} aria-hidden /> : <Hand size={14} aria-hidden />}
@@ -723,15 +728,13 @@ export function App() {
             <p className="understanding">{proposal?.understanding || "Muse Spark is reading the clash…"}</p>
           </>}
           {proposal && !proposing && <h2>Verified options</h2>}
-          {proposal && !proposing && !proposal.options.length && <p className="bad">No fix passed the check. This clash needs a person.</p>}
+          {proposal && !proposing && !proposal.options.length && <NoFix proposal={proposal} />}
           {proposal?.options.map((o, i) => (
             <div key={i} className={`card ${chosen === i ? "pick" : ""}`}>
               <button className="card-body" onClick={() => setChosen(chosen === i ? null : i)} aria-pressed={chosen === i}>
                 <span className="row"><b>{i + 1} · {o.title}</b><span className="chip ok"><Check size={11} aria-hidden /> verified</span></span>
-                <span className="row"><span>Edit</span><span className="mono">{o.kind === "offset" && o.split_m
-                  ? `offset ${o.split_m.map((v) => v.toFixed(2)).join("–")} m, ${mm(o.delta_m[2])}`
-                  : `move ${o.delta_m.map((v) => mm(v)).join(", ")}`}</span></span>
-                <span className="row"><span>Clearance</span><span className="mono">{mm(o.min_clearance_m)}</span></span>
+                <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
+                <span className="row"><span>Clearance</span><span className="mono">{o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m)}</span></span>
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 <span className="why">{o.rationale}</span>
               </button>
@@ -811,3 +814,27 @@ function remember(side: "left" | "right", w: number) {
 
 /** "Northbank-Structure.ifc" → "Structure" */
 function shortName(file: string) { return file.replace(/\.ifc$/i, "").replace(/^Northbank-/, ""); }
+
+/** When nothing passed: what Sightline learned, so the clash reaches a person with a head start, not a dead end. */
+function NoFix({ proposal }: { proposal: Proposal }) {
+  const n = proposal.attempts.length;
+  const counts = new Map<string, number>();
+  for (const t of proposal.attempts) {
+    for (const cls of new Set([...t.reason.matchAll(/(?:collision|clearance) with (Ifc\w+)/g)].map((m) => m[1]))) {
+      counts.set(cls, (counts.get(cls) ?? 0) + 1);
+    }
+  }
+  const top = [...counts.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2);
+  return (
+    <div className="nofix">
+      <h3>No edit passed the geometry check</h3>
+      <p>
+        Sightline tried {n} idea{n === 1 ? "" : "s"} and left the model unchanged.
+        {top.length > 0 && <> What stood in the way: {top.map(([cls, k], i) => (
+          <span key={cls}>{i ? ", and " : ""}<b>{cls.replace(/^Ifc/, "")}</b> elements in {k === n ? "every attempt" : `${k} of ${n}`}</span>))}.</>}
+      </p>
+      {proposal.advice && <p><b>What decides it:</b> {proposal.advice}</p>}
+      <p className="hint">Each idea and what it hit is in the activity table below. Propose again for fresh ideas, or flag it for the model's author.</p>
+    </div>
+  );
+}

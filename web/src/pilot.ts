@@ -154,5 +154,6 @@ export class Pilot {
 
 function describe(t: Trial) {
   const [dx, dy, dz] = t.delta_m.map((d) => Math.round(d * 1000));
+  if (t.kind === "trim") return `trim one end ${Math.round(Math.hypot(dx, dy, dz))} mm`;
   return t.kind === "offset" ? `offset ${dz > 0 ? "up" : "down"} ${Math.abs(dz)} mm` : `move ${dx} · ${dy} · ${dz} mm`;
 }
