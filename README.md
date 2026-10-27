@@ -75,7 +75,7 @@ Meta's API otherwise; the card says which one answered:
 |---|---|
 | `TRIAGE_API_KEY` (or `BASETEN_API_KEY`) | unset: use Muse Spark |
 | `TRIAGE_API_BASE_URL` | `https://inference.baseten.co/v1` |
-| `TRIAGE_MODEL` | `meta-models/muse-spark-open-1026` |
+| `TRIAGE_MODEL` | `meta-models/muse-spark-open` |
 | `TRIAGE_IMAGES` | `1` (`0` for a text-only host) |
 | `SIGHTLINE_TRIAGE_WORKERS` | `8` |
 

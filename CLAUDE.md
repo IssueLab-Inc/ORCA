@@ -37,7 +37,7 @@ analyzers", dashboards-as-main-feature and Streamlit apps are on the hackathon's
   every viewer event, slow WASM start for judges.
 - Meta: OpenAI-style chat completions at `https://api.meta.ai/v1` (confirmed: `/v1/...` answers 401 without a key,
   `/chat/completions` 404), model `muse-spark-1.3-contributor`. Open-weights host for bulk triage: Baseten
-  `meta-models/muse-spark-open-1026` (planned).
+  `meta-models/muse-spark-open` (confirmed name; key `BASETEN_API_KEY` in the environment).
 
 ## Geometry facts learned the hard way
 
