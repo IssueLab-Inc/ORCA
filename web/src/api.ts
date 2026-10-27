@@ -29,7 +29,7 @@ export interface ReportClash {
 }
 export interface Report { id: string; title: string; sources: string[]; clashes: ReportClash[] }
 /** Per clash id: the model elements each side matched, and how. */
-export type Matches = Record<string, { a: string | null; b: string | null; how: (string | null)[] }>;
+export type Matches = Record<string, { a: string | null; b: string | null; how: (string | null)[]; show?: (string | null)[] }>;
 export interface Measure { matched: boolean; physical: boolean | null; distance_m: number | null }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -73,6 +73,7 @@ export const api = {
     }
   },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
+  element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
   /** Keep a fix in the server's model; returns the indexes of the files that changed. */
   accept: (id: string, o: Option) => (o.kind === "offset"
     ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })

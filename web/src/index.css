@@ -133,3 +133,19 @@ h2 { font-size: 13px; margin: 6px 0 0; }
 .steps tr.pending td { color: var(--muted); }
 .badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
 .badge.move { background: #f1ece2; color: #7a5a14; }
+
+/* Viewer toolbar and overlays */
+.vtool { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; pointer-events: none; z-index: 3; }
+.vtool > * { pointer-events: auto; }
+.vtool .seg { background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.vtool .seg button { padding: 5px 10px; font-size: 12.5px; }
+.vtool .seg button:disabled { color: var(--muted); opacity: .5; cursor: default; }
+.vmodels summary { background: var(--surface); font-size: 12.5px; font-weight: 600; padding: 5px 10px; }
+.ghost-btn { padding: 5px 10px; font-size: 12.5px; }
+.stage .overlay { top: 54px; }
+.stage.measuring canvas { cursor: crosshair; }
+.hint-bar { font-size: 12.5px; }
+.viewer-label { position: absolute; transform: translate(-50%, -150%); pointer-events: none; background: rgba(24,33,44,.85); color: #fff; font: 600 11.5px var(--mono); padding: 2px 7px; border-radius: 4px; white-space: nowrap; z-index: 2; }
+.measure-label { background: var(--accent); transform: translate(-50%, -130%); }
+.props { position: absolute; top: 54px; right: 12px; width: 280px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; z-index: 3; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+.props .row { align-items: center; }

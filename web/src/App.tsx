@@ -3,7 +3,9 @@ import { Activity, statusLine, type Progress } from "./Activity";
 import { api, type AgentEvent, type Matches, type Measure, type Option, type Proposal, type Report, type ReportClash, type Verdict } from "./api";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { ReportList, mm } from "./ReportList";
-import { Viewer } from "./viewer/Viewer";
+import { Viewer, serverPointToViewer, type Preset, type ViewMode } from "./viewer/Viewer";
+import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
+import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
 
@@ -19,7 +21,12 @@ export function App() {
   const [fps, setFps] = useState(0);
   const [a, setA] = useState<string | null>(null);
   const [b, setB] = useState<string | null>(null);
-  const [isolate, setIsolate] = useState(false);
+  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", edges: true, section: false, measure: false, hiddenModels: [] });
+  const [modelNames, setModelNames] = useState<string[]>([]);
+  const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
+  const [measurePts, setMeasurePts] = useState<THREE.Vector3[]>([]);
+  const [measured, setMeasured] = useState<number | null>(null);
+  const down = useRef<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
@@ -67,13 +74,24 @@ export function App() {
   }, []);
 
   // Pieces accepted offsets added to A or B are part of that side: coloured, and kept when isolating.
+  const [standIns, setStandIns] = useState<Record<string, "a" | "b">>({});
   const group = useMemo(() => {
-    const g: Record<string, "a" | "b"> = {};
+    const g: Record<string, "a" | "b"> = { ...standIns };
     for (const p of (b && edits[b]) || []) g[p] = "b";
     for (const p of (a && edits[a]) || []) g[p] = "a";
     return g;
-  }, [a, b, edits]);
-  useEffect(() => viewer.current?.highlight(a, b, isolate, group), [a, b, isolate, group]);
+  }, [a, b, edits, standIns]);
+  useEffect(() => viewer.current?.setFocus({ a, b, group }), [a, b, group]);
+  useEffect(() => viewer.current?.setMode(tool.mode), [tool.mode]);
+  useEffect(() => viewer.current?.setEdges(tool.edges), [tool.edges]);
+  // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
+  useEffect(() => {
+    if (!tool.section) { viewer.current?.setSection(false); return; }
+    if (!viewer.current?.setSection(true)) setTool((t) => ({ ...t, section: false }));
+  }, [tool.section, a, b]);
+  useEffect(() => {
+    setMeasured(viewer.current?.setMeasure(measurePts[0] ?? null, measurePts[1] ?? null) ?? null);
+  }, [measurePts]);
 
   // A clock for the live status line while the agent works.
   useEffect(() => {
@@ -89,19 +107,30 @@ export function App() {
     api.match(report.id, sceneId).then(setMatches).catch((e) => setError((e as Error).message));
   }, [report, sceneId]);
 
+  /** Take the camera to a report clash: where its elements meet, or its reported point. */
+  function goToClash(c: ReportClash, m = matches?.[c.id]) {
+    const ids = [m?.show?.[0] ?? m?.a, m?.show?.[1] ?? m?.b].filter((g): g is string => !!g);
+    const point = c.point && c.point.every((v) => v != null) ? serverPointToViewer(c.point as number[]) : null;
+    if (!viewer.current?.focusClash(ids, point, c.name)) setError("This clash has no geometry or point to show in the open model.");
+  }
+
   // A selected report clash: its pair in the viewer, and Sightline's own measure of it.
   useEffect(() => {
     setMeasure(null);
     if (!clash || !report || !sceneId || !matches) return;
     const m = matches[clash.id];
     setA(m?.a ?? null); setB(m?.b ?? null);
-    if (m?.a || m?.b) viewer.current?.frame([m.a, m.b].filter((g): g is string => !!g));
+    // Draw what can be drawn: a port's pipe or valve stands in for the port itself.
+    const shownA = m?.show?.[0], shownB = m?.show?.[1];
+    setStandIns({ ...(shownA && shownA !== m?.a ? { [shownA]: "a" as const } : {}), ...(shownB && shownB !== m?.b ? { [shownB]: "b" as const } : {}) });
     if (!m?.a || !m?.b) return;
     let live = true;
     setMeasure("busy");
     api.measure(report.id, clash.id, sceneId).then((x) => live && setMeasure(x)).catch(() => live && setMeasure(null));
     return () => { live = false; };
   }, [clash, report, sceneId, matches, remeasure]);
+  // When the model link arrives after a clash was picked, go to it then.
+  useEffect(() => { if (clash && matches) goToClash(clash); }, [matches]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dev-only hook for smoke tests: select a clash pair by GlobalId without hunting for it with the mouse.
   useEffect(() => {
@@ -125,7 +154,7 @@ export function App() {
     if (changed?.length) viewer.current?.frameMeshes(changed, 1.6);
   }, [option]);
 
-  function resetWork() { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); }
+  function resetWork() { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); setStandIns({}); }
 
   async function open() {
     if (!picked.length) return;
@@ -134,7 +163,9 @@ export function App() {
       const { id, files } = await api.open(picked);
       setSceneId(id);
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
-      setStats(await viewer.current!.load(bytes));
+      setModelNames(files.map((f) => f.replace(/\.ifc$/i, "").replace(/^Northbank-/, "")));
+      setTool((t) => ({ ...t, hiddenModels: [] }));
+      setStats(await viewer.current!.load(bytes, files));
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
 
@@ -151,17 +182,79 @@ export function App() {
   }
 
   function selectClash(c: ReportClash) {
-    setClash(c); resetWork(); setImage(null);
-    if (!matches) { setA(null); setB(null); }
+    if (c.id !== clash?.id) { setClash(c); resetWork(); setImage(null); }
+    if (!matches) { setA(null); setB(null); return; }
+    goToClash(c);  // every click navigates, also on the clash already selected
   }
 
+  /** Single click: measure, or show the element's properties. Double click: pick element A, then B. A drag is an
+   * orbit, never a pick. */
   function onClick(ev: React.MouseEvent) {
-    if (ev.detail !== 2) return; // double-click picks, so orbiting never selects by accident
-    const gid = viewer.current?.pick(ev.nativeEvent);
-    if (!gid || gid === a) return;
-    if (!a || (a && b)) { setA(gid); setB(null); } else setB(gid);
-    setClash(null); resetWork();
+    const d = down.current;
+    if (d && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 5) return;
+    const hit = viewer.current?.pickAt(ev.nativeEvent);
+    if (ev.detail === 2) {
+      if (!hit || hit.globalId === a) return;
+      if (!a || (a && b)) { setA(hit.globalId); setB(null); } else setB(hit.globalId);
+      setClash(null); resetWork();
+      return;
+    }
+    if (tool.measure) {
+      if (hit) setMeasurePts((p) => (p.length >= 2 ? [hit.point] : [...p, hit.point]));
+      return;
+    }
+    if (!hit) { setSelected(null); return; }
+    setSelected({ globalId: hit.globalId, info: null });
+    if (sceneId) api.element(sceneId, hit.globalId)
+      .then((info) => setSelected((s) => (s?.globalId === hit.globalId ? { ...s, info } : s)))
+      .catch(() => undefined);
   }
+
+  function toggle(k: "edges" | "section" | "measure") {
+    setTool((t) => ({ ...t, [k]: !t[k] }));
+    if (k === "measure") setMeasurePts([]);
+  }
+
+  function setModelVisible(i: number, visible: boolean) {
+    viewer.current?.setModelVisible(i, visible);
+    setTool((t) => ({ ...t, hiddenModels: visible ? t.hiddenModels.filter((x) => x !== i) : [...t.hiddenModels, i] }));
+  }
+
+  function screenshot() {
+    const url = viewer.current?.snapshot();
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `sightline-${clash?.name ?? "view"}.png`;
+    link.click();
+  }
+
+  function focusNow() {
+    if (clash) goToClash(clash);
+    else if (a || b) viewer.current?.frame([a, b].filter((g): g is string => !!g));
+  }
+
+  // Keyboard: 1-4 views, H fit, F clash, X/C/I/V modes, S section, E edges, M measure, Esc clears.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
+      const views: Record<string, Preset> = { "1": "top", "2": "front", "3": "right", "4": "iso" };
+      const modes: Record<string, ViewMode> = { x: "xray", c: "context", i: "isolate", v: "shaded" };
+      const k = e.key.toLowerCase();
+      if (views[k]) viewer.current?.view(views[k]);
+      else if (k === "h") viewer.current?.fitAll();
+      else if (k === "f") focusNow();
+      else if (modes[k]) setTool((t) => ({ ...t, mode: modes[k] }));
+      else if (k === "s") toggle("section");
+      else if (k === "e") toggle("edges");
+      else if (k === "m") toggle("measure");
+      else if (k === "escape") { setMeasurePts([]); setSelected(null); setImage(null); }
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   async function propose() {
     if (!sceneId || !a || !b) return;
@@ -262,7 +355,31 @@ export function App() {
             </>}
       </aside>
 
-      <main className="stage" ref={host} onClick={onClick}>
+      <main className={`stage ${tool.measure ? "measuring" : ""}`} ref={host} onClick={onClick}
+        onPointerDown={(e) => { down.current = { x: e.clientX, y: e.clientY }; }}>
+        {stats && <ViewerToolbar state={tool} models={modelNames} hasFocus={!!(a || b)}
+          onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
+          onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
+        {tool.measure && <div className="overlay hint-bar" onClick={(e) => e.stopPropagation()}>
+          {measured != null ? `Measured ${Math.round(measured * 1000)} mm. Click again to start a new measurement.` : measurePts.length ? "Click the second point." : "Click the first point to measure from."}</div>}
+        {selected && !tool.measure && (
+          <div className="props" onClick={(e) => e.stopPropagation()}>
+            <div className="row"><b>{String(selected.info?.ifc_class ?? "Element")}</b>
+              <button className="link" onClick={() => setSelected(null)} aria-label="Close">✕</button></div>
+            <div>{String(selected.info?.name ?? "")}</div>
+            <dl className="kv">
+              <dt>GlobalId</dt><dd className="mono">{selected.globalId}</dd>
+              {selected.info?.tag ? <><dt>Tag</dt><dd>{String(selected.info.tag)}</dd></> : null}
+              {selected.info?.storey ? <><dt>Level</dt><dd>{String(selected.info.storey)}</dd></> : null}
+              {selected.info?.source ? <><dt>File</dt><dd>{String(selected.info.source)}</dd></> : null}
+              {Array.isArray(selected.info?.connected) ? <><dt>Connected</dt><dd>{(selected.info.connected as unknown[]).length} elements</dd></> : null}
+            </dl>
+            <div className="row">
+              <button className="btn" onClick={() => { setA(selected.globalId); setB(null); setClash(null); resetWork(); }}>Set as A</button>
+              <button className="btn" disabled={!a || a === selected.globalId} onClick={() => { setB(selected.globalId); setClash(null); resetWork(); }}>Set as B</button>
+            </div>
+          </div>
+        )}
         {busy && <div className="overlay">{busy}</div>}
         {progress && progress.phase !== "done" && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
         {option && (
@@ -296,8 +413,7 @@ export function App() {
               </dl>
             </>}
         <div className="actions">
-          <label className="check"><input id="isolate" type="checkbox" checked={isolate} onChange={(e) => setIsolate(e.target.checked)} /> Isolate the pair</label>
-          <button className="btn" disabled={!a || !b} onClick={() => viewer.current?.frame([a!, b!])}>Fit to pair</button>
+          <button className="btn" disabled={!a && !b} onClick={focusNow}>Go to the clash</button>
           <button className="btn primary" disabled={!a || !b || !sceneId || !!busy || (!!progress && progress.phase !== "done")} onClick={propose}>
             {progress && progress.phase !== "done" ? "Working…" : "Propose fixes"}</button>
         </div>

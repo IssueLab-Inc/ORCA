@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 import shutil
+
+import ifcopenshell.util.system
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -189,10 +191,20 @@ class Workspace:
             hits = by_name.get((e.ifc_class or "", e.name), [])
             return (hits[0], "name") if len(hits) == 1 else (None, None)
 
+        def shown(gid: str | None) -> str | None:
+            """What the viewer can draw for a matched element: a port has no body, so its pipe or valve."""
+            if gid is None:
+                return None
+            e = scene.entity(gid)
+            if e.is_a("IfcDistributionPort") or e.is_a("IfcPort"):
+                owner = ifcopenshell.util.system.get_port_element(e)
+                return owner.GlobalId if owner is not None else None
+            return gid
+
         out = {}
         for c in self.report(report_id).clashes:
             (a, how_a), (b, how_b) = find(c.a), find(c.b)
-            out[c.id] = {"a": a, "b": b, "how": [how_a, how_b]}
+            out[c.id] = {"a": a, "b": b, "how": [how_a, how_b], "show": [shown(a), shown(b)]}
         self._matches[key] = out
         return out
 

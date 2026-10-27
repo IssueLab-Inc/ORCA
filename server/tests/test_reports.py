@@ -163,3 +163,20 @@ def test_proposing_a_report_clash_sends_its_navisworks_images_and_distance(tmp_p
     text, images = recorder.calls[0]
     assert "-150.0 mm" in text and "Structure vs Ducts" in text
     assert [p.name for p in images] == ["cd000001.jpg"]
+
+
+def test_match_shows_a_ports_owner(tmp_path, monkeypatch):
+    from sightline.fixtures import build_run_fixture
+    import ifcopenshell.util.system as system
+    build_run_fixture(tmp_path / "run.ifc")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["run.ifc"])
+    model = ws.scene(sid).model
+    main = next(e for e in model.by_type("IfcDuctSegment") if e.Tag == "SA-1")
+    port = system.get_ports(main)[0]
+    xml = GROUPED.replace("0FQ9jQy2DHrgb6aZcJtSST", port.GlobalId)
+    (tmp_path / "reports" / "r").mkdir(parents=True)
+    (tmp_path / "reports" / "r" / "report.xml").write_text(xml)
+    rid = ws.open_report_sample("r").id
+    m = next(iter(ws.match(rid, sid).values()))
+    assert m["a"] == port.GlobalId and m["show"][0] == main.GlobalId

@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 34 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 35 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -122,13 +122,21 @@ result); the UI shows a live status line and an "Agent activity" table. `META_RE
 loop stops after the first round with a verified option: a proposal now takes ~17 s (was 60-100 s). Options carry
 `before` meshes: Before / After / Both (orange ghost) and a before/after summary, framed on the change. Fixed
 clashes are marked in the list (every report entry with the same pair) and the panel; accepted offset pieces stay
-with their element on later selections. 34 server tests.
+with their element on later selections.
+
+Viewer overhaul (Oct 27; ideas from ClashWise's viewer, code new): modes Shaded / X-ray / Context (within 2.5 m) /
+Isolate, with the focus pair drawn as its own meshes over the batched buffers (no copies) and outlined through other
+geometry; section box (clipping planes) around the clash; marker + label at the clash point; animated camera; presets
+Top/Front/Right/Iso, Fit, Go to clash; per-model visibility; measure (point to point, Δxyz); properties card on single
+click (double-click still picks A/B); screenshot; keys 1-4 H F X C I V S E M Esc. Navigation frames the zone where the
+two elements meet (overlap or gap + margin, distance from the field of view), runs on every click, and falls back to
+the report's clash point; ports are shown by their owning element (`match()` returns `show`). 35 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. Later: bends instead of square corners,
    sideways offsets, splitting at fittings.
-3. Viewer: context-ghost mode, A/B/C capture, section view.
+3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
 4. Agent loop end to end in the UI with Muse Spark, attempts streamed. Chat panel: Muse Spark with tools over the
    open report and model (list/filter clashes, get a clash, look at its images, triage, describe elements, check a
    move, propose), the same functions as the MCP server, every step streamed.
