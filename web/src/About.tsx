@@ -1,4 +1,4 @@
-import { Download, Eye, FolderOpen, MessageSquare, ScanSearch, ShieldCheck, X } from "lucide-react";
+import { Box, Download, Eye, FolderOpen, ListChecks, MessageSquare, ScanSearch, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 /**
@@ -33,11 +33,23 @@ export function About({ start, onClose }: {
               <button className="btn primary big" disabled={start.disabled} onClick={start.onStart}>
                 <FolderOpen size={16} aria-hidden /> {start.label}</button>
               <div className="hint">{start.details}</div>
+              <ul className="next-steps">
+                <li><ListChecks size={15} aria-hidden /><span><b>On the left:</b> the clash list, grouped by test, with a picture of each clash.</span></li>
+                <li><Box size={15} aria-hidden /><span><b>In the middle:</b> the building in 3D, with its street and riverside.</span></li>
+                <li><Sparkles size={15} aria-hidden /><span><b>On the right:</b> pick a clash, press <b>Propose fixes</b>, and watch Sightline work.</span></li>
+              </ul>
             </div>
           )}
         </div>
         <BeforeAfter />
       </header>
+
+      <section className="about-stats" aria-label="Sightline on the demo, measured">
+        <Stat value="15–25 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
+        <Stat value="3 of 3" label="designer fixes matched" note="On the demo's three planted clashes, the first idea passes at the designer's own heights." />
+        <Stat value="317" label="clashes sorted in ~3 min" note="The whole demo report triaged; 184 settled by rule, the rest by an open-weights model." />
+        <Stat value="Every" label="fix checked before you see it" note="Clash gone, 25 mm to spare, nothing new hit." />
+      </section>
 
       <section>
         <h2 className="about-h">What is a clash?</h2>
@@ -118,6 +130,15 @@ export function About({ start, onClose }: {
           · <ScanSearch size={13} aria-hidden /> <b>Triage all</b> sorts all 317 clashes in about three minutes.</p>
       </section>
 
+      <section className="built-with" aria-label="Built with">
+        <span className="hint">Built with</span>
+        <span className="tech"><b>Muse Spark</b> understands clashes and proposes fixes</span>
+        <span className="tech"><b>Muse Spark Open</b> sorts whole reports</span>
+        <span className="tech"><b>IfcOpenShell</b> edits and checks the geometry</span>
+        <span className="tech"><b>three.js</b> draws the 3D view</span>
+        <span className="tech"><b>IFC</b> the open model format, in and out</span>
+      </section>
+
       <p className="about-foot hint">
         Northbank is a fictional three-storey office with its street and riverside, modelled by IssueLab for demos: no
         real project data. Its models and clash report are built with three planted clashes that have a known answer.
@@ -130,6 +151,16 @@ export function About({ start, onClose }: {
   return (
     <div className="about-dialog" role="dialog" aria-modal="true" aria-label="How Sightline works" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}>{body}</div>
+    </div>
+  );
+}
+
+function Stat({ value, label, note }: { value: string; label: string; note: string }) {
+  return (
+    <div className="stat-tile">
+      <b>{value}</b>
+      <span className="stat-label">{label}</span>
+      <span className="stat-note">{note}</span>
     </div>
   );
 }

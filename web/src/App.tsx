@@ -542,6 +542,9 @@ export function App() {
   }
 
   const proposing = !!progress && progress.phase !== "done";
+  // Until a report or the models are open, the page is the landing: no panels, just what Sightline is and the demo.
+  const landing = !stats && !report;
+  const startLabel = reportSamples.length && !report ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   const fixedCount = Object.keys(fixes).length;
   const compareBar = (option || (plan && tab === "plan" && planOptions.length > 0)) && (
@@ -573,7 +576,7 @@ export function App() {
   );
 
   return (
-    <div className={`app ${resizing ? "resizing" : ""}`}
+    <div className={`app ${resizing ? "resizing" : ""} ${landing ? "landing" : ""}`}
       style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}>
       <header className="bar">
         <span className="brand"><span className="logo" aria-hidden>◎</span>ClashWise <b>Sightline</b></span>
@@ -605,13 +608,14 @@ export function App() {
         </Popover>
         <input ref={folderInput} type="file" hidden multiple {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         <input ref={filesInput} type="file" hidden multiple accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
-        <span className="crumbs">
+        {!landing && <span className="crumbs">
           {stats ? <span>{modelNames.join(" · ")}</span> : <span className="hint">No model open</span>}
           {report && <span>· {report.title}</span>}
           {stats && <span className="stat mono" title={`${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>{stats.elements} elements</span>}
-        </span>
-        <button className="btn ghost" onClick={() => setAbout(true)}><Info size={15} aria-hidden /> How it works</button>
+        </span>}
+        {!landing && <button className="btn ghost" onClick={() => setAbout(true)}><Info size={15} aria-hidden /> How it works</button>}
         <span className="spacer" />
+        {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={openDemo}><FolderOpen size={15} aria-hidden /> {startLabel}</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip="Download the changed IFC files" data-tip-side="bottom">
           <Download size={15} aria-hidden /> Export IFC</a>}
@@ -644,7 +648,7 @@ export function App() {
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {!stats && !busy && (
           <About start={{
-            label: reportSamples.length && !report ? "Open the Northbank demo" : "Open the models",
+            label: startLabel,
             disabled: !picked.length,
             onStart: openDemo,
             details: <>

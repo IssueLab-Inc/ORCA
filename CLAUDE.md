@@ -190,6 +190,9 @@ Start page (Oct 27): the empty viewer shows `About.tsx` (what a clash is, what S
 "try it" steps; written for people new to BIM) with **Open the Northbank demo**: the sample report first (its list shows
 at once), then the default models, now including Site (all 317 report clashes link; 290 without it). The header's
 **How it works** opens the same page as a dialog. Side panels resize from their inner edge (remembered per browser).
+Until a report or the models are open the app is a landing page (`.app.landing`: no panels or dock; the header carries
+the demo button): what happens after the click, measured numbers (15-25 s to a verified fix, 3/3 designer fixes, 317
+triaged in ~3 min), built-with. Keep those numbers true to evals/README.md if they change.
 
 Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
 some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then
