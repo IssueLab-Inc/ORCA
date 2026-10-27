@@ -75,12 +75,14 @@ Meta's API otherwise; the card says which one answered:
 |---|---|
 | `TRIAGE_API_KEY` (or `BASETEN_API_KEY`) | unset: use Muse Spark |
 | `TRIAGE_API_BASE_URL` | `https://inference.baseten.co/v1` |
-| `TRIAGE_MODEL` | `meta-models/muse-spark-open-1026` |
+| `TRIAGE_MODEL` | `meta-models/muse-spark-open` |
 | `TRIAGE_IMAGES` | `1` (`0` for a text-only host) |
 | `SIGHTLINE_TRIAGE_WORKERS` | `8` |
 
 A host without strict structured output gets JSON mode with the schema in the prompt (switched on the first 400).
-Northbank's 317 results: 184 by rule, 133 by the model, 119 s on Muse Spark with `reasoning_effort=low`.
+Northbank's 317 results: 184 by rule, 133 by the model, 119 s on Muse Spark with `reasoning_effort=low`, 189 s on Muse
+Spark Open on Baseten (live deploy, Oct 27: median call 7.9 s but a longer tail, up to 33 s). Scored on the whole package
+the two models agree on 299 of 317 verdicts ([evals/README.md](evals/README.md#triage-of-navisworks-results)).
 
 ### Several clashes at once, and root causes
 
@@ -131,7 +133,7 @@ reports in `samples/reports/<name>/` first.
 
 ```bash
 cd web && npm ci && npm run build && cd ..
-modal secret create sightline-meta META_API_KEY=...   # once (add TRIAGE_API_KEY=... for open-weights triage)
+modal secret create sightline-meta META_API_KEY="$META_API_KEY" TRIAGE_API_KEY="$BASETEN_API_KEY" --force   # once; no echo
 modal deploy deploy/modal_app.py
 ```
 

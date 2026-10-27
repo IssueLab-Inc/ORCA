@@ -37,7 +37,7 @@ analyzers", dashboards-as-main-feature and Streamlit apps are on the hackathon's
   every viewer event, slow WASM start for judges.
 - Meta: OpenAI-style chat completions at `https://api.meta.ai/v1` (confirmed: `/v1/...` answers 401 without a key,
   `/chat/completions` 404), model `muse-spark-1.3-contributor`. Open-weights host for bulk triage: Baseten
-  `meta-models/muse-spark-open-1026` (confirmed name; key `BASETEN_API_KEY` in the environment).
+  `meta-models/muse-spark-open` (confirmed Oct 27 by `/v1/models` and a call; `-1026` 404s; key `BASETEN_API_KEY` in the environment).
 
 ## Geometry facts learned the hard way
 
@@ -87,9 +87,9 @@ Findings (Oct 27, details in spikes/README.md):
 - Work goes straight to `main` (solo repo). Run `server/` tests and the web build before pushing.
 - Demo models: add `IssueLab-Inc/ClashWiseDemoModels` and copy `northbank/*.ifc` into `samples/`.
 - Deploy: Modal, public, with proposal caps (owner decision Oct 27). `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` come
-  from the environment, never chat. Once: `modal secret create sightline-meta META_API_KEY="$META_API_KEY"`
-  (no echo). Then build the web app and `modal deploy deploy/modal_app.py` (README, "Deploy"). Open the URL,
-  load Northbank, try one proposal.
+  from the environment, never chat. Once: `modal secret create sightline-meta META_API_KEY="$META_API_KEY"
+  TRIAGE_API_KEY="$BASETEN_API_KEY" --force` (no echo). Then build the web app and `modal deploy deploy/modal_app.py`
+  (README, "Deploy"). Open the URL, load Northbank, try one proposal.
 - Private notes (strategy, application): ClashWiseApp branch `claude/zealous-pascal-7tdyvm`, `docs/hackathon/`.
 
 ## Status and next steps
@@ -102,7 +102,8 @@ evals/README.md). 48 server tests (`cd server && uv run pytest -q`), web build (
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
 `uv tool install 'modal[api-proxy-support]'`. Triage eval over Navisworks results: `evals/navisworks_triage.py`
-(evals/README.md): 6/6 answer key, 129/129 non-physical, 51/55 touches on 317 Northbank results.
+(evals/README.md): 6/6 answer key, 129/129 non-physical, 51/55 touches on 317 Northbank results (Muse Spark Open: 6/6,
+129/129, 49/55).
 
 Navisworks clash reports (Oct 27): `server/sightline/reports.py` reads the XML (standard flat tags and the
 three-view export's grouped tags); the app opens samples from `samples/reports/<name>/` or uploads, lists clashes by
@@ -164,8 +165,14 @@ call), then one strict-JSON call per clash, 8 workers, same prompt/schema as `ev
 prompt. `triage.Job` is shared per sample report (`sample:<root>`; uploads per id), replays to late subscribers; a run
 costs one proposal. `POST /api/reports/{rid}/triage/stream`, `GET /api/reports/{rid}/triage`. UI: Triage card (progress,
 verdict filter chips, Set aside / Flag), row tags, reading in the clash panel. Northbank on Muse Spark: 317 in 119 s,
-184 by rule, answer key real/high/MEP. **No open-weights key yet**: the eval's `--open` run is pending one. 48 server
-tests.
+184 by rule, answer key real/high/MEP.
+
+Muse Spark Open (Oct 27): Baseten's name is `meta-models/muse-spark-open` (`/v1/models`); it takes strict json_schema
+and images; no reasoning_effort is sent. Eval on all 317 (`evals/runs/2026-10-27-northbank-open-triage/`): 6/6 answer key,
+129/129 non-physical, 49/55 touching (Muse Spark 51/55), 0 failures, median 6.1 s vs 10.0 s; agrees with Muse Spark on
+299/317, but called the B1 pad footing vs lift pit wall (−471 mm, real) by_design. Deployed with `TRIAGE_API_KEY` in the
+`sightline-meta` secret: a live run starts with `"open_weights": true`, 317 in 189 s (184 by rule, median call 7.9 s,
+max 33 s; slower end to end than Muse Spark's 119 s because of the tail). 48 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
@@ -174,7 +181,7 @@ Next, in order.
 3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
-5. ✅ Bulk triage, open-weights ready (needs a Baseten key to run on Muse Spark Open). Export IFC + BCF; voice.
+5. ✅ Bulk triage, live on Muse Spark Open (Baseten). Export IFC + BCF; voice.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.

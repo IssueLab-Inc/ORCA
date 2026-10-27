@@ -54,14 +54,14 @@ side is `non_physical`, a result within 1 mm is a touch (not a real clash), and 
 `real_clash` with the service, not the girder, moving. Each run keeps its replies, `triage.csv` and `summary.md` in
 `runs/<date>-<name>/`.
 
-| Date | Package | Clashes | Images | Answer key | Non-physical | Touching | Failed calls | Median latency |
-|---|---|---|---|---|---|---|---|---|
-| 2026-10-27 | Northbank-Demo-Clean, 73 tests × ≤5 | 317 | ABC | 6/6 | 129/129 | 51/55 | 0 | 10.0 s |
+| Date | Model | Package | Clashes | Images | Answer key | Non-physical | Touching | Failed calls | Median latency |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-27 | Muse Spark | Northbank-Demo-Clean, 73 tests × ≤5 | 317 | ABC | 6/6 | 129/129 | 51/55 | 0 | 10.0 s |
+| 2026-10-27 | Muse Spark Open (Baseten) | Northbank-Demo-Clean, 73 tests × ≤5 | 317 | ABC | 6/6 | 129/129 | 49/55 | 0 | **6.1 s** |
 
 The app's **Triage all** uses the same prompt, schema and sure rules (`server/sightline/triage.py`). To score the
 open-weights model on the same package: `--open` (the app's triage host, needs `TRIAGE_API_KEY` or `BASETEN_API_KEY`),
-or `--base-url URL --model NAME --api-key-env VAR [--effort ""]` for any OpenAI-compatible host. Not run yet: no
-open-weights key in the environment on Oct 27.
+or `--base-url URL --model NAME --api-key-env VAR [--effort ""]` for any OpenAI-compatible host.
 
 Notes on the first run (`runs/2026-10-27-northbank-nwf-triage/summary.md`):
 - The four touch misses: three task-chair parts (base, stem, seat are separate `IfcFurniture`) read as duplicated chairs
@@ -72,3 +72,14 @@ Notes on the first run (`runs/2026-10-27-northbank-nwf-triage/summary.md`):
   the answer key does not cover (it lists Structure vs services only): pad footing B1 vs the lift pit wall (−350 to
   −471 mm), column base plates buried 159 mm in ground beams, the grid B beam crossing the core trimmer (−216 mm) mid-span,
   and CHS X-bracing crossing at −9 mm. Checked against the images for the footing: the overlap is real.
+
+Muse Spark Open (`meta-models/muse-spark-open` on Baseten, `runs/2026-10-27-northbank-open-triage/`):
+- The host takes strict `json_schema` and the A/B/C images as they are; no `reasoning_effort` sent. 317 calls in 6 min 25 s
+  with 8 workers, median 6.1 s (max 26 s) against Muse Spark's 10.0 s (max 56 s). No failed calls.
+- Same answer key (6/6, service moves) and non-physical (129/129) scores. Touching 49/55: the tree canopy again, one task
+  chair and the tea point counter as duplicates, and three main-entrance door parts as a duplicated door.
+- It agrees with Muse Spark on 299 of 317 verdicts. 11 of the 18 differences are by_design → modelling_error (main
+  entrance door parts, two beam-to-beam joints at −12 mm, a column in the ground slab). One is a worse call: pad footing
+  B1 vs the lift pit wall (−471 mm, confirmed real from the images) came back by_design. Both called the same 20 clashes
+  real_clash and agreed on severity for 15.
+- Verdicts: by_design 145, non_physical 130, real_clash 21, modelling_error 21 (Muse Spark: 153, 129, 23, 12).

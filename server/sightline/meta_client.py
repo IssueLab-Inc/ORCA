@@ -1,7 +1,7 @@
 """Thin client for Meta's models over an OpenAI-style chat completions endpoint.
 
 Configuration comes from the environment so the same code talks to the Meta Model API (Muse Spark)
-or a partner host for the open-weights models (Baseten: meta-models/muse-spark-open-1026):
+or a partner host for the open-weights models (Baseten: meta-models/muse-spark-open):
 
     META_API_BASE_URL   https://api.meta.ai/v1 (requests go to <base>/chat/completions)
     META_API_KEY
@@ -13,7 +13,7 @@ Bulk triage can run on a different host (`triage_model`):
 
     TRIAGE_API_KEY      (or BASETEN_API_KEY) turns it on; without one, triage uses Muse Spark above
     TRIAGE_API_BASE_URL https://inference.baseten.co/v1
-    TRIAGE_MODEL        meta-models/muse-spark-open-1026
+    TRIAGE_MODEL        meta-models/muse-spark-open
     TRIAGE_IMAGES       1 (default) sends the clash images; 0 for a text-only host
 
 Check the request shape against the Meta Model API quickstart on day 1; only `_post` should need to change.
@@ -133,7 +133,7 @@ def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
     images = os.environ.get("TRIAGE_IMAGES", "1") != "0"
     if key:
         model = MetaChatModel(os.environ.get("TRIAGE_API_BASE_URL", "https://inference.baseten.co/v1"), key,
-                              os.environ.get("TRIAGE_MODEL", "meta-models/muse-spark-open-1026"), timeout_s,
+                              os.environ.get("TRIAGE_MODEL", "meta-models/muse-spark-open"), timeout_s,
                               reasoning_effort=os.environ.get("TRIAGE_REASONING_EFFORT", ""))
         return model, {"model": model.model, "open_weights": True, "images": images}
     model = MetaChatModel(timeout_s=timeout_s)
