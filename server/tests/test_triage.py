@@ -69,7 +69,7 @@ def test_triage_model_prefers_the_open_weights_host(monkeypatch):
     assert not info["open_weights"] and model.base_url == "https://api.meta.ai/v1"
     monkeypatch.setenv("BASETEN_API_KEY", "b")
     model, info = meta_client.triage_model()
-    assert info == {"model": "meta-models/muse-spark-open", "open_weights": True, "images": True}
+    assert info == {"model": "meta-models/muse-spark-open-1026", "open_weights": True, "images": True}
     assert model.base_url == "https://inference.baseten.co/v1" and model.reasoning_effort == ""
 
 
