@@ -228,12 +228,16 @@ def build_batch(ws: Workspace, scene_id: str, report_id: str, clash_ids: list[st
 
 # ---------------------------------------------------------------------------------------------------------- root causes
 
-def root_causes(ws: Workspace, scene_id: str, report_id: str, fixed: list[str] | None = None, top: int = 6) -> list[dict]:
+def root_causes(ws: Workspace, scene_id: str, report_id: str, fixed: list[str] | None = None, top: int = 6,
+                only: str | None = None) -> list[dict]:
     """Elements in several real clashes, most telling first, with clashes the geometry finds that the report lacks.
 
     Real here means: both elements physical and in the open model, overlapping by more than 1 mm, not yet fixed.
     Clusters across disciplines (structure against services) rank above clusters inside one model, which are mostly
-    connections."""
+    connections.
+
+    `only`: just that element's cluster, which may have a single clash left in the report when the geometry finds
+    more (the girder after one of its three services is fixed)."""
     scene = ws.scene(scene_id)
     matches = ws.match(report_id, scene_id)
     physical = scene.bounds().keys()
@@ -253,7 +257,7 @@ def root_causes(ws: Workspace, scene_id: str, report_id: str, fixed: list[str] |
     source = {g: scene.element(g).source for g in partners}
     ranked = []
     for hub, ps in partners.items():
-        if len(ps) < 2:
+        if (only and hub != only) or (len(ps) < 2 and hub != only):
             continue
         cross = sum(1 for p in ps if scene.element(p).source != source[hub])
         ranked.append((cross > 0, cross, len(ps), hub))
@@ -272,6 +276,8 @@ def root_causes(ws: Workspace, scene_id: str, report_id: str, fixed: list[str] |
                 if o.source != e.source and h.other not in e.connected:
                     extra.append({"global_id": h.other, "clash_ids": [], "distance_m": h.distance_m, "in_report": False})
             items = [{**p, "in_report": True} for p in known.values()] + extra
+            if len(items) < 2:
+                continue
             for p in items:
                 o = scene.element(p["global_id"])
                 p.update({"ifc_class": o.ifc_class, "name": o.name, "source": o.source, "storey": o.storey})
@@ -313,7 +319,7 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
     """`charge(n)` is asked before the fix agents run (one model call per pair); it returns why not, or None. The
     cause itself costs one call, charged by the caller, so a cause that needs no edits costs no more than that."""
     started = time.perf_counter()
-    cluster = next((c for c in root_causes(ws, scene_id, report_id, fixed, top=50) if c["hub"]["global_id"] == hub), None)
+    cluster = next(iter(root_causes(ws, scene_id, report_id, fixed, only=hub)), None)
     if cluster is None:
         raise KeyError("That element is not in several open clashes.")
     emit({"type": "thinking", "what": "root cause"})

@@ -25,7 +25,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   const byRule = ids.filter((id) => results[id].source === "rule").length;
   const who = run ? `${run.open_weights ? "Muse Spark Open" : "Muse Spark"} · ${run.model}` : "";
   return (
-    <section className="triage">
+    <section className="triage" data-tour="triage">
       <div className="row">
         <h3><ScanSearch size={14} aria-hidden /> Triage</h3>
         {run?.done
@@ -48,6 +48,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <div className="triage-chips">
           {ORDER.filter((k) => counts[k]).map((k) => (
             <button key={k} className={`chip ${TRIAGE[k].cls} ${filter === k ? "on" : ""}`} aria-pressed={filter === k}
+              data-tour={k === "real_clash" ? "triage-real" : undefined}
               data-tip={filter === k ? "Show every clash" : `Show only: ${TRIAGE[k].tip.toLowerCase()}`} data-tip-side="bottom"
               onClick={() => onFilter(filter === k ? null : k)}>{filter === k && <Filter size={11} aria-hidden />} {counts[k]} {TRIAGE[k].label}</button>
           ))}

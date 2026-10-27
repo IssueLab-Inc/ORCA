@@ -48,14 +48,14 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
       {pats.length > 0 && <>
         <div className="row">
           <h3><Repeat2 size={14} aria-hidden /> Patterns <span className="count">the same clash many times</span></h3>
-          {!verdicts && <button className="btn small" disabled={explaining || busy} onClick={onExplain}
+          {!verdicts && <button className="btn small" data-tour="explain" disabled={explaining || busy} onClick={onExplain}
             data-tip="Ask Sightline what each pattern is" data-tip-side="left">
             {explaining ? <><i className="spinner" aria-hidden /> Reading…</> : <><Sparkles size={13} aria-hidden /> Explain</>}</button>}
         </div>
         {shownPats.map((p) => {
           const v = verdicts?.[p.id];
           return (
-            <div key={p.id} className="insight pattern">
+            <div key={p.id} className="insight pattern" data-tour={v?.verdict === "by_design" ? "pattern-by-design" : undefined}>
               <div className="insight-text">
                 <b>{p.clashes} × {short(p.classes[0])} × {short(p.classes[1])}</b>
                 <span className="hint">{p.levels.length} level{p.levels.length === 1 ? "" : "s"} · {p.min_mm === p.max_mm ? `${p.min_mm} mm every time` : `${p.min_mm} to ${p.max_mm} mm`}
@@ -66,7 +66,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
               <div className="insight-actions">
                 <button className="ibtn" aria-label="Tick these clashes in the list" data-tip="Tick them in the list" data-tip-side="left"
                   onClick={() => onSelect(p.clash_ids)}><ListChecks size={16} aria-hidden /></button>
-                {v?.verdict === "by_design" && <button className="ibtn" aria-label="Mark as by design" data-tip="Mark all as by design" data-tip-side="left"
+                {v?.verdict === "by_design" && <button className="ibtn" data-tour="mark-by-design" aria-label="Mark as by design" data-tip="Mark all as by design" data-tip-side="left"
                   onClick={() => onReview(p.clash_ids, "by_design", v.rule || v.cause)}><CircleCheck size={16} aria-hidden /></button>}
                 {v?.verdict === "modelling_error" && <button className="ibtn" aria-label="Flag for the model author" data-tip="Flag all for the author" data-tip-side="left"
                   onClick={() => onReview(p.clash_ids, "author", v.action)}><Flag size={16} aria-hidden /></button>}

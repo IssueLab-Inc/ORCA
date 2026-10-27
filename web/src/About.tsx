@@ -1,4 +1,4 @@
-import { Box, Download, Eye, FolderOpen, ListChecks, MessageSquare, ScanSearch, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Box, Download, Eye, FolderOpen, ListChecks, MessageSquare, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 /**
@@ -6,7 +6,7 @@ import { useEffect, type ReactNode } from "react";
  * empty viewer (with the demo button) and the "How it works" dialog from the header.
  */
 export function About({ start, onClose }: {
-  start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void };
+  start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void };
   onClose?: () => void;
 }) {
   useEffect(() => {
@@ -30,8 +30,10 @@ export function About({ start, onClose }: {
           </p>
           {start && (
             <div className="about-start">
-              <button className="btn primary big" disabled={start.disabled} onClick={start.onStart}>
+              <button className="btn primary big" data-tour="demo" disabled={start.disabled} onClick={start.onStart}>
                 <FolderOpen size={16} aria-hidden /> {start.label}</button>
+              {start.onTour && <button className="btn big" disabled={start.disabled} onClick={start.onTour}>
+                <Compass size={16} aria-hidden /> Take the guided tour</button>}
               <div className="hint">{start.details}</div>
               <ul className="next-steps">
                 <li><ListChecks size={15} aria-hidden /><span><b>On the left:</b> the clash list, grouped by test, with a picture of each clash.</span></li>

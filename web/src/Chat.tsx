@@ -64,10 +64,11 @@ const SUGGESTIONS = [
   "Why are there so many clashes on Level 02? Fix the root cause.",
 ];
 
-export function ChatPanel({ context, onEvent, ready }: {
+export function ChatPanel({ context, onEvent, ready, ask }: {
   context: () => { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] };
   onEvent: (e: ChatEvent) => void;
   ready: boolean;
+  ask?: { text: string; send: boolean; n: number };  // the tour: put this in the box, or send it
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
@@ -121,6 +122,11 @@ export function ChatPanel({ context, onEvent, ready }: {
       setVoice({ state: "idle", since: 0, level: 0, note: (e as Error).message });
     }
   }
+
+  useEffect(() => {
+    if (!ask) return;
+    if (ask.send) void send(ask.text); else setDraft(ask.text);
+  }, [ask?.n]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function send(text: string, spoken = false) {
     const message = text.trim();
@@ -180,7 +186,7 @@ export function ChatPanel({ context, onEvent, ready }: {
         <textarea value={draft} rows={2} placeholder={ready ? "Ask about the clashes…" : "Open a model or a clash report first"}
           disabled={!ready} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft); } }} aria-label="Message" />
-        <button className="btn primary" disabled={!ready || busy || !draft.trim()}>{busy ? "…" : "Send"}</button>
+        <button className="btn primary" data-tour="chat-send" disabled={!ready || busy || !draft.trim()}>{busy ? "…" : "Send"}</button>
         {VoiceRecorder.supported() && (voice.state === "listening"
           ? <button type="button" className="btn mic on" onClick={() => void stopListening()} aria-label="Stop and send"
               data-tip="Stop and send" data-tip-side="top" style={{ "--level": voice.level } as React.CSSProperties}>

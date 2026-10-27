@@ -1,8 +1,9 @@
-import { Boxes, Brain, Check, CircleCheck, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Boxes, Brain, Check, CircleCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
+import { Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { api, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
 import { ClashPanel, Lightbox } from "./ClashPanel";
@@ -91,6 +92,12 @@ export function App() {
   const [evidence, setEvidence] = useState<Record<string, Evidence>>({});
   const [signoffs, setSignoffs] = useState<Record<string, Signoff[]>>({});
   const [docOpen, setDocOpen] = useState(false);
+  const [touring, setTouring] = useState(false);
+  const [replaying, setReplaying] = useState(false);
+  const [docReady, setDocReady] = useState(false);
+  const [chatAsk, setChatAsk] = useState<{ text: string; send: boolean; n: number } | undefined>(undefined);
+  // Each agent run gets a number: a run that was replaced (by a recorded replay) can no longer change the page.
+  const agentRun = useRef(0);
   const [triageFilter, setTriageFilter] = useState<TriageKind | null>(null);
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -503,7 +510,9 @@ export function App() {
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. */
   function trackAgent() {
-    setError(null); setChosen(null); setManual(null); setViewPlan(false);
+    const run = ++agentRun.current;
+    const live = () => agentRun.current === run;
+    setError(null); setChosen(null); setManual(null); setViewPlan(false); setReplaying(false);
     const t = Date.now();
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
     setProgress(p); setNow(t);
@@ -512,6 +521,7 @@ export function App() {
     pilot.current?.start();
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
     const onEvent = (e: AgentEvent) => {
+      if (!live()) return;
       pilot.current?.event(e);
       if (e.type === "reasoning") setThoughts((t) => [...t, { round: e.round, text: e.text }]);
       if (e.type === "thinking") update({ round: e.round, phase: "thinking", thinkingSince: Date.now(), checking: null });
@@ -526,6 +536,7 @@ export function App() {
       }
     };
     const finish = (result: Proposal | null) => {
+      if (!live()) return;
       const show = () => {
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
         update({ phase: "done", checking: null }); setNow(Date.now());
@@ -538,11 +549,48 @@ export function App() {
   async function propose() {
     if (!sceneId || !a || !b) return;
     const { onEvent, finish } = trackAgent();
+    const run = agentRun.current;
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
     let result: Proposal | null = null;
     try { result = await api.proposeStream(sceneId, a, b, from, onEvent); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { if (agentRun.current === run) setError((e as Error).message); }
     finally { finish(result); }
+  }
+
+  /** Play a recorded proposal (the tour's fallback when the live one fails or is slow) through the same viewer and
+   * pilot, at the pace it was recorded. Accepting its fix edits the model for real, like a live one. */
+  async function replayPropose(clashId: string) {
+    const c = report?.clashes.find((x) => x.id === clashId);
+    if (!c || !sceneId) return;
+    if (clash?.id !== c.id) selectClash(c);
+    const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } = await (await fetch(`/tour/${clashId}.json`)).json();
+    const { onEvent, finish } = trackAgent();
+    const run = agentRun.current;
+    setReplaying(true);
+    const start = Date.now();
+    for (const { t, event } of rec.events) {
+      const wait = start + t * 1000 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (agentRun.current !== run) return;
+      if (event.type === "result") { finish(event as Proposal); setReplaying(false); return; }
+      onEvent(event as AgentEvent);
+    }
+    finish(null); setReplaying(false);
+  }
+
+  /** Play the recorded root-cause plan for the girder (the tour's fallback), at the pace it was recorded. */
+  async function replayPlan() {
+    const rec: { events: { t: number; event: PlanEvent }[] } = await (await fetch("/tour/girder-plan.json")).json();
+    const { onEvent, finish } = trackPlan("root_cause");
+    setReplaying(true);
+    const start = Date.now();
+    for (const { t, event } of rec.events) {
+      const wait = start + t * 1000 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (event.type === "plan") { finish(event); setReplaying(false); return; }
+      if (event.type !== "error") onEvent(event);
+    }
+    finish(null); setReplaying(false);
   }
 
   /** Start showing a plan being built; returns the handler for its events and a function to call when done. */
@@ -682,6 +730,33 @@ export function App() {
   const startLabel = reportSamples.length && !report ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   const fixedCount = Object.keys(fixes).length;
+  const tourState: TourState = {
+    busy: !!busy, reportOpen: !!report, modelsOpen: !!stats,
+    triageStarted: !!triageRun, triageDone: !!triageRun?.done, triageCount: Object.keys(triage).length,
+    triageTotal: report?.clashes.length ?? 0, realCount: Object.values(shownTriage).filter((v) => v.verdict === "real_clash").length,
+    filter: triageFilter, clashId: clash?.id ?? null, tab, fixHidden: hideFix,
+    proposing, proposingFor: progress && proposing ? (now - progress.started) / 1000 : 0,
+    options: proposal?.options.length ?? 0, proposalDone: progress?.phase === "done", error, replaying,
+    compare, fixed: Object.keys(fixes),
+    planRunning: planning, planFor: planRun ? (now - planRun.started) / 1000 : 0, planReady: !!plan, planError,
+    patternsRead: !!verdicts, reviewedCount: Object.keys(reviewed).length, signoffs: signoffs[TOUR.duct]?.length ?? 0,
+    docOpen, docReady,
+  };
+  const tourActions: TourActions = {
+    filterReal: () => setTriageFilter("real_clash"), clearFilter: () => setTriageFilter(null),
+    selectClash: (id) => { const c = report?.clashes.find((x) => x.id === id); if (c) { setTab("clash"); selectClash(c); } },
+    compare: setCompare,
+    overview: () => { setViewPlan(false); viewer.current?.preview([]); viewer.current?.fitAll(); },
+    closeReport: () => setDocOpen(false),
+    replay: (what) => { if (what === "plan") void replayPlan(); else void replayPropose(what === "duct" ? TOUR.duct : TOUR.joint); },
+    ask: (send) => { setTab("chat"); setChatAsk((q) => ({ text: TOUR_QUESTION, send, n: (q?.n ?? 0) + 1 })); },
+    signoff: () => {
+      let name = "Guest reviewer";
+      try { name = localStorage.getItem("sightline.reviewer") || name; } catch { /* private window */ }
+      addSignoff(TOUR.duct, { team: "MEP", name, decision: "approve", note: "Reviewed in the guided tour", at: new Date().toISOString() });
+    },
+  };
+
   const compareBar = (option || (plan && viewPlan && planOptions.length > 0)) && (
     <div className="compare" onClick={(e) => e.stopPropagation()}>
       <div className="seg" role="group" aria-label="Compare before and after">
@@ -749,10 +824,11 @@ export function App() {
           {stats && <span className="stat mono" title={`${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>{stats.elements} elements</span>}
         </span>}
         {!landing && <button className="btn ghost" onClick={() => setAbout(true)}><Info size={15} aria-hidden /> How it works</button>}
+        {!landing && !touring && <button className="btn ghost" onClick={() => setTouring(true)}><Compass size={15} aria-hidden /> Tour</button>}
         <span className="spacer" />
         {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={openDemo}><FolderOpen size={15} aria-hidden /> {startLabel}</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
-        {report && <button className="btn" onClick={() => setDocOpen(true)} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
+        {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
         {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip="Download the changed IFC files" data-tip-side="bottom">
           <Download size={15} aria-hidden /> Export IFC</a>}
@@ -788,6 +864,7 @@ export function App() {
             label: startLabel,
             disabled: !picked.length,
             onStart: openDemo,
+            onTour: () => setTouring(true),
             details: <>
               {reportSamples.length > 0 && !report && <>Loads the Navisworks clash report <b>{reportSamples[0]}</b>, with a picture of every
                 clash, and </>}{report ? "Loads " : ""}{picked.length} building model{picked.length === 1 ? "" : "s"}: {picked.map(shortName).join(", ")}.
@@ -835,13 +912,13 @@ export function App() {
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => { setTab("clash"); setViewPlan(false); }}>
             <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
-          <button role="tab" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => { setTab("plan"); if (plan || planRun) setViewPlan(true); }}>
+          <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => { setTab("plan"); if (plan || planRun) setViewPlan(true); }}>
             <Network size={14} aria-hidden /> Plan{planning ? <i className="spinner" aria-hidden /> : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
-          <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
+          <button role="tab" data-tour="tab-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
             <MessageSquare size={14} aria-hidden /> Chat</button>
         </div>
         {tab === "chat" && (
-          <ChatPanel ready={!!(sceneId || report)} onEvent={onChatEvent}
+          <ChatPanel ready={!!(sceneId || report)} onEvent={onChatEvent} ask={chatAsk}
             context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
         )}
         {tab === "plan" && (
@@ -870,11 +947,11 @@ export function App() {
                 ? <p className="hint">Marked {reviewed[clash.id].kind === "by_design" ? "as by design" : "for the model's author"}.</p>
                 : <button className="btn primary" onClick={() => review([clash.id], "by_design", notAClash!.why)}>
                   <CircleCheck size={15} aria-hidden /> Mark as not a clash</button>}
-              <button className="link" onClick={() => setFixAnyway(true)}>Propose a fix anyway</button>
+              <button className="link" data-tour="fix-anyway" onClick={() => setFixAnyway(true)}>Propose a fix anyway</button>
             </div>
           )}
           <div className="actions">
-            {!hideFix && <button className="btn primary big" disabled={!a || !b || !sceneId || !!busy || proposing} onClick={propose}>
+            {!hideFix && <button className="btn primary big" data-tour="propose" disabled={!a || !b || !sceneId || !!busy || proposing} onClick={propose}>
               {proposing ? <><i className="spinner" aria-hidden /> Working…</> : <><Sparkles size={16} aria-hidden /> Propose fixes</>}</button>}
             <button className="btn" disabled={!a && !b} onClick={focusNow}><LocateFixed size={15} aria-hidden /> Go to the clash</button>
           </div>
@@ -896,7 +973,7 @@ export function App() {
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 <span className="why">{o.rationale}</span>
               </button>
-              {chosen === i && <button className="btn primary" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> Accept this fix</button>}
+              {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> Accept this fix</button>}
             </div>
           ))}
 
@@ -943,9 +1020,10 @@ export function App() {
       </footer>
 
       {about && <About onClose={() => setAbout(false)} />}
+      {touring && <Tour state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
-        triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} />}
+        triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} onReady={() => setDocReady(true)} />}
       {lightbox && report && lightbox.clash.images[lightbox.index] &&
         <Lightbox reportId={report.id} clash={lightbox.clash} index={lightbox.index} onClose={() => setLightbox(null)}
           onMove={(index) => setLightbox((l) => l && { ...l, index })} />}

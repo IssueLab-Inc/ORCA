@@ -278,6 +278,17 @@ gives way to Mark as not a clash (`basis: reviewed`) or noClash's geometry (incl
 the model's reading kept. Northbank on Muse Spark Open with the models open: 217 in 181 s, 111 settled (50 touch, 49
 non-physical, 12 same element), 106 asked. 68 server tests.
 
+Guided tour (Oct 28): `web/src/Tour.tsx`, from the landing page (**Take the guided tour**) or the header (**Tour**).
+24 steps in 9 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
+"hold on" (the girder has two more), a trim (Clash7 transom, c0051, accepted), root cause via chat ("Why are there so
+many clashes on Level 02? Fix the root cause." → girder plan for duct + tray + CW, accepted), patterns (Explain, mark by
+design), sign-off (review on #042, Report, build), hand-off (PDF, BCF, Export IFC), close (numbers). Each step spotlights
+a real control (`data-tour` attributes) and moves on when the app reaches the state (`TourState`); "Show me" clicks it.
+Live Muse steps offer **Watch a recorded run** after 45 s (plan 75 s) or on error: real runs recorded on Oct 27 in
+`web/public/tour/` (c0053 18 s, c0051 trim 9 s, girder plan 35 s), replayed through the same pilot/plan code and
+labelled as recorded; accepting a replayed fix edits the model for real. `plans.root_causes(only=)`: a requested hub
+may have one clash left in the report plus geometry hits (the girder after #042 is fixed).
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

@@ -31,7 +31,7 @@ export function ReviewBlock({ clash, teams, signoffs, onAdd, onRemove }: {
   };
   const waiting = reviewers.filter((t) => !signoffs.some((s) => s.team === t));
   return (
-    <details className="review-block" open={signoffs.length > 0}>
+    <details className="review-block" data-tour="review" open={signoffs.length > 0}>
       <summary>
         <b>Team review</b>
         <span className={`chip small ${waiting.length ? "warn" : "ok"}`}>
@@ -67,11 +67,11 @@ const STEP: Record<string, string> = {
 };
 
 /** Build a coordination report: scope, which team owns each model, BCF, then progress and the download. */
-export function ReportDialog({ report, sceneId, triage, triageDone, triageRunning, teams, onTeams, evidence, signoffs, reviewed, onRunTriage, onClose }: {
+export function ReportDialog({ report, sceneId, triage, triageDone, triageRunning, teams, onTeams, evidence, signoffs, reviewed, onRunTriage, onClose, onReady }: {
   report: Report; sceneId: string | null; triage: Record<string, TriageVerdict>; triageDone: boolean; triageRunning: boolean;
   teams: Record<string, Team>; onTeams: (t: Record<string, Team>) => void;
   evidence: Record<string, Evidence>; signoffs: Record<string, Signoff[]>; reviewed: Record<string, Review>;
-  onRunTriage: () => void; onClose: () => void;
+  onRunTriage: () => void; onClose: () => void; onReady?: () => void;
 }) {
   const [models, setModels] = useState<ModelTeam[] | null>(null);
   const [scope, setScope] = useState<Scope>("combined");
@@ -99,7 +99,7 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
         scene_id: sceneId, scope, teams, bcf, evidence, reviews: signoffs,
         marks: Object.fromEntries(Object.entries(reviewed).map(([id, r]) => [id, r.kind])),
       }, (e) => {
-        if (e.type === "ready") setReady(e);
+        if (e.type === "ready") { setReady(e); onReady?.(); }
         else if (e.type === "error") setError(e.message);
         else setStep(e);
       });
@@ -155,8 +155,8 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
         {error && <p className="bad">{error}</p>}
         <div className="actions">
           {ready
-            ? <a className="btn primary big" href={ready.url} download={ready.name}><Download size={16} aria-hidden /> Download {ready.name} ({Math.max(1, Math.round(ready.bytes / 1024))} KB)</a>
-            : <button className="btn primary big" disabled={!triageDone || busy || !models} onClick={build}>
+            ? <a className="btn primary big" data-tour="download" href={ready.url} download={ready.name}><Download size={16} aria-hidden /> Download {ready.name} ({Math.max(1, Math.round(ready.bytes / 1024))} KB)</a>
+            : <button className="btn primary big" data-tour="build" disabled={!triageDone || busy || !models} onClick={build}>
               {busy ? <><i className="spinner" aria-hidden /> Building…</> : <><FileText size={16} aria-hidden /> Build the report</>}</button>}
           {ready && <button className="btn" onClick={() => setReady(null)}>Change and build again</button>}
         </div>

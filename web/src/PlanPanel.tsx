@@ -88,7 +88,7 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
 
       {plan && plan.strategy !== "as_designed" && (
         <div className="plan-actions">
-          <button className="btn primary" disabled={busy || !items.some((i) => i.option)} onClick={onAccept}>
+          <button className="btn primary" data-tour="accept-plan" disabled={busy || !items.some((i) => i.option)} onClick={onAccept}>
             <CircleCheck size={15} aria-hidden /> Accept {plan.check.passed ? "the plan" : `the ${ok} verified`}</button>
           <button className="btn" onClick={onDiscard}><Trash2 size={15} aria-hidden /> Discard</button>
           <span className="hint">{plan.seconds.toFixed(0)} s · checked as one, so the fixes do not collide</span>
