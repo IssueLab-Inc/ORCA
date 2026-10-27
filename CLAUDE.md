@@ -99,7 +99,7 @@ Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one containe
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
 evals/README.md). 19 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
-Next, in order:
+Next, in order. **First, deploy the public demo** ("Starting a session"), then continue with 2.
 1. ✅ Spike 4 passed with images (spikes/README.md). Feed web-opening sizes/positions as text so moves land on the
    millimetre (the model said +0.38 m, the answer is +0.40 m).
 2. **Local-offset edit**: split a straight segment, raise/lower the middle piece, connecting pieces; verify against
@@ -107,7 +107,6 @@ Next, in order:
 3. Viewer: context-ghost mode, A/B/C capture, section view.
 4. Agent loop end to end in the UI with Muse Spark, attempts streamed.
 5. Export IFC + BCF; voice; Muse Spark Open triage (open-weights bonus).
-0. **First: deploy** the public demo (above), then continue with 2.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.
