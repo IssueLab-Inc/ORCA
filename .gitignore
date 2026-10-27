@@ -1,0 +1,11 @@
+# Models are large and often licensed; keep them out of git.
+samples/*
+!samples/README.md
+*.spike.ifc
+node_modules/
+web/dist/
+web/public/wasm/
+.venv/
+__pycache__/
+.pytest_cache/
+.env
