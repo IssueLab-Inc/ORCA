@@ -91,3 +91,30 @@ def test_triage_stream_is_shared_and_replayed(tmp_path, monkeypatch):
     again = [json.loads(l) for l in c.post(f"/api/reports/{rid2}/triage/stream").text.splitlines()]
     assert [e["type"] for e in again] == [e["type"] for e in events] and len(model.asked) == 2
     assert c.get(f"/api/reports/{rid2}/triage").json()["done"] is True
+
+
+def test_rule_verdicts_say_why_and_how_to_stop_them(tmp_path):
+    report = _report(tmp_path)
+    port = next(c for c in report.clashes if "IfcDistributionPort" in (c.a.ifc_class, c.b.ifc_class))
+    v = triage.by_rule(port)
+    assert v["basis"] == "non_physical" and v["understanding"].startswith("Not a clash")
+    assert "distribution port" in v["understanding"] and v["fix_hint"]
+
+
+def test_what_the_open_model_settles_is_not_asked_and_corrects_answers(tmp_path):
+    report = _report(tmp_path)
+    beam = next(c for c in report.clashes if c.distance_m == -0.15)
+    model = Scripted()
+    job = triage.Job(report, model, {"model": "scripted"}, workers=1)
+    job.learn({beam.id: triage.same_element(beam)})
+    job.start()
+    events = list(job.follow())
+    assert job.results[beam.id]["basis"] == "same_element" and len(model.asked) == len(report.clashes) - 2
+    # A fact learned after the run corrects a model answer and keeps what the model said.
+    other = next(c for c in report.clashes if job.results[c.id]["source"] == "model")
+    job.learn({other.id: triage.same_element(other)})
+    v = job.results[other.id]
+    assert v["basis"] == "same_element" and v["model_reading"].startswith("real clash: Duct through beam")
+    replay = list(job.follow())
+    assert replay[-1]["type"] == "done" and replay[-2] == {"type": "clash", "id": other.id, **v}
+    assert len(replay) == len(events) + 1

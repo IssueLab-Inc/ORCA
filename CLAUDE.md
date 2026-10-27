@@ -269,6 +269,15 @@ the open model, or triage by_design / non_physical. The clash panel then shows w
 (a by-design review) in place of Propose fixes and Try a move ("Propose a fix anyway" overrides); list rows get a
 muted tag and cannot be ticked for Fix together. A Sightline overlap > 1 mm beats a 0 mm Navisworks touch.
 
+Triage knows what is settled (Oct 28): rule verdicts carry `basis` (non_physical / touch / same_element), an
+understanding that starts "Not a clash:" and names the elements, and a `fix_hint` with the clash rule that stops it
+coming back. With `scene_id` (stream and GET), `_triage_facts` settles one-element pairs from the open model: no model
+call, and `Job.learn` corrects a run that already asked, keeping the model's answer as `model_reading` (corrections go in
+before the replayed "done"). The browser overlays the rest (`shownTriage` in App.tsx): a model "real"/"model error"
+gives way to Mark as not a clash (`basis: reviewed`) or noClash's geometry (incl. Sightline's no-overlap measure), with
+the model's reading kept. Northbank on Muse Spark Open with the models open: 217 in 181 s, 111 settled (50 touch, 49
+non-physical, 12 same element), 106 asked. 68 server tests.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

@@ -49,6 +49,11 @@ export type TriageKind = "real_clash" | "by_design" | "non_physical" | "modellin
 export interface TriageVerdict {
   verdict: TriageKind; severity?: "high" | "medium" | "low" | "none"; responsible?: string; action?: string;
   understanding?: string; fix_hint?: string; confidence?: number; source: "rule" | "model"; seconds?: number; error?: string;
+  /** What settled a "not a clash" verdict without the model (or overrode it): non_physical, touch, same_element,
+   *  no_overlap (Sightline's measure) or reviewed (marked in this browser). */
+  basis?: "non_physical" | "touch" | "same_element" | "no_overlap" | "reviewed";
+  /** The triage model's own reading, when a settled fact overrode it. */
+  model_reading?: string;
 }
 export interface TriageModel { model: string; open_weights: boolean; images?: boolean; note?: string }
 export type TriageEvent =
@@ -162,10 +167,13 @@ export const api = {
                                       bcf: boolean; evidence: Record<string, Evidence>; reviews: Record<string, Signoff[]>;
                                       marks: Record<string, string> }, onEvent: (e: DocEvent) => void) =>
     ndjson<DocEvent>(`/reports/${reportId}/document/stream`, body, (e) => { onEvent(e); return e.type !== "progress"; }),
-  triage: (reportId: string) => call<TriageState>(`/reports/${reportId}/triage`),
+  triage: (reportId: string, sceneId: string | null) =>
+    call<TriageState>(`/reports/${reportId}/triage${sceneId ? `?scene_id=${sceneId}` : ""}`),
   /** Triage every clash in the report (or follow the run already going), event by event. */
-  triageStream: (reportId: string, onEvent: (e: TriageEvent) => void, rerun = false) =>
-    ndjson<TriageEvent>(`/reports/${reportId}/triage/stream${rerun ? "?rerun=true" : ""}`, {}, (e) => { onEvent(e); return e.type === "done"; }),
+  triageStream: (reportId: string, sceneId: string | null, onEvent: (e: TriageEvent) => void, rerun = false) => {
+    const q = new URLSearchParams({ ...(rerun ? { rerun: "true" } : {}), ...(sceneId ? { scene_id: sceneId } : {}) }).toString();
+    return ndjson<TriageEvent>(`/reports/${reportId}/triage/stream${q ? `?${q}` : ""}`, {}, (e) => { onEvent(e); return e.type === "done"; });
+  },
   patterns: (reportId: string, sceneId: string, fixed: string[]) =>
     call<Pattern[]>(`/reports/${reportId}/patterns/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
   triagePatterns: (reportId: string, sceneId: string, fixed: string[]) =>

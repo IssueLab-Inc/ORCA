@@ -13,6 +13,7 @@ and rules, so its scores describe what the app does.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -63,17 +64,51 @@ def describe(c: ReportClash) -> str:
     return "\n".join(lines)
 
 
+def _kind(cls: str) -> str:
+    return re.sub(r"([a-z])([A-Z])", r"\1 \2", cls.removeprefix("Ifc")).lower()
+
+
+def not_a_clash(basis: str, understanding: str, fix_hint: str) -> dict:
+    """A settled "this needs no fix" verdict. `basis` says what settled it: non_physical, touch, same_element."""
+    return {"verdict": "by_design" if basis != "non_physical" else "non_physical", "severity": "none",
+            "responsible": "none", "action": "exclude_with_rule", "understanding": understanding,
+            "fix_hint": fix_hint, "confidence": 1.0, "basis": basis}
+
+
 def by_rule(c: ReportClash) -> dict | None:
-    """The verdict when it is certain without a model, else None."""
-    classes = {c.a.ifc_class, c.b.ifc_class}
-    if classes & NON_PHYSICAL:
-        cls = next(iter(classes & NON_PHYSICAL)).replace("Ifc", "").lower()
-        return {"verdict": "non_physical", "severity": "none", "responsible": "none", "action": "exclude_with_rule",
-                "understanding": f"One side is a {cls}, not a physical element.", "fix_hint": "", "confidence": 1.0}
+    """The verdict when it is certain without a model, else None. Says why, and the clash rule that stops it
+    coming back in the next run."""
+    np = next((e for e in (c.a, c.b) if e.ifc_class in NON_PHYSICAL), None)
+    if np:
+        other = c.b if np is c.a else c.a
+        return not_a_clash(
+            "non_physical",
+            f"Not a clash: {np.name or 'one side'} is a {_kind(np.ifc_class)}, which takes no space on site, so it "
+            f"cannot collide with {other.name or 'the other element'}.",
+            f"In the clash test, leave {_kind(np.ifc_class)}s out of the selection sets (or add a rule that ignores "
+            f"{np.ifc_class}).")
     if c.distance_m is not None and abs(c.distance_m) <= TOUCH_M:
-        return {"verdict": "by_design", "severity": "none", "responsible": "none", "action": "exclude_with_rule",
-                "understanding": "The two elements only touch (within 1 mm).", "fix_hint": "", "confidence": 1.0}
+        return not_a_clash(
+            "touch",
+            f"Not a clash: {c.a.name or 'A'} and {c.b.name or 'B'} only touch ({abs(c.distance_m) * 1000:.0f} mm), "
+            "which is how parts meet when they are built.",
+            "Run hard tests with a small tolerance (e.g. 10 mm) or as Hard (conservative) so touching faces are not "
+            "reported.")
     return None
+
+
+def same_element(c: ReportClash) -> dict:
+    """Both sides are one model element (a port and its own valve, two Navisworks parts of one door)."""
+    ports = sum(1 for e in (c.a, c.b) if (e.ifc_class or "").endswith("Port"))
+    what = ("two of its ports" if ports == 2 else "a port with the element it belongs to" if ports == 1
+            else "two parts of it")
+    name = c.a.part_of or c.b.part_of or c.a.name
+    return not_a_clash(
+        "same_element",
+        f"Not a clash: both sides are the same element in the model ({name}); Navisworks clashed {what}. There is "
+        "nothing to move.",
+        "Add a clash rule that ignores items within the same composite object (Navisworks: Rules, \"Items in same "
+        "composite object\").")
 
 
 def triage_one(model: ChatModel, c: ReportClash, images: bool = True) -> dict:
@@ -82,8 +117,10 @@ def triage_one(model: ChatModel, c: ReportClash, images: bool = True) -> dict:
 
 
 def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
-                  workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None) -> dict[str, dict]:
+                  workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
+                  settled: dict | None = None) -> dict[str, dict]:
     """A verdict for every clash in `report`. `done` holds results already known (resumed or cached); they are kept.
+    `settled` holds verdicts the open model already decides (`same_element`): no model call for those.
 
     Emits {"type": "clash", "id", "source": "rule" | "model", **verdict} as each one lands."""
     results: dict[str, dict] = dict(done or {})
@@ -91,9 +128,9 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
     for c in report.clashes:
         if c.id in results:
             continue
-        settled = by_rule(c) if rules else None
-        if settled:
-            results[c.id] = {**settled, "source": "rule"}
+        known = (settled or {}).get(c.id) or (by_rule(c) if rules else None)
+        if known:
+            results[c.id] = {**known, "source": "rule"}
             emit({"type": "clash", "id": c.id, **results[c.id]})
         else:
             todo.append(c)
@@ -140,10 +177,40 @@ class Job:
         self.started = time.time()
         self.seconds: float | None = None
         self._cond = threading.Condition()
+        self.facts: dict[str, dict] = {}  # clash id -> settled verdict known from the open model (same element)
+
+    def _settle(self, cid: str, v: dict) -> dict:
+        """A model answer for a clash the open model already settles: the settled verdict, with the model's reading."""
+        fact = self.facts.get(cid)
+        if not fact or v.get("source") == "rule":
+            return v
+        out = {**fact, "source": "rule"}
+        if v.get("understanding"):
+            out["model_reading"] = f"{v.get('verdict', '').replace('_', ' ')}: {v['understanding']}"
+        return out
+
+    def learn(self, facts: dict[str, dict]) -> None:
+        """Facts from the open model (see `same_element`). Results already in are corrected and re-sent."""
+        with self._cond:
+            new = {k: v for k, v in facts.items() if k not in self.facts}
+            self.facts.update(new)
+            fixed = [(cid, self._settle(cid, self.results[cid])) for cid in new if cid in self.results]
+            fixed = [(cid, v) for cid, v in fixed if v is not self.results[cid]]
+            if not fixed:
+                return
+            # A finished run ends with "done", where listeners stop reading: corrections go in before it.
+            tail = self.events.pop() if self.done and self.events and self.events[-1].get("type") == "done" else None
+            for cid, v in fixed:
+                self.results[cid] = v
+                self.events.append({"type": "clash", "id": cid, **v})
+            if tail:
+                self.events.append({**tail, "summary": summary(self.results)})
+            self._cond.notify_all()
 
     def _emit(self, event: dict) -> None:
         with self._cond:
             if event.get("type") == "clash":
+                event = {"type": "clash", "id": event["id"], **self._settle(event["id"], event)}
                 self.results[event["id"]] = {k: v for k, v in event.items() if k not in ("type", "id")}
             self.events.append(event)
             self._cond.notify_all()
@@ -153,7 +220,8 @@ class Job:
 
         def work():
             try:
-                triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True))
+                triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True),
+                              settled=dict(self.facts))
             except Exception as e:
                 self.error = f"{type(e).__name__}: {e}"
             self.seconds = round(time.time() - self.started, 1)

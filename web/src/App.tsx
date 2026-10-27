@@ -192,7 +192,7 @@ export function App() {
     if (rerun) { setTriage({}); setTriageFilter(null); }
     setTriageRun((r) => r ?? { model: "", open_weights: false, total: report.clashes.length, started: Date.now(), done: false });
     try {
-      await api.triageStream(rid, (e) => {
+      await api.triageStream(rid, sceneId, (e) => {
         if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false });
         else if (e.type === "clash") { const { type: _t, id, ...v } = e; setTriage((t) => ({ ...t, [id]: v })); }
         else if (e.type === "done") setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error });
@@ -205,7 +205,7 @@ export function App() {
     setTriage({}); setTriageRun(null); setTriageFilter(null);
     if (!report) return;
     let live = true;
-    api.triage(report.id).then((s) => {
+    api.triage(report.id, sceneId).then((s) => {
       if (!live || !s.model) return;
       if (s.done) {
         setTriage(s.results);
@@ -215,6 +215,15 @@ export function App() {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report]);
+
+  // Models opened after a triage: the server corrects what the open model settles (one element on both sides).
+  const triageDone = !!triageRun?.done;
+  useEffect(() => {
+    if (!report || !sceneId || !matches || !triageDone) return;
+    let live = true;
+    api.triage(report.id, sceneId).then((s) => { if (live && s.done) setTriage(s.results); }).catch(() => {});
+    return () => { live = false; };
+  }, [report, sceneId, matches, triageDone]);
 
   useEffect(() => {
     if (!report) return;
@@ -267,11 +276,34 @@ export function App() {
       rationale: o.rationale, also_needs: o.also_needs, ...pics };
   }
 
+  // Triage as shown: a model verdict of "real" or "model error" gives way to what is already settled in this browser
+  // (marked not a clash, or Sightline's own geometry: one element, not physical, a touch, no overlap here), and the
+  // model's reading is kept beside it.
+  const shownTriage = useMemo(() => {
+    if (!report) return triage;
+    const out: Record<string, TriageVerdict> = { ...triage };
+    for (const c of report.clashes) {
+      const t = triage[c.id];
+      if (!t || t.verdict === "by_design" || t.verdict === "non_physical") continue;
+      const rv = reviewed[c.id];
+      const nc = noClash(c, matches?.[c.id], c.id === clash?.id ? measure : null);
+      if (rv?.kind === "by_design" || nc) {
+        const basis: TriageVerdict["basis"] = rv?.kind === "by_design" ? "reviewed"
+          : nc!.label === "same element" ? "same_element" : nc!.label === "not physical" ? "non_physical" : nc!.label === "touch" ? "touch" : "no_overlap";
+        out[c.id] = { verdict: basis === "non_physical" ? "non_physical" : "by_design", severity: "none", responsible: "none",
+          action: "exclude_with_rule", source: "rule", basis,
+          understanding: rv?.kind === "by_design" ? `Marked not a clash: ${rv.note}` : `Not a clash: ${nc!.why}`,
+          model_reading: t.understanding ? `${t.verdict.replace("_", " ")}: ${t.understanding}` : undefined };
+      }
+    }
+    return out;
+  }, [report, triage, reviewed, matches, clash, measure]);
+
   // A selected report clash that needs no fix (one element, not physical, a touch, no overlap, by design per triage):
   // the panel says why instead of offering a fix, unless someone asks for one anyway.
   const [fixAnyway, setFixAnyway] = useState(false);
   useEffect(() => { setFixAnyway(false); }, [clash]);
-  const notAClash = clash && !fixes[clash.id] && !proposal && !progress ? noClash(clash, matches?.[clash.id], measure, triage[clash.id]) : null;
+  const notAClash = clash && !fixes[clash.id] && !proposal && !progress ? noClash(clash, matches?.[clash.id], measure, shownTriage[clash.id]) : null;
   const hideFix = !!notAClash && !fixAnyway;
 
   function review(ids: string[], kind: Review["kind"], note: string) {
@@ -729,10 +761,10 @@ export function App() {
       <aside className="pane left">
         {report
           ? <ReportList report={report} matches={matches} selected={viewPlan ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
-              reviewed={reviewed} checked={checked} busy={planning || proposing} triage={triage} triageFilter={triageFilter}
+              reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
-              insights={<><TriageCard run={triageRun} results={triage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+              insights={<><TriageCard run={triageRun} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 open={report.clashes.filter((c) => !fixes[c.id] && !reviewed[c.id]).length} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
@@ -819,7 +851,7 @@ export function App() {
         )}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report
-            ? (<><ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash, index })} fix={fixes[clash.id]} triage={triage[clash.id]} />
+            ? (<><ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]} />
               {(evidence[clash.id] || triage[clash.id]?.verdict === "real_clash" || (signoffs[clash.id]?.length ?? 0) > 0) &&
                 <ReviewBlock clash={clash} teams={modelTeams} signoffs={signoffs[clash.id] ?? []}
                   onAdd={(so) => addSignoff(clash.id, so)} onRemove={(i) => removeSignoff(clash.id, i)} />}
@@ -911,7 +943,7 @@ export function App() {
       </footer>
 
       {about && <About onClose={() => setAbout(false)} />}
-      {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={triage} triageDone={!!triageRun?.done}
+      {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
         triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} />}
       {lightbox && report && lightbox.clash.images[lightbox.index] &&

@@ -21,6 +21,11 @@ function Side({ colour, label, e, found, how }: {
   );
 }
 
+const BASIS: Record<NonNullable<TriageVerdict["basis"]>, string> = {
+  non_physical: "settled: not physical", touch: "settled: a touch", same_element: "settled: one element",
+  no_overlap: "settled: no overlap measured", reviewed: "marked by you",
+};
+
 export function ClashPanel({ reportId, clash, match, measure, onImage, fix, triage }: {
   reportId: string; clash: ReportClash; match: Matches[string] | undefined; measure: Measure | null | "busy";
   onImage: (index: number) => void; fix?: string; triage?: TriageVerdict;
@@ -35,8 +40,10 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
           <span className={`chip small ${TRIAGE[triage.verdict].cls}`}>{TRIAGE[triage.verdict].label}</span>
           {triage.severity && triage.severity !== "none" && <span className="chip small">{triage.severity}</span>}
           {triage.responsible && triage.responsible !== "none" && <span className="chip small">{triage.responsible}</span>}
-          <span className="why">{triage.source === "rule" ? "by rule" : "triage model"}</span>
-          {triage.understanding && <p>{triage.understanding}{triage.fix_hint ? <span className="why"> {triage.fix_hint}</span> : null}</p>}
+          <span className="why">{triage.basis ? BASIS[triage.basis] : triage.source === "rule" ? "by rule" : "triage model"}</span>
+          {triage.understanding && <p>{triage.understanding}</p>}
+          {triage.fix_hint && <p className="why">{triage.action === "exclude_with_rule" ? "Stop it coming back: " : "Fix: "}{triage.fix_hint}</p>}
+          {triage.model_reading && <p className="why small">The triage model read it as {triage.model_reading}</p>}
           {triage.error && <p className="bad small">{triage.error}</p>}
         </div>
       )}

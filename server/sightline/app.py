@@ -355,20 +355,41 @@ def _triage_key(report) -> str:
     return report.id if report.temporary else f"sample:{report.root}"
 
 
+def _triage_facts(report_id: str, scene_id: str | None) -> dict[str, dict]:
+    """Clashes the open model already settles: both sides resolve to one element (drawn purple in the viewer)."""
+    if not scene_id or scene_id not in ws.scenes:
+        return {}
+    report = ws.report(report_id)
+    with ws.lock:
+        matches = ws.match(report_id, scene_id)
+    out = {}
+    for c in report.clashes:
+        m = matches.get(c.id) or {}
+        a, b = (m.get("show") or [None, None])
+        a, b = a or m.get("a"), b or m.get("b")
+        if a and a == b:
+            out[c.id] = triage.same_element(c)
+    return out
+
+
 @app.get("/api/reports/{report_id}/triage")
-def triage_state(report_id: str):
+def triage_state(report_id: str, scene_id: str | None = None):
     """The bulk triage of this report so far ({"results": {}} when it has not been run)."""
     job = _triage_jobs.get(_triage_key(ws.report(_report(report_id))))
+    if job:
+        job.learn(_triage_facts(report_id, scene_id))
     return job.state() if job else {"results": {}, "done": False, "started": False}
 
 
 @app.post("/api/reports/{report_id}/triage/stream")
-def triage_stream(report_id: str, request: Request, rerun: bool = False):
+def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_id: str | None = None):
     """Triage every clash in the report (open-weights model when configured). Streams newline-delimited JSON:
     start, one "clash" event per verdict, done. One run per report is shared by every visitor; starting one costs a
-    proposal, following one already started is free."""
+    proposal, following one already started is free. With `scene_id`, what the open model already settles (one
+    element on both sides) is not asked of the model, and corrects a run that did ask."""
     report = ws.report(_report(report_id))
     key = _triage_key(report)
+    facts = _triage_facts(report_id, scene_id)
     with _triage_lock:
         job = _triage_jobs.get(key)
         if job is None or (rerun and job.done):
@@ -376,10 +397,12 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False):
             if refused:
                 raise HTTPException(429, refused)
             model, info = triage_model()
-            job = _triage_jobs[key] = triage.Job(report, model, info,
-                                                 int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8"))).start()
+            job = triage.Job(report, model, info, int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8")))
+            job.learn(facts)
+            _triage_jobs[key] = job.start()
             while len(_triage_jobs) > 16:
                 _triage_jobs.pop(next(iter(_triage_jobs)))
+    job.learn(facts)
 
     def stream():
         for event in job.follow():
