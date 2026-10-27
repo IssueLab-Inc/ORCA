@@ -20,6 +20,19 @@ from typing import Protocol
 import httpx
 
 
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+
+def load_env(path: Path = ENV_FILE) -> None:
+    """Read KEY=value lines from the repo's .env into the environment; real environment variables win."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() and not key.lstrip().startswith("#"):
+            os.environ.setdefault(key.strip(), value.strip())
+
+
 class ChatModel(Protocol):
     def complete_json(self, system: str, text: str, images: list[Path] | None = None) -> dict: ...
 
@@ -33,6 +46,7 @@ def _image_part(path: Path) -> dict:
 class MetaChatModel:
     def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None,
                  timeout_s: float = 120):
+        load_env()
         self.base_url = (base_url or os.environ["META_API_BASE_URL"]).rstrip("/")
         self.api_key = api_key or os.environ["META_API_KEY"]
         self.model = model or os.environ.get("META_MODEL", "muse-spark-1.3")

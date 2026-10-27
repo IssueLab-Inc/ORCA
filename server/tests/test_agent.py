@@ -47,3 +47,15 @@ def test_attempts_leave_the_loaded_model_unchanged(tmp_path: Path):
     duct, beam = s.model.by_type("IfcDuctSegment")[0].GlobalId, s.model.by_type("IfcBeam")[0].GlobalId
     resolve(s, Clash(duct, beam), ScriptedModel(), max_rounds=2)
     assert s.placement(duct)[2, 3] == pytest.approx(2.65)
+
+
+def test_env_file_fills_missing_settings_only(tmp_path, monkeypatch):
+    from sightline.meta_client import load_env
+    env = tmp_path / ".env"
+    env.write_text("# comment\nMETA_MODEL=from-file\nMETA_API_KEY=file-key\n")
+    monkeypatch.setenv("META_API_KEY", "shell-key")
+    monkeypatch.delenv("META_MODEL", raising=False)
+    load_env(env)
+    import os
+    assert os.environ["META_MODEL"] == "from-file"
+    assert os.environ["META_API_KEY"] == "shell-key"
