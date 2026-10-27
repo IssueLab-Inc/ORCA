@@ -97,20 +97,28 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 19 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 24 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
 `uv tool install 'modal[api-proxy-support]'`. Triage eval over Navisworks results: `evals/navisworks_triage.py`
 (evals/README.md): 6/6 answer key, 129/129 non-physical, 51/55 touches on 317 Northbank results.
 
+Navisworks clash reports (Oct 27): `server/sightline/reports.py` reads the XML (standard flat tags and the
+three-view export's grouped tags); the app opens samples from `samples/reports/<name>/` or uploads, lists clashes by
+test with their A/B/C images, matches them to the open model (Northbank: 290/317, the rest are Site elements) and
+re-measures on selection. Proposals on a report clash get its images. Muse Spark tool calling works natively on
+`api.meta.ai` (OpenAI `tools`, 2 s round trip, streaming): the chat over reports + model is next (plan below).
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). Feed web-opening sizes/positions as text so moves land on the
    millimetre (the model said +0.38 m, the answer is +0.40 m).
-2. **Local-offset edit**: split a straight segment, raise/lower the middle piece, connecting pieces; verify against
-   Rev04 on #042/#057/#061.
+2. **Local-offset edit** (before the chat, so #057/#061 get fixes too): split a straight segment, raise/lower the
+   middle piece, connecting pieces; verify against Rev04 on #042/#057/#061.
 3. Viewer: context-ghost mode, A/B/C capture, section view.
-4. Agent loop end to end in the UI with Muse Spark, attempts streamed.
+4. Agent loop end to end in the UI with Muse Spark, attempts streamed. Chat panel: Muse Spark with tools over the
+   open report and model (list/filter clashes, get a clash, look at its images, triage, describe elements, check a
+   move, propose), the same functions as the MCP server, every step streamed.
 5. Export IFC + BCF; voice; Muse Spark Open triage (open-weights bonus).
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 

@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -38,6 +38,19 @@ class Propose(BaseModel):
     element_b: str
     distance_m: float | None = None
     notes: str = ""
+    report_id: str | None = None  # a clash from an open report: its distance and images go to the model
+    clash_id: str | None = None
+
+
+class OpenReport(BaseModel):
+    sample: str
+
+
+# Uploaded clash reports: XML plus the images it links to, kept in a temp folder while the report is open.
+UPLOADS = Path(tempfile.gettempdir()) / "sightline-reports"
+UPLOAD_MAX_MB = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_MB", "200"))
+UPLOAD_MAX_FILES = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_FILES", "5000"))
+UPLOAD_TYPES = {".xml", ".png", ".jpg", ".jpeg"}
 
 
 def _scene(scene_id: str):
@@ -83,7 +96,10 @@ def propose(scene_id: str, body: Propose, request: Request):
     refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
     if refused:
         raise HTTPException(429, refused)
-    return ws.propose(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes)
+    if body.report_id:
+        _report(body.report_id)
+    return ws.propose(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes,
+                      report_id=body.report_id, clash_id=body.clash_id)
 
 
 @app.post("/api/scenes/{scene_id}/apply")
@@ -103,6 +119,92 @@ def export(scene_id: str):
         return FileResponse(paths[0], filename=paths[0].name, media_type="application/octet-stream")
     archive = shutil.make_archive(str(EXPORTS / f"{scene_id}-sightline"), "zip", out)
     return FileResponse(archive, filename=Path(archive).name, media_type="application/zip")
+
+
+def _report(report_id: str):
+    if report_id not in ws.reports:
+        raise HTTPException(404, "Clash report not loaded. Open it again.")
+    return report_id
+
+
+def _safe_relpath(name: str) -> Path | None:
+    """A browser-supplied relative path (folder uploads send "folder/sub/file.png"), without any way out."""
+    parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".", "..")]
+    return Path(*parts) if parts else None
+
+
+@app.get("/api/reports/samples")
+def report_samples():
+    return ws.list_report_samples()
+
+
+@app.post("/api/reports")
+def open_report(body: OpenReport):
+    try:
+        return ws.report_summary(ws.open_report_sample(body.sample).id)
+    except FileNotFoundError:
+        raise HTTPException(404, f"No clash report called {body.sample}.")
+
+
+@app.post("/api/reports/upload")
+async def upload_report(files: list[UploadFile] = File(...)):
+    """Navisworks XML report(s) and their images. Send a whole export folder so the images' links resolve."""
+    if len(files) > UPLOAD_MAX_FILES:
+        raise HTTPException(413, f"Too many files (limit {UPLOAD_MAX_FILES}).")
+    UPLOADS.mkdir(exist_ok=True)
+    root = Path(tempfile.mkdtemp(dir=UPLOADS))
+    total = 0
+    try:
+        for f in files:
+            rel = _safe_relpath(f.filename or "")
+            if rel is None or rel.suffix.lower() not in UPLOAD_TYPES:
+                continue  # the rest of an export folder (HTML gallery, logs) is not needed
+            dest = root / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with dest.open("wb") as out:
+                while chunk := await f.read(1 << 20):
+                    total += len(chunk)
+                    if total > UPLOAD_MAX_MB << 20:
+                        raise HTTPException(413, f"Upload is over {UPLOAD_MAX_MB} MB.")
+                    out.write(chunk)
+        if not any(root.rglob("*.xml")):
+            raise HTTPException(400, "No XML file in the upload. Export the clash report from Navisworks as XML.")
+        tops = list(root.iterdir())
+        title = tops[0].name if len(tops) == 1 and tops[0].is_dir() else min(root.rglob("*.xml")).stem  # folder name
+        return ws.report_summary(ws.open_report_folder(root, title).id)
+    except HTTPException:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+    except Exception as e:  # not a clash report, or malformed XML
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(400, f"Could not read the clash report: {e}")
+
+
+@app.get("/api/reports/{report_id}")
+def report(report_id: str):
+    return ws.report_summary(_report(report_id))
+
+
+@app.get("/api/reports/{report_id}/clashes/{clash_id}/images/{index}")
+def report_image(report_id: str, clash_id: str, index: int):
+    try:
+        path = ws.report_image(_report(report_id), clash_id, index)
+    except (KeyError, IndexError):
+        raise HTTPException(404, "No such image.")
+    return FileResponse(path)
+
+
+@app.get("/api/reports/{report_id}/match/{scene_id}")
+def match(report_id: str, scene_id: str):
+    return ws.match(_report(report_id), _scene(scene_id))
+
+
+@app.get("/api/reports/{report_id}/clashes/{clash_id}/measure/{scene_id}")
+def measure(report_id: str, clash_id: str, scene_id: str):
+    try:
+        return ws.measure(_report(report_id), clash_id, _scene(scene_id))
+    except KeyError:
+        raise HTTPException(404, "No such clash in this report.")
 
 
 # Last, so /api routes win over static files.

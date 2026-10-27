@@ -21,12 +21,13 @@ import json
 import sys
 import threading
 import time
-import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
+from sightline import reports  # noqa: E402
 from sightline.meta_client import MetaChatModel  # noqa: E402
 
 PROMPT = Path(__file__).resolve().parents[1] / "server/sightline/domain_packs/triage.md"
@@ -56,45 +57,17 @@ SCHEMA = {
 }
 
 
-def _element(obj: ET.Element) -> dict:
-    """The clashed element itself: the first tag group with an IFC class (later groups are its parents)."""
-    groups: dict[str, dict[str, str]] = {}
-    for tag in obj.findall("smarttags/smarttag"):
-        parts = (tag.findtext("name") or "").rsplit(" / ", 2)  # "<node name> / <category> / <property>"
-        if len(parts) == 3:  # node names can contain " / " themselves
-            groups.setdefault(parts[0], {})[f"{parts[1]} / {parts[2]}"] = tag.findtext("value") or ""
-    path = [n.text for n in obj.findall("pathlink/node") if n.text]
-    found = [(g, t) for g, t in groups.items() if g and t.get("Element / IfcClass")]
-    name, tags = found[0]
-    parent = next((g for g, t in found[1:] if t["Element / IfcClass"] not in
-                   {"IfcProject", "IfcSite", "IfcBuilding", "IfcBuildingStorey"}), None)
-    return {
-        "file": path[0],
-        "level": tags.get("ClashWise_Demo / Level") or (path[4] if len(path) > 6 else "Site"),
-        "ifc_class": tags["Element / IfcClass"],
-        "name": name,
-        "global_id": tags.get("Element / GlobalId", ""),
-        "description": tags.get("Element / Description", ""),
-        "system": tags.get("ClashWise_Demo / System", ""),
-        "part_of": parent,
-    }
-
-
 def load(package: Path) -> list[dict]:
-    root = ET.parse(package / "sampled-clashes.xml").getroot()
+    """The package's combined XML, through the same reader the app uses (`sightline.reports`)."""
+    report = reports.load("eval", package, [package / "sampled-clashes.xml"], package.name)
     clashes = []
-    for test in root.iter("clashtest"):
-        for res in test.iter("clashresult"):
-            folder = package / Path(res.get("href")).parent
-            pos = res.find("clashpoint/pos3f")
-            a, b = (_element(o) for o in res.findall("clashobjects/clashobject"))
-            clashes.append({
-                "id": f"{folder.parent.name}/{folder.name}",
-                "test": test.get("name"), "tolerance_m": float(test.get("tolerance")),
-                "clash": res.get("name"), "distance_m": float(res.get("distance")),
-                "point": [round(float(pos.get(k)), 3) for k in "xyz"],
-                "a": a, "b": b, "folder": folder,
-            })
+    for c in report.clashes:
+        folder = c.images[0][1].parent
+        clashes.append({
+            "id": f"{folder.parent.name}/{folder.name}",
+            "test": c.test, "tolerance_m": c.tolerance_m or 0.0, "clash": c.name, "distance_m": c.distance_m,
+            "point": [round(v, 3) for v in c.point], "a": asdict(c.a), "b": asdict(c.b), "folder": folder,
+        })
     return clashes
 
 

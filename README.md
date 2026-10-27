@@ -49,6 +49,18 @@ npm run dev     # http://localhost:5173
 Open a model, double-click element A then element B, and choose **Propose fixes**. **Check this move**
 tries a vertical move by hand and works without any API key.
 
+### Navisworks clash reports
+
+**Clash report** in the header opens a Navisworks XML clash report: a sample from `samples/reports/<name>/` (any
+`*.xml` at the top of the folder, with the images it links to), or an upload of an export folder or XML files. Several
+XML files open as one report; a result exported twice is kept once. Each clash is matched to the open model by IFC
+GlobalId (else by a unique class and name), shown with its Navisworks images, and measured again by Sightline's own
+check (Navisworks and IfcOpenShell report depth differently: #042 is −150 mm in Navisworks, −300 mm here).
+**Propose fixes** on a report clash sends its Navisworks images and distance to the model.
+
+Uploads stay in a temp folder while the report is open (`SIGHTLINE_UPLOAD_MAX_MB`, default 200;
+`SIGHTLINE_UPLOAD_MAX_FILES`, default 5000; `SIGHTLINE_MAX_REPORTS` open at once).
+
 MCP server (stdio), for agents such as ClashWise's Wise:
 
 ```bash
@@ -58,7 +70,8 @@ cd server && uv run python -m sightline.mcp_server
 ## Deploy (public demo on Modal)
 
 One container serves the built web app and the API from the same origin
-([`deploy/modal_app.py`](deploy/modal_app.py)). Put the demo `*.ifc` files in `samples/` first.
+([`deploy/modal_app.py`](deploy/modal_app.py)). Put the demo `*.ifc` files in `samples/` and any sample clash
+reports in `samples/reports/<name>/` first.
 
 ```bash
 cd web && npm ci && npm run build && cd ..

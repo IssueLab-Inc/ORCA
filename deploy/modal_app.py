@@ -4,7 +4,8 @@
     modal secret create sightline-meta META_API_KEY=...      # once
     modal deploy deploy/modal_app.py
 
-The demo models are the *.ifc files in samples/ at deploy time (not in git; see samples/README.md).
+The demo models are the *.ifc files in samples/ at deploy time, and the sample clash reports are in samples/reports/
+(not in git; see samples/README.md).
 
 One container, always: open scenes (and their edits) live in that process's memory, and so do the proposal
 limits. A second container would answer "Model not loaded" to half the requests.
@@ -24,10 +25,13 @@ image = (
         "SIGHTLINE_PROPOSE_PER_DAY": "200",    # for everyone
         "SIGHTLINE_TRUST_FORWARDED": "1",      # Modal's proxy sets X-Forwarded-For
         "SIGHTLINE_MAX_SCENES": "8",           # open model sets kept in memory
+        "SIGHTLINE_MAX_REPORTS": "8",          # open clash reports (uploads are deleted when dropped)
+        "SIGHTLINE_UPLOAD_MAX_MB": "150",
     })
     .add_local_dir(ROOT / "server" / "sightline", f"{APP_DIR}/server/sightline", ignore=["__pycache__"])
     .add_local_dir(ROOT / "web" / "dist", f"{APP_DIR}/web/dist")
-    .add_local_dir(ROOT / "samples", f"{APP_DIR}/samples", ignore=lambda p: p.suffix.lower() != ".ifc")
+    .add_local_dir(ROOT / "samples", f"{APP_DIR}/samples",  # models, and sample clash reports with their images
+                   ignore=lambda p: p.suffix.lower() not in {".ifc", ".xml", ".png", ".jpg", ".jpeg"})
 )
 
 app = modal.App("clashwise-sightline")
