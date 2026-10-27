@@ -99,7 +99,12 @@ Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one containe
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
 evals/README.md). 19 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
-Next, in order. **First, deploy the public demo** ("Starting a session"), then continue with 2.
+Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
+proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
+`uv tool install 'modal[api-proxy-support]'`. Triage eval over Navisworks results: `evals/navisworks_triage.py`
+(evals/README.md): 6/6 answer key, 129/129 non-physical, 51/55 touches on 317 Northbank results.
+
+Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). Feed web-opening sizes/positions as text so moves land on the
    millimetre (the model said +0.38 m, the answer is +0.40 m).
 2. **Local-offset edit**: split a straight segment, raise/lower the middle piece, connecting pieces; verify against

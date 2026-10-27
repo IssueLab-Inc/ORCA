@@ -30,3 +30,27 @@ The loop's own result (attempts until a verified option) gets its own columns on
 | 2026-10-27 | northbank-rev03 | #042 | ABC | 3 | 2/3 | 2/3 | 41.2 s |
 
 Details of the first runs: `spikes/README.md`, "Spike 4 on #042".
+
+## Triage of Navisworks results
+
+`navisworks_triage.py` sends every clash in a Navisworks three-view sample package (ClashWiseDemoModels,
+`northbank/StructuredOutputs/`) to the model with its A/B/C images and metadata, and asks for a verdict
+(`real_clash` / `by_design` / `non_physical` / `modelling_error`), severity, owner and action under a strict JSON schema.
+There is no human review yet, so it scores against a reference built from metadata only: a space or port on either
+side is `non_physical`, a result within 1 mm is a touch (not a real clash), and the answer key must come back as
+`real_clash` with the service, not the girder, moving. Each run keeps its replies, `triage.csv` and `summary.md` in
+`runs/<date>-<name>/`.
+
+| Date | Package | Clashes | Images | Answer key | Non-physical | Touching | Failed calls | Median latency |
+|---|---|---|---|---|---|---|---|---|
+| 2026-10-27 | Northbank-Demo-Clean, 73 tests × ≤5 | 317 | ABC | 6/6 | 129/129 | 51/55 | 0 | 10.0 s |
+
+Notes on the first run (`runs/2026-10-27-northbank-nwf-triage/summary.md`):
+- The four touch misses: three task-chair parts (base, stem, seat are separate `IfcFurniture`) read as duplicated chairs
+  (`modelling_error`), and a 0.5 mm tree canopy over a lighting column read as a real clash. Defensible on the tree,
+  wrong on the chairs.
+- #061 is not in the package: Navisworks stored no results for any pipe vs beam test.
+- Outside the answer key it called 17 more results `real_clash`. They are real overlaps inside the Structure model that
+  the answer key does not cover (it lists Structure vs services only): pad footing B1 vs the lift pit wall (−350 to
+  −471 mm), column base plates buried 159 mm in ground beams, the grid B beam crossing the core trimmer (−216 mm) mid-span,
+  and CHS X-bracing crossing at −9 mm. Checked against the images for the footing: the overlap is real.

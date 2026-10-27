@@ -60,8 +60,9 @@ def _element(obj: ET.Element) -> dict:
     """The clashed element itself: the first tag group with an IFC class (later groups are its parents)."""
     groups: dict[str, dict[str, str]] = {}
     for tag in obj.findall("smarttags/smarttag"):
-        group, _, key = (tag.findtext("name") or "").partition(" / ")
-        groups.setdefault(group, {})[key] = tag.findtext("value") or ""
+        parts = (tag.findtext("name") or "").rsplit(" / ", 2)  # "<node name> / <category> / <property>"
+        if len(parts) == 3:  # node names can contain " / " themselves
+            groups.setdefault(parts[0], {})[f"{parts[1]} / {parts[2]}"] = tag.findtext("value") or ""
     path = [n.text for n in obj.findall("pathlink/node") if n.text]
     found = [(g, t) for g, t in groups.items() if g and t.get("Element / IfcClass")]
     name, tags = found[0]
