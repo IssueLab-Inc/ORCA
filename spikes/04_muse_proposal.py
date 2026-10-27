@@ -1,6 +1,6 @@
 """Spike 4: does Muse Spark return a usable structured proposal for one clash?
 
-    export META_API_BASE_URL=...  META_API_KEY=...  META_MODEL=muse-spark-1.3
+    # META_API_KEY in .env or the environment; base URL and model default to https://api.meta.ai/v1 and muse-spark-1.3-contributor
     cd server
     uv run python ../spikes/04_muse_proposal.py A.png B.png C.png \
         --a "IfcFlowTerminal 'Fan coil unit', Level 03" --b "IfcBeam 'Open-web joist', Level 03" --distance-mm -94.8
