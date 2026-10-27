@@ -27,6 +27,8 @@ image = (
         "SIGHTLINE_MAX_SCENES": "8",           # open model sets kept in memory
         "SIGHTLINE_MAX_REPORTS": "8",          # open clash reports (uploads are deleted when dropped)
         "SIGHTLINE_UPLOAD_MAX_MB": "150",
+        "SIGHTLINE_CHAT_PER_HOUR": "40",       # chat messages per visitor; each is one or more Muse Spark calls
+        "SIGHTLINE_CHAT_PER_DAY": "1500",
     })
     .add_local_dir(ROOT / "server" / "sightline", f"{APP_DIR}/server/sightline", ignore=["__pycache__"])
     .add_local_dir(ROOT / "web" / "dist", f"{APP_DIR}/web/dist")

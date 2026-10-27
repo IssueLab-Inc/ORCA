@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Matches, Report, ReportClash } from "./api";
 
 export function mm(m: number | null | undefined) {
@@ -38,6 +38,13 @@ export function ReportList({ report, matches, selected, onSelect, fixes }: {
     return [...out.entries()];
   }, [report, matches, query, onlyLinked]);
 
+  // Bring the selected clash into view, also when something else (the chat) selected it.
+  useEffect(() => {
+    if (!selected) return;
+    const t = setTimeout(() => { document.querySelector(`[data-clash="${selected}"]`)?.scrollIntoView({ block: "nearest" }); }, 50);
+    return () => clearTimeout(t);
+  }, [selected]);
+
   const shown = groups.reduce((n, [, cs]) => n + cs.length, 0);
   const linked = matches ? report.clashes.filter((c) => linkState(matches, c.id) === "both").length : null;
   const fixedCount = report.clashes.filter((c) => fixes[c.id]).length;
@@ -65,7 +72,7 @@ export function ReportList({ report, matches, selected, onSelect, fixes }: {
             {cs.map((c) => {
               const link = linkState(matches, c.id);
               return (
-                <button key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""}`} onClick={() => onSelect(c)}
+                <button key={c.id} data-clash={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""}`} onClick={() => onSelect(c)}
                   title={fixes[c.id] ? `Fixed: ${fixes[c.id]}` : undefined}>
                   {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : link && <i className={`dot ${link}`} title={LINK_TITLE[link]} />}
                   <span className="clash-name">{c.name}</span>

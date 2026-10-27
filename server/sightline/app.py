@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import edits
+from . import chat, edits
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
@@ -23,6 +23,7 @@ ws = Workspace()
 EXPORTS = Path(tempfile.gettempdir()) / "sightline-exports"
 EXPORTS.mkdir(exist_ok=True)
 propose_limit = ProposeLimit.from_env()
+chat_limit = ProposeLimit.chat_from_env()
 # The built web app (`cd web && npm run build`), served from the same origin when present.
 WEB_DIST = Path(os.environ.get("SIGHTLINE_WEB_DIST", Path(__file__).resolve().parents[2] / "web" / "dist"))
 
@@ -52,6 +53,15 @@ class Offset(BaseModel):
     dz_m: float
     other: str | None = None   # the obstacle, for checking
     clearance_m: float = 0.025
+
+
+class ChatTurn(BaseModel):
+    message: str
+    session_id: str | None = None
+    scene_id: str | None = None
+    report_id: str | None = None
+    clash_id: str | None = None
+    fixed: list[str] = []
 
 
 class OpenReport(BaseModel):
@@ -265,6 +275,51 @@ def measure(report_id: str, clash_id: str, scene_id: str):
         return ws.measure(_report(report_id), clash_id, _scene(scene_id))
     except KeyError:
         raise HTTPException(404, "No such clash in this report.")
+
+
+_chat: chat.Chat | None = None
+
+
+def _chat_for(request: Request) -> chat.Chat:
+    global _chat
+    if _chat is None or _chat.ws is not ws:  # tests swap the workspace
+        _chat = chat.Chat(ws)
+    who = client_id(request.headers, request.client.host if request.client else None)
+    _chat.propose_allowed = lambda: propose_limit.take(who)
+    return _chat
+
+
+@app.post("/api/chat")
+def chat_turn(body: ChatTurn, request: Request):
+    """One chat message, answered by Muse Spark with tools over the open report and model. Newline-delimited JSON
+    events (see chat.py): {"type": "session", "id"} first, then the agent's steps, then {"type": "done"}."""
+    if not body.message.strip():
+        raise HTTPException(422, "Say something.")
+    refused = chat_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    if refused:
+        raise HTTPException(429, refused)
+    c = _chat_for(request)
+    session = c.session(body.session_id)
+    ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
+    events: queue.Queue = queue.Queue()
+    events.put({"type": "session", "id": session.id})
+
+    def work():
+        try:
+            c.turn(session, body.message[:4000], ctx, events.put)
+        except Exception as e:
+            events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        events.put({"type": "done"})
+        events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream():
+        while (event := events.get()) is not None:
+            yield json.dumps(event, default=str) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 # Last, so /api routes win over static files.

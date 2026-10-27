@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 35 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 38 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -130,16 +130,23 @@ geometry; section box (clipping planes) around the clash; marker + label at the 
 Top/Front/Right/Iso, Fit, Go to clash; per-model visibility; measure (point to point, Δxyz); properties card on single
 click (double-click still picks A/B); screenshot; keys 1-4 H F X C I V S E M Esc. Navigation frames the zone where the
 two elements meet (overlap or gap + margin, distance from the field of view), runs on every click, and falls back to
-the report's clash point; ports are shown by their owning element (`match()` returns `show`). 35 server tests.
+the report's clash point; ports are shown by their owning element (`match()` returns `show`).
+
+Chat (Oct 27): `server/sightline/chat.py`, Muse Spark tool loop (≤8 model calls per message) over the Workspace:
+report_summary (per class pair: count, worst mm, touching, non-physical), list/get clash, look_at_clash_images (sent
+as a user message, tool results are text only), measure, describe/find elements, find_openings, check_move/offset,
+propose_fixes (the agent; counts against proposal caps), show_clash and set_view (page actions). `POST /api/chat`
+streams NDJSON; sessions in memory. UI: right pane tab "Chat with Sightline"; chat-driven proposals fill the options
+panel and the activity table. Gotcha: Chromium's `scrollIntoView` returns a Promise; an effect that returns it
+breaks React's cleanup and blanks the panel, so effects use braces. 38 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. Later: bends instead of square corners,
    sideways offsets, splitting at fittings.
 3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
-4. Agent loop end to end in the UI with Muse Spark, attempts streamed. Chat panel: Muse Spark with tools over the
-   open report and model (list/filter clashes, get a clash, look at its images, triage, describe elements, check a
-   move, propose), the same functions as the MCP server, every step streamed.
+4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
+   server too.
 5. Export IFC + BCF; voice; Muse Spark Open triage (open-weights bonus).
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 

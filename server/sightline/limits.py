@@ -20,9 +20,10 @@ DAY = 24 * HOUR
 
 
 class ProposeLimit:
-    def __init__(self, per_client_hour: int = 0, per_day: int = 0, clock=time.monotonic):
+    def __init__(self, per_client_hour: int = 0, per_day: int = 0, clock=time.monotonic, noun: str = "proposals"):
         self.per_client_hour = per_client_hour
         self.per_day = per_day
+        self.noun = noun
         self.clock = clock
         self._clients: dict[str, deque[float]] = {}
         self._all: deque[float] = deque()
@@ -31,6 +32,12 @@ class ProposeLimit:
     def from_env(cls) -> "ProposeLimit":
         return cls(int(os.environ.get("SIGHTLINE_PROPOSE_PER_HOUR", "0")),
                    int(os.environ.get("SIGHTLINE_PROPOSE_PER_DAY", "0")))
+
+    @classmethod
+    def chat_from_env(cls) -> "ProposeLimit":
+        """Chat messages: SIGHTLINE_CHAT_PER_HOUR per visitor, SIGHTLINE_CHAT_PER_DAY for everyone."""
+        return cls(int(os.environ.get("SIGHTLINE_CHAT_PER_HOUR", "0")),
+                   int(os.environ.get("SIGHTLINE_CHAT_PER_DAY", "0")), noun="chat messages")
 
     @staticmethod
     def _trim(q: deque[float], since: float) -> deque[float]:
@@ -44,9 +51,9 @@ class ProposeLimit:
         mine = self._trim(self._clients.setdefault(client, deque()), now - HOUR)
         everyone = self._trim(self._all, now - DAY)
         if self.per_day and len(everyone) >= self.per_day:
-            return "The demo has used today's proposals. Try again tomorrow, or run Sightline locally with your own key."
+            return f"The demo has used today's {self.noun}. Try again tomorrow, or run Sightline locally with your own key."
         if self.per_client_hour and len(mine) >= self.per_client_hour:
-            return f"You've used {self.per_client_hour} proposals this hour. Try again later, or use Check this move."
+            return f"You've used {self.per_client_hour} {self.noun} this hour. Try again later."
         mine.append(now)
         everyone.append(now)
         return None

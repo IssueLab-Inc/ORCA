@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
-import { api, type AgentEvent, type Matches, type Measure, type Option, type Proposal, type Report, type ReportClash, type Verdict } from "./api";
+import { ChatPanel } from "./Chat";
+import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Proposal, type Report, type ReportClash, type Verdict } from "./api";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { ReportList, mm } from "./ReportList";
 import { Viewer, serverPointToViewer, type Preset, type ViewMode } from "./viewer/Viewer";
@@ -48,6 +49,7 @@ export function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [now, setNow] = useState(Date.now());
   const [compare, setCompare] = useState<"before" | "after" | "both">("after");
+  const [tab, setTab] = useState<"clash" | "chat">("clash");
 
   useEffect(() => {
     if (!host.current) return;
@@ -81,9 +83,9 @@ export function App() {
     for (const p of (a && edits[a]) || []) g[p] = "a";
     return g;
   }, [a, b, edits, standIns]);
-  useEffect(() => viewer.current?.setFocus({ a, b, group }), [a, b, group]);
-  useEffect(() => viewer.current?.setMode(tool.mode), [tool.mode]);
-  useEffect(() => viewer.current?.setEdges(tool.edges), [tool.edges]);
+  useEffect(() => { viewer.current?.setFocus({ a, b, group }); }, [a, b, group]);
+  useEffect(() => { viewer.current?.setMode(tool.mode); }, [tool.mode]);
+  useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
   // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
   useEffect(() => {
     if (!tool.section) { viewer.current?.setSection(false); return; }
@@ -256,8 +258,8 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  async function propose() {
-    if (!sceneId || !a || !b) return;
+  /** Start showing the agent's progress; returns the handler for its events and a function to call when done. */
+  function trackAgent() {
     setError(null); setChosen(null); setManual(null);
     const t = Date.now();
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
@@ -276,12 +278,42 @@ export function App() {
         setProposal((q) => q && { ...q, attempts: [...q.attempts, attempt] });
       }
     };
+    const finish = (result: Proposal | null) => {
+      if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
+      update({ phase: "done", checking: null }); setNow(Date.now());
+    };
+    return { onEvent, finish };
+  }
+
+  async function propose() {
+    if (!sceneId || !a || !b) return;
+    const { onEvent, finish } = trackAgent();
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
-    try {
-      const result = await api.proposeStream(sceneId, a, b, from, onEvent);
-      setProposal(result); setChosen(result.options.length ? 0 : null);
-    } catch (e) { setError((e as Error).message); }
-    finally { update({ phase: "done", checking: null }); setNow(Date.now()); }
+    let result: Proposal | null = null;
+    try { result = await api.proposeStream(sceneId, a, b, from, onEvent); }
+    catch (e) { setError((e as Error).message); }
+    finally { finish(result); }
+  }
+
+  // The chat drives the page through events: select a clash, change the view, show the fix agent's work.
+  const chatAgent = useRef<ReturnType<typeof trackAgent> | null>(null);
+  function onChatEvent(e: ChatEvent) {
+    if (e.type === "ui" && e.action === "select_clash") {
+      const c = report?.clashes.find((x) => x.id === e.clash_id);
+      if (c) selectClash(c);
+    }
+    if (e.type === "ui" && e.action === "set_view") {
+      setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
+    }
+    if (e.type === "agent") {
+      if (e.event.type === "thinking" && e.event.round === 1) chatAgent.current = trackAgent();
+      chatAgent.current?.onEvent(e.event);
+    }
+    if (e.type === "proposal") {
+      setA(e.element_a); setB(e.element_b);
+      (chatAgent.current ?? trackAgent()).finish(e);
+      chatAgent.current = null;
+    }
   }
 
   async function accept(o: Option) {
@@ -402,7 +434,16 @@ export function App() {
         {error && <div className="overlay error" onClick={() => setError(null)}>{error}</div>}
       </main>
 
-      <aside className="pane right">
+      <aside className={`pane right ${tab === "chat" ? "chatting" : ""}`}>
+        <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => setTab("clash")}>Clash{proposal?.options.length ? ` · ${proposal.options.length} option${proposal.options.length > 1 ? "s" : ""}` : ""}</button>
+          <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>Chat with Sightline</button>
+        </div>
+        {tab === "chat" && (
+          <ChatPanel ready={!!(sceneId || report)} onEvent={onChatEvent}
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: Object.keys(fixes) })} />
+        )}
+        <div className="tab-body" hidden={tab !== "clash"}>
         {clash && report
           ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={setImage} fix={fixes[clash.id]} />
           : <>
@@ -446,6 +487,7 @@ export function App() {
           </div>
         ))}
         {Object.keys(edits).length > 0 && !proposal && <p className="hint">Accepted fixes are in the model. Export edited IFC to download.</p>}
+        </div>
       </aside>
 
       <footer className="dock">

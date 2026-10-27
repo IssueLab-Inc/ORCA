@@ -62,6 +62,21 @@ GlobalId (else by a unique class and name), shown with its Navisworks images, an
 check (Navisworks and IfcOpenShell report depth differently: #042 is −150 mm in Navisworks, −300 mm here).
 **Propose fixes** on a report clash sends its Navisworks images and distance to the model.
 
+### Chat
+
+**Chat with Sightline** (right pane) talks to Muse Spark with tools over the open report and model
+(`server/sightline/chat.py`, prompt `domain_packs/chat.md`): report summary, list/get clashes, look at a clash's
+images, measure, describe/find elements, find openings, check a move or offset, propose fixes (the same verified
+agent), and two page actions, show a clash and set the view. Every tool call streams to the page. Chat messages are
+capped per visitor (`SIGHTLINE_CHAT_PER_HOUR`, `SIGHTLINE_CHAT_PER_DAY`); proposals made through the chat count
+against the proposal caps.
+
+### Viewer
+
+Modes Shaded / X-ray / Context / Isolate, edges through geometry, section box, measure, properties on click, preset
+views and fit, per-model visibility and screenshots. Keys: 1-4 views, H fit, F go to the clash, X/C/I/V modes,
+S section, E edges, M measure, Esc clears. Double-click picks element A, then B.
+
 Uploads stay in a temp folder while the report is open (`SIGHTLINE_UPLOAD_MAX_MB`, default 200;
 `SIGHTLINE_UPLOAD_MAX_FILES`, default 5000; `SIGHTLINE_MAX_REPORTS` open at once).
 

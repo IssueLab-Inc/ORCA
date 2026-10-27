@@ -39,6 +39,15 @@ class ChatModel(Protocol):
     def complete_json(self, system: str, text: str, images: list[Path] | None = None) -> dict: ...
 
 
+class ToolModel(Protocol):
+    def chat(self, messages: list[dict], tools: list[dict]) -> dict: ...
+
+
+def image_part(path: Path) -> dict:
+    """An image as an OpenAI-style content part (base64 data URL)."""
+    return _image_part(path)
+
+
 def _image_part(path: Path) -> dict:
     mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
     data = base64.b64encode(path.read_bytes()).decode()
@@ -77,3 +86,11 @@ class MetaChatModel:
         })
         raw = body["choices"][0]["message"]["content"]
         return json.loads(raw)
+
+    def chat(self, messages: list[dict], tools: list[dict]) -> dict:
+        """One assistant turn with tools: returns the message (content and/or tool_calls)."""
+        body = self._post({
+            "model": self.model, "messages": messages, "tools": tools, "temperature": 0.2,
+            **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
+        })
+        return body["choices"][0]["message"]

@@ -38,7 +38,44 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+/** What the chat streams while it works (server: chat.py). */
+export type ChatEvent =
+  | { type: "session"; id: string }
+  | { type: "thinking" }
+  | { type: "tool"; name: string; args: Record<string, unknown> }
+  | { type: "tool_result"; name: string; summary: string }
+  | { type: "ui"; action: "select_clash"; clash_id: string }
+  | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
+  | { type: "agent"; event: AgentEvent }
+  | ({ type: "proposal"; clash_id: string; element_a: string; element_b: string } & Proposal)
+  | { type: "message"; text: string }
+  | { type: "error"; detail: string }
+  | { type: "done" };
+
+/** POST and read newline-delimited JSON events until the stream ends. */
+async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void) {
+  const r = await fetch(`/api${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (line && onEvent(JSON.parse(line) as T) === true) { reader.cancel(); return; }
+    }
+    if (done) return;
+  }
+}
+
 export const api = {
+  chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
+                 clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void) =>
+    ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }),
   samples: () => call<string[]>("/samples"),
   open: (samples: string[]) => call<{ id: string; files: string[] }>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
   file: async (id: string, index: number) => new Uint8Array(await (await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" })).arrayBuffer()),
