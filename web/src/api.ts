@@ -49,8 +49,14 @@ export interface PlanCheck {
 }
 export interface Plan {
   kind: "batch" | "root_cause"; title: string; root_cause: string; strategy: string; hub: RootCause | null;
-  items: PlanItem[]; check: PlanCheck; seconds: number;
+  items: PlanItem[]; check: PlanCheck; seconds: number; advice: string;
 }
+/** Many clashes of the same kind (server: plans.patterns), and what Muse Spark makes of each. */
+export interface Pattern {
+  id: string; classes: string[]; files: string[]; cross_discipline: boolean; clashes: number; pairs: number;
+  levels: string[]; min_mm: number; max_mm: number; constant: boolean; clash_ids: string[]; examples: string[];
+}
+export interface PatternVerdict { verdict: "by_design" | "modelling_error" | "real_problem"; cause: string; action: string; rule: string }
 export interface RootCausePartner {
   global_id: string; ifc_class: string; name: string; source: string; storey: string | null;
   distance_m: number; clash_ids: string[]; in_report: boolean;
@@ -106,6 +112,10 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 }
 
 export const api = {
+  patterns: (reportId: string, sceneId: string, fixed: string[]) =>
+    call<Pattern[]>(`/reports/${reportId}/patterns/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
+  triagePatterns: (reportId: string, sceneId: string, fixed: string[]) =>
+    call<Record<string, PatternVerdict>>(`/reports/${reportId}/patterns/${sceneId}/triage`, { method: "POST", body: JSON.stringify({ fixed }) }),
   rootCauses: (reportId: string, sceneId: string, fixed: string[]) =>
     call<RootCause[]>(`/reports/${reportId}/root_causes/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
   /** Build a plan (clash_ids: fix these together; hub: fix the root cause around it). Resolves with the plan. */

@@ -11,6 +11,7 @@ const VERBS: Record<string, string> = {
   describe_element: "Read an element", find_elements: "Searched the model", find_openings: "Looked for openings",
   check_move: "Checked a move", check_offset: "Checked an offset", propose_fixes: "Ran the fix agent",
   show_clash: "Showed a clash", set_view: "Changed the view", find_root_causes: "Looked for root causes",
+  find_patterns: "Looked for patterns",
   plan_root_cause: "Planned a root-cause fix", plan_fixes_together: "Planned fixes together",
 };
 

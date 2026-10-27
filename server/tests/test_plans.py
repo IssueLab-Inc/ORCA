@@ -78,3 +78,18 @@ def test_root_causes_and_plan_endpoints(tmp_path, monkeypatch):
     assert c.post(f"/api/scenes/{sid}/plan/stream", json={"report_id": rid, "clash_ids": ["c0001"]}).status_code == 429
     applied = c.post(f"/api/scenes/{sid}/plan/apply", json={"options": [plan["items"][0]["option"]]}).json()
     assert applied["files"] == [0] and len(applied["pieces"][0]) == 5
+
+
+def test_patterns_group_same_kind_clashes_and_triage_maps_back(tmp_path):
+    ws, sid, rid, main, beam = _setup(tmp_path)
+    pats = plans.patterns(ws, sid, rid, min_pairs=1)
+    [p] = pats
+    assert p["classes"] == sorted(["IfcBeam", "IfcDuctSegment"]) and p["clashes"] == 2 and p["pairs"] == 1 and p["constant"]
+
+    class Triage:
+        def complete_json(self, system, text, images=None):
+            assert "P1:" in text
+            return {"patterns": [{"id": "P1", "verdict": "by_design", "cause": "c", "action": "a", "rule": "r"}]}
+    ws._model = Triage()
+    assert plans.triage_patterns(ws, pats)[p["id"]]["verdict"] == "by_design"
+    assert plans.patterns(ws, sid, rid, fixed=["c0001", "c0002"], min_pairs=1) == []   # resolved clashes drop out

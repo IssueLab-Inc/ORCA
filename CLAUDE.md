@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 42 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 43 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -148,7 +148,14 @@ first, plus geometry hits missing from the report; `build_root_cause` asks Muse 
 cause + strategy (move_hub / fix_partners). Northbank: girder plan with #042/#057/#061 (the last not in the report) at
 Rev04 heights, ~45-58 s. Plans cost one proposal per pair (`ProposeLimit.take_many`, all or nothing). UI pass: lucide
 icons with `data-tip` tooltips, viewer icon rail, Clash / Plan / Chat tabs, multi-select + "Fix n together" bar,
-Root causes card. 42 server tests.
+Root causes card.
+
+Insights (Oct 27): `plans.patterns` groups real clashes by class pair + files (≥3 pairs); `triage_patterns` = one
+Muse call (`domain_packs/patterns.md`) → by_design (+ clash rule) / modelling_error / real_problem. Root-cause strategy
+`as_designed` returns a plan with no edits and `advice`. UI: Insights panel (all root causes, patterns, Explain), a
+client-side `reviewed` state (by design / for author) that root causes, patterns and plans exclude like fixes.
+Northbank: 11 patterns; bolts/plates, columns/slabs, beams/columns, curtain-wall joints → by design; duplicate braces,
+low base plates → modelling error; lift pit walls vs footings → real problem. 43 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

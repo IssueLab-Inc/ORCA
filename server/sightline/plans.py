@@ -55,6 +55,7 @@ class Plan:
     items: list[Item] = field(default_factory=list)
     check: dict = field(default_factory=dict)   # the combined check (see verify_together)
     seconds: float = 0.0
+    advice: str = ""                 # root cause "as_designed": what to do instead of editing the model
 
 
 # ---------------------------------------------------------------------------------------------------------- checks
@@ -304,10 +305,14 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
     emit({"type": "thinking", "what": "root cause"})
     text = _describe_cluster(ws, scene_id, cluster)
     reply = ws.model.complete_json((PACKS / "root_cause.md").read_text(), text)
-    strategy = reply.get("strategy") if reply.get("strategy") in ("move_hub", "fix_partners") else "fix_partners"
+    strategy = reply.get("strategy") if reply.get("strategy") in ("move_hub", "fix_partners", "as_designed") else "fix_partners"
     emit({"type": "root_cause", "root_cause": reply.get("root_cause", ""), "strategy": strategy,
           "reason": reply.get("reason", "")})
     hub_el = cluster["hub"]
+    if strategy == "as_designed":  # connections, not conflicts: nothing to edit, say what to do instead
+        return Plan("root_cause", f"Root cause: {hub_el['ifc_class']} '{hub_el['name']}'", reply.get("root_cause", ""),
+                    strategy, cluster, [], {"passed": True, "items": {}, "conflicts": []},
+                    round(time.perf_counter() - started, 1), reply.get("reason", ""))
     notes = f"Root cause: {reply.get('root_cause', '')}\nCoordinated plan: {reply.get('reason', '')}"
     if strategy == "move_hub":
         first = cluster["partners"][0]
@@ -349,3 +354,70 @@ def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
 
 def to_json(plan: Plan) -> str:
     return json.dumps(asdict(plan), default=str)
+
+
+# ---------------------------------------------------------------------------------------------------------- patterns
+
+def patterns(ws: Workspace, scene_id: str, report_id: str, fixed: list[str] | None = None, min_pairs: int = 3) -> list[dict]:
+    """The same kind of clash, many times over: real clashes grouped by the two element classes and their files.
+
+    A root cause is one element in many clashes; a pattern is many elements clashing the same way (every column
+    through every slab, curtain-wall members all overlapping by exactly 30 mm). Patterns are usually a modelling
+    convention or a systematic error, and are fixed by a clash rule or one decision, not one edit at a time."""
+    scene = ws.scene(scene_id)
+    matches = ws.match(report_id, scene_id)
+    physical = scene.bounds().keys()
+    fixed_set = set(fixed or [])
+    groups: dict[tuple, list] = {}
+    for c in ws.report(report_id).clashes:
+        m = matches.get(c.id, {})
+        a, b = m.get("a"), m.get("b")
+        if not (a and b) or a not in physical or b not in physical or c.id in fixed_set:
+            continue
+        if c.distance_m is None or c.distance_m > -0.001:
+            continue
+        ea, eb = scene.element(a), scene.element(b)
+        sides = sorted([(ea.ifc_class, ea.source), (eb.ifc_class, eb.source)])
+        groups.setdefault(tuple(sides), []).append((c, ea, eb))
+    out = []
+    for (sa, sb), rows in groups.items():
+        pairs = {tuple(sorted([ea.global_id, eb.global_id])) for _, ea, eb in rows}
+        if len(pairs) < min_pairs:
+            continue
+        ds = sorted(c.distance_m * 1000 for c, _, _ in rows)
+        examples = []
+        for c, ea, eb in rows[:4]:
+            examples.append(f"{ea.ifc_class} '{ea.name}' x {eb.ifc_class} '{eb.name}' ({c.distance_m * 1000:+.0f} mm, {ea.storey})")
+        out.append({
+            "id": f"{sa[0]}|{sb[0]}|{sa[1]}|{sb[1]}",
+            "classes": [sa[0], sb[0]], "files": [sa[1], sb[1]], "cross_discipline": sa[1] != sb[1],
+            "clashes": len(rows), "pairs": len(pairs),
+            "levels": sorted({ea.storey or "?" for _, ea, _ in rows} | {eb.storey or "?" for _, _, eb in rows}),
+            "min_mm": round(ds[0]), "max_mm": round(ds[-1]), "constant": ds[-1] - ds[0] <= 2,
+            "clash_ids": [c.id for c, _, _ in rows], "examples": examples,
+        })
+    out.sort(key=lambda p: (not p["cross_discipline"], -p["pairs"]))
+    return out
+
+
+def triage_patterns(ws: Workspace, pats: list[dict]) -> dict[str, dict]:
+    """One Muse Spark call over every pattern: by design, a modelling error, or a real problem, and what to do."""
+    if not pats:
+        return {}
+    lines = []
+    for i, p in enumerate(pats, 1):
+        lines.append(f"P{i}: {p['classes'][0]} ({p['files'][0]}) x {p['classes'][1]} ({p['files'][1]}): {p['clashes']} "
+                     f"clashes, {p['pairs']} element pairs, levels {', '.join(p['levels'])}, overlap {p['min_mm']} to "
+                     f"{p['max_mm']} mm{' (the same every time)' if p['constant'] else ''}. Examples: "
+                     + "; ".join(p["examples"][:3]))
+    reply = ws.model.complete_json((PACKS / "patterns.md").read_text(), "\n".join(lines))
+    out = {}
+    for row in reply.get("patterns", []):
+        try:
+            p = pats[int(str(row.get("id", "")).lstrip("Pp")) - 1]
+        except (ValueError, IndexError):
+            continue
+        verdict = row.get("verdict") if row.get("verdict") in ("by_design", "modelling_error", "real_problem") else "real_problem"
+        out[p["id"]] = {"verdict": verdict, "cause": row.get("cause", ""), "action": row.get("action", ""),
+                        "rule": row.get("rule", "")}
+    return out

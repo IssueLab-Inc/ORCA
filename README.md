@@ -71,7 +71,13 @@ clashes (cross-discipline first) and asks the geometry for clashes the report mi
 cause and a strategy (move that element, or coordinate everything crossing it) and builds one plan. On Northbank it
 finds the transfer girder, adds the cold water main Navisworks missed, and offsets all three services through the
 girder's openings at Rev04's heights, verified together. Plans preview in 3D (before / after / both) and are accepted
-in one go. The chat can do the same (`find_root_causes`, `plan_root_cause`, `plan_fixes_together`).
+in one go. When a root cause is how the parts are meant to go together (a ground beam tying into its footings), the
+plan says so instead, with the clash rule to add, and marks those clashes as by design.
+
+**Patterns** are the same clash repeated (every column through every slab, curtain-wall members all at −30 mm).
+**Explain** asks Muse Spark about all of them in one call: by design (with the clash rule to add), a modelling error
+(flag for the author) or a real problem (fix together). Reviewed clashes drop out of root causes, patterns and plans.
+The chat can do the same (`find_root_causes`, `find_patterns`, `plan_root_cause`, `plan_fixes_together`).
 
 ### Chat
 

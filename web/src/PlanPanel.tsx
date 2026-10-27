@@ -20,9 +20,10 @@ const editText = (i: PlanItem) => {
     : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
 };
 
-export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus }: {
+export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned }: {
   run: PlanRun | null; plan: Plan | null; now: number; busy: boolean;
   onAccept: () => void; onDiscard: () => void; onFocus: (item: PlanItem) => void;
+  onAsDesigned: (clashIds: string[], note: string) => void;
 }) {
   if (!run && !plan) {
     return (
@@ -41,12 +42,23 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus }
     <section className="plan">
       <div className="row">
         <h2>{run?.kind === "root_cause" || plan?.kind === "root_cause" ? <><Network size={15} aria-hidden /> Root cause plan</> : <><Wand2 size={15} aria-hidden /> Fix together</>}</h2>
-        {plan && <span className={`chip ${plan.check.passed ? "ok" : "warn"}`}>{plan.check.passed ? "verified together" : `${ok} of ${items.length} verified`}</span>}
+        {plan && plan.strategy !== "as_designed" && <span className={`chip ${plan.check.passed ? "ok" : "warn"}`}>{plan.check.passed ? "verified together" : `${ok} of ${items.length} verified`}</span>}
       </div>
       {working && <p className="live-line"><LoaderCircle size={14} className="spin" aria-hidden />{
         run!.phase === "cause" ? "Muse Spark is working out the cause…" : run!.phase === "checking" ? "Checking every fix together…"
           : `Finding a fix for each pair… ${seconds} s`}</p>}
       {cause && <div className="cause"><b>Cause</b><p>{cause}</p></div>}
+      {plan?.strategy === "as_designed" && (
+        <div className="advice">
+          <b>No model change needed</b>
+          <p>{plan.advice || "These clashes are how the parts are meant to go together."}</p>
+          <div className="plan-actions">
+            <button className="btn primary" onClick={() => onAsDesigned(plan.hub?.clash_ids ?? [], plan.advice)}>
+              <CircleCheck size={15} aria-hidden /> Mark {plan.hub?.clash_ids.length ?? 0} clashes as by design</button>
+            <button className="btn" onClick={onDiscard}><Trash2 size={15} aria-hidden /> Dismiss</button>
+          </div>
+        </div>
+      )}
 
       <ol className="plan-items">
         {items.map((it) => {
@@ -73,7 +85,7 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus }
         })}
       </ol>
 
-      {plan && (
+      {plan && plan.strategy !== "as_designed" && (
         <div className="plan-actions">
           <button className="btn primary" disabled={busy || !items.some((i) => i.option)} onClick={onAccept}>
             <CircleCheck size={15} aria-hidden /> Accept {plan.check.passed ? "the plan" : `the ${ok} verified`}</button>

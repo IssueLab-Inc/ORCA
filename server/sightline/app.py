@@ -294,6 +294,32 @@ def root_causes(report_id: str, scene_id: str, fixed: str = ""):
     return plans.root_causes(ws, _scene(scene_id), _report(report_id), [f for f in fixed.split(",") if f])
 
 
+class PatternTriage(BaseModel):
+    fixed: list[str] = []
+
+
+@app.get("/api/reports/{report_id}/patterns/{scene_id}")
+def patterns(report_id: str, scene_id: str, fixed: str = ""):
+    """The same kind of clash many times over (no model call)."""
+    return plans.patterns(ws, _scene(scene_id), _report(report_id), [f for f in fixed.split(",") if f])
+
+
+@app.post("/api/reports/{report_id}/patterns/{scene_id}/triage")
+def triage_patterns(report_id: str, scene_id: str, body: PatternTriage, request: Request):
+    """Ask Muse Spark what each pattern is (one call for all). Counts as one proposal."""
+    pats = plans.patterns(ws, _scene(scene_id), _report(report_id), body.fixed)
+    key = (report_id, scene_id, tuple(p["id"] for p in pats))
+    if key not in _pattern_triage:
+        refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+        if refused:
+            raise HTTPException(429, refused)
+        _pattern_triage[key] = plans.triage_patterns(ws, pats)
+    return _pattern_triage[key]
+
+
+_pattern_triage: dict[tuple, dict] = {}
+
+
 @app.post("/api/scenes/{scene_id}/plan/stream")
 def plan_stream(scene_id: str, body: PlanRequest, request: Request):
     """Fix several clashes together (clash_ids), or the root cause around one element (hub). Streams progress as

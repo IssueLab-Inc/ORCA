@@ -2,10 +2,11 @@ import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, LocateFixed, Messa
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
-import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type Verdict } from "./api";
+import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type Verdict } from "./api";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
-import { ReportList, mm } from "./ReportList";
+import { Insights } from "./Insights";
+import { ReportList, mm, type Review } from "./ReportList";
 import { Popover } from "./ui";
 import { Viewer, serverPointToViewer, type Preset, type ViewMode } from "./viewer/Viewer";
 import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
@@ -56,6 +57,11 @@ export function App() {
   // Several clashes at once.
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [rootCauses, setRootCauses] = useState<RootCause[] | null>(null);
+  // Report-wide: patterns of the same clash, Muse Spark's verdict on each, and clashes reviewed without an edit.
+  const [patterns, setPatterns] = useState<Pattern[] | null>(null);
+  const [verdicts, setVerdicts] = useState<Record<string, PatternVerdict> | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [reviewed, setReviewed] = useState<Record<string, Review>>({});
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
 
@@ -85,6 +91,10 @@ export function App() {
   const planGroup = useMemo(() => {
     if (!plan || tab !== "plan") return null;
     const g: Record<string, "a" | "b"> = {};
+    if (plan.hub) {  // the element behind the clashes in red, everything it meets in green
+      g[plan.hub.hub.global_id] = "a";
+      for (const p of plan.hub.partners) g[p.global_id] = "b";
+    }
     for (const it of plan.items) {
       const moved = new Set(it.option?.moved ?? []);
       for (const gid of [it.element_a, it.element_b]) g[gid] = moved.has(gid) ? "b" : "a";
@@ -121,12 +131,26 @@ export function App() {
     api.match(report.id, sceneId).then(setMatches).catch((e) => setError((e as Error).message));
   }, [report, sceneId]);
 
-  // Root causes: elements in several open clashes. Refreshed as clashes get fixed.
+  // Root causes and patterns, over the clashes still open (not fixed, not reviewed). Refreshed as that changes.
+  const resolved = useMemo(() => [...new Set([...Object.keys(fixes), ...Object.keys(reviewed)])], [fixes, reviewed]);
   useEffect(() => {
-    setRootCauses(null);
+    setRootCauses(null); setPatterns(null);
     if (!report || !sceneId || !matches) return;
-    api.rootCauses(report.id, sceneId, Object.keys(fixes)).then(setRootCauses).catch(() => setRootCauses([]));
-  }, [report, sceneId, matches, fixes]);
+    api.rootCauses(report.id, sceneId, resolved).then(setRootCauses).catch(() => setRootCauses([]));
+    api.patterns(report.id, sceneId, resolved).then(setPatterns).catch(() => setPatterns([]));
+  }, [report, sceneId, matches, resolved]);
+
+  async function explainPatterns() {
+    if (!report || !sceneId) return;
+    setExplaining(true);
+    try { setVerdicts(await api.triagePatterns(report.id, sceneId, resolved)); }
+    catch (e) { setError((e as Error).message); } finally { setExplaining(false); }
+  }
+
+  function review(ids: string[], kind: Review["kind"], note: string) {
+    setReviewed((r) => ({ ...r, ...Object.fromEntries(ids.filter((id) => !fixes[id]).map((id) => [id, { kind, note }])) }));
+    setChecked((s) => { const n = new Set(s); for (const id of ids) n.delete(id); return n; });
+  }
 
   /** Take the camera to a report clash: where its elements meet, or its reported point. */
   function goToClash(c: ReportClash, m = matches?.[c.id]) {
@@ -173,11 +197,12 @@ export function App() {
     const changed = option.kind === "offset" && option.preview ? option.preview.slice(1, -1) : option.before;
     if (changed?.length) viewer.current?.frameMeshes(changed, 1.6);
   }, [option]);
-  // A finished plan: frame everything it changes.
+  // A finished plan: frame everything it changes, or (nothing to change) the cluster it is about.
   useEffect(() => {
     const changed = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : o.before ?? []));
     if (changed.length) viewer.current?.frameMeshes(changed, 1.3);
-  }, [planOptions]);
+    else if (plan?.hub) viewer.current?.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
+  }, [planOptions, plan]);
 
   function resetWork() { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); setStandIns({}); }
 
@@ -190,14 +215,14 @@ export function App() {
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
       setModelNames(files.map((f) => f.replace(/\.ifc$/i, "").replace(/^Northbank-/, "")));
       setTool((t) => ({ ...t, hiddenModels: [] }));
-      setEdits({}); setFixes({}); setPlan(null); setPlanRun(null); setChecked(new Set());
+      setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setStats(await viewer.current!.load(bytes, files));
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
 
   async function loadReport(get: () => Promise<Report>, what: string) {
     setBusy(`Reading ${what}…`); setError(null);
-    try { const r = await get(); setReport(r); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setFixes({}); }
+    try { const r = await get(); setReport(r); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setFixes({}); setReviewed({}); setVerdicts(null); }
     catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
 
@@ -345,7 +370,7 @@ export function App() {
     setTab("plan");
     const { onEvent, finish } = trackPlan(body.hub ? "root_cause" : "batch");
     let p: Plan | null = null;
-    try { p = await api.planStream(sceneId, { report_id: report.id, fixed: Object.keys(fixes), ...body }, onEvent); }
+    try { p = await api.planStream(sceneId, { report_id: report.id, fixed: resolved, ...body }, onEvent); }
     catch (e) { setError((e as Error).message); }
     finally { finish(p); }
   }
@@ -438,7 +463,7 @@ export function App() {
   const proposing = !!progress && progress.phase !== "done";
   const planning = !!planRun && planRun.phase !== "done";
   const fixedCount = Object.keys(fixes).length;
-  const compareBar = (option || (plan && tab === "plan")) && (
+  const compareBar = (option || (plan && tab === "plan" && planOptions.length > 0)) && (
     <div className="compare" onClick={(e) => e.stopPropagation()}>
       <div className="seg" role="group" aria-label="Compare before and after">
         {(["before", "after", "both"] as const).map((m) => (
@@ -509,10 +534,13 @@ export function App() {
       <aside className="pane left">
         {report
           ? <ReportList report={report} matches={matches} selected={clash?.id ?? null} onSelect={selectClash} fixes={fixes}
-              checked={checked} busy={planning || proposing}
+              reviewed={reviewed} checked={checked} busy={planning || proposing}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
-              rootCauses={rootCauses} onFixRoot={(hub) => runPlan({ hub })} />
+              insights={<Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
+                busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={explainPatterns}
+                onSelect={(ids) => setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])]))}
+                onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })} />} />
           : <div className="empty-left">
               <FileSpreadsheet size={28} aria-hidden />
               <h2>No clash report open</h2>
@@ -563,17 +591,18 @@ export function App() {
           <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => setTab("clash")}>
             <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
           <button role="tab" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => setTab("plan")}>
-            <Network size={14} aria-hidden /> Plan{planning ? <i className="spinner" aria-hidden /> : plan ? <span className="badge-n">{planOptions.length}</span> : null}</button>
+            <Network size={14} aria-hidden /> Plan{planning ? <i className="spinner" aria-hidden /> : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
           <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
             <MessageSquare size={14} aria-hidden /> Chat</button>
         </div>
         {tab === "chat" && (
           <ChatPanel ready={!!(sceneId || report)} onEvent={onChatEvent}
-            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: Object.keys(fixes) })} />
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
         )}
         {tab === "plan" && (
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan}
-            onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem} />
+            onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
+            onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setTab("clash"); }} />
         )}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report

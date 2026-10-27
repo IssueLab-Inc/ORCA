@@ -278,6 +278,8 @@ def passages(scene: IfcScene, run_gid: str, obstacle_gid: str, clearance_m: floa
     tris = verts[np.asarray(shape.geometry.faces).reshape(-1, 3)]
     d = np.asarray(run.direction)
     side = np.cross(UP, d)
+    if np.linalg.norm(side) < 1e-6:  # a vertical segment (a riser): openings "on its line" are not defined here
+        return []
     side /= np.linalg.norm(side)
     start, z0 = np.asarray(run.start), run.start[2]
     behind = start + d * (((verts - start) @ d).min() - 1.0)  # a point on the run's line before the obstacle

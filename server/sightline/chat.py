@@ -75,6 +75,9 @@ TOOLS = [
     _fn("find_root_causes", "Elements that are in several real clashes at once (the likely root causes), with clashes "
         "the geometry finds that the Navisworks report missed. Use it for 'why are there so many clashes here' or "
         "'what is the real problem'."),
+    _fn("find_patterns", "Patterns: the same kind of clash many times over (every column through every slab, members "
+        "all overlapping by the same 30 mm), each judged as by design, a modelling error or a real problem, with the "
+        "clash rule or action to take. Use it for 'what is all this noise' or before triaging a big report."),
     _fn("plan_root_cause", "For one element from find_root_causes: work out the cause and build one coordinated plan "
         "that fixes all its clashes, checked together. Shows the plan in the user's Plan tab to preview and accept. "
         "About a minute; costs one proposal per clashing element.", {"hub": {"type": "string", "description": "GlobalId"}},
@@ -325,6 +328,14 @@ class Chat:
                                       + ("" if p["in_report"] else " (NOT in the report)") for p in c["partners"]],
                      "cross_discipline": c["cross_discipline"] > 0} for c in causes]
             return {"root_causes": rows}, f"{len(rows)} candidate root cause(s)", []
+        if name == "find_patterns":
+            r, sid = self._report(ctx), self._scene(ctx)
+            pats = plans.patterns(ws, sid, r.id, ctx.fixed)
+            verdicts = plans.triage_patterns(ws, pats) if pats else {}
+            rows = [{"pattern": f"{p['clashes']} x {p['classes'][0]} vs {p['classes'][1]}", "files": p["files"],
+                     "levels": p["levels"], "overlap_mm": [p["min_mm"], p["max_mm"]], "clash_ids": p["clash_ids"][:12],
+                     **verdicts.get(p["id"], {})} for p in pats]
+            return {"patterns": rows}, f"{len(rows)} pattern(s)", []
         if name in ("plan_root_cause", "plan_fixes_together"):
             n = (1 + len(next((c["partners"] for c in plans.root_causes(ws, self._scene(ctx), self._report(ctx).id,
                                                                          ctx.fixed, top=50)
