@@ -9,7 +9,7 @@ import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
 import { ReportList, mm, type Review } from "./ReportList";
 import { Popover } from "./ui";
-import { Viewer, serverPointToViewer, type Preset, type ViewMode } from "./viewer/Viewer";
+import { Viewer, serverPointToViewer, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
 import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
 import type * as THREE from "three";
 
@@ -86,9 +86,9 @@ export function App() {
   }, []);
 
   // Pieces accepted offsets added to A or B are part of that side: coloured, and kept when isolating.
-  const [standIns, setStandIns] = useState<Record<string, "a" | "b">>({});
+  const [standIns, setStandIns] = useState<Record<string, Side>>({});
   const group = useMemo(() => {
-    const g: Record<string, "a" | "b"> = { ...standIns };
+    const g: Record<string, Side> = { ...standIns };
     for (const p of (b && edits[b]) || []) g[p] = "b";
     for (const p of (a && edits[a]) || []) g[p] = "a";
     return g;
@@ -205,7 +205,11 @@ export function App() {
     setA(m?.a ?? null); setB(m?.b ?? null);
     // Draw what can be drawn: a port's pipe or valve stands in for the port itself.
     const shownA = m?.show?.[0], shownB = m?.show?.[1];
-    setStandIns({ ...(shownA && shownA !== m?.a ? { [shownA]: "a" as const } : {}), ...(shownB && shownB !== m?.b ? { [shownB]: "b" as const } : {}) });
+    // Both ports of one pipe stand in for both sides: that element is A and B at once (drawn purple).
+    const ins: Record<string, Side> = {};
+    if (shownA && shownA !== m?.a) ins[shownA] = "a";
+    if (shownB && shownB !== m?.b) ins[shownB] = ins[shownB] === "a" ? "ab" : "b";
+    setStandIns(ins);
     if (!m?.a || !m?.b) return;
     let live = true;
     setMeasure("busy");
@@ -229,18 +233,28 @@ export function App() {
     } else v.preview([]);
   }, [option, plan, planOptions, compare, a, tab]);
 
-  // Zoom to what the chosen option changes: an offset's risers and middle piece, or the moved elements.
+  // Zoom to what the chosen option changes: an offset's risers and middle piece, or where a moved element now
+  // meets the other side of the clash (not the whole moved element: a raised 16 m run would fill the screen).
   useEffect(() => {
     if (!option) return;
-    const changed = option.kind === "offset" && option.preview ? option.preview.slice(1, -1) : option.before;
-    if (changed?.length) viewer.current?.frameMeshes(changed, 1.6);
-  }, [option]);
+    const sides = [a, b, ...Object.keys(standIns)].filter((g): g is string => !!g);
+    if (!frameFix(option, sides) && option.before?.length) viewer.current?.frameMeshes(option.before, 1.6);
+  }, [option]);  // eslint-disable-line react-hooks/exhaustive-deps
   // A finished plan: frame everything it changes, or (nothing to change) the cluster it is about.
   useEffect(() => {
-    const changed = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : o.before ?? []));
-    if (changed.length) viewer.current?.frameMeshes(changed, 1.3);
-    else if (plan?.hub) viewer.current?.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
+    const v = viewer.current;
+    if (!v || !plan) return;
+    const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));
+    const pairs = plan.items.flatMap((it) => it.option && it.option.kind !== "offset"
+      ? movedPairs(it.option.moved, [it.element_a, it.element_b]) : []);
+    if (meshes.length || pairs.length) v.frameFix(meshes, pairs);
+    else if (plan.hub) v.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
   }, [planOptions, plan]);
+
+  function frameFix(o: { kind: string; moved: string[]; preview: Mesh[] | null }, sides: string[]) {
+    const meshes = o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : [];
+    return !!viewer.current?.frameFix(meshes, o.kind === "offset" ? [] : movedPairs(o.moved, sides));
+  }
 
   function resetWork() { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); setStandIns({}); }
 
@@ -703,4 +717,10 @@ export function App() {
         <Lightbox reportId={report.id} clash={clash} index={image} onClose={() => setImage(null)} onMove={setImage} />}
     </div>
   );
+}
+
+/** Each moved element with every clash element that stays put: where they meet is what a move changes. */
+function movedPairs(moved: string[], sides: string[]): [string, string][] {
+  const still = sides.filter((g) => !moved.includes(g));
+  return moved.flatMap((m) => still.map((g) => [m, g] as [string, string]));
 }

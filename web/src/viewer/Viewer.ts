@@ -4,6 +4,7 @@ import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
 
 const RED = new THREE.Color("#d0342c");
 const GREEN = new THREE.Color("#1f9d3a");
+const PURPLE = new THREE.Color("#8e44ad");  // one element on both sides: a port and its own valve, two parts of a door
 const GREY = new THREE.Color("#b9c2cc");
 const GHOST = new THREE.Color("#9aa7b4");
 
@@ -29,10 +30,13 @@ export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pie
 export type ViewMode = "shaded" | "xray" | "context" | "isolate";
 export type Preset = "top" | "front" | "right" | "iso";
 
+/** Side A (red), side B (green), or both at once (purple): the model has one element where the report has two. */
+export type Side = "a" | "b" | "ab";
+
 export interface Focus {
   a: string | null;
   b: string | null;
-  group?: Record<string, "a" | "b">;  // more elements drawn as part of side A or B
+  group?: Record<string, Side>;  // more elements drawn as part of side A or B
 }
 
 /** A picked point on the model: the element and where on it (three.js world coordinates). */
@@ -59,11 +63,12 @@ export class Viewer {
   private focusLayer = new THREE.Group();
   private focusMeshes = new Map<string, THREE.Mesh>();
   private focusGeometry = new Map<string, THREE.BufferGeometry>();
-  private focusMaterials = { a: this.focusMaterial(RED), b: this.focusMaterial(GREEN) };
+  private focusMaterials = { a: this.focusMaterial(RED), b: this.focusMaterial(GREEN), ab: this.focusMaterial(PURPLE) };
   /** Outlines of the focus elements drawn through everything, so a clash buried in a wall or slab still shows. */
   private edgeMaterials = {
     a: new THREE.LineBasicMaterial({ color: "#ff5a5a", depthTest: false, transparent: true, opacity: 0.9 }),
     b: new THREE.LineBasicMaterial({ color: "#5dff8a", depthTest: false, transparent: true, opacity: 0.9 }),
+    ab: new THREE.LineBasicMaterial({ color: "#d39bff", depthTest: false, transparent: true, opacity: 0.9 }),
   };
   private edges = new Map<string, THREE.LineSegments>();
   showEdges = true;
@@ -87,6 +92,7 @@ export class Viewer {
     host.appendChild(this.renderer.domElement);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    this.controls.zoomToCursor = true;  // the wheel zooms to what is under the pointer, not the orbit centre
     this.controls.addEventListener("start", () => { this.flight = null; });
     this.scene.background = new THREE.Color("#dfe6ee");
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.6));
@@ -164,10 +170,11 @@ export class Viewer {
     this.applyMode();
   }
 
-  private focusSide(gid: string): "a" | "b" | undefined {
-    if (gid === this.focus.a) return "a";
-    if (gid === this.focus.b) return "b";
-    return this.focus.group?.[gid];
+  private focusSide(gid: string): Side | undefined {
+    const g = this.focus.group?.[gid];
+    const inA = gid === this.focus.a || g === "a" || g === "ab";
+    const inB = gid === this.focus.b || g === "b" || g === "ab";
+    return inA && inB ? "ab" : inA ? "a" : inB ? "b" : undefined;
   }
 
   private focusIds(): string[] {
@@ -243,7 +250,7 @@ export class Viewer {
     return g;
   }
 
-  private edgesOf(gid: string, f: Found, side: "a" | "b"): THREE.LineSegments {
+  private edgesOf(gid: string, f: Found, side: Side): THREE.LineSegments {
     let line = this.edges.get(gid);
     if (!line) {
       // EdgesGeometry needs a geometry of its own: copy just this element's triangles out of the batch.
@@ -393,7 +400,29 @@ export class Viewer {
     else if (boxes.length === 1 && point) zone = new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3(1, 1, 1)).intersect(boxes[0]);
     if ((!zone || zone.isEmpty()) && point) zone = new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3(0.6, 0.6, 0.6));
     if (!zone || zone.isEmpty()) return false;
-    const union = boxes.reduce((u, b) => u.union(b), zone.clone());
+    this.setMarker(point ?? zone.getCenter(new THREE.Vector3()), label);
+    this.flyToZone(zone, boxes.reduce((u, b) => u.union(b), zone.clone()));
+    return true;
+  }
+
+  /** Frame what a fix changes: the offset pieces given, and where each moved element now meets its partner
+   * (`pairs`: [moved, partner]). Not the whole moved element: raising a 16 m run frames the crossing. */
+  frameFix(meshes: Mesh[], pairs: [string, string][]) {
+    const zone = meshBox(meshes);
+    const union = zone.clone();
+    for (const [moved, partner] of pairs) {
+      const a = this.boxOf([moved]), b = this.boxOf([partner]);
+      if (a.isEmpty() || b.isEmpty()) continue;
+      zone.union(meetingZone(a, b));
+      union.union(a).union(b);
+    }
+    if (zone.isEmpty()) return false;
+    this.flyToZone(zone, union.union(zone));
+    return true;
+  }
+
+  /** Fly to a zone with a margin that grows with it and with the elements around it (`union`), never too far out. */
+  private flyToZone(zone: THREE.Box3, union: THREE.Box3) {
     const zoneDiag = zone.getSize(new THREE.Vector3()).length();
     const unionDiag = union.getSize(new THREE.Vector3()).length();
     const margin = Math.min(Math.max(0.35 * zoneDiag, 0.1 * unionDiag, 0.5), Math.max((unionDiag - zoneDiag) / (2 * Math.sqrt(3)), 0.5));
@@ -403,9 +432,7 @@ export class Viewer {
     const vFov = THREE.MathUtils.degToRad(this.camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
     const dist = Math.max((r / Math.sin(Math.min(vFov, hFov) / 2)) * 1.1, 2 * r + 0.5);
-    this.setMarker(point ?? zone.getCenter(new THREE.Vector3()), label);
     this.flyTo(centre.clone().add(this.viewDirection().multiplyScalar(dist)), centre);
-    return true;
   }
 
   /** Keep the user's angle when it is a reasonable one; otherwise a high iso view. */
@@ -422,8 +449,7 @@ export class Viewer {
 
   /** Frame server triangles (metres, Z up): the part of the model a fix changes. */
   frameMeshes(meshes: Mesh[], tight = 1.4) {
-    const box = new THREE.Box3();
-    for (const m of meshes) for (let i = 0; i < m.verts.length; i += 3) box.expandByPoint(new THREE.Vector3(m.verts[i], m.verts[i + 2], -m.verts[i + 1]));
+    const box = meshBox(meshes);
     if (!box.isEmpty()) this.flyToBox(box, tight);
   }
 
@@ -482,7 +508,7 @@ export class Viewer {
       this.sectionHelper = new THREE.Box3Helper(b, new THREE.Color("#2f5d8a"));
       this.scene.add(this.sectionHelper);
     }
-    for (const m of [this.solid, this.ghost, this.focusMaterials.a, this.focusMaterials.b]) m.needsUpdate = true;
+    for (const m of [this.solid, this.ghost, ...Object.values(this.focusMaterials)]) m.needsUpdate = true;
     return true;
   }
 
@@ -641,4 +667,11 @@ export function meetingZone(a: THREE.Box3, b: THREE.Box3): THREE.Box3 {
     max[k] = Math.max(lo, hi);
   }
   return new THREE.Box3(min, max);
+}
+
+/** The box of server triangles (metres, Z up) in viewer coordinates. */
+function meshBox(meshes: Mesh[]): THREE.Box3 {
+  const box = new THREE.Box3();
+  for (const m of meshes) for (let i = 0; i < m.verts.length; i += 3) box.expandByPoint(new THREE.Vector3(m.verts[i], m.verts[i + 2], -m.verts[i + 1]));
+  return box;
 }

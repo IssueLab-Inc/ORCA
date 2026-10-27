@@ -58,10 +58,25 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
                   : measure.distance_m == null ? "no overlap here" : mm(measure.distance_m)}</dd>
         {clash.grid && <><dt>Grid</dt><dd>{clash.grid}</dd></>}
       </dl>
+      {oneElement(match) && (
+        <p className="hint"><i className="sw purple" />A and B are one element in this model, drawn purple: Navisworks
+          clashed {sameWhy(clash)}.</p>
+      )}
       <Side colour="red" label="A" e={clash.a} found={match ? match.a : undefined} how={match?.how[0]} />
       <Side colour="green" label="B" e={clash.b} found={match ? match.b : undefined} how={match?.how[1]} />
     </section>
   );
+}
+
+/** Both sides resolve to the same model element (a port and its own valve, or two Navisworks parts of one door). */
+function oneElement(m: Matches[string] | undefined) {
+  const a = m?.show?.[0] ?? m?.a, b = m?.show?.[1] ?? m?.b;
+  return !!a && a === b;
+}
+
+function sameWhy(c: ReportClash) {
+  const ports = [c.a, c.b].filter((e) => /Port$/.test(e.ifc_class ?? "")).length;
+  return ports === 2 ? "two of its ports" : ports === 1 ? "a port with the element it belongs to" : "two parts of it";
 }
 
 export function Lightbox({ reportId, clash, index, onClose, onMove }: {

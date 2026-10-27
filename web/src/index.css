@@ -100,7 +100,7 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 
 /* Swatches, chips */
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; flex: none; }
-.sw.red { background: var(--red); } .sw.green { background: var(--green); } .sw.ghost { background: #e67e22; opacity: .6; }
+.sw.red { background: var(--red); } .sw.green { background: var(--green); } .sw.purple { background: #8e44ad; } .sw.ghost { background: #e67e22; opacity: .6; }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); white-space: nowrap; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
