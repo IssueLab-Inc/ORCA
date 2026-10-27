@@ -82,6 +82,16 @@ Findings (Oct 27, details in spikes/README.md):
 | C | Pair only, 40% transparent, ≈90° from A; a section/side view when one element is a slab/wall/beam |
 | text | Signed distance, names/classes/levels, rule. Severity comes from numbers, not pixels |
 
+## Starting a session
+
+- Work goes straight to `main` (solo repo). Run `server/` tests and the web build before pushing.
+- Demo models: add `IssueLab-Inc/ClashWiseDemoModels` and copy `northbank/*.ifc` into `samples/`.
+- Deploy: Modal, public, with proposal caps (owner decision Oct 27). `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` come
+  from the environment, never chat. Once: `modal secret create sightline-meta META_API_KEY="$META_API_KEY"`
+  (no echo). Then build the web app and `modal deploy deploy/modal_app.py` (README, "Deploy"). Open the URL,
+  load Northbank, try one proposal.
+- Private notes (strategy, application): ClashWiseApp branch `claude/zealous-pascal-7tdyvm`, `docs/hackathon/`.
+
 ## Status and next steps
 
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
@@ -96,7 +106,8 @@ Next, in order:
    Rev04 on #042/#057/#061.
 3. Viewer: context-ghost mode, A/B/C capture, section view.
 4. Agent loop end to end in the UI with Muse Spark, attempts streamed.
-5. Export IFC + BCF; voice; Muse Spark Open triage (open-weights bonus); deploy a public demo URL.
+5. Export IFC + BCF; voice; Muse Spark Open triage (open-weights bonus).
+0. **First: deploy** the public demo (above), then continue with 2.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.
