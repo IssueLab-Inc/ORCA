@@ -21,9 +21,13 @@ Browser (React + three.js + web-ifc)          Server (Python, FastAPI)
                                                   └─ Meta models: Muse Spark (vision, reasoning)
 ```
 
-The agent loop is **propose → verify → retry → rank**: Muse Spark proposes moves from the images, the
+The agent loop is **propose → verify → retry → rank**: Muse Spark proposes fixes from the images, the
 element data and a domain pack (construction rules of thumb, in `server/sightline/domain_packs/`); the
 geometry check tests each one; failures are fed back with what they hit; only verified options are shown.
+A fix is a **move** (an element and its straight run) or a **local offset** (`server/sightline/edits.py`): split a
+segment either side of an obstacle, raise or lower the middle piece, join it with risers, re-chain the ports, as a
+designer would around a beam. Openings through the obstacle are measured on the run's line and given to the model as
+heights. **Accept this fix** keeps it in the server's model; **Export edited IFC** downloads the changed files.
 
 The browser previews moves instantly; the server makes the real edit and is the only source of
 clearance numbers. Elements are addressed by IFC GlobalId everywhere.

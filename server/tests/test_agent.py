@@ -59,3 +59,19 @@ def test_env_file_fills_missing_settings_only(tmp_path, monkeypatch):
     import os
     assert os.environ["META_MODEL"] == "from-file"
     assert os.environ["META_API_KEY"] == "shell-key"
+
+
+def test_ranking_prefers_comfortable_clearance_and_drops_repeats():
+    from sightline.agent import Option, _keep, _reason
+    from sightline.verify import Hit
+
+    def opt(title, dz, clear):
+        return Option(title, ["d"], [0, 0, dz], "", "", clear, {}, "offset", [1.0, 2.0])
+
+    kept: list = []
+    for o in (opt("tight", 0.225, 0.025), opt("roomy", 0.25, 0.05), opt("roomy again", 0.252, 0.04)):
+        _keep(kept, o)
+    assert [o.title for o in kept] == ["tight", "roomy"]
+    hits = [Hit("x", "IfcDuctSegment", "collision", -0.249), Hit("y", "IfcDuctSegment", "collision", -0.1),
+            Hit("z", "IfcWall", "clearance", 0.01)]
+    assert _reason(hits) == "collision with IfcDuctSegment x2 (worst -249 mm), clearance with IfcWall (+10 mm)"

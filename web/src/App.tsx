@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Matches, type Measure, type Proposal, type Report, type ReportClash, type Verdict } from "./api";
+import { api, type Matches, type Measure, type Option, type Proposal, type Report, type ReportClash, type Verdict } from "./api";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { ReportList, mm } from "./ReportList";
 import { Viewer } from "./viewer/Viewer";
@@ -32,6 +32,8 @@ export function App() {
   const [clash, setClash] = useState<ReportClash | null>(null);
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
   const [image, setImage] = useState<number | null>(null);
+  const [accepted, setAccepted] = useState<string[]>([]);  // titles of fixes kept in the server's model
+  const [remeasure, setRemeasure] = useState(0);
 
   useEffect(() => {
     if (!host.current) return;
@@ -57,7 +59,9 @@ export function App() {
     return () => { cancelAnimationFrame(raf); v.dispose(); };
   }, []);
 
-  useEffect(() => viewer.current?.highlight(a, b, isolate), [a, b, isolate]);
+  // Pieces an accepted offset added, drawn with the side they belong to.
+  const [group, setGroup] = useState<Record<string, "a" | "b">>({});
+  useEffect(() => viewer.current?.highlight(a, b, isolate, group), [a, b, isolate, group]);
 
   // Link the report to the open model whenever either changes.
   useEffect(() => {
@@ -78,7 +82,7 @@ export function App() {
     setMeasure("busy");
     api.measure(report.id, clash.id, sceneId).then((x) => live && setMeasure(x)).catch(() => live && setMeasure(null));
     return () => { live = false; };
-  }, [clash, report, sceneId, matches]);
+  }, [clash, report, sceneId, matches, remeasure]);
 
   // Dev-only hook for smoke tests: select a clash pair by GlobalId without hunting for it with the mouse.
   useEffect(() => {
@@ -90,8 +94,9 @@ export function App() {
 
   useEffect(() => {
     const opt = chosen == null ? null : proposal?.options[chosen];
-    viewer.current?.preview(opt ? [{ globalIds: opt.moved, deltaM: opt.delta_m }] : []);
-  }, [chosen, proposal]);
+    if (opt?.kind === "offset" && opt.preview) viewer.current?.previewPieces(opt.moved, opt.preview, opt.moved[0] === a ? "#d0342c" : "#1f9d3a");
+    else viewer.current?.preview(opt ? [{ globalIds: opt.moved, deltaM: opt.delta_m }] : []);
+  }, [chosen, proposal, a]);
 
   function resetWork() { setProposal(null); setChosen(null); setManual(null); }
 
@@ -119,7 +124,7 @@ export function App() {
   }
 
   function selectClash(c: ReportClash) {
-    setClash(c); resetWork(); setImage(null);
+    setClash(c); resetWork(); setImage(null); setGroup({});
     if (!matches) { setA(null); setB(null); }
   }
 
@@ -128,7 +133,7 @@ export function App() {
     const gid = viewer.current?.pick(ev.nativeEvent);
     if (!gid || gid === a) return;
     if (!a || (a && b)) { setA(gid); setB(null); } else setB(gid);
-    setClash(null); resetWork();
+    setClash(null); resetWork(); setGroup({});
   }
 
   async function propose() {
@@ -137,6 +142,21 @@ export function App() {
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
     try { const p = await api.propose(sceneId, a, b, from); setProposal(p); setChosen(p.options.length ? 0 : null); }
     catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  }
+
+  async function accept(o: Option) {
+    if (!sceneId) return;
+    setBusy("Applying the fix…"); setError(null);
+    try {
+      const { files, pieces } = await api.accept(sceneId, o);
+      viewer.current?.preview([]);
+      for (const i of files) await viewer.current!.replace(i, await api.file(sceneId, i));
+      const side = o.moved[0] === a ? "a" : "b";
+      const next = { ...group, ...Object.fromEntries((pieces ?? []).map((g) => [g, side] as const)) };
+      setGroup(next);
+      viewer.current?.highlight(a, b, isolate, next);
+      setAccepted([...accepted, o.title]); resetWork(); setRemeasure(remeasure + 1);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
 
   async function checkManual() {
@@ -224,18 +244,25 @@ export function App() {
         <h2>Verified options</h2>
         {proposal && !proposal.options.length && <p className="bad">No move passed the check. This clash needs a person.</p>}
         {proposal?.options.map((o, i) => (
-          <button key={i} className={`card ${chosen === i ? "pick" : ""}`} onClick={() => setChosen(chosen === i ? null : i)}>
-            <span className="row"><b>{i + 1} · {o.title}</b><span className="chip ok">verified</span></span>
-            <span className="row"><span>Clearance</span><span className="mono">{mm(o.min_clearance_m)}</span></span>
-            <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
-            <span className="why">{o.rationale}</span>
-          </button>
+          <div key={i} className={`card ${chosen === i ? "pick" : ""}`}>
+            <button className="card-body" onClick={() => setChosen(chosen === i ? null : i)}>
+              <span className="row"><b>{i + 1} · {o.title}</b><span className="chip ok">verified</span></span>
+              <span className="row"><span>Edit</span><span className="mono">{o.kind === "offset" && o.split_m
+                ? `offset ${o.split_m.map((v) => v.toFixed(2)).join("–")} m, ${mm(o.delta_m[2])}`
+                : `move ${o.delta_m.map((v) => mm(v)).join(", ")}`}</span></span>
+              <span className="row"><span>Clearance</span><span className="mono">{mm(o.min_clearance_m)}</span></span>
+              <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
+              <span className="why">{o.rationale}</span>
+            </button>
+            {chosen === i && <button className="btn primary" disabled={!!busy} onClick={() => accept(o)}>Accept this fix</button>}
+          </div>
         ))}
+        {accepted.length > 0 && <p className="ok">Accepted: {accepted.join("; ")}. Export edited IFC to download.</p>}
       </aside>
 
       <footer className="dock">
         {proposal?.attempts.map((t, i) => (
-          <span key={i} className={`step ${t.passed ? "ok" : "fail"}`}><i>{i + 1}</i>{t.title}{t.passed ? "" : `: ${t.reason}`}</span>
+          <span key={i} className={`step ${t.passed ? "ok" : "fail"}`}><i>{i + 1}</i>{t.kind === "offset" ? "Offset · " : ""}{t.title}{t.passed ? "" : `: ${t.reason}`}</span>
         )) ?? <span className="hint">The agent's steps appear here, failed attempts included.</span>}
       </footer>
 

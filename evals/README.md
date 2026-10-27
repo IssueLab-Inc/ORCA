@@ -28,8 +28,17 @@ The loop's own result (attempts until a verified option) gets its own columns on
 |---|---|---|---|---|---|---|---|
 | 2026-10-27 | northbank-rev03 | #042 | none | 1 | 0/1 | 0/1 | 28.8 s |
 | 2026-10-27 | northbank-rev03 | #042 | ABC | 3 | 2/3 | 2/3 | 41.2 s |
+| 2026-10-27 | northbank-rev03, local offsets, no opening data | #042 #057 #061 | ABC, ABC, none | 3 | 0/3 | 1/3 | 33.7 s |
+| 2026-10-27 | northbank-rev03, local offsets + opening data | #042 #057 #061 | ABC, ABC, none | 3 | **3/3** | **3/3** | 34.8 s |
 
 Details of the first runs: `spikes/README.md`, "Spike 4 on #042".
+
+Local offsets (`answer_key.py`, one round each; #061 has no Navisworks images). Rows 5-10 of `results.csv`.
+- Without opening data the model offset around the girder, under it (into the ceiling and lights) or over it (into the
+  slab): 1 of 13 candidates passed, a whole-run drop on #042.
+- With the girder's openings measured on each run's line (`edits.passages`, rays through the obstacle: #042 fits at
+  +0.375 to +0.425 m, #057 +0.225 to +0.275, #061 +0.252 to +0.308) the first candidate passed every time, at Rev04's
+  own heights: +0.40, +0.25, +0.28 m, with 50/50/53 mm clearance.
 
 ## Triage of Navisworks results
 

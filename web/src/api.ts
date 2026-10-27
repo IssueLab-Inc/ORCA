@@ -1,10 +1,12 @@
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
 export interface Verdict { passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number }
+export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
   title: string; moved: string[]; delta_m: number[]; rationale: string; also_needs: string;
   min_clearance_m: number | null;
+  kind: "move" | "offset"; split_m: number[] | null; preview: Piece[] | null;
 }
-export interface Attempt { title: string; delta_m: number[]; passed: boolean; reason: string }
+export interface Attempt { title: string; delta_m: number[]; passed: boolean; reason: string; kind: "move" | "offset"; split_m: number[] | null }
 export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[] }
 
 /** One side of a clash as the Navisworks report describes it. */
@@ -31,12 +33,16 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   samples: () => call<string[]>("/samples"),
   open: (samples: string[]) => call<{ id: string; files: string[] }>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
-  file: async (id: string, index: number) => new Uint8Array(await (await fetch(`/api/scenes/${id}/files/${index}`)).arrayBuffer()),
+  file: async (id: string, index: number) => new Uint8Array(await (await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" })).arrayBuffer()),
   verify: (id: string, moved: string[], delta_m: number[]) =>
     call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
   propose: (id: string, element_a: string, element_b: string, from?: { report_id: string; clash_id: string }) =>
     call<Proposal>(`/scenes/${id}/propose`, { method: "POST", body: JSON.stringify({ element_a, element_b, ...from }) }),
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
+  /** Keep a fix in the server's model; returns the indexes of the files that changed. */
+  accept: (id: string, o: Option) => (o.kind === "offset"
+    ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
+    : call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })),
 
   reportSamples: () => call<string[]>("/reports/samples"),
   openReport: (sample: string) => call<Report>("/reports", { method: "POST", body: JSON.stringify({ sample }) }),

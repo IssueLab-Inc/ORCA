@@ -33,7 +33,7 @@ h2 { font-size: 13px; margin: 6px 0 0; }
 .stage canvas { display: block; width: 100%; height: 100%; }
 .overlay { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
 .overlay.error { color: var(--fail); border-color: var(--fail); }
-.card { all: unset; cursor: pointer; border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.card { all: unset; border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
 .card.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .row { display: flex; justify-content: space-between; gap: 8px; }
 .why { color: var(--muted); }
@@ -94,3 +94,6 @@ h2 { font-size: 13px; margin: 6px 0 0; }
 .lightbox img { max-width: 100%; max-height: calc(100vh - 140px); object-fit: contain; border-radius: 8px; background: #222; }
 .lightbox figcaption { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; color: #fff; font-size: 13px; }
 .lb-nav { display: flex; gap: 6px; }
+.card-body { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.card-body:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card .btn { margin-top: 6px; }

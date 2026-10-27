@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 24 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 33 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -110,11 +110,17 @@ test with their A/B/C images, matches them to the open model (Northbank: 290/317
 re-measures on selection. Proposals on a report clash get its images. Muse Spark tool calling works natively on
 `api.meta.ai` (OpenAI `tools`, 2 s round trip, streaming): the chat over reports + model is next (plan below).
 
+Local offsets (Oct 27): `server/sightline/edits.py` splits a straight extruded segment (profile upright or on its
+side), raises/lowers the middle, adds square-cornered risers (Rev04 uses bends), keeps the original GlobalId on the
+first piece and re-chains ports; tried in an IfcOpenShell transaction and undone. `edits.passages` finds openings in
+the obstacle by ray casting (Northbank's girder openings are cut into its geometry, no IfcOpeningElement). With that
+text Muse Spark's first proposal passes on #042/#057/#061 at Rev04's heights (evals/README.md). UI: offset preview,
+**Accept this fix** (server applies, browser reloads that file), re-measure. 33 server tests.
+
 Next, in order.
-1. ✅ Spike 4 passed with images (spikes/README.md). Feed web-opening sizes/positions as text so moves land on the
-   millimetre (the model said +0.38 m, the answer is +0.40 m).
-2. **Local-offset edit** (before the chat, so #057/#061 get fixes too): split a straight segment, raise/lower the
-   middle piece, connecting pieces; verify against Rev04 on #042/#057/#061.
+1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
+2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. Later: bends instead of square corners,
+   sideways offsets, splitting at fittings.
 3. Viewer: context-ghost mode, A/B/C capture, section view.
 4. Agent loop end to end in the UI with Muse Spark, attempts streamed. Chat panel: Muse Spark with tools over the
    open report and model (list/filter clashes, get a clash, look at its images, triage, describe elements, check a

@@ -21,6 +21,9 @@ export class Viewer {
   /** One batched mesh per federated file (structure, MEP, architecture…). */
   models: LoadedModel[] = [];
   private raycaster = new THREE.Raycaster();
+  /** New pieces of a previewed edit (a local offset), drawn over the models until the preview changes. */
+  private overlay = new THREE.Group();
+  private hidden: string[] = [];
   private resize = new ResizeObserver(() => this.fit());
 
   constructor(private host: HTMLElement) {
@@ -34,6 +37,7 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
+    this.scene.add(this.overlay);
     this.resize.observe(host);
     this.fit();
     this.renderer.setAnimationLoop(() => {
@@ -58,6 +62,15 @@ export class Viewer {
     };
   }
 
+  /** Swap one federated file for a new version of it (after an edit was accepted on the server). */
+  async replace(index: number, bytes: Uint8Array) {
+    const old = this.models[index];
+    const m = await loadIfc(bytes);
+    if (old) this.scene.remove(old.mesh);
+    this.models[index] = m;
+    this.scene.add(m.mesh);
+  }
+
   private find(globalId: string): Found | null {
     for (const model of this.models) {
       const el = model.byGlobalId.get(globalId);
@@ -76,19 +89,22 @@ export class Viewer {
     return model?.byInstance.get(hit.batchId)?.globalId ?? null;
   }
 
-  /** Red/green pair, everything else greyed or hidden (images A and B). */
-  highlight(a: string | null, b: string | null, isolate = false) {
+  /** Red/green pair, everything else greyed or hidden (images A and B). `group` holds pieces that belong to one
+   * side of the pair (the new pieces of an accepted offset): GlobalId → "a" or "b". */
+  highlight(a: string | null, b: string | null, isolate = false, group: Record<string, "a" | "b"> = {}) {
     for (const model of this.models) {
       for (const el of model.byGlobalId.values()) {
-        const inPair = el.globalId === a || el.globalId === b;
-        model.mesh.setColorAt(el.instanceId, el.globalId === a ? RED : el.globalId === b ? GREEN : a || b ? GREY : el.baseColor);
+        const side = el.globalId === a ? "a" : el.globalId === b ? "b" : group[el.globalId];
+        const inPair = !!side;
+        model.mesh.setColorAt(el.instanceId, side === "a" ? RED : side === "b" ? GREEN : a || b ? GREY : el.baseColor);
         model.mesh.setVisibleAt(el.instanceId, !isolate || inPair || !(a || b));
       }
     }
   }
 
-  /** Preview moves without touching the model: GlobalIds + server delta (metres, Z up). */
+  /** Preview moves without touching the model: GlobalIds + server delta (metres, Z up). Clears any edit preview. */
   preview(moves: { globalIds: string[]; deltaM: number[] }[]) {
+    this.clearOverlay();
     for (const model of this.models) for (const el of model.byGlobalId.values()) model.mesh.setMatrixAt(el.instanceId, el.baseMatrix);
     for (const m of moves) {
       const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(m.deltaM));
@@ -96,6 +112,43 @@ export class Viewer {
         const f = this.find(gid);
         if (f) f.model.mesh.setMatrixAt(f.el.instanceId, f.el.baseMatrix.clone().premultiply(t));
       }
+    }
+  }
+
+  /** Preview an edit that replaces elements with new shapes: hide `replaced`, draw `pieces` (server triangles,
+   * metres, Z up) in `color`. */
+  previewPieces(replaced: string[], pieces: { verts: number[]; faces: number[] }[], color: THREE.ColorRepresentation) {
+    this.preview([]);
+    for (const gid of replaced) {
+      const f = this.find(gid);
+      if (f) f.model.mesh.setVisibleAt(f.el.instanceId, false);
+    }
+    this.hidden = [...replaced];
+    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.6, side: THREE.DoubleSide });
+    for (const p of pieces) {
+      const pos = new Float32Array(p.verts.length);
+      for (let i = 0; i < p.verts.length; i += 3) {
+        pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; // IFC Z up → three.js Y up
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.setIndex(p.faces);
+      g.computeVertexNormals();
+      this.overlay.add(new THREE.Mesh(g, material));
+    }
+  }
+
+  private clearOverlay() {
+    for (const gid of this.hidden) {
+      const f = this.find(gid);
+      if (f) f.model.mesh.setVisibleAt(f.el.instanceId, true);
+    }
+    this.hidden = [];
+    for (const child of [...this.overlay.children]) {
+      const mesh = child as THREE.Mesh;
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+      this.overlay.remove(mesh);
     }
   }
 

@@ -83,3 +83,62 @@ if __name__ == "__main__":
     import sys
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "../samples/fixture-clash.ifc")
     print(build_clash_fixture(out))
+
+
+def build_run_fixture(path: Path, millimetres: bool = False) -> Path:
+    """A duct run along X that crosses a beam, under a slab: the case for a local offset.
+
+    The supply main is one straight segment (0-6 m, 400 wide x 300 deep, centreline z = 2.8) extruded along its own
+    axis, with ports at both ends; the far port joins a 1 m end segment. The beam (along Y at x = 3, z 2.6-3.0) blocks
+    it and the slab soffit is at z = 3.4, so an offset up must be 0.375-0.425 m to keep 25 mm both sides; 0.40 m
+    leaves 50 mm.
+    """
+    k = 1000.0 if millimetres else 1.0
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="Sightline offset fixture")
+    length = ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT",
+                                  prefix="MILLI" if millimetres else None)
+    ifcopenshell.api.run("unit.assign_unit", model, units=[length])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 02")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+    def element(ifc_class, name):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        return e
+
+    _box(model, body, element("IfcBeam", "Transfer beam"), (0.2 * k, 3.0 * k, 0.4 * k), (2.9 * k, -1.5 * k, 2.6 * k))
+    _box(model, body, element("IfcSlab", "Level 03 slab"), (8.0 * k, 3.0 * k, 0.2 * k), (-0.5 * k, -1.5 * k, 3.4 * k))
+
+    def duct(name, x0, run):
+        e = element("IfcDuctSegment", name)
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+        profile = model.createIfcRectangleProfileDef("AREA", None, None, 0.4 * k, 0.3 * k)
+        position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint((x0 * k, 0.0, 2.8 * k)),
+                                                   model.createIfcDirection((1.0, 0.0, 0.0)),
+                                                   model.createIfcDirection((0.0, 1.0, 0.0)))
+        solid = model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)), run * k)
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+        ports = []
+        for n, x in enumerate((x0, x0 + run)):
+            port = ifcopenshell.api.run("system.add_port", model, element=e)
+            port.Name = f"Port {n}"
+            port.FlowDirection = "SINK" if n == 0 else "SOURCE"
+            matrix = np.eye(4)
+            matrix[:3, 3] = (x * k, 0.0, 2.8 * k)
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=matrix)
+            ports.append(port)
+        return e, ports
+
+    main, (_, main_far) = duct("Supply main 400x300", 0.0, 6.0)
+    main.Tag = "SA-1"
+    _, (end_near, _) = duct("Supply main 400x300", 6.0, 1.0)
+    ifcopenshell.api.run("system.connect_port", model, port1=main_far, port2=end_near, direction="SOURCE")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path

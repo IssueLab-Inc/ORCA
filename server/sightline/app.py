@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import edits
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
@@ -40,6 +41,14 @@ class Propose(BaseModel):
     notes: str = ""
     report_id: str | None = None  # a clash from an open report: its distance and images go to the model
     clash_id: str | None = None
+
+
+class Offset(BaseModel):
+    element: str
+    split_m: list[float]
+    dz_m: float
+    other: str | None = None   # the obstacle, for checking
+    clearance_m: float = 0.025
 
 
 class OpenReport(BaseModel):
@@ -77,7 +86,9 @@ def scene_file(scene_id: str, index: int):
     paths = ws.scene(_scene(scene_id)).paths
     if not 0 <= index < len(paths):
         raise HTTPException(404, "No such file in this model set.")
-    return FileResponse(paths[index], media_type="application/octet-stream")
+    # Never cached: after an accepted edit the same URL serves the edited model.
+    return FileResponse(ws.file(scene_id, index, EXPORTS), media_type="application/octet-stream",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/scenes/{scene_id}/elements/{global_id}")
@@ -105,6 +116,21 @@ def propose(scene_id: str, body: Propose, request: Request):
 @app.post("/api/scenes/{scene_id}/apply")
 def apply(scene_id: str, body: Move):
     return ws.apply(_scene(scene_id), body.moved, body.delta_m)
+
+
+@app.post("/api/scenes/{scene_id}/offset/check")
+def check_offset(scene_id: str, body: Offset):
+    if not body.other:
+        raise HTTPException(422, "Say which element the offset goes around (other).")
+    return ws.check_offset(_scene(scene_id), body.element, body.other, body.split_m, body.dz_m, body.clearance_m)
+
+
+@app.post("/api/scenes/{scene_id}/offset/apply")
+def apply_offset(scene_id: str, body: Offset):
+    try:
+        return ws.apply_offset(_scene(scene_id), body.element, body.split_m, body.dz_m)
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot offset this element: {e}")
 
 
 @app.get("/api/scenes/{scene_id}/export")

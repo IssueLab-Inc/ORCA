@@ -126,6 +126,21 @@ class IfcScene:
                         break
         return self._bounds
 
+    def refresh_bounds(self, global_ids: list[str]) -> None:
+        """Recompute the cached boxes of elements whose shape changed or that were just created."""
+        if self._bounds is None:
+            return
+        settings = ifcopenshell.geom.settings()
+        settings.set("use-world-coords", True)
+        for gid in global_ids:
+            verts = np.asarray(ifcopenshell.geom.create_shape(settings, self.entity(gid)).geometry.verts,
+                               dtype=float).reshape(-1, 3)
+            self._bounds[gid] = np.array([verts.min(axis=0), verts.max(axis=0)])
+
+    def mark_edited(self, global_id: str) -> None:
+        """Record that the file holding this element changed, so export writes it."""
+        self._edited.add(self.index_of(global_id))
+
     def near(self, global_ids: list[str], margin_m: float) -> set[str]:
         """Elements whose box comes within `margin_m` of the boxes of `global_ids`."""
         b = self.bounds()

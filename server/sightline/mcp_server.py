@@ -53,6 +53,21 @@ def apply_solution(scene_id: str, moved: list[str], delta_m: list[float]) -> dic
 
 
 @mcp.tool()
+def check_local_offset(scene_id: str, element: str, other: str, split_m: list[float], dz_m: float,
+                       clearance_m: float = 0.025) -> dict:
+    """Try a local offset without keeping it: split `element` at two points (metres along it from its start),
+    raise (+) or lower (-) the middle piece by `dz_m`, and check it against the whole model."""
+    result = ws.check_offset(scene_id, element, other, split_m, dz_m, clearance_m)
+    return {k: v for k, v in result.items() if k != "preview"}
+
+
+@mcp.tool()
+def apply_local_offset(scene_id: str, element: str, split_m: list[float], dz_m: float) -> dict:
+    """Keep a local offset in the open model: returns the GlobalIds of the pieces in run order."""
+    return ws.apply_offset(scene_id, element, split_m, dz_m)
+
+
+@mcp.tool()
 def export_model(scene_id: str) -> list[str]:
     """Write the edited IFC files (only those with changes) and return their paths."""
     return [str(p) for p in ws.export(scene_id, Path(tempfile.gettempdir()))]

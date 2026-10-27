@@ -9,7 +9,9 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Callable
 
-from . import verify
+import numpy as np
+
+from . import edits, verify
 from .meta_client import ChatModel
 from .scene import IfcScene
 
@@ -34,6 +36,9 @@ class Option:
     also_needs: str
     min_clearance_m: float | None
     placements: dict[str, list[float]]  # GlobalId → new 4x4 world matrix, for the browser preview
+    kind: str = "move"                  # "move" (delta_m on the run) or "offset" (split, middle piece by delta_m Z)
+    split_m: list[float] | None = None  # offset only: split points, metres along the segment from its start
+    preview: list[dict] | None = None   # offset only: world triangles of every piece, for the browser preview
 
 
 @dataclass
@@ -42,6 +47,8 @@ class Attempt:
     delta_m: list[float]
     passed: bool
     reason: str
+    kind: str = "move"
+    split_m: list[float] | None = None
 
 
 @dataclass
@@ -59,15 +66,49 @@ def _describe(scene: IfcScene, clash: Clash) -> str:
     ]
     if clash.distance_m is not None:
         lines.append(f"Reported signed distance: {clash.distance_m * 1000:.1f} mm (negative = overlap)")
+    for label, this, other in (("A", clash.element_a, clash.element_b), ("B", clash.element_b, clash.element_a)):
+        lines += _run_text(scene, label, this, other)
     if clash.notes:
         lines.append(f"Notes: {clash.notes}")
     return "\n".join(lines)
 
 
+def _run_text(scene: IfcScene, label: str, gid: str, other: str) -> list[str]:
+    """A straight segment's geometry, and where the other element sits along it: what a local offset needs."""
+    try:
+        run = edits.run_of(scene, gid)
+    except (edits.Unsupported, KeyError):
+        return []
+    b = scene.bounds()
+    start, d = np.asarray(run.start), np.asarray(run.direction)
+    lines = [f"Element {label} is a straight segment from {np.round(start, 3).tolist()} to "
+             f"{np.round(run.end, 3).tolist()} m ({run.length_m:.2f} m long, direction {np.round(d, 3).tolist()}), "
+             f"profile {run.width_m * 1000:.0f} wide x {run.depth_m * 1000:.0f} deep."]
+    if other in b:
+        corners = np.array([[x, y, z] for x in b[other][:, 0] for y in b[other][:, 1] for z in b[other][:, 2]])
+        along = (corners - start) @ d
+        lo, hi = max(along.min(), 0.0), min(along.max(), run.length_m)
+        if lo < hi:
+            lines.append(f"The other element occupies {lo:.2f}-{hi:.2f} m along it, from z {b[other][0][2]:.3f} to "
+                         f"{b[other][1][2]:.3f} m. A local offset of {label} can split it either side of that (a riser "
+                         f"takes {run.depth_m:.2f} m of run, and at least 0.05 m must remain at each end).")
+            try:
+                holes = edits.passages(scene, gid, other)
+            except RuntimeError:
+                holes = []
+            for h in holes:
+                lines.append(f"The other element has an opening on this line from z {h['bottom_m']:.3f} to "
+                             f"{h['top_m']:.3f} m: offsetting {label}'s middle piece by {h['dz_min_m']:+.3f} to "
+                             f"{h['dz_max_m']:+.3f} m passes it through with 25 mm all round.")
+    return lines
+
+
 def _feedback(attempts: list[Attempt]) -> str:
     if not attempts:
         return ""
-    tried = "\n".join(f"- {t.title} {t.delta_m}: {'passed' if t.passed else 'FAILED, ' + t.reason}" for t in attempts)
+    def what(t: Attempt) -> str:
+        return f"offset {t.split_m} by {t.delta_m[2]:+.3f} m" if t.kind == "offset" else f"move {t.delta_m}"
+    tried = "\n".join(f"- {t.title} ({what(t)}): {'passed' if t.passed else 'FAILED, ' + t.reason}" for t in attempts)
     return f"\n\nAlready tried:\n{tried}\nPropose different moves."
 
 
@@ -85,6 +126,15 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         understanding = understanding or reply.get("understanding", "")
         for cand in reply.get("candidates", []):
             target = clash.element_a if cand.get("move", "A") == "A" else clash.element_b
+            other = clash.element_b if target == clash.element_a else clash.element_a
+            if cand.get("kind") == "offset":
+                attempt, option = _try_offset(base, cand, target, other, clearance_m)
+                attempts.append(attempt)
+                if on_step:
+                    on_step(attempt)
+                if option:
+                    _keep(options, option)
+                continue
             run = base.connected_run(target)
             delta = [float(v) for v in cand["delta_m"]]
             # Try the move in place and undo it: re-serialising a large model per attempt costs seconds.
@@ -95,21 +145,74 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 v = verify.check(base, run, clearance_m=clearance_m, ignore=neighbours)
             finally:
                 base.translate(run, tuple(-d for d in delta))
-            reason = "" if v.passed else ", ".join(
-                f"{h.kind} with {h.other_class} ({h.distance_m * 1000:+.0f} mm)" for h in v.hits)
+            reason = _reason(v.hits)
             attempt = Attempt(cand.get("title", "move"), delta, v.passed, reason)
             attempts.append(attempt)
             if on_step:
                 on_step(attempt)
             if v.passed:
-                options.append(Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""),
+                _keep(options, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""),
                                       cand.get("also_needs", ""), v.min_clearance_m, placements))
         if len(options) >= want:
             break
 
-    # Rank: smallest move first, then most clearance. Simple and explainable; the UI shows both numbers.
-    options.sort(key=lambda o: (sum(abs(d) for d in o.delta_m), -(o.min_clearance_m or 0)))
+    # Rank: options with comfortable clearance (twice the minimum, or nothing near) first, then the smallest change,
+    # then the most clearance. Simple and explainable; the UI shows both numbers.
+    def comfortable(o: Option) -> bool:
+        return o.min_clearance_m is None or o.min_clearance_m >= 2 * clearance_m - 1e-6
+    options.sort(key=lambda o: (not comfortable(o), sum(abs(d) for d in o.delta_m), -(o.min_clearance_m or 1.0)))
     return Result(understanding, options[:want], attempts)
+
+
+def _reason(hits: list[verify.Hit]) -> str:
+    """What a failed attempt hit, one entry per kind and class: "collision with IfcDuctSegment x5 (worst -249 mm)"."""
+    groups: dict[tuple[str, str], list[float]] = {}
+    for h in hits:
+        groups.setdefault((h.kind, h.other_class), []).append(h.distance_m)
+    return ", ".join(f"{kind} with {cls}" + (f" x{len(ds)} (worst {min(ds) * 1000:+.0f} mm)" if len(ds) > 1
+                                              else f" ({ds[0] * 1000:+.0f} mm)")
+                     for (kind, cls), ds in groups.items())
+
+
+def _keep(options: list[Option], new: Option) -> None:
+    """Add a verified option unless it is the same fix as one already kept (same kind and change, within 10 mm)."""
+    for i, o in enumerate(options):
+        if o.kind == new.kind and o.moved == new.moved and all(abs(x - y) < 0.01 for x, y in zip(o.delta_m, new.delta_m)):
+            if (new.min_clearance_m or 1.0) > (o.min_clearance_m or 1.0):
+                options[i] = new
+            return
+    options.append(new)
+
+
+def _try_offset(scene: IfcScene, cand: dict, target: str, other: str,
+               clearance_m: float) -> tuple[Attempt, Option | None]:
+    """Split `target` around the obstacle and raise or lower the middle, check it, undo it.
+
+    Only the new pieces (risers and middle) are checked against everything; the shortened end pieces only against
+    the obstacle, since they lost length and cannot have gained a clash anywhere else.
+    """
+    title = cand.get("title", "local offset")
+    split = [float(v) for v in cand.get("split_m", [])]
+    dz = float(cand.get("dz_m", 0.0))
+    delta = [0.0, 0.0, dz]
+    if len(split) != 2:
+        return Attempt(title, delta, False, "an offset needs two split points", "offset", split), None
+    try:
+        with edits.trial(scene, target):
+            off = edits.apply_offset(scene, target, split[0], split[1], dz)
+            ignore = set(off.pieces) | {c for g in off.pieces for c in scene.element(g).connected}
+            v = verify.check(scene, off.pieces[1:4], clearance_m=clearance_m, ignore=ignore)
+            ends = verify.check(scene, [off.pieces[0], off.pieces[-1]], clearance_m=clearance_m, ignore=ignore)
+            hits = v.hits + [h for h in ends.hits if h.other == other]
+            preview = edits.meshes(scene, off.pieces) if not hits else None
+    except edits.Unsupported as e:
+        return Attempt(title, delta, False, f"cannot offset this element: {e}", "offset", split), None
+    reason = _reason(hits)
+    attempt = Attempt(title, delta, not hits, reason, "offset", split)
+    if hits:
+        return attempt, None
+    return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
+                           v.min_clearance_m, {}, "offset", split, preview)
 
 
 def to_json(result: Result) -> str:

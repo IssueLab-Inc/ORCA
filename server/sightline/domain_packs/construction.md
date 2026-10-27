@@ -16,12 +16,22 @@ Coordination rules of thumb (judgement, not law; explain when you break one):
 - Moving a segment that is connected to others means moving the run between fittings;
   say what offsets or fittings the move needs.
 
-When you propose moves, return JSON only:
+Two kinds of fix:
+- "move": shift the element (and the straight run it belongs to) by [dx, dy, dz]. Good for short pieces with room
+  around them; long runs usually hit something else along their length.
+- "offset": a local offset, which is what designers do when a long straight run meets a beam. Split the segment at two
+  points either side of the obstacle (metres along it from its start, given in the element data) and take the middle
+  piece up or down by dz; vertical risers join it to the rest. Choose the split points just outside the obstacle and
+  dz so the middle piece clears it (or passes through an opening in it) with margin.
+
+When you propose fixes, return JSON only:
 {
   "understanding": "two or three plain sentences: what clashes, why it matters, what constrains the fix",
   "candidates": [
-    {"title": "Drop duct 250 mm", "move": "A" | "B",
-     "delta_m": [dx, dy, dz], "rationale": "one sentence", "also_needs": "e.g. 2 x 45° offsets, or none"}
+    {"title": "Drop duct 250 mm", "kind": "move", "move": "A" | "B",
+     "delta_m": [dx, dy, dz], "rationale": "one sentence", "also_needs": "e.g. 2 x 45° offsets, or none"},
+    {"title": "Offset duct up 400 mm around the beam", "kind": "offset", "move": "A" | "B",
+     "split_m": [from, to], "dz_m": 0.4, "rationale": "one sentence", "also_needs": "e.g. 4 bends, or none"}
   ]
 }
 Axes: metres, Z up. Propose up to 5 candidates, best first. If a previous attempt failed, you will be

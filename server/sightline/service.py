@@ -7,7 +7,7 @@ import uuid
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, reports, verify
+from . import agent, edits, reports, verify
 from .meta_client import ChatModel, MetaChatModel
 from .scene import IfcScene
 
@@ -88,7 +88,34 @@ class Workspace:
         return asdict(agent.resolve(self.scene(scene_id), clash, self.model))
 
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
-        return self.scene(scene_id).translate(moved, tuple(delta_m))
+        s = self.scene(scene_id)
+        placements = s.translate(moved, tuple(delta_m))
+        return {"placements": placements, "files": sorted({s.index_of(g) for g in moved})}
+
+    def check_offset(self, scene_id: str, element: str, other: str, split_m: list[float], dz_m: float,
+                     clearance_m: float = 0.025) -> dict:
+        """Try a local offset of `element` around `other` without keeping it (see edits.py)."""
+        attempt, option = agent._try_offset(self.scene(scene_id), {"split_m": split_m, "dz_m": dz_m}, element, other,
+                                            clearance_m)
+        return {"passed": attempt.passed, "reason": attempt.reason,
+                "min_clearance_m": option.min_clearance_m if option else None,
+                "preview": option.preview if option else None}
+
+    def apply_offset(self, scene_id: str, element: str, split_m: list[float], dz_m: float) -> dict:
+        """Keep a local offset: the element is shortened and new pieces are added to its file."""
+        s = self.scene(scene_id)
+        off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
+        s.mark_edited(element)
+        return {**asdict(off), "files": [s.index_of(element)]}
+
+    def file(self, scene_id: str, index: int, out_dir: Path) -> Path:
+        """A model file as it is now: the original on disk, or the edited model written out."""
+        s = self.scene(scene_id)
+        if index not in s._edited:
+            return s.paths[index]
+        path = out_dir / f"{scene_id}-{index}-{s.paths[index].name}"
+        s.models[index].write(str(path))
+        return path
 
     def export(self, scene_id: str, out_dir: Path) -> list[Path]:
         """Write the edited files only; untouched discipline models are not rewritten."""
