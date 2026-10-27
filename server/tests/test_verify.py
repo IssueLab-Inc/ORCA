@@ -55,3 +55,26 @@ def test_millimetre_projects_work_in_metres(tmp_path):
     v = verify.check(reloaded, [duct(reloaded)])
     assert v.passed
     assert v.min_clearance_m == pytest.approx(0.12, abs=0.005)
+
+
+def test_federated_files_clash_across_disciplines(tmp_path):
+    structure = build_clash_fixture(tmp_path / "structure.ifc", millimetres=True, only=("beam",))
+    services = build_clash_fixture(tmp_path / "services.ifc", only=("duct", "pipe"))
+    s = IfcScene([structure, services])
+    gid = s.models[1].by_type("IfcDuctSegment")[0].GlobalId
+    assert s.element(gid).source == "services.ifc"
+    assert [h.other_class for h in verify.check(s, [gid]).hits] == ["IfcBeam"]
+
+    s.translate([gid], (0, 0, -0.82))
+    v = verify.check(s, [gid])
+    assert v.passed and v.min_clearance_m == pytest.approx(0.12, abs=0.005)
+    written = s.write_edited(tmp_path)
+    assert [p.name for p in written] == ["services.sightline.ifc"]  # the structure file is untouched
+
+
+def test_neighbourhood_check_skips_far_elements(tmp_path):
+    s = IfcScene(build_clash_fixture(tmp_path / "f.ifc"))
+    gid = duct(s)
+    s.translate([gid], (50, 0, 0))  # far from everything
+    v = verify.check(s, [gid])
+    assert v.passed and v.checked_against == 0 and v.min_clearance_m is None

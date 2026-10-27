@@ -22,9 +22,9 @@ def list_models() -> list[str]:
 
 
 @mcp.tool()
-def open_model(name: str) -> str:
-    """Open an IFC model and return a scene id for the other tools."""
-    return ws.open(name)
+def open_model(names: list[str]) -> str:
+    """Open one or more IFC files that share coordinates (e.g. structure + MEP) and return a scene id."""
+    return ws.open(names)
 
 
 @mcp.tool()
@@ -53,9 +53,9 @@ def apply_solution(scene_id: str, moved: list[str], delta_m: list[float]) -> dic
 
 
 @mcp.tool()
-def export_model(scene_id: str) -> str:
-    """Write the edited IFC and return its path."""
-    return str(ws.export(scene_id, Path(tempfile.gettempdir())))
+def export_model(scene_id: str) -> list[str]:
+    """Write the edited IFC files (only those with changes) and return their paths."""
+    return [str(p) for p in ws.export(scene_id, Path(tempfile.gettempdir()))]
 
 
 if __name__ == "__main__":

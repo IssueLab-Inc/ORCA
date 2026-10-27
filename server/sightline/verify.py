@@ -42,15 +42,27 @@ def check(scene: IfcScene, moved: list[str], clearance_m: float = 0.025,
     """Check the moved elements against every other element in the model.
 
     A fix passes when nothing penetrates the moved elements and nothing sits closer than
-    `clearance_m`. `ignore` holds elements that are meant to touch (e.g. the rest of the moved run).
+    `clearance_m`. `ignore` holds elements that are meant to touch (e.g. the rest of the moved run);
+    elements joined to the moved ones through ports are always ignored, since they touch by design.
+    Only the neighbourhood (cached boxes within SEARCH_M) is triangulated, so a check takes well
+    under a second on a building-sized federation.
     """
-    ignore = set(ignore or ()) | set(moved)
-    others = [p for p in scene.products() if p.GlobalId not in ignore]
+    connected = {c for g in moved for c in scene.element(g).connected}
+    ignore = set(ignore or ()) | set(moved) | connected
+    nearby = scene.near(moved, SEARCH_M + clearance_m)
+    others = [p for p in scene.products() if p.GlobalId in nearby and p.GlobalId not in ignore]
+    if not others:
+        # Nothing nearby, so nothing to hit. Also required: IfcOpenShell's clash queries crash on an empty set.
+        return Verdict(passed=True, hits=[], min_clearance_m=None, checked_against=0)
     targets = [scene.entity(g) for g in moved]
 
     # The default "opencascade.brep" tree has no *_many clash queries; the triangle BVH tree does.
     tree = ifcopenshell.geom.tree(backend="opencascade.trianglebvh")
-    tree.add_iterator(ifcopenshell.geom.iterator(_settings(), scene.model, include=others + targets))
+    by_file: dict[int, list] = {}
+    for e in others + targets:  # one iterator per federated file, over just the elements we need
+        by_file.setdefault(scene.index_of(e.GlobalId), []).append(e)
+    for i, include in by_file.items():
+        tree.add_iterator(ifcopenshell.geom.iterator(_settings(), scene.models[i], include=include))
 
     def other_of(c):
         return c.b if c.a.GlobalId in moved else c.a

@@ -27,12 +27,20 @@ class Workspace:
     def list_samples(self) -> list[str]:
         return sorted(p.name for p in self.samples.glob("*.ifc"))
 
-    def open(self, name: str) -> str:
-        path = (self.samples / name).resolve()
-        if path.parent != self.samples.resolve() or not path.exists():
-            raise FileNotFoundError(name)
+    def open(self, names: list[str]) -> str:
+        """Open one or more IFC files that share coordinates (e.g. structure + MEP + architecture)."""
+        paths = []
+        for name in names:
+            path = (self.samples / name).resolve()
+            if path.parent != self.samples.resolve() or not path.exists():
+                raise FileNotFoundError(name)
+            paths.append(path)
+        if not paths:
+            raise FileNotFoundError("no models given")
+        scene = IfcScene(paths)
+        scene.bounds()  # pay the one-off triangulation now, not on the first check
         scene_id = uuid.uuid4().hex[:12]
-        self.scenes[scene_id] = IfcScene(path)
+        self.scenes[scene_id] = scene
         return scene_id
 
     def scene(self, scene_id: str) -> IfcScene:
@@ -59,6 +67,6 @@ class Workspace:
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
         return self.scene(scene_id).translate(moved, tuple(delta_m))
 
-    def export(self, scene_id: str, out_dir: Path) -> Path:
-        s = self.scene(scene_id)
-        return s.write(out_dir / f"{s.path.stem}.sightline.ifc")
+    def export(self, scene_id: str, out_dir: Path) -> list[Path]:
+        """Write the edited files only; untouched discipline models are not rewritten."""
+        return self.scene(scene_id).write_edited(out_dir)

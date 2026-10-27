@@ -33,12 +33,14 @@ def _box(model, body, element, size, origin):
     ifcopenshell.api.run("geometry.edit_object_placement", model, product=element, matrix=matrix, is_si=False)
 
 
-def build_clash_fixture(path: Path, millimetres: bool = False) -> Path:
+def build_clash_fixture(path: Path, millimetres: bool = False,
+                        only: tuple[str, ...] = ("beam", "duct", "pipe")) -> Path:
     """A steel beam, a duct crossing through it, and a pipe just below the beam.
 
     Moving the duct down 0.40 m clears the beam but hits the pipe; moving it down 0.80 m clears both.
     That gives the agent loop a realistic "first try fails" case. Dimensions below are metres; with
-    `millimetres=True` the file is written in mm, like most authoring-tool exports.
+    `millimetres=True` the file is written in mm, like most authoring-tool exports. `only` writes a subset,
+    so a structure file and a services file can be federated like real discipline models.
     """
     k = 1000.0 if millimetres else 1.0
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
@@ -63,11 +65,14 @@ def build_clash_fixture(path: Path, millimetres: bool = False) -> Path:
         return e
 
     # Beam along X: 6 m long, 0.2 m wide, 0.4 m deep, top at z = 3.0
-    element("IfcBeam", "UB 406x178 beam", (6.0, 0.2, 0.4), (0.0, -0.1, 2.6))
+    if "beam" in only:
+        element("IfcBeam", "UB 406x178 beam", (6.0, 0.2, 0.4), (0.0, -0.1, 2.6))
     # Duct along Y crossing the beam: 0.4 x 0.3 section, centred in the beam depth
-    element("IfcDuctSegment", "Supply duct 400x300", (0.4, 4.0, 0.3), (2.8, -2.0, 2.65))
+    if "duct" in only:
+        element("IfcDuctSegment", "Supply duct 400x300", (0.4, 4.0, 0.3), (2.8, -2.0, 2.65))
     # Pipe along Y below the beam, where a 0.40 m drop of the duct lands on it
-    element("IfcPipeSegment", "LTHW pipe DN50", (0.1, 4.0, 0.1), (2.9, -2.0, 2.25))
+    if "pipe" in only:
+        element("IfcPipeSegment", "LTHW pipe DN50", (0.1, 4.0, 0.1), (2.9, -2.0, 2.25))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))

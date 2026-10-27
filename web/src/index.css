@@ -43,3 +43,6 @@ h2 { font-size: 13px; margin: 6px 0 0; }
 .step { font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); }
 .step i { font-style: normal; font-family: var(--mono); color: var(--muted); margin-right: 6px; }
 .step.ok { border-color: var(--ok); } .step.fail { border-color: var(--fail); }
+.models { position: relative; font-size: 13px; }
+.models summary { cursor: pointer; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; list-style: none; }
+.models .menu { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; white-space: nowrap; }

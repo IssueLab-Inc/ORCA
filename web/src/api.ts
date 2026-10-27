@@ -15,8 +15,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   samples: () => call<string[]>("/samples"),
-  open: (sample: string) => call<{ id: string }>("/scenes", { method: "POST", body: JSON.stringify({ sample }) }),
-  file: async (id: string) => new Uint8Array(await (await fetch(`/api/scenes/${id}/file`)).arrayBuffer()),
+  open: (samples: string[]) => call<{ id: string; files: string[] }>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
+  file: async (id: string, index: number) => new Uint8Array(await (await fetch(`/api/scenes/${id}/files/${index}`)).arrayBuffer()),
   verify: (id: string, moved: string[], delta_m: number[]) =>
     call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
   propose: (id: string, element_a: string, element_b: string) =>

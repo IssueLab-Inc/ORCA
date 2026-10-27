@@ -33,7 +33,9 @@ async function ifcApi(): Promise<IfcAPI> {
 export async function loadIfc(bytes: Uint8Array): Promise<LoadedModel> {
   const t0 = performance.now();
   const ifc = await ifcApi();
-  const modelId = ifc.OpenModel(bytes, { COORDINATE_TO_ORIGIN: true });
+  // No COORDINATE_TO_ORIGIN: federated discipline files share coordinates, and shifting each by its own
+  // offset would pull them apart.
+  const modelId = ifc.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false });
 
   const parts: { expressId: number; geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
   ifc.StreamAllMeshes(modelId, (flat) => {

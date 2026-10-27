@@ -10,6 +10,7 @@ export function App() {
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
   const [samples, setSamples] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
   const [sceneId, setSceneId] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [fps, setFps] = useState(0);
@@ -27,7 +28,12 @@ export function App() {
     if (!host.current) return;
     const v = new Viewer(host.current);
     viewer.current = v;
-    api.samples().then(setSamples).catch((e) => setError(`Can't reach the Sightline server: ${e.message}`));
+    api.samples().then((list) => {
+      setSamples(list);
+      // Default to the coordination set: the building disciplines, not site context, grids or a later revision.
+      const set = list.filter((f) => /(structure|mep|architecture)\.ifc$/i.test(f));
+      setPicked(set.length ? set : list.slice(0, 1));
+    }).catch((e) => setError(`Can't reach the Sightline server: ${e.message}`));
     let frames = 0;
     let last = performance.now();
     let raf = 0;
@@ -43,17 +49,27 @@ export function App() {
 
   useEffect(() => viewer.current?.highlight(a, b, isolate), [a, b, isolate]);
 
+  // Dev-only hook for smoke tests: select a clash pair by GlobalId without hunting for it with the mouse.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as unknown as { sightline: object }).sightline = {
+      selectPair: (ga: string, gb: string) => { setA(ga); setB(gb); setProposal(null); setChosen(null); setManual(null); viewer.current?.frame([ga, gb]); },
+    };
+  }, []);
+
   useEffect(() => {
     const opt = chosen == null ? null : proposal?.options[chosen];
     viewer.current?.preview(opt ? [{ globalIds: opt.moved, deltaM: opt.delta_m }] : []);
   }, [chosen, proposal]);
 
-  async function open(sample: string) {
-    setBusy("Loading model…"); setError(null); setProposal(null); setA(null); setB(null);
+  async function open() {
+    if (!picked.length) return;
+    setBusy(`Loading ${picked.length} model${picked.length > 1 ? "s" : ""}…`); setError(null); setProposal(null); setA(null); setB(null);
     try {
-      const { id } = await api.open(sample);
+      const { id, files } = await api.open(picked);
       setSceneId(id);
-      setStats(await viewer.current!.load(await api.file(id)));
+      const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
+      setStats(await viewer.current!.load(bytes));
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
 
@@ -83,10 +99,18 @@ export function App() {
     <div className="app">
       <header className="bar">
         <b className="brand">ClashWise Sightline</b>
-        <select id="sample" value="" onChange={(e) => e.target.value && open(e.target.value)} aria-label="Open a model">
-          <option value="">{samples.length ? "Open a model…" : "No models in samples/"}</option>
-          {samples.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <details className="models">
+          <summary>{picked.length ? `${picked.length} model${picked.length > 1 ? "s" : ""} selected` : samples.length ? "Choose models" : "No models in samples/"}</summary>
+          <div className="menu">
+            {samples.map((f) => (
+              <label key={f} className="check">
+                <input type="checkbox" value={f} checked={picked.includes(f)}
+                  onChange={(e) => setPicked(e.target.checked ? [...picked, f] : picked.filter((x) => x !== f))} /> {f}
+              </label>
+            ))}
+          </div>
+        </details>
+        <button id="open" className="btn" disabled={!picked.length || !!busy} onClick={open}>Open</button>
         {stats && <span className="stat mono">{stats.elements} elements · {Math.round(stats.triangles / 1000)}k triangles · parsed in {(stats.parseMs / 1000).toFixed(1)} s · {fps} fps</span>}
         <span className="spacer" />
         {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)}>Export edited IFC</a>}

@@ -1,6 +1,7 @@
 """Web API for the browser app. Run: uv run uvicorn sightline.app:app --reload"""
 from __future__ import annotations
 
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -17,7 +18,7 @@ EXPORTS.mkdir(exist_ok=True)
 
 
 class Open(BaseModel):
-    sample: str
+    samples: list[str]
 
 
 class Move(BaseModel):
@@ -47,14 +48,17 @@ def samples():
 @app.post("/api/scenes")
 def open_scene(body: Open):
     try:
-        return {"id": ws.open(body.sample)}
-    except FileNotFoundError:
-        raise HTTPException(404, f"No sample called {body.sample}.")
+        return {"id": ws.open(body.samples), "files": body.samples}
+    except FileNotFoundError as e:
+        raise HTTPException(404, f"No model called {e.args[0]}.")
 
 
-@app.get("/api/scenes/{scene_id}/file")
-def scene_file(scene_id: str):
-    return FileResponse(ws.scene(_scene(scene_id)).path, media_type="application/octet-stream")
+@app.get("/api/scenes/{scene_id}/files/{index}")
+def scene_file(scene_id: str, index: int):
+    paths = ws.scene(_scene(scene_id)).paths
+    if not 0 <= index < len(paths):
+        raise HTTPException(404, "No such file in this model set.")
+    return FileResponse(paths[index], media_type="application/octet-stream")
 
 
 @app.get("/api/scenes/{scene_id}/elements/{global_id}")
@@ -79,5 +83,13 @@ def apply(scene_id: str, body: Move):
 
 @app.get("/api/scenes/{scene_id}/export")
 def export(scene_id: str):
-    path = ws.export(_scene(scene_id), EXPORTS)
-    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
+    """The edited file. With edits in several discipline files, they come back as one zip."""
+    out = EXPORTS / scene_id
+    out.mkdir(exist_ok=True)
+    paths = ws.export(_scene(scene_id), out)
+    if not paths:
+        raise HTTPException(409, "Nothing has been changed yet. Accept a fix first.")
+    if len(paths) == 1:
+        return FileResponse(paths[0], filename=paths[0].name, media_type="application/octet-stream")
+    archive = shutil.make_archive(str(EXPORTS / f"{scene_id}-sightline"), "zip", out)
+    return FileResponse(archive, filename=Path(archive).name, media_type="application/zip")
