@@ -85,10 +85,11 @@ Findings (Oct 27, details in spikes/README.md):
 ## Status and next steps
 
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
-Northbank spikes 1–3. 14 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+Northbank spikes 1–4. 14 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Next, in order:
-1. Run spike 4 (Muse Spark proposal) once `META_API_KEY` is available: `spikes/04_muse_proposal.py`, 3 runs on #042.
+1. ✅ Spike 4 passed with images (spikes/README.md). Feed web-opening sizes/positions as text so moves land on the
+   millimetre (the model said +0.38 m, the answer is +0.40 m).
 2. **Local-offset edit**: split a straight segment, raise/lower the middle piece, connecting pieces; verify against
    Rev04 on #042/#057/#061.
 3. Viewer: context-ghost mode, A/B/C capture, section view.

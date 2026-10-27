@@ -16,7 +16,7 @@ Four questions that decide whether the plan holds. Run them against Northbank on
 | 1 | **Pass.** Browser parses all three files in 0.8 s (69k triangles); open-to-rendered 6.8 s including the server's one-off 2.9 s geometry cache. fps not measured here (software GL in CI); check on a real GPU. |
 | 2 | **Pass.** Elements move, the edited file writes and reopens with the new placement. |
 | 3 | **Pass after a fix.** First version took 7.2 s per check (re-triangulating everything). Now a one-off box cache at open, then only the neighbourhood is checked: **0.4–0.6 s per check** (31–64 nearby elements). |
-| 4 | Not run yet (needs the Meta API key). |
+| 4 | **Pass, with images.** `muse-spark-1.3-contributor` at `https://api.meta.ai/v1`: valid JSON on 4/4 calls, 29–42 s each, no client changes needed. Details below. |
 
 Answer key reproduced: #042 duct, #057 tray and #061 cold-water main each hit the transfer girder
 (`IfcBeam`, −300 / −400 / −400 mm). Raising the #042 duct 0.40 m passes with exactly **50 mm** all round,
@@ -30,3 +30,26 @@ and Rev04 is the benchmark to compare its proposals against.
 
 **Finding: the full model hides the clash.** With everything visible, the girder is behind the façade and
 slabs. The viewer needs the context-ghost mode (image B) before the demo.
+
+## Spike 4 on #042 (Oct 27)
+
+Inputs: element names, classes, sizes, levels and boxes as text, signed distance −300 mm. Every candidate was then
+run through `verify.check` (25 mm clearance) on Structure + MEP + Architecture.
+
+| Run | Images | Top candidate | Verifier | Candidates passing |
+|---|---|---|---|---|
+| 0 | none | sideways +0.6 m "to the nearest opening" | fail: return-air main −200 mm | 0/4 |
+| 1 | A/B/C | raise 0.35 m (+0.05 m Y) into the opening above | fail: 0 mm to the opening sill | 0/4 |
+| 2 | A/B/C | raise 0.38 m into the opening above | **pass**, 30 mm | 1/4 |
+| 3 | A/B/C | raise 0.38 m into the opening above | **pass**, 30 mm | 1/4 |
+
+- **Images are what make it work.** Text only, it guessed where the openings are and every move hit the
+  return-air main, the ceiling, the slab or the girder. With images, all three runs found the opening directly
+  above the duct (it shows clearly in the elevation, C) and agreed on the fix direction.
+- **Pixels give the direction, not the millimetres.** The designer's answer is +0.40 m (50 mm all round); the model
+  said 0.35–0.38. Run 1 would be fixed by the retry loop (it is told it touched the sill). Better: give the opening's
+  size and position as text, the same way severity comes from numbers.
+- Fallbacks are sensible but all fail on this congested floor (drop → ceiling, over the top → Level 03 slab,
+  sideways → return-air main or the girder), which is the case for verifying before showing anything.
+- The images were quick matplotlib renders made for this spike (not committed); the product renders A/B/C in
+  the browser viewer.
