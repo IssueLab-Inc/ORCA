@@ -1,12 +1,14 @@
 """Web API for the browser app. Run: uv run uvicorn sightline.app:app --reload"""
 from __future__ import annotations
 
+import io
 import json
 import os
 import queue
 import shutil
 import tempfile
 import threading
+import wave
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -486,8 +488,13 @@ async def transcribe_voice(request: Request, audio: UploadFile = File(...), repo
     data = await audio.read(MAX_VOICE_BYTES + 1)
     if len(data) > MAX_VOICE_BYTES:
         raise HTTPException(413, "That recording is too long: keep it under a minute.")
-    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            fmt = (w.getnchannels(), w.getsampwidth(), w.getframerate())
+    except (wave.Error, EOFError):
         raise HTTPException(422, "Send the recording as a WAV file.")
+    if fmt[0] != 1 or fmt[1] != 2 or fmt[2] not in (16000, 24000):  # what Muse Voice Transcribe takes
+        raise HTTPException(422, f"Send mono 16-bit WAV at 16 or 24 kHz (this is {fmt[0]} channel, {fmt[2]} Hz).")
     refused = voice_limit.take(client_id(request.headers, request.client.host if request.client else None))
     if refused:
         raise HTTPException(429, refused)

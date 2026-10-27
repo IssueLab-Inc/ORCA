@@ -224,5 +224,11 @@ def test_voice_transcribes_a_wav_biased_to_the_reports_clash_names(tmp_path, mon
     assert ok.status_code == 200 and ok.json()["transcript"] == "Fix clash one"
     assert seen["wav"][:4] == b"RIFF" and "transom" in seen["words"] and "Clash1" in seen["words"]
     assert c.post("/api/transcribe", files={"audio": ("x.webm", b"not a wav file", "audio/webm")}).status_code == 422
+    import io, wave  # noqa: E401
+    loud = io.BytesIO()
+    with wave.open(loud, "wb") as w:
+        w.setnchannels(2); w.setsampwidth(2); w.setframerate(48000); w.writeframes(b"\0\0" * 960)
+    wrong = c.post("/api/transcribe", files={"audio": ("clip.wav", loud.getvalue(), "audio/wav")})
+    assert wrong.status_code == 422 and "16 or 24 kHz" in wrong.json()["detail"]
     assert c.post("/api/transcribe", files={"audio": ("clip.wav", _wav(), "audio/wav")}).status_code == 200
     assert c.post("/api/transcribe", files={"audio": ("clip.wav", _wav(), "audio/wav")}).status_code == 429  # the cap
