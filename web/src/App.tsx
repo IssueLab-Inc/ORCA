@@ -20,6 +20,9 @@ type Tab = "clash" | "plan" | "chat";
 export function App() {
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
+  // Side panel widths: dragged by their inner edge, remembered in this browser, double-click to reset.
+  const [widths, setWidths] = useState(() => ({ left: stored("sightline.left-w", 310), right: stored("sightline.right-w", 380) }));
+  const [resizing, setResizing] = useState<"left" | "right" | null>(null);
   // While the agent works it drives the viewer (pilot.ts); touching the view takes it back.
   const [pilotStatus, setPilotStatus] = useState<PilotStatus | null>(null);
   const sides = useRef<string[]>([]);
@@ -557,7 +560,8 @@ export function App() {
   );
 
   return (
-    <div className="app">
+    <div className={`app ${resizing ? "resizing" : ""}`}
+      style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}>
       <header className="bar">
         <span className="brand"><span className="logo" aria-hidden>◎</span>ClashWise <b>Sightline</b></span>
         <Popover icon={Boxes} label="Models" text="Models" tip="bottom">
@@ -734,6 +738,30 @@ export function App() {
         </div>
       </aside>
 
+      {(["left", "right"] as const).map((side) => (
+        <div key={side} className={`resizer ${side} ${resizing === side ? "on" : ""}`} role="separator" aria-orientation="vertical"
+          aria-label={`Resize the ${side} panel`} aria-valuenow={widths[side]} aria-valuemin={PANE[side][0]} aria-valuemax={PANE[side][1]}
+          tabIndex={0} title="Drag to resize · double-click to reset"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            setResizing(side);
+          }}
+          onPointerMove={(e) => {
+            if (resizing !== side) return;
+            const w = side === "left" ? e.clientX : window.innerWidth - e.clientX;
+            setWidths((ws) => ({ ...ws, [side]: clampPane(side, w, ws[side === "left" ? "right" : "left"]) }));
+          }}
+          onPointerUp={() => { setResizing(null); remember(side, widths[side]); }}
+          onDoubleClick={() => { setWidths((ws) => ({ ...ws, [side]: PANE[side][2] })); remember(side, PANE[side][2]); }}
+          onKeyDown={(e) => {
+            const step = e.key === "ArrowLeft" ? -20 : e.key === "ArrowRight" ? 20 : 0;
+            if (!step) return;
+            e.preventDefault();
+            const w = clampPane(side, widths[side] + (side === "left" ? step : -step), widths[side === "left" ? "right" : "left"]);
+            setWidths((ws) => ({ ...ws, [side]: w })); remember(side, w);
+          }} />
+      ))}
       <footer className="dock">
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
       </footer>
@@ -749,4 +777,18 @@ export function App() {
 function movedPairs(moved: string[], sides: string[]): [string, string][] {
   const still = sides.filter((g) => !moved.includes(g));
   return moved.flatMap((m) => still.map((g) => [m, g] as [string, string]));
+}
+
+/** Side panel widths in px: [min, max, default]. */
+const PANE = { left: [240, 640, 310], right: [300, 720, 380] } as const;
+/** Within the side's limits, leaving the viewer at least 360 px beside the other panel (`other`). */
+const clampPane = (side: "left" | "right", w: number, other = 0) =>
+  Math.round(Math.max(Math.min(w, PANE[side][1], window.innerWidth - other - 360), PANE[side][0]));
+
+function stored(key: string, fallback: number) {
+  try { const v = Number(localStorage.getItem(key)); return v > 0 ? clampPane(key.includes("left") ? "left" : "right", v) : fallback; } catch { return fallback; }
+}
+
+function remember(side: "left" | "right", w: number) {
+  try { localStorage.setItem(`sightline.${side}-w`, String(w)); } catch { /* private window: not remembered */ }
 }

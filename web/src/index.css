@@ -18,7 +18,16 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
 /* Layout */
-.app { height: 100%; display: grid; grid-template-columns: 310px 1fr 380px; grid-template-rows: auto minmax(0, 1fr) auto; }
+.app { height: 100%; display: grid; grid-template-columns: var(--left-w, 310px) minmax(0, 1fr) var(--right-w, 380px);
+  grid-template-rows: auto minmax(0, 1fr) auto; position: relative; }
+.app.resizing { cursor: col-resize; user-select: none; }
+/* Drag handles on the side panels' inner edges (absolutely placed in the panes' grid areas) */
+.resizer { position: absolute; grid-row: 2 / 3; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 7; touch-action: none; }
+.resizer.left { grid-column: 1 / 2; right: -4px; }
+.resizer.right { grid-column: 3 / 4; left: -4px; }
+.resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background .15s; }
+.resizer:hover::after, .resizer:focus-visible::after, .app.resizing .resizer.on::after { background: var(--accent); width: 2px; }
+.resizer:focus-visible { outline: none; }
 .bar { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--surface); min-height: 50px; }
 .brand { font-size: 15px; display: inline-flex; align-items: center; gap: 7px; margin-right: 10px; white-space: nowrap; }
 .logo { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 15px; }
@@ -268,8 +277,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .advice p { margin: 0; line-height: 1.45; }
 
 /* Bulk triage */
-.triage { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); }
-.triage h3 { margin: 0; }
+.triage { margin: 10px 10px 0; padding: 8px 10px 10px; border-radius: var(--radius); background: var(--raised); border: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.triage h3 { margin: 0; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
 .triage .hint { margin: 0; line-height: 1.5; }
 .triage .hint .spin { vertical-align: -2px; }
 .triage-progress { height: 4px; border-radius: 2px; background: var(--bg); overflow: hidden; }
