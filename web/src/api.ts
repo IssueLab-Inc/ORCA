@@ -21,6 +21,7 @@ export interface Proposal { understanding: string; options: Option[]; attempts: 
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent =
   | { type: "thinking"; round: number }
+  | { type: "reasoning"; round: number; text: string }  // a summary of what Muse Spark is working out, as it thinks
   | { type: "ideas"; round: number; seconds: number; understanding: string; count: number }
   | { type: "checking"; index: number; title: string; kind: string }
   | ({ type: "trial" } & Trial)

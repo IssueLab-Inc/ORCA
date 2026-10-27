@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from sightline import app as app_module
@@ -180,3 +181,15 @@ def test_match_shows_a_ports_owner(tmp_path, monkeypatch):
     rid = ws.open_report_sample("r").id
     m = next(iter(ws.match(rid, sid).values()))
     assert m["a"] == port.GlobalId and m["show"][0] == main.GlobalId
+
+
+def test_sample_exclusions_drop_whole_tests_and_renumber(tmp_path):
+    (tmp_path / "flat.xml").write_text(STANDARD)
+    (tmp_path / "grouped.xml").write_text(GROUPED)
+    xmls = [tmp_path / "flat.xml", tmp_path / "grouped.xml"]
+    assert len(reports.load("r", tmp_path, xmls, "t").clashes) == 3
+    # Named in the test, or on either side of any result: the whole test goes, and ids stay contiguous.
+    kept = reports.load("r", tmp_path, xmls, "t", exclude=("IfcDistributionPort",)).clashes
+    assert [(c.id, c.test) for c in kept] == [("c0001", "Structure vs Ducts"), ("c0002", "Structure vs Ducts")]
+    with pytest.raises(ValueError):  # Clash2 has a wall, so "Structure vs Ducts" goes too: nothing is left
+        reports.load("r", tmp_path, xmls, "t", exclude=("IfcWall",))

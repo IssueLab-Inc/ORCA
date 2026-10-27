@@ -95,3 +95,26 @@ def test_trials_show_each_candidate_before_its_check_and_attempts_name_what_they
     quiet = []
     resolve(s, Clash(duct, beam), ScriptedModel(), max_rounds=1, on_event=quiet.append)
     assert not [e for e in quiet if e["type"] == "trial"]
+
+
+class ThinkingModel(ScriptedModel):
+    """A model that streams reasoning summaries, like Muse Spark through Meta's Responses endpoint."""
+    streams_reasoning = True
+
+    def complete_json_reasoning(self, system, text, images, schema, on_reasoning):
+        on_reasoning("Reading the duct and beam sizes.")
+        on_reasoning("Checking room below the beam.")
+        return self.complete_json(system, text, images)
+
+
+def test_reasoning_summaries_stream_before_the_ideas_only_when_watched(tmp_path: Path):
+    s = IfcScene(build_clash_fixture(tmp_path / "f.ifc"))
+    duct, beam = s.model.by_type("IfcDuctSegment")[0].GlobalId, s.model.by_type("IfcBeam")[0].GlobalId
+    events = []
+    resolve(s, Clash(duct, beam), ThinkingModel(), max_rounds=1, on_event=events.append, trials=True)
+    kinds = [e["type"] for e in events]
+    assert kinds[:4] == ["thinking", "reasoning", "reasoning", "ideas"]
+    assert events[1] == {"type": "reasoning", "round": 1, "text": "Reading the duct and beam sizes."}
+    quiet = []  # plans run several agents at once and show no thinking
+    resolve(s, Clash(duct, beam), ThinkingModel(), max_rounds=1, on_event=quiet.append)
+    assert "reasoning" not in [e["type"] for e in quiet]

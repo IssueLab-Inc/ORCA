@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 53 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 58 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -192,7 +192,19 @@ at once), then the default models, now including Site (all 317 report clashes li
 **How it works** opens the same page as a dialog. Side panels resize from their inner edge (remembered per browser).
 Until a report or the models are open the app is a landing page (`.app.landing`: no panels or dock; the header carries
 the demo button): what happens after the click, measured numbers (15-25 s to a verified fix, 3/3 designer fixes, 317
-triaged in ~3 min), built-with. Keep those numbers true to evals/README.md if they change.
+triaged in 3-4 min), built-with. Keep those numbers true to measured runs if they change.
+
+Demo report trimmed (Oct 27): sample reports drop every clash test involving IfcGeographicElement, IfcSpace or
+IfcBuildingElementProxy (`service.SAMPLE_EXCLUDE`, env `SIGHTLINE_SAMPLE_EXCLUDE`; uploads are kept whole). Northbank:
+217 clashes in 52 tests (was 317 in 73), all linked; ids are renumbered (#042 is c0053). Triage of the 217 on Muse Spark
+Open: 213 s, 99 by rule, 0 errors, #042 real/high. The eval scripts still read the full package (317).
+
+Muse Spark's reasoning (Oct 27): the chat completions API hides it (reasoning tokens counted, text not returned), but
+Meta's Responses endpoint streams reasoning summaries (`reasoning: {summary: "auto"}`, strict json_schema and images
+work there too). `MetaChatModel.complete_json_reasoning` uses it when someone is watching (`resolve(trials=True)`:
+single proposals and chat), emitting `{"type": "reasoning", round, text}`; falls back to chat completions on 400/404/422
+and never for other hosts. About 2-3 notes per round, the first after ~3.5 s ("detailed" gave no more). UI: live notes
+under Understanding (`Thinking` in App.tsx), the pilot's status line, then folded into "How Muse Spark reasoned".
 
 Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
 some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then

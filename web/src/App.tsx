@@ -1,4 +1,4 @@
-import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Boxes, Brain, Check, Download, FileSpreadsheet, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
@@ -56,6 +56,8 @@ export function App() {
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
   // The image dialog: a clash's Navisworks views, opened from the clash panel or a row's thumbnail.
   const [about, setAbout] = useState(false);
+  // Muse Spark's reasoning summaries for the current proposal, as they stream in.
+  const [thoughts, setThoughts] = useState<{ round: number; text: string }[]>([]);
   const [lightbox, setLightbox] = useState<{ clash: ReportClash; index: number } | null>(null);
   useEffect(() => { setLightbox(null); }, [report]);
   const [remeasure, setRemeasure] = useState(0);
@@ -391,10 +393,12 @@ export function App() {
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
     setProgress(p); setNow(t);
     setProposal({ understanding: "", options: [], attempts: [] });
+    setThoughts([]);
     pilot.current?.start();
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
     const onEvent = (e: AgentEvent) => {
       pilot.current?.event(e);
+      if (e.type === "reasoning") setThoughts((t) => [...t, { round: e.round, text: e.text }]);
       if (e.type === "thinking") update({ round: e.round, phase: "thinking", thinkingSince: Date.now(), checking: null });
       if (e.type === "ideas") {
         update({ phase: "checking", modelSeconds: [...p.modelSeconds, e.seconds], ideas: e.count });
@@ -729,8 +733,10 @@ export function App() {
 
           {(proposal?.understanding || proposing) && <>
             <h2>Understanding</h2>
-            <p className="understanding">{proposal?.understanding || "Muse Spark is reading the clash…"}</p>
+            {(proposal?.understanding || !thoughts.length) &&
+              <p className="understanding">{proposal?.understanding || "Muse Spark is reading the clash…"}</p>}
           </>}
+          <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"} />
           {proposal && !proposing && <h2>Verified options</h2>}
           {proposal && !proposing && !proposal.options.length && <NoFix proposal={proposal} />}
           {proposal?.options.map((o, i) => (
@@ -840,5 +846,35 @@ function NoFix({ proposal }: { proposal: Proposal }) {
       {proposal.advice && <p><b>What decides it:</b> {proposal.advice}</p>}
       <p className="hint">Each idea and what it hit is in the activity table below. Propose again for fresh ideas, or flag it for the model's author.</p>
     </div>
+  );
+}
+
+
+/** Muse Spark's reasoning, summarised by the model as it thinks: live while it works, then folded away. */
+function Thinking({ notes, live, thinking }: { notes: { round: number; text: string }[]; live: boolean; thinking: boolean }) {
+  const end = useRef<HTMLLIElement | null>(null);
+  useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }); }, [notes.length]);
+  if (!notes.length && !live) return null;
+  const list = (
+    <ol className="thoughts">
+      {notes.map((n, i) => (
+        <li key={i} ref={i === notes.length - 1 ? end : undefined}>
+          {(i === 0 || notes[i - 1].round !== n.round) && n.round > 1 && <span className="round">Round {n.round}, with what failed</span>}
+          {n.text}
+        </li>
+      ))}
+      {thinking && <li className="pending"><i className="dots" aria-hidden><span /><span /><span /></i></li>}
+    </ol>
+  );
+  if (live) return (
+    <div className="thinking live" aria-live="polite">
+      <h3><Brain size={14} aria-hidden /> {thinking ? "Muse Spark is thinking" : "Muse Spark's thinking so far"}</h3>{list}
+    </div>
+  );
+  return (
+    <details className="thinking">
+      <summary><Brain size={14} aria-hidden /> How Muse Spark reasoned <span className="hint">· {notes.length} note{notes.length === 1 ? "" : "s"}</span></summary>
+      {list}
+    </details>
   );
 }

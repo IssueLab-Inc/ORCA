@@ -24,7 +24,7 @@ import base64
 import json
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 import httpx
 
@@ -81,6 +81,9 @@ class MetaChatModel:
                                  else os.environ.get("META_REASONING_EFFORT", "low"))
         self.client = httpx.Client(timeout=timeout_s)
         self.strict = True  # cleared when the host rejects json_schema; then plain JSON mode is used
+        # Meta's Responses endpoint streams reasoning summaries (short notes on what the model is working out), which
+        # the UI shows while the agent thinks. Cleared if the host does not offer it; chat completions are used then.
+        self.streams_reasoning = "api.meta.ai" in self.base_url
 
     def _post(self, payload: dict) -> dict:
         r = self.client.post(f"{self.base_url}/chat/completions", json=payload,
@@ -113,6 +116,43 @@ class MetaChatModel:
             raise
         raw = body["choices"][0]["message"]["content"]
         return json.loads(_strip_fence(raw))
+
+    def complete_json_reasoning(self, system: str, text: str, images: list[Path] | None, schema: dict | None,
+                                on_reasoning: Callable[[str], None]) -> dict:
+        """`complete_json`, streamed through the Responses endpoint so `on_reasoning` hears each reasoning summary as
+        the model writes it. Falls back to `complete_json` (no summaries) when the host does not offer it."""
+        if not self.streams_reasoning:
+            return self.complete_json(system, text, images, schema)
+        content = [{"type": "input_text", "text": text}] + [
+            {"type": "input_image", "image_url": _image_part(p)["image_url"]["url"]} for p in images or []]
+        fmt = ({"type": "json_schema", "name": "reply", "schema": schema, "strict": True} if schema
+               else {"type": "json_object"})
+        payload = {"model": self.model, "instructions": system, "stream": True, "temperature": 0.2,
+                   "input": [{"role": "user", "content": content}], "text": {"format": fmt},
+                   "reasoning": {"summary": "auto", **({"effort": self.reasoning_effort} if self.reasoning_effort else {})}}
+        out = ""
+        with self.client.stream("POST", f"{self.base_url}/responses", json=payload,
+                                headers={"Authorization": f"Bearer {self.api_key}"}) as r:
+            if r.status_code in (400, 404, 422):  # no Responses endpoint, or not with these options
+                r.read()
+                self.streams_reasoning = False
+                return self.complete_json(system, text, images, schema)
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line.startswith("data:") or line[5:].strip() in ("", "[DONE]"):
+                    continue
+                try:
+                    event = json.loads(line[5:])
+                except json.JSONDecodeError:
+                    continue
+                kind = event.get("type", "")
+                if kind == "response.reasoning_summary_text.done" and event.get("text"):
+                    on_reasoning(event["text"].strip())
+                elif kind == "response.output_text.delta":
+                    out += event.get("delta", "")
+                elif kind in ("response.failed", "error"):
+                    raise RuntimeError(f"Muse Spark failed: {json.dumps(event)[:300]}")
+        return json.loads(_strip_fence(out))
 
     def chat(self, messages: list[dict], tools: list[dict]) -> dict:
         """One assistant turn with tools: returns the message (content and/or tool_calls)."""

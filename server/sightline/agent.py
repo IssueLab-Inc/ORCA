@@ -140,7 +140,8 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
     {"type": "ideas", "round", "seconds", "understanding", "count"}, {"type": "checking", "index", "title", "kind"},
-    with `trials`, {"type": "trial", "index", "kind", "moved", "delta_m", "pieces"} (the candidate in place, before it is checked:
+    with `trials`, {"type": "reasoning", "round", "text"} (a summary of what Muse Spark is working out, as it thinks;
+    when the model streams them) and {"type": "trial", "index", "kind", "moved", "delta_m", "pieces"} (the candidate in place, before it is checked:
     a move's elements and delta, or an offset's new pieces as world triangles, so the browser can show what is being
     tried) and {"type": "attempt", "index", **attempt}.
 
@@ -164,7 +165,11 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         started = time.perf_counter()
         with lock:
             text = _describe(base, clash) + _feedback(attempts)
-        reply = model.complete_json(system, text, clash.images)
+        if trials and on_event and getattr(model, "streams_reasoning", False):  # someone is watching: show the thinking
+            reply = model.complete_json_reasoning(system, text, clash.images, None,
+                                                  lambda note, r=round_no: emit({"type": "reasoning", "round": r, "text": note}))
+        else:
+            reply = model.complete_json(system, text, clash.images)
         understanding = understanding or reply.get("understanding", "")
         advice = reply.get("advice") or advice  # the latest round knows the most
         candidates = reply.get("candidates", [])

@@ -48,6 +48,7 @@ export class Pilot {
       this.status("thinking", `Round ${e.round}: Muse Spark is thinking again, with what failed…`);
       this.viewer()?.orbit(true);
     }
+    if (e.type === "reasoning" && this.driving && !this.playing) this.status("thinking", `Thinking: ${e.text}`);
     if (e.type === "checking") this.titles.set(e.index, e.title);
     if (e.type === "trial" && this.driving) {
       const step: Step = { trial: e, title: this.titles.get(e.index) ?? "", attempt: null, arrived: () => undefined };

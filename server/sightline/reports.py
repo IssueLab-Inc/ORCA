@@ -157,23 +157,32 @@ def read_xml(root: Path, xml: Path) -> list[ReportClash]:
     return clashes
 
 
-def load(report_id: str, root: Path, xmls: list[Path], title: str, temporary: bool = False) -> Report:
+def load(report_id: str, root: Path, xmls: list[Path], title: str, temporary: bool = False,
+         exclude: tuple[str, ...] = ()) -> Report:
     """Read several XML files as one report. The same result exported twice (a combined file and a per-test
-    file, say) is kept once, preferring the copy whose image links resolve."""
+    file, say) is kept once, preferring the copy whose image links resolve.
+
+    `exclude` drops every clash test that involves one of these IFC classes (named in the test, or on either side of
+    any of its results): the demo leaves out site context, rooms and proxies, which are not coordination problems."""
+    read = [c for xml in sorted(xmls) for c in read_xml(root, xml)]
+    if exclude:
+        def involves(text: str | None) -> bool:
+            return any(re.search(rf"\b{re.escape(cls)}\b", text or "", re.IGNORECASE) for cls in exclude)
+        dropped = {c.test for c in read if involves(c.test) or involves(c.a.ifc_class) or involves(c.b.ifc_class)}
+        read = [c for c in read if c.test not in dropped]
     seen: dict[tuple[str, str], int] = {}
     clashes: list[ReportClash] = []
-    for xml in sorted(xmls):
-        for c in read_xml(root, xml):
-            key = (c.test, c.guid or f"{c.name}@{c.point}")
-            if key in seen:
-                i = seen[key]
-                if len(c.images) > len(clashes[i].images):
-                    c.id = clashes[i].id
-                    clashes[i] = c
-                continue
-            seen[key] = len(clashes)
-            c.id = f"c{len(clashes) + 1:04d}"
-            clashes.append(c)
+    for c in read:
+        key = (c.test, c.guid or f"{c.name}@{c.point}")
+        if key in seen:
+            i = seen[key]
+            if len(c.images) > len(clashes[i].images):
+                c.id = clashes[i].id
+                clashes[i] = c
+            continue
+        seen[key] = len(clashes)
+        c.id = f"c{len(clashes) + 1:04d}"
+        clashes.append(c)
     if not clashes:
         raise ValueError("No clash results found in the XML. Export a clash report from Navisworks as XML.")
     return Report(report_id, title, root, [str(x.relative_to(root)) for x in sorted(xmls)], clashes, temporary)

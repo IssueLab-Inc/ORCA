@@ -20,6 +20,12 @@ MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
 MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
 
 
+# Clash tests the demo's sample reports leave out: site context, rooms and proxies are not coordination problems.
+# Uploaded reports are kept whole. Comma-separated IFC classes; empty keeps everything.
+SAMPLE_EXCLUDE = tuple(c.strip() for c in os.environ.get(
+    "SIGHTLINE_SAMPLE_EXCLUDE", "IfcGeographicElement,IfcSpace,IfcBuildingElementProxy").split(",") if c.strip())
+
+
 class Workspace:
     def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None, max_scenes: int = MAX_SCENES,
                  max_reports: int = MAX_REPORTS):
@@ -161,7 +167,8 @@ class Workspace:
         root = (self.report_samples_dir / name).resolve()
         if root.parent != self.report_samples_dir.resolve() or not root.is_dir():
             raise FileNotFoundError(name)
-        return self._keep(reports.load(uuid.uuid4().hex[:12], root, list(root.glob("*.xml")), name))
+        return self._keep(reports.load(uuid.uuid4().hex[:12], root, list(root.glob("*.xml")), name,
+                                       exclude=SAMPLE_EXCLUDE))
 
     def open_report_folder(self, root: Path, title: str) -> reports.Report:
         """An uploaded folder: every XML in it, at any depth. The folder is deleted when the report is dropped."""

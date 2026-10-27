@@ -47,7 +47,7 @@ export function About({ start, onClose }: {
       <section className="about-stats" aria-label="Sightline on the demo, measured">
         <Stat value="15–25 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
         <Stat value="3 of 3" label="designer fixes matched" note="On the demo's three planted clashes, the first idea passes at the designer's own heights." />
-        <Stat value="317" label="clashes sorted in ~3 min" note="The whole demo report triaged; 184 settled by rule, the rest by an open-weights model." />
+        <Stat value="217" label="clashes sorted in 3–4 min" note="The whole demo report triaged; 99 settled by rule, the rest by an open-weights model." />
         <Stat value="Every" label="fix checked before you see it" note="Clash gone, 25 mm to spare, nothing new hit." />
       </section>
 
@@ -79,7 +79,7 @@ export function About({ start, onClose }: {
           </Step>
           <Step n={2} icon={<Eye size={18} aria-hidden />} title="Understands a clash">
             <b>Muse Spark</b> looks at three pictures of the clash and reads the model's own data: what each element is,
-            which way it runs, where the openings are.
+            which way it runs, where the openings are. You can follow its reasoning as it thinks.
           </Step>
           <Step n={3} icon={<ShieldCheck size={18} aria-hidden />} title="Proposes fixes, and checks every one">
             It suggests real edits: raising a duct through an opening in a beam, or trimming a member back where it runs into another. A geometry engine then tests each
@@ -127,7 +127,7 @@ export function About({ start, onClose }: {
           <li>Press <b>Propose fixes</b> and watch Sightline try its ideas in the 3D view.</li>
         </ol>
         <p className="hint"><MessageSquare size={13} aria-hidden /> Or ask it in <b>Chat</b>: “Which clashes are real problems?”
-          · <ScanSearch size={13} aria-hidden /> <b>Triage all</b> sorts all 317 clashes in about three minutes.</p>
+          · <ScanSearch size={13} aria-hidden /> <b>Triage all</b> sorts all 217 clashes in three to four minutes.</p>
       </section>
 
       <section className="built-with" aria-label="Built with">
