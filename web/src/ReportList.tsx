@@ -1,6 +1,7 @@
 import { CircleCheck, Search, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Matches, type Report, type ReportClash, type TriageKind, type TriageVerdict } from "./api";
+import { ClashThumb } from "./ClashPanel";
 import { TRIAGE } from "./Triage";
 
 /** A clash someone looked at and decided needs no model edit here. */
@@ -108,7 +109,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                     {c.images.length > 0
                       ? <button className="row-thumb" onClick={() => onImage(c, 0)} aria-label={`Open the images of ${c.name}`}
                           title={`${c.name}: open its ${c.images.length === 1 ? "image" : `${c.images.length} views`}`}>
-                          <img src={api.imageUrl(report.id, c.id, 0)} alt="" loading="lazy" />
+                          <ClashThumb url={api.imageUrl(report.id, c.id, 0)} alt="" />
                         </button>
                       : report.clashes.some((x) => x.images.length) && <span className="row-thumb none" aria-hidden />}
                     <button className="clash-main" onClick={() => onSelect(c)} title={fixes[c.id] ? `Fixed: ${fixes[c.id]}` : rv ? rv.note : link ? LINK_TITLE[link] : undefined}>

@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Matches, type Measure, type ReportClash, type ReportElement, type TriageVerdict } from "./api";
 import { mm } from "./ReportList";
+import { drawOverlay, focusSquare, readClashImage, type Box, type ClashRead } from "./clashImage";
 import { TRIAGE } from "./Triage";
 
 const VIEW_NAMES: Record<string, string> = { A: "A · pair", B: "B · context", C: "C · second angle" };
@@ -42,7 +43,7 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
         <div className={`thumbs n${clash.images.length}`}>
           {clash.images.map((label, i) => (
             <button key={label} className="thumb" onClick={() => onImage(i)} title={`Open ${VIEW_NAMES[label] ?? label}`}>
-              <img src={api.imageUrl(reportId, clash.id, i)} alt={`${clash.name}, view ${label}`} loading="lazy" />
+              <ClashThumb url={api.imageUrl(reportId, clash.id, i)} alt={`${clash.name}, view ${label}`} />
               <span>{label}</span>
             </button>
           ))}
@@ -93,13 +94,43 @@ export function Lightbox({ reportId, clash, index, onClose, onMove }: {
     return () => window.removeEventListener("keydown", key);
   }, [index, n, onClose, onMove]);
   const label = clash.images[index];
+  const url = api.imageUrl(reportId, clash.id, index);
+  const [read, setRead] = useState<ClashRead | null>(null);
+  const [marks, setMarks] = useState(true);
+  const [zoom, setZoom] = useState(false);
+  const overlay = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    let live = true;
+    setRead(null);
+    readClashImage(url).then((r) => { if (live) setRead(r); });
+    return () => { live = false; };
+  }, [url]);
+  // Redraw the outlines at the picture's display size, and again when the window resizes.
+  useEffect(() => {
+    const c = overlay.current;
+    if (!c || !read || !marks) return;
+    const draw = () => { drawOverlay(c, read); };
+    draw();
+    const ro = new ResizeObserver(draw);
+    ro.observe(c);
+    return () => { ro.disconnect(); };
+  }, [read, marks]);
+  const focus = zoom && read ? focusSquare(read, 2.4, 0.3) : null;
   return (
     <div className="lightbox" role="dialog" aria-label={`${clash.name}, view ${label}`} onClick={onClose}>
       <figure onClick={(e) => e.stopPropagation()}>
-        <img src={api.imageUrl(reportId, clash.id, index)} alt={`${clash.name}, view ${label}`} />
+        <div className="lb-frame">
+          <div className="lb-zoom" style={focus ? zoomStyle(focus) : undefined}>
+            <img src={url} alt={`${clash.name}, view ${label}`} />
+            {marks && read && <canvas ref={overlay} className="lb-overlay" aria-hidden />}
+          </div>
+        </div>
         <figcaption>
-          <span><b>{clash.name}</b> · {VIEW_NAMES[label] ?? label} · red {clash.a.ifc_class}, green {clash.b.ifc_class}</span>
+          <span><b>{clash.name}</b> · {VIEW_NAMES[label] ?? label} · red {clash.a.ifc_class}, green {clash.b.ifc_class}
+            {marks && read?.zone && <span className="lb-key"> · <i className="sw zone" />where they meet</span>}</span>
           <span className="lb-nav">
+            <button className={`btn ${marks ? "on" : ""}`} aria-pressed={marks} onClick={() => setMarks(!marks)} disabled={!read}>Outlines</button>
+            <button className={`btn ${zoom ? "on" : ""}`} aria-pressed={zoom} onClick={() => setZoom(!zoom)} disabled={!read?.pair}>Zoom to the clash</button>
             {n > 1 && clash.images.map((l, i) => <button key={l} className={`btn ${i === index ? "primary" : ""}`} onClick={() => onMove(i)}>{l}</button>)}
             <button className="btn" onClick={onClose}>Close</button>
           </span>
@@ -107,4 +138,40 @@ export function Lightbox({ reportId, clash, index, onClose, onMove }: {
       </figure>
     </div>
   );
+}
+
+/** A clash picture in a small square, zoomed to where the two elements meet (read from its colours once it scrolls
+ * into view). Until then, or if nothing is found, the whole picture. */
+export function ClashThumb({ url, alt }: { url: string; alt: string }) {
+  const el = useRef<HTMLSpanElement | null>(null);
+  const [crop, setCrop] = useState<Box | null>(null);
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    let live = true;
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      readClashImage(url).then((r) => { if (live && r) setCrop(focusSquare(r)); });
+    }, { rootMargin: "200px" });
+    io.observe(node);
+    return () => { live = false; io.disconnect(); };
+  }, [url]);
+  return (
+    <span ref={el} className="clash-thumb" role="img" aria-label={alt}
+      style={{ backgroundImage: `url("${url}")`, ...(crop ? cropStyle(crop) : { backgroundSize: "cover", backgroundPosition: "center" }) }} />
+  );
+}
+
+/** CSS background placement that shows `b` (fractions of the picture) filling the box. */
+function cropStyle(b: Box): React.CSSProperties {
+  const side = b.x1 - b.x0;
+  const pos = (start: number) => (side >= 1 ? 0 : (start / (1 - side)) * 100);
+  return { backgroundSize: `${100 / side}% ${100 / (b.y1 - b.y0)}%`, backgroundPosition: `${pos(b.x0)}% ${pos(b.y0)}%` };
+}
+
+/** A transform that brings `b` (fractions of the picture) to fill the frame. */
+function zoomStyle(b: Box): React.CSSProperties {
+  const scale = 1 / (b.x1 - b.x0);
+  return { transform: `scale(${scale}) translate(${-b.x0 * 100}%, ${-b.y0 * 100}%)`, transformOrigin: "0 0" };
 }

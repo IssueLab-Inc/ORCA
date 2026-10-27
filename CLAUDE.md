@@ -206,6 +206,14 @@ single proposals and chat), emitting `{"type": "reasoning", round, text}`; falls
 and never for other hosts. About 2-3 notes per round, the first after ~3.5 s ("detailed" gave no more). UI: live notes
 under Understanding (`Thinking` in App.tsx), the pilot's status line, then folded into "How Muse Spark reasoned".
 
+Clash pictures read by colour (Oct 27): `web/src/clashImage.ts` reads each Navisworks picture in the browser (512 grid,
+~8 ms): red A, green B, and where they meet (the red-green blend of a see-through view, or the seam where a solid pair
+touches). List and panel thumbnails zoom to that zone (`ClashThumb`, read when scrolled into view); the image dialog has
+outlines, the zone in amber, and Zoom to the clash. SAM 3.1 (`sam-3.1` on api.meta.ai, via /v1/responses; output is
+special-token text, `meta-sam-parser` decodes it) was tried first: on these flat renders it found nothing from text
+prompts and, from point prompts, outlined 52-91% of each element and never the overlap, so colour does this job.
+SAM fits site photos and video, not Navisworks renders.
+
 Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
 some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then
 the boxes' smallest overlap. Third fix kind **trim** (`edits.butt_trim` / `apply_trim`): cut a member's end back to
