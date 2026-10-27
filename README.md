@@ -53,6 +53,11 @@ npm run dev     # http://localhost:5173
 Open a model, double-click element A then element B, and choose **Propose fixes**. **Check this move**
 tries a vertical move by hand and works without any API key.
 
+While the agent works it drives the viewer ([`web/src/pilot.ts`](web/src/pilot.ts)): each idea appears in place as
+the geometry check runs (amber), then turns teal when it is clear or lights up what it hit in magenta, and the camera
+follows; between rounds it turns slowly round the clash. Drag, scroll or click in the view to take it back (the agent
+keeps working); **Let Sightline drive** hands it over again.
+
 ### Navisworks clash reports
 
 **Clash report** in the header opens a Navisworks XML clash report: a sample from `samples/reports/<name>/` (any

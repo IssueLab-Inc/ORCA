@@ -1,4 +1,4 @@
-import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, LocateFixed, MessageSquare, Move, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Boxes, Check, Download, FileSpreadsheet, FolderOpen, Hand, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
@@ -9,6 +9,7 @@ import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
 import { ReportList, mm, type Review } from "./ReportList";
 import { Popover } from "./ui";
+import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
 import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
 import type * as THREE from "three";
@@ -19,6 +20,10 @@ type Tab = "clash" | "plan" | "chat";
 export function App() {
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
+  // While the agent works it drives the viewer (pilot.ts); touching the view takes it back.
+  const [pilotStatus, setPilotStatus] = useState<PilotStatus | null>(null);
+  const sides = useRef<string[]>([]);
+  const pilot = useRef<Pilot | null>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const filesInput = useRef<HTMLInputElement>(null);
   const [samples, setSamples] = useState<string[]>([]);
@@ -75,6 +80,9 @@ export function App() {
     if (!host.current) return;
     const v = new Viewer(host.current);
     viewer.current = v;
+    pilot.current = new Pilot(() => viewer.current,
+      (t) => frameFix({ kind: t.kind, moved: t.moved, preview: t.pieces }, sides.current), setPilotStatus);
+    v.onUserCamera = () => pilot.current?.takeOver();
     api.samples().then((list) => {
       setSamples(list);
       // Default to the coordination set: the building disciplines, not site context, grids or a later revision.
@@ -87,6 +95,7 @@ export function App() {
 
   // Pieces accepted offsets added to A or B are part of that side: coloured, and kept when isolating.
   const [standIns, setStandIns] = useState<Record<string, Side>>({});
+  sides.current = [a, b, ...Object.keys(standIns)].filter((g): g is string => !!g);
   const group = useMemo(() => {
     const g: Record<string, Side> = { ...standIns };
     for (const p of (b && edits[b]) || []) g[p] = "b";
@@ -367,8 +376,10 @@ export function App() {
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
     setProgress(p); setNow(t);
     setProposal({ understanding: "", options: [], attempts: [] });
+    pilot.current?.start();
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
     const onEvent = (e: AgentEvent) => {
+      pilot.current?.event(e);
       if (e.type === "thinking") update({ round: e.round, phase: "thinking", thinkingSince: Date.now(), checking: null });
       if (e.type === "ideas") {
         update({ phase: "checking", modelSeconds: [...p.modelSeconds, e.seconds], ideas: e.count });
@@ -381,8 +392,11 @@ export function App() {
       }
     };
     const finish = (result: Proposal | null) => {
-      if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
-      update({ phase: "done", checking: null }); setNow(Date.now());
+      const show = () => {
+        if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
+        update({ phase: "done", checking: null }); setNow(Date.now());
+      };
+      if (pilot.current) pilot.current.finish(show); else show();
     };
     return { onEvent, finish };
   }
@@ -637,6 +651,15 @@ export function App() {
         )}
         {busy && <div className="overlay live"><i className="spinner" aria-hidden />{busy}</div>}
         {proposing && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
+        {pilotStatus && (
+          <div className={`pilot ${pilotStatus.state}`} role="status">
+            {pilotStatus.driving ? <Navigation size={14} aria-hidden /> : <Hand size={14} aria-hidden />}
+            <span>{pilotStatus.text}</span>
+            {pilotStatus.driving
+              ? <button className="btn small" onClick={() => pilot.current?.takeOver()}>Take the view</button>
+              : <button className="btn small" onClick={() => pilot.current?.resume()}>Let Sightline drive</button>}
+          </div>
+        )}
         {compareBar}
         {error && <div className="overlay error" role="alert" onClick={() => setError(null)}>{error}<X size={14} aria-hidden /></div>}
       </main>

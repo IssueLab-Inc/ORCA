@@ -135,7 +135,23 @@ def test_propose_stream_reports_progress_then_the_result(tmp_path, monkeypatch):
     main, beam = _ids(app_module.ws.scene(sid))
     r = c.post(f"/api/scenes/{sid}/propose/stream", json={"element_a": main, "element_b": beam})
     events = [json.loads(line) for line in r.text.splitlines()]
-    assert [e["type"] for e in events] == ["thinking", "ideas", "checking", "attempt", "result"]
-    assert events[1]["understanding"] == "Through the beam." and events[3]["passed"]
+    assert [e["type"] for e in events] == ["thinking", "ideas", "checking", "trial", "attempt", "result"]
+    assert events[1]["understanding"] == "Through the beam." and events[4]["passed"]
+    assert len(events[3]["pieces"]) == 5  # the browser shows the candidate while it is checked
     [opt] = events[-1]["options"]
     assert opt["kind"] == "offset" and len(opt["before"]) == 1 and len(opt["preview"]) == 5
+
+
+def test_offset_trial_sends_the_pieces_in_place(tmp_path):
+    scene = IfcScene(build_run_fixture(tmp_path / "run.ifc"))
+    main, beam = _ids(scene)
+
+    class Offset:
+        def complete_json(self, system, text, images=None):
+            return {"understanding": "", "candidates": [{"title": "Up", "kind": "offset", "move": "A",
+                                                         "split_m": [2.0, 4.0], "dz_m": 0.40}]}
+
+    events = []
+    resolve(scene, Clash(main, beam), Offset(), max_rounds=1, on_event=events.append, trials=True)
+    trial = next(e for e in events if e["type"] == "trial")
+    assert trial["kind"] == "offset" and trial["moved"] == [main] and len(trial["pieces"]) == 5

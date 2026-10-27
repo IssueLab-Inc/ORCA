@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 48 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 50 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -172,7 +172,19 @@ and images; no reasoning_effort is sent. Eval on all 317 (`evals/runs/2026-10-27
 129/129 non-physical, 49/55 touching (Muse Spark 51/55), 0 failures, median 6.1 s vs 10.0 s; agrees with Muse Spark on
 299/317, but called the B1 pad footing vs lift pit wall (−471 mm, real) by_design. Deployed with `TRIAGE_API_KEY` in the
 `sightline-meta` secret: a live run starts with `"open_weights": true`, 317 in 189 s (184 by rule, median call 7.9 s,
-max 33 s; slower end to end than Muse Spark's 119 s because of the tail). 48 server tests.
+max 33 s; slower end to end than Muse Spark's 119 s because of the tail).
+
+Viewer fixes (Oct 27): a move option frames where the moved element meets the other side (`Viewer.frameFix`), not the
+whole run; the wheel zooms to the cursor. When both sides resolve to one element (35 of Northbank's 317: a port and its
+own valve, two Navisworks parts of one door) it is drawn purple (`Side = "ab"`) with a note in the clash panel.
+
+The agent drives the viewer (Oct 27): `agent.resolve(trials=True)` (single proposals and chat; not plans, which run
+agents in parallel) emits `{"type": "trial", index, kind, moved, delta_m, pieces}` with the candidate in place before
+its check, and attempts carry `hit_ids`. `web/src/pilot.ts` plays them at a readable pace (catches up when steps
+queue): amber while checking, teal when clear, hits magenta, camera via `frameFix`, slow orbit (`Viewer.orbit`) while
+Muse thinks; the result shows once the steps on screen finish. Any camera move or click in the viewer
+(`Viewer.onUserCamera`) is a takeover: the pilot clears what it drew and stops, the agent keeps going; the pill's
+**Let Sightline drive** resumes from the next idea. 50 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

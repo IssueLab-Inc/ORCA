@@ -284,3 +284,14 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .tv.muted { opacity: .7; }
 .triage-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px; border-radius: var(--radius); background: var(--raised); }
 .triage-note p { flex-basis: 100%; margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; }
+
+/* The agent driving the viewer (pilot.ts) */
+.pilot { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 8px;
+  max-width: 70%; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius);
+  padding: 6px 8px 6px 10px; box-shadow: var(--shadow); font-size: 12.5px; }
+.pilot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pilot .btn { flex: none; }
+.pilot.trying { border-left-color: #f5a623; }
+.pilot.passed { border-left-color: #12b5cb; }
+.pilot.failed { border-left-color: #e040fb; }
+.pilot.idle { border-left-color: var(--line); }

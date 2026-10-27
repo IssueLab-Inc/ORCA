@@ -83,7 +83,8 @@ class Workspace:
         """With a report clash, its Navisworks distance and images go to the model too (images are what let
         the model find openings and free space; spikes/README.md, spike 4)."""
         clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id)
-        return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock))
+        return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
+                                    trials=on_event is not None))
 
     def clash_for(self, element_a: str, element_b: str, distance_m: float | None = None,
                   images: list[str] | None = None, notes: str = "", report_id: str | None = None,

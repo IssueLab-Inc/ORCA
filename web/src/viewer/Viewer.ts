@@ -71,7 +71,15 @@ export class Viewer {
     ab: new THREE.LineBasicMaterial({ color: "#d39bff", depthTest: false, transparent: true, opacity: 0.9 }),
   };
   private edges = new Map<string, THREE.LineSegments>();
+  private edgeGeometry = new Map<string, THREE.EdgesGeometry>();
   showEdges = true;
+  /** Elements a candidate fix ran into, while the agent shows its work. */
+  private hitLayer = new THREE.Group();
+  private hitMaterial = new THREE.MeshStandardMaterial({ color: "#e040fb", emissive: "#5c0a6b", roughness: 0.5,
+    side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+  private hitEdges = new THREE.LineBasicMaterial({ color: "#f48fff", depthTest: false, transparent: true, opacity: 0.95 });
+  /** Called when the user moves the camera (drag, wheel, touch) or clicks the model: the agent hands over the view. */
+  onUserCamera: (() => void) | null = null;
   /** New pieces of a previewed edit and ghosts of what it replaces, until the preview changes. */
   private overlay = new THREE.Group();
   private hidden = new Set<string>();       // replaced by a previewed edit
@@ -93,14 +101,16 @@ export class Viewer {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.zoomToCursor = true;  // the wheel zooms to what is under the pointer, not the orbit centre
-    this.controls.addEventListener("start", () => { this.flight = null; });
+    this.controls.addEventListener("start", () => { this.flight = null; this.onUserCamera?.(); });
+    this.renderer.domElement.addEventListener("pointerdown", () => this.onUserCamera?.());
+    this.controls.autoRotateSpeed = 0.6;
     this.scene.background = new THREE.Color("#dfe6ee");
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.6));
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
-    this.scene.add(this.focusLayer, this.overlay, this.marker, this.measureLayer);
-    for (const m of [this.solid, this.ghost]) m.clippingPlanes = this.clipping;
+    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.marker, this.measureLayer);
+    for (const m of [this.solid, this.ghost, this.hitMaterial]) m.clippingPlanes = this.clipping;
     this.markerLabel = this.label("marker-label");
     this.measureLabel = this.label("measure-label");
     this.buildMarker();
@@ -253,6 +263,19 @@ export class Viewer {
   private edgesOf(gid: string, f: Found, side: Side): THREE.LineSegments {
     let line = this.edges.get(gid);
     if (!line) {
+      line = new THREE.LineSegments(this.edgeGeometryOf(gid, f), this.edgeMaterials[side]);
+      line.matrixAutoUpdate = false;
+      line.frustumCulled = false;
+      line.renderOrder = 9;
+      this.edges.set(gid, line);
+    }
+    line.material = this.edgeMaterials[side];
+    return line;
+  }
+
+  private edgeGeometryOf(gid: string, f: Found): THREE.EdgesGeometry {
+    let edges = this.edgeGeometry.get(gid);
+    if (!edges) {
       // EdgesGeometry needs a geometry of its own: copy just this element's triangles out of the batch.
       const src = this.geometryOf(f);
       const index = src.getIndex()!;
@@ -265,21 +288,40 @@ export class Viewer {
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(tri, 3));
-      line = new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), this.edgeMaterials[side]);
+      edges = new THREE.EdgesGeometry(g, 25);
       g.dispose();
-      line.matrixAutoUpdate = false;
-      line.frustumCulled = false;
-      line.renderOrder = 9;
-      this.edges.set(gid, line);
+      this.edgeGeometry.set(gid, edges);
     }
-    line.material = this.edgeMaterials[side];
-    return line;
+    return edges;
   }
+
+  /** Light up what a candidate fix ran into (magenta, outlined through everything); [] clears it. */
+  setHits(ids: string[]) {
+    this.hitLayer.clear();
+    for (const gid of ids) {
+      const f = this.find(gid);
+      if (!f || this.hiddenModels.has(this.models.indexOf(f.model))) continue;
+      const mesh = new THREE.Mesh(this.geometryOf(f), this.hitMaterial);
+      const line = new THREE.LineSegments(this.edgeGeometryOf(gid, f), this.hitEdges);
+      for (const o of [mesh, line]) {
+        o.matrixAutoUpdate = false;
+        o.matrix.copy(this.matrixOf(f.el));
+        o.frustumCulled = false;
+        o.renderOrder = 8;
+      }
+      this.hitLayer.add(mesh, line);
+    }
+  }
+
+  /** A slow turn around the current target, while the agent thinks. */
+  orbit(on: boolean) { this.controls.autoRotate = on; }
 
   setEdges(on: boolean) { this.showEdges = on; this.applyMode(); }
 
   private clearFocusCache() {
-    for (const l of this.edges.values()) l.geometry.dispose();
+    this.setHits([]);
+    for (const g of this.edgeGeometry.values()) g.dispose();
+    this.edgeGeometry.clear();
     this.edges.clear();
     // Not disposed: these geometries share their model's buffers, and disposing would free them.
     this.focusGeometry.clear();
@@ -508,7 +550,7 @@ export class Viewer {
       this.sectionHelper = new THREE.Box3Helper(b, new THREE.Color("#2f5d8a"));
       this.scene.add(this.sectionHelper);
     }
-    for (const m of [this.solid, this.ghost, ...Object.values(this.focusMaterials)]) m.needsUpdate = true;
+    for (const m of [this.solid, this.ghost, this.hitMaterial, ...Object.values(this.focusMaterials)]) m.needsUpdate = true;
     return true;
   }
 

@@ -75,3 +75,23 @@ def test_ranking_prefers_comfortable_clearance_and_drops_repeats():
     hits = [Hit("x", "IfcDuctSegment", "collision", -0.249), Hit("y", "IfcDuctSegment", "collision", -0.1),
             Hit("z", "IfcWall", "clearance", 0.01)]
     assert _reason(hits) == "collision with IfcDuctSegment x2 (worst -249 mm), clearance with IfcWall (+10 mm)"
+
+
+def test_trials_show_each_candidate_before_its_check_and_attempts_name_what_they_hit(tmp_path: Path):
+    path = build_clash_fixture(tmp_path / "f.ifc")
+    s = IfcScene(path)
+    duct, beam = s.model.by_type("IfcDuctSegment")[0].GlobalId, s.model.by_type("IfcBeam")[0].GlobalId
+    pipe = s.model.by_type("IfcPipeSegment")[0].GlobalId
+    events = []
+
+    result = resolve(s, Clash(duct, beam), ScriptedModel(), max_rounds=2, on_event=events.append, trials=True)
+
+    kinds = [e["type"] for e in events if e["type"] in ("checking", "trial", "attempt")]
+    assert kinds == ["checking", "trial", "attempt"] * 3
+    first = next(e for e in events if e["type"] == "trial")
+    assert first == {"type": "trial", "index": 0, "kind": "move", "moved": [duct], "delta_m": [0, 0, -0.40], "pieces": None}
+    assert result.attempts[0].hit_ids == [pipe] and result.attempts[1].hit_ids == []
+    # without `trials` (plans run many agents at once) nothing is meshed or sent
+    quiet = []
+    resolve(s, Clash(duct, beam), ScriptedModel(), max_rounds=1, on_event=quiet.append)
+    assert not [e for e in quiet if e["type"] == "trial"]

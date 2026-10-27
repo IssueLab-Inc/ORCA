@@ -6,13 +6,19 @@ export interface Option {
   min_clearance_m: number | null;
   kind: "move" | "offset"; split_m: number[] | null; preview: Piece[] | null; before: Piece[] | null;
 }
-export interface Attempt { title: string; delta_m: number[]; passed: boolean; reason: string; kind: "move" | "offset"; split_m: number[] | null }
+export interface Attempt {
+  title: string; delta_m: number[]; passed: boolean; reason: string; kind: "move" | "offset"; split_m: number[] | null;
+  hit_ids?: string[];  // what it hit, worst first
+}
+/** A candidate in place while the agent checks it: a move's elements and delta, or an offset's new pieces. */
+export interface Trial { index: number; kind: "move" | "offset"; moved: string[]; delta_m: number[]; pieces: Piece[] | null }
 export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[] }
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent =
   | { type: "thinking"; round: number }
   | { type: "ideas"; round: number; seconds: number; understanding: string; count: number }
   | { type: "checking"; index: number; title: string; kind: string }
+  | ({ type: "trial" } & Trial)
   | ({ type: "attempt"; index: number } & Attempt)
   | ({ type: "result" } & Proposal)
   | { type: "error"; detail: string };

@@ -52,6 +52,7 @@ class Attempt:
     reason: str
     kind: str = "move"
     split_m: list[float] | None = None
+    hit_ids: list[str] = field(default_factory=list)  # GlobalIds it hit, worst first (at most 8), for the viewer
 
 
 @dataclass
@@ -117,12 +118,14 @@ def _feedback(attempts: list[Attempt]) -> str:
 
 def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = "construction",
             max_rounds: int = 3, want: int = 3, clearance_m: float = 0.025,
-            on_event: Callable[[dict], None] | None = None, lock=None) -> Result:
+            on_event: Callable[[dict], None] | None = None, lock=None, trials: bool = False) -> Result:
     """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
-    {"type": "ideas", "round", "seconds", "understanding", "count"}, {"type": "checking", "index", "title", "kind"}
-    and {"type": "attempt", "index", **attempt}.
+    {"type": "ideas", "round", "seconds", "understanding", "count"}, {"type": "checking", "index", "title", "kind"},
+    with `trials`, {"type": "trial", "index", "kind", "moved", "delta_m", "pieces"} (the candidate in place, before it is checked:
+    a move's elements and delta, or an offset's new pieces as world triangles, so the browser can show what is being
+    tried) and {"type": "attempt", "index", **attempt}.
 
     `lock` serialises every use of the scene, so several clashes can be resolved at once: their model calls
     overlap, their geometry trials (which edit the model and undo) take turns.
@@ -153,9 +156,10 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                   "kind": cand.get("kind", "move")})
             target = clash.element_a if cand.get("move", "A") == "A" else clash.element_b
             other = clash.element_b if target == clash.element_a else clash.element_a
+            trial = (lambda shape, i=len(attempts): emit({"type": "trial", "index": i, **shape})) if on_event and trials else None
             with lock:
-                attempt, option = (_try_offset(base, cand, target, other, clearance_m) if cand.get("kind") == "offset"
-                                   else _try_move(base, cand, target, clearance_m))
+                attempt, option = (_try_offset(base, cand, target, other, clearance_m, trial) if cand.get("kind") == "offset"
+                                   else _try_move(base, cand, target, clearance_m, trial))
             attempts.append(attempt)
             on_step(attempt)
             if option:
@@ -179,18 +183,21 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     return Result(understanding, options, attempts)
 
 
-def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float) -> tuple[Attempt, Option | None]:
+def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
+              on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
     """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds."""
     run = scene.connected_run(target)
     delta = [float(v) for v in cand.get("delta_m", [0, 0, 0])]
     # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
     neighbours = {c for g in run for c in scene.element(g).connected} - set(run)
+    if on_trial:
+        on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
     placements = scene.translate(run, tuple(delta))
     try:
         v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
     finally:
         scene.translate(run, tuple(-d for d in delta))
-    attempt = Attempt(cand.get("title", "move"), delta, v.passed, _reason(v.hits))
+    attempt = Attempt(cand.get("title", "move"), delta, v.passed, _reason(v.hits), hit_ids=_hit_ids(v.hits))
     if not v.passed:
         return attempt, None
     return attempt, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""), cand.get("also_needs", ""),
@@ -207,6 +214,15 @@ def _reason(hits: list[verify.Hit]) -> str:
                      for (kind, cls), ds in groups.items())
 
 
+def _hit_ids(hits: list[verify.Hit], limit: int = 8) -> list[str]:
+    """The elements hit, worst first, each once."""
+    out: list[str] = []
+    for h in sorted(hits, key=lambda h: h.distance_m):
+        if h.other not in out:
+            out.append(h.other)
+    return out[:limit]
+
+
 def _keep(options: list[Option], new: Option) -> None:
     """Add a verified option unless it is the same fix as one already kept (same kind and change, within 10 mm)."""
     for i, o in enumerate(options):
@@ -217,8 +233,8 @@ def _keep(options: list[Option], new: Option) -> None:
     options.append(new)
 
 
-def _try_offset(scene: IfcScene, cand: dict, target: str, other: str,
-               clearance_m: float) -> tuple[Attempt, Option | None]:
+def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
+                on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
     """Split `target` around the obstacle and raise or lower the middle, check it, undo it.
 
     Only the new pieces (risers and middle) are checked against everything; the shortened end pieces only against
@@ -233,15 +249,18 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str,
     try:
         with edits.trial(scene, target):
             off = edits.apply_offset(scene, target, split[0], split[1], dz)
+            shape = edits.meshes(scene, off.pieces) if on_trial else None
+            if on_trial:
+                on_trial({"kind": "offset", "moved": [target], "delta_m": delta, "pieces": shape})
             ignore = set(off.pieces) | {c for g in off.pieces for c in scene.element(g).connected}
             v = verify.check(scene, off.pieces[1:4], clearance_m=clearance_m, ignore=ignore)
             ends = verify.check(scene, [off.pieces[0], off.pieces[-1]], clearance_m=clearance_m, ignore=ignore)
             hits = v.hits + [h for h in ends.hits if h.other == other]
-            preview = edits.meshes(scene, off.pieces) if not hits else None
+            preview = (shape or edits.meshes(scene, off.pieces)) if not hits else None
     except edits.Unsupported as e:
         return Attempt(title, delta, False, f"cannot offset this element: {e}", "offset", split), None
     reason = _reason(hits)
-    attempt = Attempt(title, delta, not hits, reason, "offset", split)
+    attempt = Attempt(title, delta, not hits, reason, "offset", split, _hit_ids(hits))
     if hits:
         return attempt, None
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
