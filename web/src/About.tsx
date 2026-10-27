@@ -211,7 +211,8 @@ function BeforeAfter() {
 
         <text x={306} y={11} textAnchor="middle" className="ba-label">After</text>
         <rect x={218} y={92} width={176} height={26} rx={2} fill="#e67e22" opacity={0.28} />
-        <path d="M218 105 H264 V59 H348 V105 H394" fill="none" stroke="#12b5cb" strokeWidth={26} strokeLinejoin="miter" />
+        <path d="M218 105 H244 Q264 105 264 85 V79 Q264 59 284 59 H328 Q348 59 348 79 V85 Q348 105 368 105 H394"
+          fill="none" stroke="#12b5cb" strokeWidth={26} />
         {girder(306)}
         <text x={306} y={168} textAnchor="middle" className="ba-note ok-note">raised through the opening</text>
         <defs>

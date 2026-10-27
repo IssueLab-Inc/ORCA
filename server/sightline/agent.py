@@ -111,8 +111,12 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str) -> list[str]:
         lo, hi = max(along.min(), 0.0), min(along.max(), run.length_m)
         if lo < hi:
             lines.append(f"The other element occupies {lo:.2f}-{hi:.2f} m along it, from z {b[other][0][2]:.3f} to "
-                         f"{b[other][1][2]:.3f} m. A local offset of {label} can split it either side of that (a riser "
-                         f"takes {run.depth_m:.2f} m of run, and at least 0.05 m must remain at each end).")
+                         f"{b[other][1][2]:.3f} m. A local offset of {label} can split it either side of that: "
+                         + (f"its 90° bends take up to {run.depth_m:.2f} m of run before and after each split point "
+                            f"(the bend radius, about one profile depth), the riser {run.depth_m / 2:.2f} m either side "
+                            f"of it, and at least 0.05 m of straight must remain at each end and in the middle."
+                            if edits.default_corners() == "bends" else
+                            f"a riser takes {run.depth_m:.2f} m of run, and at least 0.05 m must remain at each end."))
             try:
                 holes = edits.passages(scene, gid, other)
             except RuntimeError:
@@ -279,7 +283,7 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_
             if on_trial:
                 on_trial({"kind": "offset", "moved": [target], "delta_m": delta, "pieces": shape})
             ignore = set(off.pieces) | {c for g in off.pieces for c in scene.element(g).connected}
-            v = verify.check(scene, off.pieces[1:4], clearance_m=clearance_m, ignore=ignore)
+            v = verify.check(scene, off.pieces[1:-1], clearance_m=clearance_m, ignore=ignore)  # bends, risers, middle
             ends = verify.check(scene, [off.pieces[0], off.pieces[-1]], clearance_m=clearance_m, ignore=ignore)
             hits = v.hits + [h for h in ends.hits if h.other == other]
             preview = (shape or edits.meshes(scene, off.pieces)) if not hits else None

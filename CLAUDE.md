@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 60 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 62 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -112,7 +112,7 @@ re-measures on selection (now 317/317 with Site). Proposals on a report clash ge
 `api.meta.ai` (OpenAI `tools`, 2 s round trip, streaming): the chat over reports + model is next (plan below).
 
 Local offsets (Oct 27): `server/sightline/edits.py` splits a straight extruded segment (profile upright or on its
-side), raises/lowers the middle, adds square-cornered risers (Rev04 uses bends), keeps the original GlobalId on the
+side), raises/lowers the middle with 90° bend fittings and short risers (Bends, below), keeps the original GlobalId on the
 first piece and re-chains ports; tried in an IfcOpenShell transaction and undone. `edits.passages` finds openings in
 the obstacle by ray casting (Northbank's girder openings are cut into its geometry, no IfcOpeningElement). With that
 text Muse Spark's first proposal passes on #042/#057/#061 at Rev04's heights (evals/README.md). UI: offset preview,
@@ -234,6 +234,15 @@ Clash tab gives it back; the Plan tab takes it again. A chat reply that built a 
 selects it (`selectClash(c, keepPlan)`), and the list highlight follows the view. Before, a plan started from chat
 moved the camera but left the old clash highlighted and the plan undrawn until the Plan tab was opened.
 
+Bends (Oct 28): offsets turn with radiused 90° bend fittings by default, as Rev04 does (`edits.apply_offset(corners=)`,
+env `SIGHTLINE_OFFSET_CORNERS=square` for the old square corners). Pieces: straight, bend, riser, bend, middle, bend,
+riser, bend, straight (9; 7 when the rise leaves no riser). Bends are IfcDuctFitting / IfcPipeFitting /
+IfcCableCarrierFitting / IfcCableFitting, PredefinedType BEND, closed IfcTriangulatedFaceSet (8 facets per 90°), own
+placement, storey and systems, two ports each, chained into the run. Radius `edits.bend_radius`: one profile depth,
+less when the rise is short (min(depth, (rise - 40 mm)/2): Rev04's 180 mm duct, 100 mm tray, 54 mm pipe exactly); falls
+back to square when the bend would fold (inside radius < 5 mm) or the class has no fitting. Agent checks pieces[1:-1];
+`_describe` tells Muse the bend footprint. Answer key still 3/3 first try at Rev04 heights with bends.
+
 Joints and trims (Oct 27): `verify.check` also runs collision without touching, because the intersection query misses
 some overlaps (two boxes with flush faces: Clash7's transom 30 mm into a mullion came back as a 0 mm gap); depth is then
 the boxes' smallest overlap. Third fix kind **trim** (`edits.butt_trim` / `apply_trim`): cut a member's end back to
@@ -245,8 +254,8 @@ first try now. Answer key unchanged (3/3 first try, rows in results.csv). The vi
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
-2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. Later: bends instead of square corners,
-   sideways offsets, splitting at fittings.
+2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
+   at fittings.
 3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.

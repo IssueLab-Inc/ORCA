@@ -27,7 +27,7 @@ def test_offset_up_clears_beam_and_slab_and_is_undone(tmp_path, millimetres):
 
     ok = ws.check_offset("s", main, beam, [2.0, 4.0], 0.40)
     assert ok["passed"] and ok["min_clearance_m"] == pytest.approx(0.05, abs=1e-3)
-    assert len(ok["preview"]) == 5
+    assert len(ok["preview"]) == 9
 
     assert "IfcSlab" in ws.check_offset("s", main, beam, [2.0, 4.0], 0.50)["reason"]   # into the slab
     assert "IfcBeam" in ws.check_offset("s", main, beam, [2.0, 4.0], 0.30)["reason"]   # still in the beam
@@ -41,9 +41,9 @@ def test_kept_offset_chains_ports_and_hands_on_the_far_connection(tmp_path):
     scene = IfcScene(build_run_fixture(tmp_path / "run.ifc"))
     main, _ = _ids(scene)
     end = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
-    off = edits.apply_offset(scene, main, 2.0, 4.0, 0.40)
+    off = edits.apply_offset(scene, main, 2.0, 4.0, 0.40, corners="square")
 
-    assert off.pieces[0] == main and len(off.pieces) == 5
+    assert off.pieces[0] == main and len(off.pieces) == 5 and off.corners == "square"
     assert [scene.entity(g).Tag for g in off.pieces[1:]] == ["SA-1-SL1", "SA-1-SL2", "SA-1-SL3", "SA-1-SL4"]
     for u, v in zip(off.pieces, off.pieces[1:]):
         assert v in scene.element(u).connected
@@ -76,7 +76,7 @@ def test_agent_offers_a_verified_offset(tmp_path):
     assert "6.00 m long" in model.texts[0] and "2.90-3.10 m along it" in model.texts[0]
     assert [(a.title, a.passed) for a in result.attempts] == [("Up 500", False), ("Up 400", True)]
     [opt] = result.options
-    assert opt.kind == "offset" and opt.split_m == [2.0, 4.0] and len(opt.preview) == 5
+    assert opt.kind == "offset" and opt.split_m == [2.0, 4.0] and len(opt.preview) == 9
     assert edits.run_of(scene, main).length_m == pytest.approx(6.0)
 
 
@@ -101,7 +101,7 @@ def test_api_applies_an_offset_and_serves_the_edited_file(tmp_path, monkeypatch)
     assert c.post(f"/api/scenes/{sid}/offset/check",
                   json={"element": main, "other": beam, "split_m": [2, 4], "dz_m": 0.4}).json()["passed"]
     r = c.post(f"/api/scenes/{sid}/offset/apply", json={"element": main, "split_m": [2, 4], "dz_m": 0.4}).json()
-    assert len(r["pieces"]) == 5 and r["files"] == [0]
+    assert len(r["pieces"]) == 9 and r["files"] == [0]
     assert b"SA-1-SL2" in c.get(f"/api/scenes/{sid}/files/0").content
     assert c.post(f"/api/scenes/{sid}/offset/apply",
                   json={"element": beam, "split_m": [1, 2], "dz_m": 0.4}).status_code == 422
@@ -137,9 +137,9 @@ def test_propose_stream_reports_progress_then_the_result(tmp_path, monkeypatch):
     events = [json.loads(line) for line in r.text.splitlines()]
     assert [e["type"] for e in events] == ["thinking", "ideas", "checking", "trial", "attempt", "result"]
     assert events[1]["understanding"] == "Through the beam." and events[4]["passed"]
-    assert len(events[3]["pieces"]) == 5  # the browser shows the candidate while it is checked
+    assert len(events[3]["pieces"]) == 9  # the browser shows the candidate while it is checked
     [opt] = events[-1]["options"]
-    assert opt["kind"] == "offset" and len(opt["before"]) == 1 and len(opt["preview"]) == 5
+    assert opt["kind"] == "offset" and len(opt["before"]) == 1 and len(opt["preview"]) == 9
 
 
 def test_offset_trial_sends_the_pieces_in_place(tmp_path):
@@ -154,7 +154,7 @@ def test_offset_trial_sends_the_pieces_in_place(tmp_path):
     events = []
     resolve(scene, Clash(main, beam), Offset(), max_rounds=1, on_event=events.append, trials=True)
     trial = next(e for e in events if e["type"] == "trial")
-    assert trial["kind"] == "offset" and trial["moved"] == [main] and len(trial["pieces"]) == 5
+    assert trial["kind"] == "offset" and trial["moved"] == [main] and len(trial["pieces"]) == 9
 
 
 def _joint(tmp_path):
@@ -200,3 +200,50 @@ def test_trim_refuses_an_overlap_mid_length(tmp_path):
     duct, beam = scene.model.by_type("IfcDuctSegment")[0].GlobalId, scene.model.by_type("IfcBeam")[0].GlobalId
     with pytest.raises(edits.Unsupported, match="not at either end"):
         edits.butt_trim(scene, duct, beam)
+
+
+def test_offset_bends_like_the_designers_rev04(tmp_path):
+    """A 300 deep duct raised 400 mm: 90° bend fittings of radius 180 mm with a 40 mm riser between, as in Northbank's
+    Rev04 (SA-MAIN-L02-5): straight, bend, riser, bend, middle, bend, riser, bend, straight, chained port to port."""
+    scene = IfcScene(build_run_fixture(tmp_path / "run.ifc"))
+    main, _ = _ids(scene)
+    end = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    off = edits.apply_offset(scene, main, 2.0, 4.0, 0.40)
+
+    assert off.corners == "bends" and len(off.pieces) == 9
+    kinds = [(scene.entity(g).is_a(), getattr(scene.entity(g), "PredefinedType", None)) for g in off.pieces]
+    assert [k for k, _ in kinds] == ["IfcDuctSegment", "IfcDuctFitting", "IfcDuctSegment", "IfcDuctFitting",
+                                     "IfcDuctSegment", "IfcDuctFitting", "IfcDuctSegment", "IfcDuctFitting", "IfcDuctSegment"]
+    assert all(t == "BEND" for k, t in kinds if k == "IfcDuctFitting")
+    assert [scene.entity(g).Tag for g in off.pieces[1:4]] == ["SA-1-BR1", "SA-1-SL1", "SA-1-BR2"]
+    for u, v in zip(off.pieces, off.pieces[1:]):                     # one continuous run
+        assert v in scene.element(u).connected
+    assert set(scene.element(off.pieces[-1]).connected) == {off.pieces[-2], end}
+
+    b = scene.bounds()
+    assert edits.run_of(scene, main).length_m == pytest.approx(2.0 - 0.18)          # straight up to the first bend
+    assert b[off.pieces[1]][0][0] == pytest.approx(1.82, abs=1e-3)                   # bend starts R before the split
+    assert b[off.pieces[1]][1][0] == pytest.approx(2.15, abs=1e-3)                   # ...and ends in the riser's face
+    assert b[off.pieces[2]][1][2] - b[off.pieces[2]][0][2] == pytest.approx(0.04, abs=1e-3)  # the 40 mm riser
+    assert b[off.pieces[4]][0][2] == pytest.approx(2.65 + 0.40) and b[off.pieces[4]][0][0] == pytest.approx(2.18)
+
+    import ifcopenshell.geom
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    for g in off.pieces[1::2]:  # every bend a closed solid, faces outward (positive volume, about w x t x quarter arc)
+        sh = ifcopenshell.geom.create_shape(settings, scene.entity(g))
+        v = np.asarray(sh.geometry.verts).reshape(-1, 3)
+        f = np.asarray(sh.geometry.faces).reshape(-1, 3)
+        vol = np.einsum("ij,ij->i", v[f[:, 0]], np.cross(v[f[:, 1]], v[f[:, 2]])).sum() / 6
+        assert vol == pytest.approx(0.4 * 0.3 * 0.18 * np.pi / 2, rel=0.03)
+
+    out = ifcopenshell.open(str(scene.write(tmp_path / "out.ifc")))
+    assert len(out.by_type("IfcDuctFitting")) == 4 and len(out.by_type("IfcDuctSegment")) == 6
+
+
+def test_small_rises_and_other_classes_fall_back_to_square_corners():
+    assert edits.bend_radius(0.3, 0.40) == pytest.approx(0.18)    # duct: Rev04's radius
+    assert edits.bend_radius(0.1, 0.25) == pytest.approx(0.10)    # tray: one depth, 50 mm riser
+    assert edits.bend_radius(0.054, 0.28) == pytest.approx(0.054)  # pipe: one diameter
+    assert edits.bend_radius(0.3, 0.32) == pytest.approx(0.16)     # no room for a riser: the bends meet
+    assert edits.bend_radius(0.3, 0.25) is None                   # the bend would fold: square corners

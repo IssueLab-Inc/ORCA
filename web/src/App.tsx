@@ -576,7 +576,7 @@ export function App() {
           <dt>After</dt><dd className="ok">{option.kind === "trim" ? "clear: the two now butt at the joint"
             : `clear${option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}`}</dd>
           <dt>Change</dt><dd>{option.kind === "offset" && option.split_m
-            ? `1 segment → ${option.preview?.length ?? 5} pieces; ${(option.split_m[1] - option.split_m[0]).toFixed(2)} m of it ${option.delta_m[2] > 0 ? "raised" : "lowered"} ${Math.abs(Math.round(option.delta_m[2] * 1000))} mm`
+            ? `${(option.split_m[1] - option.split_m[0]).toFixed(2)} m of it ${option.delta_m[2] > 0 ? "raised" : "lowered"} ${Math.abs(Math.round(option.delta_m[2] * 1000))} mm; ${offsetParts(option.preview?.length ?? 5)}`
             : option.kind === "trim" && option.trim
               ? `one end cut back ${Math.round(option.trim.by_m * 1000)} mm; nothing moves`
               : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
@@ -889,4 +889,9 @@ function Thinking({ notes, live, thinking }: { notes: { round: number; text: str
       {list}
     </details>
   );
+}
+
+/** What an offset adds, from its piece count: square corners make 5 straights; bends add four fittings (7 or 9 pieces). */
+function offsetParts(pieces: number) {
+  return pieces > 5 ? `4 bends${pieces === 9 ? " and 2 short risers" : ""}` : "square corners";
 }

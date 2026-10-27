@@ -19,12 +19,14 @@ changes. Any straight extrusion can be trimmed, at either end, whatever its prof
 """
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 import ifcopenshell
 import ifcopenshell.api
 import ifcopenshell.geom
+import ifcopenshell.util.element
 import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import numpy as np
@@ -64,7 +66,8 @@ class Offset:
     start_m: float        # split points, metres along the run from its start (riser centrelines)
     end_m: float
     dz_m: float           # middle piece up (+) or down (-)
-    pieces: list[str]     # GlobalIds in run order: first, riser, middle, riser, last
+    pieces: list[str]     # GlobalIds in run order: first, (bend,) riser, (bend,) middle, ..., last
+    corners: str = "square"  # "bends" (90° bend fittings) or "square"
 
 
 def _profile_size(profile) -> tuple[float, float]:
@@ -133,9 +136,36 @@ def _ports(element):
     return sorted(ifcopenshell.util.system.get_ports(element), key=lambda p: p.Name or "")
 
 
-def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, dz_m: float) -> Offset:
+# Fittings for a segment's bends, by segment class (IFC4). Anything else gets square corners.
+FITTING_CLASS = {"IfcDuctSegment": "IfcDuctFitting", "IfcPipeSegment": "IfcPipeFitting",
+                 "IfcCableCarrierSegment": "IfcCableCarrierFitting", "IfcCableSegment": "IfcCableFitting"}
+RISER_MIN_M = 0.04       # straight riser left between two bends when the rise allows (Rev04: 40-172 mm)
+BEND_STEPS = 8           # facets per 90° bend
+
+
+def default_corners() -> str:
+    """How offsets turn: "bends" (radiused 90° fittings, as Northbank's Rev04 does) or "square" (SIGHTLINE_OFFSET_CORNERS)."""
+    return "square" if os.environ.get("SIGHTLINE_OFFSET_CORNERS", "bends").lower().startswith("sq") else "bends"
+
+
+def bend_radius(depth_m: float, dz_m: float) -> float | None:
+    """Centreline radius of an offset's bends: one profile depth, smaller when the rise is too short for two bends and
+    a riser (Rev04: duct 300 deep rising 400 mm gets 180 mm). None when even that would fold the inside of the bend."""
+    r = min(depth_m, (abs(dz_m) - RISER_MIN_M) / 2)
+    if r - depth_m / 2 < 0.005:  # the inside radius: below 5 mm the bend would fold on itself
+        r = abs(dz_m) / 2         # no riser: two bends meet
+    return r if r - depth_m / 2 >= 0.005 else None
+
+
+def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, dz_m: float,
+                 corners: str | None = None) -> Offset:
     """Split `global_id` at `start_m` and `end_m` (metres along it) and take the middle piece `dz_m` up or down.
-    Edits the model in place; wrap in `trial` to try it and undo."""
+    Edits the model in place; wrap in `trial` to try it and undo.
+
+    `corners` "bends" (default): each turn is a 90° bend fitting (IfcDuctFitting, IfcPipeFitting... of type BEND)
+    with a radius of about one profile depth, joined by short risers, the way Northbank's Rev04 does it. "square":
+    risers overlap the straight pieces at square corners. Bends fall back to square corners when the segment has no
+    fitting class or the rise is too small to bend."""
     element = scene.entity(global_id)
     i, place, item, origin, d, px, py = _frames(scene, element)
     model, s = scene.models[i], scene.unit_scales[i]
@@ -145,64 +175,105 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         raise Unsupported("the offset height is zero")
     sx, sy = _profile_size(item.SweptArea)
     if abs(py @ UP) > 0.999:      # profile Y is up: risers keep profile X across the run
-        t, riser_ref = sy, (lambda axis: px)
+        t, w, riser_ref = sy, sx, (lambda axis: px)
     elif abs(px @ UP) > 0.999:    # profile X is up (a tray drawn on its side): keep profile Y across the run
-        t, riser_ref = sx, (lambda axis: np.cross(py, axis))
+        t, w, riser_ref = sx, sy, (lambda axis: np.cross(py, axis))
     else:
         raise Unsupported("the profile is tilted")
     a, b, dz, L = start_m / s, end_m / s, dz_m / s, item.Depth
     if a > b:
         a, b = b, a
-    if a - t / 2 < MIN_PIECE_M / s or L - b - t / 2 < MIN_PIECE_M / s or b - a - t < MIN_PIECE_M / s:
-        raise Unsupported(f"the split points leave a piece shorter than {MIN_PIECE_M * 1000:.0f} mm "
-                          f"(run {L * s:.2f} m, riser footprint {t * s * 1000:.0f} mm)")
     sign = 1.0 if dz > 0 else -1.0
-    # World (file units) start, axis, length of every piece. Risers keep the profile's X across the run.
-    pieces = [
-        (origin, d, a - t / 2),
-        (origin + d * a - UP * sign * t / 2, UP * sign, abs(dz) + t),
-        (origin + d * (a + t / 2) + UP * dz, d, b - a - t),
-        (origin + d * b + UP * (dz + sign * t / 2), -UP * sign, abs(dz) + t),
-        (origin + d * (b + t / 2), d, L - b - t / 2),
-    ]
+    u = UP * sign
+
+    r_m = bend_radius(t * s, dz_m) if (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS else None
+    if r_m is not None:
+        R = r_m / s
+        if a - R < MIN_PIECE_M / s or L - b - R < MIN_PIECE_M / s or b - a - 2 * R < MIN_PIECE_M / s:
+            raise Unsupported(f"the split points leave a piece shorter than {MIN_PIECE_M * 1000:.0f} mm "
+                              f"(run {L * s:.2f} m, each bend takes {R * s:.2f} m of run)")
+        rise = abs(dz) - 2 * R
+        risers = rise > 1e-3 / s
+        # World (file units) pieces in run order: straights (start, axis, length) and bends (start, from, to, radius).
+        pieces = [("straight", origin, d, a - R),
+                  ("bend", origin + d * (a - R), d, u, R)]
+        pieces += [("straight", origin + d * a + u * R, u, rise)] if risers else []
+        pieces += [("bend", origin + d * a + u * (abs(dz) - R), u, d, R),
+                   ("straight", origin + d * (a + R) + UP * dz, d, b - a - 2 * R),
+                   ("bend", origin + d * (b - R) + UP * dz, d, -u, R)]
+        pieces += [("straight", origin + d * b + UP * dz - u * R, -u, rise)] if risers else []
+        pieces += [("bend", origin + d * b + u * R, -u, d, R),
+                   ("straight", origin + d * (b + R), d, L - b - R)]
+        used = "bends"
+    else:
+        if a - t / 2 < MIN_PIECE_M / s or L - b - t / 2 < MIN_PIECE_M / s or b - a - t < MIN_PIECE_M / s:
+            raise Unsupported(f"the split points leave a piece shorter than {MIN_PIECE_M * 1000:.0f} mm "
+                              f"(run {L * s:.2f} m, riser footprint {t * s * 1000:.0f} mm)")
+        # Risers overlap the straights by half a depth at each square corner.
+        pieces = [
+            ("straight", origin, d, a - t / 2),
+            ("straight", origin + d * a - u * t / 2, u, abs(dz) + t),
+            ("straight", origin + d * (a + t / 2) + UP * dz, d, b - a - t),
+            ("straight", origin + d * b + UP * (dz + sign * t / 2), -u, abs(dz) + t),
+            ("straight", origin + d * (b + t / 2), d, L - b - t / 2),
+        ]
+        used = "square"
     inv = np.linalg.inv(place)
     body, _ = _body(element)
     styles = [x for x in model.get_inverse(item) if x.is_a("IfcStyledItem")]
+    round_ = item.SweptArea.is_a("IfcCircleProfileDef")
 
     first_ports = _ports(element)
     far = ifcopenshell.util.system.get_connected_port(first_ports[-1]) if len(first_ports) > 1 else None
     if far is not None:
         ifcopenshell.api.run("system.disconnect_port", model, port=first_ports[-1])
 
-    item.Depth = pieces[0][2]
-    chain = [element]
-    for n, (start, axis, length) in enumerate(pieces[1:], start=1):
-        copy = ifcopenshell.api.run("root.copy_class", model, product=element)
-        if element.Tag:
-            copy.Tag = f"{element.Tag}-SL{n}"
-        local_start = (inv @ np.append(start, 1.0))[:3]
-        ref = px if abs(axis @ UP) < 0.5 else riser_ref(axis)
-        position = model.createIfcAxis2Placement3D(
-            _point(model, local_start), _dir(model, inv[:3, :3] @ axis), _dir(model, inv[:3, :3] @ ref))
-        solid = model.createIfcExtrudedAreaSolid(item.SweptArea, position, model.createIfcDirection((0.0, 0.0, 1.0)),
-                                                 float(length))
-        rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "SweptSolid", [solid])
-        copy.Representation = model.createIfcProductDefinitionShape(None, None, [rep])
+    item.Depth = pieces[0][3]
+    chain, ends = [element], [(pieces[0][1], pieces[0][1] + pieces[0][2] * pieces[0][3])]
+    straights = bends = 0
+    for piece in pieces[1:]:
+        if piece[0] == "straight":
+            _, start, axis, length = piece
+            straights += 1
+            part = ifcopenshell.api.run("root.copy_class", model, product=element)
+            if element.Tag:
+                part.Tag = f"{element.Tag}-SL{straights}"
+            local_start = (inv @ np.append(start, 1.0))[:3]
+            ref = px if abs(axis @ UP) < 0.5 else riser_ref(axis)
+            position = model.createIfcAxis2Placement3D(
+                _point(model, local_start), _dir(model, inv[:3, :3] @ axis), _dir(model, inv[:3, :3] @ ref))
+            solid = model.createIfcExtrudedAreaSolid(item.SweptArea, position, model.createIfcDirection((0.0, 0.0, 1.0)),
+                                                     float(length))
+            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "SweptSolid", [solid])
+            ends.append((start, start + axis * length))
+        else:
+            _, start, t0, t1, R = piece
+            bends += 1
+            part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} bend", 
+                                f"{element.Tag}-BR{bends}" if element.Tag else None)
+            verts, faces = _bend_mesh(start, t0, t1, R, w, t, round_)
+            local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
+            solid = model.createIfcTriangulatedFaceSet(
+                model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]), None, True,
+                [[int(x) + 1 for x in f] for f in faces], None)
+            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "Tessellation", [solid])
+            ends.append((start, start + (t0 + t1) * R))
+        part.Representation = model.createIfcProductDefinitionShape(None, None, [rep])
         for st in styles:
             model.createIfcStyledItem(solid, st.Styles, st.Name)
-        chain.append(copy)
+        chain.append(part)
 
     # Ports: one at each end of every piece, joined in run order; the last piece takes the far connection.
-    for (start, axis, length), piece in zip(pieces, chain):
+    for (p0, p1), piece in zip(ends, chain):
         ports = _ports(piece)
         if len(ports) >= 2:
-            _place_port(model, ports[0], start, s)
-            _place_port(model, ports[-1], start + axis * length, s)
-    for u, v in zip(chain, chain[1:]):
-        pu, pv = _ports(u), _ports(v)
-        if len(pu) >= 2 and len(pv) >= 2:
-            ifcopenshell.api.run("system.connect_port", model, port1=pu[-1], port2=pv[0],
-                                 direction=pu[-1].FlowDirection or "NOTDEFINED")
+            _place_port(model, ports[0], p0, s)
+            _place_port(model, ports[-1], p1, s)
+    for x, y in zip(chain, chain[1:]):
+        px_, py_ = _ports(x), _ports(y)
+        if len(px_) >= 2 and len(py_) >= 2:
+            ifcopenshell.api.run("system.connect_port", model, port1=px_[-1], port2=py_[0],
+                                 direction=px_[-1].FlowDirection or "NOTDEFINED")
     last = _ports(chain[-1])
     if far is not None and len(last) >= 2:
         ifcopenshell.api.run("system.connect_port", model, port1=last[-1], port2=far,
@@ -210,7 +281,76 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
 
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)
-    return Offset(global_id, start_m, end_m, dz_m, gids)
+    return Offset(global_id, start_m, end_m, dz_m, gids, used)
+
+
+def _new_fitting(model, segment, place, name: str, tag: str | None):
+    """A bend fitting for `segment`: its fitting class, type BEND, in the same storey and systems, with two ports and
+    its own placement (the segment's frame, so bend vertices share the segment's local coordinates)."""
+    fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=FITTING_CLASS[segment.is_a()],
+                                   predefined_type="BEND", name=name)
+    if tag:
+        fitting.Tag = tag
+    container = ifcopenshell.util.element.get_container(segment)
+    if container is not None:
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=container, products=[fitting])
+    for system in ifcopenshell.util.system.get_element_systems(segment):
+        ifcopenshell.api.run("system.assign_system", model, products=[fitting], system=system)
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=fitting, matrix=place, is_si=False)
+    old = _ports(segment)
+    for n in range(2):
+        port = ifcopenshell.api.run("system.add_port", model, element=fitting)
+        port.Name = f"Port {n}"
+        if len(old) >= 2:
+            port.FlowDirection = old[n].FlowDirection
+            port.PredefinedType = old[n].PredefinedType
+            port.SystemType = old[n].SystemType
+    return fitting
+
+
+def _bend_mesh(p0, t0, t1, r, width, depth, round_: bool) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
+    """A closed triangulated 90° bend (world coordinates): the section swept from `p0` going along `t0` round a radius
+    `r` until it runs along `t1`. Width stays across the bend plane; depth lies in it. Faces point outward."""
+    t0, t1 = np.asarray(t0, float), np.asarray(t1, float)
+    side = np.cross(t0, t1)
+    side /= np.linalg.norm(side)
+    centre = np.asarray(p0, float) + r * t1
+    if round_:
+        ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
+        section = np.c_[np.cos(ang) * width / 2, np.sin(ang) * depth / 2]
+    else:
+        section = np.array([[-width / 2, -depth / 2], [width / 2, -depth / 2], [width / 2, depth / 2], [-width / 2, depth / 2]])
+    m = len(section)
+    rings = []
+    for k in range(BEND_STEPS + 1):
+        th = (np.pi / 2) * k / BEND_STEPS
+        p = centre - r * np.cos(th) * t1 + r * np.sin(th) * t0
+        tangent = np.cos(th) * t0 + np.sin(th) * t1
+        across = np.cross(tangent, side)
+        rings.append([p + x * side + y * across for x, y in section])
+    verts = np.array([v for ring in rings for v in ring])
+    sides, caps0, caps1 = [], [], []
+    for k in range(BEND_STEPS):
+        for j in range(m):
+            a_, b_ = k * m + j, k * m + (j + 1) % m
+            c_, d_ = (k + 1) * m + (j + 1) % m, (k + 1) * m + j
+            sides += [(a_, b_, c_), (a_, c_, d_)]
+    base = BEND_STEPS * m
+    caps0 = [(0, j + 1, j) for j in range(1, m - 1)]
+    caps1 = [(base, base + j, base + j + 1) for j in range(1, m - 1)]
+
+    def normal(f):
+        a_, b_, c_ = verts[list(f)]
+        return np.cross(b_ - a_, c_ - a_)
+
+    def facing(tris, outward):
+        return tris if normal(tris[0]) @ outward >= 0 else [(f[0], f[2], f[1]) for f in tris]
+
+    mid = rings[0]
+    sides = facing(sides, verts[sides[0][0]] + verts[sides[0][1]] - 2 * np.mean(mid, axis=0))
+    caps0 = facing(caps0, -t0)
+    caps1 = facing(caps1, t1)
+    return verts, sides + caps0 + caps1
 
 
 def member_axis(scene: IfcScene, element) -> tuple[str, np.ndarray, np.ndarray, float]:

@@ -77,7 +77,7 @@ def test_root_causes_and_plan_endpoints(tmp_path, monkeypatch):
     # The allowance is per pair: a second plan this hour is refused before any work starts.
     assert c.post(f"/api/scenes/{sid}/plan/stream", json={"report_id": rid, "clash_ids": ["c0001"]}).status_code == 429
     applied = c.post(f"/api/scenes/{sid}/plan/apply", json={"options": [plan["items"][0]["option"]]}).json()
-    assert applied["files"] == [0] and len(applied["pieces"][0]) == 5
+    assert applied["files"] == [0] and len(applied["pieces"][0]) == 9
 
 
 def test_patterns_group_same_kind_clashes_and_triage_maps_back(tmp_path):
