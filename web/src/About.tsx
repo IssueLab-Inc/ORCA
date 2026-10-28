@@ -1,4 +1,4 @@
-import { Box, Download, Eye, FolderOpen, ListChecks, MessageSquare, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
+import { Box, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 /**
@@ -6,7 +6,8 @@ import { useEffect, type ReactNode } from "react";
  * empty viewer (with the demo button) and the "How it works" dialog from the header.
  */
 export function About({ start, onClose }: {
-  start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void };
+  // onGolden: one click opens the demo, picks the duct-through-girder clash and proposes a fix.
+  start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void };
   onClose?: () => void;
 }) {
   useEffect(() => {
@@ -30,7 +31,9 @@ export function About({ start, onClose }: {
           </p>
           {start && <>
             <div className="about-cta">
-              <button className="btn primary big" data-tour="demo" disabled={start.disabled} onClick={start.onStart}>
+              {start.onGolden && <button className="btn primary big" data-tour="golden" disabled={start.disabled} onClick={start.onGolden}>
+                <Play size={16} aria-hidden /> Watch Sightline fix a clash</button>}
+              <button className="btn big" data-tour="demo" disabled={start.disabled} onClick={start.onStart}>
                 <FolderOpen size={16} aria-hidden /> {start.label}</button>
               {start.onTour && <button className="btn big" disabled={start.disabled} onClick={start.onTour}>
                 <Compass size={16} aria-hidden /> Take the guided tour</button>}
