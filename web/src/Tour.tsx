@@ -206,8 +206,8 @@ export const STEPS: Step[] = [
   // 6. Judgement
   {
     act: "Not everything needs a fix", title: "Patterns",
-    body: () => <>The same clash, many times. Click <b>Explain</b>: Muse Spark reads each pattern and says whether it is how
-      the parts are meant to go together, a modelling error, or a real problem.</>,
+    body: (s) => <>The same clash, many times. {s.patternsRead ? "Muse Spark has read each pattern" : "Muse Spark is reading each pattern"} and
+      says whether it is how the parts are meant to go together, a modelling error, or a real problem.</>,
     target: "[data-tour=explain]", done: (s) => s.patternsRead, show: { label: "Explain for me" }, enter: (a) => a.overview(),
   },
   {
