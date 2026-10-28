@@ -347,6 +347,14 @@ stream workers and model-call pools. `_take` skips the demo caps for the owner. 
 for the owner, or on a page opened with `#owner`; chip "owner · effort …". When GitHub sign-in comes, `cookie_ok`
 becomes "signed in as an allowed login"; the rest stays. Historical validation: 79 server tests.
 
+See-through elements (Oct 28): web-ifc's style alpha now reaches the viewer. Each model has a second BatchedMesh,
+`glass`, for elements with alpha < 0.99 (a robot's restricted space, mesh guards, glazing), drawn without depth writes with
+per-element alpha (`setColorAt` with a Vector4); in focus they get a tinted see-through material. A pick takes the first
+solid hit and falls back to glass, so a zone does not swallow clicks on what stands inside it. Demo set 2 is
+ClashWiseDemoModels `palletising-cell/` (PC-03: STEP + IFC, Rev A with five planted problems, Rev B fixed). Sightline's
+offset (C1), move (C2) and trim (C3) pass on it; a move of something standing on the floor (the C5 HMI) fails, because
+the clearance check counts the floor contact.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

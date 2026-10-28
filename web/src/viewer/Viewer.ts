@@ -15,6 +15,9 @@ export function serverDeltaToViewer([dx, dy, dz]: number[]): THREE.Vector3 {
 export const serverPointToViewer = serverDeltaToViewer;
 
 type Found = { model: LoadedModel; el: LoadedElement };
+/** A model's batches: its solid mesh, and its see-through one when it has see-through elements. */
+const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.glass] : [m.mesh]);
+const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[] };
 /** A fix to preview: an offset's new pieces, or a move. `before`: what it changes, as it is now. */
@@ -57,6 +60,9 @@ export class Viewer {
   private solid = new THREE.MeshStandardMaterial({ metalness: 0, roughness: 0.85, side: THREE.DoubleSide });
   private ghost = new THREE.MeshStandardMaterial({ metalness: 0, roughness: 1, side: THREE.DoubleSide, transparent: true,
     opacity: 0.12, depthWrite: false });
+  /** See-through elements (safety zones, mesh guards): per-element opacity from the IFC style, drawn without depth. */
+  private glass = new THREE.MeshStandardMaterial({ metalness: 0, roughness: 0.85, side: THREE.DoubleSide, transparent: true,
+    depthWrite: false });
   private clipping: THREE.Plane[] = [];
   private focus: Focus = { a: null, b: null };
   /** Elements in focus are drawn as their own meshes over shared GPU buffers, so any mode can keep them solid. */
@@ -64,6 +70,8 @@ export class Viewer {
   private focusMeshes = new Map<string, THREE.Mesh>();
   private focusGeometry = new Map<string, THREE.BufferGeometry>();
   private focusMaterials = { a: this.focusMaterial(RED), b: this.focusMaterial(GREEN), ab: this.focusMaterial(PURPLE) };
+  /** The same for a see-through element in focus (a zone): tinted, still see-through. */
+  private focusGlass = { a: this.focusMaterial(RED, 0.35), b: this.focusMaterial(GREEN, 0.35), ab: this.focusMaterial(PURPLE, 0.35) };
   /** Outlines of the focus elements drawn through everything, so a clash buried in a wall or slab still shows. */
   private edgeMaterials = {
     a: new THREE.LineBasicMaterial({ color: "#ff5a5a", depthTest: false, transparent: true, opacity: 0.9 }),
@@ -110,7 +118,7 @@ export class Viewer {
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
     this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.marker, this.measureLayer);
-    for (const m of [this.solid, this.ghost, this.hitMaterial]) m.clippingPlanes = this.clipping;
+    for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial]) m.clippingPlanes = this.clipping;
     this.markerLabel = this.label("marker-label");
     this.measureLabel = this.label("measure-label");
     this.buildMarker();
@@ -127,13 +135,13 @@ export class Viewer {
     try {
       for (const bytes of files) {
         staged.push(await loadIfc(bytes));
-        if (!isCurrent()) { for (const m of staged) m.mesh.dispose(); return; }
+        if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
       }
-    } catch (e) { for (const m of staged) m.mesh.dispose(); throw e; }
-    if (!isCurrent()) { for (const m of staged) m.mesh.dispose(); return; }
+    } catch (e) { for (const m of staged) disposeBatches(m); throw e; }
+    if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
     this.preview([]);
     this.clearFocusCache();
-    for (const m of this.models) { this.scene.remove(m.mesh); m.mesh.dispose(); }
+    for (const m of this.models) { this.scene.remove(...batches(m)); disposeBatches(m); }
     this.models = staged.map((m) => this.adopt(m));
     this.names = names;
     this.hiddenModels.clear();
@@ -151,9 +159,9 @@ export class Viewer {
     const old = this.models[index];
     const loaded = await loadIfc(bytes);
     // IFC parsing yields; a scene replaced during that work must never receive the old file.
-    if (!isCurrent()) { loaded.mesh.dispose(); return; }
+    if (!isCurrent()) { disposeBatches(loaded); return; }
     const m = this.adopt(loaded);
-    if (old) this.scene.remove(old.mesh);
+    if (old) { this.scene.remove(...batches(old)); disposeBatches(old); }
     this.models[index] = m;
     this.clearFocusCache();
     this.applyMode();
@@ -166,7 +174,8 @@ export class Viewer {
 
   private adopt(m: LoadedModel): LoadedModel {
     m.mesh.material = this.solid;
-    this.scene.add(m.mesh);
+    if (m.glass) m.glass.material = this.glass;
+    this.scene.add(...batches(m));
     return m;
   }
 
@@ -213,14 +222,19 @@ export class Viewer {
     this.models.forEach((model, mi) => {
       model.mesh.visible = !this.hiddenModels.has(mi);
       model.mesh.material = ghostly ? this.ghost : this.solid;
+      if (model.glass) {
+        model.glass.visible = model.mesh.visible;
+        model.glass.material = ghostly ? this.ghost : this.glass;
+      }
       for (const el of model.byGlobalId.values()) {
         const inFocus = !!this.focusSide(el.globalId);
         let visible = !inFocus && !this.hidden.has(el.globalId);  // focus elements are drawn by the focus layer
         if (visible && hasFocus && this.mode === "isolate") visible = false;
         if (visible && near) visible = near.has(el.globalId);
-        model.mesh.setVisibleAt(el.instanceId, visible);
-        model.mesh.setColorAt(el.instanceId, ghostly ? GHOST : hasFocus && this.mode === "shaded" ? GREY : el.baseColor);
-        model.mesh.setMatrixAt(el.instanceId, this.matrixOf(el));
+        el.mesh.setVisibleAt(el.instanceId, visible);
+        const c = ghostly ? GHOST : hasFocus && this.mode === "shaded" ? GREY : el.baseColor;
+        el.mesh.setColorAt(el.instanceId, new THREE.Vector4(c.r, c.g, c.b, ghostly ? 1 : el.baseAlpha));
+        el.mesh.setMatrixAt(el.instanceId, this.matrixOf(el));
       }
     });
     this.drawFocus(ids);
@@ -237,15 +251,16 @@ export class Viewer {
       const f = this.find(gid);
       const side = this.focusSide(gid);
       if (!f || !side || this.hiddenModels.has(this.models.indexOf(f.model))) continue;
+      const material = (f.el.baseAlpha < 1 ? this.focusGlass : this.focusMaterials)[side];
       let mesh = this.focusMeshes.get(gid);
       if (!mesh) {
-        mesh = new THREE.Mesh(this.geometryOf(f), this.focusMaterials[side]);
+        mesh = new THREE.Mesh(this.geometryOf(f), material);
         mesh.matrixAutoUpdate = false;
         mesh.frustumCulled = false;
         mesh.userData.globalId = gid;
         this.focusMeshes.set(gid, mesh);
       }
-      mesh.material = this.focusMaterials[side];
+      mesh.material = material;
       mesh.matrix.copy(this.matrixOf(f.el));
       this.focusLayer.add(mesh);
       if (this.showEdges) {
@@ -261,8 +276,8 @@ export class Viewer {
     const key = `${this.models.indexOf(model)}:${el.globalId}`;
     let g = this.focusGeometry.get(key);
     if (!g) {
-      const src = model.mesh.geometry;
-      const range = model.mesh.getGeometryRangeAt(model.mesh.getGeometryIdAt(el.instanceId))!;
+      const src = el.mesh.geometry;
+      const range = el.mesh.getGeometryRangeAt(el.mesh.getGeometryIdAt(el.instanceId))!;
       g = new THREE.BufferGeometry();
       g.setAttribute("position", src.getAttribute("position"));
       g.setAttribute("normal", src.getAttribute("normal"));
@@ -341,8 +356,9 @@ export class Viewer {
     this.focusMeshes.clear();
   }
 
-  private focusMaterial(color: THREE.Color) {
-    const m = new THREE.MeshStandardMaterial({ color, metalness: 0, roughness: 0.6, side: THREE.DoubleSide });
+  private focusMaterial(color: THREE.Color, opacity = 1) {
+    const m = new THREE.MeshStandardMaterial({ color, metalness: 0, roughness: 0.6, side: THREE.DoubleSide,
+      ...(opacity < 1 ? { transparent: true, opacity, depthWrite: false } : {}) });
     m.clippingPlanes = this.clipping;
     return m;
   }
@@ -356,15 +372,15 @@ export class Viewer {
     const tmp = new THREE.Box3();
     for (const model of this.models) {
       for (const el of model.byGlobalId.values()) {
-        this.instanceBox(model, el, tmp);
+        this.instanceBox(el, tmp);
         if (tmp.intersectsBox(box)) out.add(el.globalId);
       }
     }
     return out;
   }
 
-  private instanceBox(model: LoadedModel, el: LoadedElement, target: THREE.Box3) {
-    model.mesh.getBoundingBoxAt(model.mesh.getGeometryIdAt(el.instanceId), target);
+  private instanceBox(el: LoadedElement, target: THREE.Box3) {
+    el.mesh.getBoundingBoxAt(el.mesh.getGeometryIdAt(el.instanceId), target);
     return target.applyMatrix4(this.matrixOf(el));
   }
 
@@ -373,7 +389,7 @@ export class Viewer {
     const tmp = new THREE.Box3();
     for (const gid of ids) {
       const f = this.find(gid);
-      if (f) box.union(this.instanceBox(f.model, f.el, tmp));
+      if (f) box.union(this.instanceBox(f.el, tmp));
     }
     return box;
   }
@@ -510,7 +526,10 @@ export class Viewer {
 
   fitAll(animate = true) {
     const box = new THREE.Box3();
-    this.models.forEach((m, i) => { if (!this.hiddenModels.has(i)) { m.mesh.computeBoundingBox(); box.union(m.mesh.boundingBox!); } });
+    this.models.forEach((m, i) => {
+      if (this.hiddenModels.has(i)) return;
+      for (const b of batches(m)) { b.computeBoundingBox(); box.union(b.boundingBox!); }
+    });
     if (!box.isEmpty()) this.flyToBox(box, 1.1, undefined, animate);
   }
 
@@ -563,7 +582,8 @@ export class Viewer {
       this.sectionHelper = new THREE.Box3Helper(b, new THREE.Color("#2f5d8a"));
       this.scene.add(this.sectionHelper);
     }
-    for (const m of [this.solid, this.ghost, this.hitMaterial, ...Object.values(this.focusMaterials)]) m.needsUpdate = true;
+    for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, ...Object.values(this.focusMaterials),
+      ...Object.values(this.focusGlass)]) m.needsUpdate = true;
     return true;
   }
 
@@ -600,17 +620,23 @@ export class Viewer {
     const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     const targets: THREE.Object3D[] = [...this.focusLayer.children,
-      ...this.models.filter((_, i) => !this.hiddenModels.has(i)).map((m) => m.mesh)];
+      ...this.models.filter((_, i) => !this.hiddenModels.has(i)).flatMap(batches)];
     const ghostly = this.focusIds().length > 0 && this.mode !== "shaded";
+    // A see-through element (a safety zone round a robot) is picked only where nothing solid is under the pointer,
+    // or it would swallow every click on what stands inside it.
+    let behindGlass: Pick | null = null;
     for (const hit of this.raycaster.intersectObjects(targets, false)) {
       if (this.clipping.length && !this.sectionBox?.containsPoint(hit.point)) continue;
       if (hit.object.userData.globalId) return { globalId: hit.object.userData.globalId, point: hit.point };
       if (ghostly) continue;  // see-through context is not pickable: click through it to the focus
-      const model = this.models.find((m) => m.mesh === hit.object);
-      const el = hit.batchId !== undefined ? model?.byInstance.get(hit.batchId) : undefined;
-      if (el) return { globalId: el.globalId, point: hit.point };
+      const solid = this.models.find((m) => m.mesh === hit.object);
+      const glass = this.models.find((m) => m.glass === hit.object);
+      if (hit.batchId === undefined) continue;
+      const el = solid ? solid.byInstance.get(hit.batchId) : glass?.glassByInstance.get(hit.batchId);
+      if (el && solid) return { globalId: el.globalId, point: hit.point };
+      if (el) behindGlass ??= { globalId: el.globalId, point: hit.point };
     }
-    return null;
+    return behindGlass;
   }
 
   pick(ev: MouseEvent): string | null { return this.pickAt(ev)?.globalId ?? null; }
