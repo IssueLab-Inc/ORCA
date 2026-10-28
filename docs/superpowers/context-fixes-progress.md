@@ -1,6 +1,6 @@
 # Context fixes program — 2026-10-28
 
-Status: approved design saved; implementation starting on codex/context-fix-foundations.
+Status: foundations complete/reviewed through 3568340; planner implemented but three review findings and constraint/fixture integration remain. UI/runtime slice follows.
 
 Spec: docs/superpowers/specs/2026-10-28-context-fixes.md
 Plan: docs/superpowers/plans/2026-10-28-context-fixes.md
@@ -36,3 +36,19 @@ Task 1 complete: fix 6fdccf1 addresses missing-placement bypass with real flow/s
 - Ruling: use a fresh private candidate copy rather than reusing IFC undo history between candidates — measured clone cost is small on Northbank and it makes failed multi-file trials completely isolated; cost if wrong is extra CPU/memory and fewer trials within the time budget, not partially changed live files.
 
 Next: create foundations PR and branch codex/context-fix-planner from its head; dispatch fresh Task 2 implementer.
+
+Additional targeted review found incorrect IFC SOURCE/SINK port-frame convention; correction queued after Task 2 commit, before planner publication. Foundations PR is draft meanwhile.
+
+- Ruling: honor explicit `Pset_SightlineConstraints.KeepFixed` model constraints, including run members, and expose them to planner inspection — the principal fixture must need a surrounding edit, whereas the original open-space fixture has a larger single-duct escape. Any supported unlocked element stays eligible. Cost if wrong is a custom IFC convention needing documentation; no class-based structural ban or new UI lock feature is introduced.
+
+- Ruling: preserve authored external connections with missing flow metadata as explicit frame/flow review conditions; do not let reconnect invent flow on an untouched peer. Fully known SOURCE/SINK and new known-flow joints enforce IFC signed frames, and independent position/system/profile failures still reject. Northbank has unconventional authored external axes with unknown-flow partners; cost if wrong is requiring modeller review of these external conventions rather than claiming verified IFC orientation.
+
+Correction to the preceding diagnostic: Northbank peer flows are known before editing; offset copying/reconnection was clearing one near peer's flow. The prior assumption of originally unknown partners is superseded.
+
+- Ruling: preserve both original peer metadata and narrowly retain an unchanged authored external frame-convention violation as `legacy_port_frames` review evidence plus an integrity warning, requiring acknowledgement. Exact baseline external poses, physical endpoints and profile must be preserved; new/generated or changed/worsened bad frames reject, as do independent position/flow/system/profile violations. This extends the spec's baseline-conflict treatment to legacy external port conventions instead of rejecting all otherwise valid Northbank offsets. Cost if wrong: exported external legacy conventions still need modeller correction; the product must not claim full IFC conformance.
+
+## Foundations final checkpoint
+
+Port/constraint/fixture correction 8adadf1 was cherry-picked as f8743a9 onto foundations. Scoped review found an exception leak for a known physical endpoint gap; fix 3568340 now independently checks both connection owners and prevents that exception. Final scoped review approved with no Critical/Important findings; full foundations Linux suite 173 passed, focused 94 passed. All Northbank reference offsets still pass with disclosed legacy-orientation warnings. The constrained metre/mm fixture proves the duct route needs a surrounding tray relocation under explicit locks/anchors.
+
+Planner commit e24fab4 is preserved on codex/context-fix-planner; next rebase it onto corrected foundations, then fix all three Task 2 findings (inspection keyword, initial pagination, chat cancellation) and integrate constraint inspection/stronger fixture. No UI completion claim yet.
