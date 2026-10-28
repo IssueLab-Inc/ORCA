@@ -18,7 +18,7 @@ type Found = { model: LoadedModel; el: LoadedElement };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[] };
 /** A fix to preview: an offset's new pieces, or a move. `before`: what it changes, as it is now. */
-export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null };
+export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null; worldMeshes?: boolean };
 
 /**
  * How the model is drawn around the elements in focus (a clash pair, plus pieces an accepted fix added):
@@ -137,9 +137,12 @@ export class Viewer {
   }
 
   /** Swap one federated file for a new version of it (after an edit was accepted on the server). */
-  async replace(index: number, bytes: Uint8Array) {
+  async replace(index: number, bytes: Uint8Array, isCurrent: () => boolean = () => true) {
     const old = this.models[index];
-    const m = this.adopt(await loadIfc(bytes));
+    const loaded = await loadIfc(bytes);
+    // IFC parsing yields; a scene replaced during that work must never receive the old file.
+    if (!isCurrent()) { loaded.mesh.dispose(); return; }
+    const m = this.adopt(loaded);
     if (old) this.scene.remove(old.mesh);
     this.models[index] = m;
     this.clearFocusCache();
@@ -390,7 +393,7 @@ export class Viewer {
     this.moved.clear();
     if (mode !== "before") {
       for (const opt of opts) {
-        if ((opt.kind === "offset" || opt.kind === "trim") && opt.pieces) {  // new shapes in place of the element
+        if ((opt.worldMeshes || opt.kind === "offset" || opt.kind === "trim") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
           for (const gid of opt.moved) this.hidden.add(gid);
           this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
         } else {

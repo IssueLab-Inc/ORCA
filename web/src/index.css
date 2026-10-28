@@ -571,3 +571,22 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .triage-stage b { font-size: 13px; }
 .triage-stage small { font-size: 11.5px; color: var(--muted); }
 .triage-bar .seg { flex-basis: 0; min-width: 4px; transition: flex-grow .4s ease; }
+
+/* Context proposals keep the existing cards and Plan tab, with whole-arrangement review. */
+.chat-slot { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+.chat-slot[hidden] { display: none; }
+.context-chat-link { justify-content: flex-start; text-align: left; white-space: normal; }
+.plan-switch { align-self: flex-start; margin-bottom: 10px; }
+.context-plan p { margin: 0; line-height: 1.45; }
+.context-plan details { font-size: 12px; overflow-wrap: anywhere; }
+.context-plan summary { cursor: pointer; color: var(--muted); }
+.context-activity ol { margin: 6px 0; padding-left: 20px; display: grid; gap: 5px; }
+.context-card .card-body { text-align: left; width: 100%; }
+.context-evidence { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.context-edits { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 12px; }
+.context-edits li > p { margin-top: 4px; }
+.context-warning { background: var(--warn-soft); padding: 8px 10px; border-radius: 6px; color: #73500a; overflow-wrap: anywhere; }
+.context-conditions { display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; }
+.context-conditions h3 { margin: 0; font-size: 13px; }
+.context-condition { display: flex; align-items: flex-start; gap: 8px; line-height: 1.45; }
+.context-condition input { flex: none; margin-top: 3px; }

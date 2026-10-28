@@ -21,6 +21,33 @@ export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m:
 export type FixKind = "move" | "offset" | "trim";
 export interface TrimCut { end: "start" | "end"; by_m: number }
 export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[]; advice?: string }
+/** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
+export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
+export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
+export interface ContextChecks {
+  geometry: { passed: boolean; target_resolved: boolean; hits: ContextHit[]; existing_conflicts: ContextHit[]; min_clearance_m: number | null };
+  integrity: { passed: boolean; errors: string[]; warnings: string[] };
+}
+export interface ContextEdit {
+  kind: FixKind; element: string; reason: string; label: string; moved: string[]; pieces: string[];
+  before: Piece[]; preview: Piece[]; delta_m?: number[]; split_m?: number[]; end?: "start" | "end"; by_m?: number;
+}
+export interface ContextProposal {
+  id: string; scene_revision: number; objective: ContextObjective; title: string; edits: ContextEdit[];
+  checks: ContextChecks; review_conditions: { id: string; message: string }[]; passed: boolean;
+}
+export interface ContextResult {
+  type: "context_result"; proposals: ContextProposal[]; message: string; seconds: number; trials: number; model_calls: number;
+  blockers?: string[];
+}
+export type ContextEvent =
+  | { type: "context_progress"; phase: "inspecting" | "thinking" | "checking" | "blocked"; message: string }
+  | ContextResult
+  | { type: "error"; detail: string };
+export interface ContextApplied {
+  files: number[]; pieces: string[][]; edits: ContextEdit[];
+  resolved_pairs: { element_a: string; element_b: string }[]; checks: ContextChecks;
+}
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent =
   | { type: "thinking"; round: number }
@@ -82,8 +109,12 @@ const jsonHeaders = () => ({ "Content-Type": "application/json", ...settingsHead
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, { headers: jsonHeaders(), ...init });
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
+  if (!r.ok) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`, r.status);
   return r.json() as Promise<T>;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); }
 }
 
 /** A plan: several fixes chosen together and checked as a whole (server: plans.py). */
@@ -131,6 +162,7 @@ export type ChatEvent =
   | { type: "ui"; action: "select_clash"; clash_id: string }
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   | { type: "agent"; event: AgentEvent }
+  | { type: "context_event"; event: ContextEvent }
   | ({ type: "proposal"; clash_id: string; element_a: string; element_b: string } & Proposal)
   | { type: "plan_started"; kind: "batch" | "root_cause" }
   | { type: "plan_event"; event: PlanEvent }
@@ -175,6 +207,16 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 }
 
 export const api = {
+  contextStream: async (sceneId: string, objective: ContextObjective, onEvent: (e: ContextEvent) => void) => {
+    let finished = false;
+    await ndjson<ContextEvent>(`/scenes/${sceneId}/context/stream`, objective, (e) => {
+      onEvent(e); finished = e.type === "context_result" || e.type === "error"; return finished;
+    });
+    if (!finished) throw new Error("The server stopped before the wider search finished. Regenerate for the original objective.");
+  },
+  applyContext: (sceneId: string, proposalId: string, acknowledgedConditions: string[]) =>
+    call<ContextApplied>(`/scenes/${sceneId}/context/apply`, { method: "POST",
+      body: JSON.stringify({ proposal_id: proposalId, acknowledged_conditions: acknowledgedConditions }) }),
   owner: () => call<{ available: boolean; owner: boolean }>("/owner"),
   unlock: (token: string) => call<{ owner: boolean }>("/owner/unlock", { method: "POST", body: JSON.stringify({ token }) }),
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),

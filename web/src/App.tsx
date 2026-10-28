@@ -6,10 +6,11 @@ import { ReportDialog, ReviewBlock } from "./ReportDoc";
 import type { OwnerSettings } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
-import { api, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
+import { api, ApiError, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
+import { ContextPlan, contextStep, type ContextRun } from "./ContextPlan";
 import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
 import { ReportList, mm, type Review } from "./ReportList";
@@ -108,6 +109,33 @@ export function App() {
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [context, setContext] = useState<ContextRun | null>(null);
+  const [contextChosen, setContextChosen] = useState<string | null>(null);
+  const [contextNames, setContextNames] = useState<Record<string, Record<string, unknown>>>({});
+  const [acknowledged, setAcknowledged] = useState<string[]>([]);
+  const [planKind, setPlanKind] = useState<"batch" | "context">("batch");
+  const [viewContext, setViewContext] = useState(false);
+  // Invalidate callbacks immediately when replacement starts, before the new scene ID arrives.
+  const sceneEpoch = useRef(0);
+  const contextRequest = useRef(0);
+  const planRequest = useRef(0);
+  const contextProposal = context?.result?.proposals.find((p) => p.id === contextChosen) ?? null;
+  const contextWorking = !!context && context.phase !== "done";
+  const activeContext = viewContext && !context?.accepted;
+  const renderedSceneEpoch = sceneEpoch.current;
+
+  useEffect(() => {
+    if (!sceneId || !contextProposal) return;
+    const epoch = sceneEpoch.current;
+    let live = true;
+    const roots = [...new Set(contextProposal.edits.map((e) => e.element))].filter((gid) => !contextNames[gid]);
+    void Promise.all(roots.map(async (gid) => [gid, await api.element(sceneId, gid).catch(() => ({}))] as const)).then((entries) => {
+      if (live && sceneEpoch.current === epoch && entries.length) setContextNames((old) => ({ ...old, ...Object.fromEntries(entries) }));
+    });
+    return () => { live = false; };
+    // Fetch only the chosen proposal's edit roots; long run members remain available as IDs in details.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneId, contextProposal]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -150,25 +178,39 @@ export function App() {
     }
     return g;
   }, [plan, viewPlan]);
+  const contextGroup = useMemo(() => {
+    if (!activeContext) return null;
+    const objective = contextProposal?.objective ?? context?.objective;
+    const g: Record<string, Side> = {};
+    if (objective) { g[objective.element_a] = "a"; g[objective.element_b] = "a"; }
+    for (const edit of contextProposal?.edits ?? []) {
+      for (const gid of edit.moved) {
+        g[gid] = "b";
+        for (const piece of edits[gid] ?? []) g[piece] = "b";
+      }
+    }
+    return g;
+  }, [activeContext, contextProposal, context?.objective, edits]);
   useEffect(() => {
     // A plan on screen: its elements. A plan still being worked out: nothing yet (the old clash would mislead).
-    viewer.current?.setFocus(planGroup ? { a: null, b: null, group: planGroup } : viewPlan ? { a: null, b: null } : { a, b, group });
-  }, [a, b, group, planGroup, viewPlan]);
-  useEffect(() => { if (viewPlan) viewer.current?.setMarker(null); }, [viewPlan]);  // the clash's marker goes with it
+    viewer.current?.setFocus(contextGroup ? { a: null, b: null, group: contextGroup }
+      : planGroup ? { a: null, b: null, group: planGroup } : viewPlan ? { a: null, b: null } : { a, b, group });
+  }, [a, b, group, planGroup, viewPlan, contextGroup]);
+  useEffect(() => { if (viewPlan || activeContext) viewer.current?.setMarker(null); }, [viewPlan, activeContext]);
   useEffect(() => { viewer.current?.setMode(tool.mode); }, [tool.mode]);
   useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
   // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
   useEffect(() => {
     if (!tool.section) { viewer.current?.setSection(false); return; }
     if (!viewer.current?.setSection(true)) setTool((t) => ({ ...t, section: false }));
-  }, [tool.section, a, b]);
+  }, [tool.section, a, b, contextGroup, planGroup]);
   useEffect(() => {
     setMeasured(viewer.current?.setMeasure(measurePts[0] ?? null, measurePts[1] ?? null) ?? null);
   }, [measurePts]);
 
   // A clock for the live status lines while an agent works.
   const working = (!!progress && progress.phase !== "done") || (!!planRun && planRun.phase !== "done")
-    || (!!triageRun && !triageRun.done);
+    || (!!triageRun && !triageRun.done) || contextWorking;
   useEffect(() => {
     if (!working) return;
     const t = setInterval(() => setNow(Date.now()), 500);
@@ -179,7 +221,9 @@ export function App() {
   useEffect(() => {
     setMatches(null);
     if (!report || !sceneId) return;
-    api.match(report.id, sceneId).then(setMatches).catch((e) => setError((e as Error).message));
+    let live = true;
+    api.match(report.id, sceneId).then((m) => { if (live) setMatches(m); }).catch((e) => { if (live) setError((e as Error).message); });
+    return () => { live = false; };
   }, [report, sceneId]);
 
   // Root causes and patterns, over the clashes still open (not fixed, not reviewed). Refreshed as that changes.
@@ -187,8 +231,10 @@ export function App() {
   useEffect(() => {
     setRootCauses(null); setPatterns(null);
     if (!report || !sceneId || !matches) return;
-    api.rootCauses(report.id, sceneId, resolved).then(setRootCauses).catch(() => setRootCauses([]));
-    api.patterns(report.id, sceneId, resolved).then(setPatterns).catch(() => setPatterns([]));
+    let live = true;
+    api.rootCauses(report.id, sceneId, resolved).then((r) => { if (live) setRootCauses(r); }).catch(() => { if (live) setRootCauses([]); });
+    api.patterns(report.id, sceneId, resolved).then((r) => { if (live) setPatterns(r); }).catch(() => { if (live) setPatterns([]); });
+    return () => { live = false; };
   }, [report, sceneId, matches, resolved]);
 
   async function explainPatterns() {
@@ -357,21 +403,28 @@ export function App() {
     return () => { live = false; };
   }, [clash, report, sceneId, matches, remeasure]);
   // When the model link arrives after a clash was picked, go to it then.
-  useEffect(() => { if (clash && matches) goToClash(clash); }, [matches]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (clash && matches && !viewPlan && !activeContext) goToClash(clash); }, [matches]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // What the viewer previews: the chosen option of a single proposal, else every fix of a plan.
-  const option = chosen == null ? null : proposal?.options[chosen] ?? null;
+  const option = viewPlan || activeContext || chosen == null ? null : proposal?.options[chosen] ?? null;
   const planOptions = useMemo(() => (plan?.items.filter((i) => i.option).map((i) => i.option!) ?? []), [plan]);
   useEffect(() => {
     const v = viewer.current;
     if (!v) return;
-    if (option) {
+    if (activeContext && contextProposal) {
+      v.showOptions(contextShapes(contextProposal), compare);
+    } else if (activeContext) v.preview([]);
+    else if (option) {
       v.showOption({ kind: option.kind, moved: option.moved, deltaM: option.delta_m, pieces: option.preview, before: option.before },
         compare, option.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     } else if (plan && viewPlan) {
       v.showOptions(planOptions.map((o) => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m, pieces: o.preview, before: o.before, color: "#1f9d3a" })), compare);
     } else v.preview([]);
-  }, [option, plan, planOptions, compare, a, viewPlan]);
+  }, [option, plan, planOptions, compare, a, viewPlan, activeContext, contextProposal]);
+
+  useEffect(() => {
+    if (activeContext && contextProposal) viewer.current?.frameMeshes(contextProposal.edits.flatMap((e) => [...e.before, ...e.preview]), 1.4);
+  }, [contextProposal, activeContext]);
 
   // Zoom to what the chosen option changes: an offset's risers and middle piece, or where a moved element now
   // meets the other side of the clash (not the whole moved element: a raised 16 m run would fill the screen).
@@ -392,13 +445,13 @@ export function App() {
   // A finished plan: frame everything it changes, or (nothing to change) the cluster it is about.
   useEffect(() => {
     const v = viewer.current;
-    if (!v || !plan) return;
+    if (!v || !plan || !viewPlan) return;
     const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));  // moves and trims: their pairs
     const pairs = plan.items.flatMap((it) => it.option && it.option.kind !== "offset"
       ? movedPairs(it.option.moved, [it.element_a, it.element_b]) : []);
     if (meshes.length || pairs.length) v.frameFix(meshes, pairs);
     else if (plan.hub) v.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
-  }, [planOptions, plan]);
+  }, [planOptions, plan, viewPlan]);
 
   function frameFix(o: { kind: string; moved: string[]; preview: Mesh[] | null }, sides: string[]) {
     // An offset: its risers and middle piece. A move: where it now meets the other side. A trim: the joint it changes.
@@ -406,20 +459,27 @@ export function App() {
     return !!viewer.current?.frameFix(meshes, o.kind === "offset" ? [] : movedPairs(o.moved, sides));
   }
 
-  function resetWork() { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); setStandIns({}); }
+  function resetWork(keepContext = false) { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); setStandIns({}); if (!keepContext) setViewContext(false); }
 
   async function open() {
     if (!picked.length) return;
+    const epoch = ++sceneEpoch.current;
+    ++contextRequest.current; ++agentRun.current; ++planRequest.current;
+    pilot.current?.takeOver(); setPilotStatus(null); chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
+    setChatAsk(undefined);
+    setContext(null); setContextChosen(null); setContextNames({}); setAcknowledged([]); setViewContext(false); setViewPlan(false); setSceneId(null);
     setBusy(`Loading ${picked.length} model${picked.length > 1 ? "s" : ""}…`); setError(null); resetWork(); setA(null); setB(null);
     try {
       const { id, files } = await api.open(picked);
-      setSceneId(id);
+      if (sceneEpoch.current !== epoch) return;
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
+      if (sceneEpoch.current !== epoch) return;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setStats(await viewer.current!.load(bytes, files));
-    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+      if (sceneEpoch.current === epoch) setSceneId(id);
+    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
   }
 
   /** The start page's button: the sample clash report (its list shows at once), then the models. */
@@ -452,9 +512,9 @@ export function App() {
 
   /** Select a report clash and take the view to it, or (`keepPlan`) only select it while a plan stays on screen. */
   function selectClash(c: ReportClash, keepPlan = false) {
-    if (c.id !== clash?.id) { setClash(c); resetWork(); setLightbox(null); }
+    if (c.id !== clash?.id) { setClash(c); resetWork(keepPlan); setLightbox(null); }
     if (keepPlan) return;
-    setViewPlan(false);
+    setViewPlan(false); setViewContext(false);
     if (tab === "plan" && !planRun) setTab("clash");
     if (!matches) { setA(null); setB(null); return; }
     goToClash(c);  // every click navigates, also on the clash already selected
@@ -477,9 +537,10 @@ export function App() {
       return;
     }
     if (!hit) { setSelected(null); return; }
+    const epoch = sceneEpoch.current;
     setSelected({ globalId: hit.globalId, info: null });
     if (sceneId) api.element(sceneId, hit.globalId)
-      .then((info) => setSelected((s) => (s?.globalId === hit.globalId ? { ...s, info } : s)))
+      .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === hit.globalId ? { ...s, info } : s)); })
       .catch(() => undefined);
   }
 
@@ -532,8 +593,9 @@ export function App() {
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. */
   function trackAgent() {
     const run = ++agentRun.current;
-    const live = () => agentRun.current === run;
-    setError(null); setChosen(null); setManual(null); setViewPlan(false); setReplaying(false);
+    const epoch = sceneEpoch.current;
+    const live = () => agentRun.current === run && sceneEpoch.current === epoch;
+    setError(null); setChosen(null); setManual(null); setViewPlan(false); setViewContext(false); setReplaying(false);
     const t = Date.now();
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
     setProgress(p); setNow(t);
@@ -559,12 +621,13 @@ export function App() {
     const finish = (result: Proposal | null) => {
       if (!live()) return;
       const show = () => {
+        if (!live()) return;
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
         update({ phase: "done", checking: null }); setNow(Date.now());
       };
       if (pilot.current) pilot.current.finish(show); else show();
     };
-    return { onEvent, finish };
+    return { onEvent, finish, live };
   }
 
   async function propose() {
@@ -584,7 +647,9 @@ export function App() {
     const c = report?.clashes.find((x) => x.id === clashId);
     if (!c || !sceneId) return;
     if (clash?.id !== c.id) selectClash(c);
+    const epoch = sceneEpoch.current;
     const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } = await (await fetch(`/tour/${clashId}.json`)).json();
+    if (sceneEpoch.current !== epoch) return;
     const { onEvent, finish } = trackAgent();
     const run = agentRun.current;
     setReplaying(true);
@@ -601,13 +666,16 @@ export function App() {
 
   /** Play the recorded root-cause plan for the girder (the tour's fallback), at the pace it was recorded. */
   async function replayPlan() {
+    const epoch = sceneEpoch.current;
     const rec: { events: { t: number; event: PlanEvent }[] } = await (await fetch("/tour/girder-plan.json")).json();
-    const { onEvent, finish } = trackPlan("root_cause");
+    if (sceneEpoch.current !== epoch) return;
+    const { onEvent, finish, live } = trackPlan("root_cause");
     setReplaying(true);
     const start = Date.now();
     for (const { t, event } of rec.events) {
       const wait = start + t * 1000 - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (!live()) return;
       if (event.type === "plan") { finish(event); setReplaying(false); return; }
       if (event.type !== "error") onEvent(event);
     }
@@ -616,13 +684,16 @@ export function App() {
 
   /** Start showing a plan being built; returns the handler for its events and a function to call when done. */
   function trackPlan(kind: "batch" | "root_cause") {
+    const epoch = sceneEpoch.current, request = ++planRequest.current;
+    const live = () => sceneEpoch.current === epoch && planRequest.current === request;
     resetWork(); setPlan(null); setError(null); setPlanError(null);
-    setViewPlan(true);
+    setViewPlan(true); setViewContext(false); setPlanKind("batch");
     const t = Date.now();
     let run: PlanRun = { kind, started: t, phase: kind === "root_cause" ? "cause" : "fixing", rootCause: "", items: [], status: {} };
     setPlanRun(run); setNow(t);
     const update = (f: (r: PlanRun) => PlanRun) => { run = f(run); setPlanRun(run); };
     const onEvent = (e: PlanEvent) => {
+      if (!live()) return;
       if (e.type === "root_cause") update((r) => ({ ...r, rootCause: e.root_cause, phase: "fixing" }));
       if (e.type === "plan_items") update((r) => ({ ...r, phase: "fixing", items: e.items,
         status: Object.fromEntries(e.items.map((i) => [i.key, { state: "waiting" as const }])) }));
@@ -630,30 +701,39 @@ export function App() {
         state: e.status, ok: e.ok, note: e.status === "thinking" ? "Muse Spark is looking…" : e.status === "checking" ? `checked: ${e.attempt}` : e.title } } }));
       if (e.type === "checking_plan") update((r) => ({ ...r, phase: "checking" }));
     };
-    const finish = (p: Plan | null) => { if (p) setPlan(p); update((r) => ({ ...r, phase: "done" })); setNow(Date.now()); };
-    return { onEvent, finish };
+    const finish = (p: Plan | null) => { if (!live()) return; if (p) setPlan(p); update((r) => ({ ...r, phase: "done" })); setNow(Date.now()); };
+    return { onEvent, finish, live };
   }
 
   /** Build a plan: several ticked clashes together, or the root cause around one element. */
   async function runPlan(body: { clash_ids?: string[]; hub?: string }) {
     if (!sceneId || !report) return;
     setTab("plan");
-    const { onEvent, finish } = trackPlan(body.hub ? "root_cause" : "batch");
+    const { onEvent, finish, live } = trackPlan(body.hub ? "root_cause" : "batch");
     let p: Plan | null = null;
     try { p = await api.planStream(sceneId, { report_id: report.id, fixed: resolved, ...body }, onEvent); }
-    catch (e) { setPlanError((e as Error).message); }
+    catch (e) { if (live()) setPlanError((e as Error).message); }
     finally { finish(p); }
   }
 
   async function acceptPlan() {
     if (!sceneId || !plan) return;
+    const epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
     const items = plan.items.filter((i) => i.option && (plan.check.passed || plan.check.items[i.key]?.passed));
     setBusy(`Applying ${items.length} fix${items.length > 1 ? "es" : ""}…`);
     const pics = captureFix(items.map((i) => i.option!), "#1f9d3a");
     try {
       const { files, pieces } = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      if (!live()) return;
+      staleContext();
       viewer.current?.preview([]);
-      for (const i of files) await viewer.current!.replace(i, await api.file(sceneId, i));
+      for (const i of files) {
+        const bytes = await api.file(sceneId, i);
+        if (!live()) return;
+        await viewer.current!.replace(i, bytes, live);
+      }
+      if (!live()) return;
       setEdits((e) => {
         const next = { ...e };
         for (const ps of pieces) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
@@ -667,7 +747,7 @@ export function App() {
         return next;
       });
       setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+    } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
   }
 
   /** Mark every report clash of these element pairs as fixed (one pair can be reported by several tests). */
@@ -689,9 +769,99 @@ export function App() {
     else viewer.current?.focusClash([it.element_a, it.element_b], null, it.in_report ? "" : "not in the report");
   }
 
+  /** Context events own their objective and request generation, independent of later clash selection. */
+  function trackContext(objective: ContextObjective | null) {
+    const epoch = sceneEpoch.current, request = ++contextRequest.current;
+    const live = () => sceneEpoch.current === epoch && contextRequest.current === request;
+    ++agentRun.current; pilot.current?.takeOver(); setPilotStatus(null);
+    resetWork(); setViewPlan(false); setViewContext(true); setPlanKind("context"); setCompare("after");
+    setContextChosen(null); setAcknowledged([]);
+    const started = Date.now(); setNow(started);
+    setContext({ objective, started, phase: "inspecting", messages: [], result: null, error: null, stale: false });
+    const onEvent = (event: ContextEvent) => {
+      if (!live()) return;
+      setContext((r) => r && contextStep(r, event));
+      if (event.type === "context_result") {
+        setContextChosen(event.proposals[0]?.id ?? null); setAcknowledged([]);
+      }
+    };
+    const fail = (message: string) => onEvent({ type: "error", detail: message });
+    return { onEvent, fail, live };
+  }
+
+  async function exploreContext(objective?: ContextObjective) {
+    if (!sceneId) return;
+    const target = objective ?? (a && b ? { element_a: a, element_b: b,
+      ...(clash && report ? { report_id: report.id, clash_id: clash.id } : {}) } : null);
+    if (!target) return;
+    setTab("plan");
+    const tracker = trackContext(target);
+    try { await api.contextStream(sceneId, target, tracker.onEvent); }
+    catch (e) { tracker.fail((e as Error).message); }
+  }
+
+  function staleContext() {
+    // The server alone decides revisions; local mutation only disables reuse of the old proposal.
+    ++contextRequest.current;
+    setAcknowledged([]);
+    setContext((r) => r && !r.accepted ? { ...r, phase: "done", stale: true } : r);
+  }
+
+  async function acceptContext() {
+    if (!sceneId || !contextProposal || context?.stale || context?.accepted || contextWorking) return;
+    const p = contextProposal, sid = sceneId, epoch = sceneEpoch.current, request = contextRequest.current;
+    const live = () => sceneEpoch.current === epoch && contextRequest.current === request;
+    if (!p.review_conditions.every((c) => acknowledged.includes(c.id))) return;
+    setBusy("Rechecking and applying the complete proposal…");
+    setContext((r) => r && { ...r, error: null });
+    let committed = false;
+    try {
+      const applied = await api.applyContext(sid, p.id, acknowledged);
+      if (!live()) return;
+      committed = true;
+      // Every source in a moved group maps to its actual committed pieces, never trial mesh IDs.
+      setEdits((old) => {
+        const next = { ...old };
+        for (const edit of applied.edits) for (const source of edit.moved)
+          next[source] = [...new Set([...(next[source] ?? []), ...edit.pieces.filter((g) => g !== source)])];
+        return next;
+      });
+      markFixed(applied.resolved_pairs.map((pair) => [pair.element_a, pair.element_b] as const), applied.resolved_pairs.map(() => p.title));
+      viewer.current?.preview([]);
+      // Download first; a replaced scene cannot receive any of this request's geometry.
+      const files = await Promise.all(applied.files.map(async (index) => ({ index, bytes: await api.file(sid, index) })));
+      if (!live()) return;
+      for (const file of files) {
+        if (!live()) return;
+        await viewer.current!.replace(file.index, file.bytes, live);
+      }
+      if (!live()) return;
+      setContext((r) => r && { ...r, accepted: true });
+      setViewContext(false); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
+    } catch (e) {
+      if (!live()) return;
+      const conflict = e instanceof ApiError && (e.status === 409 || e.status === 404);
+      setContext((r) => r && { ...r, accepted: committed, stale: conflict,
+        error: committed ? `The proposal was accepted on the server, but the viewer could not reload all files: ${(e as Error).message}. Export IFC includes the accepted edits.`
+          : conflict ? `Revision conflict or fresh checks failed: ${(e as Error).message}` : (e as Error).message });
+      if (committed) setViewContext(false);
+      if (conflict) setAcknowledged([]);
+    } finally { if (sceneEpoch.current === epoch) setBusy(null); }
+  }
+
   // The chat drives the page through events: select a clash, change the view, show the fix agent's work.
   const chatAgent = useRef<ReturnType<typeof trackAgent> | null>(null);
+  const chatContext = useRef<ReturnType<typeof trackContext> | null>(null);
   function onChatEvent(e: ChatEvent) {
+    if (e.type === "tool" && e.name === "explore_wider_fix") {
+      const c = report?.clashes.find((x) => x.id === e.args.clash_id), pair = c && matches?.[c.id];
+      chatContext.current = trackContext(c && pair?.a && pair.b ? { element_a: pair.a, element_b: pair.b, report_id: report!.id, clash_id: c.id } : null);
+      planThisTurn.current = true;
+    }
+    if (e.type === "context_event") {
+      const tracker = chatContext.current ?? trackContext(null);
+      chatContext.current = tracker; tracker.onEvent(e.event); planThisTurn.current = true;
+    }
     if (e.type === "ui" && e.action === "select_clash") {
       const c = report?.clashes.find((x) => x.id === e.clash_id);
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
@@ -710,7 +880,11 @@ export function App() {
       chatAgent.current = null;
     }
     if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind); planThisTurn.current = true; }
-    if (e.type === "done") planThisTurn.current = false;
+    if (e.type === "error") chatContext.current?.fail(e.detail);
+    if (e.type === "tool_result" && e.name === "explore_wider_fix" && chatContext.current?.live()) {
+      setContext((r) => r && r.phase !== "done" ? { ...r, phase: "done", error: e.summary } : r);
+    }
+    if (e.type === "done") { planThisTurn.current = false; chatContext.current = null; }
     if (e.type === "plan_event") chatPlan.current?.onEvent(e.event);
     if (e.type === "plan") { (chatPlan.current ?? trackPlan(e.kind)).finish(e); chatPlan.current = null; }
   }
@@ -719,6 +893,8 @@ export function App() {
 
   async function accept(o: Option) {
     if (!sceneId) return;
+    const epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
     setBusy("Applying the fix…"); setError(null);
     const ids = clashIdsOf([[a, b]])[0];
     const pics = ids.some((id) => evidence[id]?.after_img && evidence[id]?.title === o.title)
@@ -726,21 +902,31 @@ export function App() {
       : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     try {
       const { files, pieces } = await api.accept(sceneId, o);
+      if (!live()) return;
+      staleContext();
       setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
-      for (const i of files) await viewer.current!.replace(i, await api.file(sceneId, i));
+      for (const i of files) {
+        const bytes = await api.file(sceneId, i);
+        if (!live()) return;
+        await viewer.current!.replace(i, bytes, live);
+      }
+      if (!live()) return;
       if (pieces?.length) {
         const [first, ...added] = pieces;
         setEdits((e) => ({ ...e, [first]: [...(e[first] ?? []), ...added] }));
       }
       markFixed([[a, b]], [o.title]);
       resetWork(); setRemeasure((n) => n + 1);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+    } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
   }
 
   async function checkManual() {
     if (!sceneId || !a) return;
+    const epoch = sceneEpoch.current;
     const v = await api.verify(sceneId, [a], [0, 0, manualDz]);
+    if (sceneEpoch.current !== epoch) return;
+    setViewContext(false); setViewPlan(false); setChosen(null);
     setManual(v);
     viewer.current?.preview([{ globalIds: [a], deltaM: [0, 0, manualDz] }]);
   }
@@ -778,7 +964,7 @@ export function App() {
     },
   };
 
-  const compareBar = (option || (plan && viewPlan && planOptions.length > 0)) && (
+  const compareBar = (option || (plan && viewPlan && planOptions.length > 0) || (activeContext && contextProposal)) && (
     <div className="compare" onClick={(e) => e.stopPropagation()}>
       <div className="seg" role="group" aria-label="Compare before and after">
         {(["before", "after", "both"] as const).map((m) => (
@@ -796,6 +982,9 @@ export function App() {
               ? `one end cut back ${Math.round(option.trim.by_m * 1000)} mm; nothing moves`
               : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
         </dl>
+      ) : activeContext && contextProposal ? (
+        <dl className="diff"><dt>Wider fix</dt><dd>{contextProposal.edits.length} coordinated edits shown together</dd>
+          <dt>Checks</dt><dd className="ok">Geometry and model checks passed; designer review conditions apply</dd></dl>
       ) : plan && (
         <dl className="diff">
           <dt>Plan</dt><dd>{planOptions.length} fix{planOptions.length === 1 ? "" : "es"} shown together</dd>
@@ -860,7 +1049,7 @@ export function App() {
 
       <aside className="pane left">
         {report
-          ? <ReportList report={report} matches={matches} selected={viewPlan ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
+          ? <ReportList report={report} matches={matches} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
@@ -937,22 +1126,37 @@ export function App() {
 
       <aside className={`pane right ${tab === "chat" ? "chatting" : ""}`}>
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => { setTab("clash"); setViewPlan(false); }}>
+          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => { setTab("clash"); setViewPlan(false); setViewContext(false); }}>
             <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
-          <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => { setTab("plan"); if (plan || planRun) setViewPlan(true); }}>
-            <Network size={14} aria-hidden /> Plan{planning ? <i className="spinner" aria-hidden /> : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
+          <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => {
+            setTab("plan"); setViewContext(planKind === "context" && !!context); setViewPlan(planKind === "batch" && !!(plan || planRun));
+          }}>
+            <Network size={14} aria-hidden /> Plan{planning || contextWorking ? <i className="spinner" aria-hidden />
+              : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
+              : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
           <button role="tab" data-tour="tab-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
             <MessageSquare size={14} aria-hidden /> Chat</button>
         </div>
-        {tab === "chat" && (
-          <ChatPanel ready={!!(sceneId || report)} onEvent={onChatEvent} ask={chatAsk}
+        <div className="chat-slot" hidden={tab !== "chat"}>
+          {context && <button className="context-chat-link btn" onClick={() => { setTab("plan"); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>
+            <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
+          <ChatPanel key={`${sceneId}:${report?.id}`} ready={!!(sceneId || report)} onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch) onChatEvent(e); }} ask={chatAsk}
             context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
-        )}
-        {tab === "plan" && (
+        </div>
+        {tab === "plan" && <>
+          {context && (plan || planRun) && <div className="seg plan-switch" role="group" aria-label="Plan type">
+            <button className={planKind === "context" ? "on" : ""} onClick={() => { setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>Wider fix</button>
+            <button className={planKind === "batch" ? "on" : ""} onClick={() => { setPlanKind("batch"); setViewContext(false); setViewPlan(true); }}>Clash plan</button>
+          </div>}
+          {planKind === "context" && context ? <ContextPlan run={context} names={contextNames} chosen={contextChosen} acknowledged={acknowledged} busy={!!busy} now={now}
+            onChoose={(id) => { setContextChosen(id); setAcknowledged([]); setViewContext(true); setViewPlan(false); }}
+            onAcknowledge={(id, checked) => setAcknowledged((ids) => checked ? [...new Set([...ids, id])] : ids.filter((x) => x !== id))}
+            onAccept={acceptContext} onRegenerate={() => { if (context.objective) void exploreContext(context.objective); }}
+            onDiscard={() => { ++contextRequest.current; setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
-            onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />
-        )}
+            onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />}
+        </>}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report
             ? (<><ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]} />
@@ -980,6 +1184,8 @@ export function App() {
           <div className="actions">
             {!hideFix && <button className="btn primary big" data-tour="propose" disabled={!a || !b || !sceneId || !!busy || proposing} onClick={propose}>
               {proposing ? <><i className="spinner" aria-hidden /> Working…</> : <><Sparkles size={16} aria-hidden /> Propose fixes</>}</button>}
+            <button className="btn" disabled={!a || !b || a === b || !sceneId || !!busy || contextWorking || proposing || planning}
+              onClick={() => void exploreContext()}><Network size={15} aria-hidden /> Explore wider fix</button>
             <button className="btn" disabled={!a && !b} onClick={focusNow}><LocateFixed size={15} aria-hidden /> Go to the clash</button>
           </div>
 
@@ -1078,6 +1284,12 @@ export function App() {
 function movedPairs(moved: string[], sides: string[]): [string, string][] {
   const still = sides.filter((g) => !moved.includes(g));
   return moved.flatMap((m) => still.map((g) => [m, g] as [string, string]));
+}
+
+/** All context previews are evaluator world meshes, including moves; originals are hidden once. */
+function contextShapes(p: ContextProposal) {
+  return p.edits.map((edit) => ({ kind: edit.kind, moved: edit.moved, deltaM: [0, 0, 0],
+    pieces: edit.preview, before: edit.before, worldMeshes: true, color: "#1f9d3a" }));
 }
 
 /** Side panel widths in px: [min, max, default]. */

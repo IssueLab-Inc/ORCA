@@ -32,6 +32,19 @@ heights. **Accept this fix** keeps it in the server's model; **Export edited IFC
 The browser previews moves instantly; the server makes the real edit and is the only source of
 clearance numbers. Elements are addressed by IFC GlobalId everywhere.
 
+For a clash that needs changes around it, choose **Explore wider fix** on a matched report clash or two manually
+picked model elements. Sightline inspects nearby geometry, discovers blockers and checks complete arrangements with
+up to three coordinated edit groups. The **Plan** tab shows up to three alternatives, every edit and its reason,
+geometry and model integrity evidence, retained authored frame warnings, and individual designer review conditions.
+**Before / After / Both** previews the entire arrangement, including surrounding elements that must move.
+
+Acknowledge every condition to **Accept complete proposal**. The server rechecks its stored proposal against the
+current model revision and keeps all dependent edits atomically; the browser reloads every affected IFC file and
+marks only confirmed resolved pairs fixed. If the model changed, regenerate for the proposal's original objective.
+Chat can also explore wider fixes; the same review appears in Plan while the conversation stays open. Search is
+bounded, so an empty result does not prove no solution exists. These are geometry and model checks with designer
+review conditions, not a claim of engineering adequacy or full IFC conformance. **Export IFC** includes all edited files.
+
 ## Run it
 
 Requirements: Python 3.13+, [uv](https://docs.astral.sh/uv/), Node 22+.
