@@ -109,6 +109,9 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     button(text) { return find(tree, (n) => n.type === "button" && hasText(n, text)); },
     component(name) { return find(tree, (n) => n.type?.name === name); },
     input(id) { return find(tree, (n) => n.type === "input" && n.props.id === id); },
+    reportMenu() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Clash report"); return p.props.children(() => {}); },
+    fileInput(kind) { return find(tree, (n) => n.type === "input" && n.props.type === "file"
+      && (kind === "folder" ? "webkitdirectory" in n.props : !!n.props.accept)); },
     chat(event) { find(tree, (n) => n.type?.name === "ChatPanel").props.onEvent(event); render(); },
     open() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Models");
       find(p.props.children(() => {}), (n) => n.props?.id === "open").props.onClick(); render(); },

@@ -535,6 +535,8 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, sceneId, matches, clash, a, b]);
   async function loadReport(get: () => Promise<Report>, what: string) {
+    // Report replacement changes callback ownership; defer it until committed model reloads finish.
+    if (busy) return;
     const workspace = ++workspaceEpoch.current;
     replaceChatWork(); retireDirectWork(); ++agentRun.current; ++planRequest.current; ++contextRequest.current; ++sceneEpoch.current;
     pilot.current?.cancel(); resetWork(); setContext(null); setContextChosen(null); setAcknowledged([]); setPlanKind("batch"); setChatAsk(undefined);
@@ -544,6 +546,7 @@ export function App() {
   }
 
   function upload(list: FileList | null) {
+    if (busy) return;
     const files = [...(list ?? [])].filter((f) => /\.(xml|png|jpe?g)$/i.test(f.name));
     if (!files.length) return setError("Choose a Navisworks XML report, or the folder it was exported to.");
     loadReport(() => api.uploadReport(files), `${files.length} file${files.length > 1 ? "s" : ""}`);
@@ -1128,16 +1131,16 @@ export function App() {
           {(close) => (<>
             <p className="pop-title">Navisworks clash report (XML)</p>
             {reportSamples.map((s) => (
-              <button key={s} className="pop-item" onClick={() => { close(); loadReport(() => api.openReport(s), s); }}>
+              <button key={s} className="pop-item" disabled={!!busy} onClick={() => { close(); loadReport(() => api.openReport(s), s); }}>
                 <FileSpreadsheet size={14} aria-hidden /> {s}</button>
             ))}
-            <button className="pop-item" onClick={() => { close(); folderInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload an export folder…</button>
-            <button className="pop-item" onClick={() => { close(); filesInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload XML files…</button>
+            <button className="pop-item" disabled={!!busy} onClick={() => { close(); folderInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload an export folder…</button>
+            <button className="pop-item" disabled={!!busy} onClick={() => { close(); filesInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload XML files…</button>
             <p className="hint">Upload the whole export folder to get each clash's images.</p>
           </>)}
         </Popover>
-        <input ref={folderInput} type="file" hidden multiple {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
-        <input ref={filesInput} type="file" hidden multiple accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
+        <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
+        <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         {!landing && <span className="crumbs">
           {stats ? <span>{modelNames.join(" · ")}</span> : <span className="hint">No model open</span>}
           {report && <span>· {report.title}</span>}

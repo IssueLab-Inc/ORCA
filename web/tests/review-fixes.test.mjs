@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appHost, checks, contextProposal, contextResult, option, flush, compiled } from "./app-host.mjs";
+import { appHost, checks, contextProposal, contextResult, option, flush, compiled, find, hasText } from "./app-host.mjs";
 
 async function completed(host) {
   const work = host.button("Propose fixes").props.onClick(); host.render();
@@ -212,6 +212,45 @@ test("a wider response after scene replacement cannot write evidence, files or b
   await accept; host.render(); assert.equal(host.state.busy, busy); assert.deepEqual(host.state.evidence, {}); assert.deepEqual(fetched, []);
   finishOpen(); await host.settle(); assert.equal(host.state.sceneId, "new-scene"); assert.deepEqual(fetched, ["new-scene"]);
   host.unmount();
+});
+
+test("sample and upload report replacement cannot interrupt wider apply, download or parse in the same scene", async () => {
+  for (const window of ["apply", "download", "parse"]) for (const path of ["sample", "folder", "files"]) {
+    let finishApply, finishFile, finishParse, reportRequests = 0, downloads = 0, replacements = 0, predicate;
+    const applied = { files: [0], edits: contextProposal.edits, resolved_pairs: [{ element_a: "duct", element_b: "beam" }], checks };
+    const nextReport = { id: "report-two", title: "Report two", clashes: [] };
+    const host = await appHost({ api: {
+      applyContext: () => window === "apply" ? new Promise((resolve) => { finishApply = () => resolve(applied); }) : Promise.resolve(applied),
+      file: () => { downloads++; return window === "download" ? new Promise((resolve) => { finishFile = () => resolve(new Uint8Array([1])); }) : Promise.resolve(new Uint8Array([1])); },
+      openReport: async () => { reportRequests++; return nextReport; }, uploadReport: async () => { reportRequests++; return nextReport; },
+    } });
+    host.viewer.replace = async (_index, _bytes, isCurrent) => {
+      predicate = isCurrent;
+      if (window === "parse") await new Promise((resolve) => { finishParse = resolve; });
+      if (isCurrent()) replacements++;
+    };
+    await wider(host); const accept = host.component("ContextPlan").props.onAccept(); await host.settle();
+    const report = host.state.report, busy = host.state.busy, epoch = host.refs.sceneEpoch.current, request = host.refs.contextRequest.current;
+    const menu = host.reportMenu();
+    const entry = find(menu, (n) => n.type === "button" && hasText(n, path === "sample" ? "sample" : path === "folder" ? "Upload an export folder" : "Upload XML files"));
+    // Drive the actual handler even when disabled: file dialogs opened before apply may return during it.
+    if (path === "sample") entry.props.onClick();
+    else host.fileInput(path).props.onChange({ target: { files: [{ name: "report.xml" }], value: "report.xml" } });
+    await host.settle();
+    assert.equal(reportRequests, 0, `${window}/${path}: report IO must not start`);
+    assert.equal(entry.props.disabled, true); assert.equal(host.fileInput("folder").props.disabled, true); assert.equal(host.fileInput("files").props.disabled, true);
+    assert.equal(host.state.report, report); assert.equal(host.state.busy, busy);
+    assert.equal(host.refs.sceneEpoch.current, epoch); assert.equal(host.refs.contextRequest.current, request);
+    if (window === "apply") finishApply(); else if (window === "download") finishFile(); else { assert.equal(predicate(), true); finishParse(); }
+    await accept; await host.settle();
+    assert.equal(downloads, 1); assert.equal(replacements, 1); assert.equal(host.state.sceneId, "scene");
+    assert.equal(host.state.context.accepted, true); assert.equal(host.state.evidence.clash.status, "accepted"); assert.equal(host.state.busy, null);
+    // The same entry point works again after committed geometry has been adopted.
+    if (path === "sample") host.loadReport();
+    else host.fileInput(path).props.onChange({ target: { files: [{ name: "report.xml" }], value: "report.xml" } });
+    await host.settle(); assert.equal(reportRequests, 1); assert.equal(host.state.report.id, "report-two");
+    host.unmount();
+  }
 });
 
 test("failed API open or download preserves the prior scene id, selection, stats and usability", async () => {
