@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
+import tempfile
 import threading
 from collections import Counter
 
@@ -11,7 +13,7 @@ import uuid
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, reports, verify
+from . import agent, detect, edits, reports, step, verify
 from .meta_client import ChatModel, MetaChatModel
 from .scene import IfcScene
 
@@ -19,6 +21,9 @@ SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
 MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
 MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
+# Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
+MODELS = Path(tempfile.gettempdir()) / "sightline-models"
+MODEL_SUFFIXES = {".ifc"} | step.SUFFIXES
 
 
 # Clash tests the demo's sample reports leave out: site context, rooms and proxies are not coordination problems.
@@ -38,6 +43,10 @@ class Workspace:
         self._matches: dict[tuple[str, str], dict] = {}
         self._runs: dict[str, dict] = {}  # scene id → what its last detection run found, for the next run's diff
         self._run_reports: dict[str, str] = {}  # scene id → its last detection report, whose views a rerun keeps
+        # Scene id → {file index: {"step": original STEP, "manifest": converter manifest}} for models opened from STEP,
+        # and the scene's own temporary folder (uploads, conversions), deleted when the scene is dropped.
+        self.sources: dict[str, dict[int, dict]] = {}
+        self._roots: dict[str, Path] = {}
         # Geometry trials edit the model and undo; anything touching a scene's geometry holds this.
         self.lock = threading.RLock()
         self._model = model
@@ -49,25 +58,67 @@ class Workspace:
         return self._model
 
     def list_samples(self) -> list[str]:
-        return sorted(p.name for p in self.samples.glob("*.ifc"))
+        return sorted(p.name for p in self.samples.iterdir() if p.suffix.lower() in MODEL_SUFFIXES)
 
-    def open(self, names: list[str]) -> str:
-        """Open one or more IFC files that share coordinates (e.g. structure + MEP + architecture)."""
+    def open(self, names: list[str], classify_with: ChatModel | None = None, on_event=lambda e: None) -> str:
+        """Open one or more sample models that share coordinates (e.g. structure + MEP + architecture). IFC opens as
+        is; STEP is converted first (`step.convert`, cached by its hash)."""
         paths = []
         for name in names:
             path = (self.samples / name).resolve()
             if path.parent != self.samples.resolve() or not path.exists():
                 raise FileNotFoundError(name)
             paths.append(path)
+        return self.open_paths(paths, classify_with=classify_with, on_event=on_event)
+
+    def open_paths(self, paths: list[Path], root: Path | None = None, classify_with: ChatModel | None = None,
+                   on_event=lambda e: None) -> str:
+        """Open models from these paths (samples, or an upload kept in `root`, which is deleted with the scene)."""
         if not paths:
             raise FileNotFoundError("no models given")
-        scene = IfcScene(paths)
-        scene.bounds()  # pay the one-off triangulation now, not on the first check
+        ifc_paths, sources = [], {}
+        try:
+            for i, path in enumerate(paths):
+                if path.suffix.lower() in step.SUFFIXES:
+                    if root is None:
+                        MODELS.mkdir(parents=True, exist_ok=True)
+                        root = Path(tempfile.mkdtemp(dir=MODELS))
+                    ifc, manifest = step.convert(path, root / f"converted-{i}", classify_with, self.step_cache,
+                                                 on_event)
+                    ifc_paths.append(ifc)
+                    sources[i] = {"step": path, "manifest": manifest}
+                else:
+                    ifc_paths.append(path)
+            on_event({"type": "opening", "files": len(ifc_paths)})
+            scene = IfcScene(ifc_paths)
+            scene.bounds()  # pay the one-off triangulation now, not on the first check
+        except BaseException:
+            if root is not None:
+                shutil.rmtree(root, ignore_errors=True)
+            raise
         scene_id = uuid.uuid4().hex[:12]
         self.scenes[scene_id] = scene
+        self.sources[scene_id] = sources
+        if root is not None:
+            self._roots[scene_id] = root
         while self.max_scenes and len(self.scenes) > self.max_scenes:
-            del self.scenes[next(iter(self.scenes))]  # oldest first (dicts keep insertion order)
+            old = next(iter(self.scenes))  # oldest first (dicts keep insertion order)
+            del self.scenes[old]
+            self.sources.pop(old, None)
+            if old in self._roots:
+                shutil.rmtree(self._roots.pop(old), ignore_errors=True)
         return scene_id
+
+    @property
+    def step_cache(self) -> Path:
+        """Converted STEP files by hash. `samples/step-cache` when it exists (the demo ships its conversion, so the
+        first visitor after a restart does not wait for the part classes), else a temporary folder."""
+        shipped = self.samples / "step-cache"
+        return shipped if shipped.is_dir() else MODELS / "step-cache"
+
+    def step_files(self, scene_id: str) -> dict[int, str]:
+        """File index → the STEP file name it was converted from, for the models of this scene that came from STEP."""
+        return {i: Path(src["step"]).name for i, src in self.sources.get(scene_id, {}).items()}
 
     def scene(self, scene_id: str) -> IfcScene:
         return self.scenes[scene_id]
@@ -158,9 +209,28 @@ class Workspace:
             return path
 
     def export(self, scene_id: str, out_dir: Path) -> list[Path]:
-        """Write the edited files only; untouched discipline models are not rewritten."""
+        """Write the edited files only; untouched discipline models are not rewritten. A model that came from STEP is
+        also written back as STEP, each moved part translated in the original file (`step.export`)."""
         with self.lock:
-            return self.scene(scene_id).write_edited(out_dir)
+            s = self.scene(scene_id)
+            out = s.write_edited(out_dir)
+            for i in sorted(s._edited):
+                src = self.sources.get(scene_id, {}).get(i)
+                if not src:
+                    continue
+                parts = json.loads(Path(src["manifest"]).read_text())["parts"]
+                moves = {}
+                for gid, info in parts.items():
+                    try:
+                        now = s.placement(gid)[:3, 3]
+                    except Exception:  # not in the model any more
+                        continue
+                    delta = [float(a - b) for a, b in zip(now, info["origin"])]
+                    if any(abs(d) > 1e-6 for d in delta):
+                        moves[gid] = delta
+                stem = Path(src["step"]).stem
+                out.append(step.export(Path(src["step"]), moves, parts, out_dir / f"{stem}.sightline.step"))
+            return out
 
     # Clash reports (Navisworks XML).
 

@@ -40,6 +40,8 @@ export function App() {
   const filesInput = useRef<HTMLInputElement>(null);
   const [samples, setSamples] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
+  const [stepFiles, setStepFiles] = useState<string[]>([]);  // open models that came from STEP (Export gives STEP back)
+  const modelInput = useRef<HTMLInputElement>(null);
   const [sceneId, setSceneId] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [a, setA] = useState<string | null>(null);
@@ -540,17 +542,24 @@ export function App() {
     setReplaying(false);
   }
 
-  async function open() {
-    if (!picked.length) return;
+  /** Open models: the picked samples, other sample names, or files the visitor chose (uploaded). A STEP model is
+   * converted to IFC on the server; Export gives it back as STEP too. */
+  async function open(source: string[] | File[] = picked) {
+    if (!source.length) return;
+    const upload = source[0] instanceof File;
+    const names = (source as (string | File)[]).map((x) => (typeof x === "string" ? x : x.name));
+    const hasStep = names.some((n) => /\.(step|stp)$/i.test(n));
     ++workspaceEpoch.current; replaceChatWork(); retireDirectWork();
     const epoch = ++sceneEpoch.current;
     ++contextRequest.current; ++agentRun.current; ++planRequest.current;
     pilot.current?.cancel();
     setChatAsk(undefined);
     setContext(null); setContextChosen(null); setContextNames({}); setAcknowledged([]); setViewContext(false); setViewPlan(false);
-    setBusy(`Loading ${picked.length} model${picked.length > 1 ? "s" : ""}…`); setError(null); resetWork(false, true);
+    setBusy(upload ? `Uploading ${names.length} model${names.length > 1 ? "s" : ""}${hasStep ? " and converting the STEP" : ""}…`
+      : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`);
+    setError(null); resetWork(false, true);
     try {
-      const { id, files } = await api.open(picked);
+      const { id, files, step } = upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]);
       if (sceneEpoch.current !== epoch) return;
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
       if (sceneEpoch.current !== epoch) return;
@@ -560,6 +569,7 @@ export function App() {
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
+      setStepFiles(Object.values(step ?? {}));
       return id;
     } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
   }
@@ -567,10 +577,12 @@ export function App() {
   /** The start page's buttons: open the demo models and let Sightline check them (the golden path also picks the duct
    * through the girder and proposes a fix). A Navisworks report is optional: Coordinate › Import. */
   async function startGolden() { golden.current = true; await openDemo(); }
-  async function openDemo() {
-    const id = await open();
+  async function openDemo(source?: string[] | File[]) {
+    const id = await open(source);
     if (id) await runDetect(null, id);
   }
+  // The second demo: the palletising cell, opened from its STEP file.
+  const cellSample = samples.find((f) => /palletising-cell-reva\.(step|stp)$/i.test(f));
 
   /** A clash the tour or the golden path is about, by its two elements: the same in a check or an imported report. */
   function clashOfPair(pair: readonly string[], r: Report | null = report): ReportClash | undefined {
@@ -1365,6 +1377,11 @@ export function App() {
             {!samples.length && <p className="hint">No models in samples/</p>}
             <button id="open" className="btn primary small" disabled={!picked.length || !!busy} onClick={() => { close(); open(); }}>
               <FolderOpen size={14} aria-hidden /> Open {picked.length} model{picked.length === 1 ? "" : "s"}</button>
+            <p className="pop-title">Or your own</p>
+            <button className="pop-item" disabled={!!busy} onClick={() => { close(); modelInput.current?.click(); }}>
+              <Upload size={14} aria-hidden /> Upload models (IFC or STEP)…</button>
+            <p className="hint">Up to 150 MB together. A STEP machine is converted to IFC to check; Export gives your STEP back
+              with the fixes.</p>
           </>)}
         </Popover>
         {stats && <span className="stat mono" title={`${modelNames.join(", ")}: ${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>
@@ -1385,6 +1402,8 @@ export function App() {
             <p className="hint">Upload the whole export folder to get each clash's images.</p>
           </>)}
         </Popover>
+        <input ref={modelInput} type="file" hidden multiple accept=".ifc,.step,.stp" disabled={!!busy}
+          onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) void openDemo(files); }} />
         <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         {!landing && <button className="btn ghost" onClick={() => setAbout(true)} aria-label="How it works" title="How it works"><Info size={15} aria-hidden /><span className="lbl"> How it works</span></button>}
@@ -1400,8 +1419,9 @@ export function App() {
         <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
         {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
-        {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip="Download the changed IFC files" data-tip-side="bottom">
-          <Download size={15} aria-hidden /> Export IFC</a>}
+        {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip-side="bottom"
+          data-tip={stepFiles.length ? "Download the changed models: the STEP with its fixes, and the IFC" : "Download the changed IFC files"}>
+          <Download size={15} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
         </div>
       </header>
 
@@ -1446,7 +1466,8 @@ export function App() {
           <About triageOpen={!!triageModel?.open_weights} start={{
             label: startLabel,
             disabled: !picked.length,
-            onStart: openDemo,
+            onStart: () => void openDemo(),
+            onCell: cellSample ? () => void openDemo([cellSample]) : undefined,
             onGolden: startGolden,
             onTour: () => setTouring(true),
             details: <>
@@ -1697,7 +1718,7 @@ function remember(side: "left" | "right", w: number) {
 }
 
 /** "Northbank-Structure.ifc" → "Structure" */
-function shortName(file: string) { return file.replace(/\.ifc$/i, "").replace(/^Northbank-/, ""); }
+function shortName(file: string) { return file.replace(/\.(ifc|step|stp)$/i, "").replace(/^Northbank-/, ""); }
 
 function ProofStrip({ o, rank, options, before }: { o: Option; rank: number; options: Option[]; before: number | null }) {
   const need = 0.025;

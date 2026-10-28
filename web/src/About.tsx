@@ -1,4 +1,4 @@
-import { Box, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
+import { Box, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 /**
@@ -7,7 +7,8 @@ import { useEffect, type ReactNode } from "react";
  */
 export function About({ start, onClose, triageOpen = false }: {
   // onGolden: one click opens the demo models, checks them, picks the duct-through-girder clash and proposes a fix.
-  start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void };
+  start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void;
+    onCell?: () => void };  // the second demo: the palletising cell from STEP
   onClose?: () => void;
   triageOpen?: boolean;  // titles and triage run on the open-weights model now (server: /api/models)
 }) {
@@ -45,6 +46,19 @@ export function About({ start, onClose, triageOpen = false }: {
         </div>
         <BeforeAfter />
       </header>
+
+      {start?.onCell && (
+        <section className="about-second" aria-label="Second demo">
+          <div>
+            <p className="eyebrow">Second demo · from STEP</p>
+            <h2>A machine cell, from its STEP file</h2>
+            <p>Robot palletising cell PC-03: 144 parts, five planted problems. Sightline converts the STEP, checks it,
+              moves what clashes, and gives you the STEP back with the fixes.</p>
+          </div>
+          <button className="btn big" disabled={start.disabled} onClick={start.onCell}>
+            <Cpu size={16} aria-hidden /> Open the machine cell</button>
+        </section>
+      )}
 
       {start && (
         <section className="about-layout" aria-label="Once the demo is open">

@@ -175,7 +175,37 @@ class IfcScene:
                 if other not in seen and not any(self.entity(other).is_a(c) for c in stop_at):
                     seen.add(other)
                     todo.append(other)
+        if len(seen) == 1:
+            seen = set(self.step_run(global_id))
         return sorted(seen)
+
+    def step_run(self, global_id: str, touch_m: float = 0.001) -> list[str]:
+        """For a part converted from STEP (no ports): the parts of the same STEP group that touch it, transitively
+        (boxes within `touch_m`). A cable ladder's runs and bends move together; fence posts, which touch nothing in
+        their own group, move alone. Anything else: just the element."""
+        group = self.step_group(global_id)
+        if group is None:
+            return [global_id]
+        b = self.bounds()
+        i = self.index_of(global_id)
+        members = [e.GlobalId for e in self.models[i].by_type("IfcElement")
+                   if e.GlobalId in b and self.step_group(e.GlobalId) == group]
+        seen, todo = {global_id}, [global_id]
+        while todo:
+            box = b.get(todo.pop())
+            if box is None:
+                continue
+            for other in members:
+                if other not in seen and np.all(b[other][0] <= box[1] + touch_m) and np.all(b[other][1] >= box[0] - touch_m):
+                    seen.add(other)
+                    todo.append(other)
+        return sorted(seen)
+
+    def step_group(self, global_id: str) -> str | None:
+        """The STEP assembly group a converted part came from (pset Sightline_STEP), else None."""
+        entity = self.entity(global_id)
+        group = ifcopenshell.util.element.get_pset(entity, "Sightline_STEP", "Group") if entity is not None else None
+        return group if isinstance(group, str) and group else None
 
     def placement(self, global_id: str) -> np.ndarray:
         """World placement of an element in METRES, whatever the project unit."""

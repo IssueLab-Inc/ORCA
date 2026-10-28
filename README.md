@@ -99,6 +99,25 @@ the geometry check runs (amber), then turns teal when it is clear or lights up w
 follows; between rounds it turns slowly round the clash. Drag, scroll or click in the view to take it back (the agent
 keeps working); **Let Sightline drive** hands it over again.
 
+### Your own models, and STEP
+
+**Models › Upload models (IFC or STEP)** opens your own files: up to eight, 150 MB together on the demo, a few uploads
+per visitor per hour. A STEP machine (AP203/AP214/AP242) is converted to IFC when it opens (`server/sightline/step.py`,
+design in [docs/step.md](docs/step.md)):
+- every part keeps its name, colour and transparency;
+- the model names each part's IFC class from its name and group;
+- the parts are checked like any model.
+
+Fixes on STEP parts are moves: parts of one STEP group that touch move together, so a cable ladder moves as one.
+**Export** then gives your STEP back with the moved parts translated, names and colours kept, beside the IFC.
+
+The landing's second demo opens the PC-03 robot palletising cell from its STEP file:
+- the check finds all five planted problems (13 part pairs, nothing unexpected);
+- Muse Spark fixes the cable ladder through the fence post by raising it 150 mm, the designers' own fix;
+- the exported STEP has exactly those five ladder parts moved.
+
+`evals/step_cell.py` checks this against the cell's answer key.
+
 ### Works with Navisworks reports
 
 Teams that already run Navisworks can bring its results instead: **Coordinate › Import a Navisworks clash report** opens

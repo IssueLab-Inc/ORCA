@@ -384,6 +384,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .bad-note { fill: #b26a00; } .ok-note { fill: #0b7f8f; }
 .ba-tag { font-size: 9.5px; fill: var(--muted); }
 .about-h { font-size: 17px; margin: 0; letter-spacing: -.005em; }
+.about-second { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.about-second h2 { margin: 2px 0 4px; font-size: 17px; }
+.about-second p { margin: 0; font-size: 13.5px; color: #3d4a58; line-height: 1.5; }
+.about-second .eyebrow { font-size: 11px; }
+@container (max-width: 640px) { .about-second { flex-direction: column; align-items: flex-start; } }
 .disciplines { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .discipline { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .discipline span { color: var(--muted); line-height: 1.45; }
