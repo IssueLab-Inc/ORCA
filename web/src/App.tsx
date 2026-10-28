@@ -103,6 +103,7 @@ export function App() {
   const [chatAsk, setChatAsk] = useState<{ text: string; send: boolean; n: number } | undefined>(undefined);
   // Each agent run gets a number: a run that was replaced (by a recorded replay) can no longer change the page.
   const agentRun = useRef(0);
+  const golden = useRef(false);
   const [triageFilter, setTriageFilter] = useState<TriageKind | null>(null);
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -422,12 +423,21 @@ export function App() {
   }
 
   /** The start page's button: the sample clash report (its list shows at once), then the models. */
+  async function startGolden() { golden.current = true; await openDemo(); }
   async function openDemo() {
     const sample = reportSamples[0];
     if (sample && !report) await loadReport(() => api.openReport(sample), sample);
     await open();
   }
 
+  useEffect(() => {
+    if (!golden.current || !report || !sceneId || !matches) return;
+    const target = report.clashes.find((c) => c.id === TOUR.duct) ?? [...report.clashes].sort((x, y) => (x.distance_m ?? 0) - (y.distance_m ?? 0))[0];
+    if (!target) { golden.current = false; return; }
+    if (clash?.id !== target.id) { selectClash(target); return; }
+    if (a && b && !proposal && !proposing) { golden.current = false; void propose(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report, sceneId, matches, clash, a, b]);
   async function loadReport(get: () => Promise<Report>, what: string) {
     setBusy(`Reading ${what}…`); setError(null);
     try { const r = await get(); setReport(r); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setFixes({}); setReviewed({}); setVerdicts(null); }
@@ -837,7 +847,7 @@ export function App() {
         {!landing && <button className="btn ghost" onClick={() => setAbout(true)}><Info size={15} aria-hidden /> How it works</button>}
         {!landing && !touring && <button className="btn ghost" onClick={() => setTouring(true)}><Compass size={15} aria-hidden /> Tour</button>}
         <span className="spacer" />
-        {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={openDemo}><FolderOpen size={15} aria-hidden /> {startLabel}</button>}
+        {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch Sightline fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
           owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}</span>}
@@ -880,6 +890,7 @@ export function App() {
             label: startLabel,
             disabled: !picked.length,
             onStart: openDemo,
+            onGolden: startGolden,
             onTour: () => setTouring(true),
             details: <>
               Loads {reportSamples.length > 0 && !report ? <>the Navisworks clash report <b>{reportSamples[0]}</b> and </> : ""}
@@ -979,7 +990,7 @@ export function App() {
           </>}
           <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"} />
           {proposal && !proposing && <h2>Verified options</h2>}
-          {proposal && !proposing && !proposal.options.length && <NoFix proposal={proposal} />}
+          {proposal && !proposing && !proposal.options.length && <NoFix proposal={proposal} onRetry={propose} onFlag={clash ? () => review([clash.id], "author", "No verified fix: needs the model's author") : undefined} />}
           {clash && proposal && !proposing && proposal.options.length > 0 && proposal.options.every((o) => o.cleanup) && (
             <div className="cleanup-note">
               <b>Model cleanup, not a coordination clash</b>
@@ -1002,6 +1013,7 @@ export function App() {
                 <span className="row"><span>Clearance</span><span className="mono">{o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m)}</span></span>
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 <span className="why">{o.rationale}</span>
+                <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} />
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
             </div>
@@ -1085,8 +1097,18 @@ function remember(side: "left" | "right", w: number) {
 /** "Northbank-Structure.ifc" → "Structure" */
 function shortName(file: string) { return file.replace(/\.ifc$/i, "").replace(/^Northbank-/, ""); }
 
+function ProofStrip({ o, rank, options, before }: { o: Option; rank: number; options: Option[]; before: number | null }) {
+  const need = 0.025;
+  const clear = o.kind === "trim" ? "butt joint, no overlap" : o.min_clearance_m == null ? "nothing within 500 mm" : `${mm(o.min_clearance_m)} clear`;
+  const margin = o.kind !== "trim" && o.min_clearance_m != null ? ` (${Math.round((o.min_clearance_m - need) * 1000)} mm over the 25 mm needed)` : "";
+  const change = options.map((x) => x.delta_m.reduce((s, v) => s + Math.abs(v), 0));
+  const smallest = change[rank] === Math.min(...change);
+  const comfy = o.min_clearance_m == null || o.min_clearance_m >= 2 * need;
+  const why = rank === 0 ? (comfy && smallest ? "ranked first: comfortable clearance, smallest change" : comfy ? "ranked first: comfortable clearance" : smallest ? "ranked first: smallest change that clears" : "ranked first: best clearance of the verified fixes") : `option ${rank + 1} of ${options.length}`;
+  return <span className="proof-strip"><span className="ok">✓ Clash gone</span><span>{clear}{margin}</span>{before != null && <span>was {mm(before)} overlap</span>}<span>{o.checked_against ? `checked vs ${o.checked_against} elements` : "checked vs the model"}</span><span className="why">{why}</span></span>;
+}
 /** When nothing passed: what Sightline learned, so the clash reaches a person with a head start, not a dead end. */
-function NoFix({ proposal }: { proposal: Proposal }) {
+function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: () => void; onFlag?: () => void }) {
   const n = proposal.attempts.length;
   const counts = new Map<string, number>();
   for (const t of proposal.attempts) {
@@ -1095,6 +1117,10 @@ function NoFix({ proposal }: { proposal: Proposal }) {
     }
   }
   const top = [...counts.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2);
+  const blockers = proposal.attempts.filter((t) => !t.passed).slice(0, 3);
+  const kinds = new Set(proposal.attempts.map((t) => t.kind));
+  const lesson = kinds.has("offset") && !kinds.has("trim") ? "Whole moves and offsets are blocked along this run. A local trim, a different element, or a design change is likely needed." : kinds.has("trim") ? "Even cutting back at the joint still hits something. This needs a person to decide which element gives way." : "Every direction tried hits something else. Try the other element, or a smaller move by hand below.";
+  const next = proposal.advice ? "Follow the advice below, then propose again." : lesson;
   return (
     <div className="nofix">
       <h3>No edit passed the geometry check</h3>
@@ -1104,7 +1130,9 @@ function NoFix({ proposal }: { proposal: Proposal }) {
           <span key={cls}>{i ? ", and " : ""}<b>{cls.replace(/^Ifc/, "")}</b> elements in {k === n ? "every attempt" : `${k} of ${n}`}</span>))}.</>}
       </p>
       {proposal.advice && <p><b>What decides it:</b> {proposal.advice}</p>}
-      <p className="hint">Each idea and what it hit is in the activity table below. Propose again for fresh ideas, or flag it for the model's author.</p>
+      {blockers.length > 0 && <ul className="nofix-blockers">{blockers.map((t, i) => <li key={i}><b>{t.title}</b> — {t.reason}</li>)}</ul>}
+      <p><b>What this teaches:</b> {next}</p>
+      <div className="row nofix-actions">{onRetry && <button className="btn small" onClick={onRetry}>Propose again</button>}{onFlag && <button className="btn small" onClick={onFlag}>Flag for the model's author</button>}<span className="hint">Full detail in the activity table below.</span></div>
     </div>
   );
 }

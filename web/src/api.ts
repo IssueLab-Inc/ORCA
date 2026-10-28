@@ -8,6 +8,7 @@ export interface Option {
   trim?: TrimCut | null;
   /** A trim inside one model: tidies a joint for the model's author, not a coordination fix. */
   cleanup?: boolean;
+  checked_against?: number;
 }
 export interface Attempt {
   title: string; delta_m: number[]; passed: boolean; reason: string; kind: FixKind; split_m: number[] | null;

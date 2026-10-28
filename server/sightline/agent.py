@@ -45,6 +45,7 @@ class Option:
     before: list[dict] | None = None    # the changed elements as they are now (world triangles), to compare
     trim: dict | None = None            # trim only: {"end": "start" | "end", "by_m": metres}
     cleanup: bool = False               # a trim inside one model: tidies a joint for its author, not a coordination fix
+    checked_against: int = 0            # elements the geometry check tested this fix against (proof strip)
 
 
 @dataclass
@@ -237,7 +238,7 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
     if not v.passed:
         return attempt, None
     return attempt, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""), cand.get("also_needs", ""),
-                           v.min_clearance_m, placements)
+                           v.min_clearance_m, placements, checked_against=v.checked_against)
 
 
 def _reason(hits: list[verify.Hit]) -> str:
@@ -300,7 +301,7 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_
     if hits:
         return attempt, None
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
-                           v.min_clearance_m, {}, "offset", split, preview)
+                           v.min_clearance_m, {}, "offset", split, preview, checked_against=v.checked_against)
 
 
 def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
@@ -334,7 +335,7 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
         return attempt, None
     same_model = scene.element(target).source == scene.element(other).source
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
-                           v.min_clearance_m, {}, "trim", None, shape, trim=trim, cleanup=same_model)
+                           v.min_clearance_m, {}, "trim", None, shape, trim=trim, cleanup=same_model, checked_against=v.checked_against)
 
 
 def to_json(result: Result) -> str:

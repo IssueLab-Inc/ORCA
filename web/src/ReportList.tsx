@@ -26,6 +26,15 @@ const LINK_TITLE = { both: "Both elements are in the open model", one: "One elem
 
 const short = (c: ReportClash) => `${c.a.ifc_class?.replace(/^Ifc/, "") ?? "?"} × ${c.b.ifc_class?.replace(/^Ifc/, "") ?? "?"}`;
 
+function ImpactBar({ total, triage, fixes, reviewed }: { total: number; triage: Record<string, TriageVerdict>; fixes: Record<string, string>; reviewed: Record<string, Review> }) {
+  const triaged = Object.keys(triage).length;
+  if (!triaged) return <p className="impact-bar"><span><b>{total}</b> clashes to sort</span><span className="why">Run Triage all to separate real problems from noise.</span></p>;
+  const real = Object.values(triage).filter((v) => v.verdict === "real_clash").length;
+  const resolved = Object.keys(fixes).length + Object.keys(reviewed).length;
+  const need = Math.max(0, real - Object.keys(fixes).length);
+  const hours = (triaged * 15 / 60).toFixed(1).replace(/\.0$/, "");
+  return <p className="impact-bar" role="status"><span><b>{total}</b> clashes</span><span className="bad"><b>{real}</b> real</span><span><b>{need}</b> need a fix</span><span className="ok"><b>{resolved}</b> resolved</span><span className="why">≈{hours} h of manual review sorted (est. 15 min/clash)</span></p>;
+}
 export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
@@ -74,6 +83,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
             {reviewedCount > 0 && <span className="chip">{reviewedCount} reviewed</span>}</span></div>
         <p className="hint">{report.clashes.length} clashes · {new Set(report.clashes.map((c) => c.test)).size} tests
           {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}</p>
+        <ImpactBar total={report.clashes.length} triage={triage} fixes={fixes} reviewed={reviewed} />
         <div className="search-box">
           <Search size={15} aria-hidden />
           <input type="search" placeholder="Filter by element, class, level…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter clashes" />
