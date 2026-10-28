@@ -145,7 +145,8 @@ class Chat:
     def turn(self, session: Session, text: str, ctx: Context, emit: Callable[[dict], None], *,
              cancel: threading.Event | None = None,
              propose_allowed: Callable[[], str | None] | None = None,
-             propose_allowed_many: Callable[[int], str | None] | None = None) -> str:
+             propose_allowed_many: Callable[[int], str | None] | None = None,
+             before_publish: Callable[[], None] | None = None) -> str:
         cancel = cancel or threading.Event()
         # Defaults preserve constructor/direct-tool callers; each turn captures its
         # callbacks before a model wait can interleave with another visitor's turn.
@@ -210,6 +211,11 @@ class Chat:
         if cancel.is_set():
             return ''
         self._trim(session)
+        emit({"type": "message", "text": answer})
+        # A bounded stream can still cancel on its message/done/end sentinel.
+        # Finish all fallible publication work before committing shared history.
+        if before_publish is not None:
+            before_publish()
         with target._history_lock:
             if cancel.is_set():
                 return ''
@@ -217,7 +223,6 @@ class Chat:
             if turn_number > target._published_turn:
                 target.messages = session.messages
                 target._published_turn = turn_number
-        emit({"type": "message", "text": answer})
         return answer
 
     def _context_line(self, ctx: Context) -> str:

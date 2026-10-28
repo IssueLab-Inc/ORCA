@@ -387,6 +387,75 @@ def test_canonical_event_overflow_explicitly_cancels_and_completes():
         events.cancel.set(); thread.join(2)
 
 
+@pytest.mark.parametrize('views, overflow_at', [(60, None), (61, 'end'), (62, 'done'), (63, 'message')])
+def test_chat_completion_overflow_never_publishes_cancelled_history(monkeypatch, views, overflow_at):
+    import asyncio
+    from sightline.service import Workspace
+    from test_chat import Scripted as ChatScripted
+    ws = Workspace()
+    chat = Chat(ws, ChatScripted([[('set_view', {'mode': 'xray'})] * views, 'Finished']))
+    session = chat.session(None); before = list(session.messages)
+    monkeypatch.setattr(api, 'ws', ws); monkeypatch.setattr(api, '_chat', chat)
+    monkeypatch.setattr(api, 'chat_limit', ProposeLimit())
+    captured, threads, event_type, spawn = [], [], api._RequestEvents, owner.spawn
+    class Events(event_type):
+        overflow_at = None
+        def __init__(self, request):
+            super().__init__(request); captured.append(self)
+        def put(self, event):
+            was_cancelled = self.cancel.is_set()
+            super().put(event)
+            if not was_cancelled and self.cancel.is_set():
+                self.overflow_at = 'end' if event is None else event['type']
+    def tracked(work):
+        thread = spawn(work); threads.append(thread); return thread
+    monkeypatch.setattr(api, '_RequestEvents', Events); monkeypatch.setattr(owner, 'spawn', tracked)
+    class Request:
+        headers = {}; client = None
+        async def is_disconnected(self): return False
+    response = api.chat_turn(api.ChatTurn(message='Update views', session_id=session.id), Request())
+    for thread in threads: thread.join(3)
+    assert all(not thread.is_alive() for thread in threads)
+    events = captured[0]
+    assert events.overflow_at == overflow_at and events.queue.qsize() <= 64
+    assert events.cancel.is_set() is (overflow_at is not None)
+    async def drain(): return [json.loads(line) async for line in response.body_iterator]
+    wire = asyncio.run(drain())
+    if overflow_at:
+        assert wire == [dict(type='error', detail='Request cancelled: too many unread result events. Please retry.')]
+        assert session.messages == before and session._published_turn == 0
+    else:
+        assert [e['type'] for e in wire[-2:]] == ['message', 'done']
+        assert session.messages[-1] == dict(role='assistant', content='Finished') and session._published_turn == 1
+
+
+def test_successful_stream_can_drain_before_chat_history_publication(monkeypatch):
+    import asyncio
+    from sightline.service import Workspace
+    from test_chat import Scripted as ChatScripted
+    ws = Workspace(); chat = Chat(ws, ChatScripted(['Finished'])); session = chat.session(None)
+    monkeypatch.setattr(api, 'ws', ws); monkeypatch.setattr(api, '_chat', chat)
+    monkeypatch.setattr(api, 'chat_limit', ProposeLimit())
+    observed, wire, event_type = [], [], api._RequestEvents
+    class Events(event_type):
+        def put(self, event):
+            super().put(event)
+            if event is None and not observed:
+                observed.append(session._published_turn)
+                async def drain(): return [json.loads(line) async for line in self.stream()]
+                wire.extend(asyncio.run(drain()))
+                observed.append(self.cancel.is_set())
+    monkeypatch.setattr(api, '_RequestEvents', Events)
+    monkeypatch.setattr(owner, 'spawn', lambda work: work())
+    class Request:
+        headers = {}; client = None
+        async def is_disconnected(self): return False
+    api.chat_turn(api.ChatTurn(message='Hello', session_id=session.id), Request())
+    assert observed == [0, False]
+    assert [e['type'] for e in wire[-2:]] == ['message', 'done']
+    assert session._published_turn == 1 and session.messages[-1]['content'] == 'Finished'
+
+
 @pytest.mark.parametrize('tool, args, units', [
     ('propose_fixes', {'clash_id': 'c0001'}, 1),
     ('explore_wider_fix', {'clash_id': 'c0001'}, 3),

@@ -133,3 +133,17 @@ def test_immediate_resume_preserves_newer_history_when_older_model_returns_late(
     assert inputs['Newer question'][-1]['content'].endswith('Newer question')
     if cancel_older:
         assert not any(e['type'] == 'message' for e in old_events)
+
+
+def test_final_emit_cancellation_cannot_publish_or_erase_a_newer_turn():
+    cancel = threading.Event()
+    chat = Chat(Workspace(), Scripted(['Older answer', 'Newer answer']))
+    session = chat.session(None); newer = []
+    def emit(event):
+        if event['type'] == 'message':
+            chat.turn(session, 'Newer question', Context(), lambda e: None)
+            newer.extend(session.messages)
+            cancel.set()
+    answer = chat.turn(session, 'Older question', Context(), emit, cancel=cancel)
+    assert answer == '' and session.messages == newer
+    assert session._published_turn == 2 and session.messages[-1]['content'] == 'Newer answer'

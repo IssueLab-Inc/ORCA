@@ -117,6 +117,7 @@ class _RequestEvents:
                 self._closed = True
 
     async def stream(self):
+        completed = False
         try:
             while not await self.request.is_disconnected():
                 try:
@@ -125,10 +126,14 @@ class _RequestEvents:
                     await asyncio.sleep(.05)
                     continue
                 if event is None:
+                    completed = True
                     break
                 yield json.dumps(event, default=str) + '\n'
         finally:
-            self.cancel.set()
+            # Successful consumption can finish before the worker commits chat
+            # history. Only disconnection/abandonment cancels that pending publish.
+            if not completed:
+                self.cancel.set()
 
 
 propose_limit = ProposeLimit.from_env()
@@ -674,14 +679,17 @@ def chat_turn(body: ChatTurn, request: Request):
     events = _RequestEvents(request)
     events.put({"type": "session", "id": session.id})
 
+    def finish():
+        events.put({"type": "done"})
+        events.put(None)
+
     def work():
         try:
             c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel,
-                   propose_allowed=allowed, propose_allowed_many=allowed_many)
+                   propose_allowed=allowed, propose_allowed_many=allowed_many, before_publish=finish)
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
-        events.put({"type": "done"})
-        events.put(None)
+        finish()  # idempotent after successful completion; also close failed/cancelled turns
 
     owner.spawn(work)
 
