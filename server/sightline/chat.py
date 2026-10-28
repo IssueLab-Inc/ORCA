@@ -19,6 +19,7 @@ import json
 import threading
 import uuid
 from collections import Counter, OrderedDict
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -102,6 +103,9 @@ TOOLS = [
 class Session:
     id: str
     messages: list[dict] = field(default_factory=list)
+    _history_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
+    _next_turn: int = field(default=0, init=False, repr=False)
+    _published_turn: int = field(default=0, init=False, repr=False)
 
 
 @dataclass
@@ -141,7 +145,12 @@ class Chat:
     def turn(self, session: Session, text: str, ctx: Context, emit: Callable[[dict], None], *,
              cancel: threading.Event | None = None) -> str:
         cancel = cancel or threading.Event()
-        history_start = len(session.messages)
+        target = session
+        with target._history_lock:
+            target._next_turn += 1
+            turn_number = target._next_turn
+            # Active requests own their tool history; only completed turns become shared context.
+            session = Session(target.id, deepcopy(target.messages))
         session.messages.append({"role": "user", "content": f"{self._context_line(ctx)}\n\n{text}"})
         answer = ""
         for _ in range(MAX_STEPS):
@@ -192,10 +201,15 @@ class Chat:
         else:
             answer = "I ran out of steps on that one. Ask me to carry on, or narrow the question."
         if cancel.is_set():
-            # Discard this interrupted turn, including unmatched tool calls, so the next request can resume cleanly.
-            del session.messages[history_start:]
             return ''
         self._trim(session)
+        with target._history_lock:
+            if cancel.is_set():
+                return ''
+            # An older in-flight request cannot replace a newer completed conversation.
+            if turn_number > target._published_turn:
+                target.messages = session.messages
+                target._published_turn = turn_number
         emit({"type": "message", "text": answer})
         return answer
 
