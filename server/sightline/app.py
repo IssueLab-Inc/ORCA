@@ -10,6 +10,7 @@ import tempfile
 import threading
 import uuid
 import wave
+from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -18,12 +19,38 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, document, edits, plans, triage
+from . import chat, document, edits, owner, plans, triage
 from .meta_client import transcribe, triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
 app = FastAPI(title="ClashWise Sightline")
+
+
+class _OwnerContext:
+    """Each request knows whether it is the owner's (the signed cookie) and carries the owner's settings (owner.py)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+        headers = dict(scope.get("headers") or [])
+        jar = SimpleCookie()
+        try:
+            jar.load(headers.get(b"cookie", b"").decode("latin-1"))
+        except CookieError:
+            pass
+        signed = jar[owner.COOKIE].value if owner.COOKIE in jar else None
+        tokens = owner.enter(owner.cookie_ok(signed), headers.get(owner.HEADER.encode(), b"").decode("utf-8", "replace") or None)
+        try:
+            await self.inner(scope, receive, send)
+        finally:
+            owner.leave(tokens)
+
+
+app.add_middleware(_OwnerContext)
 ws = Workspace()
 EXPORTS = Path(tempfile.gettempdir()) / "sightline-exports"
 EXPORTS.mkdir(exist_ok=True)
@@ -40,6 +67,7 @@ def _ndjson(events) -> StreamingResponse:
 
 propose_limit = ProposeLimit.from_env()
 chat_limit = ProposeLimit.chat_from_env()
+unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
 voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
                            int(os.environ.get("SIGHTLINE_VOICE_PER_DAY", "0")), noun="voice messages")
 
@@ -117,6 +145,41 @@ def _scene(scene_id: str):
     return scene_id
 
 
+def _take(limit: ProposeLimit, request: Request) -> str | None:
+    """One use of a demo cap for this visitor: why not, or None. The owner has none (unless they switch them on)."""
+    if owner.no_caps():
+        return None
+    return limit.take(client_id(request.headers, request.client.host if request.client else None))
+
+
+class Unlock(BaseModel):
+    token: str
+
+
+@app.get("/api/owner")
+def owner_state():
+    return {"available": owner.available(), "owner": owner.is_owner()}
+
+
+@app.post("/api/owner/unlock")
+def owner_unlock(body: Unlock, request: Request, response: Response):
+    """The owner token, once, for a signed cookie scripts cannot read. Wrong tokens are capped per visitor."""
+    if not owner.available():
+        raise HTTPException(404, "No owner is configured on this server.")
+    if not owner.check_token(body.token.strip()):
+        refused = unlock_limit.take(client_id(request.headers, request.client.host if request.client else None))
+        raise HTTPException(429 if refused else 403, refused or "That is not the owner token.")
+    response.set_cookie(owner.COOKIE, owner.cookie_value(), max_age=owner.DAYS * 86400, httponly=True, secure=True,
+                        samesite="strict", path="/api")
+    return {"owner": True}
+
+
+@app.post("/api/owner/lock")
+def owner_lock(response: Response):
+    response.delete_cookie(owner.COOKIE, path="/api", secure=True, httponly=True, samesite="strict")
+    return {"owner": False}
+
+
 @app.get("/api/samples")
 def samples():
     return ws.list_samples()
@@ -153,7 +216,7 @@ def verify_move(scene_id: str, body: Move):
 @app.post("/api/scenes/{scene_id}/propose")
 def propose(scene_id: str, body: Propose, request: Request):
     _scene(scene_id)
-    refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    refused = _take(propose_limit, request)
     if refused:
         raise HTTPException(429, refused)
     if body.report_id:
@@ -169,7 +232,7 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
     _scene(scene_id)
     if body.report_id:
         _report(body.report_id)
-    refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    refused = _take(propose_limit, request)
     if refused:
         raise HTTPException(429, refused)
     events: queue.Queue = queue.Queue()
@@ -183,7 +246,7 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         events.put(None)
 
-    threading.Thread(target=work, daemon=True).start()
+    owner.spawn(work)
 
     def stream():
         while (event := events.get()) is not None:
@@ -348,7 +411,7 @@ def triage_patterns(report_id: str, scene_id: str, body: PatternTriage, request:
     pats = plans.patterns(ws, _scene(scene_id), _report(report_id), body.fixed)
     key = (report_id, scene_id, tuple(p["id"] for p in pats))
     if key not in _pattern_triage:
-        refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+        refused = _take(propose_limit, request)
         if refused:
             raise HTTPException(429, refused)
         _pattern_triage[key] = plans.triage_patterns(ws, pats)
@@ -403,7 +466,7 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
     with _triage_lock:
         job = _triage_jobs.get(key)
         if job is None or (rerun and job.done):
-            refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+            refused = _take(propose_limit, request)
             if refused:
                 raise HTTPException(429, refused)
             model, info = triage_model()
@@ -434,7 +497,7 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
         if not body.clash_ids:
             raise HTTPException(422, "Pick the clashes to fix.")
         n = len(plans.pairs_for(ws, scene_id, body.report_id, body.clash_ids)[0][: plans.MAX_ITEMS])
-    refused = propose_limit.take_many(who, max(n, 1))
+    refused = None if owner.no_caps() else propose_limit.take_many(who, max(n, 1))
     if refused:
         raise HTTPException(429, refused)
     events: queue.Queue = queue.Queue()
@@ -442,14 +505,14 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
     def work():
         try:
             plan = (plans.build_root_cause(ws, scene_id, body.report_id, body.hub, body.fixed, events.put,
-                                           charge=lambda k: propose_limit.take_many(who, k)) if body.hub
+                                           charge=lambda k: None if owner.no_caps() else propose_limit.take_many(who, k)) if body.hub
                     else plans.build_batch(ws, scene_id, body.report_id, body.clash_ids, events.put))
             events.put({"type": "plan", **json.loads(plans.to_json(plan))})
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         events.put(None)
 
-    threading.Thread(target=work, daemon=True).start()
+    owner.spawn(work)
 
     def stream():
         while (event := events.get()) is not None:
@@ -474,8 +537,8 @@ def _chat_for(request: Request) -> chat.Chat:
     if _chat is None or _chat.ws is not ws:  # tests swap the workspace
         _chat = chat.Chat(ws)
     who = client_id(request.headers, request.client.host if request.client else None)
-    _chat.propose_allowed = lambda: propose_limit.take(who)
-    _chat.propose_allowed_many = lambda n: propose_limit.take_many(who, n)
+    _chat.propose_allowed = lambda: None if owner.no_caps() else propose_limit.take(who)
+    _chat.propose_allowed_many = lambda n: None if owner.no_caps() else propose_limit.take_many(who, n)
     return _chat
 
 
@@ -485,7 +548,7 @@ def chat_turn(body: ChatTurn, request: Request):
     events (see chat.py): {"type": "session", "id"} first, then the agent's steps, then {"type": "done"}."""
     if not body.message.strip():
         raise HTTPException(422, "Say something.")
-    refused = chat_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    refused = _take(chat_limit, request)
     if refused:
         raise HTTPException(429, refused)
     c = _chat_for(request)
@@ -502,7 +565,7 @@ def chat_turn(body: ChatTurn, request: Request):
         events.put({"type": "done"})
         events.put(None)
 
-    threading.Thread(target=work, daemon=True).start()
+    owner.spawn(work)
 
     def stream():
         while (event := events.get()) is not None:
@@ -548,7 +611,7 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
     if len(verdicts) < len(report.clashes) // 2:
         raise HTTPException(409, "Triage the report first: the report sorts clashes by its verdicts.")
     scene = ws.scene(body.scene_id) if body.scene_id and body.scene_id in ws.scenes else None
-    refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    refused = _take(propose_limit, request)
     if refused:
         raise HTTPException(429, refused)
     events: queue.Queue = queue.Queue()
@@ -569,7 +632,7 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
             events.put({"type": "error", "message": f"Could not build the report: {type(e).__name__}: {e}"})
         events.put(None)
 
-    threading.Thread(target=work, daemon=True).start()
+    owner.spawn(work)
 
     def stream():
         while (event := events.get()) is not None:
@@ -601,7 +664,7 @@ async def transcribe_voice(request: Request, audio: UploadFile = File(...), repo
         raise HTTPException(422, "Send the recording as a WAV file.")
     if fmt[0] != 1 or fmt[1] != 2 or fmt[2] not in (16000, 24000):  # what Muse Voice Transcribe takes
         raise HTTPException(422, f"Send mono 16-bit WAV at 16 or 24 kHz (this is {fmt[0]} channel, {fmt[2]} Hz).")
-    refused = voice_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    refused = _take(voice_limit, request)
     if refused:
         raise HTTPException(429, refused)
     words = list(VOICE_WORDS)

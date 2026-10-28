@@ -71,8 +71,16 @@ export interface TriageState extends Partial<TriageModel> {
   error?: string | null;
 }
 
+/** The owner's settings (server: owner.py), sent with every call; the server ignores them for anyone but the owner. */
+export type Effort = "minimal" | "low" | "medium" | "high";
+export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean }
+let ownerSettings: OwnerSettings | null = null;
+export function setOwnerSettings(s: OwnerSettings | null) { ownerSettings = s; }
+const settingsHeader = (): Record<string, string> => (ownerSettings ? { "X-Sightline-Settings": JSON.stringify(ownerSettings) } : {});
+const jsonHeaders = () => ({ "Content-Type": "application/json", ...settingsHeader() });
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...init });
+  const r = await fetch(`/api${path}`, { headers: jsonHeaders(), ...init });
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
   return r.json() as Promise<T>;
 }
@@ -147,7 +155,7 @@ export type DocEvent =
 
 /** POST and read newline-delimited JSON events until the stream ends. */
 async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void) {
-  const r = await fetch(`/api${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const r = await fetch(`/api${path}`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
   if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
@@ -166,6 +174,9 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 }
 
 export const api = {
+  owner: () => call<{ available: boolean; owner: boolean }>("/owner"),
+  unlock: (token: string) => call<{ owner: boolean }>("/owner/unlock", { method: "POST", body: JSON.stringify({ token }) }),
+  lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
   teams: (reportId: string, sceneId: string | null) =>
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
   document: (reportId: string, body: { scene_id: string | null; scope: "combined" | "team" | "model"; teams: Record<string, Team>;
@@ -213,7 +224,7 @@ export const api = {
   proposeStream: async (id: string, element_a: string, element_b: string, from: { report_id: string; clash_id: string } | undefined,
                         onEvent: (e: AgentEvent) => void): Promise<Proposal> => {
     const r = await fetch(`/api/scenes/${id}/propose/stream`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ element_a, element_b, ...from }),
+      method: "POST", headers: jsonHeaders(), body: JSON.stringify({ element_a, element_b, ...from }),
     });
     if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
     const reader = r.body.getReader();
@@ -259,7 +270,7 @@ export const api = {
     const form = new FormData();
     form.append("audio", wav, "voice.wav");
     if (reportId) form.append("report_id", reportId);
-    const r = await fetch("/api/transcribe", { method: "POST", body: form });
+    const r = await fetch("/api/transcribe", { method: "POST", body: form, headers: settingsHeader() });
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Transcription failed (${r.status})`);
     return r.json() as Promise<{ transcript: string; duration_ms: number | null }>;
   },

@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import agent, edits, verify
+from . import agent, edits, owner, verify
 from .service import Workspace
 
 PACKS = Path(__file__).parent / "domain_packs"
@@ -187,7 +187,7 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
               "title": it.option["title"] if it.option else it.error})
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(one, items))
+        [f.result() for f in [owner.submit(pool, one, it) for it in items]]
 
 
 def _settle(ws: Workspace, scene_id: str, items: list[Item], emit) -> dict:

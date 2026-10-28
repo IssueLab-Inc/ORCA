@@ -34,7 +34,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import triage as triage_mod
+from . import owner, triage as triage_mod
 from .meta_client import ChatModel
 from .reports import Report, ReportClash
 
@@ -235,7 +235,7 @@ def explain(model: ChatModel, rows: list[Row], emit: Callable[[dict], None], wor
 
     if pages:
         with ThreadPoolExecutor(workers) as pool:
-            list(pool.map(one, pages))
+            [f.result() for f in [owner.submit(pool, one, r) for r in pages]]
 
 
 def summarise(model: ChatModel, rows: list[Row]) -> dict:

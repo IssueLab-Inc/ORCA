@@ -550,3 +550,12 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 /* A trim inside one model (App.tsx): optional tidy-up, with "not a clash" offered first */
 .cleanup-note { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--raised); border: 1px solid var(--line); font-size: 12.5px; }
 .cleanup-note p { margin: 0; line-height: 1.45; color: #3d4a58; }
+
+/* Owner settings (Owner.tsx): opens under the gear, right-aligned in the header */
+.owner-pop .pop-menu { left: auto; right: 0; }
+.owner-menu { display: flex; flex-direction: column; gap: 8px; padding: 6px; width: 260px; font-size: 12.5px; }
+.owner-menu b { display: inline-flex; align-items: center; gap: 6px; }
+.owner-menu label { display: flex; flex-direction: column; gap: 3px; }
+.owner-menu label.check { flex-direction: row; align-items: center; gap: 6px; }
+.owner-menu select, .owner-menu input[type="password"] { font: inherit; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; }
+.owner-menu .hint { margin: 0; }

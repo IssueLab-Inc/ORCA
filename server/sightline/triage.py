@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
+from . import owner
 from .meta_client import ChatModel
 from .reports import Report, ReportClash
 
@@ -175,7 +176,7 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
         return c.id, {"verdict": "unknown", "error": err, "source": "model"}
 
     with ThreadPoolExecutor(max(1, workers)) as pool:
-        for fut in as_completed(pool.submit(one, c) for c in todo):
+        for fut in as_completed(owner.submit(pool, one, c) for c in todo):
             cid, v = fut.result()
             with lock:
                 results[cid] = v
@@ -258,7 +259,7 @@ class Job:
                 self.done = True
                 self._cond.notify_all()
 
-        threading.Thread(target=work, daemon=True).start()
+        owner.spawn(work)  # with the starter's settings (the owner's triage effort)
         return self
 
     def follow(self):

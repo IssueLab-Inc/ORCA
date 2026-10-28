@@ -79,11 +79,18 @@ class MetaChatModel:
         self.model = model or os.environ.get("META_MODEL", "muse-spark-1.3-contributor")
         self.reasoning_effort = (reasoning_effort if reasoning_effort is not None
                                  else os.environ.get("META_REASONING_EFFORT", "low"))
+        self.role = "default"  # "triage" for the bulk triage model: the owner sets its effort separately
         self.client = httpx.Client(timeout=timeout_s)
         self.strict = True  # cleared when the host rejects json_schema; then plain JSON mode is used
         # Meta's Responses endpoint streams reasoning summaries (short notes on what the model is working out), which
         # the UI shows while the agent thinks. Cleared if the host does not offer it; chat completions are used then.
         self.streams_reasoning = "api.meta.ai" in self.base_url
+
+    @property
+    def effort(self) -> str | None:
+        """The owner's effort for this request (owner.py), else this model's."""
+        from . import owner
+        return owner.effort(self.role) or self.reasoning_effort
 
     def _post(self, payload: dict) -> dict:
         r = self.client.post(f"{self.base_url}/chat/completions", json=payload,
@@ -105,7 +112,7 @@ class MetaChatModel:
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}],
             "response_format": response_format,
             "temperature": 0.2,
-            **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
+            **({"reasoning_effort": self.effort} if self.effort else {}),
         }
         try:
             body = self._post(payload)
@@ -131,7 +138,7 @@ class MetaChatModel:
             "messages": [{"role": "system", "content": sys_text}, {"role": "user", "content": content}],
             "response_format": ({"type": "json_schema", "json_schema": {"name": "reply", "schema": schema, "strict": True}}
                                 if strict else {"type": "json_object"}),
-            **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
+            **({"reasoning_effort": self.effort} if self.effort else {}),
         }
         out = ""
         with self.client.stream("POST", f"{self.base_url}/chat/completions", json=payload,
@@ -165,7 +172,7 @@ class MetaChatModel:
                else {"type": "json_object"})
         payload = {"model": self.model, "instructions": system, "stream": True, "temperature": 0.2,
                    "input": [{"role": "user", "content": content}], "text": {"format": fmt},
-                   "reasoning": {"summary": "auto", **({"effort": self.reasoning_effort} if self.reasoning_effort else {})}}
+                   "reasoning": {"summary": "auto", **({"effort": self.effort} if self.effort else {})}}
         out = ""
         with self.client.stream("POST", f"{self.base_url}/responses", json=payload,
                                 headers={"Authorization": f"Bearer {self.api_key}"}) as r:
@@ -194,7 +201,7 @@ class MetaChatModel:
         """One assistant turn with tools: returns the message (content and/or tool_calls)."""
         body = self._post({
             "model": self.model, "messages": messages, "tools": tools, "temperature": 0.2,
-            **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
+            **({"reasoning_effort": self.effort} if self.effort else {}),
         })
         return body["choices"][0]["message"]
 
@@ -230,7 +237,9 @@ def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
         model = MetaChatModel(os.environ.get("TRIAGE_API_BASE_URL", "https://inference.baseten.co/v1"), key,
                               os.environ.get("TRIAGE_MODEL", "meta-models/muse-spark-open"), timeout_s,
                               reasoning_effort=os.environ.get("TRIAGE_REASONING_EFFORT", ""))
+        model.role = "triage"
         return model, {"model": model.model, "open_weights": True, "images": images}
     model = MetaChatModel(timeout_s=timeout_s)
+    model.role = "triage"
     return model, {"model": model.model, "open_weights": False, "images": True,
                    "note": "No open-weights host configured (TRIAGE_API_KEY); using Muse Spark."}

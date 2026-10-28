@@ -324,7 +324,17 @@ as a verified option: half the pad's bearing, which geometry cannot judge. `edit
 slender (`SLENDER = 3`: length at least 3x across, measured off its own mesh), and `_try_trim` marks a trim within one
 model `cleanup`; `_joint_text` tells Muse so. UI: "Model cleanup, not a coordination clash" with Mark as not a clash
 above such options, a "model cleanup" chip, "Accept this cleanup". Eval `evals/not_a_clash.py` (+ `not_a_clash.csv`):
-pad/ground beam, transom/mullion, beam/column: 3/3 by design, 0/3 touch what must stay, 3/3 cleanup only. 72 server tests.
+pad/ground beam, transom/mullion, beam/column: 3/3 by design, 0/3 touch what must stay, 3/3 cleanup only.
+
+Owner settings (Oct 28): `server/sightline/owner.py`. `SIGHTLINE_OWNER_TOKEN` (≥ 24 chars, in the `sightline-meta` Modal
+secret; never in git, chat or the browser's scripts). `POST /api/owner/unlock` checks it once (constant time; wrong
+tokens capped 5/hour per visitor, 50/day) and sets a signed cookie (HttpOnly, Secure, SameSite=Strict, Path=/api, 30
+days, keyed on the token: a new token logs everyone out); `/api/owner/lock` clears it. `_OwnerContext` (ASGI middleware)
+marks each request; only then is `X-Sightline-Settings` read (effort, triage_effort, no_caps) into context variables
+that `MetaChatModel.effort` uses (role "triage" for the triage model). `owner.spawn` / `owner.submit` carry them into
+stream workers and model-call pools. `_take` skips the demo caps for the owner. UI: `Owner.tsx`, a gear in the header
+for the owner, or on a page opened with `#owner`; chip "owner · effort …". When GitHub sign-in comes, `cookie_ok`
+becomes "signed in as an allowed login"; the rest stays. 79 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

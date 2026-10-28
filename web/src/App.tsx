@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
+import type { OwnerSettings } from "./api";
+import { OwnerSettingsMenu } from "./Owner";
 import { Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { api, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
@@ -95,6 +97,7 @@ export function App() {
   const [signoffs, setSignoffs] = useState<Record<string, Signoff[]>>({});
   const [docOpen, setDocOpen] = useState(false);
   const [touring, setTouring] = useState(false);
+  const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [docReady, setDocReady] = useState(false);
   const [chatAsk, setChatAsk] = useState<{ text: string; send: boolean; n: number } | undefined>(undefined);
@@ -836,6 +839,9 @@ export function App() {
         <span className="spacer" />
         {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={openDemo}><FolderOpen size={15} aria-hidden /> {startLabel}</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
+        {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
+          owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}</span>}
+        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
         {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
         {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip="Download the changed IFC files" data-tip-side="bottom">
