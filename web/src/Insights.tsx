@@ -2,7 +2,11 @@ import { ChevronDown, ChevronUp, CircleCheck, Flag, ListChecks, Network, Repeat2
 import { useState } from "react";
 import type { Pattern, PatternVerdict, RootCause } from "./api";
 
-const short = (c: string) => c.replace(/^Ifc/, "");
+/** "IfcMechanicalFastener" → "Mechanical fastener". */
+const human = (c: string) => {
+  const words = c.replace(/^Ifc/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
 const VERDICT: Record<PatternVerdict["verdict"], { label: string; cls: string }> = {
   by_design: { label: "by design", cls: "" }, modelling_error: { label: "model error", cls: "warn" }, real_problem: { label: "real problem", cls: "bad" },
 };
@@ -21,43 +25,51 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
   if (rootCauses && patterns && !roots.length && !pats.length) return null;
   const shownRoots = allRoots ? roots : roots.slice(0, 2);
   const shownPats = allPatterns ? pats : pats.slice(0, 4);
+  const nRoots = rootCauses ? `${roots.length} root cause${roots.length === 1 ? "" : "s"}` : "…";
+  const nPats = patterns ? `${pats.length} pattern${pats.length === 1 ? "" : "s"}` : "…";
   return (
     <details className="insights" open>
-      <summary><Sparkles size={14} aria-hidden /> Insights <span className="count">{rootCauses && patterns
-        ? `${roots.length} root cause${roots.length === 1 ? "" : "s"} · ${pats.length} pattern${pats.length === 1 ? "" : "s"}`
-        : "updating…"}</span></summary>
+      <summary>
+        <span className="insights-icon"><Sparkles size={14} aria-hidden /></span>
+        <span className="insights-title">Insights<small>What the clashes have in common · {nRoots} · {nPats}</small></span>
+        <ChevronDown size={15} className="insights-caret" aria-hidden />
+      </summary>
 
-      {roots.length > 0 && <>
-        <h3><Network size={14} aria-hidden /> Root causes <span className="count">one element in several clashes</span></h3>
+      {roots.length > 0 && <div className="insights-part">
+        <h3><Network size={14} aria-hidden /> Root causes</h3>
+        <p className="hint">One element behind several clashes: fix the cause once, not each clash.</p>
         {shownRoots.map((r) => (
           <div key={r.hub.global_id} className="insight">
             <div className="insight-text">
               <b title={`${r.hub.ifc_class} '${r.hub.name}': ${r.partners.map((p) => p.name).join(", ")}`}>{r.hub.name}</b>
-              <span className="hint">{r.partners.length} clashing · {r.hub.storey ?? r.hub.source}
-                {r.cross_discipline > 0 ? " · across disciplines" : " · within one model"}
-                {r.not_in_report > 0 && <> · <span className="warn">{r.not_in_report} not in the report</span></>}</span>
+              <span className="insight-meta">
+                <span className="chip small">{r.partners.length} clashing</span>
+                {(r.hub.storey ?? r.hub.source) && <span className="chip small">{r.hub.storey ?? r.hub.source}</span>}
+                <span className={`chip small ${r.cross_discipline > 0 ? "accent" : ""}`}>{r.cross_discipline > 0 ? "across disciplines" : "one model"}</span>
+                {r.not_in_report > 0 && <span className="chip small warn">{r.not_in_report} not in the report</span>}
+              </span>
             </div>
             <button className="btn small" disabled={busy} onClick={() => onFixRoot(r.hub.global_id)}
-              title="Find the cause and fix these clashes together"><Wand2 size={14} aria-hidden /> Fix</button>
+              data-tip="Find the cause and fix these clashes together" data-tip-side="left"><Wand2 size={14} aria-hidden /> Fix</button>
           </div>
         ))}
         {roots.length > 2 && <button className="more" onClick={() => setAllRoots(!allRoots)}>
           {allRoots ? <><ChevronUp size={13} aria-hidden /> Fewer</> : <><ChevronDown size={13} aria-hidden /> All {roots.length} root causes</>}</button>}
-      </>}
+      </div>}
 
-      {pats.length > 0 && <>
-        <div className="row">
-          <h3><Repeat2 size={14} aria-hidden /> Patterns <span className="count">the same clash many times</span></h3>
-          {!verdicts && <button className="btn small" data-tour="explain" disabled={explaining || busy} onClick={onExplain}
-            data-tip="Ask Sightline what each pattern is" data-tip-side="left">
-            {explaining ? <><i className="spinner" aria-hidden /> Reading…</> : <><Sparkles size={13} aria-hidden /> Explain</>}</button>}
-        </div>
+      {pats.length > 0 && <div className="insights-part">
+        <h3><Repeat2 size={14} aria-hidden /> Patterns</h3>
+        <p className="hint">The same pair of element types clashing again and again: usually one decision, not many problems.</p>
+        {!verdicts && <button className="btn small explain-all" data-tour="explain" disabled={explaining || busy} onClick={onExplain}>
+          {explaining ? <><i className="spinner" aria-hidden /> Muse Spark is reading the patterns…</>
+            : <><Sparkles size={13} aria-hidden /> Explain the {pats.length} patterns with Muse Spark</>}</button>}
         {shownPats.map((p) => {
           const v = verdicts?.[p.id];
           return (
             <div key={p.id} className="insight pattern" data-tour={v?.verdict === "by_design" ? "pattern-by-design" : undefined}>
+              <span className="pattern-n" aria-label={`${p.clashes} clashes`}>{p.clashes}×</span>
               <div className="insight-text">
-                <b>{p.clashes} × {short(p.classes[0])} × {short(p.classes[1])}</b>
+                <b title={`${p.classes[0]} with ${p.classes[1]}`}>{human(p.classes[0])} <span className="with">with</span> {human(p.classes[1])}</b>
                 <span className="hint">{p.levels.length} level{p.levels.length === 1 ? "" : "s"} · {p.min_mm === p.max_mm ? `${p.min_mm} mm every time` : `${p.min_mm} to ${p.max_mm} mm`}
                   {p.cross_discipline ? " · across disciplines" : ""}</span>
                 {v && <span className="verdict"><span className={`chip small ${VERDICT[v.verdict].cls}`}>{VERDICT[v.verdict].label}</span> {v.cause}</span>}
@@ -78,7 +90,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
         })}
         {pats.length > 4 && <button className="more" onClick={() => setAllPatterns(!allPatterns)}>
           {allPatterns ? <><ChevronUp size={13} aria-hidden /> Fewer</> : <><ChevronDown size={13} aria-hidden /> All {pats.length} patterns</>}</button>}
-      </>}
+      </div>}
     </details>
   );
 }

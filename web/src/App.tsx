@@ -12,7 +12,7 @@ import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
 import { ReportList, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
-import { Popover } from "./ui";
+import { Popover, Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
 import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
@@ -851,7 +851,7 @@ export function App() {
               insights={<><TriageCard run={triageRun} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: report.clashes.find((c) => c.id === id)?.name ?? id }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
-                open={report.clashes.filter((c) => !fixes[c.id] && !reviewed[c.id]).length} onRun={runTriage}
+                total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
                 busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={explainPatterns}
@@ -1029,6 +1029,7 @@ export function App() {
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
       </footer>
 
+      <Tooltips />
       {about && <About onClose={() => setAbout(false)} />}
       {touring && <Tour state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}

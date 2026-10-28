@@ -83,7 +83,7 @@ export const STEPS: Step[] = [
   },
   {
     act: "Triage", title: "Just the real ones",
-    body: (s) => <>Click the <b>real</b> chip to keep only the clashes that need a change{s.realCount ? `: ${s.realCount} of ${s.triageTotal}` : ""}.
+    body: (s) => <>Click <b>Real problem</b> to keep only the clashes that need a change{s.realCount ? `: ${s.realCount} of ${s.triageTotal}` : ""}.
       The rest stay in the report, sorted, for the record.</>,
     target: "[data-tour=triage-real]", done: (s) => s.filter === "real_clash",
     show: { label: "Filter for me", run: (a) => a.filterReal() },

@@ -309,6 +309,16 @@ Triage again): that left "Triage the report first" with no way out during the to
 Landing (Oct 28): hero = headline, lede, the two buttons side by side and a one-line load note, beside the before/after
 picture; "Once it's open" (left / middle / right) is its own three-card row.
 
+Triage and Insights UI (Oct 28): Triage leads the left panel. Before a run: "Step 1 · sort the report", one line on why,
+a full-width "Triage all n clashes". Running: count, one bar that fills in verdict colours (the unsorted rest striped),
+the live reading. Done: "n need a fix of N", the bar (a segment per verdict, click to filter), a row per verdict
+(name, what it means, count; click to filter; the real row is `data-tour=triage-real`), "Set aside n as noise" /
+"Flag n for their authors" (then a done chip), and a footer with time, rule count and model. Insights: header with
+counts in its subtitle, a purpose line per part, root causes with chips (clashing, level, across disciplines, not in the
+report), patterns as "11× Mechanical fastener with Plate" and one "Explain the n patterns with Muse Spark" button.
+Tooltips: `Tooltips` (ui.tsx) draws every `data-tip` in one fixed layer above the page, flips sides when there is no
+room and clamps to the window (was CSS ::after, cut off by panel and window edges).
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
