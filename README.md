@@ -1,9 +1,9 @@
 # ClashWise Sightline
 
-An agent that resolves spatial conflicts in 3D models, proven on buildings.
+An AI design coordinator for 3D models, proven on buildings.
 
-Sightline looks at a clash (images plus model data), understands what clashes and why it matters, and,
-when the IFC model is available, proposes one to three fixes by editing real model elements. Every fix
+Sightline checks the models every team makes against each other, finds where they clash, sorts what matters from what
+doesn't, and proposes one to three fixes by editing real model elements. Every fix
 is checked with geometry before you see it: the clash is gone, there is clearance, and nothing new clashes.
 You review the options in 3D and export the edited IFC.
 
@@ -32,25 +32,26 @@ heights. **Accept this fix** keeps it in the server's model; **Export edited IFC
 The browser previews moves instantly; the server makes the real edit and is the only source of
 clearance numbers. Elements are addressed by IFC GlobalId everywhere.
 
-**Detect clashes** finds the clashes itself, so no Navisworks report is needed (design: [docs/detection.md](docs/detection.md),
-code: `server/sightline/detect.py`):
+**Coordinate › Check the open models** finds the clashes (design: [docs/detection.md](docs/detection.md), code:
+`server/sightline/detect.py`). The demo opens Northbank and runs it at once:
 - **Tests:** every pair of open models and each model against itself, hard at 1 mm, plus duplicates.
 - **Not reported:** pairs meant to meet (joined by ports, one assembly, a door in its wall) and touches. They are
   counted and shown under "What was checked".
 - **Engine:** a sweep over the element boxes finds every pair that could clash; IfcOpenShell's triangle tree measures
   them, with an exact check for flush rectangular solids.
-- **Result:** opens as the clash report, so triage, insights, fixes, chat ("find the clashes") and the PDF work on it
-  as on a Navisworks report. Sightline takes each clash's A/B/C views in the browser for the fix agent.
+- **Result:** the clash list, which triage, insights, fixes, chat ("find the clashes") and the PDF all work on.
+  Sightline takes each clash's A/B/C views in the browser for the fix agent.
 - **Detect again:** after fixes, it says which clashes were resolved.
 
-On Northbank (1,961 elements): about 10 s, and every sampled Navisworks result that is a real overlap (117 of 117).
+On Northbank (1,961 elements): 633 clashes in 7-12 s, including all three of the answer key's girder clashes, and every
+sampled Navisworks result that is a real overlap (117 of 117).
 
 **Clashes have numbers and titles, not "Clash39".**
 - **Number:** every clash has a number, #39, unique across the whole report. For clashes Sightline finds, it is kept
   across runs.
 - **Title:** Muse writes one from the clash's facts ("Cold-water main clips the transfer girder at grid 3, level 02";
   `server/sightline/titles.py`). Until it lands, a plain name from the two elements shows.
-- **Navisworks label:** kept as a small reference.
+- **Navisworks label:** on an imported report, kept as a small reference.
 - **Using the number:** chat and voice understand "#39".
 
 For a clash that needs changes around it, choose **Explore wider fix** on a matched report clash or two manually
@@ -96,16 +97,19 @@ the geometry check runs (amber), then turns teal when it is clear or lights up w
 follows; between rounds it turns slowly round the clash. Drag, scroll or click in the view to take it back (the agent
 keeps working); **Let Sightline drive** hands it over again.
 
-### Navisworks clash reports
+### Works with Navisworks reports
 
-**Clash report** in the header opens a Navisworks XML clash report: a sample from `samples/reports/<name>/` (any
+Teams that already run Navisworks can bring its results instead: **Coordinate › Import a Navisworks clash report** opens
+an XML clash report: a sample from `samples/reports/<name>/` (any
 `*.xml` at the top of the folder, with the images it links to), or an upload of an export folder or XML files. Several
 XML files open as one report; a result exported twice is kept once. Each clash is matched to the open model by IFC
 GlobalId (else by a unique class and name), shown with its Navisworks images, and measured again by Sightline's own
 check (Navisworks and IfcOpenShell report depth differently: #042 is −150 mm in Navisworks, −300 mm here).
 **Propose fixes** on a report clash sends its Navisworks images and distance to the model.
 
-**Triage all** gives every clash in the report a verdict (real, by design, not physical, model error) before anyone
+### Triage
+
+**Triage all** gives every clash a verdict (real, by design, not physical, model error) before anyone
 opens one ([`server/sightline/triage.py`](server/sightline/triage.py)). Sure cases are settled by rule with no model call
 (a space, port or opening on either side; a touch within 1 mm); the rest go to the triage model, eight at a time, with
 their images. The list shows a tag per row and filters by verdict, the clash panel shows the reading, and **Set aside**
@@ -123,7 +127,9 @@ Meta's API otherwise; the card says which one answered:
 | `SIGHTLINE_TRIAGE_WORKERS` | `8` |
 
 A host without strict structured output gets JSON mode with the schema in the prompt (switched on the first 400).
-Northbank's 317 results: 184 by rule, 133 by the model, 119 s on Muse Spark with `reasoning_effort=low`, 189 s on Muse
+Alike clashes (the same kinds of element, named alike, about as deep; three or more) are read once, through the deepest:
+Northbank's 633 detected clashes took 98 model calls and 214 s on Muse Spark Open (13 real, including the answer key's
+three, all high and for MEP). Navisworks' 317 results: 184 by rule, 133 by the model, 119 s on Muse Spark with `reasoning_effort=low`, 189 s on Muse
 Spark Open on Baseten (live deploy, Oct 27: median call 7.9 s but a longer tail, up to 33 s). Scored on the whole package
 the two models agree on 299 of 317 verdicts ([evals/README.md](evals/README.md#triage-of-navisworks-results)).
 

@@ -87,7 +87,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} }`);
   const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary"];
   const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
-    export const TOUR={},TOUR_QUESTION=""; export const mm=(v)=>String(v); export const noClash=()=>null;
+    export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION=""; export const mm=(v)=>String(v); export const noClash=()=>null;
     export const clashLabel=(c)=>"#"+c.number;
     export class Viewer {constructor(){return globalThis.${key}.viewer;}} export const serverPointToViewer=(v)=>v;
     export class Pilot { start(){} event(){} cancel(){globalThis.${key}.viewer.preview([]);} finish(fn){fn();} takeOver(){} }`);
@@ -111,13 +111,13 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     button(text) { return find(tree, (n) => n.type === "button" && hasText(n, text)); },
     component(name) { return find(tree, (n) => n.type?.name === name); },
     input(id) { return find(tree, (n) => n.type === "input" && n.props.id === id); },
-    reportMenu() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Clash report"); return p.props.children(() => {}); },
+    reportMenu() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Coordinate"); return p.props.children(() => {}); },
     fileInput(kind) { return find(tree, (n) => n.type === "input" && n.props.type === "file"
       && (kind === "folder" ? "webkitdirectory" in n.props : !!n.props.accept)); },
     chat(event) { find(tree, (n) => n.type?.name === "ChatPanel").props.onEvent(event); render(); },
     open() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Models");
       find(p.props.children(() => {}), (n) => n.props?.id === "open").props.onClick(); render(); },
-    loadReport() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Clash report");
+    loadReport() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Coordinate");
       find(p.props.children(() => {}), (n) => n.type === "button" && hasText(n, "sample")).props.onClick(); render(); },
     runTimers() { const entries = [...timers.values()]; timers.clear(); for (const fn of entries) fn(); render(); },
     unmount() { for (const cell of cells) cell?.cleanup?.(); delete globalThis[key]; },

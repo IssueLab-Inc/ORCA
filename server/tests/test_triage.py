@@ -167,3 +167,39 @@ def test_streamed_completion_reads_reasoning_then_json():
     heard = []
     assert model.complete_json_streamed("s", "t", None, triage.SCHEMA, heard.append) == {"verdict": "by_design"}
     assert heard == ["Think", "ing."] and sent == [True]
+
+
+def test_triage_reads_alike_clashes_once(tmp_path):
+    """48 bolts in 48 footings are one question: the deepest is read, the verdict applies to all (triage.alike_groups)."""
+    from sightline import triage
+    from sightline.reports import Report, ReportClash, ReportElement
+
+    def clash(n, a, b, mm, test="Structure (within)"):
+        e = lambda name, cls: ReportElement(f"g{name}", cls, name, "Level 01", "S.ifc")
+        return ReportClash(f"s{n}", f"{a} × {b}", f"s{n}", test, "hard", 0.001, "new", -mm / 1000, None, None,
+                           e(a, "IfcMechanicalFastener"), e(b, "IfcFooting"), number=n)
+
+    bolts = [clash(i, "Holding-down bolt M24", f"Pad footing 1800x1800x600 - {g}", 340 + i) for i, g in
+             enumerate(["A1", "A2", "B1", "B2", "C3"], 1)]
+    lone = clash(6, "Holding-down bolt M24", "Pad footing 1800x1800x600 - D4", 30)   # much shallower: its own question
+    duct = clash(7, "Supply air main L02 600x300", "Transfer plate girder 1000 deep - grid 3", 300, "MEP vs Structure")
+    groups = triage.alike_groups(bolts + [lone, duct])
+    assert sorted(len(g) for g in groups) == [1, 1, 5]
+    assert next(g for g in groups if len(g) == 5)[0].number == 5          # the deepest stands for the group
+
+    asked = []
+
+    class Model:
+        def complete_json(self, system, text, images=None, schema=None):
+            asked.append(text)
+            return {"understanding": "Bolts cast into their footing.", "verdict": "by_design", "severity": "none",
+                    "responsible": "none", "action": "exclude_with_rule", "fix_hint": "", "confidence": 0.9}
+
+    report = Report("r", "t", tmp_path, [], bolts + [lone, duct])
+    out = triage.triage_report(report, Model(), workers=1)
+    assert len(asked) == 3 and sum("stands for 5 alike clashes" in t for t in asked) == 1
+    assert all(out[c.id]["verdict"] == "by_design" for c in bolts)
+    assert out["s1"]["alike_of"] == "s5" and out["s1"]["alike"] == 5 and "alike_of" not in out["s5"]
+    assert "alike" not in out["s6"] and "alike" not in out["s7"]
+    assert len(triage.triage_report(Report("r2", "t", tmp_path, [], bolts), Model(), workers=1, alike=False)) == 5
+    assert len(asked) == 8

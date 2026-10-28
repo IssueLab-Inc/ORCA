@@ -2,11 +2,11 @@ import { Box, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSe
 import { useEffect, type ReactNode } from "react";
 
 /**
- * What Sightline is and does, for people who have never heard of BIM or clash detection: the start page in the
+ * What Sightline is and does, for people who have never heard of BIM or design coordination: the start page in the
  * empty viewer (with the demo button) and the "How it works" dialog from the header.
  */
 export function About({ start, onClose }: {
-  // onGolden: one click opens the demo, picks the duct-through-girder clash and proposes a fix.
+  // onGolden: one click opens the demo models, checks them, picks the duct-through-girder clash and proposes a fix.
   start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void };
   onClose?: () => void;
 }) {
@@ -24,10 +24,11 @@ export function About({ start, onClose }: {
       <header className="about-hero">
         <div>
           <p className="eyebrow">ClashWise Sightline</p>
-          <h1>An AI agent that fixes clashes in 3D building models</h1>
+          <h1>An AI design coordinator for 3D models</h1>
           <p className="lede">
-            Before a building goes up, every part of it is designed in 3D. Sightline finds the places where those parts
-            run into each other, works out a fix, <b>proves the fix works</b>, and edits the model for you.
+            Before anything is built, every part of it is designed in 3D, by several teams at once. Sightline checks
+            their models against each other, finds where they conflict, works out a fix, <b>proves the fix works</b>,
+            and edits the model for you.
           </p>
           {start && <>
             <div className="about-cta">
@@ -48,7 +49,7 @@ export function About({ start, onClose }: {
         <section className="about-layout" aria-label="Once the demo is open">
           <h2 className="about-h">Once it's open</h2>
           <ul className="next-steps">
-            <li><ListChecks size={18} aria-hidden /><span><b>On the left</b>The clash list, grouped by test, with a picture of each clash.</span></li>
+            <li><ListChecks size={18} aria-hidden /><span><b>On the left</b>What Sightline found: every clash numbered and named, grouped by which models it checked.</span></li>
             <li><Box size={18} aria-hidden /><span><b>In the middle</b>The building in 3D, with its street and riverside.</span></li>
             <li><Sparkles size={18} aria-hidden /><span><b>On the right</b>Pick a clash, press <i>Propose fixes</i>, and watch Sightline work.</span></li>
           </ul>
@@ -56,18 +57,19 @@ export function About({ start, onClose }: {
       )}
 
       <section className="about-stats" aria-label="Sightline on the demo, measured">
-        <Stat value="15–25 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
+        <Stat value="~40 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
         <Stat value="3 of 3" label="designer fixes matched" note="On the demo's three planted clashes, the first idea passes at the designer's own heights." />
-        <Stat value="217" label="clashes sorted in 3–4 min" note="The whole demo report triaged; 99 settled by rule, the rest by an open-weights model." />
-        <Stat value="Every" label="fix checked before you see it" note="Clash gone, 25 mm to spare, nothing new hit." />
+        <Stat value="7 s" label="to check 1,961 elements" note="Every pair of the demo's four models, and each against itself: 633 clashes." />
+        <Stat value="633" label="clashes sorted in 3½ min" note="Read by an open-weights model; alike clashes once, so 98 calls." />
       </section>
 
       <section>
-        <h2 className="about-h">What is a clash?</h2>
+        <h2 className="about-h">What is design coordination?</h2>
         <p>
-          A building is designed by several teams at once, and each one draws its own 3D model. When the models are put
-          together, things overlap: an air duct running straight through a steel beam, a pipe through a wall with no
-          hole in it. Each overlap is a <b>clash</b>.
+          A building is designed by several teams at once, and each one draws its own 3D model. <b>Design
+          coordination</b> is making those models agree before anything is built. Put them together and things overlap:
+          an air duct running straight through a steel beam, a pipe through a wall with no hole in it. Each overlap is a
+          <b> clash</b>.
         </p>
         <div className="disciplines">
           <Discipline colour="#6b7f99" name="Structure" what="The frame that holds it up: columns, beams, floors, foundations." />
@@ -75,18 +77,20 @@ export function About({ start, onClose }: {
           <Discipline colour="#3f8f6b" name="Architecture" what="What people see: walls, ceilings, doors, glazing, stairs." />
         </div>
         <p>
-          Clash detection software finds them by the hundred. Most are harmless (parts that only touch, or meet on
-          purpose, like a bolt in a plate). A few are real, and each real one costs a meeting and a redesign. Missed, it
-          costs rework on site, which is where clashes get expensive.
+          A check finds them by the hundred. Most are harmless: parts that meet on purpose, like a bolt in its plate.
+          A few are real, and each real one costs a meeting and a redesign. Missed, it costs rework on site, which is
+          where clashes get expensive. The same goes for any design made in 3D by more than one team: a machine cell, a
+          plant room, a ship.
         </p>
       </section>
 
       <section>
         <h2 className="about-h">What Sightline does</h2>
         <ol className="about-steps">
-          <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Sorts the whole report">
-            Every clash gets a verdict: a real problem, by design, not a physical object, or a modelling mistake. Sure
-            cases are settled by rule; the rest go to <b>Muse Spark Open</b>, an open-weights model, many at a time.
+          <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Checks the models and sorts what it finds">
+            Sightline checks every pair of models and each model against itself, and numbers each clash. <b>Muse Spark
+            Open</b>, an open-weights model, names every one and gives it a verdict: a real problem, by design, or a
+            modelling mistake. Alike clashes (forty bolts in forty plates) are read once.
           </Step>
           <Step n={2} icon={<Eye size={18} aria-hidden />} title="Understands a clash">
             <b>Muse Spark</b> looks at three pictures of the clash and reads the model's own data: what each element is,
@@ -122,8 +126,9 @@ export function About({ start, onClose }: {
           <dl className="glossary">
             <dt>BIM</dt><dd>Building Information Modelling: a 3D model where every object knows what it is.</dd>
             <dt>IFC</dt><dd>The open file format for those models, readable by any tool.</dd>
-            <dt>Navisworks</dt><dd>Widely used software that finds clashes and exports them as a report.</dd>
-            <dt>Clash test</dt><dd>One pair of things checked against each other, like ducts against beams.</dd>
+            <dt>Design coordination</dt><dd>Making several teams' models agree before anything is built.</dd>
+            <dt>Clash</dt><dd>One place where two parts of the models conflict. Each has a number, like #3.</dd>
+            <dt>Check</dt><dd>One pair of things checked against each other: two models, or one model against itself.</dd>
             <dt>Clearance</dt><dd>Space left between two things once a clash is fixed. Sightline asks for at least 25 mm.</dd>
           </dl>
         </div>
@@ -133,27 +138,28 @@ export function About({ start, onClose }: {
         <h2 className="about-h">Try it in a minute</h2>
         <ol>
           <li>{start ? <>Press <b>{start.label}</b> above.</> : <>Open the Northbank demo from the start page.</>}</li>
-          <li>In the list on the left, open <b>IfcDuctSegment (MEP) vs IfcProject (Structure)</b> and pick <b>#53</b>:
-            a supply air duct running through the transfer girder, the big beam on Level 02.</li>
+          <li>Sightline checks the models. In the list on the left, under <b>MEP vs Structure</b>, pick the supply air
+            main running through the transfer girder, the big beam on Level 02.</li>
           <li>Press <b>Propose fixes</b> and watch Sightline try its ideas in the 3D view.</li>
         </ol>
         <p className="hint"><MessageSquare size={13} aria-hidden /> Or ask it in <b>Chat</b>, typed or spoken: “Which clashes are real problems?”
-          · <ScanSearch size={13} aria-hidden /> <b>Triage all</b> sorts all 217 clashes in three to four minutes.</p>
+          · <ScanSearch size={13} aria-hidden /> <b>Triage all</b> sorts every clash the check found.</p>
       </section>
 
       <section className="built-with" aria-label="Built with">
         <span className="hint">Built with</span>
         <span className="tech"><b>Muse Spark</b> understands clashes and proposes fixes</span>
-        <span className="tech"><b>Muse Spark Open</b> sorts whole reports</span>
+        <span className="tech"><b>Muse Spark Open</b> names and sorts every clash</span>
         <span className="tech"><b>Muse Voice Transcribe</b> lets you talk to it</span>
-        <span className="tech"><b>IfcOpenShell</b> edits and checks the geometry</span>
+        <span className="tech"><b>IfcOpenShell</b> finds the clashes, edits and checks the geometry</span>
         <span className="tech"><b>three.js</b> draws the 3D view</span>
         <span className="tech"><b>IFC</b> the open model format, in and out</span>
       </section>
 
       <p className="about-foot hint">
         Northbank is a fictional three-storey office with its street and riverside, modelled by IssueLab for demos: no
-        real project data. Its models and clash report are built with three planted clashes that have a known answer.
+        real project data. Its models are built with three planted clashes that have a known answer. Sightline also
+        imports Navisworks clash reports.
         Fixes are limited to 20 per visitor an hour.
       </p>
     </article>

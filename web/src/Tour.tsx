@@ -7,12 +7,13 @@
 import { ArrowLeft, ArrowRight, Hand, PlayCircle, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-// Clash ids in the trimmed Northbank demo report.
+// The tour's clashes, by their two elements (GlobalIds): the same whether Sightline's check found them or a report
+// was imported, whatever number they get.
 export const TOUR = {
-  duct: "c0053",    // #53: supply air main through the Level 02 transfer girder (#042 in the marketing story)
-  joint: "c0051",   // #51: curtain-wall transom 30 mm into a mullion
+  duct: ["2AbvqKF25LGeR0M34N_jld", "1eVHoPtl1IhAbbhivqVqb0"],   // supply air main through the Level 02 transfer girder (#042)
+  joint: ["3FZ5_g0pXGx9qRfB9Lw5Mw", "2AgFm_5w1SU9p7tLtV6sDp"],  // curtain-wall transom 30 mm into a mullion
   girder: "1eVHoPtl1IhAbbhivqVqb0",
-};
+} as const;
 export const TOUR_QUESTION = "Why are there so many clashes on Level 02? Fix the root cause.";
 
 /** What the tour can see of the app. */
@@ -25,11 +26,13 @@ export interface TourState {
   compare: string; fixed: string[];
   planRunning: boolean; planFor: number; planReady: boolean; planError: string | null;
   patternsRead: boolean; reviewedCount: number; signoffs: number; docOpen: boolean; docReady: boolean;
+  /** The tour's clashes in the open report: their ids and numbers (null until the check has found them). */
+  duct: { id: string; number: number } | null; joint: { id: string; number: number } | null;
 }
 
 /** What "Show me" can do for the visitor beyond clicking the control the step points at. */
 export interface TourActions {
-  filterReal: () => void; clearFilter: () => void; selectClash: (id: string) => void; compare: (m: "before" | "after" | "both") => void;
+  filterReal: () => void; clearFilter: () => void; selectClash: (which: "duct" | "joint") => void; compare: (m: "before" | "after" | "both") => void;
   replay: (what: "duct" | "joint" | "plan") => void; ask: (send: boolean) => void; signoff: () => void;
   overview: () => void; closeReport: () => void;
 }
@@ -38,7 +41,7 @@ interface Step {
   act: string;
   title: string;
   body: (s: TourState) => React.ReactNode;
-  target?: string;                     // CSS selector of the control to point at
+  target?: string | ((s: TourState) => string);  // CSS selector of the control to point at
   done?: (s: TourState) => boolean;    // the visitor has done what the step asks: move on
   show?: { label: string; run?: (a: TourActions, s: TourState) => void; hidden?: (s: TourState) => boolean };  // no run: click the target
   enter?: (a: TourActions, s: TourState) => void;  // set the page up for this step (a filter that would hide the target)
@@ -46,35 +49,38 @@ interface Step {
   fallback?: { what: "duct" | "joint" | "plan"; when: (s: TourState) => boolean };  // offer a recorded run
 }
 
-const row = (id: string) => `[data-clash="${id}"] .clash-main`;
+const row = (which: "duct" | "joint") => (s: TourState) => `[data-clash="${s[which]?.id ?? "none"}"] .clash-main`;
+const no = (c: TourState["duct"]) => (c ? <b>#{c.number}</b> : null);
 const ran = (s: TourState) => s.proposing || s.proposalDone;
 const slowProposal = (s: TourState) => !s.proposalDone && !s.replaying && (!!s.error || s.proposingFor > 45 || !s.proposing);
 
 export const STEPS: Step[] = [
   // 1. The problem
   {
-    act: "The problem", title: "A building, three teams, one clash report",
-    body: () => <>Structure, MEP and Architecture each model the same building. Put their models together and a clash
-      detection run (here Navisworks) lists every place they collide. Open the demo: an office building called Northbank,
-      and its clash report.</>,
+    act: "Design coordination", title: "A building, four teams, one set of models",
+    body: () => <>Structure, MEP, Architecture and Site each model the same building. Coordination means making their
+      models agree before anything is built. Open the demo: an office building called Northbank. Sightline checks every
+      pair of models, and each model against itself.</>,
     target: "[data-tour=demo]", done: (s) => s.reportOpen && s.modelsOpen && !s.busy,
     show: { label: "Open it for me" },
   },
   {
-    act: "The problem", title: "217 clashes. Most are noise",
-    body: () => <>Every row is a clash Navisworks found, grouped by test. A coordinator would open them one by one: a bolt
-      touching its plate, a pipe meeting its own valve, a duct through a beam. Only a few need anyone to change anything.</>,
-    target: ".pane.left .report-head",
+    act: "Design coordination", title: "Hundreds of clashes. Most are detail",
+    body: (s) => <>Sightline found {s.triageTotal || "hundreds of"} clashes, each with a number and a name Muse writes from
+      its facts. What was checked, and what was left out on purpose (pieces joined by ports, a door in its wall), is under
+      <b> What was checked</b>. A coordinator would open them one by one: bolts in their plates, beams into columns, a
+      duct through a girder. Only a few need anyone to change anything.</>,
+    target: "[data-tour=detected]",
   },
   // 2. Triage
   {
     act: "Triage", title: "Sort them all first",
     body: (s) => s.triageDone
-      ? <>Done: {s.triageTotal} clashes sorted. Sure cases (spaces, ports, touches) are settled by rule; the rest were read
-        by <b>Muse Spark Open</b>, an open-weights model, many at a time.</>
+      ? <>Done: {s.triageTotal} clashes sorted by <b>Muse Spark Open</b>, an open-weights model, many at a time; alike
+        clashes were read once.</>
       : s.triageStarted
-        ? <>Triage is running: {s.triageCount} of {s.triageTotal}. Sure cases are settled by rule; the rest go to
-          <b> Muse Spark Open</b>, eight at a time. About three minutes: carry on, it keeps going.</>
+        ? <>Triage is running: {s.triageCount} of {s.triageTotal}. <b>Muse Spark Open</b> reads eight at a time, and
+          alike clashes (forty bolts in forty plates) only once. Carry on: it keeps going.</>
         : <>Click <b>Triage all</b>. Every clash gets a verdict: a real problem, by design, not physical, or a modelling
           error for the model's author.</>,
     target: "[data-tour=triage]", done: (s) => s.triageDone,
@@ -91,15 +97,15 @@ export const STEPS: Step[] = [
   // 3. One fix, live
   {
     act: "One fix, live", title: "A duct through a transfer girder",
-    body: () => <>Open <b>#53</b>: the Level 02 supply air main runs straight through a 1 m deep steel transfer girder,
-      150 mm into it. A classic MEP against structure clash.</>,
-    target: row(TOUR.duct), reveal: true, done: (s) => s.clashId === TOUR.duct,
-    show: { label: "Open it for me", run: (a) => a.selectClash(TOUR.duct) },
+    body: (s) => <>Open {no(s.duct) ?? "the supply air main"} under <b>MEP vs Structure</b>: the Level 02 supply air main runs
+      straight through a 1 m deep steel transfer girder. A classic services against structure clash.</>,
+    target: row("duct"), reveal: true, done: (s) => !!s.duct && s.clashId === s.duct.id,
+    show: { label: "Open it for me", run: (a) => a.selectClash("duct") },
   },
   {
     act: "One fix, live", title: "What Sightline knows",
-    body: () => <>The Navisworks pictures (red is A, green is B), the two elements found in the real IFC models, and
-      Sightline's own measure of the overlap. The viewer has gone to where they meet.</>,
+    body: () => <>Sightline's three views of the clash (red is A, green is B), taken as you opened it, the two elements in
+      the IFC models, and how far one must move to clear the other. The viewer has gone to where they meet.</>,
     target: ".clash-panel",
   },
   {
@@ -128,19 +134,19 @@ export const STEPS: Step[] = [
   },
   {
     act: "One fix, live", title: "Hold on: it isn't only this duct",
-    body: () => <>The same girder is also hit by a cable tray and a cold water main, and the second isn't even in the
-      clash report. Fixed one at a time, the three fixes could run into each other. Leave this one for now: we'll come
-      back to the girder and fix all three together.</>,
+    body: () => <>The same girder is also hit by a cable tray and a cold water main: the next two in the list. (Navisworks
+      never reported the cold water main; Sightline's check did.) Fixed one at a time, the three fixes could run into each
+      other. Leave this one for now: we'll come back to the girder and fix all three together.</>,
     target: ".pane.right",
   },
   // 4. A different kind of fix
   {
     act: "A joint, not a move", title: "A transom 30 mm into a mullion",
-    body: () => <>Not every clash is fixed by moving something. Open this <b>#51</b>: in the curtain wall, a horizontal
+    body: (s) => <>Not every clash is fixed by moving something. Open this {no(s.joint) ?? "one"}: in the curtain wall, a horizontal
       transom runs 30 mm into the vertical mullion it should stop against. Triage reads joints like this as by design
       (frames are often modelled overlapping), but a model going to fabrication needs a clean joint.</>,
-    target: row(TOUR.joint), reveal: true, enter: (a) => a.clearFilter(), done: (s) => s.clashId === TOUR.joint,
-    show: { label: "Open it for me", run: (a) => a.selectClash(TOUR.joint) },
+    target: row("joint"), reveal: true, enter: (a) => a.clearFilter(), done: (s) => !!s.joint && s.clashId === s.joint.id,
+    show: { label: "Open it for me", run: (a) => a.selectClash("joint") },
   },
   {
     act: "A joint, not a move", title: "Ask again",
@@ -161,15 +167,15 @@ export const STEPS: Step[] = [
   },
   {
     act: "A joint, not a move", title: "Accept it",
-    body: () => <>Click <b>Accept this cleanup</b>. The server edits the IFC model, the viewer reloads it, and every
-      report entry for this pair is marked fixed.</>,
-    target: "[data-tour=accept]", reveal: true, done: (s) => s.fixed.includes(TOUR.joint), show: { label: "Accept for me" },
+    body: () => <>Click <b>Accept this cleanup</b>. The server edits the IFC model, the viewer reloads it, and the clash
+      is marked fixed.</>,
+    target: "[data-tour=accept]", reveal: true, done: (s) => !!s.joint && s.fixed.includes(s.joint.id), show: { label: "Accept for me" },
   },
   // 5. Root cause
   {
     act: "The root cause", title: "Ask Sightline, like a colleague",
-    body: () => <>Open <b>Chat</b>. It can read the whole report and the models, measure, propose and plan, and it drives the
-      page. The mic button takes voice too.</>,
+    body: () => <>Open <b>Chat</b>. It can read every clash and the models, check them again, measure, propose and plan,
+      and it drives the page. The mic button takes voice too.</>,
     target: "[data-tour=tab-chat]", done: (s) => s.tab === "chat", show: { label: "Open it for me" },
   },
   {
@@ -193,7 +199,7 @@ export const STEPS: Step[] = [
     act: "The root cause", title: "Accept the plan",
     body: () => <>Open the <b>Plan</b> tab and accept it: three services rerouted, one change to the model.</>,
     target: "[data-tour=accept-plan]", enter: () => (document.querySelector("[data-tour=tab-plan]") as HTMLElement | null)?.click(),
-    done: (s) => s.fixed.includes(TOUR.duct), show: { label: "Accept for me" },
+    done: (s) => !!s.duct && s.fixed.includes(s.duct.id), show: { label: "Accept for me" },
   },
   // 6. Judgement
   {
@@ -205,7 +211,7 @@ export const STEPS: Step[] = [
   {
     act: "Not everything needs a fix", title: "By design",
     body: () => <>Bolts in their plates, columns through slabs: that's how they're built. Mark the pattern <b>by design</b>
-      (the tick); it leaves the open list, and Sightline suggests the clash rule that stops Navisworks reporting it.</>,
+      (the tick); it leaves the open list, and Sightline suggests the rule that stops it coming back.</>,
     target: "[data-tour=pattern-by-design]", done: (s) => s.reviewedCount > 0,
     show: { label: "Mark it for me", run: () => (document.querySelector("[data-tour=mark-by-design]") as HTMLElement | null)?.click() },
   },
@@ -214,7 +220,7 @@ export const STEPS: Step[] = [
     act: "People decide", title: "Each team reviews",
     body: () => <>Back to the duct. Every team with an element in a clash reviews it: here MEP and Structure. Add a review:
       your name and a decision. No sign-in yet; the name goes in the report.</>,
-    target: "[data-tour=review]", enter: (a) => a.selectClash(TOUR.duct), done: (s) => s.signoffs > 0,
+    target: "[data-tour=review]", enter: (a) => a.selectClash("duct"), done: (s) => s.signoffs > 0,
     show: { label: "Review for me", run: (a) => a.signoff() },
   },
   {
@@ -242,8 +248,9 @@ export const STEPS: Step[] = [
     act: "Sightline", title: "Clashes fixed, proved, signed off", enter: (a) => { a.closeReport(); a.overview(); },
     body: () => <>
       <span className="tour-stats">
-        <span><b>~3½ min</b> to triage 217 clashes</span>
-        <span><b>15–25 s</b> to a verified fix</span>
+        <span><b>7 s</b> to check 1,961 elements</span>
+        <span><b>3½ min</b> to triage 633 clashes</span>
+        <span><b>~40 s</b> to a verified fix</span>
         <span><b>3 of 3</b> designer fixes matched</span>
       </span>
       Built during the hackathon with Muse Spark (reasoning, tools, images), Muse Spark Open on Baseten (bulk triage), Muse
@@ -274,7 +281,8 @@ export function Tour({ state, actions, onClose }: { state: TourState; actions: T
     let shown: Element | null = null;
     let settle = Date.now() + 1500;
     const find = () => {
-      const el = step.target ? document.querySelector(step.target) : null;
+      const sel = typeof step.target === "function" ? step.target(stateRef.current) : step.target;
+      const el = sel ? document.querySelector(sel) : null;
       if (el && el !== shown) {
         const group = step.reveal ? el.closest("details") : null;
         if (group && !group.open) group.open = true;
@@ -309,7 +317,7 @@ export function Tour({ state, actions, onClose }: { state: TourState; actions: T
   const offer = step.fallback && !done && step.fallback.when(state);
   const showMe = () => {
     if (step.show?.run) step.show.run(actions, state);
-    else if (step.target) (document.querySelector(step.target) as HTMLElement | null)?.click();
+    else if (step.target) (document.querySelector(typeof step.target === "function" ? step.target(state) : step.target) as HTMLElement | null)?.click();
   };
 
   return (

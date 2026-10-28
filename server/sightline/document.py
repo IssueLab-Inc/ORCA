@@ -373,7 +373,7 @@ CSS = """
 @page { size: A4; margin: 18mm 16mm 18mm 16mm; font-family: "DejaVu Sans", sans-serif;
   @top-left { content: string(doc-title); font-size: 8pt; color: #5d6a7a; }
   @top-right { content: string(draft); font-size: 8pt; color: #b8352a; font-weight: bold; }
-  @bottom-left { content: "ClashWise Sightline · AI-assisted coordination report"; font-size: 8pt; color: #5d6a7a; }
+  @bottom-left { content: "ClashWise Sightline · AI-assisted design coordination report"; font-size: 8pt; color: #5d6a7a; }
   @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #5d6a7a; } }
 @page cover { @top-left { content: none; } @top-right { content: none; } }
 body { font-family: "IBM Plex Sans", "DejaVu Sans", sans-serif; font-size: 9.5pt; color: #16202b; line-height: 1.45; }
@@ -467,7 +467,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
              f"<div class='stamp'>DRAFT · AI-assisted · {reviewed} of {len(pages)} reviewed</div>")
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{_e(title)}</title><style>{CSS}</style></head><body>
 <section class='cover'>
-  <div class='eyebrow'>ClashWise Sightline · coordination report</div>
+  <div class='eyebrow'>ClashWise Sightline · design coordination</div>
   <h1>{_e(title)}</h1>
   <div style='font-size:12pt;color:#5d6a7a'>{_e(subtitle)}</div>
   <span class='draft-mark'>{'' if final else 'DRAFT · requires review'}</span>
@@ -610,7 +610,7 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
     summary = summarise(model, rows)
     stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     models = sorted({r.model_a for r in rows} | {r.model_b for r in rows})
-    base_ctx = {"Clash report": report.title, "Models": ", ".join(f"{m} ({model_teams.get(m, '?')})" for m in models),
+    base_ctx = {"Clashes from": "Sightline's check of the models" if report.origin == "sightline" else f"Navisworks report {report.title}", "Models": ", ".join(f"{m} ({model_teams.get(m, '?')})" for m in models),
                 "Generated": stamp, "Scope": {"combined": "All clashes", "team": "Per team", "model": "Per model"}[scope]}
 
     if scope == "team":
@@ -625,7 +625,7 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
     emit({"type": "progress", "step": "rendering", "done": 0, "total": len(groups)})
     files: list[tuple[str, bytes]] = []
     for i, (key, items) in enumerate(groups.items()):
-        title = "Clash coordination report" + (f": {key}" if key else "")
+        title = "Design coordination report" + (f": {key}" if key else "")
         sub = f"{report.title} · {len(items)} results" + (f" involving {label.lower()} {key}" if key else "")
         html_text = render_html(title, sub, items, summary, {**base_ctx, **({label: key} if key else {})})
         files.append((f"sightline-report{('-' + _slug(key)) if key else ''}.pdf", to_pdf(html_text)))

@@ -1,11 +1,14 @@
 # Sightline detection: design
 
-Sightline finds clashes itself, in the models that are open, and hands them to everything that already works on a
-Navisworks report: the list, triage, insights, root causes, plans, chat, the PDF and BCF, and export. A Navisworks
-report is still welcome; detection means nobody needs one first. That matters most for models no one runs Navisworks
-on, such as a machine cell from mechanical CAD.
+Sightline finds clashes itself, in the models that are open, and hands them to everything else: the list, triage,
+insights, root causes, plans, chat, the PDF and BCF, and export. This is the main way in (Oct 28): the demo opens the
+models and runs it, and the header's **Coordinate** menu leads with **Check the open models**. Importing a Navisworks
+report is the second way, for teams that already run it. Detection matters most for models no one runs Navisworks on,
+such as a machine cell from mechanical CAD.
 
-In the product this is **Sightline detection**, and a clash it finds is **found by Sightline**. It is new work, written
+In the product the job is **design coordination** (the card is "Coordinate the models", a run's report is "Coordination ·
+4 models", the PDF is a "Design coordination report"); a single item is still a **clash**, and one it finds is **found
+by Sightline**. It is new work, written
 for Sightline. ClashWise's native-detection notes informed the design, but no ClashWise code is used, and this is not
 ClashWise native detection.
 

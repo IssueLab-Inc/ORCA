@@ -266,7 +266,8 @@ class Chat:
 
     def _report(self, ctx: Context):
         if ctx.report_id not in self.ws.reports:
-            raise LookupError("no clash report is open: ask the user to open one from 'Clash report'")
+            raise LookupError("no clashes are open: check the open models with detect_clashes, or ask the user to import a report "
+                              "from 'Coordinate'")
         return self.ws.report(ctx.report_id)  # type: ignore[arg-type]
 
     def _matches(self, ctx: Context) -> dict:

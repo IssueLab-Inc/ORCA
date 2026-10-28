@@ -29,7 +29,7 @@ export function DetectSetupCard({ setup, progress, onRun, disabled }: {
     tolerance_m: t.kind === "hard" ? Math.max(0, toleranceMm) / 1000 : t.tolerance_m }));
   return (
     <section className="triage detect idle" data-tour="detect">
-      <DetectHead sub="Sightline detection · no Navisworks report needed" />
+      <DetectHead sub="Every pair of models, and each model against itself" />
       <p className="triage-lead">Sightline checks every pair of models and each model against itself, and reports
         overlaps deeper than the tolerance. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and
         touches are counted, not reported.</p>
@@ -43,9 +43,9 @@ export function DetectSetupCard({ setup, progress, onRun, disabled }: {
       <label className="detect-tol">Hard clashes deeper than
         <input type="number" min={0} step={1} value={toleranceMm} onChange={(e) => setToleranceMm(Number(e.target.value))} /> mm</label>
       <button className="btn primary triage-go" disabled={disabled || !chosen.length} onClick={() => onRun(chosen)}>
-        <Radar size={15} aria-hidden /> Detect clashes in {setup.elements.toLocaleString()} elements</button>
-      <p className="hint">About ten seconds for a building. The result opens as the clash report: triage, insights and
-        fixes work on it as on a Navisworks report.</p>
+        <Radar size={15} aria-hidden /> Check {setup.elements.toLocaleString()} elements</button>
+      <p className="hint">About ten seconds for a building. Then Muse names each clash, triage sorts them, and Sightline
+        proposes verified fixes.</p>
     </section>
   );
 }
@@ -54,7 +54,7 @@ function DetectHead({ sub, action }: { sub: string; action?: React.ReactNode }) 
   return (
     <div className="triage-head">
       <span className="triage-icon"><Radar size={15} aria-hidden /></span>
-      <div><h3>Find the clashes</h3><span className="triage-sub">{sub}</span></div>
+      <div><h3>Coordinate the models</h3><span className="triage-sub">{sub}</span></div>
       {action}
     </div>
   );
@@ -85,7 +85,7 @@ export function DetectSummary({ detection, progress, onAgain, disabled }: {
   const partial = detection.coverage.filter((c) => c.partial);
   const d = detection.diff;
   return (
-    <section className={`triage detect summary ${progress ? "running" : ""}`}>
+    <section className={`triage detect summary ${progress ? "running" : ""}`} data-tour="detected">
       <DetectHead sub={progress ? "Checking again…" : `Found by Sightline · ${detection.seconds.toFixed(1)} s`}
         action={!progress && <button className="ibtn" aria-label="Detect again" data-tip="Detect again: see what your fixes resolved"
           data-tip-side="left" disabled={disabled} onClick={onAgain}><RotateCcw size={14} aria-hidden /></button>} />

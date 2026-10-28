@@ -397,7 +397,7 @@ needed.
   (Navisworks has no #061). Cell: Rev A 13/13 planted, 0 unexpected; Rev B 0.
 - **End to end in the browser:** detect → #061 → views captured → Muse Spark proposed "up 280 mm through the beam
   opening" (Rev04's height) in 44 s → accept → Detect again: 1 resolved, 0 new.
-- **Still to do:** the tour and landing still use the Navisworks sample (the tour hard-codes c0053/c0051).
+- **Tour and landing:** now on detection (below).
 
 Clash numbers and titles (Oct 28): no "Clash39".
 - **Numbers:** every clash has `number`, shown as #N, unique across the whole report (not per test).
@@ -421,9 +421,29 @@ Clash numbers and titles (Oct 28): no "Clash39".
   - `Report.clash()` accepts "#39" and "39", so chat tools and voice can use numbers; chat refers to "#39 title".
   - Voice keywords are element names and titles, not clash names.
   - PDF and BCF titles use the label.
-  - Tour and About say #53 / #51.
+  - The tour finds its clashes by element pair (below), not by number.
 - **Web tests:** `web/tests/app-host.mjs` and `app-replacement.test.mjs` stub App's imports. A new import in App
   needs adding to both lists, or `npm test` fails to resolve it.
+
+Coordination first (Oct 28, owner decision): Sightline's own check is the golden path; Navisworks is secondary.
+- **Wording:** "design coordination" for the job and its outputs, "clash" for one geometric item. Landing hero "An AI
+  design coordinator for 3D models"; header menu **Coordinate** ("Check the open models" first, then "Or import a
+  Navisworks clash report"); Detect card "Coordinate the models"; a run's report "Coordination · N models"; PDF "Design
+  coordination report"; chat prompt "design coordination app". Code identifiers stay `clash`/`report`; BCF TopicType
+  stays "Clash". Navisworks stays named where it is a fact: an imported clash's reference, the BCF tools list, the
+  README's "Works with Navisworks reports", the recorded plan's cause text.
+- **Golden path:** "Open the Northbank demo" / "Watch Sightline fix a clash" open the four models and run the check
+  (`openDemo` → `runDetect(null, id)`); the golden path then opens the duct × girder clash (#1) and proposes. Measured:
+  list at 22 s, Muse's first idea (+400 mm offset through the web opening, Rev04's height) verified at 42 s into the
+  proposal, so the landing says "~40 s to a verified fix" (the old 15-25 s was the imported report).
+- **Tour:** `TOUR.duct` / `TOUR.joint` are GlobalId pairs; `clashOfPair` in App.tsx finds them in whatever report is
+  open (detected: #1 and #15). Step targets may be functions of `TourState` (`duct`/`joint` carry id and number). The
+  recorded runs (`web/public/tour/`, recorded on the imported report as c0053/c0051) are fetched by role; the girder
+  plan's clash ids are re-pointed by element pair at replay (`replayPlan`), so "not in the report" reflects this report.
+- **Triage of a detected run:** 633 clashes, 98 model calls (alike groups read once), 214 s on Muse Spark Open; 13 real
+  (answer key 3/3 real, high, MEP; the B1 pad footing vs lift-pit wall; site trees and paving), 491 by design, 128
+  model errors. Landing: "7 s to check 1,961 elements", "633 clashes sorted in 3½ min". The clash panel says when a
+  verdict was "read once for n alike clashes".
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
@@ -434,8 +454,8 @@ Next, in order.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ Sightline
-   detection (no Navisworks needed). ✅ #N numbers and Muse titles. Next: demo, tour and landing on detection and the
-   palletising cell.
+   detection (no Navisworks needed). ✅ #N numbers and Muse titles. ✅ Demo, tour and landing on detection. Next: the
+   palletising cell as a second demo.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.
