@@ -1,6 +1,7 @@
 """Web API for the browser app. Run: uv run uvicorn sightline.app:app --reload"""
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
@@ -17,9 +18,9 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from . import chat, document, edits, owner, plans, triage
+from . import chat, context_planner, document, edits, owner, plans, triage
 from .meta_client import load_env, transcribe, triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
@@ -259,6 +260,78 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
 @app.post("/api/scenes/{scene_id}/apply")
 def apply(scene_id: str, body: Move):
     return ws.apply(_scene(scene_id), body.moved, body.delta_m)
+
+
+class ContextObjective(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    element_a: str
+    element_b: str
+    report_id: str | None = None
+    clash_id: str | None = None
+
+
+class ContextApply(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    proposal_id: str
+    acknowledged_conditions: list[str]
+
+
+@app.post('/api/scenes/{scene_id}/context/stream')
+def context_stream(scene_id: str, body: ContextObjective, request: Request):
+    _scene(scene_id)
+    try:
+        objective = context_planner.validate_objective(ws, scene_id, body.model_dump(exclude_none=True))
+    except context_planner.ContextError as exc:
+        raise HTTPException(exc.status, str(exc))
+    who = client_id(request.headers, request.client.host if request.client else None)
+    refused = None if owner.no_caps() else propose_limit.take_many(who, 3)
+    if refused:
+        raise HTTPException(429, refused)
+    events = queue.Queue(maxsize=64)
+    cancel = threading.Event()
+
+    def emit(event):
+        while not cancel.is_set():
+            try:
+                events.put(event, timeout=.1)
+                return
+            except queue.Full:
+                continue
+
+    def work():
+        try:
+            emit(context_planner.build(ws, scene_id, objective, emit, cancel=cancel))
+        except Exception as exc:
+            emit(dict(type='error', detail=f'{type(exc).__name__}: {exc}'))
+        finally:
+            emit(None)
+
+    owner.spawn(work)
+
+    async def stream():
+        try:
+            while not await request.is_disconnected():
+                try:
+                    event = events.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(.05)
+                    continue
+                if event is None:
+                    break
+                yield json.dumps(event) + '\n'
+        finally:
+            cancel.set()
+
+    return _ndjson(stream())
+
+
+@app.post('/api/scenes/{scene_id}/context/apply')
+def context_apply(scene_id: str, body: ContextApply):
+    _scene(scene_id)
+    try:
+        return context_planner.accept(ws, scene_id, body.proposal_id, body.acknowledged_conditions)
+    except context_planner.ContextError as exc:
+        raise HTTPException(exc.status, str(exc))
 
 
 @app.post("/api/scenes/{scene_id}/offset/check")

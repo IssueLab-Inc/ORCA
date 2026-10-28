@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import edits, plans
+from . import context_planner, edits, plans
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 
@@ -39,6 +39,10 @@ def _fn(name: str, description: str, properties: dict | None = None, required: l
 
 
 TOOLS = [
+    _fn('explore_wider_fix', 'Explore a complete coordinated arrangement for one clash, including surrounding '
+        'elements when needed. Use when the user asks to move other objects or a single-element fix is blocked. '
+        'Costs three proposal units; shows whole proposals for designer review. You cannot accept them.',
+        {'clash_id': {'type': 'string'}}, ['clash_id']),
     _fn("report_summary", "Counts for the open clash report: clashes per test and per element class pair, how many "
         "are found in the open model, how many are fixed. Start here for questions about the whole report."),
     _fn("list_clashes", "List clashes in the report, optionally filtered. Returns at most `limit` rows.", {
@@ -214,6 +218,22 @@ class Chat:
 
     def _run(self, name: str, args: dict, ctx: Context, emit) -> tuple[dict, str, list[Path]]:
         ws = self.ws
+        if name == 'explore_wider_fix':
+            report, sid = self._report(ctx), self._scene(ctx)
+            c = report.clash(args['clash_id'])
+            matched = self._matches(ctx).get(c.id, {})
+            objective = context_planner.validate_objective(ws, sid, dict(element_a=matched.get('a'),
+                element_b=matched.get('b'), report_id=report.id, clash_id=c.id))
+            refused = self.propose_allowed_many(3)
+            if refused:
+                return {'error': refused}, 'refused: allowance used', []
+            forward = lambda event: emit(dict(type='context_event', event=event))
+            result = context_planner.build(ws, sid, objective, forward)
+            forward(result)
+            summary = dict(proposals=[dict(id=p['id'], title=p['title'], review_conditions=p['review_conditions'])
+                                     for p in result['proposals']], message=result['message'],
+                           note='Whole proposals are available for preview and designer review. You cannot accept them.')
+            return summary, f'{len(result["proposals"])} passing context arrangements for review', []
         if name == "report_summary":
             r, matches = self._report(ctx), self._matches(ctx)
             tests = Counter(c.test for c in r.clashes)
