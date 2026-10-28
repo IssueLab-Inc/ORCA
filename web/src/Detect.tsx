@@ -75,8 +75,9 @@ function ProgressRows({ progress }: { progress: DetectProgress }) {
 }
 
 /** Over a report Sightline found: what was checked, what changed since the last run, and Detect again. */
-export function DetectSummary({ detection, progress, onAgain, disabled }: {
+export function DetectSummary({ detection, progress, onAgain, disabled, compact = false }: {
   detection: Detection; progress: DetectProgress | null; onAgain: () => void; disabled: boolean;
+  compact?: boolean;  // the list is filtered: one line, so the list gets the room
 }) {
   const clashes = detection.coverage.reduce((n, c) => n + c.clashes, 0);
   const pairs = detection.coverage.reduce((n, c) => n + c.candidate_pairs, 0);
@@ -85,11 +86,13 @@ export function DetectSummary({ detection, progress, onAgain, disabled }: {
   const partial = detection.coverage.filter((c) => c.partial);
   const d = detection.diff;
   return (
-    <section className={`triage detect summary ${progress ? "running" : ""}`} data-tour="detected">
-      <DetectHead sub={progress ? "Checking again…" : `Found by Sightline · ${detection.seconds.toFixed(1)} s`}
+    <section className={`triage detect summary ${progress ? "running" : ""} ${compact && !progress ? "compact" : ""}`} data-tour="detected">
+      <DetectHead sub={progress ? "Checking again…" : compact
+        ? `${clashes.toLocaleString()} clashes in ${detection.elements.toLocaleString()} elements · ${detection.seconds.toFixed(1)} s`
+        : `Found by Sightline · ${detection.seconds.toFixed(1)} s`}
         action={!progress && <button className="ibtn" aria-label="Detect again" data-tip="Detect again: see what your fixes resolved"
           data-tip-side="left" disabled={disabled} onClick={onAgain}><RotateCcw size={14} aria-hidden /></button>} />
-      {progress ? <ProgressRows progress={progress} /> : <>
+      {progress ? <ProgressRows progress={progress} /> : !compact && <>
         <p className="detect-count"><b>{clashes.toLocaleString()}</b> clash{clashes === 1 ? "" : "es"} in
           {" "}{detection.elements.toLocaleString()} elements</p>
         {!d.first && (
