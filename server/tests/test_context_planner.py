@@ -60,6 +60,8 @@ def test_real_blocker_feedback_compound_search_is_isolated(tmp_path):
     feedback = json.loads(model.messages[1][-1]['content'])
     assert not feedback['passed'] and c in feedback['discovered']
     assert c in str(feedback['checks']['geometry']['hits'])
+    inspected = json.loads(model.messages[2][-1]['content'])
+    assert inspected['global_id'] == c and inspected['bounds_m'] and inspected['capabilities']
     assert any(e['phase'] == 'blocked' for e in events)
     assert 0 < min(model.timeouts) <= max(model.timeouts) <= 120
     assert before == ws.scene(sid).model.to_string() and ws.scene(sid).revision == 0
@@ -219,3 +221,82 @@ def test_translating_different_members_of_the_same_run_is_one_alternative(tmp_pa
     model = Scripted([[evaluate([move(main, [0, 0, 1])]), evaluate([move(end, [0., 0., 1.])])], 'Done'])
     result = planner.build(ws, sid, obj, model=model)
     assert result['trials'] == 2 and len(result['proposals']) == 1
+
+
+def test_long_seed_initial_pages_keep_the_clash_centre_for_either_objective(tmp_path):
+    import ifcopenshell.api
+    from sightline.fixtures import _box
+    ws, sid, obj, c = setup(tmp_path)
+    scene = ws.scene(sid)
+    beam = scene.entity(obj['element_b'])
+    profile = planner.edits._body(beam)[1].SweptArea
+    profile.XDim = 100.
+    profile.Position.Location.Coordinates = (50., .1)
+    scene.translate([obj['element_a']], (87., 0., 0.))
+    body = scene.model.by_type('IfcGeometricRepresentationSubContext')[0]
+    for i in range(25):
+        item = ifcopenshell.api.run('root.create_entity', scene.model, ifc_class='IfcBuildingElementProxy', name=f'Near {i}')
+        _box(scene.model, body, item, (.1, .1, .1), (89.5 + i*.025, 1., 2.5))
+    # This element fits the hard default 2.5 m search but must be excluded at the configured 1.25 m radius.
+    outside = ifcopenshell.api.run('root.create_entity', scene.model, ifc_class='IfcBuildingElementProxy', name='Outside radius')
+    _box(scene.model, body, outside, (.1, .1, .1), (90., 2., 2.5))
+    scene._bounds = None
+    model = Scripted([[('inspect_neighbourhood', dict(element=obj['element_a'], offset=20)),
+                       ('inspect_neighbourhood', dict(element=obj['element_b'], offset=20))], 'Done'])
+    planner.build(ws, sid, obj, model=model, limits=planner.Limits(radius_m=1.25))
+    first = json.loads(model.messages[0][1]['content'])['neighbourhood']
+    pages = [json.loads(m['content']) for m in model.messages[1][-2:]]
+    expected = set(scene.bounds()) - {c, outside.GlobalId}
+    assert first['total'] == len(expected) == 27 and first['next_offset'] == 20
+    for page in pages:
+        assert page['total'] == 27 and page['next_offset'] is None
+        assert page['center_m'] == first['center_m'] and page['radius_m'] == first['radius_m'] == 1.25
+        ids = [e['global_id'] for e in first['elements'] + page['elements']]
+        assert len(ids) == len(set(ids)) == 27 and set(ids) == expected
+
+
+def test_explicit_constraints_filter_only_the_affected_operation_and_run(tmp_path):
+    import ifcopenshell.api
+    from sightline.fixtures import build_context_fixture
+    build_context_fixture(tmp_path / 'context.ifc')
+    ws = Workspace(samples=tmp_path); sid = ws.open(['context.ifc']); scene = ws.scene(sid)
+    ids = {e.Tag: e.GlobalId for e in scene.products()}
+    obj = dict(element_a=ids['CTX-DUCT'], element_b=ids['CTX-BEAM'])
+    inspection = planner.Inspection(scene, obj, 2.5)
+    fixed = inspection.element(ids['CTX-BEAM'])
+    assert fixed['constraints'] == ['KeepFixed'] and fixed['capabilities'] == []
+    assert 'KeepFixed' in ' '.join(fixed['unsupported'])
+    main = inspection.element(ids['CTX-DUCT'])
+    assert 'move' in main['capabilities'] and 'offset' in main['capabilities']
+    end = scene.entity(ids['CTX-END'])
+    pset = ifcopenshell.api.run('pset.add_pset', scene.model, product=end, name='Pset_SightlineConstraints')
+    ifcopenshell.api.run('pset.edit_pset', scene.model, pset=pset, properties={'KeepFixed': True})
+    main = inspection.element(ids['CTX-DUCT'])
+    assert 'move' not in main['capabilities'] and 'offset' in main['capabilities']
+    assert main['run_constraints'][ids['CTX-END']] == ['KeepFixed']
+    # Structural classes remain editable when no explicit constraint was authored.
+    free_ws, free_sid, free_obj, _ = setup(tmp_path / 'free')
+    free = planner.Inspection(free_ws.scene(free_sid), free_obj, 2.5).element(free_obj['element_b'])
+    assert free['constraints'] == [] and 'move' in free['capabilities']
+
+
+def test_cancellation_while_progress_is_backpressured_stops_the_next_expensive_step(tmp_path):
+    ws, sid, obj, c = setup(tmp_path)
+    for phase, expected_calls in [('thinking', 0), ('checking', 1)]:
+        cancel = threading.Event()
+        model = Scripted([[evaluate([move(obj['element_a'], [0, 0, -.8])])]])
+        def emit(event):
+            if event['phase'] == phase: cancel.set()
+        result = planner.build(ws, sid, obj, emit, model=model, cancel=cancel)
+        assert result['model_calls'] == len(model.messages) == expected_calls and result['trials'] == 0
+
+
+def test_cancellation_at_storage_boundary_publishes_no_proposal(tmp_path, monkeypatch):
+    ws, sid, obj, c = setup(tmp_path)
+    cancel = threading.Event(); store = planner._store
+    def disconnect(*args, **kwargs):
+        cancel.set()
+        return store(*args, **kwargs)
+    monkeypatch.setattr(planner, '_store', disconnect)
+    result = planner.build(ws, sid, obj, model=Scripted([[evaluate([move(obj['element_a'], [0, 0, -.8])])], 'Done']), cancel=cancel)
+    assert not result['proposals'] and not getattr(ws, '_context_proposals', {})

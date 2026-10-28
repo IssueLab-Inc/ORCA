@@ -178,3 +178,137 @@ def test_fresh_review_conditions_must_also_be_acknowledged(tmp_path, monkeypatch
     response = client.post(f'/api/scenes/{sid}/context/apply', json=dict(proposal_id=proposal['id'],
                            acknowledged_conditions=[x['id'] for x in proposal['review_conditions']]))
     assert response.status_code == 409 and ws.scene(sid).model.to_string() == before
+
+
+def test_anchored_corridor_search_inspects_blocker_then_accepts_and_exports(tmp_path, monkeypatch):
+    import ifcopenshell.api
+    from sightline.fixtures import build_context_fixture
+    from sightline.scene import IfcScene
+    from sightline.service import Workspace
+    build_context_fixture(tmp_path / 'context.ifc')
+    ws = Workspace(samples=tmp_path); sid = ws.open(['context.ifc']); scene = ws.scene(sid)
+    ids = {e.Tag: e.GlobalId for e in scene.products()}
+    obj = dict(element_a=ids['CTX-DUCT'], element_b=ids['CTX-BEAM'])
+    # An explicitly retained authored defect must remain visible and acknowledged.
+    port = planner.edits._ports(scene.entity(ids['CTX-DUCT']))[0]
+    frame = scene.placement(port.GlobalId)
+    frame[:3, 2] *= -1; frame[:3, 1] *= -1
+    ifcopenshell.api.run('geometry.edit_object_placement', scene.model, product=port, matrix=frame, is_si=True)
+    offset = dict(kind='offset', element=ids['CTX-DUCT'], split_m=[2, 4], delta_m=[0, 0, .4],
+                  reason='Use the upper route while retaining anchored external endpoints')
+    model = Scripted([[('inspect_element', {'element': ids['CTX-DUCT']})], [evaluate([offset])],
+                      [('inspect_element', {'element': ids['CTX-TRAY']})],
+                      [evaluate([offset, move(ids['CTX-TRAY'], [0, .35, 0])])], 'Done'])
+    ws._model = model
+    monkeypatch.setattr(api, 'ws', ws); monkeypatch.setattr(api, 'propose_limit', ProposeLimit(0, 0))
+    client = TestClient(api.app); before = scene.model.to_string()
+    result = stream(client, sid, obj)
+    blocked = json.loads(model.messages[2][-1]['content'])
+    assert not blocked['passed'] and ids['CTX-TRAY'] in blocked['discovered']
+    assert json.loads(model.messages[3][-1]['content'])['global_id'] == ids['CTX-TRAY']
+    [proposal] = result['proposals']
+    assert proposal['passed'] and len(proposal['edits']) == 2 and proposal['checks']['integrity']['passed']
+    assert scene.model.to_string() == before and scene.revision == 0
+    ack = [r['id'] for r in proposal['review_conditions']]
+    assert 'legacy_port_frames' in ack
+    url = f'/api/scenes/{sid}/context/apply'
+    assert client.post(url, json=dict(proposal_id=proposal['id'], acknowledged_conditions=[x for x in ack if x != 'legacy_port_frames'])).status_code == 422
+    accepted = client.post(url, json=dict(proposal_id=proposal['id'], acknowledged_conditions=ack))
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()['resolved_pairs'] == [obj] and scene.revision == 1
+    exported = client.get(f'/api/scenes/{sid}/export')
+    assert exported.status_code == 200
+    path = tmp_path / 'accepted.ifc'; path.write_bytes(exported.content)
+    loaded = IfcScene(path)
+    assert len(loaded.model.by_type('IfcDuctFitting')) == 6
+    assert loaded.bounds()[ids['CTX-TRAY']][0][1] > .29
+
+
+def test_chat_disconnect_cancels_nested_search_before_trials_or_storage(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    from sightline import owner
+    from test_chat import Scripted as ChatScripted
+    ws, sid, obj, c = setup(tmp_path)
+    root = tmp_path / 'reports' / 'r'; root.mkdir(parents=True)
+    root.joinpath('report.xml').write_text(_report_xml([(obj['element_a'], obj['element_b'], -.3)]))
+    rid = ws.open_report_sample('r').id
+    entered, release = threading.Event(), threading.Event()
+    effort = []
+    def waiting(messages):
+        effort.append(owner.effort()); entered.set()
+        assert release.wait(3)
+        return [evaluate([move(obj['element_a'], [0, 0, -.8])])]
+    nested = Scripted([waiting]); ws._model = nested
+    outer = ChatScripted([[('explore_wider_fix', {'clash_id': 'c0001'})], 'Should never be called'])
+    chat = Chat(ws, outer)
+    monkeypatch.setattr(api, 'ws', ws); monkeypatch.setattr(api, '_chat', chat)
+    threads = []; spawn = owner.spawn
+    def tracked(work):
+        thread = spawn(work); threads.append(thread); return thread
+    monkeypatch.setattr(owner, 'spawn', tracked)
+    class Request:
+        headers = {}; client = None; disconnected = False
+        async def is_disconnected(self): return self.disconnected
+    request = Request()
+    async def consume():
+        response = api.chat_turn(api.ChatTurn(message='Move surrounding objects', scene_id=sid, report_id=rid), request)
+        iterator = response.body_iterator
+        while not entered.is_set():
+            await asyncio.wait_for(anext(iterator), 3)
+        request.disconnected = True
+        try:
+            await asyncio.wait_for(anext(iterator), 3)
+        except StopAsyncIteration:
+            pass
+        release.set()
+    tokens = owner.enter(True, '{"effort":"high"}')
+    try:
+        asyncio.run(consume())
+    finally:
+        release.set(); owner.leave(tokens)
+    for thread in threads: thread.join(3)
+    assert all(not thread.is_alive() for thread in threads)
+    assert effort == ['high'] and len(nested.messages) == 1 and len(outer.seen) == 1
+    assert not getattr(ws, '_context_proposals', {}) and not ws.scene(sid)._edited
+    assert len(chat.sessions[next(iter(chat.sessions))].messages) == 1
+
+
+def test_chat_disconnect_unblocks_a_producer_with_a_full_event_queue(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    from sightline import owner
+    from test_chat import Scripted as ChatScripted
+    ws, sid, obj, c = setup(tmp_path)
+    outer = ChatScripted([[('set_view', {'mode': 'xray'})] * 100, 'Should never be called'])
+    chat = Chat(ws, outer)
+    monkeypatch.setattr(api, 'ws', ws); monkeypatch.setattr(api, '_chat', chat)
+    full, captured, threads = threading.Event(), [], []
+    event_type, spawn = api._RequestEvents, owner.spawn
+    class Events(event_type):
+        def __init__(self, request):
+            super().__init__(request); captured.append(self)
+        def put(self, event):
+            if self.queue.full(): full.set()
+            return super().put(event)
+    def tracked(work):
+        thread = spawn(work); threads.append(thread); return thread
+    monkeypatch.setattr(api, '_RequestEvents', Events)
+    monkeypatch.setattr(owner, 'spawn', tracked)
+    class Request:
+        headers = {}; client = None; disconnected = False
+        async def is_disconnected(self): return self.disconnected
+    request = Request()
+    async def disconnect():
+        response = api.chat_turn(api.ChatTurn(message='Show x-ray', scene_id=sid), request)
+        assert await asyncio.to_thread(full.wait, 3)
+        request.disconnected = True
+        try:
+            await asyncio.wait_for(anext(response.body_iterator), 3)
+        except StopAsyncIteration:
+            pass
+    asyncio.run(disconnect())
+    for thread in threads: thread.join(3)
+    assert all(not thread.is_alive() for thread in threads) and len(outer.seen) == 1
+    assert captured[0].cancel.is_set() and captured[0].queue.maxsize == 64
+    assert not event_type(request).cancel.is_set()  # independent requests have independent cancellation

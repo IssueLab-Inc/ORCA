@@ -67,6 +67,36 @@ def _ndjson(events) -> StreamingResponse:
     return StreamingResponse(events, media_type="application/x-ndjson", headers=NDJSON_HEADERS)
 
 
+class _RequestEvents:
+    """Bounded progress production with cooperative cancellation when this request closes."""
+    def __init__(self, request):
+        self.request = request
+        self.queue = queue.Queue(maxsize=64)
+        self.cancel = threading.Event()
+
+    def put(self, event):
+        while not self.cancel.is_set():
+            try:
+                self.queue.put(event, timeout=.1)
+                return
+            except queue.Full:
+                continue
+
+    async def stream(self):
+        try:
+            while not await self.request.is_disconnected():
+                try:
+                    event = self.queue.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(.05)
+                    continue
+                if event is None:
+                    break
+                yield json.dumps(event, default=str) + '\n'
+        finally:
+            self.cancel.set()
+
+
 propose_limit = ProposeLimit.from_env()
 chat_limit = ProposeLimit.chat_from_env()
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
@@ -287,42 +317,19 @@ def context_stream(scene_id: str, body: ContextObjective, request: Request):
     refused = None if owner.no_caps() else propose_limit.take_many(who, 3)
     if refused:
         raise HTTPException(429, refused)
-    events = queue.Queue(maxsize=64)
-    cancel = threading.Event()
-
-    def emit(event):
-        while not cancel.is_set():
-            try:
-                events.put(event, timeout=.1)
-                return
-            except queue.Full:
-                continue
+    events = _RequestEvents(request)
 
     def work():
         try:
-            emit(context_planner.build(ws, scene_id, objective, emit, cancel=cancel))
+            events.put(context_planner.build(ws, scene_id, objective, events.put, cancel=events.cancel))
         except Exception as exc:
-            emit(dict(type='error', detail=f'{type(exc).__name__}: {exc}'))
+            events.put(dict(type='error', detail=f'{type(exc).__name__}: {exc}'))
         finally:
-            emit(None)
+            events.put(None)
 
     owner.spawn(work)
 
-    async def stream():
-        try:
-            while not await request.is_disconnected():
-                try:
-                    event = events.get_nowait()
-                except queue.Empty:
-                    await asyncio.sleep(.05)
-                    continue
-                if event is None:
-                    break
-                yield json.dumps(event) + '\n'
-        finally:
-            cancel.set()
-
-    return _ndjson(stream())
+    return _ndjson(events.stream())
 
 
 @app.post('/api/scenes/{scene_id}/context/apply')
@@ -628,12 +635,12 @@ def chat_turn(body: ChatTurn, request: Request):
     c = _chat_for(request)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
-    events: queue.Queue = queue.Queue()
+    events = _RequestEvents(request)
     events.put({"type": "session", "id": session.id})
 
     def work():
         try:
-            c.turn(session, body.message[:4000], ctx, events.put)
+            c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel)
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         events.put({"type": "done"})
@@ -641,11 +648,7 @@ def chat_turn(body: ChatTurn, request: Request):
 
     owner.spawn(work)
 
-    def stream():
-        while (event := events.get()) is not None:
-            yield json.dumps(event, default=str) + "\n"
-
-    return _ndjson(stream())
+    return _ndjson(events.stream())
 
 
 class DocumentRequest(BaseModel):

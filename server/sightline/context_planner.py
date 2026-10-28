@@ -56,7 +56,8 @@ def _tool(name, description, properties, required):
 TOOLS = [
     _tool('inspect_element', 'Inspect a discovered element, its complete translation run, connections and measured openings.',
           {'element': {'type': 'string'}}, ['element']),
-    _tool('inspect_neighbourhood', 'Explicitly inspect around a discovered element. Follow next_offset for dense context. '
+    _tool('inspect_neighbourhood', 'Inspect around a discovered element. For either objective seed, continue the original '
+          'clash-centred query using next_offset. Omitted radius uses the configured initial radius. '
           'A larger radius is an explicit wider search (maximum 10 metres).',
           {'element': {'type': 'string'}, 'radius_m': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 10},
            'offset': {'type': 'integer', 'minimum': 0}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 20}}, ['element']),
@@ -104,6 +105,7 @@ def validate_objective(ws, scene_id, objective):
 class Inspection:
     def __init__(self, scene, objective, radius):
         self.scene, self.objective = scene, objective
+        self.radius = radius
         self.discovered = {objective['element_a'], objective['element_b']}
         boxes = [scene.bounds()[g] for g in self.discovered]
         # The clash zone, rather than the whole extent of a long beam or service run.
@@ -116,12 +118,15 @@ class Inspection:
         return sorted(g for g, box in self.scene.bounds().items()
                       if np.all(box[0] <= point + radius) and np.all(box[1] >= point - radius))
 
-    def element(self, gid):
+    def element(self, element):
+        gid = element
         if gid not in self.discovered:
             raise ValueError(f'element was not discovered: {gid}')
         scene = self.scene
         info = asdict(scene.element(gid))
         run_members = scene.connected_run(gid)
+        constraints = context_eval.element_constraints(scene, gid)
+        run_constraints = {g: c for g in run_members if (c := context_eval.element_constraints(scene, g))}
         self.discovered.update(run_members)
         self.discovered.update(info['connected'])
         connections = []
@@ -150,6 +155,12 @@ class Inspection:
                 capabilities.append('trim')
         except (edits.Unsupported, RuntimeError, ValueError) as exc:
             unsupported.append(str(exc))
+        if constraints:
+            capabilities = []
+            unsupported.append('KeepFixed model property prohibits editing this element.')
+        elif run_constraints:
+            capabilities.remove('move')
+            unsupported.append(f'Translation run includes KeepFixed elements: {sorted(run_constraints)}')
         openings = []
         for other in (self.objective['element_a'], self.objective['element_b']):
             if other == gid or 'offset' not in capabilities:
@@ -161,7 +172,8 @@ class Inspection:
         return dict(**info, bounds_m=scene.bounds().get(gid).tolist() if gid in scene.bounds() else None,
                     run=run, run_members=run_members, systems=[dict(global_id=s.GlobalId, name=s.Name)
                     for s in system.get_element_systems(scene.entity(gid))], connections=connections,
-                    capabilities=capabilities, unsupported=unsupported, openings=openings)
+                    capabilities=capabilities, unsupported=unsupported, openings=openings,
+                    constraints=constraints, run_constraints=run_constraints)
 
     def page(self, ids, offset=0, limit=20):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 20:
@@ -170,15 +182,17 @@ class Inspection:
         return dict(total=len(ids), elements=[self.element(g) for g in ids[offset:offset + limit]],
                     next_offset=offset + limit if offset + limit < len(ids) else None)
 
-    def neighbourhood(self, element, radius_m=2.5, offset=0, limit=20):
+    def neighbourhood(self, element, radius_m=None, offset=0, limit=20):
         if element not in self.discovered:
             raise ValueError(f'element was not discovered: {element}')
+        radius_m = self.radius if radius_m is None else radius_m
         if isinstance(radius_m, bool) or not isinstance(radius_m, (int, float)) or not np.isfinite(radius_m) or not 0 < radius_m <= 10:
             raise ValueError('radius_m must be positive and at most 10 metres')
         box = self.scene.bounds().get(element)
         if box is None:
             raise ValueError('element has no measurable bounds')
-        return self.page(self._near(box.mean(axis=0), radius_m), offset, limit)
+        point = self.origin if element in (self.objective['element_a'], self.objective['element_b']) else box.mean(axis=0)
+        return self.page(self._near(point, radius_m), offset, limit) | dict(center_m=point.tolist(), radius_m=radius_m)
 
 
 def _identity(evaluated_edits):
@@ -207,8 +221,10 @@ def _rank(scene, proposal):
     return structural, len(proposal['review_conditions']), len(changes), fittings, displacement, -(gap if gap is not None else -1)
 
 
-def _store(ws, sid, candidates):
+def _store(ws, sid, candidates, cancel=None):
     with ws.lock:
+        if cancel is not None and cancel.is_set():
+            return False
         if not hasattr(ws, '_context_proposals'):
             ws._context_proposals = OrderedDict()
         stores = ws._context_proposals
@@ -223,6 +239,7 @@ def _store(ws, sid, candidates):
             store.popitem(last=False)
         while len(stores) > MAX_STORED_SCENES:
             stores.popitem(last=False)
+        return True
 
 
 def build(ws, scene_id, objective, emit=lambda e: None, model=None, *, limits=None, cancel=None, clock=time.monotonic):
@@ -236,7 +253,7 @@ def build(ws, scene_id, objective, emit=lambda e: None, model=None, *, limits=No
     progress = lambda phase, message: emit(dict(type='context_progress', phase=phase, message=message))
     progress('inspecting', 'Inspecting the objective and local geometry, connections and supported edits.')
     initial = dict(objective=objective, objective_elements=[inspection.element(objective[k]) for k in ('element_a', 'element_b')],
-                   neighbourhood=inspection.page(inspection.initial_ids), limits=asdict(limits))
+                   neighbourhood=inspection.neighbourhood(objective['element_a']), limits=asdict(limits))
     messages = [dict(role='system', content=PROMPT.read_text()), dict(role='user', content=json.dumps(initial))]
     candidates, seen, blockers = [], set(), set()
     trials = calls = 0
@@ -245,6 +262,8 @@ def build(ws, scene_id, objective, emit=lambda e: None, model=None, *, limits=No
     model = model if model is not None else ws.model
     while active() and calls < limits.model_calls and trials < limits.trials:
         progress('thinking', 'Considering complete arrangements of at most three edit groups.')
+        if not active():
+            break
         calls += 1
         try:
             reply = model.chat(messages, TOOLS, timeout_s=max(.001, limits.seconds - (clock() - start)))
@@ -275,16 +294,22 @@ def build(ws, scene_id, objective, emit=lambda e: None, model=None, *, limits=No
                     raise ValueError('tool arguments must be an object')
                 if name == 'inspect_element':
                     progress('inspecting', f'Inspecting discovered element {args.get("element", "")}.')
+                    if not active():
+                        break
                     result = inspection.element(**args)
                 elif name == 'inspect_neighbourhood':
                     progress('inspecting', 'Expanding the inspected neighbourhood explicitly.')
+                    if not active():
+                        break
                     result = inspection.neighbourhood(**args)
                 elif name == 'evaluate_proposal':
                     if trials >= limits.trials:
                         result = dict(error='Geometry trial budget exhausted.')
                     else:
+                        progress('checking', f'Checking complete arrangement {trials + 1} of {limits.trials}.')
+                        if not active():
+                            break
                         trials += 1
-                        progress('checking', f'Checking complete arrangement {trials} of {limits.trials}.')
                         ops = args.get('operations')
                         result = context_eval.evaluate_candidate(scene, objective, ops, inspection.discovered)
                         hits = result['checks']['geometry']['hits']
@@ -320,7 +345,9 @@ def build(ws, scene_id, objective, emit=lambda e: None, model=None, *, limits=No
     else:
         if not active() or trials >= limits.trials or calls >= limits.model_calls:
             stop = 'Search budget reached; retained passing arrangements.'
-        _store(ws, scene_id, candidates)
+        if not _store(ws, scene_id, candidates, cancel=cancel):
+            candidates = []
+            stop = 'Search cancelled.'
     if not candidates:
         stop += ' No passing arrangement was found in this bounded search; other solutions may exist.'
     return dict(type='context_result', proposals=[c[0] for c in candidates], message=stop,

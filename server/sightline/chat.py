@@ -16,6 +16,7 @@ Every step is reported through `emit` as it happens, so the UI can show the agen
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from collections import Counter, OrderedDict
 from dataclasses import asdict, dataclass, field
@@ -137,12 +138,26 @@ class Chat:
             self.sessions.popitem(last=False)
         return s
 
-    def turn(self, session: Session, text: str, ctx: Context, emit: Callable[[dict], None]) -> str:
+    def turn(self, session: Session, text: str, ctx: Context, emit: Callable[[dict], None], *,
+             cancel: threading.Event | None = None) -> str:
+        cancel = cancel or threading.Event()
+        history_start = len(session.messages)
         session.messages.append({"role": "user", "content": f"{self._context_line(ctx)}\n\n{text}"})
         answer = ""
         for _ in range(MAX_STEPS):
+            if cancel.is_set():
+                break
             emit({"type": "thinking"})
-            reply = self.model.chat(session.messages, TOOLS)
+            if cancel.is_set():
+                break
+            try:
+                reply = self.model.chat(session.messages, TOOLS)
+            except Exception:
+                if cancel.is_set():
+                    break
+                raise
+            if cancel.is_set():
+                break
             calls = reply.get("tool_calls") or []
             session.messages.append({k: v for k, v in reply.items() if k in ("role", "content", "tool_calls") and v}
                                     | {"role": "assistant"})
@@ -151,16 +166,22 @@ class Chat:
                 break
             images: list[Path] = []
             for call in calls:
+                if cancel.is_set():
+                    break
                 name = call["function"]["name"]
                 try:
                     args = json.loads(call["function"].get("arguments") or "{}")
                 except json.JSONDecodeError:
                     args = {}
                 emit({"type": "tool", "name": name, "args": args})
+                if cancel.is_set():
+                    break
                 try:
-                    result, summary, pics = self._run(name, args, ctx, emit)
+                    result, summary, pics = self._run(name, args, ctx, emit, cancel=cancel)
                 except Exception as e:  # a bad id, a shape that cannot be edited: tell the model, keep going
                     result, summary, pics = {"error": f"{type(e).__name__}: {e}"}, f"failed: {e}", []
+                if cancel.is_set():
+                    break
                 images += pics
                 emit({"type": "tool_result", "name": name, "summary": summary})
                 session.messages.append({"role": "tool", "tool_call_id": call["id"],
@@ -170,6 +191,10 @@ class Chat:
                     {"type": "text", "text": "The clash images you asked for (A, B, C):"}] + [image_part(p) for p in images]})
         else:
             answer = "I ran out of steps on that one. Ask me to carry on, or narrow the question."
+        if cancel.is_set():
+            # Discard this interrupted turn, including unmatched tool calls, so the next request can resume cleanly.
+            del session.messages[history_start:]
+            return ''
         self._trim(session)
         emit({"type": "message", "text": answer})
         return answer
@@ -216,7 +241,7 @@ class Chat:
                 "level": c.a.level or c.b.level, "distance_mm": round(c.distance_m * 1000) if c.distance_m is not None else None,
                 "in_model": bool(m.get("a") and m.get("b")), "fixed": c.id in ctx.fixed}
 
-    def _run(self, name: str, args: dict, ctx: Context, emit) -> tuple[dict, str, list[Path]]:
+    def _run(self, name: str, args: dict, ctx: Context, emit, *, cancel=None) -> tuple[dict, str, list[Path]]:
         ws = self.ws
         if name == 'explore_wider_fix':
             report, sid = self._report(ctx), self._scene(ctx)
@@ -228,8 +253,9 @@ class Chat:
             if refused:
                 return {'error': refused}, 'refused: allowance used', []
             forward = lambda event: emit(dict(type='context_event', event=event))
-            result = context_planner.build(ws, sid, objective, forward)
-            forward(result)
+            result = context_planner.build(ws, sid, objective, forward, cancel=cancel)
+            if cancel is None or not cancel.is_set():
+                forward(result)
             summary = dict(proposals=[dict(id=p['id'], title=p['title'], review_conditions=p['review_conditions'])
                                      for p in result['proposals']], message=result['message'],
                            note='Whole proposals are available for preview and designer review. You cannot accept them.')
