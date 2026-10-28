@@ -12,7 +12,6 @@ type Step = { trial: Trial; title: string; attempt: Attempt | null; arrived: () 
 
 const TRYING = "#f5a623";
 const PASSED = "#12b5cb";  // teal: not either side's red or green
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Lets the fix agent drive the viewer while it works: each candidate appears in place as it is checked, the camera
@@ -30,13 +29,15 @@ export class Pilot {
   private titles = new Map<number, string>();
   private playing = false;
   private done: (() => void) | null = null;
+  private generation = 0;
+  private waits = new Set<() => void>();
 
   constructor(private viewer: () => Viewer | null, private frame: (t: Trial) => void,
               private onStatus: (s: PilotStatus | null) => void) {}
 
   /** A proposal started: take the view. */
   start() {
-    this.reset();
+    this.cancel();
     this.active = this.driving = true;
     this.status("thinking", "Muse Spark is reading the clash…");
     this.viewer()?.orbit(true);
@@ -69,6 +70,18 @@ export class Pilot {
     if (!this.playing || !this.driving) this.land();
   }
 
+  /** Superseded work owns no future stage cleanup, status or completion, even after an animation wait. */
+  cancel() {
+    const hadWork = this.active || this.playing || !!this.done;
+    ++this.generation;
+    this.done = null;
+    this.reset();
+    this.playing = false;
+    for (const end of this.waits) end();
+    this.waits.clear();
+    if (hadWork) { this.clear(); this.onStatus(null); }
+  }
+
   /** The user moved the camera: stop driving, clear what the pilot drew, let the result show when it comes. */
   takeOver() {
     if (!this.active || !this.driving) return;
@@ -88,6 +101,8 @@ export class Pilot {
 
   private async play() {
     if (this.playing) return;
+    const generation = this.generation;
+    const current = () => this.generation === generation;
     this.playing = true;
     let n = 0;
     while (this.driving && this.queue.length) {
@@ -103,7 +118,8 @@ export class Pilot {
       this.frame(t);
       this.status("trying", `Trying idea ${t.index + 1}: ${step.title || describe(t)}`);
       const arrived = step.attempt ? Promise.resolve() : new Promise<void>((r) => { step.arrived = r; });
-      await Promise.all([arrived, sleep(busy ? 500 : 1100)]);
+      await Promise.all([arrived, this.wait(busy ? 500 : 1100)]);
+      if (!current()) return;
       const a = step.attempt;
       if (!this.driving || !a) break;
       if (a.passed) {
@@ -113,8 +129,10 @@ export class Pilot {
         v.setHits(a.hit_ids ?? []);
         this.status("failed", `✗ ${step.title || describe(t)}: ${a.reason || "did not pass"}`);
       }
-      await sleep(busy ? 600 : 1400);
+      await this.wait(busy ? 600 : 1400);
+      if (!current()) return;
     }
+    if (!current()) return;
     this.playing = false;
     if (n && this.driving && !this.done) {
       this.status("thinking", "Muse Spark is weighing what it found…");
@@ -126,11 +144,16 @@ export class Pilot {
   /** Clear the stage and show the result. */
   private land() {
     const then = this.done;
-    this.done = null;
-    this.clear();
-    this.reset();
-    this.onStatus(null);
+    this.cancel();
     then?.();
+  }
+
+  private wait(ms: number) {
+    return new Promise<void>((resolve) => {
+      const end = () => { clearTimeout(timer); this.waits.delete(end); resolve(); };
+      const timer = setTimeout(end, ms);
+      this.waits.add(end);
+    });
   }
 
   private clear() {

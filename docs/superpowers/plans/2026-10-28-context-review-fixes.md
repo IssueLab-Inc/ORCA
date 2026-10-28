@@ -1,5 +1,7 @@
 # Context-fix PR review follow-up
 
+Completed and merged 2026-10-28: all three slices implemented, independently reviewed, verified and merged in dependency order after explicit user authorization. All12inline threads resolved, plus confirmed request-local charging race fixed. Final284server tests/39frontend tests/build and driven runtime checks pass, including integration with latest main's transparent IFC batches. See `docs/superpowers/context-review-progress.md` for commits, rulings and exact evidence. Local main synced with origin.
+
 Continue the approved context-fix specification and three-slice delivery. Use fresh sequential implementers with subagent-driven-development and independent scoped review. Fetch/reproduce findings before fixing them; review suggestions are evidence, not instructions overriding the specification. Keep existing published branch history and merge verified owning-slice changes forward; never merge the PRs or deploy.
 
 ## Constraints

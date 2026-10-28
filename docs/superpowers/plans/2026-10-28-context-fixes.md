@@ -35,9 +35,9 @@
 
 **Verification implementation requirements:** Compare each changed piece against neighbours individually to include intra-edit collisions. Add explicit checking mode/helpers rather than breaking legacy verify behavior. No blanket connected-neighbour exclusion in context checks; allow touching at validated joint pairs but still reject penetrations. Compare baseline pair findings to final findings and report unchanged baseline conflicts; target must resolve. Check original external connections and new chain ports (position, frame/flow compatibility where available), systems/profiles; unknown metadata -> review. Structure -> structural review; services -> performance/access/supports review as relevant. Do not claim engineering adequacy. Keep slender trim gate. For context offsets require real fitting support rather than silent square-corner fallback if it would invalidate checking.
 
-- [ ] RED: tests for lateral external endpoints and SI units; snapshot/trial isolation; single edit blocked, compound passes; three-group bound; connected neighbour overlap; external connection break; unsupported/fabricated/NaN/overlap inputs; structural review; multi-file failed commit rollback and export reload.
-- [ ] GREEN: implement interfaces above, run focused tests and full server suite, self-review.
-- [ ] Commit assigned changes and report RED/GREEN evidence and exact interfaces.
+- [x] RED: tests for lateral external endpoints and SI units; snapshot/trial isolation; single edit blocked, compound passes; three-group bound; connected neighbour overlap; external connection break; unsupported/fabricated/NaN/overlap inputs; structural review; multi-file failed commit rollback and export reload.
+- [x] GREEN: implement interfaces above, run focused tests and full server suite, self-review.
+- [x] Commit assigned changes and report RED/GREEN evidence and exact interfaces.
 
 ### Task 2: Bounded planner, APIs and chat
 
@@ -54,9 +54,9 @@ Wire contract (the web task consumes this verbatim):
 - Chat adds `explore_wider_fix(clash_id)` and emits `{type:"context_event",event: ContextEvent}` then final context_result via same event wrapper. Counts three units via propose_allowed_many. Chat cannot accept. Supply clear prompt direction when user asks to move surrounding objects.
 - Numeric context knobs in .env.example (defaults above), owner effort carried into workers. Existing routes untouched.
 
-- [ ] RED: scripted model discovers a real blocker then evaluates a passing compound plan; rejects unseen IDs/overlapping closure, respects all budgets, retains best passing candidates on deadline, ranking/dedup, and verifies no live mutation during search.
-- [ ] RED: API charges exactly three, owner bypass, streams progress/result, invalid acknowledgements/stale/forged IDs, failed commit rollback, confirmed-only resolved pairs; chat request yields context events without applying.
-- [ ] GREEN: implement, run focused/full server tests, self-review, commit and report.
+- [x] RED: scripted model discovers a real blocker then evaluates a passing compound plan; rejects unseen IDs/overlapping closure, respects all budgets, retains best passing candidates on deadline, ranking/dedup, and verifies no live mutation during search.
+- [x] RED: API charges exactly three, owner bypass, streams progress/result, invalid acknowledgements/stale/forged IDs, failed commit rollback, confirmed-only resolved pairs; chat request yields context events without applying.
+- [x] GREEN: implement, run focused/full server tests, self-review, commit and report.
 
 ### Task 3: Product integration and runtime
 
@@ -68,9 +68,9 @@ Wire contract (the web task consumes this verbatim):
 
 Render `checks.integrity.warnings` as well as review conditions, particularly retained known `legacy_port_frames` conventions; never describe them as unknown or fully conformant. Regenerate a stale proposal for its stored objective, not whichever clash was selected later. Route previews coherently between clash, existing batch plan and context proposal; reset acknowledgement when the alternative changes, and ignore result/accept callbacks belonging to a scene that has since been replaced. The controller will drive the browser using the ignored runtime_smoke.py fixture server; no fake model route is shipped.
 
-- [ ] Verify RED via initial typecheck for new contract usage; implement component wiring; production typecheck/build.
-- [ ] Drive local running app through selecting a clash, wider discovery, full context preview, condition acknowledgement, acceptance and IFC export; include a scripted local server model for deterministic geometry proof without shipping a fake-model route.
-- [ ] Run complete server suite and web build once final changes settle. Self-review, commit, report runtime evidence and limitations honestly.
+- [x] Verify RED via initial typecheck for new contract usage; implement component wiring; production typecheck/build.
+- [x] Drive local running app through selecting a clash, wider discovery, full context preview, condition acknowledgement, acceptance and IFC export; include a scripted local server model for deterministic geometry proof without shipping a fake-model route.
+- [x] Run complete server suite and web build once final changes settle. Self-review, commit, report runtime evidence and limitations honestly.
 
 ## Delivery
 

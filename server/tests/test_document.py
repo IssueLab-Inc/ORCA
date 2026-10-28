@@ -4,6 +4,7 @@ import json
 import zipfile
 from collections import Counter
 
+import pytest
 from PIL import Image
 
 from sightline import document, triage
@@ -75,6 +76,27 @@ def test_combined_without_bcf_is_one_pdf_and_stays_draft(tmp_path):
     data, name, media = document.generate(report, verdicts, Writer(), scope="combined", model_teams={}, matches=None,
                                           scene=None, evidence={}, reviews={}, marks={}, include_bcf=False)
     assert media == "application/pdf" and data.startswith(b"%PDF")
+
+
+@pytest.mark.parametrize("kind", ["context", "move", None])
+def test_screenshot_facts_do_not_assign_pair_colours_to_coordinated_edits(tmp_path, monkeypatch, kind):
+    report = _report(tmp_path)
+    first = report.clashes[0]
+    first.images = [("A", tmp_path / "navisworks.jpg")]
+    monkeypatch.setattr(document, "_zone_crop", lambda _: _jpeg())
+    fix = {"status": "accepted", "title": "Coordinated fix" if kind == "context" else "Raise the duct",
+           "before_img": _jpeg(), "after_img": _jpeg()}
+    if kind is not None:
+        fix["kind"] = kind
+    rows = document.build_rows(report, {}, {}, None, None, {first.id: fix}, {}, {})
+    html_text = document.render_html("Report", "Coordination", rows, {}, {})
+    if kind == "context":
+        assert "<th>A</th>" in html_text and "<th>B</th>" in html_text
+        assert "<th>A (red)</th>" not in html_text and "<th>B (green)</th>" not in html_text
+    else:
+        assert "<th>A (red)</th>" in html_text and "<th>B (green)</th>" in html_text
+    assert "Navisworks view, zoomed to where they meet (red A, green B)" in html_text
+    assert "The model as it is" in html_text and "With the fix (applied)" in html_text
 
 
 class _AllReal:

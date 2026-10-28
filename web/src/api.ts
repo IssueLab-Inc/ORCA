@@ -21,6 +21,33 @@ export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m:
 export type FixKind = "move" | "offset" | "trim";
 export interface TrimCut { end: "start" | "end"; by_m: number }
 export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[]; advice?: string }
+/** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
+export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
+export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
+export interface ContextChecks {
+  geometry: { passed: boolean; target_resolved: boolean; hits: ContextHit[]; existing_conflicts: ContextHit[]; min_clearance_m: number | null };
+  integrity: { passed: boolean; errors: string[]; warnings: string[] };
+}
+export interface ContextEdit {
+  kind: FixKind; element: string; reason: string; label: string; moved: string[]; pieces: string[];
+  before: Piece[]; preview: Piece[]; delta_m?: number[]; split_m?: number[]; end?: "start" | "end"; by_m?: number;
+}
+export interface ContextProposal {
+  id: string; scene_revision: number; objective: ContextObjective; title: string; edits: ContextEdit[];
+  checks: ContextChecks; review_conditions: { id: string; message: string }[]; passed: boolean;
+}
+export interface ContextResult {
+  type: "context_result"; proposals: ContextProposal[]; message: string; seconds: number; trials: number; model_calls: number;
+  blockers?: string[];
+}
+export type ContextEvent =
+  | { type: "context_progress"; phase: "inspecting" | "thinking" | "checking" | "blocked"; message: string }
+  | ContextResult
+  | { type: "error"; detail: string };
+export interface ContextApplied {
+  files: number[]; pieces: string[][]; edits: ContextEdit[];
+  resolved_pairs: { element_a: string; element_b: string }[]; checks: ContextChecks;
+}
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent =
   | { type: "thinking"; round: number }
@@ -82,8 +109,12 @@ const jsonHeaders = () => ({ "Content-Type": "application/json", ...settingsHead
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, { headers: jsonHeaders(), ...init });
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
+  if (!r.ok) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`, r.status);
   return r.json() as Promise<T>;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); }
 }
 
 /** A plan: several fixes chosen together and checked as a whole (server: plans.py). */
@@ -131,6 +162,7 @@ export type ChatEvent =
   | { type: "ui"; action: "select_clash"; clash_id: string }
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   | { type: "agent"; event: AgentEvent }
+  | { type: "context_event"; event: ContextEvent }
   | ({ type: "proposal"; clash_id: string; element_a: string; element_b: string } & Proposal)
   | { type: "plan_started"; kind: "batch" | "root_cause" }
   | { type: "plan_event"; event: PlanEvent }
@@ -144,7 +176,7 @@ export type Team = "Structure" | "MEP" | "Architecture" | "Site";
 export interface ModelTeam { file: string; guess: Team; elements: number }
 /** A fix shown in the report: what it changes, and the view of the clash as it is and with the fix. */
 export interface Evidence {
-  status: "proposed" | "accepted"; title: string; kind: FixKind; edit: string; clearance: string; clearance_m: number | null;
+  status: "proposed" | "accepted"; title: string; kind: FixKind | "context"; edit: string; clearance: string; clearance_m: number | null;
   rationale: string; also_needs: string; advice?: string; moved: string[]; before_img?: string; after_img?: string;
 }
 /** A team's review of one clash, recorded in the app. */
@@ -155,26 +187,42 @@ export type DocEvent =
   | { type: "error"; message: string };
 
 /** POST and read newline-delimited JSON events until the stream ends. */
-async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void) {
-  const r = await fetch(`/api${path}`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
+async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void, signal?: AbortSignal) {
+  const r = await fetch(`/api${path}`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body), signal });
   if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    let nl: number;
-    while ((nl = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (line && onEvent(JSON.parse(line) as T) === true) { reader.cancel(); return; }
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (signal?.aborted) return;
+        if (line && onEvent(JSON.parse(line) as T) === true) return;
+      }
+      if (done) return;
     }
-    if (done) return;
-  }
+  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
 export const api = {
+  contextStream: async (sceneId: string, objective: ContextObjective, onEvent: (e: ContextEvent) => void, signal?: AbortSignal) => {
+    let finished = false;
+    try {
+      await ndjson<ContextEvent>(`/scenes/${sceneId}/context/stream`, objective, (e) => {
+        onEvent(e); finished = e.type === "context_result" || e.type === "error"; return finished;
+      }, signal);
+    } catch (e) { if (!signal?.aborted) throw e; }
+    if (signal?.aborted) return;
+    if (!finished) throw new Error("The server stopped before the wider search finished. Regenerate for the original objective.");
+  },
+  applyContext: (sceneId: string, proposalId: string, acknowledgedConditions: string[]) =>
+    call<ContextApplied>(`/scenes/${sceneId}/context/apply`, { method: "POST",
+      body: JSON.stringify({ proposal_id: proposalId, acknowledged_conditions: acknowledgedConditions }) }),
   owner: () => call<{ available: boolean; owner: boolean }>("/owner"),
   unlock: (token: string) => call<{ owner: boolean }>("/owner/unlock", { method: "POST", body: JSON.stringify({ token }) }),
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
@@ -212,11 +260,15 @@ export const api = {
   applyPlan: (sceneId: string, options: Option[]) =>
     call<{ files: number[]; pieces: string[][] }>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
-                 clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void) =>
-    ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }),
+                 clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
+    ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   samples: () => call<string[]>("/samples"),
   open: (samples: string[]) => call<{ id: string; files: string[] }>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
-  file: async (id: string, index: number) => new Uint8Array(await (await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" })).arrayBuffer()),
+  file: async (id: string, index: number) => {
+    const r = await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" });
+    if (!r.ok) throw new ApiError(`Model download failed (${r.status})`, r.status);
+    return new Uint8Array(await r.arrayBuffer());
+  },
   verify: (id: string, moved: string[], delta_m: number[]) =>
     call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
   propose: (id: string, element_a: string, element_b: string, from?: { report_id: string; clash_id: string }) =>
