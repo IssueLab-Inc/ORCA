@@ -1,4 +1,7 @@
 import json
+import threading
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -92,3 +95,69 @@ def test_chat_finds_root_causes_and_builds_a_plan(tmp_path):
     plan = next(e for e in events if e["type"] == "plan")
     assert plan["kind"] == "batch" and plan["check"]["passed"]
     assert any(e["type"] == "plan_event" for e in events)
+
+
+@pytest.mark.parametrize('cancel_older', [True, False])
+def test_immediate_resume_preserves_newer_history_when_older_model_returns_late(cancel_older):
+    entered, release, cancel = threading.Event(), threading.Event(), threading.Event()
+    inputs, results, errors, old_events = {}, {}, [], []
+    class Model:
+        def chat(self, messages, tools):
+            question = messages[-1]['content'].split('\n\n')[-1]
+            inputs[question] = json.loads(json.dumps(messages))
+            if question == 'Older question':
+                entered.set()
+                assert release.wait(5)
+                return dict(role='assistant', content='Older answer')
+            return dict(role='assistant', content='Newer answer')
+    chat = Chat(Workspace(), Model()); session = chat.session(None)
+    def old_turn():
+        try:
+            results['old'] = chat.turn(session, 'Older question', Context(), old_events.append, cancel=cancel)
+        except Exception as exc:
+            errors.append(exc)
+    thread = threading.Thread(target=old_turn); thread.start()
+    try:
+        assert entered.wait(5)
+        if cancel_older: cancel.set()
+        # A resumed request finishes while the older model request remains blocked.
+        results['new'] = chat.turn(session, 'Newer question', Context(), lambda e: None)
+        completed = json.loads(json.dumps(session.messages))
+    finally:
+        release.set(); thread.join(5)
+    assert not thread.is_alive() and not errors
+    assert results == {'old': '' if cancel_older else 'Older answer', 'new': 'Newer answer'}
+    assert session.messages == completed
+    assert len(completed) == 3 and completed[-1]['content'] == 'Newer answer'
+    assert [m['role'] for m in inputs['Newer question']] == ['system', 'user']
+    assert inputs['Newer question'][-1]['content'].endswith('Newer question')
+    if cancel_older:
+        assert not any(e['type'] == 'message' for e in old_events)
+
+
+def test_final_emit_cancellation_cannot_publish_or_erase_a_newer_turn():
+    cancel, entered, release = threading.Event(), threading.Event(), threading.Event()
+    class Model:
+        def chat(self, messages, tools):
+            if messages[-1]['content'].endswith('Older question'):
+                entered.set(); assert release.wait(3)
+                return dict(role='assistant', content='Older answer')
+            return dict(role='assistant', content='Newer answer')
+    chat = Chat(Workspace(), Model()); session = chat.session(None); answers, errors = [], []
+    def emit(event):
+        if event['type'] == 'message':
+            cancel.set()
+    def old_turn():
+        try:
+            answers.append(chat.turn(session, 'Older question', Context(), emit, cancel=cancel))
+        except Exception as exc:
+            errors.append(exc)
+    thread = threading.Thread(target=old_turn, daemon=True); thread.start()
+    try:
+        assert entered.wait(3)
+        chat.turn(session, 'Newer question', Context(), lambda e: None)
+        newer = json.loads(json.dumps(session.messages))
+    finally:
+        release.set(); thread.join(3)
+    assert not thread.is_alive() and not errors and answers == [''] and session.messages == newer
+    assert session._published_turn == 2 and session.messages[-1]['content'] == 'Newer answer'

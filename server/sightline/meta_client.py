@@ -47,7 +47,7 @@ class ChatModel(Protocol):
 
 
 class ToolModel(Protocol):
-    def chat(self, messages: list[dict], tools: list[dict]) -> dict: ...
+    def chat(self, messages: list[dict], tools: list[dict], *, timeout_s: float | None = None) -> dict: ...
 
 
 def image_part(path: Path) -> dict:
@@ -92,9 +92,10 @@ class MetaChatModel:
         from . import owner
         return owner.effort(self.role) or self.reasoning_effort
 
-    def _post(self, payload: dict) -> dict:
+    def _post(self, payload: dict, *, timeout_s: float | None = None) -> dict:
         r = self.client.post(f"{self.base_url}/chat/completions", json=payload,
-                             headers={"Authorization": f"Bearer {self.api_key}"})
+                             headers={"Authorization": f"Bearer {self.api_key}"},
+                             **({"timeout": timeout_s} if timeout_s is not None else {}))
         r.raise_for_status()
         return r.json()
 
@@ -197,12 +198,13 @@ class MetaChatModel:
                     raise RuntimeError(f"Muse Spark failed: {json.dumps(event)[:300]}")
         return json.loads(_strip_fence(out))
 
-    def chat(self, messages: list[dict], tools: list[dict]) -> dict:
+    def chat(self, messages: list[dict], tools: list[dict], *, timeout_s: float | None = None) -> dict:
         """One assistant turn with tools: returns the message (content and/or tool_calls)."""
-        body = self._post({
+        payload = {
             "model": self.model, "messages": messages, "tools": tools, "temperature": 0.2,
             **({"reasoning_effort": self.effort} if self.effort else {}),
-        })
+        }
+        body = self._post(payload, timeout_s=timeout_s)
         return body["choices"][0]["message"]
 
 
