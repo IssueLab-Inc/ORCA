@@ -24,6 +24,15 @@ function tail(text: string) {
   return "…" + cut.slice(cut.indexOf(" ") + 1);
 }
 
+const BASIS_LABEL: Record<string, string> = { touch: "touch", non_physical: "not physical", same_element: "same element" };
+
+/** "50 touch · 49 not physical · 12 same element": what the rules settled, biggest first. */
+function ruleBreakdown(vs: TriageVerdict[]) {
+  const by: Record<string, number> = {};
+  for (const v of vs) { const k = BASIS_LABEL[v.basis ?? ""] ?? "other"; by[k] = (by[k] ?? 0) + 1; }
+  return Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, c]) => `${c} ${k}`).join(" · ");
+}
+
 const ORDER: TriageKind[] = ["real_clash", "modelling_error", "by_design", "non_physical", "unknown"];
 
 export interface TriageRun extends TriageModel { total: number; started: number; done: boolean; seconds?: number; error?: string }
@@ -60,6 +69,17 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
     </div>
   );
 
+  // While running, the second stage's own bar: what the model has read, out of what it has to read.
+  const asked = ids.filter((id) => results[id].source !== "rule");
+  const askedCounts = Object.fromEntries(ORDER.map((k) => [k, asked.filter((id) => results[id].verdict === k).length])) as Record<TriageKind, number>;
+  const modelBar = (
+    <div className="triage-bar" aria-label={`${asked.length} of ${Math.max(0, n - byRule)} read by the model`}>
+      {ORDER.filter((k) => askedCounts[k]).map((k) => (
+        <span key={k} className="seg" style={{ flexGrow: askedCounts[k], background: TRIAGE[k].colour }} />))}
+      {n - byRule > asked.length && <span className="rest" style={{ flexGrow: n - byRule - asked.length }} />}
+    </div>
+  );
+
   return (
     <section className={`triage ${state}`} data-tour="triage">
       <div className="triage-head">
@@ -81,8 +101,21 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
       </>}
 
       {state === "running" && run && <>
-        <div className="triage-count"><b>{ids.length}</b> of {n} sorted <span className="hint">· {seconds} s{byRule ? ` · ${byRule} by rule` : ""}</span></div>
-        {bar}
+        <div className="triage-stage done">
+          <CircleCheck size={15} aria-hidden />
+          <div>
+            <b>{byRule ? `${byRule} settled by rule` : "Checking the sure cases…"}</b>
+            {byRule > 0 && <small>{ruleBreakdown(ids.filter((id) => results[id].source === "rule").map((id) => results[id]))} · no model needed</small>}
+          </div>
+        </div>
+        <div className="triage-stage">
+          <Brain size={15} aria-hidden />
+          <div>
+            <b>{model || "The model"} has read {ids.length - byRule} of {Math.max(0, n - byRule)}</b>
+            <small>the rest, eight at a time · {seconds} s</small>
+          </div>
+        </div>
+        {modelBar}
         {live.length > 0 && (
           <div className="triage-live" aria-live="off">
             <span className="triage-live-head"><Brain size={12} aria-hidden /> {model || "The model"} is reading {live.length} now</span>

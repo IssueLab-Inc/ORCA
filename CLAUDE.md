@@ -310,8 +310,9 @@ Landing (Oct 28): hero = headline, lede, the two buttons side by side and a one-
 picture; "Once it's open" (left / middle / right) is its own three-card row.
 
 Triage and Insights UI (Oct 28): Triage leads the left panel. Before a run: "Step 1 · sort the report", one line on why,
-a full-width "Triage all n clashes". Running: count, one bar that fills in verdict colours (the unsorted rest striped),
-the live reading. Done: "n need a fix of N", the bar (a segment per verdict, click to filter), a row per verdict
+a full-width "Triage all n clashes". Running: two stages, "n settled by rule" (by basis: touch, same element, not physical; no
+model) and "Muse Spark Open has read k of m" with its own bar (verdict colours, the unread rest striped), then the live
+reading. Done: "n need a fix of N", the bar (a segment per verdict, click to filter), a row per verdict
 (name, what it means, count; click to filter; the real row is `data-tour=triage-real`), "Set aside n as noise" /
 "Flag n for their authors" (then a done chip), and a footer with time, rule count and model. Insights: header with
 counts in its subtitle, a purpose line per part, root causes with chips (clashing, level, across disciplines, not in the
