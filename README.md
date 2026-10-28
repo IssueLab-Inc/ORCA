@@ -38,6 +38,10 @@ up to three coordinated edit groups. The **Plan** tab shows up to three alternat
 geometry and model integrity evidence, retained authored frame warnings, and individual designer review conditions.
 **Before / After / Both** previews the entire arrangement, including surrounding elements that must move.
 
+Wider-search offsets support horizontal straight service segments with plain rectangular or circular profiles.
+Hollow, rounded and open-section profiles cannot yet retain their shape through generated bends, so those offsets
+are rejected and inspection explains the limit. Whole-run moves remain available when supported by the model.
+
 Acknowledge every condition to **Accept complete proposal**. The server rechecks its stored proposal against the
 current model revision and keeps all dependent edits atomically; the browser reloads every affected IFC file and
 marks only confirmed resolved pairs fixed. If the model changed, regenerate for the proposal's original objective.

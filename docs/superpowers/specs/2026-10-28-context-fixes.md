@@ -16,6 +16,8 @@ Check objective resolution, all changed/new geometry against unchanged and chang
 
 Extend local offsets to vertical OR lateral detours on supported horizontal straight service segments, preserving external endpoints, profile/system metadata and fitting chains. Compound 3D detours and sloped runs are out of scope. Preserve slender-member trim restrictions and old API behavior. Do not introduce destructive structural edits beyond existing supported primitives.
 
+Context offsets initially support exact plain `IfcRectangleProfileDef` and `IfcCircleProfileDef` profiles. Hollow, rounded, open-section and other decorated profiles are unsupported because the current bend generator does not preserve their material topology. Reject these offsets with a specific reason and omit the offset capability during inspection; whole-run moves remain eligible. This includes Northbank's U-section tray reference, whose prior context-offset pass is superseded by the stricter profile check. Existing legacy edit routes retain their behavior.
+
 ## Product and acceptance
 
 Dedicated context-proposal stream and acceptance endpoints; existing proposal/batch APIs remain compatible. Return server IDs, revision, objective, edits with reasons/dependencies, before/after geometry, checks and review conditions. Stream inspection/discovery/check progress using existing uncompressed NDJSON headers. Reuse before/after/both previews; show every edit and its reason. Keep the original clash objective separate from enabling edits. Chat can request a wider fix but cannot accept it.

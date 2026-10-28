@@ -1,6 +1,6 @@
 # Context fixes program — 2026-10-28
 
-Status: all three slices implemented and task-reviewed through37db0e2; final whole-branch review underway before readying the three stacked PRs.
+Status: all three slices implemented, task-reviewed and whole-branch-reviewed; final profile fix approved through e672cb5. Preparing fast-forward-safe backports and readying the three stacked PRs.
 
 Spec: docs/superpowers/specs/2026-10-28-context-fixes.md
 Plan: docs/superpowers/plans/2026-10-28-context-fixes.md
@@ -72,3 +72,17 @@ Task review caught obsolete pilot cleanup and late chat callbacks. Fix c629806 a
 Task3 fix37db0e2 retires only pending progress owned by the cancelled chat tracker, preserving completed proposals and newer work. Scoped review2 approved, no Critical/Important findings. Final fresh controller checks:205 server tests passed in30.00s;12 actual-source frontend regressions passed; production build `index-KOMhoYeQ.js` passed with the existing bundle-size warning. Latest-bundle browser proof also replaced an in-flight chat search with direct work, confirmed wider controls were enabled again, and completed a new wider proposal. The private scripted model lacks the legacy single-proposal method, so that replacement's single action reported its expected QA-stub error rather than exercising a real single proposal; no such stub ships.
 
 Latest-bundle normal flow was reloaded cleanly and completed discovery, full Both preview, six-condition guard, whole acceptance/reload and browser IFC export. Reopened export:30272bytes,6 duct fittings,tray y0.30..0.40m; no browser console errors. Evidence remains in ignored QA files. Native Windows's two original PDF dependency failures were verified separately through the Linux/Pango environment rather than suppressed in product code. Whole-branch review is independent and still pending at this checkpoint.
+
+## Whole-branch review correction
+
+Final reviewer found exactly one Important defect: the inherited profile-size support accepts hollow/open/decorated source profiles, while the bend generator fills a plain rectangle/circle. A real hollow400x300x10mm source cap0.0136m² became solid0.12m² in accepted/exported bends without a profile warning. The final fix wave must reject context offsets outside exact plain rectangle/circle profiles, expose truthful inspection capabilities, preserve whole-run moves and existing legacy edit routes, and verify real IFC rollback plus positive controls. No other Critical/Important finding remained.
+
+Fresh Northbank inventory confirms the tray `LV-TRAY-L02-1` is `IfcUShapeProfileDef`; this new strict context rejection intentionally supersedes prior claims that all three reference offsets preserve profiles. The duct is plain rectangle and cold-water main plain circle. Controller will recheck supported references and explicit tray rejection after the correction; no Northbank-specific bypass is allowed. The stricter unsupported-shape behavior and initial profile limit are now explicit in the spec. Original three-reference legacy API behavior remains unchanged.
+
+Final fix wave: foundationf561898 and plannere672cb5 share `check_offset_profile`, gating exact plain rectangle/circle before mutation and during inspection. Real metre/mm regressions reject hollow rectangle/circle, rounded rectangle and U-section offsets without IFC/revision changes; controls preserve plain offsets and whole-run moves through export/reload. Full server227 passed in36.06s. Scoped final rereview approved, no remaining Critical/Important findings. Web12 regressions and build `index-KOMhoYeQ.js` remain unchanged and passed.
+
+Fresh four-file Northbank checks after the fix: legacy offsets042/057/061 all retain prior behavior; strict context042 and061 pass separately and together with disclosed authored-frame warnings;057 rejects explicitly with `unsupported offset profile: IfcUShapeProfileDef`. This is the final regression result, superseding earlier all-three strict-pass notes.
+
+Restarted final backend, latest web bundle: Chat -> wider discovery -> complete tray+duct Both preview -> six-condition guard -> whole acceptance/reload -> exactly one confirmed report clash fixed -> browser IFC export/reopen all passed. Export30272bytes contains6 duct fittings and trayy0.30..0.40m; browser console errors empty. Original explicit-action, stale409 and stored-objective regeneration proofs remain valid. Actual configured model found this plain-profile arrangement in49.612s; bounded unsuccessful search remains inconclusive. No fake model route ships.
+
+PR3: https://github.com/IssueLab-Inc/clashwise-sightline/pull/3, attached and stacked on PR2. All PRs remain unmerged and undeployed. Native Windows still needs its original native PDF dependencies; all PDF tests passed in frozen-lock Linux/Pango. QA artifacts will be preserved outside the completed SDD scratch directory before cleanup.
