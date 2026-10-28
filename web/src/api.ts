@@ -187,23 +187,26 @@ export type DocEvent =
   | { type: "error"; message: string };
 
 /** POST and read newline-delimited JSON events until the stream ends. */
-async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void) {
-  const r = await fetch(`/api${path}`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
+async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void, signal?: AbortSignal) {
+  const r = await fetch(`/api${path}`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body), signal });
   if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    let nl: number;
-    while ((nl = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (line && onEvent(JSON.parse(line) as T) === true) { reader.cancel(); return; }
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (signal?.aborted) return;
+        if (line && onEvent(JSON.parse(line) as T) === true) return;
+      }
+      if (done) return;
     }
-    if (done) return;
-  }
+  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
 export const api = {
@@ -254,8 +257,8 @@ export const api = {
   applyPlan: (sceneId: string, options: Option[]) =>
     call<{ files: number[]; pieces: string[][] }>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
-                 clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void) =>
-    ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }),
+                 clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
+    ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   samples: () => call<string[]>("/samples"),
   open: (samples: string[]) => call<{ id: string; files: string[] }>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
   file: async (id: string, index: number) => new Uint8Array(await (await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" })).arrayBuffer()),

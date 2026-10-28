@@ -2,6 +2,7 @@ import { Boxes, Brain, Check, CircleCheck, Compass, Download, FileSpreadsheet, F
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
+import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
 import type { OwnerSettings } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
@@ -117,12 +118,15 @@ export function App() {
   const [viewContext, setViewContext] = useState(false);
   // Invalidate callbacks immediately when replacement starts, before the new scene ID arrives.
   const sceneEpoch = useRef(0);
+  const workspaceEpoch = useRef(0);
+  const chatOwner = useRef(new ChatRequestOwner());
   const contextRequest = useRef(0);
   const planRequest = useRef(0);
   const contextProposal = context?.result?.proposals.find((p) => p.id === contextChosen) ?? null;
   const contextWorking = !!context && context.phase !== "done";
   const activeContext = viewContext && !context?.accepted;
   const renderedSceneEpoch = sceneEpoch.current;
+  const renderedWorkspaceEpoch = workspaceEpoch.current;
 
   useEffect(() => {
     if (!sceneId || !contextProposal) return;
@@ -151,7 +155,7 @@ export function App() {
       setPicked(set.length ? set : list.slice(0, 1));
     }).catch((e) => setError(`Can't reach the Sightline server: ${e.message}`));
     api.reportSamples().then(setReportSamples).catch(() => undefined);
-    return () => v.dispose();
+    return () => { pilot.current?.cancel(); chatOwner.current.invalidate(); v.dispose(); };
   }, []);
 
   // Pieces accepted offsets added to A or B are part of that side: coloured, and kept when isolating.
@@ -463,9 +467,10 @@ export function App() {
 
   async function open() {
     if (!picked.length) return;
+    ++workspaceEpoch.current; replaceChatWork();
     const epoch = ++sceneEpoch.current;
     ++contextRequest.current; ++agentRun.current; ++planRequest.current;
-    pilot.current?.takeOver(); setPilotStatus(null); chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
+    pilot.current?.cancel();
     setChatAsk(undefined);
     setContext(null); setContextChosen(null); setContextNames({}); setAcknowledged([]); setViewContext(false); setViewPlan(false); setSceneId(null);
     setBusy(`Loading ${picked.length} model${picked.length > 1 ? "s" : ""}…`); setError(null); resetWork(); setA(null); setB(null);
@@ -499,9 +504,12 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, sceneId, matches, clash, a, b]);
   async function loadReport(get: () => Promise<Report>, what: string) {
+    const workspace = ++workspaceEpoch.current;
+    replaceChatWork(); ++agentRun.current; ++planRequest.current; ++contextRequest.current;
+    pilot.current?.cancel(); resetWork(); setContext(null); setContextChosen(null); setAcknowledged([]); setPlanKind("batch"); setChatAsk(undefined);
     setBusy(`Reading ${what}…`); setError(null);
-    try { const r = await get(); setReport(r); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setFixes({}); setReviewed({}); setVerdicts(null); }
-    catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+    try { const r = await get(); if (workspaceEpoch.current !== workspace) return; setReport(r); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({}); setVerdicts(null); }
+    catch (e) { if (workspaceEpoch.current === workspace) setError((e as Error).message); } finally { if (workspaceEpoch.current === workspace) setBusy(null); }
   }
 
   function upload(list: FileList | null) {
@@ -632,6 +640,7 @@ export function App() {
 
   async function propose() {
     if (!sceneId || !a || !b) return;
+    replaceChatWork();
     const { onEvent, finish } = trackAgent();
     const run = agentRun.current;
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
@@ -646,6 +655,7 @@ export function App() {
   async function replayPropose(clashId: string) {
     const c = report?.clashes.find((x) => x.id === clashId);
     if (!c || !sceneId) return;
+    replaceChatWork();
     if (clash?.id !== c.id) selectClash(c);
     const epoch = sceneEpoch.current;
     const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } = await (await fetch(`/tour/${clashId}.json`)).json();
@@ -666,6 +676,7 @@ export function App() {
 
   /** Play the recorded root-cause plan for the girder (the tour's fallback), at the pace it was recorded. */
   async function replayPlan() {
+    replaceChatWork();
     const epoch = sceneEpoch.current;
     const rec: { events: { t: number; event: PlanEvent }[] } = await (await fetch("/tour/girder-plan.json")).json();
     if (sceneEpoch.current !== epoch) return;
@@ -686,6 +697,7 @@ export function App() {
   function trackPlan(kind: "batch" | "root_cause") {
     const epoch = sceneEpoch.current, request = ++planRequest.current;
     const live = () => sceneEpoch.current === epoch && planRequest.current === request;
+    ++agentRun.current; pilot.current?.cancel();
     resetWork(); setPlan(null); setError(null); setPlanError(null);
     setViewPlan(true); setViewContext(false); setPlanKind("batch");
     const t = Date.now();
@@ -708,6 +720,7 @@ export function App() {
   /** Build a plan: several ticked clashes together, or the root cause around one element. */
   async function runPlan(body: { clash_ids?: string[]; hub?: string }) {
     if (!sceneId || !report) return;
+    replaceChatWork();
     setTab("plan");
     const { onEvent, finish, live } = trackPlan(body.hub ? "root_cause" : "batch");
     let p: Plan | null = null;
@@ -718,6 +731,7 @@ export function App() {
 
   async function acceptPlan() {
     if (!sceneId || !plan) return;
+    replaceChatWork();
     const epoch = sceneEpoch.current;
     const live = () => sceneEpoch.current === epoch;
     const items = plan.items.filter((i) => i.option && (plan.check.passed || plan.check.items[i.key]?.passed));
@@ -773,7 +787,7 @@ export function App() {
   function trackContext(objective: ContextObjective | null) {
     const epoch = sceneEpoch.current, request = ++contextRequest.current;
     const live = () => sceneEpoch.current === epoch && contextRequest.current === request;
-    ++agentRun.current; pilot.current?.takeOver(); setPilotStatus(null);
+    ++agentRun.current; pilot.current?.cancel();
     resetWork(); setViewPlan(false); setViewContext(true); setPlanKind("context"); setCompare("after");
     setContextChosen(null); setAcknowledged([]);
     const started = Date.now(); setNow(started);
@@ -794,6 +808,7 @@ export function App() {
     const target = objective ?? (a && b ? { element_a: a, element_b: b,
       ...(clash && report ? { report_id: report.id, clash_id: clash.id } : {}) } : null);
     if (!target) return;
+    replaceChatWork();
     setTab("plan");
     const tracker = trackContext(target);
     try { await api.contextStream(sceneId, target, tracker.onEvent); }
@@ -809,6 +824,7 @@ export function App() {
 
   async function acceptContext() {
     if (!sceneId || !contextProposal || context?.stale || context?.accepted || contextWorking) return;
+    replaceChatWork();
     const p = contextProposal, sid = sceneId, epoch = sceneEpoch.current, request = contextRequest.current;
     const live = () => sceneEpoch.current === epoch && contextRequest.current === request;
     if (!p.review_conditions.every((c) => acknowledged.includes(c.id))) return;
@@ -852,6 +868,11 @@ export function App() {
   // The chat drives the page through events: select a clash, change the view, show the fix agent's work.
   const chatAgent = useRef<ReturnType<typeof trackAgent> | null>(null);
   const chatContext = useRef<ReturnType<typeof trackContext> | null>(null);
+  function replaceChatWork() {
+    // Close the turn boundary before starting direct work; old tool events cannot create a fresh tracker.
+    chatOwner.current.invalidate();
+    chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
+  }
   function onChatEvent(e: ChatEvent) {
     if (e.type === "tool" && e.name === "explore_wider_fix") {
       const c = report?.clashes.find((x) => x.id === e.args.clash_id), pair = c && matches?.[c.id];
@@ -893,6 +914,7 @@ export function App() {
 
   async function accept(o: Option) {
     if (!sceneId) return;
+    replaceChatWork();
     const epoch = sceneEpoch.current;
     const live = () => sceneEpoch.current === epoch;
     setBusy("Applying the fix…"); setError(null);
@@ -923,6 +945,8 @@ export function App() {
 
   async function checkManual() {
     if (!sceneId || !a) return;
+    replaceChatWork();
+    ++agentRun.current; pilot.current?.cancel(); setProgress(null);
     const epoch = sceneEpoch.current;
     const v = await api.verify(sceneId, [a], [0, 0, manualDz]);
     if (sceneEpoch.current !== epoch) return;
@@ -1140,7 +1164,8 @@ export function App() {
         <div className="chat-slot" hidden={tab !== "chat"}>
           {context && <button className="context-chat-link btn" onClick={() => { setTab("plan"); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
-          <ChatPanel key={`${sceneId}:${report?.id}`} ready={!!(sceneId || report)} onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch) onChatEvent(e); }} ask={chatAsk}
+          <ChatPanel key={`${sceneId}:${report?.id}`} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
+            onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
             context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
         </div>
         {tab === "plan" && <>

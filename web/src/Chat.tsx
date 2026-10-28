@@ -1,11 +1,12 @@
 import { Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type ChatEvent } from "./api";
+import type { ChatRequest, ChatRequestOwner } from "./chatRequest";
 import { MAX_SECONDS, VoiceRecorder } from "./voice";
 
 /** One step the assistant took, shown under its answer. */
 export interface Step { name: string; args: Record<string, unknown>; summary?: string }
-export interface Turn { role: "user" | "assistant"; text: string; steps: Step[]; pending?: boolean; error?: string; voice?: boolean }
+export interface Turn { role: "user" | "assistant"; text: string; steps: Step[]; pending?: boolean; error?: string; voice?: boolean; request?: number }
 
 const VERBS: Record<string, string> = {
   report_summary: "Read the report summary", list_clashes: "Listed clashes", get_clash: "Read a clash",
@@ -15,6 +16,7 @@ const VERBS: Record<string, string> = {
   show_clash: "Showed a clash", set_view: "Changed the view", find_root_causes: "Looked for root causes",
   find_patterns: "Looked for patterns",
   plan_root_cause: "Planned a root-cause fix", plan_fixes_together: "Planned fixes together",
+  explore_wider_fix: "Explored a wider fix",
 };
 
 function stepLabel(s: Step) {
@@ -64,9 +66,10 @@ const SUGGESTIONS = [
   "Why are there so many clashes on Level 02? Fix the root cause.",
 ];
 
-export function ChatPanel({ context, onEvent, ready, ask }: {
+export function ChatPanel({ context, onEvent, owner, ready, ask }: {
   context: () => { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] };
   onEvent: (e: ChatEvent) => void;
+  owner: ChatRequestOwner;
   ready: boolean;
   ask?: { text: string; send: boolean; n: number };  // the tour: put this in the box, or send it
 }) {
@@ -74,10 +77,19 @@ export function ChatPanel({ context, onEvent, ready, ask }: {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const session = useRef<string | null>(null);
+  const active = useRef<ChatRequest | null>(null);
+  const mounted = useRef(false);
+  const sequence = useRef(0);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [turns]);
 
-  const patchLast = (f: (t: Turn) => Turn) => setTurns((ts) => [...ts.slice(0, -1), f(ts[ts.length - 1])]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; active.current?.cancel(); active.current = null; };
+  }, []);
+  const patchTurn = (request: number, f: (t: Turn) => Turn) => {
+    if (mounted.current) setTurns((ts) => ts.map((t) => t.request === request ? f(t) : t));
+  };
 
   // Voice: record, transcribe with Muse Voice Transcribe, then send the words like a typed message.
   const recorder = useRef<VoiceRecorder | null>(null);
@@ -97,14 +109,17 @@ export function ChatPanel({ context, onEvent, ready, ask }: {
   async function startListening() {
     if (busy || voice.state !== "idle") return;
     const r = new VoiceRecorder();
+    const current = owner.capture();
     try {
       await r.start((level) => setVoice((v) => (v.state === "listening" ? { ...v, level } : v)));
     } catch (e) {
+      if (!mounted.current || !current()) return;
       const denied = (e as Error).name === "NotAllowedError";
       setVoice({ state: "idle", since: 0, level: 0, note: denied ? "Microphone access was blocked. Allow it in the browser to talk to Sightline."
         : "No microphone found." });
       return;
     }
+    if (!mounted.current || !current()) { r.cancel(); return; }
     recorder.current = r;
     setVoice({ state: "listening", since: Date.now(), level: 0 });
   }
@@ -113,12 +128,17 @@ export function ChatPanel({ context, onEvent, ready, ask }: {
     const r = recorder.current;
     if (!r) return;
     recorder.current = null;
+    const current = owner.capture(), reportId = context().report_id;
     setVoice({ state: "transcribing", since: 0, level: 0 });
     try {
-      const { transcript } = await api.transcribe(await r.stop(), context().report_id);
+      const { transcript } = await api.transcribe(await r.stop(), reportId);
+      if (!mounted.current) return;
+      if (!current()) { setVoice({ state: "idle", since: 0, level: 0 }); return; }
       setVoice({ state: "idle", since: 0, level: 0, note: transcript ? undefined : "Didn't catch that. Try again, a little closer to the mic." });
       if (transcript) await send(transcript, true);
     } catch (e) {
+      if (!mounted.current) return;
+      if (!current()) { setVoice({ state: "idle", since: 0, level: 0 }); return; }
       setVoice({ state: "idle", since: 0, level: 0, note: (e as Error).message });
     }
   }
@@ -130,29 +150,45 @@ export function ChatPanel({ context, onEvent, ready, ask }: {
 
   async function send(text: string, spoken = false) {
     const message = text.trim();
-    if (!message || busy) return;
+    if (!message || !ready || busy || !mounted.current || active.current?.isCurrent()) return;
+    const request = ++sequence.current, lease = owner.begin();
+    active.current = lease;
+    const current = () => mounted.current && active.current === lease && lease.isCurrent();
+    const patch = (f: (t: Turn) => Turn) => patchTurn(request, f);
+    const aborted = () => {
+      if (!mounted.current || active.current !== lease) return;
+      patch((t) => ({ ...t, pending: false, text: t.text || "Stopped when newer work took over." }));
+      active.current = null; setBusy(false);
+    };
+    lease.signal.addEventListener("abort", aborted, { once: true });
     setDraft("");
     setBusy(true);
-    setTurns((ts) => [...ts, { role: "user", text: message, steps: [], voice: spoken }, { role: "assistant", text: "", steps: [], pending: true }]);
+    setTurns((ts) => [...ts, { role: "user", text: message, steps: [], voice: spoken }, { role: "assistant", text: "", steps: [], pending: true, request }]);
     try {
       await api.chat({ message, session_id: session.current, ...context() }, (e) => {
+        if (!current()) return;
         if (e.type === "session") session.current = e.id;
-        if (e.type === "tool") patchLast((t) => ({ ...t, steps: [...t.steps, { name: e.name, args: e.args }] }));
-        if (e.type === "tool_result") patchLast((t) => {
+        if (e.type === "tool") patch((t) => ({ ...t, steps: [...t.steps, { name: e.name, args: e.args }] }));
+        if (e.type === "tool_result") patch((t) => {
           const steps = [...t.steps];
           const i = steps.map((s) => s.name).lastIndexOf(e.name);
           if (i >= 0) steps[i] = { ...steps[i], summary: e.summary };
           return { ...t, steps };
         });
-        if (e.type === "message") patchLast((t) => ({ ...t, text: e.text, pending: false }));
-        if (e.type === "error") patchLast((t) => ({ ...t, error: e.detail, pending: false }));
+        if (e.type === "message") patch((t) => ({ ...t, text: e.text, pending: false }));
+        if (e.type === "error") patch((t) => ({ ...t, error: e.detail, pending: false }));
         onEvent(e);
-      });
+      }, lease.signal);
     } catch (err) {
-      patchLast((t) => ({ ...t, error: (err as Error).message, pending: false }));
+      if (current()) {
+        const detail = (err as Error).message;
+        patch((t) => ({ ...t, error: detail, pending: false }));
+        onEvent({ type: "error", detail });
+      }
     } finally {
-      patchLast((t) => ({ ...t, pending: false }));
-      setBusy(false);
+      if (current()) { patch((t) => ({ ...t, pending: false })); setBusy(false); active.current = null; }
+      lease.signal.removeEventListener("abort", aborted);
+      lease.finish();
     }
   }
 
