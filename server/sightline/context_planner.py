@@ -320,7 +320,9 @@ def build(ws, scene_id, objective, emit=lambda e: None, model=None, *, limits=No
                         result['discovered'] = sorted(found)
                         if not result['passed']:
                             progress('blocked', f'Arrangement did not pass; discovered {len(found)} geometry elements for inspection.')
-                        elif active():
+                        elif not cancel.is_set():
+                            # The deadline bounds starting work, not retaining a
+                            # completed, verified trial. Cancellation still discards it.
                             key = _identity(result['edits'])
                             if key not in seen:
                                 seen.add(key)

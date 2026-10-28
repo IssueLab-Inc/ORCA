@@ -94,6 +94,28 @@ def test_model_failure_and_deadline_keep_earlier_passing_candidate(tmp_path):
     assert 'no solution' not in result['message'].lower()
 
 
+@pytest.mark.parametrize('cancel_trial', [False, True])
+def test_completed_trial_after_deadline_is_retained_unless_cancelled(tmp_path, monkeypatch, cancel_trial):
+    ws, sid, obj, _ = setup(tmp_path)
+    clock, cancel = [0.], threading.Event()
+    evaluate_candidate = planner.context_eval.evaluate_candidate
+    def finish_late(*args, **kwargs):
+        result = evaluate_candidate(*args, **kwargs)
+        assert result['passed']
+        clock[0] = 121.
+        if cancel_trial:
+            cancel.set()
+        return result
+    monkeypatch.setattr(planner.context_eval, 'evaluate_candidate', finish_late)
+    model = Scripted([[evaluate([move(obj['element_a'], [0, 0, -.8])]),
+                       evaluate([move(obj['element_a'], [0, 0, -1.])])], 'Must not start'])
+    result = planner.build(ws, sid, obj, model=model, cancel=cancel, clock=lambda: clock[0])
+    assert result['trials'] == result['model_calls'] == len(model.messages) == 1
+    assert len(result['proposals']) == (0 if cancel_trial else 1)
+    stored = getattr(ws, '_context_proposals', {}).get(sid, {})
+    assert len(stored) == (0 if cancel_trial else 1)
+
+
 def test_unseen_and_overlapping_run_are_rejected(tmp_path):
     build_run_fixture(tmp_path / 'run.ifc')
     ws = Workspace(samples=tmp_path)

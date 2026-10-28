@@ -143,8 +143,15 @@ class Chat:
         return s
 
     def turn(self, session: Session, text: str, ctx: Context, emit: Callable[[dict], None], *,
-             cancel: threading.Event | None = None) -> str:
+             cancel: threading.Event | None = None,
+             propose_allowed: Callable[[], str | None] | None = None,
+             propose_allowed_many: Callable[[int], str | None] | None = None,
+             before_publish: Callable[[], None] | None = None) -> str:
         cancel = cancel or threading.Event()
+        # Defaults preserve constructor/direct-tool callers; each turn captures its
+        # callbacks before a model wait can interleave with another visitor's turn.
+        allowed = self.propose_allowed if propose_allowed is None else propose_allowed
+        allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
         target = session
         with target._history_lock:
             target._next_turn += 1
@@ -186,7 +193,8 @@ class Chat:
                 if cancel.is_set():
                     break
                 try:
-                    result, summary, pics = self._run(name, args, ctx, emit, cancel=cancel)
+                    result, summary, pics = self._run(name, args, ctx, emit, cancel=cancel,
+                                                     propose_allowed=allowed, propose_allowed_many=allowed_many)
                 except Exception as e:  # a bad id, a shape that cannot be edited: tell the model, keep going
                     result, summary, pics = {"error": f"{type(e).__name__}: {e}"}, f"failed: {e}", []
                 if cancel.is_set():
@@ -206,11 +214,19 @@ class Chat:
         with target._history_lock:
             if cancel.is_set():
                 return ''
+            # Final callbacks only enqueue bounded, nonblocking events. Hold the
+            # session snapshot lock across completion AND its guarded history commit:
+            # a follow-up after done must see this exchange in its initial snapshot.
+            emit({"type": "message", "text": answer})
+            if before_publish is not None:
+                before_publish()
+            # Message/done/end may themselves overflow the bounded queue.
+            if cancel.is_set():
+                return ''
             # An older in-flight request cannot replace a newer completed conversation.
             if turn_number > target._published_turn:
                 target.messages = session.messages
                 target._published_turn = turn_number
-        emit({"type": "message", "text": answer})
         return answer
 
     def _context_line(self, ctx: Context) -> str:
@@ -255,15 +271,18 @@ class Chat:
                 "level": c.a.level or c.b.level, "distance_mm": round(c.distance_m * 1000) if c.distance_m is not None else None,
                 "in_model": bool(m.get("a") and m.get("b")), "fixed": c.id in ctx.fixed}
 
-    def _run(self, name: str, args: dict, ctx: Context, emit, *, cancel=None) -> tuple[dict, str, list[Path]]:
+    def _run(self, name: str, args: dict, ctx: Context, emit, *, cancel=None,
+             propose_allowed=None, propose_allowed_many=None) -> tuple[dict, str, list[Path]]:
         ws = self.ws
+        allowed = self.propose_allowed if propose_allowed is None else propose_allowed
+        allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
         if name == 'explore_wider_fix':
             report, sid = self._report(ctx), self._scene(ctx)
             c = report.clash(args['clash_id'])
             matched = self._matches(ctx).get(c.id, {})
             objective = context_planner.validate_objective(ws, sid, dict(element_a=matched.get('a'),
                 element_b=matched.get('b'), report_id=report.id, clash_id=c.id))
-            refused = self.propose_allowed_many(3)
+            refused = allowed_many(3)
             if refused:
                 return {'error': refused}, 'refused: allowance used', []
             forward = lambda event: emit(dict(type='context_event', event=event))
@@ -360,7 +379,7 @@ class Chat:
             v.pop("preview", None)
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "propose_fixes":
-            refused = self.propose_allowed()
+            refused = allowed()
             if refused:
                 return {"error": refused}, "refused: allowance used", []
             r, sid = self._report(ctx), self._scene(ctx)
@@ -399,13 +418,13 @@ class Chat:
         if name in ("plan_root_cause", "plan_fixes_together"):
             n = (1 if name == "plan_root_cause"  # the fixes are charged later, only if the cause needs edits
                  else len(plans.pairs_for(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]))[0]))
-            refused = self.propose_allowed_many(max(n, 1))
+            refused = allowed_many(max(n, 1))
             if refused:
                 return {"error": refused}, "refused: allowance used", []
             emit({"type": "plan_started", "kind": "root_cause" if name == "plan_root_cause" else "batch"})
             forward = lambda e: emit({"type": "plan_event", "event": e})
             plan = (plans.build_root_cause(ws, self._scene(ctx), self._report(ctx).id, args["hub"], ctx.fixed, forward,
-                                           charge=self.propose_allowed_many)
+                                           charge=allowed_many)
                     if name == "plan_root_cause"
                     else plans.build_batch(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]), forward))
             data = json.loads(plans.to_json(plan))

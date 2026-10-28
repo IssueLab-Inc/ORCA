@@ -144,7 +144,7 @@ def _rectangular_penetration(scene: IfcScene, a: str, b: str) -> float | None:
             _, _, solid, _, direction, px, py = edits._frames(scene, entity)
         except edits.Unsupported:
             return None
-        if not solid.SweptArea.is_a('IfcRectangleProfileDef'):
+        if solid.SweptArea.is_a() != 'IfcRectangleProfileDef':
             return None
         position = solid.SweptArea.Position
         if position is not None and position.RefDirection is not None:
