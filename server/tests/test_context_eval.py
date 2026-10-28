@@ -224,6 +224,44 @@ def test_joint_system_mismatch_rejects_even_when_geometry_clears(tmp_path):
     assert not r['passed'] and 'system mismatch' in str(r['checks']['integrity']['errors'])
 
 
+@pytest.mark.parametrize('mismatch', ['system', 'flow', 'profile'])
+def test_missing_port_placement_does_not_hide_known_incompatibility(tmp_path, mismatch):
+    from sightline.context_eval import evaluate_candidate
+    scene = IfcScene(build_run_fixture(tmp_path/'r.ifc'))
+    main, end = scene.model.by_type('IfcDuctSegment')
+    main_far, end_near = edits._ports(main)[-1], edits._ports(end)[0]
+    end_near.ObjectPlacement = None
+    if mismatch == 'system':
+        for element in (main, end):
+            service = ifcopenshell.api.run('system.add_system', scene.model)
+            ifcopenshell.api.run('system.assign_system', scene.model, products=[element], system=service)
+    elif mismatch == 'flow':
+        main_far.FlowDirection = end_near.FlowDirection = 'SOURCE'
+    else:
+        edits._body(end)[1].SweptArea.XDim = .5
+    beam = scene.model.by_type('IfcBeam')[0].GlobalId
+    original = scene.model.to_string()
+    result = evaluate_candidate(scene, dict(element_a=main.GlobalId, element_b=beam),
+                                [move(main.GlobalId, [0, 0, -1])])
+    assert result['checks']['geometry']['target_resolved']
+    assert not result['passed'] and not result['checks']['integrity']['passed']
+    assert f'{mismatch} mismatch' in str(result['checks']['integrity']['errors'])
+    assert any(r['id'] == 'connection_metadata' for r in result['review_conditions'])
+    assert scene.model.to_string() == original
+
+
+def test_missing_port_placement_alone_remains_a_review_condition(tmp_path):
+    from sightline.context_eval import evaluate_candidate
+    scene = IfcScene(build_run_fixture(tmp_path/'r.ifc'))
+    main, end = scene.model.by_type('IfcDuctSegment')
+    edits._ports(end)[0].ObjectPlacement = None
+    beam = scene.model.by_type('IfcBeam')[0].GlobalId
+    result = evaluate_candidate(scene, dict(element_a=main.GlobalId, element_b=beam),
+                                [move(main.GlobalId, [0, 0, -1])])
+    assert result['passed'], result
+    assert any(r['id'] == 'connection_metadata' for r in result['review_conditions'])
+
+
 def test_baseline_conflicts_are_reported_but_target_must_resolve(tmp_path):
     from sightline.context_eval import evaluate_candidate
     scene, ids = fixture(tmp_path)

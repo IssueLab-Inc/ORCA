@@ -147,32 +147,34 @@ def _integrity(before, after, originals, sources, result):
         pair = frozenset((a,b))
         source_pair = frozenset((sources.get(a,a), sources.get(b,b)))
         ep, eq = after.entity(p), after.entity(q)
+        orientation_ok, gap = False, None
         if ep.ObjectPlacement is None or eq.ObjectPlacement is None:
             review.append(dict(id='connection_metadata', message='Connection positions or frames are missing; verify routing continuity.'))
-            continue
-        mp, mq = after.placement(p), after.placement(q)
-        gap = float(np.linalg.norm(mp[:3,3] - mq[:3,3]))
-        baseline = old_pairs.get(source_pair)
-        if gap > TOL:
-            errors.append(f'connection misaligned between {a} and {b}: {gap:.4f} m')
-            continue
-        # Authored external frames can use different conventions. Preserve their relative
-        # orientation; newly generated joints must have opposed outward tangent axes.
-        orientation_ok = (float(mp[:3,2] @ mq[:3,2]) < -.999
-                          and abs(float(mp[:3,0] @ mq[:3,0])) > .999)
-        if baseline:
-            bp, bq = baseline
-            if before.entity(bp).ObjectPlacement and before.entity(bq).ObjectPlacement:
-                old_dot = float(before.placement(bp)[:3,2] @ before.placement(bq)[:3,2])
-                old_frame = np.abs(before.placement(bp)[:3,:3].T @ before.placement(bq)[:3,:3])
-                new_frame = np.abs(mp[:3,:3].T @ mq[:3,:3])
-                orientation_ok = (abs(float(mp[:3,2] @ mq[:3,2]) - old_dot) < .001
-                                  and (np.allclose(old_frame,new_frame,atol=.001,rtol=0)
-                                       or np.allclose(old_frame.T,new_frame,atol=.001,rtol=0)))
-                if old_dot > -.999:
-                    review.append(dict(id='port_frames', message='Authored port frames lack opposed outward axes; confirm the connection convention.'))
-        if not orientation_ok:
-            errors.append(f'connection frame mismatch between {a} and {b}')
+        else:
+            mp, mq = after.placement(p), after.placement(q)
+            gap = float(np.linalg.norm(mp[:3,3] - mq[:3,3]))
+            baseline = old_pairs.get(source_pair)
+            if gap > TOL:
+                errors.append(f'connection misaligned between {a} and {b}: {gap:.4f} m')
+            # Authored external frames can use different conventions. Preserve their relative
+            # orientation; newly generated joints must have opposed outward tangent axes.
+            orientation_ok = (float(mp[:3,2] @ mq[:3,2]) < -.999
+                              and abs(float(mp[:3,0] @ mq[:3,0])) > .999)
+            if baseline:
+                bp, bq = baseline
+                if before.entity(bp).ObjectPlacement and before.entity(bq).ObjectPlacement:
+                    old_dot = float(before.placement(bp)[:3,2] @ before.placement(bq)[:3,2])
+                    old_frame = np.abs(before.placement(bp)[:3,:3].T @ before.placement(bq)[:3,:3])
+                    new_frame = np.abs(mp[:3,:3].T @ mq[:3,:3])
+                    orientation_ok = (abs(float(mp[:3,2] @ mq[:3,2]) - old_dot) < .001
+                                      and (np.allclose(old_frame,new_frame,atol=.001,rtol=0)
+                                           or np.allclose(old_frame.T,new_frame,atol=.001,rtol=0)))
+                    if old_dot > -.999:
+                        review.append(dict(id='port_frames', message='Authored port frames lack opposed outward axes; confirm the connection convention.'))
+            if not orientation_ok:
+                errors.append(f'connection frame mismatch between {a} and {b}')
+        # Semantic and profile evidence is independent of port positions and frames:
+        # missing spatial metadata must not conceal a known incompatibility.
         flows = (ep.FlowDirection, eq.FlowDirection)
         if all(f in ('SOURCE', 'SINK') for f in flows) and flows[0] == flows[1]:
             errors.append(f'connection flow mismatch between {a} and {b}')
@@ -198,7 +200,7 @@ def _integrity(before, after, originals, sources, result):
             # Generated bends are built from the source profile by apply_offset.
             if a not in sources or b not in sources or sources.get(a) != sources.get(b):
                 review.append(dict(id='profile_metadata', message='Some joint profiles cannot be verified; confirm fitting compatibility.'))
-        if orientation_ok:
+        if orientation_ok and gap is not None and gap <= TOL:
             allowed.add(pair)
     for gid in originals:
         entity = before.entity(gid)
