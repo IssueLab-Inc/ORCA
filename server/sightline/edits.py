@@ -128,13 +128,16 @@ def _dir(model, v):
     return model.createIfcDirection([float(x) for x in v / np.linalg.norm(v)])
 
 
-def _place_port(model, port, point_file_units, scale, direction=None):
+def _place_port(model, port, point_file_units, scale, direction=None, ref=None):
     m = np.eye(4)
     if direction is not None:
-        z = np.asarray(direction, dtype=float)
+        z = np.array(direction, dtype=float)
+        if port.FlowDirection == 'SINK':
+            z *= -1
         z /= np.linalg.norm(z)
-        ref = UP if abs(z @ UP) < .9 else np.array([1., 0., 0.])
-        x = np.cross(ref, z)
+        x = np.array(ref, dtype=float) if ref is not None else np.cross(
+            UP if abs(z @ UP) < .9 else np.array([1., 0., 0.]), z)
+        x -= z * (x @ z)
         x /= np.linalg.norm(x)
         m[:3, :3] = np.column_stack([x, np.cross(z, x), z])
     m[:3, 3] = np.asarray(point_file_units) * scale
@@ -192,15 +195,28 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         raise Unsupported("the offset height is zero")
     sx, sy = _profile_size(item.SweptArea)
     if abs(py @ UP) > 0.999:      # profile Y is up: risers keep profile X across the run
-        t, w, riser_ref = sy, sx, (lambda axis: px)
+        t, w = sy, sx
     elif abs(px @ UP) > 0.999:    # profile X is up (a tray drawn on its side): keep profile Y across the run
-        t, w, riser_ref = sx, sy, (lambda axis: np.cross(py, axis))
+        t, w = sx, sy
     else:
         raise Unsupported("the profile is tilted")
     if lateral_m:
         t, w = w, t
-        # Rotate the horizontal profile axis with the detour; the vertical axis stays vertical.
-        riser_ref = (lambda axis: np.cross(axis, py)) if abs(py @ UP) > .999 else (lambda axis: px)
+    profile_x = px.copy()
+    profile_position = getattr(item.SweptArea,'Position',None)
+    if profile_position is not None and profile_position.RefDirection is not None:
+        local_x = np.asarray(profile_position.RefDirection.DirectionRatios,dtype=float)
+        local_x /= np.linalg.norm(local_x)
+        profile_x = px*local_x[0] + py*local_x[1]
+
+    def section_ref(axis, reference=px):
+        """Transport the actual profile X axis in the detour plane, without section roll."""
+        normal = np.cross(d, axis)
+        sine, cosine = np.linalg.norm(normal), float(d @ axis)
+        if sine < 1e-9:
+            return reference.copy()
+        normal /= sine
+        return reference*cosine + np.cross(normal,reference)*sine + normal*(normal @ reference)*(1-cosine)
     a, b, dz, L = start_m / s, end_m / s, amount / s, item.Depth
     if a > b:
         a, b = b, a
@@ -248,8 +264,11 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     if len(first_ports) > 2:
         raise Unsupported('a branched segment with more than two ports cannot be offset')
     first_ports.sort(key=lambda p: float(scene.placement(p.GlobalId)[:3, 3] @ d) if p.ObjectPlacement else 0.)
+    original_flows = [p.FlowDirection for p in first_ports] if len(first_ports) == 2 else ['NOTDEFINED','NOTDEFINED']
     external_frames = [scene.placement(p.GlobalId) if p.ObjectPlacement else None
                        for p in (first_ports[0], first_ports[-1])] if len(first_ports) >= 2 else []
+    external_flows = {peer.GlobalId:peer.FlowDirection for port in first_ports
+                      if (peer := ifcopenshell.util.system.get_connected_port(port)) is not None}
     far = ifcopenshell.util.system.get_connected_port(first_ports[-1]) if len(first_ports) > 1 else None
     if far is not None:
         ifcopenshell.api.run("system.disconnect_port", model, port=first_ports[-1])
@@ -265,7 +284,7 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
             if element.Tag:
                 part.Tag = f"{element.Tag}-SL{straights}"
             local_start = (inv @ np.append(start, 1.0))[:3]
-            ref = px if abs(axis @ d) > .999 else riser_ref(axis)
+            ref = section_ref(axis)
             position = model.createIfcAxis2Placement3D(
                 _point(model, local_start), _dir(model, inv[:3, :3] @ axis), _dir(model, inv[:3, :3] @ ref))
             solid = model.createIfcExtrudedAreaSolid(item.SweptArea, position, model.createIfcDirection((0.0, 0.0, 1.0)),
@@ -301,16 +320,8 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
             port.FlowDirection = 'NOTDEFINED'
             ports.append(port)
         chain_ports.append(ports)
-        if len(ports) >= 2:
-            t0 = shape_piece[2]
-            t1 = shape_piece[3] if shape_piece[0] == "bend" else t0
-            _place_port(model, ports[0], p0, s, -t0)
-            _place_port(model, ports[-1], p1, s, t1)
-    # Preserve authored external frames; internal ports use outward endpoint tangents.
-    if external_frames:
-        for port, frame in zip((chain_ports[0][0], chain_ports[-1][-1]), external_frames):
-            if frame is not None:
-                ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=frame, is_si=True)
+        for port, flow in zip(ports,original_flows):
+            port.FlowDirection = flow
     for px_, py_ in zip(chain_ports, chain_ports[1:]):
         if len(px_) >= 2 and len(py_) >= 2:
             ifcopenshell.api.run("system.connect_port", model, port1=px_[-1], port2=py_[0],
@@ -319,6 +330,22 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     if far is not None and len(last) >= 2:
         ifcopenshell.api.run("system.connect_port", model, port1=last[-1], port2=far,
                              direction=last[-1].FlowDirection or "NOTDEFINED")
+    # IFC copying/disconnection can clear the near peer as well as the far peer.
+    # Restore both authored flows; never manufacture knowledge on an untouched peer.
+    for gid,flow in external_flows.items():
+        scene.entity(gid).FlowDirection = flow
+
+    # connect_port assigns final flow directions. IFC SINK axes point into the
+    # product, SOURCE axes outward; references follow the physical profile X.
+    for (p0,p1), ports, shape_piece in zip(ends,chain_ports,pieces):
+        t0 = shape_piece[2]
+        t1 = shape_piece[3] if shape_piece[0] == 'bend' else t0
+        _place_port(model,ports[0],p0,s,-t0,section_ref(t0,profile_x))
+        _place_port(model,ports[-1],p1,s,t1,section_ref(t1,profile_x))
+    if external_frames:
+        for port, frame in zip((chain_ports[0][0], chain_ports[-1][-1]), external_frames):
+            if frame is not None:
+                ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=frame, is_si=True)
 
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)

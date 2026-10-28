@@ -9,12 +9,19 @@ from copy import deepcopy
 
 import numpy as np
 import ifcopenshell.util.system as system
+import ifcopenshell.util.element
 
 from . import edits, verify
 from .scene import IfcScene, FIXED_CLASSES
 
 TOL = .002
 CLEARANCE = .025
+
+
+def element_constraints(scene: IfcScene, gid: str) -> list[str]:
+    """Explicit per-element model constraints; absent properties impose no restriction."""
+    properties = ifcopenshell.util.element.get_pset(scene.entity(gid),'Pset_SightlineConstraints') or {}
+    return ['KeepFixed'] if properties.get('KeepFixed') is True else []
 
 
 def _number(value, name):
@@ -60,6 +67,9 @@ def _validate(scene, objective, operations, discovered):
             raise ValueError('duplicate or overlapping edit groups')
         if any(g not in physical for g in group):
             raise ValueError('connected run contains an element without supported geometry')
+        fixed = [g for g in group if element_constraints(scene,g)]
+        if fixed:
+            raise ValueError(f'KeepFixed model constraint prohibits editing: {fixed}')
         seen.update(group)
         if kind in ('move', 'offset'):
             delta = np.array(_vector(op.get('delta_m'), 3, 'delta_m'))
@@ -109,6 +119,118 @@ def _systems(scene, gid):
     return {s.GlobalId for s in system.get_element_systems(scene.entity(gid))}
 
 
+def _profile_evidence(scene, gid):
+    try:
+        item = edits._body(scene.entity(gid))[1]
+        dimensions = np.array(edits._profile_size(item.SweptArea)) * scene.unit_scales[scene.index_of(gid)]
+        return item.SweptArea.is_a('IfcCircleProfileDef'), dimensions
+    except edits.Unsupported:
+        return None, None
+
+
+def _physical_port_frame(scene, owner, port, circular, dimensions, generated, flow=None):
+    """Compare IFC flow axes to actual extrusion endpoints or triangulated fitting caps.
+
+    This does not reuse the offset generator's tangent/reference construction. None
+    means the available shape cannot establish the physical frame independently.
+    """
+    flow = flow or port.FlowDirection
+    if port.ObjectPlacement is None or flow not in ('SOURCE','SINK'):
+        return None
+    matrix = scene.placement(port.GlobalId)
+    outward = matrix[:3,2] * (-1 if flow == 'SINK' else 1)
+    try:
+        run = edits.run_of(scene,owner)
+        _,_,item,_,d,px,py = edits._frames(scene,scene.entity(owner))
+        position = getattr(item.SweptArea,'Position',None)
+        if position is not None and position.RefDirection is not None:
+            x,y = position.RefDirection.DirectionRatios
+            px = (px*x + py*y) / np.hypot(x,y)
+        if np.linalg.norm(matrix[:3,3]-run.start) <= TOL:
+            normal = -d
+        elif np.linalg.norm(matrix[:3,3]-run.end) <= TOL:
+            normal = d
+        else:
+            return False
+        return bool(outward @ normal > .999 and (circular or matrix[:3,0] @ px > .999))
+    except edits.Unsupported:
+        pass
+    if dimensions is None:
+        return None
+    mesh = edits.meshes(scene,[owner])[0]
+    vertices = np.array(mesh['verts']).reshape(-1,3)
+    triangles = vertices[np.array(mesh['faces']).reshape(-1,3)]
+    cap = np.all(np.abs((triangles-matrix[:3,3]) @ outward) < 1e-4,axis=1)
+    if not cap.any():
+        return False if generated else None
+    triangles = triangles[cap]
+    normals = np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0])
+    lengths = np.linalg.norm(normals,axis=1)
+    normals = normals[lengths > 1e-10] / lengths[lengths > 1e-10,None]
+    if not len(normals) or not np.all(normals @ outward > .999):
+        return False
+    if circular:
+        return True
+    extents = np.ptp(triangles.reshape(-1,3) @ matrix[:3,:2],axis=0)
+    return bool(np.allclose(extents,dimensions,atol=.001,rtol=0))
+
+
+def _unchanged_external_frame_defect(before, after, originals, sources, old, a, b, ep, eq):
+    """Narrow baseline exception: an authored external defect, never a new joint.
+
+    Both port poses and flows, the unchanged peer, and the edited source's physical
+    endpoint/profile frame must be retained exactly. Known other violations are
+    checked separately. This is a disclosed legacy defect, not IFC conformance.
+    """
+    sa,sb = sources.get(a,a),sources.get(b,b)
+    if (sa in originals) == (sb in originals):
+        return False
+    if sb in originals:
+        a,b,sa,sb,ep,eq = b,a,sb,sa,eq,ep
+    for p,q,x,y in old.values():
+        if y == sa and x == sb:
+            p,q,x,y = q,p,y,x
+        if x != sa or y != sb or q != eq.GlobalId:
+            continue
+        bp,bq = before.entity(p),before.entity(q)
+        if any(port.ObjectPlacement is None or port.FlowDirection not in ('SOURCE','SINK')
+               for port in (bp,bq,ep,eq)):
+            return False
+        if bp.FlowDirection != ep.FlowDirection or bq.FlowDirection != eq.FlowDirection:
+            return False
+        mp,mq = before.placement(p),before.placement(q)
+        if not (np.allclose(mp,after.placement(ep.GlobalId),atol=1e-8,rtol=0) and
+                np.allclose(mq,after.placement(eq.GlobalId),atol=1e-8,rtol=0)):
+            return False
+        try:
+            old_run,new_run = edits.run_of(before,sa),edits.run_of(after,a)
+            old_frame,new_frame = edits._frames(before,before.entity(sa)),edits._frames(after,after.entity(a))
+        except edits.Unsupported:
+            return False
+        ends = [(old_run.start,new_run.start),(old_run.end,new_run.end)]
+        if not any(np.linalg.norm(mp[:3,3]-start) <= TOL and np.allclose(start,end,atol=1e-8,rtol=0)
+                   for start,end in ends):
+            return False
+        if not all(np.allclose(old_frame[k],new_frame[k],atol=1e-8,rtol=0) for k in (4,5,6)):
+            return False
+        if old_frame[2].SweptArea.get_info(recursive=True) != new_frame[2].SweptArea.get_info(recursive=True):
+            return False
+        ca,da = _profile_evidence(before,sa)
+        cn,dn = _profile_evidence(after,a)
+        cb,db = _profile_evidence(before,sb)
+        if da is None or dn is None or ca != cn or not np.allclose(da,dn,atol=1e-8,rtol=0):
+            return False
+        # The fixed peer's geometry also must be retained, not merely its port pose.
+        old_box,new_box = before.bounds().get(sb),after.bounds().get(b)
+        if old_box is None or new_box is None or not np.allclose(old_box,new_box,atol=1e-8,rtol=0):
+            return False
+        return (float(mp[:3,2] @ mq[:3,2]) <= .999 or
+                ((ca is False or cb is False) and float(mp[:3,0] @ mq[:3,0]) <= .999) or
+                _physical_port_frame(before,sa,bp,ca,da,False) is False or
+                _physical_port_frame(before,sb,bq,cb,db,False) is False)
+    return False
+
+
 def _integrity(before, after, originals, sources, result):
     errors = result['checks']['integrity']['errors']
     review = result['review_conditions']
@@ -142,44 +264,55 @@ def _integrity(before, after, originals, sources, result):
             matches = [edge for edge in matches if external in edge[:2]]
         if not matches:
             errors.append(f'connection removed between {a} and {b}')
-    old_pairs = {frozenset((a,b)): (p,q) for p,q,a,b in old.values()}
     for p, q, a, b in new.values():
         pair = frozenset((a,b))
-        source_pair = frozenset((sources.get(a,a), sources.get(b,b)))
         ep, eq = after.entity(p), after.entity(q)
+        ca,da = _profile_evidence(before,sources.get(a,a))
+        cb,db = _profile_evidence(before,sources.get(b,b))
         orientation_ok, gap = False, None
         if ep.ObjectPlacement is None or eq.ObjectPlacement is None:
             review.append(dict(id='connection_metadata', message='Connection positions or frames are missing; verify routing continuity.'))
         else:
             mp, mq = after.placement(p), after.placement(q)
             gap = float(np.linalg.norm(mp[:3,3] - mq[:3,3]))
-            baseline = old_pairs.get(source_pair)
             if gap > TOL:
                 errors.append(f'connection misaligned between {a} and {b}: {gap:.4f} m')
-            # Authored external frames can use different conventions. Preserve their relative
-            # orientation; newly generated joints must have opposed outward tangent axes.
-            orientation_ok = (float(mp[:3,2] @ mq[:3,2]) < -.999
-                              and abs(float(mp[:3,0] @ mq[:3,0])) > .999)
-            if baseline:
-                bp, bq = baseline
-                if before.entity(bp).ObjectPlacement and before.entity(bq).ObjectPlacement:
-                    old_dot = float(before.placement(bp)[:3,2] @ before.placement(bq)[:3,2])
-                    old_frame = np.abs(before.placement(bp)[:3,:3].T @ before.placement(bq)[:3,:3])
-                    new_frame = np.abs(mp[:3,:3].T @ mq[:3,:3])
-                    orientation_ok = (abs(float(mp[:3,2] @ mq[:3,2]) - old_dot) < .001
-                                      and (np.allclose(old_frame,new_frame,atol=.001,rtol=0)
-                                           or np.allclose(old_frame.T,new_frame,atol=.001,rtol=0)))
-                    if old_dot > -.999:
-                        review.append(dict(id='port_frames', message='Authored port frames lack opposed outward axes; confirm the connection convention.'))
-            if not orientation_ok:
-                errors.append(f'connection frame mismatch between {a} and {b}')
+            if ep.FlowDirection in ('SOURCE','SINK') and eq.FlowDirection in ('SOURCE','SINK'):
+                # IFC rigid SOURCE/SINK joints have equal signed effective flow axes.
+                orientation_ok = float(mp[:3,2] @ mq[:3,2]) > .999
+                if ca is False or cb is False:
+                    orientation_ok &= float(mp[:3,0] @ mq[:3,0]) > .999
+                physical = [_physical_port_frame(after,a,ep,ca,da,sources.get(a,a)!=a),
+                            _physical_port_frame(after,b,eq,cb,db,sources.get(b,b)!=b)]
+                if False in physical or not orientation_ok:
+                    if _unchanged_external_frame_defect(before,after,originals,sources,old,a,b,ep,eq):
+                        message = f'Authored external frame defect remains unchanged between {a} and {b}; these frames are not IFC-conformant and require designer review.'
+                        result['checks']['integrity']['warnings'].append(message)
+                        review.append(dict(id='legacy_port_frames',message=message))
+                        orientation_ok = True  # retained physical contact, not a conformant frame
+                    else:
+                        errors.append(f'connection frame mismatch between {a} and {b}')
+                        orientation_ok = False
+                if None in physical or ca is None or cb is None:
+                    review.append(dict(id='port_frames',message='Some physical port frames cannot be established from the available profiles; verify connection orientation.'))
+            else:
+                review.append(dict(id='port_frames',message='Flow direction is undefined or bidirectional; verify effective connection frames.'))
+                # Contact can still be established from opposed physical cap normals.
+                # This validates touching geometry only, not an unknown flow convention.
+                fp = ep.FlowDirection if ep.FlowDirection in ('SOURCE','SINK') else 'SOURCE'
+                fq = eq.FlowDirection if eq.FlowDirection in ('SOURCE','SINK') else 'SOURCE'
+                outward_p = mp[:3,2] * (-1 if fp == 'SINK' else 1)
+                outward_q = mq[:3,2] * (-1 if fq == 'SINK' else 1)
+                orientation_ok = (outward_p @ outward_q < -.999 and
+                    _physical_port_frame(after,a,ep,ca,da,sources.get(a,a)!=a,fp) is True and
+                    _physical_port_frame(after,b,eq,cb,db,sources.get(b,b)!=b,fq) is True)
         # Semantic and profile evidence is independent of port positions and frames:
         # missing spatial metadata must not conceal a known incompatibility.
         flows = (ep.FlowDirection, eq.FlowDirection)
         if all(f in ('SOURCE', 'SINK') for f in flows) and flows[0] == flows[1]:
             errors.append(f'connection flow mismatch between {a} and {b}')
-        elif any(f not in ('SOURCE', 'SINK', 'SOURCEANDSINK') for f in flows):
-            review.append(dict(id='flow_metadata', message='Flow direction is missing; confirm service continuity.'))
+        elif any(f not in ('SOURCE', 'SINK') for f in flows):
+            review.append(dict(id='flow_metadata', message='Flow direction is missing or bidirectional; confirm service continuity.'))
         sa, sb = _systems(after,a), _systems(after,b)
         if sa and sb and sa.isdisjoint(sb):
             errors.append(f'connection system mismatch between {a} and {b}')
