@@ -26,15 +26,17 @@ const BASIS: Record<NonNullable<TriageVerdict["basis"]>, string> = {
   no_overlap: "settled: no overlap measured", reviewed: "marked by you",
 };
 
-export function ClashPanel({ reportId, clash, match, measure, onImage, fix, triage }: {
+export function ClashPanel({ reportId, clash, match, measure, onImage, fix, triage, origin = "navisworks", capturing = false }: {
   reportId: string; clash: ReportClash; match: Matches[string] | undefined; measure: Measure | null | "busy";
-  onImage: (index: number) => void; fix?: string; triage?: TriageVerdict;
+  onImage: (index: number) => void; fix?: string; triage?: TriageVerdict; origin?: "navisworks" | "sightline";
+  capturing?: boolean;  // the A/B/C views of a clash Sightline found are being taken
 }) {
+  const found = origin === "sightline";  // Sightline detected it: its depth is how far one must move to clear the other
   return (
     <section className="clash-panel">
-      <div className="row"><h2>{clash.name}</h2>{fix ? <span className="chip ok">✓ fixed</span> : clash.status && <span className="chip">{clash.status}</span>}</div>
-      <p className="hint">{clash.test}</p>
-      {fix && <p className="fixed-note">Fixed in this session: {fix}. The Navisworks images show the clash as reported.</p>}
+      <div className="row"><h2><span className="num">#{clash.number}</span> {clash.title ?? clash.name}</h2>{fix ? <span className="chip ok">✓ fixed</span> : clash.status && <span className="chip">{clash.status}</span>}</div>
+      <p className="hint">{clash.title ? `${clash.name} · ` : ""}{clash.test}{clash.ref ? ` · Navisworks ${clash.ref}` : ""}</p>
+      {fix && <p className="fixed-note">Fixed in this session: {fix}. The {found ? "views show the clash as found" : "Navisworks images show the clash as reported"}.</p>}
       {triage && (
         <div className="triage-note">
           <span className={`chip small ${TRIAGE[triage.verdict].cls}`}>{TRIAGE[triage.verdict].label}</span>
@@ -51,19 +53,20 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
           {triage.error && <p className="bad small">{triage.error}</p>}
         </div>
       )}
+      {capturing && <p className="hint small">Taking the A/B/C views of this clash…</p>}
       {clash.images.length > 0 && (
         <div className={`thumbs n${clash.images.length}`}>
           {clash.images.map((label, i) => (
             <button key={label} className="thumb" onClick={() => onImage(i)} title={`Open ${VIEW_NAMES[label] ?? label}`}>
-              <ClashThumb url={api.imageUrl(reportId, clash.id, i)} alt={`${clash.name}, view ${label}`} />
+              <ClashThumb url={api.imageUrl(reportId, clash.id, i)} alt={`#${clash.number}, view ${label}`} />
               <span>{label}</span>
             </button>
           ))}
         </div>
       )}
       <dl className="kv">
-        <dt>Navisworks</dt><dd className="mono">{mm(clash.distance_m)}{clash.tolerance_m ? ` (tolerance ${mm(clash.tolerance_m)})` : ""}</dd>
-        <dt>Sightline</dt><dd className="mono">{
+        <dt>{found ? "Found by Sightline" : "Navisworks"}</dt><dd className="mono">{mm(clash.distance_m)}{clash.tolerance_m ? ` (${clash.test_type === "clearance" ? "clearance" : "tolerance"} ${mm(clash.tolerance_m)})` : ""}</dd>
+        <dt>{found ? "Now" : "Sightline"}</dt><dd className="mono">{
           measure === "busy" ? "measuring…"
             : !measure ? "open the models to measure"
               : !measure.matched ? "not in the open model"
@@ -119,16 +122,16 @@ export function Lightbox({ reportId, clash, index, onClose, onMove }: {
   }, [read, marks]);
   const focus = zoom && read ? focusSquare(read, 2.4, 0.3) : null;
   return (
-    <div className="lightbox" role="dialog" aria-label={`${clash.name}, view ${label}`} onClick={onClose}>
+    <div className="lightbox" role="dialog" aria-label={`#${clash.number}, view ${label}`} onClick={onClose}>
       <figure onClick={(e) => e.stopPropagation()}>
         <div className="lb-frame">
           <div className="lb-zoom" style={focus ? zoomStyle(focus) : undefined}>
-            <img src={url} alt={`${clash.name}, view ${label}`} />
+            <img src={url} alt={`#${clash.number}, view ${label}`} />
             {marks && read && <canvas ref={overlay} className="lb-overlay" aria-hidden />}
           </div>
         </div>
         <figcaption>
-          <span><b>{clash.name}</b> · {VIEW_NAMES[label] ?? label} · red {clash.a.ifc_class}, green {clash.b.ifc_class}
+          <span><b>#{clash.number} {clash.title ?? clash.name}</b> · {VIEW_NAMES[label] ?? label} · red {clash.a.ifc_class}, green {clash.b.ifc_class}
             {marks && read?.zone && <span className="lb-key"> · <i className="sw zone" />where they meet</span>}</span>
           <span className="lb-nav">
             <button className={`btn ${marks ? "on" : ""}`} aria-pressed={marks} onClick={() => setMarks(!marks)} disabled={!read}>Outlines</button>

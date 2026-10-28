@@ -147,10 +147,10 @@ def pairs_for(ws: Workspace, scene_id: str, report_id: str, clash_ids: list[str]
         c = report.clash(cid)
         m = matches.get(cid, {})
         if not (m.get("a") and m.get("b")):
-            skipped.append(f"{c.name} ({c.test}): not in the open model")
+            skipped.append(f"{c.label} ({c.test}): not in the open model")
             continue
         if m["a"] not in physical or m["b"] not in physical:
-            skipped.append(f"{c.name} ({c.test}): a space or port, not a physical clash")
+            skipped.append(f"{c.label} ({c.test}): a space or port, not a physical clash")
             continue
         key = "|".join(sorted([m["a"], m["b"]]))
         if key in items:

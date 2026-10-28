@@ -24,7 +24,8 @@ export function linkState(m: Matches | null, id: string): "both" | "one" | "none
 
 const LINK_TITLE = { both: "Both elements are in the open model", one: "One element is in the open model", none: "Not in the open model" };
 
-const short = (c: ReportClash) => `${c.a.ifc_class?.replace(/^Ifc/, "") ?? "?"} × ${c.b.ifc_class?.replace(/^Ifc/, "") ?? "?"}`;
+/** "#39 Cold-water main clips the transfer girder": its number across the report, and Muse's title or its plain name. */
+export const clashLabel = (c: ReportClash) => `#${c.number} ${c.title ?? c.name}`;
 
 function ImpactBar({ total, triage, fixes, reviewed }: { total: number; triage: Record<string, TriageVerdict>; fixes: Record<string, string>; reviewed: Record<string, Review> }) {
   const triaged = Object.keys(triage).length;
@@ -35,13 +36,14 @@ function ImpactBar({ total, triage, fixes, reviewed }: { total: number; triage: 
   const hours = (triaged * 15 / 60).toFixed(1).replace(/\.0$/, "");
   return <p className="impact-bar" role="status"><span><b>{total}</b> clashes</span><span className="bad"><b>{real}</b> real</span><span><b>{need}</b> need a fix</span><span className="ok"><b>{resolved}</b> resolved</span><span className="why">≈{hours} h of manual review sorted (est. 15 min/clash)</span></p>;
 }
-export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter }: {
+export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter, naming = 0 }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
   checked: Set<string>; onCheck: (ids: string[], on: boolean) => void; onFixChecked: () => void;
   insights: React.ReactNode; busy: boolean;
   triage: Record<string, TriageVerdict>; triageFilter: TriageKind | null;
+  naming?: number;  // clashes Muse is still titling
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -54,7 +56,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
       if (onlyLinked && linkState(matches, c.id) !== "both") continue;
       if (hideFixed && (fixes[c.id] || reviewed[c.id])) continue;
       if (triageFilter && triage[c.id]?.verdict !== triageFilter) continue;
-      const text = [c.name, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class, c.a.level, c.b.level, c.grid].join(" ").toLowerCase();
+      const text = [`#${c.number}`, c.title, c.name, c.ref, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class, c.a.level, c.b.level, c.grid].join(" ").toLowerCase();
       if (q && !q.split(/\s+/).every((w) => text.includes(w))) continue;
       out.set(c.test, [...(out.get(c.test) ?? []), c]);
     }
@@ -82,11 +84,12 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
           <span className="chips">{fixedCount > 0 && <span className="chip ok"><CircleCheck size={12} aria-hidden /> {fixedCount} fixed</span>}
             {reviewedCount > 0 && <span className="chip">{reviewedCount} reviewed</span>}</span></div>
         <p className="hint">{report.clashes.length} clashes · {new Set(report.clashes.map((c) => c.test)).size} tests
-          {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}</p>
+          {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}
+          {naming > 0 && <span className="naming"> · Muse is naming {naming}…</span>}</p>
         <ImpactBar total={report.clashes.length} triage={triage} fixes={fixes} reviewed={reviewed} />
         <div className="search-box">
           <Search size={15} aria-hidden />
-          <input type="search" placeholder="Filter by element, class, level…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter clashes" />
+          <input type="search" placeholder="Filter by #, title, element, level…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter clashes" />
         </div>
         <div className="filters">
           {matches && <label className="check"><input type="checkbox" checked={onlyLinked} onChange={(e) => setOnlyLinked(e.target.checked)} /> In the model</label>}
@@ -117,18 +120,18 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                 const nc = !fixes[c.id] && !rv ? noClash(c, matches?.[c.id], null, tv) : null;
                 return (
                   <div key={c.id} className={`clash-row ${selected === c.id ? "pick" : ""} ${fixes[c.id] ? "fixed" : ""} ${rv ? "reviewed" : ""} ${nc ? "noclash" : ""}`} data-clash={c.id}>
-                    {matches && <input type="checkbox" aria-label={`Select ${c.name}`} checked={checked.has(c.id)} disabled={!fixable(c)}
+                    {matches && <input type="checkbox" aria-label={`Select ${clashLabel(c)}`} checked={checked.has(c.id)} disabled={!fixable(c)}
                       onChange={(e) => onCheck([c.id], e.target.checked)} />}
                     {c.images.length > 0
-                      ? <button className="row-thumb" onClick={() => onImage(c, 0)} aria-label={`Open the images of ${c.name}`}
-                          title={`${c.name}: open its ${c.images.length === 1 ? "image" : `${c.images.length} views`}`}>
+                      ? <button className="row-thumb" onClick={() => onImage(c, 0)} aria-label={`Open the images of ${clashLabel(c)}`}
+                          title={`#${c.number}: open its ${c.images.length === 1 ? "image" : `${c.images.length} views`}`}>
                           <ClashThumb url={api.imageUrl(report.id, c.id, 0)} alt="" />
                         </button>
                       : report.clashes.some((x) => x.images.length) && <span className="row-thumb none" aria-hidden />}
                     <button className="clash-main" onClick={() => onSelect(c)} title={fixes[c.id] ? `Fixed: ${fixes[c.id]}` : rv ? rv.note : link ? LINK_TITLE[link] : undefined}>
                       {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : rv ? <i className="tick muted" aria-label="Reviewed">✓</i> : link ? <i className={`dot ${link}`} /> : <i />}
-                      <span className="clash-name">{c.name}</span>
-                      <span className="clash-pair">{short(c)}</span>
+                      <span className="clash-name">#{c.number}</span>
+                      <span className={`clash-pair ${c.title ? "titled" : ""}`}>{c.title ?? c.name}</span>
                       {nc && !tv && <span className="tv muted" title={nc.why}>{nc.label}</span>}
                       {tv && !fixes[c.id] && !rv && <span className={`tv ${TRIAGE[tv.verdict].cls}`} title={tv.understanding || TRIAGE[tv.verdict].tip}
                         aria-label={`Triage: ${TRIAGE[tv.verdict].label}`}>{TRIAGE[tv.verdict].label}</span>}

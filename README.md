@@ -32,6 +32,27 @@ heights. **Accept this fix** keeps it in the server's model; **Export edited IFC
 The browser previews moves instantly; the server makes the real edit and is the only source of
 clearance numbers. Elements are addressed by IFC GlobalId everywhere.
 
+**Detect clashes** finds the clashes itself, so no Navisworks report is needed (design: [docs/detection.md](docs/detection.md),
+code: `server/sightline/detect.py`):
+- **Tests:** every pair of open models and each model against itself, hard at 1 mm, plus duplicates.
+- **Not reported:** pairs meant to meet (joined by ports, one assembly, a door in its wall) and touches. They are
+  counted and shown under "What was checked".
+- **Engine:** a sweep over the element boxes finds every pair that could clash; IfcOpenShell's triangle tree measures
+  them, with an exact check for flush rectangular solids.
+- **Result:** opens as the clash report, so triage, insights, fixes, chat ("find the clashes") and the PDF work on it
+  as on a Navisworks report. Sightline takes each clash's A/B/C views in the browser for the fix agent.
+- **Detect again:** after fixes, it says which clashes were resolved.
+
+On Northbank (1,961 elements): about 10 s, and every sampled Navisworks result that is a real overlap (117 of 117).
+
+**Clashes have numbers and titles, not "Clash39".**
+- **Number:** every clash has a number, #39, unique across the whole report. For clashes Sightline finds, it is kept
+  across runs.
+- **Title:** Muse writes one from the clash's facts ("Cold-water main clips the transfer girder at grid 3, level 02";
+  `server/sightline/titles.py`). Until it lands, a plain name from the two elements shows.
+- **Navisworks label:** kept as a small reference.
+- **Using the number:** chat and voice understand "#39".
+
 For a clash that needs changes around it, choose **Explore wider fix** on a matched report clash or two manually
 picked model elements. Sightline inspects nearby geometry, discovers blockers and checks complete arrangements with
 up to three coordinated edit groups. The **Plan** tab shows up to three alternatives, every edit and its reason,
@@ -166,7 +187,7 @@ each one is a paid Muse Spark call; **Check this move** is not limited.
 ## Tests
 
 ```bash
-cd server && uv run pytest -q      # geometry check, agent loop, web API, MCP tools
+cd server && uv run pytest -q      # geometry check, detection, agent loop, web API, MCP tools
 cd web && npm run build            # type-check + production build
 ```
 

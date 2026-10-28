@@ -76,7 +76,8 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     planStream: (_sid, body, onEvent) => new Promise((resolve, reject) => planRequests.push({ body, onEvent, resolve, reject })),
     verify: (...args) => new Promise((resolve, reject) => verifyRequests.push({ args, resolve, reject })),
     applyContext: async () => ({ files: [], edits: contextProposal.edits, pieces: [], resolved_pairs: [{ element_a: "duct", element_b: "beam" }], checks }),
-    file: async () => new Uint8Array([1]), accept: async () => ({ files: [], pieces: [] }), ...overrides };
+    file: async () => new Uint8Array([1]), accept: async () => ({ files: [], pieces: [] }),
+    titles: async () => {}, detectTests: async () => ({ tests: [], teams: {}, elements: 0, rules: {} }), ...overrides };
   const key = `__sightlineHost${sequence++}`;
   globalThis[key] = { hooks, api, viewer };
   globalThis.window = { innerWidth: 1600, addEventListener() {}, removeEventListener() {},
@@ -84,17 +85,18 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   globalThis.setInterval = () => Symbol(); globalThis.clearInterval = () => {};
   const react = url(`const h=globalThis.${key}.hooks; export const useState=(...a)=>h.useState(...a),useRef=(...a)=>h.useRef(...a),useMemo=(...a)=>h.useMemo(...a),useEffect=(...a)=>h.useEffect(...a);`);
   const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} }`);
-  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips"];
+  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary"];
   const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
     export const TOUR={},TOUR_QUESTION=""; export const mm=(v)=>String(v); export const noClash=()=>null;
+    export const clashLabel=(c)=>"#"+c.number;
     export class Viewer {constructor(){return globalThis.${key}.viewer;}} export const serverPointToViewer=(v)=>v;
     export class Pilot { start(){} event(){} cancel(){globalThis.${key}.viewer.preview([]);} finish(fn){fn();} takeOver(){} }`);
-  const icons = url(["Boxes", "Brain", "Check", "CircleCheck", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2"].map((name) => `export function ${name}(){return null;}`).join("\n"));
+  const icons = url(["Boxes", "Brain", "Check", "CircleCheck", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2"].map((name) => `export function ${name}(){return null;}`).join("\n"));
   const ownership = await compiled("../src/chatRequest.ts");
   const context = await compiled("../src/ContextPlan.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), "lucide-react": icons, "./ReportList": mocks });
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context };
-  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar"]) dependencies[name] = mocks;
+  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   function render() {
     let passes = 0;

@@ -67,7 +67,7 @@ def main() -> None:
             touches = [o for o in result.options if keep in o.moved]
             detail = "; ".join(f"{o.kind} {scene.element(o.moved[0]).name}{' (cleanup)' if o.cleanup else ''}"
                                for o in result.options)
-            row = [datetime.date.today().isoformat(), label, c.name, tri_info["model"], verdict, model.model, seconds,
+            row = [datetime.date.today().isoformat(), label, c.ref, tri_info["model"], verdict, model.model, seconds,
                    len(result.options), "yes" if touches else "no",
                    "yes" if result.options and all(o.cleanup for o in result.options) else "no" if result.options else "-",
                    detail, result.advice.replace("\n", " ")[:300]]

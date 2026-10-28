@@ -10,7 +10,7 @@ import uuid
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, edits, reports, verify
+from . import agent, detect, edits, reports, verify
 from .meta_client import ChatModel, MetaChatModel
 from .scene import IfcScene
 
@@ -35,6 +35,8 @@ class Workspace:
         self.scenes: dict[str, IfcScene] = {}
         self.reports: dict[str, reports.Report] = {}
         self._matches: dict[tuple[str, str], dict] = {}
+        self._runs: dict[str, dict] = {}  # scene id → what its last detection run found, for the next run's diff
+        self._run_reports: dict[str, str] = {}  # scene id → its last detection report, whose views a rerun keeps
         # Geometry trials edit the model and undo; anything touching a scene's geometry holds this.
         self.lock = threading.RLock()
         self._model = model
@@ -101,8 +103,10 @@ class Workspace:
             pics = pics or [p for _, p in c.images]
             if distance_m is None:
                 distance_m = c.distance_m
-            notes = "\n".join(filter(None, [notes, f"From a Navisworks clash report: {c.test}, {c.name}. "
-                                                    "Images are Navisworks views of this clash."]))
+            source = (f"Found by Sightline's own detection: {c.test}, {c.name}." if self.report(report_id).origin == "sightline"
+                      else f"From a Navisworks clash report: {c.test}, {c.name}.")
+            seen = " Images are views of this clash." if pics else ""
+            notes = "\n".join(filter(None, [notes, source + seen]))
         return agent.Clash(element_a, element_b, distance_m, pics, notes)
 
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
@@ -198,10 +202,69 @@ class Workspace:
     def report_summary(self, report_id: str) -> dict:
         r = self.report(report_id)
         return {
-            "id": r.id, "title": r.title, "sources": r.sources,
+            "id": r.id, "title": r.title, "sources": r.sources, "origin": r.origin,
             "clashes": [{**{k: v for k, v in asdict(c).items() if k != "images"},
                          "images": [label for label, _ in c.images]} for c in r.clashes],
         }
+
+    # Sightline detection (detect.py; design in docs/detection.md).
+
+    def detect_tests(self, scene_id: str) -> dict:
+        """The tests a run would use by default for the open models, and the ones offered but off."""
+        scene = self.scene(scene_id)
+        with self.lock:
+            ix = detect._Index(scene)
+            tests = detect.default_tests(scene, ix) + detect.presets(scene, ix)
+            teams = {name: team for name, team in zip(ix.names, ix.teams)}
+        return {"tests": [asdict(t) for t in tests], "teams": teams, "elements": len(ix.entity),
+                "rules": detect.RULE_LABEL}
+
+    def detect(self, scene_id: str, tests: list[dict] | None = None, on_event=None) -> dict:
+        """Run Sightline's own clash detection and open the result as a clash report."""
+        scene = self.scene(scene_id)
+        chosen = None if tests is None else [detect.Test.from_dict(t) for t in tests]
+        with self.lock:
+            run = detect.run(scene, chosen, on_event=on_event, previous=self._runs.get(scene_id))
+        self._runs[scene_id] = run.state
+        self._carry(self.reports.get(self._run_reports.get(scene_id, "")), run.report)
+        self._run_reports[scene_id] = run.report.id
+        report = self._keep(run.report)
+        return {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
+                "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset}
+
+    @staticmethod
+    def _carry(old: reports.Report | None, new: reports.Report) -> None:
+        """A clash keeps its id across runs, so its title and the views taken of it last time come with it."""
+        if old is None:
+            return
+        titles = {c.id: c.title for c in old.clashes if c.title}
+        before = {c.id: c.images for c in old.clashes if c.images}
+        for c in new.clashes:
+            c.title = c.title or titles.get(c.id)
+            for label, path in before.get(c.id, []):
+                if path.exists():
+                    dest = new.root / "views" / path.name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(path, dest)
+                    c.images.append((label, dest))
+
+    def save_capture(self, report_id: str, clash_id: str, label: str, png: bytes) -> list[str]:
+        """A view of a detected clash taken in the browser (A, B or C). It joins the clash's images, so the fix agent,
+        triage and the PDF see it as they see Navisworks views. Only detected reports take captures."""
+        report = self.report(report_id)
+        if report.origin != "sightline":
+            raise PermissionError("Only clashes found by Sightline take captured views.")
+        if label not in ("A", "B", "C"):
+            raise ValueError("label must be A, B or C")
+        clash = report.clash(clash_id)
+        folder = report.root / "views"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{clash_id}-{label}.png"
+        path.write_bytes(png)
+        images = dict(clash.images)
+        images[label] = path
+        clash.images = sorted(images.items())
+        return [k for k, _ in clash.images]
 
     def report_image(self, report_id: str, clash_id: str, index: int) -> Path:
         return self.report(report_id).clash(clash_id).images[index][1]
@@ -254,6 +317,8 @@ class Workspace:
             physical = scene.bounds().keys()
             if m["a"] not in physical or m["b"] not in physical:
                 return {"matched": True, "physical": False, "distance_m": None}
+            if self.report(report_id).origin == "sightline":  # the same measure the run used, so the two agree
+                return {"matched": True, "physical": True, "distance_m": detect.measure_pair(scene, m["a"], m["b"])}
             v = verify.check(scene, [m["a"]], clearance_m=0.0)
             hit = next((h for h in v.hits if h.other == m["b"]), None)
             return {"matched": True, "physical": True, "distance_m": hit.distance_m if hit else None}

@@ -239,3 +239,88 @@ def build_context_fixture(path: Path, millimetres: bool = False) -> Path:
     ifcopenshell.api.run('system.assign_system',model,products=[main,end,*model.by_type('IfcDuctFitting')],system=service)
     model.write(str(path))
     return path
+
+
+def build_detection_fixtures(folder: Path, offset: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> list[Path]:
+    """A structure model and a services model with one of every case Sightline detection has to get right
+    (docs/detection.md), in metres, everything shifted by `offset` (to test models far from the origin):
+
+    Structure vs services: the duct runs 300 mm through the beam (a clash); one pipe sits on the beam (a touch), another
+    0.5 mm into it (still a touch at 1 mm); a third hangs 20 mm under it (only a 25 mm clearance test sees it).
+    Structure within: a strut runs 30 mm into the beam's end with every face flush (only the collision query sees it);
+    a door is 20 mm larger than its wall's opening (host and filler); two curtain-wall plates overlap (one assembly);
+    two identical columns (a duplicate); two crossing braces with the same box (a real overlap, not a duplicate).
+    Services within: a sensor wholly inside the duct (a clash); two duct segments joined port to port overlap 50 mm.
+    """
+    ox, oy, oz = offset
+
+    def new(name):
+        model = ifcopenshell.api.run("project.create_file", version="IFC4")
+        project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name=name)
+        ifcopenshell.api.run("unit.assign_unit", model, units=[
+            ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+        ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+        body = ifcopenshell.api.run("context.add_context", model, context_type="Model", context_identifier="Body",
+                                    target_view="MODEL_VIEW", parent=ctx)
+        storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 01")
+        ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+        return model, body, storey
+
+    def element(model, body, storey, ifc_class, name, size=None, origin=None):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        if size is not None:
+            _box(model, body, e, size, (origin[0] + ox, origin[1] + oy, origin[2] + oz))
+        return e
+
+    def brace(model, body, storey, name, start, end):
+        e = element(model, body, storey, "IfcMember", name)
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+        d = np.subtract(end, start)
+        length = float(np.linalg.norm(d))
+        profile = model.createIfcRectangleProfileDef("AREA", None, None, 0.1, 0.1)
+        position = model.createIfcAxis2Placement3D(
+            model.createIfcCartesianPoint((start[0] + ox, start[1] + oy, start[2] + oz)),
+            model.createIfcDirection(tuple(float(x) for x in d / length)), model.createIfcDirection((0.0, 1.0, 0.0)))
+        solid = model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)), length)
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+
+    s, sb, ss = new("Detection fixture structure")
+    element(s, sb, ss, "IfcBeam", "Beam B1", (6.0, 0.2, 0.4), (0.0, -0.1, 2.6))
+    element(s, sb, ss, "IfcMember", "Strut S1", (0.5, 0.2, 0.4), (5.97, -0.1, 2.6))
+    wall = element(s, sb, ss, "IfcWall", "Wall W1", (4.0, 0.2, 3.0), (0.0, 3.0, 0.0))
+    opening = element(s, sb, ss, "IfcOpeningElement", "Door opening", (1.0, 0.4, 2.1), (1.5, 2.9, 0.0))
+    ifcopenshell.api.run("feature.add_feature", s, feature=opening, element=wall)
+    door = element(s, sb, ss, "IfcDoor", "Door D1", (1.04, 0.2, 2.12), (1.48, 3.0, 0.0))
+    ifcopenshell.api.run("feature.add_filling", s, opening=opening, element=door)
+    cw = element(s, sb, ss, "IfcCurtainWall", "Curtain wall CW1")
+    panels = [element(s, sb, ss, "IfcPlate", f"CW1 panel {n}", (1.55, 0.05, 3.0), (6.0 + 1.5 * n, 3.0, 0.0))
+              for n in (0, 1)]
+    ifcopenshell.api.run("aggregate.assign_object", s, relating_object=cw, products=panels)
+    for n in (1, 2):
+        element(s, sb, ss, "IfcColumn", f"Column C1 copy {n}", (0.3, 0.3, 3.0), (10.0, 0.0, 0.0))
+    brace(s, sb, ss, "Brace X1", (12.0, 0.0, 0.0), (14.0, 0.0, 2.0))
+    brace(s, sb, ss, "Brace X2", (12.0, 0.0, 2.0), (14.0, 0.0, 0.0))
+
+    m, mb, ms = new("Detection fixture services")
+    element(m, mb, ms, "IfcDuctSegment", "Duct D1", (0.4, 4.0, 0.3), (2.8, -2.0, 2.65))
+    element(m, mb, ms, "IfcSensor", "Sensor in duct", (0.05, 0.05, 0.05), (2.9, 1.0, 2.75))
+    element(m, mb, ms, "IfcPipeSegment", "Pipe P1 on beam", (0.1, 4.0, 0.1), (4.0, -2.0, 2.5))
+    element(m, mb, ms, "IfcPipeSegment", "Pipe P2 half a millimetre in", (0.1, 4.0, 0.1), (4.5, -2.0, 2.5005))
+    element(m, mb, ms, "IfcPipeSegment", "Pipe P3 under beam", (0.1, 4.0, 0.1), (1.0, -2.0, 2.48))
+    ducts = [element(m, mb, ms, "IfcDuctSegment", f"Duct run {n}", (2.05, 0.4, 0.3), (2.0 * n, 6.0, 2.65)) for n in (0, 1)]
+    ports = []
+    for duct, x in zip(ducts, (2.0, 2.0)):
+        port = ifcopenshell.api.run("system.add_port", m, element=duct)
+        matrix = np.eye(4)
+        matrix[:3, 3] = (x + ox, 6.2 + oy, 2.8 + oz)
+        ifcopenshell.api.run("geometry.edit_object_placement", m, product=port, matrix=matrix, is_si=True)
+        ports.append(port)
+    ifcopenshell.api.run("system.connect_port", m, port1=ports[0], port2=ports[1], direction="SOURCE")
+
+    folder.mkdir(parents=True, exist_ok=True)
+    paths = [folder / "Fixture-Structure.ifc", folder / "Fixture-MEP.ifc"]
+    s.write(str(paths[0]))
+    m.write(str(paths[1]))
+    return paths

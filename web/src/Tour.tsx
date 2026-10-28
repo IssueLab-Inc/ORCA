@@ -9,8 +9,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // Clash ids in the trimmed Northbank demo report.
 export const TOUR = {
-  duct: "c0053",    // Clash1: supply air main through the Level 02 transfer girder (#042 in the marketing story)
-  joint: "c0051",   // Clash7: curtain-wall transom 30 mm into a mullion
+  duct: "c0053",    // #53: supply air main through the Level 02 transfer girder (#042 in the marketing story)
+  joint: "c0051",   // #51: curtain-wall transom 30 mm into a mullion
   girder: "1eVHoPtl1IhAbbhivqVqb0",
 };
 export const TOUR_QUESTION = "Why are there so many clashes on Level 02? Fix the root cause.";
@@ -91,7 +91,7 @@ export const STEPS: Step[] = [
   // 3. One fix, live
   {
     act: "One fix, live", title: "A duct through a transfer girder",
-    body: () => <>Open <b>Clash1</b>: the Level 02 supply air main runs straight through a 1 m deep steel transfer girder,
+    body: () => <>Open <b>#53</b>: the Level 02 supply air main runs straight through a 1 m deep steel transfer girder,
       150 mm into it. A classic MEP against structure clash.</>,
     target: row(TOUR.duct), reveal: true, done: (s) => s.clashId === TOUR.duct,
     show: { label: "Open it for me", run: (a) => a.selectClash(TOUR.duct) },
@@ -136,7 +136,7 @@ export const STEPS: Step[] = [
   // 4. A different kind of fix
   {
     act: "A joint, not a move", title: "A transom 30 mm into a mullion",
-    body: () => <>Not every clash is fixed by moving something. Open this <b>Clash7</b>: in the curtain wall, a horizontal
+    body: () => <>Not every clash is fixed by moving something. Open this <b>#51</b>: in the curtain wall, a horizontal
       transom runs 30 mm into the vertical mullion it should stop against. Triage reads joints like this as by design
       (frames are often modelled overlapping), but a model going to fabrication needs a clean joint.</>,
     target: row(TOUR.joint), reveal: true, enter: (a) => a.clearFilter(), done: (s) => s.clashId === TOUR.joint,

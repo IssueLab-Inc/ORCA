@@ -84,8 +84,9 @@ Findings (Oct 27, details in spikes/README.md):
 
 ## Starting a session
 
-- Follow `AGENTS.md`: large work uses `codex/` branches and a PR per slice; do not implement on `main` or merge
-  without authorization. Run the relevant server tests, web build and product runtime checks before delivery.
+- Follow `AGENTS.md`: large work uses a branch per slice named for its kind (`feature/…`, `fix/…`, `docs/…`, never a
+  tool prefix like `codex/` or `claude/`) and a PR; do not implement on `main` or merge without authorization. Run
+  the relevant server tests, web build (`npm run build`, `npm test`) and product runtime checks before delivery.
 - Demo models: add `IssueLab-Inc/ClashWiseDemoModels` and copy `northbank/*.ifc` into `samples/`.
 - Deploy: Modal, public, with proposal caps (owner decision Oct 27). `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` come
   from the environment, never chat. Once: `modal secret create sightline-meta META_API_KEY="$META_API_KEY"
@@ -355,14 +356,86 @@ ClashWiseDemoModels `palletising-cell/` (PC-03: STEP + IFC, Rev A with five plan
 offset (C1), move (C2) and trim (C3) pass on it; a move of something standing on the floor (the C5 HMI) fails, because
 the clearance check counts the floor contact.
 
+Sightline detection (Oct 28): design in `docs/detection.md`, code `server/sightline/detect.py`; no Navisworks report
+needed.
+- **Default tests:** every pair of model files, each file against itself (one model alone is named after its file),
+  and duplicates. Hard tests use 1 mm.
+- **Never a clash:** rules for same element, joined by ports, one assembly (aggregates/nests) and door in its wall
+  (`IfcRelFillsElement`). These, and touches, are counted per test, not reported.
+- **Engine:**
+  - a sort and sweep over `IfcScene.bounds()` (the completeness argument);
+  - one triangle tree per run: intersection, then collision without touching;
+  - `_Solids`, an exact separating-axis depth for rectangular extrusions, which also catches fully flush overlaps
+    that both queries miss;
+  - `model-offset` towards the middle when the federation lies over 200 m from the origin (the tree drops overlaps
+    there);
+  - one result per pair, capped at 5,000 per test (`partial`).
+- **Depth:** how far one must move to clear the other. Exact for rectangular solids, else min(intersection figure,
+  box separation). The intersection figure alone is wrong both ways: a 0.5 mm touch read 200 mm, a 40 mm rail read
+  20 mm. So #057 now reads −100 mm and #061 −77 mm (−400 mm was the old figure).
+- **Ids and reruns:**
+  - Ids are `s` + a hash of the test and the GlobalId pair, so they are stable.
+  - `Workspace.detect` keeps the last run per scene: a rerun marks clashes new or active and lists resolved only
+    when both elements were still checked.
+  - Views and "not a clash" marks carry over to a rerun.
+  - The report has `origin: "sightline"` and `temporary=True` (its own run folder).
+  - The clash panel's "Now" uses `detect.measure_pair` for these reports.
+- **API:**
+  - `GET /api/scenes/{sid}/detect/tests`;
+  - `POST /api/scenes/{sid}/detect/stream` (NDJSON: phase, start, test, test_done, done; cap
+    `SIGHTLINE_DETECT_PER_HOUR`/`DAY`);
+  - `POST /api/reports/{rid}/clashes/{cid}/images` (A/B/C PNGs captured in the browser by `Viewer.captureClash`,
+    then used by the agent, triage and the PDF);
+  - chat tool `detect_clashes`.
+- **UI:**
+  - `Detect.tsx`: a setup card when models are open and no report is, and a summary card over a detected report
+    (coverage table, resolved/new chips, Detect again);
+  - "Find clashes in the open models" in the Clash report menu;
+  - "Found by Sightline" / "Now" in the clash panel;
+  - chat-run detection adopts its report without remounting the chat (`chatReport`).
+- **Evals:** Northbank, 633 clashes in 7-12 s; 117/117 of the sampled real Navisworks overlaps; answer key 3/3
+  (Navisworks has no #061). Cell: Rev A 13/13 planted, 0 unexpected; Rev B 0.
+- **End to end in the browser:** detect → #061 → views captured → Muse Spark proposed "up 280 mm through the beam
+  opening" (Rev04's height) in 44 s → accept → Detect again: 1 resolved, 0 new.
+- **Still to do:** the tour and landing still use the Navisworks sample (the tour hard-codes c0053/c0051).
+
+Clash numbers and titles (Oct 28): no "Clash39".
+- **Numbers:** every clash has `number`, shown as #N, unique across the whole report (not per test).
+  - Navisworks reports number by position, so c0053 is #53. Their own label is kept as `ref` and shown as a small
+    reference ("Navisworks Clash1") in the panel and the PDF.
+  - Detection numbers are stable across reruns (`state["numbers"]`): a new clash takes the next number, and a
+    resolved clash's number is never reused.
+- **Names:** `name` is now the plain name from the two elements (`reports.plain_name`: "A × B"). `label` is
+  "#N title-or-name".
+- **Titles:** `titles.py` with `domain_packs/titles.md`.
+  - The triage model (Muse Spark Open) titles every clash from text facts, 40 per call, 8 calls at a time, with
+    strict JSON. Northbank's 633 detected clashes take 60 s.
+  - `POST /api/reports/{rid}/titles/stream` runs one shared job per report (`_title_jobs`, keyed like triage; cap
+    `SIGHTLINE_TITLES_PER_HOUR`/`DAY`). `GET .../titles` returns them.
+  - The browser starts titling as soon as any report opens. Titles stream into the list ("Muse is naming n…") and
+    are carried to reruns by id.
+  - The prompt says "modelled twice" only in a duplicates test. Muse first called Northbank's X-brace diagonals (same
+    name, same box, 3 m apart in shape) duplicates. Insights' Oct 27 "duplicate braces → modelling error" is likely
+    the same misreading.
+- **Everywhere else:**
+  - `Report.clash()` accepts "#39" and "39", so chat tools and voice can use numbers; chat refers to "#39 title".
+  - Voice keywords are element names and titles, not clash names.
+  - PDF and BCF titles use the label.
+  - Tour and About say #53 / #51.
+- **Web tests:** `web/tests/app-host.mjs` and `app-replacement.test.mjs` stub App's imports. A new import in App
+  needs adding to both lists, or `npm test` fails to resolve it.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
    at fittings.
-3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
+3. ✅ Viewer: context/x-ray modes, section box, measure (above). ✅ A/B/C capture in the browser (detected clashes).
+   Still to do: plan view.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
-5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF.
+5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ Sightline
+   detection (no Navisworks needed). ✅ #N numbers and Muse titles. Next: demo, tour and landing on detection and the
+   palletising cell.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.

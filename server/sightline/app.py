@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
-from . import chat, context_planner, document, edits, owner, plans, triage
+from . import chat, context_planner, detect, document, edits, owner, plans, titles, triage
 from .meta_client import load_env, transcribe, triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
@@ -139,6 +139,12 @@ class _RequestEvents:
 propose_limit = ProposeLimit.from_env()
 chat_limit = ProposeLimit.chat_from_env()
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
+# Clash titles: one titling run per report (a few model calls for a whole report): SIGHTLINE_TITLES_PER_HOUR per visitor.
+title_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_TITLES_PER_HOUR", "0")),
+                           int(os.environ.get("SIGHTLINE_TITLES_PER_DAY", "0")), noun="titling runs")
+# Detection runs cost no model call but take the server's CPU for seconds: SIGHTLINE_DETECT_PER_HOUR per visitor.
+detect_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_DETECT_PER_HOUR", "0")),
+                            int(os.environ.get("SIGHTLINE_DETECT_PER_DAY", "0")), noun="detection runs")
 voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
                            int(os.environ.get("SIGHTLINE_VOICE_PER_DAY", "0")), noun="voice messages")
 
@@ -201,6 +207,10 @@ class PlanApply(BaseModel):
 
 class OpenReport(BaseModel):
     sample: str
+
+
+class DetectRequest(BaseModel):
+    tests: list[dict] | None = None  # None: the default tests (GET /detect/tests); see detect.Test.from_dict
 
 
 # Uploaded clash reports: XML plus the images it links to, kept in a temp folder while the report is open.
@@ -496,6 +506,64 @@ def report_image(report_id: str, clash_id: str, index: int):
     return FileResponse(path)
 
 
+MAX_VIEW_BYTES = 4_000_000
+
+
+@app.post("/api/reports/{report_id}/clashes/{clash_id}/images")
+async def save_view(report_id: str, clash_id: str, label: str = Form(...), image: UploadFile = File(...)):
+    """A view of a clash Sightline detected, captured in the browser (A, B or C)."""
+    data = await image.read(MAX_VIEW_BYTES + 1)
+    if len(data) > MAX_VIEW_BYTES:
+        raise HTTPException(413, "That picture is too large.")
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(415, "Send a PNG.")
+    try:
+        return {"images": ws.save_capture(_report(report_id), clash_id, label, data)}
+    except KeyError:
+        raise HTTPException(404, "No such clash.")
+    except PermissionError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/scenes/{scene_id}/detect/tests")
+def detect_tests(scene_id: str):
+    """The clash tests Sightline would run on the open models (docs/detection.md)."""
+    return ws.detect_tests(_scene(scene_id))
+
+
+@app.post("/api/scenes/{scene_id}/detect/stream")
+def detect_stream(scene_id: str, body: DetectRequest, request: Request):
+    """Find the clashes in the open models. Streams newline-delimited JSON: {"type": "phase"|"start"|"test"|
+    "test_done", ...} while it works, then {"type": "done", report, coverage, diff, ...} or {"type": "error"}."""
+    _scene(scene_id)
+    if body.tests is not None:
+        try:
+            [detect.Test.from_dict(t) for t in body.tests]
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(422, f"Check the tests: {e}")
+    refused = _take(detect_limit, request)
+    if refused:
+        raise HTTPException(429, refused)
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            events.put({"type": "done", **ws.detect(scene_id, body.tests, on_event=events.put)})
+        except Exception as e:
+            events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        events.put(None)
+
+    owner.spawn(work)
+
+    def stream():
+        while (event := events.get()) is not None:
+            yield json.dumps(event, default=str) + "\n"
+
+    return _ndjson(stream())
+
+
 @app.get("/api/reports/{report_id}/match/{scene_id}")
 def match(report_id: str, scene_id: str):
     return ws.match(_report(report_id), _scene(scene_id))
@@ -599,6 +667,56 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
 
     def stream():
         for event in job.follow():
+            yield json.dumps(event, default=str) + "\n"
+
+    return _ndjson(stream())
+
+
+_title_jobs: dict[str, titles.Job] = {}
+_title_lock = threading.Lock()
+
+
+def _with_titles(report, found: dict[str, str]) -> None:
+    """A shared run titles one copy of a sample report; every visitor's copy (same ids) gets its titles."""
+    for c in report.clashes:
+        if not c.title and c.id in found:
+            c.title = found[c.id]
+
+
+@app.get("/api/reports/{report_id}/titles")
+def report_titles(report_id: str):
+    report = ws.report(_report(report_id))
+    job = _title_jobs.get(_triage_key(report))
+    if job:
+        _with_titles(report, job.titles)
+    return {"titles": {c.id: c.title for c in report.clashes if c.title}, "running": bool(job and not job.done)}
+
+
+@app.post("/api/reports/{report_id}/titles/stream")
+def titles_stream(report_id: str, request: Request):
+    """Title every clash in the report with Muse (titles.py). Streams newline-delimited JSON: start, a "titles" event
+    per batch ({id: title}), done. One run per report is shared; following a run already started is free."""
+    report = ws.report(_report(report_id))
+    key = _triage_key(report)
+    with _title_lock:
+        job = _title_jobs.get(key)
+        if job is not None:
+            _with_titles(report, job.titles)
+        # Start one when there is none, or when a finished one left clashes untitled (a failed batch): those only.
+        if job is None or (job.done and any(not c.title for c in report.clashes)):
+            refused = _take(title_limit, request)
+            if refused:
+                raise HTTPException(429, refused)
+            model, info = triage_model()
+            job = titles.Job(report, model, info)
+            _title_jobs[key] = job.start()
+            while len(_title_jobs) > 32:
+                _title_jobs.pop(next(iter(_title_jobs)))
+
+    def stream():
+        for event in job.follow():
+            if event.get("type") == "titles":
+                _with_titles(report, event["items"])
             yield json.dumps(event, default=str) + "\n"
 
     return _ndjson(stream())
@@ -791,7 +909,10 @@ async def transcribe_voice(request: Request, audio: UploadFile = File(...), repo
         raise HTTPException(429, refused)
     words = list(VOICE_WORDS)
     if report_id and report_id in ws.reports:
-        words += sorted({c.name for c in ws.report(report_id).clashes}, key=lambda n: (len(n), n))[:40]
+        # What people say about a report's clashes: the elements' names (and Muse's titles), not their numbers.
+        clashes = ws.report(report_id).clashes
+        names = {e.name for c in clashes for e in (c.a, c.b) if e.name} | {c.title for c in clashes if c.title}
+        words += sorted(names, key=lambda n: (len(n), n))[:40]
     try:
         return await run_in_threadpool(transcribe, data, words)
     except Exception as e:  # the key, the network or the service: say so rather than fail silently

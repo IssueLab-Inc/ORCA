@@ -1,4 +1,4 @@
-import { Boxes, Brain, Check, CircleCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Boxes, Brain, Check, CircleCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
@@ -7,14 +7,15 @@ import { ReportDialog, ReviewBlock } from "./ReportDoc";
 import type { OwnerSettings } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
-import { api, ApiError, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
+import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
 import { ContextPlan, contextStep, type ContextRun } from "./ContextPlan";
 import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
-import { ReportList, mm, type Review } from "./ReportList";
+import { DetectSetupCard, DetectSummary, type DetectProgress } from "./Detect";
+import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
 import { Popover, Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
@@ -63,6 +64,20 @@ export function App() {
   const [matches, setMatches] = useState<Matches | null>(null);
   const [clash, setClash] = useState<ReportClash | null>(null);
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
+  // Sightline's own detection (server: detect.py): what it would run on the open models, a run in progress, the last
+  // result, and the A/B/C views taken in the browser of the clashes it found (by clash id).
+  const [detectSetup, setDetectSetup] = useState<DetectSetup | null>(null);
+  const [detecting, setDetecting] = useState<DetectProgress | null>(null);
+  const [detection, setDetection] = useState<Detection | null>(null);
+  const [views, setViews] = useState<Record<string, string[]>>({});
+  const [capturing, setCapturing] = useState<string | null>(null);
+  // Muse's titles for the open report's clashes (server: titles.py), as they stream in, and how many are still coming.
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const [naming, setNaming] = useState(0);
+  const captures = useRef(new Map<string, Promise<void>>());
+  const lastTests = useRef<DetectTest[] | null>(null);
+  // The chat starts over when the user opens another report, not when the chat itself opened one (Detect from chat).
+  const [chatReport, setChatReport] = useState<string | null>(null);
   // The image dialog: a clash's Navisworks views, opened from the clash panel or a row's thumbnail.
   const [about, setAbout] = useState(false);
   // Muse Spark's reasoning summaries for the current proposal, as they stream in.
@@ -403,7 +418,7 @@ export function App() {
   function goToClash(c: ReportClash, m = matches?.[c.id]) {
     const ids = [m?.show?.[0] ?? m?.a, m?.show?.[1] ?? m?.b].filter((g): g is string => !!g);
     const point = c.point && c.point.every((v) => v != null) ? serverPointToViewer(c.point as number[]) : null;
-    if (!viewer.current?.focusClash(ids, point, c.name)) setError("This clash has no geometry or point to show in the open model.");
+    if (!viewer.current?.focusClash(ids, point, `#${c.number}`)) setError("This clash has no geometry or point to show in the open model.");
   }
 
   // A selected report clash: its pair in the viewer, and Sightline's own measure of it.
@@ -541,8 +556,106 @@ export function App() {
     replaceChatWork(); retireDirectWork(); ++agentRun.current; ++planRequest.current; ++contextRequest.current; ++sceneEpoch.current;
     pilot.current?.cancel(); resetWork(); setContext(null); setContextChosen(null); setAcknowledged([]); setPlanKind("batch"); setChatAsk(undefined);
     setBusy(`Reading ${what}…`); setError(null);
-    try { const r = await get(); if (workspaceEpoch.current !== workspace) return; setReport(r); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({}); setVerdicts(null); }
+    try {
+      const r = await get(); if (workspaceEpoch.current !== workspace) return;
+      setReport(r); setChatReport(r.id); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({}); setVerdicts(null);
+      setDetection(null); setViews({}); captures.current.clear();
+      return r;
+    }
     catch (e) { if (workspaceEpoch.current === workspace) setError((e as Error).message); } finally { if (workspaceEpoch.current === workspace) setBusy(null); }
+  }
+
+  // Every report's clashes get titles: "#39 Cold-water main clips the transfer girder", not "Clash39".
+  useEffect(() => {
+    setTitles({}); setNaming(0);
+    if (!report) return;
+    const missing = report.clashes.filter((c) => !c.title).length;
+    if (!missing) return;
+    let live = true;
+    setNaming(missing);
+    api.titles(report.id, (e) => {
+      if (!live) return;
+      if (e.type === "titles") {
+        setTitles((t) => ({ ...t, ...e.items }));
+        setNaming((n) => Math.max(0, n - Object.keys(e.items).length));
+      }
+      if (e.type === "done") setNaming(0);
+    }).catch(() => { if (live) setNaming(0); });  // no titles (no key, cap reached): the plain names stay
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report?.id]);
+
+  // ------------------------------------------------------------------ Sightline detection (docs/detection.md)
+
+  useEffect(() => {
+    setDetectSetup(null);
+    if (!sceneId) return;
+    let live = true;
+    api.detectTests(sceneId).then((s) => { if (live) setDetectSetup(s); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [sceneId]);
+
+  function onDetectEvent(e: DetectEvent) {
+    setDetecting((p) => {
+      const cur = p ?? { phase: "Starting…", tests: [] };
+      if (e.type === "phase") return { ...cur, phase: e.text };
+      if (e.type === "start") return { ...cur, phase: `Checking ${e.elements.toLocaleString()} elements`, tests: e.tests.map((t) => ({ name: t.name })) };
+      if (e.type === "test") return { ...cur, running: e.index };
+      if (e.type === "test_done") return { ...cur, tests: cur.tests.map((t, i) => (i === e.index ? { ...t, coverage: e.coverage } : t)) };
+      return cur;
+    });
+  }
+
+  /** Find the clashes in the open models and open them as the report. `tests` null: the server's defaults. Marks on
+   * clashes that are still there (by design, for the author) survive a rerun: their ids stay the same. */
+  async function runDetect(tests: DetectTest[] | null) {
+    if (!sceneId || busy || detecting) return;
+    const epoch = sceneEpoch.current;
+    const keep = report?.origin === "sightline" ? reviewed : {};
+    const selected = report?.origin === "sightline" ? clash?.id : undefined;
+    lastTests.current = tests;
+    setDetecting({ phase: "Starting…", tests: [] }); setError(null);
+    try {
+      const done = await api.detect(sceneId, tests, onDetectEvent);
+      if (sceneEpoch.current !== epoch) return;
+      const r = await loadReport(async () => done.report, "the clashes Sightline found");
+      if (!r) return;
+      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds });
+      const ids = new Set(r.clashes.map((c) => c.id));
+      setReviewed(Object.fromEntries(Object.entries(keep).filter(([id]) => ids.has(id))));
+      const still = selected && r.clashes.find((c) => c.id === selected);
+      if (still) selectClash(still);
+    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); }
+    finally { setDetecting(null); }
+  }
+
+  /** The chat ran detection: show its report without ending the chat turn that is still answering about it. */
+  async function adoptChatReport(reportId: string, found: Detection) {
+    const workspace = workspaceEpoch.current;
+    try {
+      const r = await api.report(reportId);
+      if (workspaceEpoch.current !== workspace) return;
+      setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({});
+      setVerdicts(null); setViews({}); captures.current.clear(); setDetection(found);
+    } catch (e) { setError((e as Error).message); }
+    finally { setDetecting(null); }
+  }
+
+  /** A clash Sightline found has no pictures: take its A/B/C views in the viewer and keep them on the server, where the
+   * fix agent, triage and the PDF use them as they use Navisworks views. Once per clash. */
+  function captureViews(reportId: string, clashId: string, ga: string, gb: string): Promise<void> {
+    const pending = captures.current.get(clashId);
+    if (pending) return pending;
+    const shots = viewer.current?.captureClash(ga, gb);
+    if (!shots) return Promise.resolve();
+    setCapturing(clashId);
+    const p = (async () => {
+      let labels: string[] = [];
+      for (const label of ["A", "B", "C"] as const) labels = await api.saveView(reportId, clashId, label, await (await fetch(shots[label])).blob());
+      setViews((v) => ({ ...v, [clashId]: labels }));
+    })().catch(() => undefined).finally(() => setCapturing((c) => (c === clashId ? null : c)));
+    captures.current.set(clashId, p);
+    return p;
   }
 
   function upload(list: FileList | null) {
@@ -602,7 +715,7 @@ export function App() {
     if (!url) return;
     const link = document.createElement("a");
     link.href = url;
-    link.download = `sightline-${clash?.name ?? "view"}.png`;
+    link.download = `sightline-${clash ? `clash-${clash.number}` : "view"}.png`;
     link.click();
   }
 
@@ -691,6 +804,9 @@ export function App() {
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
+    // A clash Sightline found: give the agent its views, as a Navisworks report would (waiting a few seconds at most).
+    if (clash && report?.origin === "sightline" && !clash.images.length && !views[clash.id])
+      await Promise.race([captureViews(report.id, clash.id, a, b), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
     try { result = await api.proposeStream(sceneId, a, b, from, onEvent); }
     catch (e) { if (agentRun.current === run) setError((e as Error).message); }
@@ -974,6 +1090,10 @@ export function App() {
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
       if (c) selectClash(c, planThisTurn.current);
     }
+    if (e.type === "tool" && e.name === "detect_clashes") setDetecting({ phase: "Starting…", tests: [] });
+    if (e.type === "detect_event") onDetectEvent(e.event);
+    if (e.type === "tool_result" && e.name === "detect_clashes") setDetecting(null);
+    if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
     }
@@ -1045,6 +1165,23 @@ export function App() {
   }
 
   const proposing = !!progress && progress.phase !== "done";
+  // A detected clash's views, taken once the camera has reached it (selecting a clash flies there first).
+  useEffect(() => {
+    if (!clash || !report || report.origin !== "sightline" || clash.images.length || views[clash.id] || !a || !b) return;
+    if (viewPlan || activeContext || proposing) return;
+    const rid = report.id, cid = clash.id;
+    const t = setTimeout(() => { void captureViews(rid, cid, a, b); }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clash, report, a, b, views, viewPlan, activeContext, proposing]);
+  // What the list and the panel show: each clash with its title and, for a detected clash, the views taken of it.
+  const shown = (c: ReportClash) => (views[c.id] || (titles[c.id] && !c.title)
+    ? { ...c, images: views[c.id] ?? c.images, title: c.title ?? titles[c.id] ?? null } : c);
+  const shownReport = useMemo(() => (report && (Object.keys(views).length || Object.keys(titles).length)
+    ? { ...report, clashes: report.clashes.map(shown) } : report),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [report, views, titles]);
+  const shownClash = clash ? shown(clash) : clash;
   // Until a report or the models are open, the page is the landing: no panels, just what Sightline is and the demo.
   const landing = !stats && !report;
   const startLabel = reportSamples.length && !report ? "Open the Northbank demo" : "Open the models";
@@ -1129,6 +1266,10 @@ export function App() {
         </Popover>
         <Popover icon={FileSpreadsheet} label="Clash report" text="Clash report" tip="bottom">
           {(close) => (<>
+            <p className="pop-title">Sightline detection</p>
+            <button className="pop-item" disabled={!sceneId || !!busy || !!detecting} onClick={() => { close(); void runDetect(null); }}>
+              <Radar size={14} aria-hidden /> Find clashes in the open models</button>
+            {!sceneId && <p className="hint">Open the models first: no Navisworks report is needed.</p>}
             <p className="pop-title">Navisworks clash report (XML)</p>
             {reportSamples.map((s) => (
               <button key={s} className="pop-item" disabled={!!busy} onClick={() => { close(); loadReport(() => api.openReport(s), s); }}>
@@ -1162,12 +1303,15 @@ export function App() {
 
       <aside className="pane left">
         {report
-          ? <ReportList report={report} matches={matches} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
+          ? <ReportList report={shownReport ?? report} naming={naming} matches={matches} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
-              insights={<><TriageCard run={triageRun} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
-                live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: report.clashes.find((c) => c.id === id)?.name ?? id }))}
+              insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
+                detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
+                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} />}
+                <TriageCard run={triageRun} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+                live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
                 total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
@@ -1175,10 +1319,14 @@ export function App() {
                 busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={explainPatterns}
                 onSelect={(ids) => setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])]))}
                 onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })} /></>} />
-          : <div className="empty-left">
+          : sceneId
+            ? <div className="detect-slot"><DetectSetupCard setup={detectSetup} progress={detecting} disabled={!!busy}
+                onRun={(tests) => void runDetect(tests)} />
+                <p className="hint small">Or open a Navisworks clash report from the header, or double-click element A, then element B, in the model.</p></div>
+            : <div className="empty-left">
               <FileSpreadsheet size={28} aria-hidden />
               <h2>No clash report open</h2>
-              <p className="hint">Open a Navisworks clash report from the header, or double-click element A, then element B, in the model.</p>
+              <p className="hint">Open the models and let Sightline find the clashes, or open a Navisworks clash report from the header.</p>
             </div>}
       </aside>
 
@@ -1254,7 +1402,7 @@ export function App() {
         <div className="chat-slot" hidden={tab !== "chat"}>
           {context && <button className="context-chat-link btn" onClick={() => { clearManual(); setTab("plan"); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
-          <ChatPanel key={`${sceneId}:${report?.id}`} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
+          <ChatPanel key={`${sceneId}:${chatReport}`} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
             context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
         </div>
@@ -1274,7 +1422,8 @@ export function App() {
         </>}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report
-            ? (<><ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]} />
+            ? (<><ClashPanel reportId={report.id} clash={shownClash ?? clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash: shownClash ?? clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]}
+              origin={report.origin} capturing={capturing === clash.id} />
               {(evidence[clash.id] || triage[clash.id]?.verdict === "real_clash" || (signoffs[clash.id]?.length ?? 0) > 0) &&
                 <ReviewBlock clash={clash} teams={modelTeams} signoffs={signoffs[clash.id] ?? []}
                   onAdd={(so) => addSignoff(clash.id, so)} onRemove={(i) => removeSignoff(clash.id, i)} />}
