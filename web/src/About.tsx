@@ -133,7 +133,7 @@ export function About({ start, onClose }: {
         <h2 className="about-h">Try it in a minute</h2>
         <ol>
           <li>{start ? <>Press <b>{start.label}</b> above.</> : <>Open the Northbank demo from the start page.</>}</li>
-          <li>In the list on the left, open <b>IfcDuctSegment (MEP) vs IfcProject (Structure)</b> and pick <b>Clash1</b>:
+          <li>In the list on the left, open <b>IfcDuctSegment (MEP) vs IfcProject (Structure)</b> and pick <b>#53</b>:
             a supply air duct running through the transfer girder, the big beam on Level 02.</li>
           <li>Press <b>Propose fixes</b> and watch Sightline try its ideas in the 3D view.</li>
         </ol>

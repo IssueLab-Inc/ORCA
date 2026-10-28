@@ -1,0 +1,180 @@
+{
+ "seconds": 6.28,
+ "elements": 1961,
+ "clashes": 633,
+ "coverage": [
+  {
+   "test": "pair:Northbank-Architecture.ifc|Northbank-MEP.ifc",
+   "name": "Architecture vs MEP",
+   "kind": "hard",
+   "elements_a": 658,
+   "elements_b": 844,
+   "candidate_pairs": 312,
+   "clashes": 0,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.366
+  },
+  {
+   "test": "pair:Northbank-Architecture.ifc|Northbank-Site.ifc",
+   "name": "Architecture vs Site",
+   "kind": "hard",
+   "elements_a": 658,
+   "elements_b": 229,
+   "candidate_pairs": 145,
+   "clashes": 0,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.165
+  },
+  {
+   "test": "pair:Northbank-Architecture.ifc|Northbank-Structure.ifc",
+   "name": "Architecture vs Structure",
+   "kind": "hard",
+   "elements_a": 658,
+   "elements_b": 230,
+   "candidate_pairs": 188,
+   "clashes": 0,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.038
+  },
+  {
+   "test": "pair:Northbank-MEP.ifc|Northbank-Site.ifc",
+   "name": "MEP vs Site",
+   "kind": "hard",
+   "elements_a": 844,
+   "elements_b": 229,
+   "candidate_pairs": 48,
+   "clashes": 0,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.022
+  },
+  {
+   "test": "pair:Northbank-MEP.ifc|Northbank-Structure.ifc",
+   "name": "MEP vs Structure",
+   "kind": "hard",
+   "elements_a": 844,
+   "elements_b": 230,
+   "candidate_pairs": 33,
+   "clashes": 3,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.027
+  },
+  {
+   "test": "pair:Northbank-Site.ifc|Northbank-Structure.ifc",
+   "name": "Site vs Structure",
+   "kind": "hard",
+   "elements_a": 229,
+   "elements_b": 230,
+   "candidate_pairs": 53,
+   "clashes": 0,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.021
+  },
+  {
+   "test": "self:Northbank-Architecture.ifc",
+   "name": "Architecture (within)",
+   "kind": "hard",
+   "elements_a": 658,
+   "elements_b": 658,
+   "candidate_pairs": 1637,
+   "clashes": 12,
+   "touching": 6,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.13
+  },
+  {
+   "test": "self:Northbank-MEP.ifc",
+   "name": "MEP (within)",
+   "kind": "hard",
+   "elements_a": 844,
+   "elements_b": 844,
+   "candidate_pairs": 647,
+   "clashes": 0,
+   "touching": 10,
+   "excluded": {
+    "connected": 1
+   },
+   "partial": false,
+   "seconds": 0.103
+  },
+  {
+   "test": "self:Northbank-Site.ifc",
+   "name": "Site (within)",
+   "kind": "hard",
+   "elements_a": 229,
+   "elements_b": 229,
+   "candidate_pairs": 472,
+   "clashes": 169,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.232
+  },
+  {
+   "test": "self:Northbank-Structure.ifc",
+   "name": "Structure (within)",
+   "kind": "hard",
+   "elements_a": 230,
+   "elements_b": 230,
+   "candidate_pairs": 691,
+   "clashes": 449,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.172
+  },
+  {
+   "test": "duplicates",
+   "name": "Duplicates (all models)",
+   "kind": "duplicate",
+   "elements_a": 1961,
+   "elements_b": 1961,
+   "candidate_pairs": 4226,
+   "clashes": 0,
+   "touching": 0,
+   "excluded": {},
+   "partial": false,
+   "seconds": 0.038
+  }
+ ],
+ "answer_key": {
+  "#042": {
+   "sightline_mm": -300.0,
+   "test": "MEP vs Structure",
+   "navisworks_sampled": true
+  },
+  "#057": {
+   "sightline_mm": -100.0,
+   "test": "MEP vs Structure",
+   "navisworks_sampled": true
+  },
+  "#061": {
+   "sightline_mm": -76.8,
+   "test": "MEP vs Structure",
+   "navisworks_sampled": false
+  }
+ },
+ "outcomes": {
+  "not physical (never reported)": 129,
+  "found": 117,
+  "one element on both sides": 24,
+  "touch at 1 mm (Navisworks)": 46,
+  "meant to meet: joined by ports": 1
+ },
+ "recall": [
+  117,
+  117
+ ]
+}

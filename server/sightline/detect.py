@@ -1,0 +1,604 @@
+"""Sightline detection: find the clashes in the open models, as a clash report the rest of Sightline already reads.
+
+Design: docs/detection.md. In short:
+- a test asks one question (hard, clearance or duplicate) of two selections, or of one selection against itself;
+- the default tests are every pair of model files, each file against itself, and duplicates, hard at 1 mm;
+- pairs that are meant to meet (one element, joined by ports, one assembly, a door in its wall) are never reported, but
+  they are counted, as are touches no deeper than the tolerance;
+- a sort and sweep over the cached element boxes finds every pair that could clash (the completeness argument), then
+  one triangle tree measures them: intersection for depth, collision without touching for flush faces it misses;
+- each clash keeps an id made from its test and its two GlobalIds, so running again keeps ids, and a clash that has gone
+  is "resolved" only when both elements were still checked against each other.
+
+A run returns a `reports.Report` (origin "sightline") plus per-test coverage, so the list, triage, insights, plans, chat
+and the PDF work on it unchanged.
+"""
+from __future__ import annotations
+
+import hashlib
+import os
+import tempfile
+import time
+import uuid
+from collections import Counter
+from dataclasses import asdict, dataclass, field
+from itertools import combinations
+from pathlib import Path
+from typing import Callable
+
+import ifcopenshell
+import ifcopenshell.geom
+import ifcopenshell.util.element
+import ifcopenshell.util.system
+import numpy as np
+
+from . import verify
+from .document import guess_team
+from .reports import Report, ReportClash, ReportElement, plain_name
+from .scene import IfcScene
+
+TOLERANCE_M = 0.001        # an overlap must be deeper than this to be a hard clash; less is a touch
+DUPLICATE_M = 0.001        # two copies of one thing: boxes and vertices agree within this
+FAR_M = 200.0              # the triangle tree drops real overlaps this far from its origin: shift the models nearer
+CAP = 5000                 # clashes kept per test; a test that reaches it is partial
+RULES = ("same_element", "connected", "assembly", "host")
+RULE_LABEL = {"same_element": "same element", "connected": "joined by ports", "assembly": "one assembly",
+              "host": "door or window in its wall"}
+
+Event = Callable[[dict], None]
+
+
+@dataclass
+class Selection:
+    """Which elements a side of a test takes. Empty fields mean "any"."""
+    files: list[str] = field(default_factory=list)        # model file names
+    teams: list[str] = field(default_factory=list)        # disciplines, as guessed per file
+    classes: list[str] = field(default_factory=list)      # IFC classes, subclasses included
+    exclude_classes: list[str] = field(default_factory=list)
+    systems: list[str] = field(default_factory=list)      # distribution system names
+    ids: list[str] = field(default_factory=list)          # particular elements, by GlobalId
+
+
+@dataclass
+class Test:
+    id: str
+    name: str
+    a: Selection
+    b: Selection | None = None   # None: A against itself
+    kind: str = "hard"           # "hard" | "clearance" | "duplicate"
+    tolerance_m: float = TOLERANCE_M
+    clearance_m: float = 0.0
+    rules: dict[str, bool] = field(default_factory=lambda: {r: True for r in RULES})
+    enabled: bool = True
+
+    @staticmethod
+    def from_dict(d: dict) -> "Test":
+        sel = lambda s: None if s is None else Selection(**{k: list(v) for k, v in s.items() if k in Selection.__dataclass_fields__})
+        kind = d.get("kind", "hard")
+        if kind not in ("hard", "clearance", "duplicate"):
+            raise ValueError(f"unknown test kind {kind!r}")
+        rules = {r: True for r in RULES} | {k: bool(v) for k, v in (d.get("rules") or {}).items() if k in RULES}
+        return Test(id=str(d["id"]), name=str(d.get("name") or d["id"]), a=sel(d.get("a") or {}), b=sel(d.get("b")),
+                    kind=kind, tolerance_m=max(0.0, float(d.get("tolerance_m", TOLERANCE_M))),
+                    clearance_m=max(0.0, float(d.get("clearance_m", 0.0))), rules=rules,
+                    enabled=bool(d.get("enabled", True)))
+
+
+@dataclass
+class Coverage:
+    test: str
+    name: str
+    kind: str
+    elements_a: int
+    elements_b: int
+    candidate_pairs: int      # pairs whose boxes come close enough to clash: every other pair cannot
+    clashes: int
+    touching: int             # overlapping no deeper than the tolerance
+    excluded: dict[str, int]  # overlapping pairs not reported, by rule
+    partial: bool
+    seconds: float
+
+
+@dataclass
+class Run:
+    report: Report
+    coverage: list[Coverage]
+    diff: dict                # {"new": [ids], "resolved": [...], "no_longer_checked": [...]} against the last run
+    elements: int
+    seconds: float
+    offset: list[float]       # what the triangle tree was shifted by (zero unless the models are far from the origin)
+    state: dict               # what the next run compares against
+
+
+# ------------------------------------------------------------------------------------------------- the open models
+
+class _Index:
+    """Lookups the run needs many times, built once: file of each element, physical boxes, labels, relations."""
+
+    def __init__(self, scene: IfcScene):
+        self.scene = scene
+        self.boxes = scene.bounds()
+        self.file: dict[str, int] = {}
+        self.entity: dict[str, object] = {}
+        for i, m in enumerate(scene.models):
+            for p in m.by_type("IfcElement"):
+                if p.GlobalId in self.boxes:
+                    self.file[p.GlobalId] = i
+                    self.entity[p.GlobalId] = p
+        self.names = [p.name for p in scene.paths]
+        self.teams = []
+        for i, m in enumerate(scene.models):
+            classes = Counter(e.is_a() for e in m.by_type("IfcElement") if e.GlobalId in self.boxes)
+            self.teams.append(guess_team(classes, self.names[i]))
+        self._systems: dict[str, list[str]] = {}
+        self.connected = self._connected()
+        self.assembly = self._assemblies()
+        self.host = self._hosts()
+
+    def systems(self, gid: str) -> list[str]:
+        if gid not in self._systems:
+            self._systems[gid] = [s.Name for s in ifcopenshell.util.system.get_element_systems(self.entity[gid]) if s.Name]
+        return self._systems[gid]
+
+    def _connected(self) -> set[frozenset]:
+        """Element pairs joined port to port."""
+        out = set()
+        for m in self.scene.models:
+            for rel in m.by_type("IfcRelConnectsPorts"):
+                owners = [ifcopenshell.util.system.get_port_element(p) for p in (rel.RelatingPort, rel.RelatedPort)]
+                if all(o is not None for o in owners) and owners[0].GlobalId != owners[1].GlobalId:
+                    out.add(frozenset((owners[0].GlobalId, owners[1].GlobalId)))
+        return out
+
+    def _assemblies(self) -> dict[str, str]:
+        """Element → the element-level assembly it belongs to (aggregate or nest of elements). Parts of one
+        assembly, and an assembly and its parts, share a key."""
+        root: dict[str, str] = {}
+        for m in self.scene.models:
+            for rel in list(m.by_type("IfcRelAggregates")) + list(m.by_type("IfcRelNests")):
+                whole = rel.RelatingObject
+                if not whole.is_a("IfcElement"):
+                    continue
+                for part in rel.RelatedObjects:
+                    if part.is_a("IfcElement"):
+                        root[part.GlobalId] = whole.GlobalId
+        def top(g):
+            seen = set()
+            while g in root and g not in seen:
+                seen.add(g)
+                g = root[g]
+            return g
+        keys = {g: top(g) for g in root}
+        for g in set(keys.values()):
+            keys[g] = g
+        return keys
+
+    def _hosts(self) -> set[frozenset]:
+        """A door or window and the element whose opening it fills."""
+        out = set()
+        for m in self.scene.models:
+            for rel in m.by_type("IfcRelFillsElement"):
+                for voids in rel.RelatingOpeningElement.VoidsElements or ():
+                    out.add(frozenset((rel.RelatedBuildingElement.GlobalId, voids.RelatingBuildingElement.GlobalId)))
+        return out
+
+    def excluded_by(self, a: str, b: str, rules: dict[str, bool]) -> str | None:
+        if rules.get("same_element", True) and a == b:
+            return "same_element"
+        pair = frozenset((a, b))
+        if rules.get("connected", True) and pair in self.connected:
+            return "connected"
+        if rules.get("assembly", True) and a in self.assembly and self.assembly.get(a) == self.assembly.get(b):
+            return "assembly"
+        if rules.get("host", True) and pair in self.host:
+            return "host"
+        return None
+
+    def select(self, sel: Selection) -> list[str]:
+        out = []
+        for g, e in self.entity.items():
+            if sel.ids and g not in sel.ids:
+                continue
+            i = self.file[g]
+            if sel.files and self.names[i] not in sel.files:
+                continue
+            if sel.teams and self.teams[i] not in sel.teams:
+                continue
+            if sel.classes and not any(e.is_a(c) for c in sel.classes):
+                continue
+            if sel.exclude_classes and any(e.is_a(c) for c in sel.exclude_classes):
+                continue
+            if sel.systems and not set(self.systems(g)) & set(sel.systems):
+                continue
+            out.append(g)
+        return sorted(out)
+
+    def report_element(self, gid: str) -> ReportElement:
+        e = self.entity[gid]
+        container = ifcopenshell.util.element.get_container(e)
+        systems = self.systems(gid)
+        return ReportElement(global_id=gid, ifc_class=e.is_a(), name=e.Name or e.is_a(),
+                             level=getattr(container, "Name", None), file=self.names[self.file[gid]],
+                             system=systems[0] if systems else None, description=getattr(e, "Description", None))
+
+
+# ------------------------------------------------------------------------------------------------- default tests
+
+def default_tests(scene: IfcScene, index: _Index | None = None) -> list[Test]:
+    """Every pair of model files, each file against itself, and duplicates across everything: hard, 1 mm."""
+    ix = index or _Index(scene)
+    files = [i for i in range(len(scene.models)) if any(f == i for f in ix.file.values())]
+    counts = Counter(ix.teams[i] for i in files)
+    # A discipline names a model only among several; one model on its own (a machine cell) keeps its file name.
+    label = {i: ix.teams[i] if len(files) > 1 and counts[ix.teams[i]] == 1 else Path(ix.names[i]).stem for i in files}
+    order = sorted(files, key=lambda i: label[i])
+    tests = []
+    for i, j in combinations(order, 2):
+        tests.append(Test(id=f"pair:{ix.names[i]}|{ix.names[j]}", name=f"{label[i]} vs {label[j]}",
+                          a=Selection(files=[ix.names[i]]), b=Selection(files=[ix.names[j]])))
+    for i in order:
+        tests.append(Test(id=f"self:{ix.names[i]}", name=f"{label[i]} (within)", a=Selection(files=[ix.names[i]])))
+    tests.append(Test(id="duplicates", name="Duplicates (all models)", a=Selection(), kind="duplicate",
+                      tolerance_m=DUPLICATE_M))
+    return tests
+
+
+def presets(scene: IfcScene, index: _Index | None = None) -> list[Test]:
+    """Tests offered but not run by default: MEP clearance to structure, 25 mm."""
+    ix = index or _Index(scene)
+    teams = set(ix.teams)
+    if {"MEP", "Structure"} <= teams:
+        return [Test(id="clearance:MEP|Structure", name="MEP vs Structure, 25 mm clearance", kind="clearance",
+                     a=Selection(teams=["MEP"]), b=Selection(teams=["Structure"]), clearance_m=0.025, enabled=False)]
+    return []
+
+
+# ------------------------------------------------------------------------------------------------- broad phase
+
+def _candidates(ix: _Index, a: list[str], b: list[str] | None, margin: float) -> list[tuple[str, str]]:
+    """Every pair whose boxes come within `margin` of each other: a sort and sweep on x, then y and z. A pair it does
+    not return cannot overlap or come that close, so it needs no further check. `b` None pairs A with itself, once."""
+    if not a or (b is not None and not b):
+        return []
+    A = np.array([ix.boxes[g] for g in a])            # (n, 2, 3)
+    B = A if b is None else np.array([ix.boxes[g] for g in b])
+    ids_b = a if b is None else b
+    order = np.argsort(B[:, 0, 0])
+    bmin_x = B[order, 0, 0]
+    out = []
+    for i, g in enumerate(a):
+        lo, hi = A[i, 0] - margin, A[i, 1] + margin
+        end = np.searchsorted(bmin_x, hi[0], side="right")
+        js = order[:end]
+        js = js[(B[js, 1, 0] >= lo[0]) & (B[js, 0, 1] <= hi[1]) & (B[js, 1, 1] >= lo[1])
+                & (B[js, 0, 2] <= hi[2]) & (B[js, 1, 2] >= lo[2])]
+        for j in js:
+            h = ids_b[j]
+            if b is None and h <= g:      # self test: each unordered pair once, never an element with itself
+                continue
+            out.append((g, h))
+    return out
+
+
+# ------------------------------------------------------------------------------------------------- narrow phase
+
+def _offset(ix: _Index) -> np.ndarray:
+    """Shift for the triangle tree: zero near the origin; the federation's middle, in whole metres, when far."""
+    if not ix.boxes:
+        return np.zeros(3)
+    lo = np.min([b[0] for b in ix.boxes.values()], axis=0)
+    hi = np.max([b[1] for b in ix.boxes.values()], axis=0)
+    if max(np.abs(lo).max(), np.abs(hi).max()) <= FAR_M:
+        return np.zeros(3)
+    return -np.round((lo + hi) / 2)
+
+
+def _tree(ix: _Index, gids: set[str], offset: np.ndarray):
+    tree = ifcopenshell.geom.tree(backend="opencascade.trianglebvh")
+    by_file: dict[int, list] = {}
+    for g in gids:
+        by_file.setdefault(ix.file[g], []).append(ix.entity[g])
+    for i, include in by_file.items():
+        s = verify._settings()
+        if offset.any():
+            s.set("model-offset", tuple(float(x) for x in offset))
+        tree.add_iterator(ifcopenshell.geom.iterator(s, ix.scene.models[i], os.cpu_count() or 1, include=include))
+    return tree
+
+
+def _box_point(ix: _Index, a: str, b: str) -> list[float]:
+    (amin, amax), (bmin, bmax) = ix.boxes[a], ix.boxes[b]
+    return [float(x) for x in (np.maximum(amin, bmin) + np.minimum(amax, bmax)) / 2]
+
+
+def _box_depth(ix: _Index, a: str, b: str) -> float:
+    """How far one box must move to clear the other (0 when apart or touching). It bounds the elements' own depth
+    from above: moving the boxes apart moves what is inside them apart too."""
+    (amin, amax), (bmin, bmax) = ix.boxes[a], ix.boxes[b]
+    return float(max(0.0, np.minimum(amax - bmin, bmax - amin).min()))
+
+
+class _Solids:
+    """Oriented boxes of rectangular extrusions, for the exact separating-axis depth. The triangle queries miss two
+    such solids that overlap with every side face flush (a strut run 30 mm into a beam's end, two panels of one wall
+    lapping), so pairs whose boxes overlap get this check too when both are rectangular."""
+
+    def __init__(self, ix: _Index):
+        self.ix = ix
+        self._cache: dict[str, tuple | None] = {}
+
+    def box(self, gid: str):
+        if gid not in self._cache:
+            self._cache[gid] = self._make(gid)
+        return self._cache[gid]
+
+    def _make(self, gid: str):
+        from . import edits
+        entity = self.ix.entity[gid]
+        if getattr(entity, "HasOpenings", ()):
+            return None
+        try:
+            _, _, solid, _, direction, px, py = edits._frames(self.ix.scene, entity)
+        except Exception:
+            return None
+        if solid.SweptArea.is_a() != "IfcRectangleProfileDef":
+            return None
+        position = solid.SweptArea.Position
+        if position is not None and position.RefDirection is not None:
+            x, y = position.RefDirection.DirectionRatios
+            norm = float(np.hypot(x, y))
+            px, py = (px * x + py * y) / norm, (-px * y + py * x) / norm
+        verts = _verts(self.ix, gid)
+        axes = np.array([px, py, direction], dtype=float)
+        axes /= np.linalg.norm(axes, axis=1)[:, None]
+        local = verts @ axes.T
+        return ((local.max(axis=0) + local.min(axis=0)) / 2) @ axes, (local.max(axis=0) - local.min(axis=0)) / 2, axes
+
+    def depth(self, a: str, b: str) -> float | None:
+        """Exact minimum translation to separate two rectangular solids; None when either is not one."""
+        A, B = self.box(a), self.box(b)
+        if A is None or B is None:
+            return None
+        (ca, ha, aa), (cb, hb, ab) = A, B
+        best = float("inf")
+        for axis in list(aa) + list(ab) + [np.cross(x, y) for x in aa for y in ab]:
+            n = np.linalg.norm(axis)
+            if n < 1e-8:
+                continue
+            axis = axis / n
+            overlap = float(ha @ np.abs(aa @ axis) + hb @ np.abs(ab @ axis) - abs((cb - ca) @ axis))
+            if overlap <= 0:
+                return 0.0
+            best = min(best, overlap)
+        return best
+
+
+def _verts(ix: _Index, gid: str) -> np.ndarray:
+    shape = ifcopenshell.geom.create_shape(verify._settings(), ix.entity[gid])
+    return np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
+
+
+def _same_shape(ix: _Index, a: str, b: str, tol: float) -> bool:
+    """Every vertex of each lies within `tol` of a vertex of the other (symmetric Hausdorff over vertices)."""
+    va, vb = _verts(ix, a), _verts(ix, b)
+    if not len(va) or not len(vb) or max(len(va), len(vb)) > 4000:
+        return False
+    d = np.linalg.norm(va[:, None, :] - vb[None, :, :], axis=2)
+    return bool(d.min(axis=1).max() <= tol and d.min(axis=0).max() <= tol)
+
+
+@dataclass
+class _Hit:
+    a: str
+    b: str
+    distance_m: float
+    point: list[float]
+
+
+def _measure(ix: _Index, solids: _Solids, test: Test, pairs: list[tuple[str, str]], tree, offset: np.ndarray,
+             ) -> tuple[dict[frozenset, _Hit], int]:
+    """Measure candidate pairs. Returns the overlapping (or too close) pairs and how many only touch.
+
+    Depth is how far one must move to clear the other. For two rectangular solids it is exact (separating axes).
+    Otherwise it is an estimate: the lesser of the intersection query's figure and how far the boxes must move apart.
+    The query's figure alone can be far off either way: a pipe half a millimetre into a beam's underside reads 200 mm
+    (the beam's width), and a top rail 40 mm into a post reads 20."""
+    if not pairs:
+        return {}, 0
+    allowed = {frozenset(p): p for p in pairs}
+    left = sorted({a for a, _ in pairs})
+    right = sorted({b for _, b in pairs})
+    ea = [ix.entity[g] for g in left]
+    eb = [ix.entity[g] for g in right]
+    back = lambda p: [float(x) - float(o) for x, o in zip(p, offset)]
+    hits: dict[frozenset, _Hit] = {}
+    touching = 0
+
+    def keep(a, b, distance, point):
+        key = frozenset((a, b))
+        old = hits.get(key)
+        if old is None or distance < old.distance_m:
+            oa, ob = allowed[key]
+            hits[key] = _Hit(oa, ob, distance, point)
+
+    if test.kind == "duplicate":
+        for a, b in pairs:
+            if ix.entity[a].is_a() != ix.entity[b].is_a():
+                continue
+            if np.abs(ix.boxes[a] - ix.boxes[b]).max() > test.tolerance_m:
+                continue
+            if _same_shape(ix, a, b, test.tolerance_m):
+                keep(a, b, -_box_depth(ix, a, b), _box_point(ix, a, b))
+        return hits, 0
+
+    tol = test.tolerance_m if test.kind == "hard" else 0.0
+    seen: set[frozenset] = set()
+
+    def judge(a, b, depth, point):
+        nonlocal touching
+        key = frozenset((a, b))
+        seen.add(key)
+        exact = solids.depth(a, b)
+        depth = exact if exact is not None else min(depth, _box_depth(ix, a, b))
+        if depth <= tol:
+            touching += 1 if depth > 0 else 0
+            return
+        keep(a, b, -depth, point)
+
+    # Intersection finds overlaps, also one element wholly inside another.
+    for c in tree.clash_intersection_many(ea, eb, tolerance=0.0, check_all=True):
+        a, b = c.a.GlobalId, c.b.GlobalId
+        if a != b and frozenset((a, b)) in allowed and frozenset((a, b)) not in seen:
+            judge(a, b, abs(float(c.distance)), [(x + y) / 2 for x, y in zip(back(c.p1), back(c.p2))])
+    # Collision without touching sees some flush-face overlaps intersection misses.
+    for c in tree.clash_collision_many(ea, eb, allow_touching=False):
+        a, b = c.a.GlobalId, c.b.GlobalId
+        if a != b and frozenset((a, b)) in allowed and frozenset((a, b)) not in seen:
+            judge(a, b, float("inf"), _box_point(ix, a, b))
+    # Neither sees two rectangular solids overlapping with every side flush: the separating-axis check does.
+    for a, b in pairs:
+        key = frozenset((a, b))
+        if a == b or key in seen or _box_depth(ix, a, b) <= tol:
+            continue
+        exact = solids.depth(a, b)
+        if exact is not None and exact > 0:
+            judge(a, b, exact, _box_point(ix, a, b))
+    if test.kind == "clearance":
+        # The clearance query's gap for pairs that overlap is unreliable, so overlaps keep the measures above.
+        for c in tree.clash_clearance_many(ea, eb, clearance=test.clearance_m, check_all=True):
+            a, b = c.a.GlobalId, c.b.GlobalId
+            key = frozenset((a, b))
+            if a == b or key not in allowed or key in seen:
+                continue
+            gap = float(c.distance)
+            if gap < test.clearance_m:
+                keep(a, b, gap, [(x + y) / 2 for x, y in zip(back(c.p1), back(c.p2))])
+    return hits, touching
+
+
+# ------------------------------------------------------------------------------------------------- a run
+
+def measure_pair(scene: IfcScene, a: str, b: str) -> float | None:
+    """How deep two elements overlap now, the way a run measures it (negative metres), or None when they don't."""
+    ix = _Index(scene)
+    if a not in ix.entity or b not in ix.entity or a == b:
+        return None
+    test = Test(id="pair", name="pair", a=Selection(ids=[a]), b=Selection(ids=[b]), tolerance_m=0.0)
+    pairs = _candidates(ix, [a], [b], 0.0)
+    if not pairs:
+        return None
+    hits, _ = _measure(ix, _Solids(ix), test, pairs, _tree(ix, {a, b}, _offset(ix)), _offset(ix))
+    hit = hits.get(frozenset((a, b)))
+    return None if hit is None else round(hit.distance_m, 6)
+
+
+def clash_id(test_id: str, a: str, b: str) -> str:
+    x, y = sorted((a, b))
+    return "s" + hashlib.sha1(f"{test_id}|{x}|{y}".encode()).hexdigest()[:9]
+
+
+def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None = None, previous: dict | None = None,
+        cap: int = CAP, title: str | None = None) -> Run:
+    """Run the tests (default: `default_tests`) over the open models and return them as a clash report."""
+    emit = on_event or (lambda e: None)
+    t0 = time.perf_counter()
+    emit({"type": "phase", "text": "Reading the models"})
+    ix = _Index(scene)
+    tests = [t for t in (tests if tests is not None else default_tests(scene, ix)) if t.enabled]
+    if len({t.id for t in tests}) != len(tests):
+        raise ValueError("Two tests share an id")
+    emit({"type": "start", "elements": len(ix.entity), "tests": [{"id": t.id, "name": t.name, "kind": t.kind}
+                                                                   for t in tests]})
+
+    # Broad phase for every test first, so the triangle tree is built once over just what can clash.
+    plans = []
+    for t in tests:
+        a = ix.select(t.a)
+        b = None if t.b is None else ix.select(t.b)
+        margin = t.clearance_m if t.kind == "clearance" else t.tolerance_m
+        plans.append((t, a, b, _candidates(ix, a, b, margin)))
+    needed = {g for _, _, _, pairs in plans for p in pairs for g in p}
+    offset = _offset(ix)
+    emit({"type": "phase", "text": f"Building geometry for {len(needed)} elements"})
+    tree = _tree(ix, needed, offset) if needed else None
+    solids = _Solids(ix)
+
+    clashes: list[ReportClash] = []
+    tested: dict[str, Test] = {}
+    coverage: list[Coverage] = []
+    selections: dict[str, dict] = {}
+    for n, (t, a, b, pairs) in enumerate(plans):
+        t1 = time.perf_counter()
+        emit({"type": "test", "index": n, "id": t.id, "name": t.name, "candidates": len(pairs)})
+        hits, touching = _measure(ix, solids, t, pairs, tree, offset) if tree is not None else ({}, 0)
+        excluded: Counter = Counter()
+        found = []
+        for h in hits.values():
+            rule = ix.excluded_by(h.a, h.b, t.rules)
+            if rule:
+                excluded[rule] += 1
+            else:
+                found.append(h)
+        found.sort(key=lambda h: (h.distance_m, h.a, h.b))
+        partial = len(found) > cap
+        found = found[:cap]
+        for h in found:
+            cid = clash_id(t.id, h.a, h.b)
+            tested[cid] = t
+            ea, eb = ix.report_element(h.a), ix.report_element(h.b)
+            clashes.append(ReportClash(
+                id=cid, name=plain_name(ea, eb), guid=cid, test=t.name, test_type=t.kind,
+                tolerance_m=t.clearance_m if t.kind == "clearance" else t.tolerance_m, status="new",
+                distance_m=round(h.distance_m, 6), point=[round(x, 4) for x in h.point], grid=None,
+                a=ea, b=eb, source="sightline"))
+        cov = Coverage(test=t.id, name=t.name, kind=t.kind, elements_a=len(a), elements_b=len(a if b is None else b),
+                       candidate_pairs=len(pairs), clashes=len(found), touching=touching, excluded=dict(excluded),
+                       partial=partial, seconds=round(time.perf_counter() - t1, 3))
+        coverage.append(cov)
+        selections[t.id] = {"a": set(a), "b": None if b is None else set(b), "complete": not partial}
+        emit({"type": "test_done", "index": n, "coverage": asdict(cov)})
+
+    # #N across the whole set and across runs: a clash keeps its number, a new one takes the next, none is reused.
+    numbers = dict((previous or {}).get("numbers", {}))
+    following = max([0, *numbers.values()]) + 1
+    for c in clashes:
+        if c.id not in numbers:
+            numbers[c.id], following = following, following + 1
+        c.number = numbers[c.id]
+    diff = _diff(previous, clashes, selections)
+    for c in clashes:
+        if c.id not in diff["new_ids"]:
+            c.status = "active"
+    root = Path(tempfile.mkdtemp(prefix="sightline-run-"))
+    report = Report(id=uuid.uuid4().hex[:12], title=title or f"Sightline detection · {len(ix.names)} model"
+                    f"{'' if len(ix.names) == 1 else 's'}", root=root, sources=list(ix.names), clashes=clashes,
+                    temporary=True, origin="sightline")
+    state = {"clashes": {c.id: {"test": tested[c.id].id, "name": tested[c.id].name, "a": c.a.global_id,
+                                "b": c.b.global_id} for c in clashes},
+             "selections": selections, "numbers": numbers}
+    seconds = round(time.perf_counter() - t0, 2)
+    return Run(report, coverage, {k: v for k, v in diff.items() if k != "new_ids"}, len(ix.entity), seconds,
+               [float(x) for x in offset], state)
+
+
+def _diff(previous: dict | None, clashes: list[ReportClash], selections: dict[str, dict]) -> dict:
+    """Against the last run: which clashes are new, which have gone because they were fixed (both elements still
+    checked against each other in a complete test), and which have gone only because they were no longer checked."""
+    now = {c.id for c in clashes}
+    if not previous:
+        return {"new": sorted(now), "new_ids": now, "resolved": [], "no_longer_checked": [], "first": True}
+    before = previous.get("clashes", {})
+    new = sorted(now - set(before))
+    resolved, unchecked = [], []
+    for cid, was in before.items():
+        if cid in now:
+            continue
+        sel = selections.get(was["test"])
+        item = {"id": cid, "test": was["name"], "a": was["a"], "b": was["b"]}
+        if sel is None or not sel["complete"]:
+            unchecked.append(item)
+            continue
+        side_b = sel["a"] if sel["b"] is None else sel["b"]
+        still = (was["a"] in sel["a"] and was["b"] in side_b) or (was["b"] in sel["a"] and was["a"] in side_b)
+        (resolved if still else unchecked).append(item)
+    return {"new": new, "new_ids": set(new), "resolved": resolved, "no_longer_checked": unchecked, "first": False}

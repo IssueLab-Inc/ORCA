@@ -1,0 +1,318 @@
+test,clash,a,a_class,b,b_class,navisworks_mm,tolerance_mm,outcome,sightline_mm,sightline_test
+IfcDistributionPort (MEP) vs IfcValve (MEP),Clash27,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcValve (MEP),Clash18,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcValve (MEP),Clash15,Port 1,IfcDistributionPort,Main stop valve DN54,IfcValve,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcValve (MEP),Clash8,Port 1,IfcDistributionPort,Isolation valve DN54,IfcValve,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcValve (MEP),Clash1,Port 0,IfcDistributionPort,Main stop valve DN54,IfcValve,-1.8,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcSpace (Architecture),Clash13,Fire damper 600x300,IfcDamper,01-05,IfcSpace,-40.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcSpace (Architecture),Clash11,Fire damper 600x300,IfcDamper,02-03,IfcSpace,-50.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcSpace (Architecture),Clash8,Fire damper 500x250,IfcDamper,03-03,IfcSpace,-50.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcSpace (Architecture),Clash5,Fire damper 600x300,IfcDamper,01-10,IfcSpace,-50.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcSpace (Architecture),Clash2,Fire damper 500x250,IfcDamper,03-09,IfcSpace,-50.0,0,not physical (never reported),,
+IfcFooting (Structure) vs IfcProject (Structure),Clash85,Ground beam 450x500 - grid C,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-73.5,25.0,found,-76.9,Structure (within)
+IfcFooting (Structure) vs IfcProject (Structure),Clash65,Ground beam 450x500 - grid 1,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-77.0,25.0,found,-77.0,Structure (within)
+IfcFooting (Structure) vs IfcProject (Structure),Clash35,Pad footing 1800x1800x600 - B4,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-80.0,25.0,found,-350.0,Structure (within)
+IfcFooting (Structure) vs IfcProject (Structure),Clash25,Pad footing 1800x1800x600 - B1,IfcFooting,Ground beam 450x500 - grid 1,IfcFooting,-150.0,25.0,found,-150.0,Structure (within)
+IfcFooting (Structure) vs IfcProject (Structure),Clash1,Pad footing 1800x1800x600 - B1,IfcFooting,Lift pit wall 200,IfcWall,-471.3,25.0,found,-500.0,Structure (within)
+IfcBeam (Structure) vs IfcBeam (Structure),Clash47,UB 457x191x67 - grid B,IfcBeam,UB 457x191x67 - grid 1,IfcBeam,-12.3,10.0,found,-95.0,Structure (within)
+IfcBeam (Structure) vs IfcBeam (Structure),Clash39,UB 457x191x67 - grid A,IfcBeam,UB 457x191x67 - grid 1,IfcBeam,-12.3,10.0,found,-95.0,Structure (within)
+IfcBeam (Structure) vs IfcBeam (Structure),Clash65,UB 457x191x67 - grid A,IfcBeam,UB 457x191x67 - grid 2,IfcBeam,-12.3,10.0,found,-95.0,Structure (within)
+IfcBeam (Structure) vs IfcBeam (Structure),Clash14,UB 457x191x67 - grid 2,IfcBeam,UB 457x191x67 - grid C,IfcBeam,-12.3,10.0,found,-95.0,Structure (within)
+IfcBeam (Structure) vs IfcBeam (Structure),Clash3,UB 457x191x67 - grid B,IfcBeam,UB 457x191x67 - core trimmer,IfcBeam,-215.9,10.0,found,-189.9,Structure (within)
+IfcColumn (Structure) vs IfcSlab (Structure),Clash36,UC 254x254x89 - A1,IfcColumn,Composite floor slab 150 - Level 02,IfcSlab,-132.4,25.0,found,-116.2,Structure (within)
+IfcColumn (Structure) vs IfcSlab (Structure),Clash32,UC 254x254x89 - C4,IfcColumn,Composite floor slab 150 - Level 03,IfcSlab,-150.0,25.0,found,-150.0,Structure (within)
+IfcColumn (Structure) vs IfcSlab (Structure),Clash20,UC 254x254x89 - C4,IfcColumn,Composite floor slab 150 - Level 02,IfcSlab,-150.0,25.0,found,-150.0,Structure (within)
+IfcColumn (Structure) vs IfcSlab (Structure),Clash10,UC 254x254x89 - C1,IfcColumn,Ground bearing slab 250,IfcSlab,-275.5,25.0,found,-250.0,Structure (within)
+IfcColumn (Structure) vs IfcSlab (Structure),Clash1,UC 254x254x89 - B2,IfcColumn,Ground bearing slab 250,IfcSlab,-570.0,25.0,found,-250.0,Structure (within)
+IfcGeographicElement (Site) vs IfcLightFixture (Site),Clash2,Tree canopy,IfcGeographicElement,Riverside lighting column 5 m,IfcLightFixture,-0.5,0,found,-400.0,Site (within)
+IfcGeographicElement (Site) vs IfcLightFixture (Site),Clash1,Tree canopy,IfcGeographicElement,Riverside lighting column 5 m,IfcLightFixture,-70.2,0,found,-400.0,Site (within)
+IfcFooting (Structure) vs IfcWall (Structure),Clash4,Ground beam 450x500 - grid 1,IfcFooting,Lift pit wall 200,IfcWall,-25.0,0,found,-25.0,Structure (within)
+IfcFooting (Structure) vs IfcWall (Structure),Clash5,Ground beam 450x500 - grid 1,IfcFooting,Lift pit wall 200,IfcWall,-25.0,0,found,-25.0,Structure (within)
+IfcFooting (Structure) vs IfcWall (Structure),Clash3,Ground beam 450x500 - grid 1,IfcFooting,Lift pit wall 200,IfcWall,-225.0,0,found,-225.0,Structure (within)
+IfcFooting (Structure) vs IfcWall (Structure),Clash2,Pad footing 1800x1800x600 - B1,IfcFooting,Lift pit wall 200,IfcWall,-350.0,0,found,-500.0,Structure (within)
+IfcFooting (Structure) vs IfcWall (Structure),Clash1,Pad footing 1800x1800x600 - B1,IfcFooting,Lift pit wall 200,IfcWall,-471.3,0,found,-500.0,Structure (within)
+IfcRailing (Site) vs IfcRailing (Site),Clash119,Quayside railing,IfcRailing,Quayside railing,IfcRailing,-4.0,0,one element on both sides,,
+IfcRailing (Site) vs IfcRailing (Site),Clash100,Quayside railing,IfcRailing,Quayside railing,IfcRailing,-5.3,0,one element on both sides,,
+IfcRailing (Site) vs IfcRailing (Site),Clash57,Quayside railing,IfcRailing,Quayside railing,IfcRailing,-5.9,0,one element on both sides,,
+IfcRailing (Site) vs IfcRailing (Site),Clash31,Quayside railing,IfcRailing,Quayside railing,IfcRailing,-7.1,0,one element on both sides,,
+IfcRailing (Site) vs IfcRailing (Site),Clash3,Quayside railing,IfcRailing,Quayside railing,IfcRailing,-7.8,0,one element on both sides,,
+IfcWall (Site) vs IfcWall (Site),Clash1,Boundary fence 1.8 m (weldmesh),IfcWall,Boundary fence 1.8 m (weldmesh),IfcWall,-25.0,25.0,found,-25.0,Site (within)
+IfcWall (Site) vs IfcWall (Site),Clash2,Boundary fence 1.8 m (weldmesh),IfcWall,Boundary fence 1.8 m (weldmesh),IfcWall,-25.0,25.0,found,-25.0,Site (within)
+IfcPlate (Structure) vs IfcProject (Structure),Clash31,Base plate 450x450x30 - A1,IfcPlate,Holding-down bolt M24,IfcMechanicalFastener,-50.0,25.0,found,-30.0,Structure (within)
+IfcPlate (Structure) vs IfcProject (Structure),Clash43,Base plate 450x450x30 - C2,IfcPlate,Holding-down bolt M24,IfcMechanicalFastener,-50.0,25.0,found,-30.0,Structure (within)
+IfcPlate (Structure) vs IfcProject (Structure),Clash17,Base plate 450x450x30 - A4,IfcPlate,Holding-down bolt M24,IfcMechanicalFastener,-73.5,25.0,found,-30.0,Structure (within)
+IfcPlate (Structure) vs IfcProject (Structure),Clash8,Base plate 450x450x30 - B4,IfcPlate,Holding-down bolt M24,IfcMechanicalFastener,-73.5,25.0,found,-30.0,Structure (within)
+IfcPlate (Structure) vs IfcProject (Structure),Clash1,Base plate 450x450x30 - C1,IfcPlate,Ground beam 450x500 - grid C,IfcFooting,-159.1,25.0,found,-180.0,Structure (within)
+IfcProject (Structure) vs IfcSlab (Structure),Clash35,UC 254x254x89 - A1,IfcColumn,Composite floor slab 150 - Level 03,IfcSlab,-132.4,25.0,found,-116.2,Structure (within)
+IfcProject (Structure) vs IfcSlab (Structure),Clash30,UC 254x254x89 - C2,IfcColumn,Composite floor slab 150 - Level 03,IfcSlab,-150.0,25.0,found,-10.3,Structure (within)
+IfcProject (Structure) vs IfcSlab (Structure),Clash16,UC 254x254x89 - C1,IfcColumn,Composite floor slab 150 - Level 02,IfcSlab,-150.0,25.0,found,-150.0,Structure (within)
+IfcProject (Structure) vs IfcSlab (Structure),Clash10,UC 254x254x89 - C1,IfcColumn,Ground bearing slab 250,IfcSlab,-275.5,25.0,found,-250.0,Structure (within)
+IfcProject (Structure) vs IfcSlab (Structure),Clash2,UC 254x254x89 - B3,IfcColumn,Ground bearing slab 250,IfcSlab,-570.0,25.0,found,-250.0,Structure (within)
+IfcFurniture (Architecture) vs IfcSpace (Architecture),Clash219,Task chair,IfcFurniture,01-01,IfcSpace,-0.0,0,not physical (never reported),,
+IfcFurniture (Architecture) vs IfcSpace (Architecture),Clash139,Task chair,IfcFurniture,02-02,IfcSpace,-0.0,0,not physical (never reported),,
+IfcFurniture (Architecture) vs IfcSpace (Architecture),Clash106,Task chair,IfcFurniture,02-04,IfcSpace,-11.6,0,not physical (never reported),,
+IfcFurniture (Architecture) vs IfcSpace (Architecture),Clash60,Task chair,IfcFurniture,02-04,IfcSpace,-130.0,0,not physical (never reported),,
+IfcFurniture (Architecture) vs IfcSpace (Architecture),Clash5,Bench desk cluster (4 person),IfcFurniture,01-05,IfcSpace,-700.0,0,not physical (never reported),,
+IfcPipeFitting (MEP) vs IfcPipeSegment (MEP),Clash458,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcPipeFitting (MEP) vs IfcPipeSegment (MEP),Clash402,Sink waste L03 bend DN40,IfcPipeFitting,Port 0,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcPipeFitting (MEP) vs IfcPipeSegment (MEP),Clash269,Vent terminal - Kitchen waste stack WS-01,IfcPipeFitting,Kitchen waste stack WS-01 DN110,IfcPipeSegment,-0.0,0,touch at 1 mm (Navisworks),,
+IfcPipeFitting (MEP) vs IfcPipeSegment (MEP),Clash137,Port 0,IfcDistributionPort,Cold water to WC cistern L01 DN22,IfcPipeSegment,-1.6,0,not physical (never reported),,
+IfcPipeFitting (MEP) vs IfcPipeSegment (MEP),Clash1,Port 0,IfcDistributionPort,Hot water riser DN42,IfcPipeSegment,-3.0,0,not physical (never reported),,
+IfcMember (Architecture) vs IfcMember (Architecture),Clash3,Mullion 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcMember (Architecture) vs IfcMember (Architecture),Clash10,Mullion 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcMember (Architecture) vs IfcMember (Architecture),Clash4,Transom 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcMember (Architecture) vs IfcMember (Architecture),Clash7,Transom 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcMember (Architecture) vs IfcMember (Architecture),Clash8,Mullion 60x120,IfcMember,Transom 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcDuctSegment (MEP) vs IfcProject (Structure),Clash1,Supply air main L02 600x300,IfcDuctSegment,Transfer plate girder 1000 deep - grid 3,IfcBeam,-150.0,25.0,found,-300.0,MEP vs Structure
+IfcCurtainWall (Architecture) vs IfcCurtainWall (Architecture),Clash7,Transom 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcCurtainWall (Architecture) vs IfcCurtainWall (Architecture),Clash6,Transom 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcCurtainWall (Architecture) vs IfcCurtainWall (Architecture),Clash10,Mullion 60x120,IfcMember,Transom 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcCurtainWall (Architecture) vs IfcCurtainWall (Architecture),Clash5,Mullion 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,10.0,found,-30.0,Architecture (within)
+IfcCurtainWall (Architecture) vs IfcCurtainWall (Architecture),Clash1,Main entrance - automatic sliding doors,IfcDoor,Main entrance - automatic sliding doors,IfcDoor,-50.0,10.0,one element on both sides,,
+IfcCovering (Architecture) vs IfcWall (Architecture),Clash1,Parapet coping,IfcCovering,Head house wall E,IfcWall,-50.0,10.0,found,-50.0,Architecture (within)
+IfcFlowMeter (MEP) vs IfcFlowMeter (MEP),Clash1,Water meter DN54,IfcFlowMeter,Port 1,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcFlowMeter (MEP) vs IfcFlowMeter (MEP),Clash2,Water meter DN54,IfcFlowMeter,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcBeam (Structure) vs IfcSpace (Architecture),Clash103,UB 356x171x45 - shaft trimmer,IfcBeam,01-11,IfcSpace,-35.8,25.0,not physical (never reported),,
+IfcBeam (Structure) vs IfcSpace (Architecture),Clash77,UB 457x191x67 - grid C,IfcBeam,02-05,IfcSpace,-235.4,25.0,not physical (never reported),,
+IfcBeam (Structure) vs IfcSpace (Architecture),Clash52,UB 356x171x45 - secondary,IfcBeam,01-07,IfcSpace,-351.4,25.0,not physical (never reported),,
+IfcBeam (Structure) vs IfcSpace (Architecture),Clash27,UB 457x191x67 - grid C,IfcBeam,01-01,IfcSpace,-395.0,25.0,not physical (never reported),,
+IfcBeam (Structure) vs IfcSpace (Architecture),Clash2,Transfer plate girder 1000 deep - grid 3,IfcBeam,02-04,IfcSpace,-1000.0,25.0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcFlowMeter (MEP),Clash1,Port 0,IfcDistributionPort,Port 1,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcFlowMeter (MEP),Clash2,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcFlowMeter (MEP),Clash5,Port 0,IfcDistributionPort,Water meter DN54,IfcFlowMeter,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcFlowMeter (MEP),Clash4,Port 1,IfcDistributionPort,Water meter DN54,IfcFlowMeter,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcFlowMeter (MEP),Clash3,Port 0,IfcDistributionPort,Water meter DN54,IfcFlowMeter,0.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcSpace (Architecture),Clash74,Supply air main L02 bend 600x300,IfcDuctFitting,02-04,IfcSpace,0.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcSpace (Architecture),Clash43,Supply air main L02 tee 600x300/300x200,IfcDuctFitting,02-04,IfcSpace,-0.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcSpace (Architecture),Clash37,Port 1,IfcDistributionPort,01-07,IfcSpace,-8.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcSpace (Architecture),Clash12,Supply air main L01 tee 600x300/300x200,IfcDuctFitting,01-05,IfcSpace,-50.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcSpace (Architecture),Clash2,Supply air main L02 bend 600x300,IfcDuctFitting,02-03,IfcSpace,-300.0,0,not physical (never reported),,
+IfcMember (Structure) vs IfcSpace (Architecture),Clash18,CHS 139.7x8 bracing - 4AB,IfcMember,03-01,IfcSpace,-196.0,25.0,not physical (never reported),,
+IfcMember (Structure) vs IfcSpace (Architecture),Clash14,CHS 139.7x8 bracing - 4AB,IfcMember,03-02,IfcSpace,-220.4,25.0,not physical (never reported),,
+IfcMember (Structure) vs IfcSpace (Architecture),Clash12,CHS 139.7x8 bracing - 4AB,IfcMember,02-06,IfcSpace,-277.0,25.0,not physical (never reported),,
+IfcMember (Structure) vs IfcSpace (Architecture),Clash5,CHS 139.7x8 bracing - 4AB,IfcMember,01-03,IfcSpace,-370.0,25.0,not physical (never reported),,
+IfcMember (Structure) vs IfcSpace (Architecture),Clash3,CHS 139.7x8 bracing - 4AB,IfcMember,03-01,IfcSpace,-370.0,25.0,not physical (never reported),,
+IfcGeographicElement (Site) vs IfcGeographicElement (Site),Clash210,Tree canopy,IfcGeographicElement,Tree (deciduous),IfcGeographicElement,-38.8,25.0,found,-86.7,Site (within)
+IfcGeographicElement (Site) vs IfcGeographicElement (Site),Clash158,Tree canopy,IfcGeographicElement,Tree canopy,IfcGeographicElement,-121.7,25.0,one element on both sides,,
+IfcGeographicElement (Site) vs IfcGeographicElement (Site),Clash106,Tree canopy,IfcGeographicElement,Tree canopy,IfcGeographicElement,-159.7,25.0,one element on both sides,,
+IfcGeographicElement (Site) vs IfcGeographicElement (Site),Clash53,Tree canopy,IfcGeographicElement,Tree canopy,IfcGeographicElement,-192.8,25.0,one element on both sides,,
+IfcGeographicElement (Site) vs IfcGeographicElement (Site),Clash1,Tree canopy,IfcGeographicElement,Tree canopy,IfcGeographicElement,-300.7,25.0,one element on both sides,,
+IfcCableCarrierSegment (MEP) vs IfcSpace (Architecture),Clash11,Incoming supply duct D100 incoming,IfcCableCarrierSegment,01-10,IfcSpace,-210.0,0,not physical (never reported),,
+IfcCableCarrierSegment (MEP) vs IfcSpace (Architecture),Clash10,Cable ladder riser 300x100 riser,IfcCableCarrierSegment,01-10,IfcSpace,-254.9,0,not physical (never reported),,
+IfcCableCarrierSegment (MEP) vs IfcSpace (Architecture),Clash6,Cable tray L01 300x100,IfcCableCarrierSegment,01-04,IfcSpace,-264.7,0,not physical (never reported),,
+IfcCableCarrierSegment (MEP) vs IfcSpace (Architecture),Clash3,Cable tray L01 300x100,IfcCableCarrierSegment,01-10,IfcSpace,-550.0,0,not physical (never reported),,
+IfcCableCarrierSegment (MEP) vs IfcSpace (Architecture),Clash2,Cable tray L03 300x100,IfcCableCarrierSegment,03-09,IfcSpace,-550.0,0,not physical (never reported),,
+IfcWall (Architecture) vs IfcWall (Architecture),Clash1,Head house wall E,IfcWall,Parapet wall N,IfcWall,-50.0,25.0,found,-50.0,Architecture (within)
+IfcDistributionPort (MEP) vs IfcDuctSegment (MEP),Clash881,Port 2,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcDuctSegment (MEP),Clash790,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcDuctSegment (MEP),Clash485,Port 0,IfcDistributionPort,Supply branch L03 300x200,IfcDuctSegment,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcDuctSegment (MEP),Clash239,Port 0,IfcDistributionPort,Port 0,IfcDistributionPort,-0.8,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcDuctSegment (MEP),Clash1,Port 0,IfcDistributionPort,Return air riser 500x400,IfcDuctSegment,-6.5,0,not physical (never reported),,
+IfcDuctSegment (MEP) vs IfcSpace (Architecture),Clash109,Supply air main L03 600x300,IfcDuctSegment,03-03,IfcSpace,-0.0,0,not physical (never reported),,
+IfcDuctSegment (MEP) vs IfcSpace (Architecture),Clash84,Supply air main L03 600x300,IfcDuctSegment,03-04,IfcSpace,-0.0,0,not physical (never reported),,
+IfcDuctSegment (MEP) vs IfcSpace (Architecture),Clash56,Toilet extract riser D200,IfcDuctSegment,03-09,IfcSpace,-250.0,0,not physical (never reported),,
+IfcDuctSegment (MEP) vs IfcSpace (Architecture),Clash30,Supply branch L01 300x200,IfcDuctSegment,01-03,IfcSpace,-450.0,0,not physical (never reported),,
+IfcDuctSegment (MEP) vs IfcSpace (Architecture),Clash1,Supply air riser 600x400,IfcDuctSegment,RF-01,IfcSpace,-620.0,0,not physical (never reported),,
+IfcFurniture (Architecture) vs IfcProject (Structure),Clash76,Task chair,IfcFurniture,Ground bearing slab 250,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcFurniture (Architecture) vs IfcProject (Structure),Clash85,Task chair,IfcFurniture,Ground bearing slab 250,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcFurniture (Architecture) vs IfcProject (Structure),Clash57,Task chair,IfcFurniture,Composite floor slab 150 - Level 02,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcFurniture (Architecture) vs IfcProject (Structure),Clash28,Task chair,IfcFurniture,Composite floor slab 150 - Level 03,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcFurniture (Architecture) vs IfcProject (Structure),Clash1,Reception desk,IfcFurniture,Ground bearing slab 250,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcBeam (Structure) vs IfcColumn (Structure),Clash106,UB 203x133x25 - plant frame,IfcBeam,Plant frame post SHS 150x150x8,IfcColumn,-3.2,0,found,-3.2,Structure (within)
+IfcBeam (Structure) vs IfcColumn (Structure),Clash60,UB 457x191x67 - grid C,IfcBeam,UC 254x254x89 - C1,IfcColumn,-5.2,0,found,-5.2,Structure (within)
+IfcBeam (Structure) vs IfcColumn (Structure),Clash85,UB 457x191x67 - grid B,IfcBeam,UC 254x254x89 - B2,IfcColumn,-5.2,0,found,-5.2,Structure (within)
+IfcBeam (Structure) vs IfcColumn (Structure),Clash6,UB 457x191x67 - grid 4,IfcBeam,UC 254x254x89 - B4,IfcColumn,-130.0,0,found,-9.4,Structure (within)
+IfcBeam (Structure) vs IfcColumn (Structure),Clash1,UB 457x191x67 - grid 1,IfcBeam,UC 254x254x89 - A1,IfcColumn,-130.0,0,found,-9.4,Structure (within)
+IfcFooting (Structure) vs IfcFooting (Structure),Clash18,Ground beam 450x500 - grid 1,IfcFooting,Ground beam 450x500 - grid A,IfcFooting,-0.0,0,touch at 1 mm (Navisworks),,
+IfcFooting (Structure) vs IfcFooting (Structure),Clash7,Ground beam 450x500 - grid 1,IfcFooting,Pad footing 1800x1800x600 - A1,IfcFooting,-150.0,0,found,-150.0,Structure (within)
+IfcFooting (Structure) vs IfcFooting (Structure),Clash9,Pad footing 1800x1800x600 - A2,IfcFooting,Ground beam 450x500 - grid A,IfcFooting,-150.0,0,found,-150.0,Structure (within)
+IfcFooting (Structure) vs IfcFooting (Structure),Clash13,Pad footing 1800x1800x600 - C1,IfcFooting,Ground beam 450x500 - grid 1,IfcFooting,-150.0,0,found,-150.0,Structure (within)
+IfcFooting (Structure) vs IfcFooting (Structure),Clash1,Pad footing 1800x1800x600 - C1,IfcFooting,Ground beam 450x500 - grid C,IfcFooting,-150.0,0,found,-150.0,Structure (within)
+IfcDistributionPort (MEP) vs IfcSpace (Architecture),Clash14,Port 1,IfcDistributionPort,02-03,IfcSpace,-8.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcSpace (Architecture),Clash11,Port 1,IfcDistributionPort,02-06,IfcSpace,-8.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcSpace (Architecture),Clash12,Port 0,IfcDistributionPort,02-06,IfcSpace,-8.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcSpace (Architecture),Clash4,Port 0,IfcDistributionPort,01-04,IfcSpace,-8.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcSpace (Architecture),Clash1,Port 0,IfcDistributionPort,02-07,IfcSpace,-16.6,0,not physical (never reported),,
+IfcMember (Structure) vs IfcMember (Structure),Clash7,CHS 139.7x8 bracing - 4AB,IfcMember,CHS 139.7x8 bracing - 4AB,IfcMember,-9.0,0,found,-139.5,Structure (within)
+IfcMember (Structure) vs IfcMember (Structure),Clash8,CHS 139.7x8 bracing - 4AB,IfcMember,CHS 139.7x8 bracing - 4AB,IfcMember,-9.0,0,found,-139.5,Structure (within)
+IfcMember (Structure) vs IfcMember (Structure),Clash5,CHS 139.7x8 bracing - C23,IfcMember,CHS 139.7x8 bracing - C23,IfcMember,-9.0,0,found,-139.5,Structure (within)
+IfcMember (Structure) vs IfcMember (Structure),Clash1,CHS 139.7x8 bracing - A34,IfcMember,CHS 139.7x8 bracing - A34,IfcMember,-9.0,0,found,-139.5,Structure (within)
+IfcMember (Structure) vs IfcMember (Structure),Clash2,CHS 139.7x8 bracing - A34,IfcMember,CHS 139.7x8 bracing - A34,IfcMember,-9.0,0,found,-139.5,Structure (within)
+IfcRailing (Architecture) vs IfcSpace (Architecture),Clash12,Stair balustrade - glass with handrail,IfcRailing,01-12,IfcSpace,-83.5,25.0,not physical (never reported),,
+IfcRailing (Architecture) vs IfcSpace (Architecture),Clash9,Stair balustrade - glass with handrail,IfcRailing,RF-02,IfcSpace,-262.0,25.0,not physical (never reported),,
+IfcRailing (Architecture) vs IfcSpace (Architecture),Clash6,Stair balustrade - glass with handrail,IfcRailing,01-12,IfcSpace,-392.0,25.0,not physical (never reported),,
+IfcRailing (Architecture) vs IfcSpace (Architecture),Clash4,Stair balustrade - glass with handrail,IfcRailing,02-11,IfcSpace,-666.2,25.0,not physical (never reported),,
+IfcRailing (Architecture) vs IfcSpace (Architecture),Clash1,Stair balustrade - glass with handrail,IfcRailing,03-11,IfcSpace,-842.0,25.0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeFitting (MEP),Clash391,Port 0,IfcDistributionPort,Port 1,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeFitting (MEP),Clash470,Port 0,IfcDistributionPort,Port 1,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeFitting (MEP),Clash246,Port 0,IfcDistributionPort,Hot water riser tee DN42/DN22,IfcPipeFitting,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeFitting (MEP),Clash120,Port 1,IfcDistributionPort,Cold water to basin L03 bend DN22,IfcPipeFitting,-1.6,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeFitting (MEP),Clash1,Port 0,IfcDistributionPort,Hot water main L02 bend DN42,IfcPipeFitting,-3.3,0,not physical (never reported),,
+IfcFooting (Structure) vs IfcPlate (Structure),Clash1,Ground beam 450x500 - grid A,IfcFooting,Base plate 450x450x30 - A1,IfcPlate,-159.1,10.0,found,-180.0,Structure (within)
+IfcFooting (Structure) vs IfcPlate (Structure),Clash3,Ground beam 450x500 - grid C,IfcFooting,Base plate 450x450x30 - C1,IfcPlate,-159.1,10.0,found,-180.0,Structure (within)
+IfcFooting (Structure) vs IfcPlate (Structure),Clash4,Ground beam 450x500 - grid C,IfcFooting,Base plate 450x450x30 - C4,IfcPlate,-159.1,10.0,found,-180.0,Structure (within)
+IfcFooting (Structure) vs IfcPlate (Structure),Clash2,Ground beam 450x500 - grid A,IfcFooting,Base plate 450x450x30 - A4,IfcPlate,-159.1,10.0,found,-180.0,Structure (within)
+IfcBeam (Structure) vs IfcDuctSegment (MEP),Clash1,Transfer plate girder 1000 deep - grid 3,IfcBeam,Supply air main L02 600x300,IfcDuctSegment,-150.0,0,found,-300.0,MEP vs Structure
+IfcMechanicalFastener (Structure) vs IfcProject (Structure),Clash119,Holding-down bolt M24,IfcMechanicalFastener,Pad footing 1800x1800x600 - C3,IfcFooting,-12.0,0,found,-350.0,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcProject (Structure),Clash88,Holding-down bolt M24,IfcMechanicalFastener,Base plate 450x450x30 - C1,IfcPlate,-50.0,0,found,-30.0,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcProject (Structure),Clash70,Holding-down bolt M24,IfcMechanicalFastener,Base plate 450x450x30 - C1,IfcPlate,-73.5,0,found,-30.0,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcProject (Structure),Clash26,Holding-down bolt M24,IfcMechanicalFastener,Ground beam 450x500 - grid C,IfcFooting,-77.0,0,found,-76.9,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcProject (Structure),Clash6,Holding-down bolt M24,IfcMechanicalFastener,Pad footing 1800x1800x600 - A4,IfcFooting,-80.0,0,found,-350.0,Structure (within)
+IfcProject (Structure) vs IfcSpace (Architecture),Clash195,UC 254x254x89 - C4,IfcColumn,03-05,IfcSpace,0.0,0,not physical (never reported),,
+IfcProject (Structure) vs IfcSpace (Architecture),Clash153,UB 457x191x67 - grid A,IfcBeam,01-03,IfcSpace,-0.0,0,not physical (never reported),,
+IfcProject (Structure) vs IfcSpace (Architecture),Clash102,UB 457x191x67 - grid 4,IfcBeam,01-01,IfcSpace,-228.4,0,not physical (never reported),,
+IfcProject (Structure) vs IfcSpace (Architecture),Clash56,UB 457x191x67 - grid 1,IfcBeam,01-11,IfcSpace,-394.9,0,not physical (never reported),,
+IfcProject (Structure) vs IfcSpace (Architecture),Clash1,Transfer plate girder 1000 deep - grid 3,IfcBeam,02-01,IfcSpace,-1000.0,0,not physical (never reported),,
+IfcProject (Structure) vs IfcStairFlight (Architecture),Clash1,Ground bearing slab 250,IfcSlab,Stair flight 1,IfcStairFlight,-0.0,0,touch at 1 mm (Navisworks),,
+IfcBuildingElementProxy (Site) vs IfcGeographicElement (Site),Clash18,Raised planter with seating edge,IfcBuildingElementProxy,Shrub planting,IfcGeographicElement,-40.2,25.0,found,-200.0,Site (within)
+IfcBuildingElementProxy (Site) vs IfcGeographicElement (Site),Clash13,Raised planter with seating edge,IfcBuildingElementProxy,Shrub planting,IfcGeographicElement,-40.2,25.0,found,-200.0,Site (within)
+IfcBuildingElementProxy (Site) vs IfcGeographicElement (Site),Clash4,Raised planter with seating edge,IfcBuildingElementProxy,Shrub planting,IfcGeographicElement,-42.7,25.0,found,-200.0,Site (within)
+IfcBuildingElementProxy (Site) vs IfcGeographicElement (Site),Clash7,Raised planter with seating edge,IfcBuildingElementProxy,Shrub planting,IfcGeographicElement,-42.7,25.0,found,-200.0,Site (within)
+IfcBuildingElementProxy (Site) vs IfcGeographicElement (Site),Clash1,Raised planter with seating edge,IfcBuildingElementProxy,Tree (deciduous),IfcGeographicElement,-148.9,25.0,found,-370.0,Site (within)
+IfcFooting (Structure) vs IfcSlab (Structure),Clash4,Ground beam 450x500 - grid 1,IfcFooting,Ground bearing slab 250,IfcSlab,0.0,0,touch at 1 mm (Navisworks),,
+IfcFooting (Structure) vs IfcSlab (Structure),Clash1,Ground beam 450x500 - grid C,IfcFooting,Ground bearing slab 250,IfcSlab,0.0,0,touch at 1 mm (Navisworks),,
+IfcFooting (Structure) vs IfcSlab (Structure),Clash2,Ground beam 450x500 - grid A,IfcFooting,Ground bearing slab 250,IfcSlab,0.0,0,touch at 1 mm (Navisworks),,
+IfcFooting (Structure) vs IfcSlab (Structure),Clash3,Ground beam 450x500 - grid 4,IfcFooting,Ground bearing slab 250,IfcSlab,0.0,0,touch at 1 mm (Navisworks),,
+IfcCableCarrierSegment (MEP) vs IfcProject (Structure),Clash2,Cable tray L02 300x100,IfcCableCarrierSegment,Transfer plate girder 1000 deep - grid 3,IfcBeam,-40.0,25.0,found,-100.0,MEP vs Structure
+IfcCableCarrierSegment (MEP) vs IfcProject (Structure),Clash1,Cable tray L02 300x100,IfcCableCarrierSegment,Transfer plate girder 1000 deep - grid 3,IfcBeam,-60.0,25.0,found,-100.0,MEP vs Structure
+IfcDoor (Architecture) vs IfcWall (Architecture),Clash17,Door - core lobby,IfcDoor,Core wall E - Level 02,IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcWall (Architecture),Clash14,Meeting room glazed door,IfcDoor,Meeting room glazed partition S - Level 01,IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcWall (Architecture),Clash9,Door - services riser,IfcDoor,Core wall - lift/riser / lobby - Level 02,IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcWall (Architecture),Clash5,Draught lobby sliding doors,IfcDoor,Draught lobby screen N,IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcWall (Architecture),Clash2,Door - accessible WC,IfcDoor,Core wall E - Level 02,IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDamper (MEP) vs IfcDistributionPort (MEP),Clash119,Port 0,IfcDistributionPort,Port 1,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcDistributionPort (MEP),Clash94,Port 0,IfcDistributionPort,Port 1,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcDistributionPort (MEP),Clash68,Volume control damper 300x200,IfcDamper,Port 1,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcDistributionPort (MEP),Clash33,Volume control damper 300x200,IfcDamper,Port 0,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcDamper (MEP) vs IfcDistributionPort (MEP),Clash1,Fire damper 500x250,IfcDamper,Port 0,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcMechanicalFastener (Structure) vs IfcPlate (Structure),Clash47,Holding-down bolt M24,IfcMechanicalFastener,Base plate 450x450x30 - A2,IfcPlate,-50.0,10.0,found,-30.0,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcPlate (Structure),Clash36,Holding-down bolt M24,IfcMechanicalFastener,Base plate 450x450x30 - C3,IfcPlate,-50.0,10.0,found,-30.0,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcPlate (Structure),Clash23,Holding-down bolt M24,IfcMechanicalFastener,Base plate 450x450x30 - A2,IfcPlate,-73.5,10.0,found,-30.0,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcPlate (Structure),Clash9,Holding-down bolt M24,IfcMechanicalFastener,Base plate 450x450x30 - A1,IfcPlate,-73.5,10.0,found,-30.0,Structure (within)
+IfcMechanicalFastener (Structure) vs IfcPlate (Structure),Clash5,Holding-down bolt M24,IfcMechanicalFastener,Base plate 450x450x30 - B2,IfcPlate,-73.5,10.0,found,-30.0,Structure (within)
+IfcPipeSegment (MEP) vs IfcSpace (Architecture),Clash73,Hot water to basin L01 DN22,IfcPipeSegment,01-08,IfcSpace,-30.0,25.0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcSpace (Architecture),Clash54,Hot water main L01 DN42,IfcPipeSegment,01-05,IfcSpace,-121.0,25.0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcSpace (Architecture),Clash38,Cold water to basin L02 DN22,IfcPipeSegment,02-09,IfcSpace,-224.2,25.0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcSpace (Architecture),Clash19,Cold water main L03 DN54,IfcPipeSegment,03-09,IfcSpace,-302.6,25.0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcSpace (Architecture),Clash1,Hot water riser DN42,IfcPipeSegment,03-09,IfcSpace,-521.0,25.0,not physical (never reported),,
+IfcDoor (Architecture) vs IfcSpace (Architecture),Clash8,Meeting room glazed door,IfcDoor,01-01,IfcSpace,-15.0,10.0,not physical (never reported),,
+IfcDoor (Architecture) vs IfcSpace (Architecture),Clash7,Meeting room glazed door,IfcDoor,01-06,IfcSpace,-15.0,10.0,not physical (never reported),,
+IfcDoor (Architecture) vs IfcSpace (Architecture),Clash3,Meeting room glazed door,IfcDoor,02-01,IfcSpace,-15.0,10.0,not physical (never reported),,
+IfcDoor (Architecture) vs IfcSpace (Architecture),Clash4,Meeting room glazed door,IfcDoor,03-01,IfcSpace,-15.0,10.0,not physical (never reported),,
+IfcDoor (Architecture) vs IfcSpace (Architecture),Clash1,Draught lobby sliding doors,IfcDoor,01-02,IfcSpace,-15.0,10.0,not physical (never reported),,
+IfcCableCarrierFitting (MEP) vs IfcCableCarrierFitting (MEP),Clash2,Cable ladder riser tee 300x100 riser/300x100,IfcCableCarrierFitting,Cable ladder riser tee 300x100 riser/300x100,IfcCableCarrierFitting,-47.4,25.0,one element on both sides,,
+IfcCableCarrierFitting (MEP) vs IfcCableCarrierFitting (MEP),Clash1,Cable ladder riser tee 300x100 riser/300x100,IfcCableCarrierFitting,Cable ladder riser tee 300x100 riser/300x100,IfcCableCarrierFitting,-47.4,25.0,one element on both sides,,
+IfcBuildingElementProxy (Site) vs IfcBuildingElementProxy (Site),Clash1267,Terrace house 8,IfcBuildingElementProxy,Terrace house 7,IfcBuildingElementProxy,0.0,0,touch at 1 mm (Navisworks),,
+IfcBuildingElementProxy (Site) vs IfcBuildingElementProxy (Site),Clash580,Northgate Works - brick envelope and chimney,IfcBuildingElementProxy,Northgate Works - windows and roof lights,IfcBuildingElementProxy,-60.0,0,found,-60.0,Site (within)
+IfcBuildingElementProxy (Site) vs IfcBuildingElementProxy (Site),Clash547,Northgate Works - brick envelope and chimney,IfcBuildingElementProxy,Northgate Works - windows and roof lights,IfcBuildingElementProxy,-60.0,0,found,-60.0,Site (within)
+IfcBuildingElementProxy (Site) vs IfcBuildingElementProxy (Site),Clash373,Mill Yard - aluminium fins and canopy,IfcBuildingElementProxy,Mill Yard - curtain wall glazing,IfcBuildingElementProxy,-173.9,0,found,-30.0,Site (within)
+IfcBuildingElementProxy (Site) vs IfcBuildingElementProxy (Site),Clash1,Northgate Works - north-light roof,IfcBuildingElementProxy,Northgate Works - brick envelope and chimney,IfcBuildingElementProxy,-1565.8,0,found,-1699.4,Site (within)
+IfcFurniture (Architecture) vs IfcFurniture (Architecture),Clash161,Task chair,IfcFurniture,Task chair,IfcFurniture,-0.0,0,one element on both sides,,
+IfcFurniture (Architecture) vs IfcFurniture (Architecture),Clash123,Task chair,IfcFurniture,Task chair,IfcFurniture,-0.0,0,one element on both sides,,
+IfcFurniture (Architecture) vs IfcFurniture (Architecture),Clash70,Task chair,IfcFurniture,Task chair,IfcFurniture,-0.0,0,one element on both sides,,
+IfcFurniture (Architecture) vs IfcFurniture (Architecture),Clash35,Task chair,IfcFurniture,Task chair,IfcFurniture,-0.0,0,one element on both sides,,
+IfcFurniture (Architecture) vs IfcFurniture (Architecture),Clash1,Tea point counter with base units,IfcFurniture,Tea point counter with base units,IfcFurniture,-0.0,0,one element on both sides,,
+IfcCovering (Architecture) vs IfcSpace (Architecture),Clash25,Plasterboard ceiling - WC - Level 03,IfcCovering,03-07,IfcSpace,0.0,0,not physical (never reported),,
+IfcCovering (Architecture) vs IfcSpace (Architecture),Clash20,Parapet coping,IfcCovering,RF-01,IfcSpace,-20.0,0,not physical (never reported),,
+IfcCovering (Architecture) vs IfcSpace (Architecture),Clash14,Suspended ceiling 600x600 - Level 02,IfcCovering,02-04,IfcSpace,-693.1,0,not physical (never reported),,
+IfcCovering (Architecture) vs IfcSpace (Architecture),Clash8,Suspended ceiling 600x600 - Level 02,IfcCovering,02-03,IfcSpace,-750.0,0,not physical (never reported),,
+IfcCovering (Architecture) vs IfcSpace (Architecture),Clash1,Suspended ceiling 600x600 - Level 02,IfcCovering,02-05,IfcSpace,-1150.0,0,not physical (never reported),,
+IfcDoor (Architecture) vs IfcSlab (Structure),Clash7,Meeting room glazed door,IfcDoor,Ground bearing slab 250,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcSlab (Structure),Clash5,Meeting room glazed door,IfcDoor,Composite floor slab 150 - Level 02,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcSlab (Structure),Clash4,Meeting room glazed door,IfcDoor,Ground bearing slab 250,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcSlab (Structure),Clash3,Draught lobby sliding doors,IfcDoor,Ground bearing slab 250,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcSlab (Structure),Clash1,Meeting room glazed door,IfcDoor,Composite floor slab 150 - Level 03,IfcSlab,-0.0,0,touch at 1 mm (Navisworks),,
+IfcBeam (Structure) vs IfcProject (Structure),Clash54,UB 457x191x67 - grid B,IfcBeam,Bearing stiffener 20,IfcPlate,-94.0,50.0,found,-105.0,Structure (within)
+IfcBeam (Structure) vs IfcProject (Structure),Clash49,UB 457x191x67 - grid 3,IfcBeam,UC 254x254x89 - B3,IfcColumn,-130.0,50.0,found,-9.4,Structure (within)
+IfcBeam (Structure) vs IfcProject (Structure),Clash50,UB 457x191x67 - grid 2,IfcBeam,UC 254x254x89 - A2,IfcColumn,-130.0,50.0,found,-9.4,Structure (within)
+IfcBeam (Structure) vs IfcProject (Structure),Clash21,UB 457x191x67 - grid 1,IfcBeam,UC 254x254x89 - C1,IfcColumn,-130.0,50.0,found,-9.4,Structure (within)
+IfcBeam (Structure) vs IfcProject (Structure),Clash2,UB 457x191x67 - grid B,IfcBeam,UB 457x191x67 - core trimmer,IfcBeam,-215.9,50.0,found,-189.9,Structure (within)
+IfcColumn (Structure) vs IfcSpace (Architecture),Clash19,UC 254x254x89 - B1,IfcColumn,02-10,IfcSpace,-150.0,10.0,not physical (never reported),,
+IfcColumn (Structure) vs IfcSpace (Architecture),Clash22,UC 254x254x89 - C3,IfcColumn,02-01,IfcSpace,-150.0,10.0,not physical (never reported),,
+IfcColumn (Structure) vs IfcSpace (Architecture),Clash12,UC 254x254x89 - A4,IfcColumn,01-03,IfcSpace,-155.5,10.0,not physical (never reported),,
+IfcColumn (Structure) vs IfcSpace (Architecture),Clash7,UC 254x254x89 - C2,IfcColumn,01-01,IfcSpace,-412.7,10.0,not physical (never reported),,
+IfcColumn (Structure) vs IfcSpace (Architecture),Clash1,UC 254x254x89 - C3,IfcColumn,01-01,IfcSpace,-430.0,10.0,not physical (never reported),,
+IfcBeam (Structure) vs IfcCableCarrierSegment (MEP),Clash2,Transfer plate girder 1000 deep - grid 3,IfcBeam,Cable tray L02 300x100,IfcCableCarrierSegment,-40.0,25.0,found,-100.0,MEP vs Structure
+IfcBeam (Structure) vs IfcCableCarrierSegment (MEP),Clash1,Transfer plate girder 1000 deep - grid 3,IfcBeam,Cable tray L02 300x100,IfcCableCarrierSegment,-60.0,25.0,found,-100.0,MEP vs Structure
+IfcBeam (Structure) vs IfcPlate (Structure),Clash9,Transfer plate girder 1000 deep - grid 3,IfcBeam,Bearing stiffener 20,IfcPlate,-0.0,0,touch at 1 mm (Navisworks),,
+IfcBeam (Structure) vs IfcPlate (Structure),Clash4,Transfer plate girder 1000 deep - grid 3,IfcBeam,Bearing stiffener 20,IfcPlate,-0.0,0,touch at 1 mm (Navisworks),,
+IfcBeam (Structure) vs IfcPlate (Structure),Clash3,Transfer plate girder 1000 deep - grid 3,IfcBeam,Bearing stiffener 20,IfcPlate,-0.0,0,touch at 1 mm (Navisworks),,
+IfcBeam (Structure) vs IfcPlate (Structure),Clash8,Transfer plate girder 1000 deep - grid 3,IfcBeam,Bearing stiffener 20,IfcPlate,-0.0,0,touch at 1 mm (Navisworks),,
+IfcBeam (Structure) vs IfcPlate (Structure),Clash1,UB 457x191x67 - grid B,IfcBeam,Bearing stiffener 20,IfcPlate,-94.0,0,found,-105.0,Structure (within)
+IfcDistributionPort (MEP) vs IfcElectricDistributionBoard (MEP),Clash10,Port 0,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcElectricDistributionBoard (MEP),Clash8,Port 0,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcElectricDistributionBoard (MEP),Clash6,Port 0,IfcDistributionPort,Main LV switchboard MSB-01,IfcElectricDistributionBoard,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcElectricDistributionBoard (MEP),Clash3,Port 1,IfcDistributionPort,Distribution board DB-L03,IfcElectricDistributionBoard,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcElectricDistributionBoard (MEP),Clash2,Port 0,IfcDistributionPort,Distribution board DB-L03,IfcElectricDistributionBoard,-0.0,0,not physical (never reported),,
+IfcCovering (Architecture) vs IfcCurtainWall (Architecture),Clash33,Parapet cladding E,IfcCovering,Transom 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcCovering (Architecture) vs IfcCurtainWall (Architecture),Clash45,Parapet cladding S,IfcCovering,Transom 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcCovering (Architecture) vs IfcCurtainWall (Architecture),Clash11,Parapet cladding E,IfcCovering,Mullion 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcCovering (Architecture) vs IfcCurtainWall (Architecture),Clash14,Parapet cladding S,IfcCovering,Mullion 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcCovering (Architecture) vs IfcCurtainWall (Architecture),Clash10,Parapet cladding S,IfcCovering,Mullion 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcDoor (Architecture),Clash2,Main entrance - automatic sliding doors,IfcDoor,Main entrance - automatic sliding doors,IfcDoor,-50.0,5.0,one element on both sides,,
+IfcDoor (Architecture) vs IfcDoor (Architecture),Clash1,Main entrance - automatic sliding doors,IfcDoor,Main entrance - automatic sliding doors,IfcDoor,-50.0,5.0,one element on both sides,,
+IfcProject (Structure) vs IfcWall (Structure),Clash13,Ground bearing slab 250,IfcSlab,Lift pit wall 200,IfcWall,0.0,0,touch at 1 mm (Navisworks),,
+IfcProject (Structure) vs IfcWall (Structure),Clash11,Ground bearing slab 250,IfcSlab,Lift pit wall 200,IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcProject (Structure) vs IfcWall (Structure),Clash6,Lift pit base 200,IfcSlab,Lift pit wall 200,IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcProject (Structure) vs IfcWall (Structure),Clash5,Ground beam 450x500 - grid 1,IfcFooting,Lift pit wall 200,IfcWall,-25.0,0,found,-25.0,Structure (within)
+IfcProject (Structure) vs IfcWall (Structure),Clash1,Pad footing 1800x1800x600 - B1,IfcFooting,Lift pit wall 200,IfcWall,-471.3,0,found,-500.0,Structure (within)
+IfcGeographicElement (Site) vs IfcWall (Site),Clash2,Terrain - soft landscaping,IfcGeographicElement,Boundary fence 1.8 m (weldmesh),IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcGeographicElement (Site) vs IfcWall (Site),Clash3,Terrain - soft landscaping,IfcGeographicElement,Boundary fence 1.8 m (weldmesh),IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcGeographicElement (Site) vs IfcWall (Site),Clash1,Terrain - soft landscaping,IfcGeographicElement,Boundary fence 1.8 m (weldmesh),IfcWall,-0.0,0,touch at 1 mm (Navisworks),,
+IfcColumn (Structure) vs IfcProject (Structure),Clash93,UC 254x254x89 - C1,IfcColumn,Ground beam 450x500 - grid C,IfcFooting,-112.3,25.0,found,-128.0,Structure (within)
+IfcColumn (Structure) vs IfcProject (Structure),Clash66,UC 254x254x89 - B3,IfcColumn,UB 457x191x67 - grid 3,IfcBeam,-130.0,25.0,found,-9.4,Structure (within)
+IfcColumn (Structure) vs IfcProject (Structure),Clash53,UC 254x254x89 - A1,IfcColumn,UB 457x191x67 - grid 1,IfcBeam,-130.0,25.0,found,-9.4,Structure (within)
+IfcColumn (Structure) vs IfcProject (Structure),Clash27,UC 254x254x89 - A2,IfcColumn,Composite floor slab 150 - Level 02,IfcSlab,-150.0,25.0,found,-150.0,Structure (within)
+IfcColumn (Structure) vs IfcProject (Structure),Clash1,UC 254x254x89 - B2,IfcColumn,Ground bearing slab 250,IfcSlab,-570.0,25.0,found,-250.0,Structure (within)
+IfcDoor (Architecture) vs IfcMember (Architecture),Clash1,Main entrance - automatic sliding doors,IfcDoor,Transom 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDoor (Architecture) vs IfcMember (Architecture),Clash2,Main entrance - automatic sliding doors,IfcDoor,Transom 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcDistributionPort (MEP) vs IfcPipeSegment (MEP),Clash411,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeSegment (MEP),Clash408,Port 0,IfcDistributionPort,Port 1,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeSegment (MEP),Clash255,Port 1,IfcDistributionPort,Sink waste L03 DN40,IfcPipeSegment,-0.0,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeSegment (MEP),Clash129,Port 1,IfcDistributionPort,Cold water to WC cistern L01 DN22,IfcPipeSegment,-1.2,0,not physical (never reported),,
+IfcDistributionPort (MEP) vs IfcPipeSegment (MEP),Clash1,Port 0,IfcDistributionPort,Hot water riser DN42,IfcPipeSegment,-3.0,0,not physical (never reported),,
+IfcCurtainWall (Architecture) vs IfcMember (Architecture),Clash205,Mullion 60x120,IfcMember,Mullion 60x120,IfcMember,0.0,0,touch at 1 mm (Navisworks),,
+IfcCurtainWall (Architecture) vs IfcMember (Architecture),Clash178,Mullion 60x120,IfcMember,Mullion 60x120,IfcMember,0.0,0,touch at 1 mm (Navisworks),,
+IfcCurtainWall (Architecture) vs IfcMember (Architecture),Clash115,Vision glazing unit,IfcPlate,Transom 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcCurtainWall (Architecture) vs IfcMember (Architecture),Clash36,Vision glazing unit,IfcPlate,Transom 60x120,IfcMember,-0.0,0,touch at 1 mm (Navisworks),,
+IfcCurtainWall (Architecture) vs IfcMember (Architecture),Clash1,Mullion 60x120,IfcMember,Mullion 60x120,IfcMember,-30.0,0,found,-30.0,Architecture (within)
+IfcFooting (Structure) vs IfcMechanicalFastener (Structure),Clash71,Pad footing 1800x1800x600 - C3,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-12.0,10.0,found,-350.0,Structure (within)
+IfcFooting (Structure) vs IfcMechanicalFastener (Structure),Clash61,Pad footing 1800x1800x600 - B2,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-12.0,10.0,found,-350.0,Structure (within)
+IfcFooting (Structure) vs IfcMechanicalFastener (Structure),Clash29,Ground beam 450x500 - grid 4,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-77.0,10.0,found,-77.0,Structure (within)
+IfcFooting (Structure) vs IfcMechanicalFastener (Structure),Clash21,Pad footing 1800x1800x600 - B3,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-80.0,10.0,found,-350.0,Structure (within)
+IfcFooting (Structure) vs IfcMechanicalFastener (Structure),Clash14,Pad footing 1800x1800x600 - A3,IfcFooting,Holding-down bolt M24,IfcMechanicalFastener,-80.0,10.0,found,-350.0,Structure (within)
+IfcSpace (Architecture) vs IfcWall (Architecture),Clash16,03-05,IfcSpace,Meeting room glazed partition W - Level 03,IfcWall,-30.0,25.0,not physical (never reported),,
+IfcSpace (Architecture) vs IfcWall (Architecture),Clash14,01-03,IfcSpace,Draught lobby screen W,IfcWall,-30.0,25.0,not physical (never reported),,
+IfcSpace (Architecture) vs IfcWall (Architecture),Clash9,02-01,IfcSpace,Meeting room glazed partition W - Level 02,IfcWall,-30.0,25.0,not physical (never reported),,
+IfcSpace (Architecture) vs IfcWall (Architecture),Clash6,01-02,IfcSpace,Draught lobby screen W,IfcWall,-30.0,25.0,not physical (never reported),,
+IfcSpace (Architecture) vs IfcWall (Architecture),Clash1,01-01,IfcSpace,Meeting room glazed partition W - Level 01,IfcWall,-30.0,25.0,not physical (never reported),,
+IfcCurtainWall (Architecture) vs IfcDoor (Architecture),Clash8,Transom 60x120,IfcMember,Main entrance - automatic sliding doors,IfcDoor,-0.0,0,touch at 1 mm (Navisworks),,
+IfcCurtainWall (Architecture) vs IfcDoor (Architecture),Clash6,Main entrance - automatic sliding doors,IfcDoor,Main entrance - automatic sliding doors,IfcDoor,-0.0,0,one element on both sides,,
+IfcCurtainWall (Architecture) vs IfcDoor (Architecture),Clash4,Main entrance - automatic sliding doors,IfcDoor,Main entrance - automatic sliding doors,IfcDoor,-0.0,0,one element on both sides,,
+IfcCurtainWall (Architecture) vs IfcDoor (Architecture),Clash3,Main entrance - automatic sliding doors,IfcDoor,Main entrance - automatic sliding doors,IfcDoor,-0.0,0,one element on both sides,,
+IfcCurtainWall (Architecture) vs IfcDoor (Architecture),Clash1,Main entrance - automatic sliding doors,IfcDoor,Main entrance - automatic sliding doors,IfcDoor,-50.0,0,one element on both sides,,
+IfcProject (Structure) vs IfcProject (Structure),Clash565,UB 356x171x45 - secondary,IfcBeam,UB 356x171x45 - secondary,IfcBeam,0.0,0,touch at 1 mm (Navisworks),,
+IfcProject (Structure) vs IfcProject (Structure),Clash411,UB 457x191x67 - grid C,IfcBeam,UC 254x254x89 - C1,IfcColumn,-5.2,0,found,-5.2,Structure (within)
+IfcProject (Structure) vs IfcProject (Structure),Clash287,UB 457x191x67 - grid B,IfcBeam,UB 457x191x67 - grid 2,IfcBeam,-12.3,0,found,-95.0,Structure (within)
+IfcProject (Structure) vs IfcProject (Structure),Clash162,Holding-down bolt M24,IfcMechanicalFastener,Ground beam 450x500 - grid 4,IfcFooting,-77.0,0,found,-77.0,Structure (within)
+IfcProject (Structure) vs IfcProject (Structure),Clash1,UC 254x254x89 - B2,IfcColumn,Ground bearing slab 250,IfcSlab,-570.0,0,found,-250.0,Structure (within)
+IfcAirTerminal (MEP) vs IfcSpace (Architecture),Clash11,Return grille 600x600 - L03,IfcAirTerminal,03-03,IfcSpace,-47.5,25.0,not physical (never reported),,
+IfcAirTerminal (MEP) vs IfcSpace (Architecture),Clash7,Return grille 600x600 - L02,IfcAirTerminal,02-01,IfcSpace,-47.5,25.0,not physical (never reported),,
+IfcAirTerminal (MEP) vs IfcSpace (Architecture),Clash10,Return grille 600x600 - L02,IfcAirTerminal,02-03,IfcSpace,-47.5,25.0,not physical (never reported),,
+IfcAirTerminal (MEP) vs IfcSpace (Architecture),Clash1,Return grille 600x600 - L01,IfcAirTerminal,01-01,IfcSpace,-47.5,25.0,not physical (never reported),,
+IfcAirTerminal (MEP) vs IfcSpace (Architecture),Clash5,Return grille 600x600 - L03,IfcAirTerminal,03-01,IfcSpace,-47.5,25.0,not physical (never reported),,
+IfcColumn (Structure) vs IfcFooting (Structure),Clash9,UC 254x254x89 - A1,IfcColumn,Ground beam 450x500 - grid A,IfcFooting,-112.3,25.0,found,-128.0,Structure (within)
+IfcColumn (Structure) vs IfcFooting (Structure),Clash7,UC 254x254x89 - C1,IfcColumn,Ground beam 450x500 - grid C,IfcFooting,-112.3,25.0,found,-128.0,Structure (within)
+IfcColumn (Structure) vs IfcFooting (Structure),Clash5,UC 254x254x89 - B4,IfcColumn,Ground beam 450x500 - grid 4,IfcFooting,-133.0,25.0,found,-219.8,Structure (within)
+IfcColumn (Structure) vs IfcFooting (Structure),Clash4,UC 254x254x89 - A2,IfcColumn,Ground beam 450x500 - grid A,IfcFooting,-187.5,25.0,found,-180.0,Structure (within)
+IfcColumn (Structure) vs IfcFooting (Structure),Clash2,UC 254x254x89 - C2,IfcColumn,Ground beam 450x500 - grid C,IfcFooting,-187.5,25.0,found,-180.0,Structure (within)
+IfcPipeSegment (MEP) vs IfcValve (MEP),Clash19,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcValve (MEP),Clash29,Port 1,IfcDistributionPort,Port 0,IfcDistributionPort,0.0,0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcValve (MEP),Clash16,Cold water riser DN54,IfcPipeSegment,Port 1,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcValve (MEP),Clash9,Hot water main L01 DN42,IfcPipeSegment,Port 1,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcPipeSegment (MEP) vs IfcValve (MEP),Clash1,Cold water riser DN54,IfcPipeSegment,Main stop valve DN54,IfcValve,-5.6,0,meant to meet: joined by ports,,
+IfcDuctFitting (MEP) vs IfcDuctFitting (MEP),Clash235,Port 1,IfcDistributionPort,Toilet extract branch L03 bend D125,IfcDuctFitting,-0.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcDuctFitting (MEP),Clash189,Port 0,IfcDistributionPort,Supply air main L02 tee 600x300/300x200,IfcDuctFitting,-0.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcDuctFitting (MEP),Clash134,Supply branch L01 bend 300x200,IfcDuctFitting,Port 1,IfcDistributionPort,-0.0,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcDuctFitting (MEP),Clash65,Port 0,IfcDistributionPort,Supply branch L03 bend 300x200,IfcDuctFitting,-6.1,0,not physical (never reported),,
+IfcDuctFitting (MEP) vs IfcDuctFitting (MEP),Clash6,Return air main L02 tee 500x250/D250,IfcDuctFitting,Return air main L02 tee 500x250/D250,IfcDuctFitting,-50.0,0,one element on both sides,,

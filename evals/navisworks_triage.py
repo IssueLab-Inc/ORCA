@@ -56,7 +56,7 @@ def load(package: Path) -> list[dict]:
         folder = c.images[0][1].parent
         clashes.append({
             "id": f"{folder.parent.name}/{folder.name}",
-            "test": c.test, "tolerance_m": c.tolerance_m or 0.0, "clash": c.name, "distance_m": c.distance_m,
+            "test": c.test, "tolerance_m": c.tolerance_m or 0.0, "clash": c.ref, "distance_m": c.distance_m,
             "point": [round(v, 3) for v in c.point], "a": asdict(c.a), "b": asdict(c.b), "folder": folder,
         })
     return clashes

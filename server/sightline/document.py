@@ -244,7 +244,7 @@ def summarise(model: ChatModel, rows: list[Row]) -> dict:
     text = json.dumps({
         "results": len(rows), "by_verdict": counts,
         "for_authors": sum(r.section == "author" for r in rows),
-        "need_action": [{"clash": r.clash.name, "test": r.clash.test, "acting": r.acting, "reviewers": r.reviewers,
+        "need_action": [{"clash": r.clash.label, "test": r.clash.test, "acting": r.acting, "reviewers": r.reviewers,
                          "fix": (r.evidence or {}).get("status", "none"),
                          "explanation": (r.ai or {}).get("explanation") or r.reading.get("understanding", "")}
                         for r in pages],
@@ -327,9 +327,10 @@ def _page(r: Row, n: int) -> str:
     # Coordinated captures colour edit groups, so their colours do not identify the report's A/B pair.
     label_a, label_b = ("A", "B") if ev.get("kind") == "context" else ("A (red)", "B (green)")
     crop = _zone_crop(c.images[0][1]) if c.images else None
+    found_by = "Sightline" if c.source == "sightline" else "Navisworks"  # who detected it, and whose depth this is
     pics = "".join(
         f"<figure><img src='{_e(u)}'/><figcaption>{_e(cap)}</figcaption></figure>" for u, cap in [
-            (crop, "Navisworks view, zoomed to where they meet (red A, green B)"),
+            (crop, f"{found_by} view, zoomed to where they meet (red A, green B)"),
             (_data_url_ok(ev.get("before_img")), "The model as it is"),
             (_data_url_ok(ev.get("after_img")), "With the fix" + (" (applied)" if ev.get("status") == "accepted" else " (proposed)")),
         ] if u)
@@ -347,11 +348,11 @@ def _page(r: Row, n: int) -> str:
     source = "Muse Spark" if ai.get("explanation") else "triage reading"
     return f"""
 <section class='clash'>
-  <h2><span class='num'>{n}</span> {_e(c.name)} <span class='test'>{_e(c.test)}</span></h2>
+  <h2><span class='num'>#{c.number}</span> {_e(c.title or c.name)} <span class='test'>{_e(c.test)}{' · Navisworks ' + _e(c.ref) if c.ref else ''}</span></h2>
   <table class='facts'>
     <tr><th>{label_a}</th><td>{_e(c.a.ifc_class)} · {_e(c.a.name)}</td><td>{_e(r.model_a)} · {_e(r.team_a)}</td></tr>
     <tr><th>{label_b}</th><td>{_e(c.b.ifc_class)} · {_e(c.b.name)}</td><td>{_e(r.model_b)} · {_e(r.team_b)}</td></tr>
-    <tr><th>Distance</th><td>Navisworks {_mm(c.distance_m)}{' · tolerance ' + _mm(c.tolerance_m) if c.tolerance_m else ''}</td>
+    <tr><th>Distance</th><td>{found_by} {_mm(c.distance_m)}{' · tolerance ' + _mm(c.tolerance_m) if c.tolerance_m else ''}</td>
         <td>{_e(c.a.level or c.b.level or 'Level unknown')}{' · grid ' + _e(c.grid) if c.grid else ''}</td></tr>
     <tr><th>Triage</th><td>{_e(VERDICT_LABEL.get(r.verdict, r.verdict))}{' · ' + _e(r.reading.get('severity')) if r.reading.get('severity') not in (None, 'none') else ''}</td>
         <td><b>Acts:</b> {_e(r.acting)} · <b>Reviews:</b> {_e(', '.join(r.reviewers))}</td></tr>
@@ -426,7 +427,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
     for team in teams:
         mine = [r for r in pages if team in r.reviewers]
         lines = "".join(
-            f"<tr><td>{i}</td><td>{_e(r.clash.name)}<br><span style='color:#5d6a7a'>{_e(r.clash.test)}</span></td>"
+            f"<tr><td>#{r.clash.number}</td><td>{_e(r.clash.title or r.clash.name)}<br><span style='color:#5d6a7a'>{_e(r.clash.test)}</span></td>"
             f"<td>{'Acts' if r.acting == team else 'Reviews'}</td>"
             f"<td>{_e({'accepted': 'Fix applied', 'proposed': 'Fix proposed'}.get((r.evidence or {}).get('status'), 'No fix yet'))}</td>"
             f"<td>{'Reviewed' if any(v.get('team') == team for v in r.reviews) else 'Waiting'}</td></tr>"
@@ -439,7 +440,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
 
     def table(items: list[Row], note: str) -> str:
         body = "".join(
-            f"<tr><td>{_e(r.clash.name)}</td><td>{_e(r.clash.test)}</td><td>{_e(r.clash.a.name)} / {_e(r.clash.b.name)}</td>"
+            f"<tr><td>{_e(r.clash.label)}</td><td>{_e(r.clash.test)}</td><td>{_e(r.clash.a.name)} / {_e(r.clash.b.name)}</td>"
             f"<td>{_mm(r.clash.distance_m)}</td><td>{_e(VERDICT_LABEL.get(r.verdict, r.verdict))}"
             f"{' · marked ' + _e(r.mark.replace('_', ' ')) if r.mark else ''}</td>"
             f"<td>{_e((r.reading.get('understanding') or '')[:180])}</td></tr>" for r in items)
@@ -479,7 +480,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
     <div class='count'><b>{len(noise)}</b>noise</div>
   </div>
   <p style='color:#5d6a7a;font-size:8.5pt'>Text marked AI-drafted was written by Muse Spark (Meta) from the clash data,
-  the Navisworks pictures and Sightline's geometry checks, and must be reviewed by the teams named before anyone acts on it.
+  the clash pictures and Sightline's geometry checks, and must be reviewed by the teams named before anyone acts on it.
   Fixes marked verified were checked against the whole federated model: the clash is gone, at least 25 mm clear, and
   nothing new is hit. They are not structural, cost or site approvals.</p>
 </section>
@@ -562,7 +563,7 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "Sightli
             priority = {"high": "Critical", "medium": "Major", "low": "Minor"}.get(r.reading.get("severity"), "Normal")
             markup = ['<?xml version="1.0" encoding="UTF-8"?>\n<Markup xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
                       f'<Topic Guid="{topic}" TopicType="Clash" TopicStatus="Open">',
-                      f"<Title>{_e(r.clash.name)}: {_e(r.clash.a.name)} vs {_e(r.clash.b.name)}</Title>",
+                      f"<Title>{_e(r.clash.label)}</Title>",
                       f"<Priority>{priority}</Priority>",
                       f"<Labels>{_e(r.acting)}</Labels>" + "".join(f"<Labels>{_e(t)}</Labels>" for t in r.reviewers if t != r.acting),
                       f"<CreationDate>{now}</CreationDate><CreationAuthor>{_e(author)}</CreationAuthor>",
@@ -571,8 +572,11 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "Sightli
             for who, text in comments:
                 markup.append(f'<Comment Guid="{uuid.uuid4()}"><Date>{now}</Date><Author>{_e(who)}</Author>'
                               f'<Comment>{_e(text)}</Comment><Viewpoint Guid="{view}"/></Comment>')
-            markup.append(f'<Viewpoints Guid="{view}"><Viewpoint>viewpoint.bcfv</Viewpoint><Snapshot>snapshot.png</Snapshot>'
-                          "</Viewpoints></Markup>")
+            snap = _data_url_ok((r.evidence or {}).get("after_img")) or (
+                _zone_crop(r.clash.images[0][1]) if r.clash.images else None)
+            # Name the snapshot only when there is one: a detected clash with no captured view has none.
+            markup.append(f'<Viewpoints Guid="{view}"><Viewpoint>viewpoint.bcfv</Viewpoint>'
+                          + ("<Snapshot>snapshot.png</Snapshot>" if snap else "") + "</Viewpoints></Markup>")
             z.writestr(f"{topic}/markup.bcf", "".join(markup))
             comps = "".join(f'<Component IfcGuid="{g}"/>' for g in (ga, gb) if g)
             colours = "".join(f'<Color Color="{c}"><Component IfcGuid="{g}"/></Color>'
@@ -585,8 +589,6 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "Sightli
                        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Components>'
                        f"<Selection>{comps}</Selection><Visibility DefaultVisibility=\"true\"/>"
                        f"<Coloring>{colours}</Coloring></Components>{camera}</VisualizationInfo>")
-            snap = _data_url_ok((r.evidence or {}).get("after_img")) or (
-                _zone_crop(r.clash.images[0][1]) if r.clash.images else None)
             if snap:
                 png = io.BytesIO()
                 Image.open(io.BytesIO(base64.b64decode(snap.split(",", 1)[1]))).convert("RGB").save(png, "PNG")

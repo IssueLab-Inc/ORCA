@@ -37,8 +37,8 @@ class ReportElement:
 
 @dataclass
 class ReportClash:
-    id: str                   # position in the report, stable while it is open
-    name: str                 # Navisworks' own label, e.g. "Clash39"
+    id: str                   # stable while the report is open (detected clashes: stable across runs too)
+    name: str                 # what it is, plainly: "Cold water main L02 DN54 × Transfer plate girder" (see plain_name)
     guid: str | None
     test: str
     test_type: str | None
@@ -50,7 +50,23 @@ class ReportClash:
     a: ReportElement
     b: ReportElement
     images: list[tuple[str, Path]] = field(default_factory=list)  # (label, file) on the server
-    source: str = ""          # the XML file it came from
+    source: str = ""          # the XML file it came from ("sightline" for a clash Sightline found)
+    number: int = 0           # #N, unique across the whole report (not per test); people say "#39"
+    title: str | None = None  # a short title written by Muse from the clash's facts, when there is one
+    ref: str | None = None    # the source tool's own label (Navisworks "Clash39", repeated in every test)
+
+    @property
+    def label(self) -> str:
+        """How people and the models refer to it: "#39 Cold-water main clips the girder's bottom flange"."""
+        return f"#{self.number} {self.title or self.name}"
+
+
+def plain_name(a: ReportElement, b: ReportElement) -> str:
+    """A name anyone can read, from the two elements, before Muse has titled the clash."""
+    def short(e: ReportElement) -> str:
+        n = (e.name or e.ifc_class or "element").strip()
+        return f"{e.part_of} ({n})" if e.part_of and e.ifc_class and e.ifc_class.endswith("Port") else n
+    return f"{short(a)} × {short(b)}"
 
 
 @dataclass
@@ -61,11 +77,18 @@ class Report:
     sources: list[str]
     clashes: list[ReportClash]
     temporary: bool = False   # uploaded: the folder is deleted when the report is closed
+    origin: str = "navisworks"  # "sightline" when Sightline detected the clashes itself (detect.py)
 
     def clash(self, clash_id: str) -> ReportClash:
+        """By id, or by number as people say it ("#39" or "39")."""
         for c in self.clashes:
             if c.id == clash_id:
                 return c
+        number = str(clash_id).strip().lstrip("#")
+        if number.isdigit():
+            for c in self.clashes:
+                if c.number == int(number):
+                    return c
         raise KeyError(clash_id)
 
 
@@ -139,9 +162,10 @@ def read_xml(root: Path, xml: Path) -> list[ReportClash]:
             if len(objs) != 2:
                 continue
             pos = res.find("clashpoint/pos3f")
+            a, b = _element(objs[0]), _element(objs[1])
             clashes.append(ReportClash(
                 id=f"c{len(clashes) + 1:04d}",
-                name=res.get("name") or f"Clash {len(clashes) + 1}",
+                name=plain_name(a, b), ref=res.get("name") or None,
                 guid=res.get("guid"),
                 test=test.get("name") or "(unnamed test)",
                 test_type=test.get("test_type"),
@@ -150,7 +174,7 @@ def read_xml(root: Path, xml: Path) -> list[ReportClash]:
                 distance_m=_float(res.get("distance")),
                 point=[_float(pos.get(k)) for k in "xyz"] if pos is not None else None,
                 grid=res.findtext("gridlocation") or None,
-                a=_element(objs[0]), b=_element(objs[1]),
+                a=a, b=b,
                 images=_images(root, xml.parent, res.get("href")),
                 source=str(xml.relative_to(root)) if xml.is_relative_to(root) else xml.name,
             ))
@@ -173,15 +197,16 @@ def load(report_id: str, root: Path, xmls: list[Path], title: str, temporary: bo
     seen: dict[tuple[str, str], int] = {}
     clashes: list[ReportClash] = []
     for c in read:
-        key = (c.test, c.guid or f"{c.name}@{c.point}")
+        key = (c.test, c.guid or f"{c.ref}@{c.point}")
         if key in seen:
             i = seen[key]
             if len(c.images) > len(clashes[i].images):
-                c.id = clashes[i].id
+                c.id, c.number = clashes[i].id, clashes[i].number
                 clashes[i] = c
             continue
         seen[key] = len(clashes)
         c.id = f"c{len(clashes) + 1:04d}"
+        c.number = len(clashes) + 1  # #N across the whole report: Navisworks' "Clash39" repeats in every test
         clashes.append(c)
     if not clashes:
         raise ValueError("No clash results found in the XML. Export a clash report from Navisworks as XML.")

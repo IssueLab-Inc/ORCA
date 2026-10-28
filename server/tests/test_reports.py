@@ -98,7 +98,8 @@ def test_upload_match_measure_and_images(tmp_path, monkeypatch):
     r = c.post("/api/reports/upload", files=files)
     assert r.status_code == 200, r.text
     rep = r.json()
-    assert [x["name"] for x in rep["clashes"]] == ["Clash1", "Clash2"]
+    assert [x["ref"] for x in rep["clashes"]] == ["Clash1", "Clash2"]
+    assert [x["number"] for x in rep["clashes"]] == [1, 2]       # #N across the report, not Navisworks' per-test label
     first = rep["clashes"][0]
     assert first["a"]["global_id"] == beam and first["a"]["ifc_class"] == "IfcBeam" and first["a"]["level"] == "Level 03"
     assert first["b"]["ifc_class"] == "IfcDuctSegment" and first["images"] == ["Navisworks"]
@@ -130,7 +131,7 @@ def test_sample_reports_are_folders_under_samples_reports(tmp_path, monkeypatch)
     monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))
     c = TestClient(app_module.app)
     assert c.get("/api/reports/samples").json() == ["demo"]
-    assert c.post("/api/reports", json={"sample": "demo"}).json()["clashes"][0]["name"] == "Clash7"
+    assert c.post("/api/reports", json={"sample": "demo"}).json()["clashes"][0]["ref"] == "Clash7"
     assert c.post("/api/reports", json={"sample": "../reports"}).status_code == 404
 
 
@@ -222,7 +223,7 @@ def test_voice_transcribes_a_wav_biased_to_the_reports_clash_names(tmp_path, mon
     c = TestClient(app_module.app)
     ok = c.post("/api/transcribe", files={"audio": ("clip.wav", _wav(), "audio/wav")}, data={"report_id": report.id})
     assert ok.status_code == 200 and ok.json()["transcript"] == "Fix clash one"
-    assert seen["wav"][:4] == b"RIFF" and "transom" in seen["words"] and "Clash1" in seen["words"]
+    assert seen["wav"][:4] == b"RIFF" and "transom" in seen["words"] and "Clash1" not in seen["words"]
     assert c.post("/api/transcribe", files={"audio": ("x.webm", b"not a wav file", "audio/webm")}).status_code == 422
     import io, wave  # noqa: E401
     loud = io.BytesIO()

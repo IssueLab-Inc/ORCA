@@ -68,8 +68,39 @@ export interface ReportClash {
   id: string; name: string; guid: string | null; test: string; test_type: string | null; tolerance_m: number | null;
   status: string | null; distance_m: number | null; point: number[] | null; grid: string | null;
   a: ReportElement; b: ReportElement; images: string[]; source: string;
+  /** #N, unique across the report; Muse's title (null until titled); the source tool's own label ("Clash39"). */
+  number: number; title: string | null; ref: string | null;
 }
-export interface Report { id: string; title: string; sources: string[]; clashes: ReportClash[] }
+/** Muse titling a report's clashes (server: titles.py). */
+export type TitleEvent =
+  | { type: "start"; total: number; missing: number; model: string }
+  | { type: "titles"; items: Record<string, string> }
+  | { type: "batch_error"; detail: string }
+  | { type: "ping" }
+  | { type: "done"; titled: number; seconds: number; error?: string };
+export interface Report { id: string; title: string; sources: string[]; clashes: ReportClash[]; origin?: "navisworks" | "sightline" }
+
+/** Sightline detection (server: detect.py; design in docs/detection.md). */
+export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[] }
+export interface DetectTest {
+  id: string; name: string; a: DetectSelection; b: DetectSelection | null; kind: "hard" | "clearance" | "duplicate";
+  tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; enabled: boolean;
+}
+export interface DetectCoverage {
+  test: string; name: string; kind: string; elements_a: number; elements_b: number; candidate_pairs: number; clashes: number;
+  touching: number; excluded: Record<string, number>; partial: boolean; seconds: number;
+}
+export interface DetectGone { id: string; test: string; a: string; b: string }
+export interface DetectDiff { new: string[]; resolved: DetectGone[]; no_longer_checked: DetectGone[]; first: boolean }
+export interface Detection { coverage: DetectCoverage[]; diff: DetectDiff; elements: number; seconds: number }
+export interface DetectSetup { tests: DetectTest[]; teams: Record<string, string>; elements: number; rules: Record<string, string> }
+export type DetectEvent =
+  | { type: "phase"; text: string }
+  | { type: "start"; elements: number; tests: { id: string; name: string; kind: string }[] }
+  | { type: "test"; index: number; id: string; name: string; candidates: number }
+  | { type: "test_done"; index: number; coverage: DetectCoverage }
+  | ({ type: "done"; report: Report; offset: number[] } & Detection)
+  | { type: "error"; detail: string };
 /** Per clash id: the model elements each side matched, and how. */
 export type Matches = Record<string, { a: string | null; b: string | null; how: (string | null)[]; show?: (string | null)[] }>;
 export interface Measure { matched: boolean; physical: boolean | null; distance_m: number | null }
@@ -161,6 +192,8 @@ export type ChatEvent =
   | { type: "tool_result"; name: string; summary: string }
   | { type: "ui"; action: "select_clash"; clash_id: string }
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
+  | { type: "ui"; action: "open_report"; report_id: string; detection: Detection }
+  | { type: "detect_event"; event: DetectEvent }
   | { type: "agent"; event: AgentEvent }
   | { type: "context_event"; event: ContextEvent }
   | ({ type: "proposal"; clash_id: string; element_a: string; element_b: string } & Proposal)
@@ -308,6 +341,31 @@ export const api = {
     ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
     : call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })),
 
+  detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
+  /** Sightline's own detection; resolves with the "done" event (the report and its coverage). */
+  detect: async (sceneId: string, tests: DetectTest[] | null, onEvent: (e: DetectEvent) => void) => {
+    let done: Extract<DetectEvent, { type: "done" }> | null = null;
+    await ndjson<DetectEvent>(`/scenes/${sceneId}/detect/stream`, { tests }, (e) => {
+      onEvent(e);
+      if (e.type === "error") throw new Error(e.detail);
+      if (e.type === "done") { done = e; return true; }
+    });
+    if (!done) throw new Error("Detection stopped before it finished.");
+    return done as Extract<DetectEvent, { type: "done" }>;
+  },
+  report: (reportId: string) => call<Report>(`/reports/${reportId}`),
+  /** Muse titles the report's clashes; one run per report is shared, so this may join one already going. */
+  titles: (reportId: string, onEvent: (e: TitleEvent) => void) =>
+    ndjson<TitleEvent>(`/reports/${reportId}/titles/stream`, {}, (e) => { onEvent(e); return e.type === "done"; }),
+  /** A view of a clash Sightline found (A, B or C), captured in the browser for the fix agent, triage and the PDF. */
+  saveView: async (reportId: string, clashId: string, label: string, png: Blob) => {
+    const form = new FormData();
+    form.append("label", label);
+    form.append("image", png, `${label}.png`);
+    const r = await fetch(`/api/reports/${reportId}/clashes/${clashId}/images`, { method: "POST", body: form });
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Saving the view failed (${r.status})`);
+    return (await r.json()).images as string[];
+  },
   reportSamples: () => call<string[]>("/reports/samples"),
   openReport: (sample: string) => call<Report>("/reports", { method: "POST", body: JSON.stringify({ sample }) }),
   /** XML report(s) plus their images; folder uploads keep relative paths so the XML's image links resolve. */

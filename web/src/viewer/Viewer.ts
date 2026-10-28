@@ -494,6 +494,12 @@ export class Viewer {
 
   /** Fly to a zone with a margin that grows with it and with the elements around it (`union`), never too far out. */
   private flyToZone(zone: THREE.Box3, union: THREE.Box3) {
+    const [position, target] = this.zoneCamera(zone, union);
+    this.flyTo(position, target);
+  }
+
+  /** Where the camera goes to frame a zone (see flyToZone): [position, target]. */
+  private zoneCamera(zone: THREE.Box3, union: THREE.Box3): [THREE.Vector3, THREE.Vector3] {
     const zoneDiag = zone.getSize(new THREE.Vector3()).length();
     const unionDiag = union.getSize(new THREE.Vector3()).length();
     const margin = Math.min(Math.max(0.35 * zoneDiag, 0.1 * unionDiag, 0.5), Math.max((unionDiag - zoneDiag) / (2 * Math.sqrt(3)), 0.5));
@@ -503,7 +509,52 @@ export class Viewer {
     const vFov = THREE.MathUtils.degToRad(this.camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
     const dist = Math.max((r / Math.sin(Math.min(vFov, hFov) / 2)) * 1.1, 2 * r + 0.5);
-    this.flyTo(centre.clone().add(this.viewDirection().multiplyScalar(dist)), centre);
+    return [centre.clone().add(this.viewDirection().multiplyScalar(dist)), centre];
+  }
+
+  /** The three pictures of a clash Sightline found, taken the way the Navisworks export takes them (CLAUDE.md, "Images
+   * sent to the model"): A the pair alone and see-through, framed on where they meet; B the pair solid in its grey
+   * context within 2.5 m; C the pair alone from a quarter turn round. Red A and green B, so the colour reading that
+   * crops Navisworks pictures works on these too. The view is put back as it was. Null when either element has no
+   * geometry here. */
+  captureClash(a: string, b: string, side = 768): { A: string; B: string; C: string } | null {
+    const boxA = this.boxOf([a]), boxB = this.boxOf([b]);
+    if (boxA.isEmpty() || boxB.isEmpty()) return null;
+    const zone = meetingZone(boxA, boxB);
+    if (zone.isEmpty()) return null;
+    const saved = { position: this.camera.position.clone(), target: this.controls.target.clone(), mode: this.mode,
+      focus: this.focus, flight: this.flight, marker: this.marker.visible };
+    const pair = Object.values(this.focusMaterials);
+    const shot = (mode: ViewMode, seeThrough: boolean) => {
+      for (const m of pair) { m.transparent = seeThrough; m.opacity = seeThrough ? 0.6 : 1; m.depthWrite = !seeThrough; m.needsUpdate = true; }
+      this.setMode(mode);
+      this.controls.update();
+      this.adjustClipRange();
+      return this.png(side);
+    };
+    try {
+      this.flight = null;
+      this.marker.visible = false;
+      this.setFocus({ a, b });
+      const [position, target] = this.zoneCamera(zone, boxA.clone().union(boxB));
+      this.camera.position.copy(position);
+      this.controls.target.copy(target);
+      const A = shot("isolate", true);
+      const B = shot("context", false);
+      this.camera.position.copy(position.clone().sub(target).applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2).add(target));
+      const C = shot("isolate", true);
+      return { A, B, C };
+    } finally {
+      for (const m of pair) { m.transparent = false; m.opacity = 1; m.depthWrite = true; m.needsUpdate = true; }
+      this.setFocus(saved.focus);
+      this.setMode(saved.mode);
+      this.camera.position.copy(saved.position);
+      this.controls.target.copy(saved.target);
+      this.flight = saved.flight;
+      this.marker.visible = saved.marker;
+      this.controls.update();
+      this.adjustClipRange();
+    }
   }
 
   /** Keep the user's angle when it is a reasonable one; otherwise a high iso view. */
@@ -718,6 +769,17 @@ export class Viewer {
   snapshot(): string {
     this.renderer.render(this.scene, this.camera);
     return this.renderer.domElement.toDataURL("image/png");
+  }
+
+  /** A PNG of the current view's centre square, `side` pixels across. */
+  private png(side: number): string {
+    this.renderer.render(this.scene, this.camera);
+    const src = this.renderer.domElement;
+    const s = Math.min(src.width, src.height);
+    const out = document.createElement("canvas");
+    out.width = out.height = Math.min(side, s);
+    out.getContext("2d")!.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, 0, 0, out.width, out.height);
+    return out.toDataURL("image/png");
   }
 
   /** A small JPEG of the current view (for reports): the centre square, `side` pixels across. */

@@ -45,6 +45,12 @@ TOOLS = [
         'elements when needed. Use when the user asks to move other objects or a single-element fix is blocked. '
         'Costs three proposal units; shows whole proposals for designer review. You cannot accept them.',
         {'clash_id': {'type': 'string'}}, ['clash_id']),
+    _fn("detect_clashes", "Find the clashes in the open models with Sightline's own detection, no Navisworks report "
+        "needed: every pair of models and each model against itself (hard clashes deeper than the tolerance, 1 mm by "
+        "default) and duplicates. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and touches "
+        "are counted, not reported. Takes about 10 s and opens the result as the user's clash report, replacing the open "
+        "one; running it again after fixes says which clashes were resolved.",
+        {"tolerance_mm": {"type": "number", "description": "hard clash tolerance in mm (default 1)"}}),
     _fn("report_summary", "Counts for the open clash report: clashes per test and per element class pair, how many "
         "are found in the open model, how many are fixed. Start here for questions about the whole report."),
     _fn("list_clashes", "List clashes in the report, optionally filtered. Returns at most `limit` rows.", {
@@ -234,7 +240,8 @@ class Chat:
         parts.append("a model is open" if ctx.scene_id in self.ws.scenes else "no model is open")
         if ctx.report_id in self.ws.reports:
             r = self.ws.report(ctx.report_id)
-            parts.append(f"clash report '{r.title}' is open ({len(r.clashes)} clashes)")
+            source = "found by Sightline's own detection" if r.origin == "sightline" else "from Navisworks"
+            parts.append(f"clash report '{r.title}' is open ({len(r.clashes)} clashes, {source})")
         else:
             parts.append("no clash report is open")
         if ctx.clash_id:
@@ -266,7 +273,7 @@ class Chat:
         return self.ws.match(ctx.report_id, ctx.scene_id) if ctx.scene_id in self.ws.scenes else {}  # type: ignore
 
     def _row(self, c, m: dict, ctx: Context) -> dict:
-        return {"clash_id": c.id, "name": c.name, "test": c.test,
+        return {"clash_id": c.id, "number": f"#{c.number}", "title": c.title or c.name, "test": c.test,
                 "a": f"{c.a.ifc_class} '{c.a.name}'", "b": f"{c.b.ifc_class} '{c.b.name}'",
                 "level": c.a.level or c.b.level, "distance_mm": round(c.distance_m * 1000) if c.distance_m is not None else None,
                 "in_model": bool(m.get("a") and m.get("b")), "fixed": c.id in ctx.fixed}
@@ -293,6 +300,28 @@ class Chat:
                                      for p in result['proposals']], message=result['message'],
                            note='Whole proposals are available for preview and designer review. You cannot accept them.')
             return summary, f'{len(result["proposals"])} passing context arrangements for review', []
+        if name == "detect_clashes":
+            sid = self._scene(ctx)
+            tests = None
+            if args.get("tolerance_mm") is not None:
+                tol = max(0.0, float(args["tolerance_mm"])) / 1000
+                tests = [{**t, "tolerance_m": tol if t["kind"] == "hard" else t["tolerance_m"]}
+                         for t in ws.detect_tests(sid)["tests"] if t["enabled"]]
+            out = ws.detect(sid, tests, on_event=lambda e: emit({"type": "detect_event", "event": e}))
+            rid = out["report"]["id"]
+            ctx.report_id = rid  # the rest of this answer works on the new report
+            detection = {k: out[k] for k in ("coverage", "diff", "elements", "seconds")}
+            emit({"type": "ui", "action": "open_report", "report_id": rid, "detection": detection})
+            n = len(out["report"]["clashes"])
+            diff = out["diff"]
+            summary = {"report_id": rid, "clashes": n, "seconds": out["seconds"], "elements": out["elements"],
+                       "tests": [{"test": c["name"], "clashes": c["clashes"], "touching": c["touching"],
+                                  "meant_to_meet": c["excluded"], "partial": c["partial"]} for c in out["coverage"]],
+                       "since_last_run": None if diff.get("first") else {
+                           "new": len(diff["new"]), "resolved": len(diff["resolved"]),
+                           "no_longer_checked": len(diff["no_longer_checked"])},
+                       "note": "The result is now the open clash report. Triage sorts real problems from noise."}
+            return summary, f"{n} clashes found by Sightline in {out['seconds']} s", []
         if name == "report_summary":
             r, matches = self._report(ctx), self._matches(ctx)
             tests = Counter(c.test for c in r.clashes)
@@ -320,7 +349,7 @@ class Chat:
             rows = []
             for c in r.clashes:
                 m = matches.get(c.id, {})
-                text = " ".join(str(x) for x in [c.name, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class,
+                text = " ".join(str(x) for x in [f"#{c.number}", c.title, c.name, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class,
                                                  c.a.level, c.b.level, c.a.system, c.b.system]).lower()
                 if q and not all(w in text for w in q):
                     continue
@@ -338,7 +367,7 @@ class Chat:
             res = {**self._row(c, m, ctx), "point_m": c.point, "status": c.status, "tolerance_m": c.tolerance_m,
                    "element_a": asdict(c.a), "element_b": asdict(c.b), "model_ids": {"a": m.get("a"), "b": m.get("b")},
                    "images": [label for label, _ in c.images]}
-            return res, f"{c.name}: {res['a']} vs {res['b']}", []
+            return res, f"{c.label}: {res['a']} vs {res['b']}", []
         if name == "look_at_clash_images":
             c = self._report(ctx).clash(args["clash_id"])
             pics = [p for _, p in c.images]
@@ -437,7 +466,7 @@ class Chat:
         if name == "show_clash":
             c = self._report(ctx).clash(args["clash_id"])
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
-            return {"shown": c.id}, f"showing {c.name}", []
+            return {"shown": c.id}, f"showing {c.label}", []
         if name == "set_view":
             emit({"type": "ui", "action": "set_view", **{k: args[k] for k in ("mode", "section_box") if k in args}})
             return {"done": True}, "view changed", []

@@ -99,3 +99,26 @@ width across) and a trim inside one model is marked `cleanup`.
 | Date | Cases | Triage by design | Touches what must stay | All options model cleanup |
 |---|---|---|---|---|
 | 2026-10-28 | 3 | 3/3 | 0/3 | 3/3 (one trim each, on the beam, transom, beam) |
+
+## Sightline detection
+
+`detection_navisworks.py` runs Sightline's own detection (`server/sightline/detect.py`, docs/detection.md) on Northbank
+and compares it with the Navisworks package. `detection_cell.py` checks it on the palletising cell from
+ClashWiseDemoModels, against the cell's generated answer key.
+
+    cd server
+    uv run python ../evals/detection_navisworks.py --out ../evals/runs/<date>-northbank-detection
+    uv run python ../evals/detection_cell.py --out ../evals/runs/<date>-cell-detection
+
+Results on Oct 28 (`runs/2026-10-28-northbank-detection/`, `runs/2026-10-28-cell-detection/`):
+
+| | Result |
+|---|---|
+| Northbank, default tests | 633 clashes in 1,961 elements, 7-12 s |
+| Sampled Navisworks results Sightline also reports | 117 of 117 real overlaps. The other 200 are 129 not physical, 46 touches, 24 one element, 1 joined by ports |
+| Answer key | 3/3, including #061, which Navisworks stored no result for |
+| Cell Rev A / Rev B | 13/13 planted pairs and 0 unexpected / 0 planted and 0 unexpected |
+
+The per-discipline counts in `summary.md` are context, not a score. Navisworks stores ports, spaces, sub-objects of one
+element and repeated pairs, and 3,100 of its 7,668 stored results are tests of a space, port or opening.
+
