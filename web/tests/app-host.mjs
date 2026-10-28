@@ -69,7 +69,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
       }); },
   };
   const api = { samples: async () => ["model.ifc"], reportSamples: async () => ["sample"], match: async () => matches,
-    rootCauses: async () => [], patterns: async () => [], triage: async () => ({}), teams: async () => ({ models: [] }),
+    models: async () => ({ triage: { model: "m", open_weights: false } }), rootCauses: async () => [], patterns: async () => [], triage: async () => ({}), teams: async () => ({ models: [] }),
     measure: async () => ({ matched: true, physical: true, distance_m: -.3 }), element: async () => ({}), exportUrl: () => "/export",
     proposeStream: (...args) => new Promise((resolve, reject) => requests.push({ args, onEvent: args[4], resolve, reject })),
     contextStream: (_sid, objective, onEvent, signal) => new Promise((resolve, reject) => contextRequests.push({ objective, onEvent, signal, resolve, reject })),

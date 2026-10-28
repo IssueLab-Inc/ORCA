@@ -567,6 +567,9 @@ export class Viewer {
       this.marker.visible = saved.marker;
       this.controls.update();
       this.adjustClipRange();
+      // Draw the user's view again before the browser paints: the canvas keeps its last frame (preserveDrawingBuffer),
+      // and a shot taken after this frame's own render would otherwise show until the next one (thumbnails flashing).
+      this.renderer.render(this.scene, this.camera);
     }
   }
 

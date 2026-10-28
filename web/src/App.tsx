@@ -4,7 +4,7 @@ import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { OwnerSettings } from "./api";
+import type { OwnerSettings, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
@@ -122,13 +122,21 @@ export function App() {
   const [docOpen, setDocOpen] = useState(false);
   const [touring, setTouring] = useState(false);
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
+  // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
+  const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
+  useEffect(() => { api.models().then((m) => setTriageModel(m.triage)).catch(() => undefined); }, [ownerSettings]);
   const [replaying, setReplaying] = useState(false);
   const [docReady, setDocReady] = useState(false);
   const [chatAsk, setChatAsk] = useState<{ text: string; send: boolean; n: number } | undefined>(undefined);
   // Each agent run gets a number: a run that was replaced (by a recorded replay) can no longer change the page.
   const agentRun = useRef(0);
   const golden = useRef(false);
-  const [triageFilter, setTriageFilter] = useState<TriageKind | null>(null);
+  const [triageFilter, setTriageFilterState] = useState<TriageKind | null>(null);
+  // The list filtered to one pattern's or root cause's clashes (Insights). One filter at a time: either clears the other.
+  const [listFocus, setListFocusState] = useState<{ label: string; ids: string[] } | null>(null);
+  const setTriageFilter = (k: TriageKind | null) => { setTriageFilterState(k); if (k) setListFocusState(null); };
+  const setListFocus = (f: { label: string; ids: string[] } | null) => { setListFocusState(f); if (f) setTriageFilterState(null); };
+  useEffect(() => { setListFocusState(null); }, [report?.id]);
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -258,14 +266,25 @@ export function App() {
     return () => { live = false; };
   }, [report, sceneId]);
 
-  // Root causes and patterns, over the clashes still open (not fixed, not reviewed). Refreshed as that changes.
+  // Root causes and patterns, over the clashes still open (not fixed, not reviewed). Nothing jumps while the user
+  // works through them: patterns are read once per report, and Insights shows each one's open clashes from `resolved`;
+  // root causes are read again as clashes are resolved, but each stays in its place (a resolved hub as a done row).
   const resolved = useMemo(() => [...new Set([...Object.keys(fixes), ...Object.keys(reviewed)])], [fixes, reviewed]);
+  const resolvedSet = useMemo(() => new Set(resolved), [resolved]);
+  const resolvedNow = useRef(resolved);
+  resolvedNow.current = resolved;
   useEffect(() => {
     setRootCauses(null); setPatterns(null);
     if (!report || !sceneId || !matches) return;
     let live = true;
-    api.rootCauses(report.id, sceneId, resolved).then((r) => { if (live) setRootCauses(r); }).catch(() => { if (live) setRootCauses([]); });
-    api.patterns(report.id, sceneId, resolved).then((r) => { if (live) setPatterns(r); }).catch(() => { if (live) setPatterns([]); });
+    api.patterns(report.id, sceneId, resolvedNow.current).then((r) => { if (live) setPatterns(r); }).catch(() => { if (live) setPatterns([]); });
+    return () => { live = false; };
+  }, [report, sceneId, matches]);
+  useEffect(() => {
+    if (!report || !sceneId || !matches) return;
+    let live = true;
+    api.rootCauses(report.id, sceneId, resolved).then((r) => { if (live) setRootCauses((prev) => keepPlaces(prev, r)); })
+      .catch(() => { if (live) setRootCauses((prev) => prev ?? []); });
     return () => { live = false; };
   }, [report, sceneId, matches, resolved]);
 
@@ -1231,10 +1250,11 @@ export function App() {
     pumpThumbs();
   }
   const thumbTimer = useRef<number | null>(null);
-  /** Draw one queued thumbnail per frame, newest request first (the rows on screen now). */
+  /** Draw one queued thumbnail every 60 ms or so, newest request first (the rows on screen now), so scrolling and the
+   * viewer's own frames stay smooth. */
   function pumpThumbs() {
     if (thumbTimer.current != null) return;
-    thumbTimer.current = requestAnimationFrame(() => {
+    thumbTimer.current = window.setTimeout(() => {
       thumbTimer.current = null;
       if (thumbPaused.current || !viewer.current) return;
       const next = thumbQueue.current.pop();
@@ -1247,7 +1267,7 @@ export function App() {
         setThumbs((t) => ({ ...t, [next.clash.id]: url }));
       }
       if (thumbQueue.current.length) pumpThumbs();
-    });
+    }, 60);
   }
   const fixedCount = Object.keys(fixes).length;
   const tourDuct = clashOfPair(TOUR.duct), tourJoint = clashOfPair(TOUR.joint);
@@ -1256,6 +1276,7 @@ export function App() {
     triageStarted: !!triageRun, triageDone: !!triageRun?.done, triageCount: Object.keys(triage).length,
     triageTotal: report?.clashes.length ?? 0, realCount: Object.values(shownTriage).filter((v) => v.verdict === "real_clash").length,
     filter: triageFilter, clashId: clash?.id ?? null, tab, fixHidden: hideFix,
+    triageOpen: triageRun?.model ? !!triageRun.open_weights : !!triageModel?.open_weights,
     proposing, proposingFor: progress && proposing ? (now - progress.started) / 1000 : 0,
     options: proposal?.options.length ?? 0, proposalDone: progress?.phase === "done", error, replaying,
     compare, fixed: Object.keys(fixes),
@@ -1371,19 +1392,21 @@ export function App() {
       <aside className="pane left">
         {report
           ? <ReportList report={shownReport ?? report} naming={naming} matches={matches}
-              thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
+              thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb}
+              focus={listFocus} onClearFocus={() => setListFocus(null)} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
               insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
                 detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
                 progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} />}
-                <TriageCard run={triageRun} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+                <TriageCard run={triageRun} active={triageModel} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
                 total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
+                resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={setListFocus}
                 busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={explainPatterns}
                 onSelect={(ids) => setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])]))}
                 onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })} /></>} />
@@ -1404,7 +1427,7 @@ export function App() {
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {!stats && !busy && (
-          <About start={{
+          <About triageOpen={!!triageModel?.open_weights} start={{
             label: startLabel,
             disabled: !picked.length,
             onStart: openDemo,
@@ -1599,7 +1622,7 @@ export function App() {
       </footer>
 
       <Tooltips />
-      {about && <About onClose={() => setAbout(false)} />}
+      {about && <About triageOpen={!!triageModel?.open_weights} onClose={() => setAbout(false)} />}
       {touring && <Tour state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
@@ -1733,4 +1756,13 @@ function Thinking({ notes, live, thinking }: { notes: { round: number; text: str
 /** What an offset adds, from its piece count: square corners make 5 straights; bends add four fittings (7 or 9 pieces). */
 function offsetParts(pieces: number) {
   return pieces > 5 ? `4 bends${pieces === 9 ? " and 2 short risers" : ""}` : "square corners";
+}
+
+/** The new root causes in the order already on screen (new ones after), with any that dropped out kept as done rows. */
+function keepPlaces(prev: RootCause[] | null, next: RootCause[]): RootCause[] {
+  if (!prev) return next;
+  const now = new Map(next.map((r) => [r.hub.global_id, r]));
+  const out = prev.map((r) => now.get(r.hub.global_id) ?? { ...r, done: true });
+  const seen = new Set(prev.map((r) => r.hub.global_id));
+  return [...out, ...next.filter((r) => !seen.has(r.hub.global_id))];
 }

@@ -5,10 +5,11 @@ import { useEffect, type ReactNode } from "react";
  * What Sightline is and does, for people who have never heard of BIM or design coordination: the start page in the
  * empty viewer (with the demo button) and the "How it works" dialog from the header.
  */
-export function About({ start, onClose }: {
+export function About({ start, onClose, triageOpen = false }: {
   // onGolden: one click opens the demo models, checks them, picks the duct-through-girder clash and proposes a fix.
   start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void };
   onClose?: () => void;
+  triageOpen?: boolean;  // titles and triage run on the open-weights model now (server: /api/models)
 }) {
   useEffect(() => {
     if (!onClose) return;
@@ -60,7 +61,8 @@ export function About({ start, onClose }: {
         <Stat value="~40 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
         <Stat value="3 of 3" label="designer fixes matched" note="On the demo's three planted clashes, the first idea passes at the designer's own heights." />
         <Stat value="4 s" label="to check 1,732 elements" note="Every pair of the demo's three building models, and each against itself: 464 clashes." />
-        <Stat value="464" label="clashes sorted in under 2 min" note="Read by an open-weights model; alike clashes once, so 39 calls." />
+        <Stat value="464" label="clashes sorted in under 2 min" note={triageOpen ? "Read by an open-weights model; alike clashes once, so 39 calls."
+          : "Measured on Muse Spark Open, the open-weights model; alike clashes are read once (39 calls)."} />
       </section>
 
       <section>
@@ -88,9 +90,10 @@ export function About({ start, onClose }: {
         <h2 className="about-h">What Sightline does</h2>
         <ol className="about-steps">
           <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Checks the models and sorts what it finds">
-            Sightline checks every pair of models and each model against itself, and numbers each clash. <b>Muse Spark
-            Open</b>, an open-weights model, names every one and gives it a verdict: a real problem, by design, or a
-            modelling mistake. Alike clashes (forty bolts in forty plates) are read once.
+            Sightline checks every pair of models and each model against itself, and numbers each clash.{" "}
+            {triageOpen ? <><b>Muse Spark Open</b>, an open-weights model,</> : <b>Muse Spark</b>} names every one and gives
+            it a verdict: a real problem, by design, or a modelling mistake. Alike clashes (forty bolts in forty plates) are
+            read once.
           </Step>
           <Step n={2} icon={<Eye size={18} aria-hidden />} title="Understands a clash">
             <b>Muse Spark</b> looks at three pictures of the clash and reads the model's own data: what each element is,
@@ -148,8 +151,8 @@ export function About({ start, onClose }: {
 
       <section className="built-with" aria-label="Built with">
         <span className="hint">Built with</span>
-        <span className="tech"><b>Muse Spark</b> understands clashes and proposes fixes</span>
-        <span className="tech"><b>Muse Spark Open</b> names and sorts every clash</span>
+        <span className="tech"><b>Muse Spark</b> understands clashes and proposes fixes{triageOpen ? "" : ", names and sorts them"}</span>
+        {triageOpen && <span className="tech"><b>Muse Spark Open</b> names and sorts every clash</span>}
         <span className="tech"><b>Muse Voice Transcribe</b> lets you talk to it</span>
         <span className="tech"><b>IfcOpenShell</b> finds the clashes, edits and checks the geometry</span>
         <span className="tech"><b>three.js</b> draws the 3D view</span>

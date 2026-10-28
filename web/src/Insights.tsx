@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, CircleCheck, Flag, ListChecks, Network, Repeat2, Sparkles, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleCheck, Filter, Flag, ListChecks, Network, Repeat2, Sparkles, Wand2 } from "lucide-react";
 import { useState } from "react";
 import type { Pattern, PatternVerdict, RootCause } from "./api";
 
@@ -12,9 +12,13 @@ const VERDICT: Record<PatternVerdict["verdict"], { label: string; cls: string }>
 };
 
 /** What Sightline sees across the report: elements behind several clashes, and clashes that repeat the same way. */
-export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onFixRoot, onExplain, onSelect, onReview, onFixAll }: {
+export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onFixRoot, onExplain, onSelect, onReview, onFixAll,
+  resolved, focus, onFocus }: {
   rootCauses: RootCause[] | null; patterns: Pattern[] | null; verdicts: Record<string, PatternVerdict> | null;
   explaining: boolean; busy: boolean;
+  resolved: Set<string>;  // fixed or reviewed: a pattern shows only its open clashes, and stays in place when none are left
+  focus: string | null;   // the label the list is filtered to, if one of these
+  onFocus: (f: { label: string; ids: string[] } | null) => void;
   onFixRoot: (hub: string) => void; onExplain: () => void; onSelect: (ids: string[]) => void;
   onReview: (ids: string[], kind: "by_design" | "author", note: string) => void; onFixAll: (ids: string[]) => void;
 }) {
@@ -25,8 +29,16 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
   if (rootCauses && patterns && !roots.length && !pats.length) return null;
   const shownRoots = allRoots ? roots : roots.slice(0, 2);
   const shownPats = allPatterns ? pats : pats.slice(0, 4);
-  const nRoots = rootCauses ? `${roots.length} root cause${roots.length === 1 ? "" : "s"}` : "…";
-  const nPats = patterns ? `${pats.length} pattern${pats.length === 1 ? "" : "s"}` : "…";
+  const openRoots = roots.filter((r) => !r.done).length;
+  const openPats = pats.filter((p) => p.clash_ids.some((id) => !resolved.has(id))).length;
+  const nRoots = rootCauses ? `${openRoots} root cause${openRoots === 1 ? "" : "s"}` : "…";
+  const nPats = patterns ? `${openPats} pattern${openPats === 1 ? "" : "s"}` : "…";
+  // Show these clashes only, in the list; pressed again, show everything.
+  const filterButton = (label: string, ids: string[]) => (
+    <button className={`ibtn ${focus === label ? "on" : ""}`} aria-pressed={focus === label} aria-label="Show only these in the list"
+      data-tip={focus === label ? "Show every clash again" : "Show only these in the list"} data-tip-side="left"
+      onClick={() => onFocus(focus === label ? null : { label, ids })}><Filter size={15} aria-hidden /></button>
+  );
   return (
     <details className="insights" open>
       <summary>
@@ -39,18 +51,23 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
         <h3><Network size={14} aria-hidden /> Root causes</h3>
         <p className="hint">One element behind several clashes: fix the cause once, not each clash.</p>
         {shownRoots.map((r) => (
-          <div key={r.hub.global_id} className="insight">
+          <div key={r.hub.global_id} className={`insight ${r.done ? "done" : ""}`}>
             <div className="insight-text">
               <b title={`${r.hub.ifc_class} '${r.hub.name}': ${r.partners.map((p) => p.name).join(", ")}`}>{r.hub.name}</b>
               <span className="insight-meta">
-                <span className="chip small">{r.partners.length} clashing</span>
+                <span className="chip small count">{r.partners.length} clashing</span>
                 {(r.hub.storey ?? r.hub.source) && <span className="chip small">{r.hub.storey ?? r.hub.source}</span>}
                 <span className={`chip small ${r.cross_discipline > 0 ? "accent" : ""}`}>{r.cross_discipline > 0 ? "across disciplines" : "one model"}</span>
                 {r.not_in_report > 0 && <span className="chip small warn">{r.not_in_report} not in the report</span>}
               </span>
             </div>
-            <button className="btn small" disabled={busy} onClick={() => onFixRoot(r.hub.global_id)}
-              data-tip="Find the cause and fix these clashes together" data-tip-side="left"><Wand2 size={14} aria-hidden /> Fix</button>
+            <div className="insight-actions">
+              {filterButton(`Root cause: ${r.hub.name}`, r.clash_ids)}
+              {r.done
+                ? <button className="btn small root-act" disabled data-tip="Its clashes are resolved" data-tip-side="left"><CircleCheck size={14} aria-hidden /> Done</button>
+                : <button className="btn small root-act" disabled={busy} onClick={() => onFixRoot(r.hub.global_id)}
+                    data-tip="Find the cause and fix these clashes together" data-tip-side="left"><Wand2 size={14} aria-hidden /> Fix</button>}
+            </div>
           </div>
         ))}
         {roots.length > 2 && <button className="more" onClick={() => setAllRoots(!allRoots)}>
@@ -65,9 +82,12 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
             : <><Sparkles size={13} aria-hidden /> Explain the {pats.length} patterns with Muse Spark</>}</button>}
         {shownPats.map((p) => {
           const v = verdicts?.[p.id];
+          const open = p.clash_ids.filter((id) => !resolved.has(id));
+          const name = `${human(p.classes[0])} with ${human(p.classes[1])}`;
           return (
-            <div key={p.id} className="insight pattern" data-tour={v?.verdict === "by_design" ? "pattern-by-design" : undefined}>
-              <span className="pattern-n" aria-label={`${p.clashes} clashes`}>{p.clashes}×</span>
+            <div key={p.id} className={`insight pattern ${open.length ? "" : "done"}`} data-tour={v?.verdict === "by_design" ? "pattern-by-design" : undefined}>
+              <span className="pattern-n" aria-label={`${open.length} clashes open of ${p.clashes}`}
+                title={open.length < p.clashes ? `${open.length} of ${p.clashes} still open` : undefined}>{open.length ? open.length : p.clashes}×</span>
               <div className="insight-text">
                 <b title={`${p.classes[0]} with ${p.classes[1]}`}>{human(p.classes[0])} <span className="with">with</span> {human(p.classes[1])}</b>
                 <span className="hint">{p.levels.length} level{p.levels.length === 1 ? "" : "s"} · {p.min_mm === p.max_mm ? `${p.min_mm} mm every time` : `${p.min_mm} to ${p.max_mm} mm`}
@@ -76,14 +96,18 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
                 {v && <span className="hint">{v.rule ? <>Rule: <i>{v.rule}</i></> : v.action}</span>}
               </div>
               <div className="insight-actions">
+                {filterButton(`Pattern: ${name}`, p.clash_ids)}
+                {!open.length && <span className="ibtn done-mark" aria-label="All resolved" data-tip="All resolved" data-tip-side="left"><CircleCheck size={16} aria-hidden /></span>}
+                {open.length > 0 && <>
                 <button className="ibtn" aria-label="Tick these clashes in the list" data-tip="Tick them in the list" data-tip-side="left"
-                  onClick={() => onSelect(p.clash_ids)}><ListChecks size={16} aria-hidden /></button>
+                  onClick={() => onSelect(open)}><ListChecks size={16} aria-hidden /></button>
                 {v?.verdict === "by_design" && <button className="ibtn" data-tour="mark-by-design" aria-label="Mark as by design" data-tip="Mark all as by design" data-tip-side="left"
-                  onClick={() => onReview(p.clash_ids, "by_design", v.rule || v.cause)}><CircleCheck size={16} aria-hidden /></button>}
+                  onClick={() => onReview(open, "by_design", v.rule || v.cause)}><CircleCheck size={16} aria-hidden /></button>}
                 {v?.verdict === "modelling_error" && <button className="ibtn" aria-label="Flag for the model author" data-tip="Flag all for the author" data-tip-side="left"
-                  onClick={() => onReview(p.clash_ids, "author", v.action)}><Flag size={16} aria-hidden /></button>}
+                  onClick={() => onReview(open, "author", v.action)}><Flag size={16} aria-hidden /></button>}
                 {v?.verdict === "real_problem" && <button className="ibtn" disabled={busy} aria-label="Fix these together" data-tip="Fix these together (up to 8 pairs)" data-tip-side="left"
-                  onClick={() => onFixAll(p.clash_ids)}><Wand2 size={16} aria-hidden /></button>}
+                  onClick={() => onFixAll(open)}><Wand2 size={16} aria-hidden /></button>}
+                </>}
               </div>
             </div>
           );

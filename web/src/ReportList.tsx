@@ -36,7 +36,7 @@ function ImpactBar({ total, triage, fixes, reviewed }: { total: number; triage: 
   const hours = (triaged * 15 / 60).toFixed(1).replace(/\.0$/, "");
   return <p className="impact-bar" role="status"><span><b>{total}</b> clashes</span><span className="bad"><b>{real}</b> real</span><span><b>{need}</b> need a fix</span><span className="ok"><b>{resolved}</b> resolved</span><span className="why">≈{hours} h of manual review sorted (est. 15 min/clash)</span></p>;
 }
-export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter, naming = 0, thumbs, onThumb }: {
+export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
@@ -46,6 +46,8 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   naming?: number;  // clashes Muse is still titling
   /** Thumbnails drawn in the browser for clashes with no pictures (detected ones), and a way to ask for one. */
   thumbs?: Record<string, string>; onThumb?: (c: ReportClash) => void;
+  /** Only these clashes (a pattern or root cause picked in Insights), with a chip to show every clash again. */
+  focus?: { label: string; ids: string[] } | null; onClearFocus?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -53,8 +55,10 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const only = focus ? new Set(focus.ids) : null;
     const out = new Map<string, ReportClash[]>();
     for (const c of report.clashes) {
+      if (only && !only.has(c.id)) continue;
       if (onlyLinked && linkState(matches, c.id) !== "both") continue;
       if (hideFixed && (fixes[c.id] || reviewed[c.id])) continue;
       if (triageFilter && triage[c.id]?.verdict !== triageFilter) continue;
@@ -63,7 +67,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
       out.set(c.test, [...(out.get(c.test) ?? []), c]);
     }
     return [...out.entries()];
-  }, [report, matches, query, onlyLinked, hideFixed, fixes, reviewed, triage, triageFilter]);
+  }, [report, matches, query, onlyLinked, hideFixed, fixes, reviewed, triage, triageFilter, focus]);
 
   // Bring the selected clash into view, also when something else (the chat) selected it.
   useEffect(() => {
@@ -98,6 +102,11 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
           {fixedCount + reviewedCount > 0 && <label className="check"><input type="checkbox" checked={hideFixed} onChange={(e) => setHideFixed(e.target.checked)} /> Hide resolved</label>}
           {shown !== report.clashes.length && <span className="hint">{shown} shown</span>}
         </div>
+        {focus && <div className="list-focus" role="status">
+          <span><b>{focus.label}</b> · {shown} of {focus.ids.length} shown</span>
+          <button className="ibtn" onClick={onClearFocus} aria-label="Show every clash again" data-tip="Show every clash again" data-tip-side="left">
+            <X size={14} aria-hidden /></button>
+        </div>}
       </div>
 
       {insights}
@@ -107,7 +116,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
           const pick = cs.filter(fixable).map((c) => c.id);
           const all = pick.length > 0 && pick.every((id) => checked.has(id));
           return (
-            <details key={test} open={!!query.trim() || groups.length <= 3 || cs.some((c) => c.id === selected)}>
+            <details key={test} open={!!query.trim() || !!focus || groups.length <= 3 || cs.some((c) => c.id === selected)}>
               <summary>
                 {matches && <input type="checkbox" className="group-check" aria-label={`Select every fixable clash in ${test}`}
                   checked={all} disabled={!pick.length} onClick={(e) => e.stopPropagation()} onChange={(e) => onCheck(pick, e.target.checked)} />}

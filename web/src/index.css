@@ -270,7 +270,14 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .pattern-n { flex: none; min-width: 34px; text-align: center; font-weight: 700; font-size: 13px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 6px; padding: 3px 4px; font-variant-numeric: tabular-nums; }
 .insight.pattern { align-items: flex-start; }
 .insight.pattern .pattern-n { margin-top: 1px; }
-.insight-actions { display: flex; gap: 0; }
+.insight-actions { display: flex; gap: 0; align-items: center; }
+.insight.done > :not(.insight-actions) { opacity: .55; }
+.list-focus { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); font-size: 12.5px; }
+.insight-meta .chip.count { min-width: 11.5ch; justify-content: center; font-variant-numeric: tabular-nums; }  /* a count change doesn't reflow the row */
+.insights .insight-actions { flex-shrink: 0; justify-content: flex-end; }  /* the same width resolved or not: rows keep their height */
+.insights .insight.pattern .insight-actions { min-width: 84px; }
+.insights .root-act { min-width: 66px; justify-content: center; }
+.insight .done-mark { color: var(--ok); cursor: default; display: inline-grid; place-items: center; }
 .insight-actions .ibtn { width: 28px; height: 28px; }
 .explain-all { justify-content: center; background: #f4f1fd; border-color: #d9d0f5; color: #4a3d9e; }
 .explain-all:hover:not(:disabled) { background: #ebe5fb; }
@@ -305,6 +312,13 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .triage-count { font-size: 13px; color: #33414f; }
 .triage-count b { font-size: 22px; font-weight: 700; margin-right: 2px; letter-spacing: -.01em; }
 .triage-count b.bad { color: var(--fail); } .triage-count b.ok { color: var(--ok); }
+.triage.compact { padding: 10px 12px; }
+.triage.compact .triage-head { margin-bottom: 6px; }
+.triage-fold svg { transition: transform .15s; }
+.triage.compact .triage-fold svg { transform: rotate(-90deg); }
+.triage-count.small { display: flex; align-items: baseline; gap: 4px; margin-bottom: 6px; }
+.triage-count.small b { font-size: 18px; }
+.triage-info { display: inline-grid; place-items: center; margin-left: auto; color: var(--muted); cursor: help; align-self: center; }
 .triage-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--bg); gap: 2px; }
 .triage-bar button { all: unset; cursor: pointer; flex-basis: 0; min-width: 4px; transition: flex-grow .4s ease, opacity .2s; }
 .triage-bar button:hover, .triage-bar button:focus-visible { opacity: .8; }

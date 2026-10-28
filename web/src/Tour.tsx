@@ -21,6 +21,8 @@ export interface TourState {
   busy: boolean; reportOpen: boolean; modelsOpen: boolean;
   triageStarted: boolean; triageDone: boolean; triageCount: number; triageTotal: number; realCount: number;
   filter: string | null; clashId: string | null; tab: string;
+  /** Titles and triage run on the open-weights model (Muse Spark Open) now, else Muse Spark. */
+  triageOpen: boolean;
   fixHidden: boolean;  // the clash panel says "not a clash" and offers "Propose a fix anyway" instead
   proposing: boolean; proposingFor: number; options: number; proposalDone: boolean; error: string | null; replaying: boolean;
   compare: string; fixed: string[];
@@ -76,10 +78,10 @@ export const STEPS: Step[] = [
   {
     act: "Triage", title: "Sort them all first",
     body: (s) => s.triageDone
-      ? <>Done: {s.triageTotal} clashes sorted by <b>Muse Spark Open</b>, an open-weights model, many at a time; alike
+      ? <>Done: {s.triageTotal} clashes sorted by {s.triageOpen ? <><b>Muse Spark Open</b>, an open-weights model,</> : <b>Muse Spark</b>} many at a time; alike
         clashes were read once.</>
       : s.triageStarted
-        ? <>Triage is running: {s.triageCount} of {s.triageTotal}. <b>Muse Spark Open</b> reads eight at a time, and
+        ? <>Triage is running: {s.triageCount} of {s.triageTotal}. <b>{s.triageOpen ? "Muse Spark Open" : "Muse Spark"}</b> reads eight at a time, and
           alike clashes (forty bolts in forty plates) only once. Carry on: it keeps going.</>
         : <>Click <b>Triage all</b>. Every clash gets a verdict: a real problem, by design, not physical, or a modelling
           error for the model's author.</>,
@@ -89,7 +91,7 @@ export const STEPS: Step[] = [
   },
   {
     act: "Triage", title: "Just the real ones",
-    body: (s) => <>Click <b>Real problem</b> to keep only the clashes that need a change{s.realCount ? `: ${s.realCount} of ${s.triageTotal}` : ""}.
+    body: (s) => <>Click <b>Real problem</b> (red) to keep only the clashes that need a change{s.realCount ? `: ${s.realCount} of ${s.triageTotal}` : ""}.
       The rest stay in the report, sorted, for the record.</>,
     target: "[data-tour=triage-real]", done: (s) => s.filter === "real_clash",
     show: { label: "Filter for me", run: (a) => a.filterReal() },
@@ -246,15 +248,15 @@ export const STEPS: Step[] = [
   // 9. Close
   {
     act: "Sightline", title: "Clashes fixed, proved, signed off", enter: (a) => { a.closeReport(); a.overview(); },
-    body: () => <>
+    body: (s) => <>
       <span className="tour-stats">
         <span><b>4 s</b> to check 1,732 elements</span>
         <span><b>&lt; 2 min</b> to triage 464 clashes</span>
         <span><b>~40 s</b> to a verified fix</span>
         <span><b>3 of 3</b> designer fixes matched</span>
       </span>
-      Built during the hackathon with Muse Spark (reasoning, tools, images), Muse Spark Open on Baseten (bulk triage), Muse
-      Voice Transcribe and IfcOpenShell. Every fix is a real IFC edit, checked against the whole building.</>,
+      Built during the hackathon with Muse Spark (reasoning, tools, images{s.triageOpen ? "" : ", titles and triage"}),
+      {s.triageOpen ? " Muse Spark Open on Baseten (titles and triage)," : ""} Muse Voice Transcribe and IfcOpenShell. Every fix is a real IFC edit, checked against the whole building.</>,
   },
 ];
 

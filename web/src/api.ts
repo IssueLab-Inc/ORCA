@@ -186,6 +186,8 @@ export interface RootCausePartner {
 export interface RootCause {
   hub: { global_id: string; ifc_class: string; name: string; storey: string | null; source: string };
   partners: RootCausePartner[]; cross_discipline: number; clash_ids: string[]; not_in_report: number;
+  /** Client only: no longer a root cause (its clashes were resolved); kept in its place so the list does not jump. */
+  done?: boolean;
 }
 export type PlanEvent =
   | { type: "plan_items"; items: PlanItem[]; skipped: string[] }
@@ -272,6 +274,8 @@ export const api = {
   unlock: (token: string) => call<{ owner: boolean }>("/owner/unlock", { method: "POST", body: JSON.stringify({ token }) }),
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
   settings: () => call<SettingsState>("/settings"),
+  /** Which model this browser's titles and triage would use now (the owner's choice, else the setting for everyone). */
+  models: () => call<{ triage: TriageModel }>("/models"),
   saveSettings: (changes: Partial<EveryoneSettings>) => call<SettingsState>("/settings", { method: "PUT", body: JSON.stringify(changes) }),
   teams: (reportId: string, sceneId: string | null) =>
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
