@@ -86,7 +86,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <span className="triage-icon"><ScanSearch size={15} aria-hidden /></span>
         <div>
           <h3>Triage</h3>
-          <span className="triage-sub">{state === "idle" ? "Step 1 · sort the report" : state === "running" ? "Sorting the report…" : "Every clash has a verdict"}</span>
+          <span className="triage-sub">{state === "idle" ? "Step 1 · sort the clashes" : state === "running" ? "Sorting the clashes…" : "Every clash has a verdict"}</span>
         </div>
         {run?.done && <button className="ibtn" aria-label="Triage again" data-tip="Triage again" data-tip-side="left" onClick={() => onRun(true)}>
           <RotateCcw size={14} aria-hidden /></button>}
@@ -97,7 +97,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <button className="btn primary triage-go" onClick={() => onRun(false)}>
           <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>
         <p className="hint">Sure cases (spaces, ports, touches) are settled by rule at once; Muse Spark Open, an open-weights
-          model, reads the rest, eight at a time. About three minutes.</p>
+          model, reads the rest, eight at a time, and alike clashes once. About three minutes.</p>
       </>}
 
       {state === "running" && run && <>

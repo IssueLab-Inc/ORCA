@@ -197,7 +197,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
       <div className="chat-log" aria-live="polite">
         {!turns.length && (
           <div className="chat-empty">
-            <p className="hint">Ask Sightline about the open clash report and model. It can read clashes, look at their
+            <p className="hint">Ask Sightline about the models and their clashes. It can read clashes, look at their
               images, measure, try fixes and show you what it means. Type, or press the mic and say it.</p>
             {SUGGESTIONS.map((s) => <button key={s} className="suggest" disabled={!ready} onClick={() => send(s)}>{s}</button>)}
           </div>
@@ -219,7 +219,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
         <div ref={end} />
       </div>
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
-        <textarea value={draft} rows={2} placeholder={ready ? "Ask about the clashes…" : "Open a model or a clash report first"}
+        <textarea value={draft} rows={2} placeholder={ready ? "Ask about the clashes…" : "Open the models first"}
           disabled={!ready} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft); } }} aria-label="Message" />
         <button className="btn primary" data-tour="chat-send" disabled={!ready || busy || !draft.trim()}>{busy ? "…" : "Send"}</button>

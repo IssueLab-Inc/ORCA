@@ -570,7 +570,7 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         if c.id not in diff["new_ids"]:
             c.status = "active"
     root = Path(tempfile.mkdtemp(prefix="sightline-run-"))
-    report = Report(id=uuid.uuid4().hex[:12], title=title or f"Sightline detection · {len(ix.names)} model"
+    report = Report(id=uuid.uuid4().hex[:12], title=title or f"Coordination · {len(ix.names)} model"
                     f"{'' if len(ix.names) == 1 else 's'}", root=root, sources=list(ix.names), clashes=clashes,
                     temporary=True, origin="sightline")
     state = {"clashes": {c.id: {"test": tested[c.id].id, "name": tested[c.id].name, "a": c.a.global_id,

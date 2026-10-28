@@ -117,6 +117,8 @@ export interface TriageVerdict {
   model_reading?: string;
   /** What the triage model wrote while working it out (Muse Spark Open streams it). */
   reasoning?: string;
+  /** Alike clashes are read once (server: triage.alike_groups): the group's size, and on the others the clash read. */
+  alike?: number; alike_of?: string;
 }
 export interface TriageModel { model: string; open_weights: boolean; images?: boolean; note?: string }
 export type TriageEvent =

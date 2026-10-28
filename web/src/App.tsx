@@ -530,20 +530,27 @@ export function App() {
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
+      return id;
     } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
   }
 
-  /** The start page's button: the sample clash report (its list shows at once), then the models. */
+  /** The start page's buttons: open the demo models and let Sightline check them (the golden path also picks the duct
+   * through the girder and proposes a fix). A Navisworks report is optional: Coordinate › Import. */
   async function startGolden() { golden.current = true; await openDemo(); }
   async function openDemo() {
-    const sample = reportSamples[0];
-    if (sample && !report) await loadReport(() => api.openReport(sample), sample);
-    await open();
+    const id = await open();
+    if (id) await runDetect(null, id);
+  }
+
+  /** A clash the tour or the golden path is about, by its two elements: the same in a check or an imported report. */
+  function clashOfPair(pair: readonly string[], r: Report | null = report): ReportClash | undefined {
+    return r?.clashes.find((c) => pair.includes(c.a.global_id ?? "") && pair.includes(c.b.global_id ?? "")
+      && c.a.global_id !== c.b.global_id);
   }
 
   useEffect(() => {
     if (!golden.current || !report || !sceneId || !matches) return;
-    const target = report.clashes.find((c) => c.id === TOUR.duct) ?? [...report.clashes].sort((x, y) => (x.distance_m ?? 0) - (y.distance_m ?? 0))[0];
+    const target = clashOfPair(TOUR.duct) ?? [...report.clashes].sort((x, y) => (x.distance_m ?? 0) - (y.distance_m ?? 0))[0];
     if (!target) { golden.current = false; return; }
     if (clash?.id !== target.id) { selectClash(target); return; }
     if (a && b && !proposal && !proposing) { golden.current = false; void propose(); }
@@ -608,15 +615,15 @@ export function App() {
 
   /** Find the clashes in the open models and open them as the report. `tests` null: the server's defaults. Marks on
    * clashes that are still there (by design, for the author) survive a rerun: their ids stay the same. */
-  async function runDetect(tests: DetectTest[] | null) {
-    if (!sceneId || busy || detecting) return;
+  async function runDetect(tests: DetectTest[] | null, sid: string | null = sceneId) {
+    if (!sid || busy || detecting) return;
     const epoch = sceneEpoch.current;
     const keep = report?.origin === "sightline" ? reviewed : {};
     const selected = report?.origin === "sightline" ? clash?.id : undefined;
     lastTests.current = tests;
     setDetecting({ phase: "Starting…", tests: [] }); setError(null);
     try {
-      const done = await api.detect(sceneId, tests, onDetectEvent);
+      const done = await api.detect(sid, tests, onDetectEvent);
       if (sceneEpoch.current !== epoch) return;
       const r = await loadReport(async () => done.report, "the clashes Sightline found");
       if (!r) return;
@@ -815,13 +822,15 @@ export function App() {
 
   /** Play a recorded proposal (the tour's fallback when the live one fails or is slow) through the same viewer and
    * pilot, at the pace it was recorded. Accepting its fix edits the model for real, like a live one. */
-  async function replayPropose(clashId: string) {
-    const c = report?.clashes.find((x) => x.id === clashId);
+  async function replayPropose(which: "duct" | "joint") {
+    const c = clashOfPair(TOUR[which]);
     if (!c || !sceneId) return;
     replaceChatWork();
     if (clash?.id !== c.id) selectClash(c);
     const epoch = sceneEpoch.current;
-    const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } = await (await fetch(`/tour/${clashId}.json`)).json();
+    // Recorded on Oct 27 from the imported report, where these were c0053 and c0051.
+    const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } =
+      await (await fetch(`/tour/${which === "duct" ? "c0053" : "c0051"}.json`)).json();
     if (sceneEpoch.current !== epoch) return;
     const tracker = trackAgent(); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
@@ -844,6 +853,25 @@ export function App() {
     const epoch = sceneEpoch.current;
     const rec: { events: { t: number; event: PlanEvent }[] } = await (await fetch("/tour/girder-plan.json")).json();
     if (sceneEpoch.current !== epoch) return;
+    // It was recorded on the imported report: point its clash ids at this report's clashes of the same element pairs
+    // (a fix item names its pair; a hub partner pairs with the hub).
+    const pairIds = (x: string, y: string) => (report?.clashes ?? [])
+      .filter((c) => [c.a.global_id, c.b.global_id].sort().join("|") === [x, y].sort().join("|")).map((c) => c.id);
+    const remap = (o: unknown): unknown => {
+      if (Array.isArray(o)) return o.map(remap);
+      if (!o || typeof o !== "object") return o;
+      const out: Record<string, unknown> = Object.fromEntries(Object.entries(o).map(([k, v]) => [k, remap(v)]));
+      const pair = typeof out.element_a === "string" && typeof out.element_b === "string" ? [out.element_a, out.element_b]
+        : typeof out.global_id === "string" && "in_report" in out ? [out.global_id, TOUR.girder] : null;
+      if (pair && Array.isArray(out.clash_ids)) { out.clash_ids = pairIds(pair[0], pair[1]); out.in_report = (out.clash_ids as string[]).length > 0; }
+      if (Array.isArray(out.partners)) {
+        const partners = out.partners as { clash_ids: string[]; in_report?: boolean }[];
+        out.clash_ids = [...new Set(partners.flatMap((x) => x.clash_ids))];
+        out.not_in_report = partners.filter((x) => !x.in_report).length;
+      }
+      return out;
+    };
+    rec.events = rec.events.map((e) => ({ ...e, event: remap(e.event) as PlanEvent }));
     const tracker = trackPlan("root_cause"); directPlan.current = tracker;
     const { onEvent, finish, live } = tracker;
     setReplaying(true);
@@ -1184,9 +1212,10 @@ export function App() {
   const shownClash = clash ? shown(clash) : clash;
   // Until a report or the models are open, the page is the landing: no panels, just what Sightline is and the demo.
   const landing = !stats && !report;
-  const startLabel = reportSamples.length && !report ? "Open the Northbank demo" : "Open the models";
+  const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   const fixedCount = Object.keys(fixes).length;
+  const tourDuct = clashOfPair(TOUR.duct), tourJoint = clashOfPair(TOUR.joint);
   const tourState: TourState = {
     busy: !!busy, reportOpen: !!report, modelsOpen: !!stats,
     triageStarted: !!triageRun, triageDone: !!triageRun?.done, triageCount: Object.keys(triage).length,
@@ -1196,21 +1225,23 @@ export function App() {
     options: proposal?.options.length ?? 0, proposalDone: progress?.phase === "done", error, replaying,
     compare, fixed: Object.keys(fixes),
     planRunning: planning, planFor: planRun ? (now - planRun.started) / 1000 : 0, planReady: !!plan, planError,
-    patternsRead: !!verdicts, reviewedCount: Object.keys(reviewed).length, signoffs: signoffs[TOUR.duct]?.length ?? 0,
+    patternsRead: !!verdicts, reviewedCount: Object.keys(reviewed).length, signoffs: tourDuct ? signoffs[tourDuct.id]?.length ?? 0 : 0,
     docOpen, docReady,
+    duct: tourDuct ? { id: tourDuct.id, number: tourDuct.number } : null,
+    joint: tourJoint ? { id: tourJoint.id, number: tourJoint.number } : null,
   };
   const tourActions: TourActions = {
     filterReal: () => setTriageFilter("real_clash"), clearFilter: () => setTriageFilter(null),
-    selectClash: (id) => { const c = report?.clashes.find((x) => x.id === id); if (c) { setTab("clash"); selectClash(c); } },
+    selectClash: (which) => { const c = which === "duct" ? tourDuct : tourJoint; if (c) { setTab("clash"); selectClash(c); } },
     compare: setCompare,
     overview: () => { setViewPlan(false); viewer.current?.preview([]); viewer.current?.fitAll(); },
     closeReport: () => setDocOpen(false),
-    replay: (what) => { if (what === "plan") void replayPlan(); else void replayPropose(what === "duct" ? TOUR.duct : TOUR.joint); },
+    replay: (what) => { if (what === "plan") void replayPlan(); else void replayPropose(what); },
     ask: (send) => { setTab("chat"); setChatAsk((q) => ({ text: TOUR_QUESTION, send, n: (q?.n ?? 0) + 1 })); },
     signoff: () => {
       let name = "Guest reviewer";
       try { name = localStorage.getItem("sightline.reviewer") || name; } catch { /* private window */ }
-      addSignoff(TOUR.duct, { team: "MEP", name, decision: "approve", note: "Reviewed in the guided tour", at: new Date().toISOString() });
+      if (tourDuct) addSignoff(tourDuct.id, { team: "MEP", name, decision: "approve", note: "Reviewed in the guided tour", at: new Date().toISOString() });
     },
   };
 
@@ -1264,13 +1295,13 @@ export function App() {
               <FolderOpen size={14} aria-hidden /> Open {picked.length} model{picked.length === 1 ? "" : "s"}</button>
           </>)}
         </Popover>
-        <Popover icon={FileSpreadsheet} label="Clash report" text="Clash report" tip="bottom">
+        <Popover icon={Radar} label="Coordinate" text="Coordinate" tip="bottom">
           {(close) => (<>
-            <p className="pop-title">Sightline detection</p>
+            <p className="pop-title">Coordinate the open models</p>
             <button className="pop-item" disabled={!sceneId || !!busy || !!detecting} onClick={() => { close(); void runDetect(null); }}>
-              <Radar size={14} aria-hidden /> Find clashes in the open models</button>
-            {!sceneId && <p className="hint">Open the models first: no Navisworks report is needed.</p>}
-            <p className="pop-title">Navisworks clash report (XML)</p>
+              <Radar size={14} aria-hidden /> Check the open models</button>
+            {!sceneId && <p className="hint">Open the models first.</p>}
+            <p className="pop-title">Or import a Navisworks clash report (XML)</p>
             {reportSamples.map((s) => (
               <button key={s} className="pop-item" disabled={!!busy} onClick={() => { close(); loadReport(() => api.openReport(s), s); }}>
                 <FileSpreadsheet size={14} aria-hidden /> {s}</button>
@@ -1322,11 +1353,11 @@ export function App() {
           : sceneId
             ? <div className="detect-slot"><DetectSetupCard setup={detectSetup} progress={detecting} disabled={!!busy}
                 onRun={(tests) => void runDetect(tests)} />
-                <p className="hint small">Or open a Navisworks clash report from the header, or double-click element A, then element B, in the model.</p></div>
+                <p className="hint small">Or double-click element A, then element B, in the model.</p></div>
             : <div className="empty-left">
-              <FileSpreadsheet size={28} aria-hidden />
-              <h2>No clash report open</h2>
-              <p className="hint">Open the models and let Sightline find the clashes, or open a Navisworks clash report from the header.</p>
+              <Radar size={28} aria-hidden />
+              <h2>Nothing to coordinate yet</h2>
+              <p className="hint">Open the models: Sightline checks them for clashes.</p>
             </div>}
       </aside>
 
@@ -1343,9 +1374,8 @@ export function App() {
             onGolden: startGolden,
             onTour: () => setTouring(true),
             details: <>
-              Loads {reportSamples.length > 0 && !report ? <>the Navisworks clash report <b>{reportSamples[0]}</b> and </> : ""}
-              {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) in about 15
-              seconds. Other models: <b>Models</b>, in the header.
+              Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
+              checks them, in about 25 seconds. Other models: <b>Models</b>, in the header.
             </>,
           }} />
         )}

@@ -35,7 +35,7 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
   return (
     <section className="clash-panel">
       <div className="row"><h2><span className="num">#{clash.number}</span> {clash.title ?? clash.name}</h2>{fix ? <span className="chip ok">✓ fixed</span> : clash.status && <span className="chip">{clash.status}</span>}</div>
-      <p className="hint">{clash.title ? `${clash.name} · ` : ""}{clash.test}{clash.ref ? ` · Navisworks ${clash.ref}` : ""}</p>
+      <p className="hint">{clash.title ? `${clash.name} · ` : ""}{clash.test}{clash.ref ? ` · imported from Navisworks, ${clash.ref}` : ""}</p>
       {fix && <p className="fixed-note">Fixed in this session: {fix}. The {found ? "views show the clash as found" : "Navisworks images show the clash as reported"}.</p>}
       {triage && (
         <div className="triage-note">
@@ -46,6 +46,8 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
           {triage.understanding && <p>{triage.understanding}</p>}
           {triage.fix_hint && <p className="why">{triage.action === "exclude_with_rule" ? "Stop it coming back: " : "Fix: "}{triage.fix_hint}</p>}
           {triage.model_reading && <p className="why small">The triage model read it as {triage.model_reading}</p>}
+          {triage.alike && <p className="why small">Read once for {triage.alike} alike clashes: the same kinds of element,
+            named alike and about as deep{triage.alike_of ? ". This one shares that reading" : ""}.</p>}
           {triage.reasoning && <details className="triage-reasoning">
             <summary>How the triage model reasoned</summary>
             <p>{triage.reasoning}</p>

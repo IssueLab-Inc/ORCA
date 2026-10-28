@@ -83,3 +83,4 @@ def test_titles_api_streams_and_is_shared(tmp_path, monkeypatch):
     got = c.get(f"/api/reports/{rid}/titles").json()
     assert got["running"] is False and len(got["titles"]) == len(ws.report(rid).clashes)
     assert all(x["title"] for x in c.get(f"/api/reports/{rid}").json()["clashes"])
+

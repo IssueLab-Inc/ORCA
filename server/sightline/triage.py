@@ -113,13 +113,59 @@ def same_element(c: ReportClash) -> dict:
 
 
 def triage_one(model: ChatModel, c: ReportClash, images: bool = True,
-               on_reasoning: Callable[[str], None] | None = None) -> dict:
+               on_reasoning: Callable[[str], None] | None = None, note: str = "") -> dict:
     """One verdict. With `on_reasoning`, and a model that streams its reasoning, each piece of it is passed on as the
-    model writes it."""
+    model writes it. `note` is added to the clash's facts (see `alike_groups`)."""
     pics = [p for _, p in c.images] if images else []
+    text = describe(c) + (f"\n{note}" if note else "")
     if on_reasoning and hasattr(model, "complete_json_streamed"):
-        return model.complete_json_streamed(PROMPT.read_text(), describe(c), pics, SCHEMA, on_reasoning)  # type: ignore[attr-defined]
-    return model.complete_json(PROMPT.read_text(), describe(c), pics, schema=SCHEMA)  # type: ignore[call-arg]
+        return model.complete_json_streamed(PROMPT.read_text(), text, pics, SCHEMA, on_reasoning)  # type: ignore[attr-defined]
+    return model.complete_json(PROMPT.read_text(), text, pics, schema=SCHEMA)  # type: ignore[call-arg]
+
+
+# Alike clashes: a model is checked against itself, so the same joint repeats many times (48 holding-down bolts in
+# their pad footings, 44 beams into columns). Each group of ALIKE_MIN or more is read once, through its deepest member,
+# and the verdict applies to all of it: Northbank's 633 detected clashes are about 60 groups.
+ALIKE_MIN = 3
+_GRID = re.compile(r"\b(grid|gridline|level|lvl|axis)\s*[-:]?\s*[A-Za-z]{0,2}\d*[A-Za-z]?\b", re.I)
+_SIZE = re.compile(r"^\d+(x\d+){1,2}$", re.I)            # a section size: 457x191x67 stays
+_TAG = re.compile(r"^[A-Za-z]{0,3}\d+[A-Za-z]{0,3}$|^[A-Z]$")  # a tag or number: A4, C3, L02, 12, B
+DEPTH_BANDS_MM = (5, 20, 60, 150, 400)
+
+
+def _stem(name: str | None) -> str:
+    """A name without its grid, level or tag: "UB 457x191x67 - grid C" and "... - grid 4" are the same member type,
+    "UB 356x171x45" is not."""
+    words = _GRID.sub(r"\1 #", name or "").split()
+    return " ".join("#" if _TAG.match(w) and not _SIZE.match(w) else w for w in words)
+
+
+def _band(distance_m: float | None) -> int:
+    d = abs(distance_m or 0.0) * 1000
+    return next((b for b in DEPTH_BANDS_MM if d <= b), 9999)
+
+
+def alike_groups(clashes: list[ReportClash]) -> list[list[ReportClash]]:
+    """Clashes that are the same thing over and over: one test, the same kinds of element with the same names apart
+    from grid, level or tag, and overlapping by about as much. Deepest first in each group; singles stay single."""
+    groups: dict[tuple, list[ReportClash]] = {}
+    for c in clashes:
+        sides = sorted([(c.a.ifc_class or "", _stem(c.a.name)), (c.b.ifc_class or "", _stem(c.b.name))])
+        groups.setdefault((c.test, *sides, _band(c.distance_m)), []).append(c)
+    out: list[list[ReportClash]] = []
+    for g in groups.values():
+        g.sort(key=lambda c: (c.distance_m if c.distance_m is not None else 0.0, c.number))
+        out.extend([g] if len(g) >= ALIKE_MIN else [[c] for c in g])
+    return out
+
+
+def _alike_note(group: list[ReportClash]) -> str:
+    if len(group) < 2:
+        return ""
+    mm = sorted(abs(c.distance_m or 0) * 1000 for c in group)
+    return (f"This clash stands for {len(group)} alike clashes in the report: the same kinds of element, named the same "
+            f"apart from grid, level or tag, overlapping {mm[0]:.0f} to {mm[-1]:.0f} mm. Your verdict applies to all of "
+            "them, so write the understanding and the fix hint so they are true of every one.")
 
 
 REASONING_KEPT = 6000      # characters of a clash's reasoning kept with its verdict
@@ -128,13 +174,16 @@ REASONING_EVERY_S = 0.6    # how often a clash's new reasoning goes to the brows
 
 def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
                   workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
-                  settled: dict | None = None, reasoning: bool = False) -> dict[str, dict]:
+                  settled: dict | None = None, reasoning: bool = False, alike: bool = True) -> dict[str, dict]:
     """A verdict for every clash in `report`. `done` holds results already known (resumed or cached); they are kept.
     `settled` holds verdicts the open model already decides (`same_element`): no model call for those.
 
     Emits {"type": "clash", "id", "source": "rule" | "model", **verdict} as each one lands. With `reasoning`, also
     {"type": "reasoning", "id", "text"} with what the model has written since the last one (a few times a second per
-    clash, for a model that streams its reasoning), and the verdict keeps the whole reasoning (cut to REASONING_KEPT)."""
+    clash, for a model that streams its reasoning), and the verdict keeps the whole reasoning (cut to REASONING_KEPT).
+
+    With `alike`, each group of alike clashes (`alike_groups`) is read once, through its deepest member; the others
+    get the same verdict with "alike_of" (that member's id) and "alike" (the group's size)."""
     results: dict[str, dict] = dict(done or {})
     todo: list[ReportClash] = []
     for c in report.clashes:
@@ -148,7 +197,8 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
             todo.append(c)
     lock = threading.Lock()
 
-    def one(c: ReportClash) -> tuple[str, dict]:
+    def one(group: list[ReportClash]) -> tuple[list[ReportClash], dict]:
+        c = group[0]
         for attempt in range(3):
             started = time.perf_counter()
             thought: list[str] = []
@@ -164,23 +214,28 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
                     sent[0] = time.perf_counter()
 
             try:
-                v = triage_one(model, c, images, heard if reasoning else None)
+                v = triage_one(model, c, images, heard if reasoning else None, _alike_note(group))
                 out = {**v, "source": "model", "seconds": round(time.perf_counter() - started, 1)}
                 if thought:
                     whole = "".join(thought).strip()
                     out["reasoning"] = whole if len(whole) <= REASONING_KEPT else whole[:REASONING_KEPT] + " …"
-                return c.id, out
+                return group, out
             except Exception as e:  # rate limits, timeouts, malformed JSON: back off and retry, then give up
                 err = f"{type(e).__name__}: {e}"[:200]
                 time.sleep(2 ** attempt)
-        return c.id, {"verdict": "unknown", "error": err, "source": "model"}
+        return group, {"verdict": "unknown", "error": err, "source": "model"}
 
+    units = alike_groups(todo) if alike else [[c] for c in todo]
     with ThreadPoolExecutor(max(1, workers)) as pool:
-        for fut in as_completed(owner.submit(pool, one, c) for c in todo):
-            cid, v = fut.result()
-            with lock:
-                results[cid] = v
-            emit({"type": "clash", "id": cid, **v})
+        for fut in as_completed(owner.submit(pool, one, g) for g in units):
+            group, v = fut.result()
+            for k, c in enumerate(group):
+                mine = v if k == 0 else {**{x: y for x, y in v.items() if x != "reasoning"}, "alike_of": group[0].id}
+                if len(group) > 1:
+                    mine = {**mine, "alike": len(group)}
+                with lock:
+                    results[c.id] = mine
+                emit({"type": "clash", "id": c.id, **mine})
     return results
 
 
