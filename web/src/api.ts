@@ -176,7 +176,7 @@ export type Team = "Structure" | "MEP" | "Architecture" | "Site";
 export interface ModelTeam { file: string; guess: Team; elements: number }
 /** A fix shown in the report: what it changes, and the view of the clash as it is and with the fix. */
 export interface Evidence {
-  status: "proposed" | "accepted"; title: string; kind: FixKind; edit: string; clearance: string; clearance_m: number | null;
+  status: "proposed" | "accepted"; title: string; kind: FixKind | "context"; edit: string; clearance: string; clearance_m: number | null;
   rationale: string; also_needs: string; advice?: string; moved: string[]; before_img?: string; after_img?: string;
 }
 /** A team's review of one clash, recorded in the app. */
@@ -210,11 +210,14 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 }
 
 export const api = {
-  contextStream: async (sceneId: string, objective: ContextObjective, onEvent: (e: ContextEvent) => void) => {
+  contextStream: async (sceneId: string, objective: ContextObjective, onEvent: (e: ContextEvent) => void, signal?: AbortSignal) => {
     let finished = false;
-    await ndjson<ContextEvent>(`/scenes/${sceneId}/context/stream`, objective, (e) => {
-      onEvent(e); finished = e.type === "context_result" || e.type === "error"; return finished;
-    });
+    try {
+      await ndjson<ContextEvent>(`/scenes/${sceneId}/context/stream`, objective, (e) => {
+        onEvent(e); finished = e.type === "context_result" || e.type === "error"; return finished;
+      }, signal);
+    } catch (e) { if (!signal?.aborted) throw e; }
+    if (signal?.aborted) return;
     if (!finished) throw new Error("The server stopped before the wider search finished. Regenerate for the original objective.");
   },
   applyContext: (sceneId: string, proposalId: string, acknowledgedConditions: string[]) =>
@@ -261,7 +264,11 @@ export const api = {
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   samples: () => call<string[]>("/samples"),
   open: (samples: string[]) => call<{ id: string; files: string[] }>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
-  file: async (id: string, index: number) => new Uint8Array(await (await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" })).arrayBuffer()),
+  file: async (id: string, index: number) => {
+    const r = await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" });
+    if (!r.ok) throw new ApiError(`Model download failed (${r.status})`, r.status);
+    return new Uint8Array(await r.arrayBuffer());
+  },
   verify: (id: string, moved: string[], delta_m: number[]) =>
     call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
   propose: (id: string, element_a: string, element_b: string, from?: { report_id: string; clash_id: string }) =>

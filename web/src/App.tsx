@@ -55,6 +55,8 @@ export function App() {
   const [chosen, setChosen] = useState<number | null>(null);
   const [manualDz, setManualDz] = useState(-0.25);
   const [manual, setManual] = useState<Verdict | null>(null);
+  const [manualPreview, setManualPreview] = useState<{ element: string; delta: number[] } | null>(null);
+  const previewRequest = useRef(0);
   // Clash reports (Navisworks XML).
   const [reportSamples, setReportSamples] = useState<string[]>([]);
   const [report, setReport] = useState<Report | null>(null);
@@ -122,6 +124,9 @@ export function App() {
   const chatOwner = useRef(new ChatRequestOwner());
   const contextRequest = useRef(0);
   const planRequest = useRef(0);
+  const directAgent = useRef<ReturnType<typeof trackAgent> | null>(null);
+  const directPlan = useRef<ReturnType<typeof trackPlan> | null>(null);
+  const directContext = useRef<ReturnType<typeof trackContext> | null>(null);
   const contextProposal = context?.result?.proposals.find((p) => p.id === contextChosen) ?? null;
   const contextWorking = !!context && context.phase !== "done";
   const activeContext = viewContext && !context?.accepted;
@@ -155,7 +160,10 @@ export function App() {
       setPicked(set.length ? set : list.slice(0, 1));
     }).catch((e) => setError(`Can't reach the Sightline server: ${e.message}`));
     api.reportSamples().then(setReportSamples).catch(() => undefined);
-    return () => { pilot.current?.cancel(); chatOwner.current.invalidate(); v.dispose(); };
+    return () => {
+      ++sceneEpoch.current; ++workspaceEpoch.current; ++previewRequest.current;
+      directContext.current?.retire(); pilot.current?.cancel(); chatOwner.current.invalidate(); v.dispose();
+    };
   }, []);
 
   // Pieces accepted offsets added to A or B are part of that side: coloured, and kept when isolating.
@@ -345,6 +353,17 @@ export function App() {
       rationale: o.rationale, also_needs: o.also_needs, ...pics };
   }
 
+  function captureContext(p: ContextProposal): { before_img?: string; after_img?: string } {
+    const v = viewer.current;
+    if (!v) return {};
+    try {
+      v.showOptions(contextShapes(p), "before"); const before_img = v.capture();
+      v.showOptions(contextShapes(p), "after"); const after_img = v.capture();
+      return { before_img, after_img };
+    } catch { return {}; }
+    finally { v.showOptions(contextShapes(p), compare); }
+  }
+
   // Triage as shown: a model verdict of "real" or "model error" gives way to what is already settled in this browser
   // (marked not a clash, or Sightline's own geometry: one element, not physical, a touch, no overlap here), and the
   // model's reading is kept beside it.
@@ -423,8 +442,10 @@ export function App() {
         compare, option.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     } else if (plan && viewPlan) {
       v.showOptions(planOptions.map((o) => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m, pieces: o.preview, before: o.before, color: "#1f9d3a" })), compare);
+    } else if (manualPreview) {
+      v.preview([{ globalIds: [manualPreview.element], deltaM: manualPreview.delta }]);
     } else v.preview([]);
-  }, [option, plan, planOptions, compare, a, viewPlan, activeContext, contextProposal]);
+  }, [option, plan, planOptions, compare, a, viewPlan, activeContext, contextProposal, manualPreview]);
 
   useEffect(() => {
     if (activeContext && contextProposal) viewer.current?.frameMeshes(contextProposal.edits.flatMap((e) => [...e.before, ...e.preview]), 1.4);
@@ -437,8 +458,9 @@ export function App() {
     const sides = [a, b, ...Object.keys(standIns)].filter((g): g is string => !!g);
     if (!frameFix(option, sides) && option.before?.length) viewer.current?.frameMeshes(option.before, 1.6);
     // Once the camera has arrived: the pictures the report shows for this proposed fix (accepting replaces them).
-    const o = option, pair = [a, b] as const;
+    const o = option, pair = [a, b] as const, request = previewRequest.current;
     const timer = window.setTimeout(() => {
+      if (previewRequest.current !== request) return;
       const ids = clashIdsOf([pair])[0];
       if (!ids.length) return;
       const pics = captureFix([o], o.moved.includes(pair[0] ?? "") ? "#d0342c" : "#1f9d3a");
@@ -463,27 +485,36 @@ export function App() {
     return !!viewer.current?.frameFix(meshes, o.kind === "offset" ? [] : movedPairs(o.moved, sides));
   }
 
-  function resetWork(keepContext = false) { setProposal(null); setChosen(null); setManual(null); setProgress(null); setCompare("after"); setStandIns({}); if (!keepContext) setViewContext(false); }
+  function clearManual() { ++previewRequest.current; setManual(null); setManualPreview(null); }
+  function resetWork(keepContext = false, keepStandIns = false) { clearManual(); setProposal(null); setChosen(null); setProgress(null); setCompare("after"); if (!keepStandIns) setStandIns({}); if (!keepContext) setViewContext(false); }
+
+  function retireDirectWork() {
+    directAgent.current?.retire(); directPlan.current?.retire(); directContext.current?.retire();
+    directAgent.current = null; directPlan.current = null; directContext.current = null;
+    ++agentRun.current; ++planRequest.current; pilot.current?.cancel();
+    setReplaying(false);
+  }
 
   async function open() {
     if (!picked.length) return;
-    ++workspaceEpoch.current; replaceChatWork();
+    ++workspaceEpoch.current; replaceChatWork(); retireDirectWork();
     const epoch = ++sceneEpoch.current;
     ++contextRequest.current; ++agentRun.current; ++planRequest.current;
     pilot.current?.cancel();
     setChatAsk(undefined);
-    setContext(null); setContextChosen(null); setContextNames({}); setAcknowledged([]); setViewContext(false); setViewPlan(false); setSceneId(null);
-    setBusy(`Loading ${picked.length} model${picked.length > 1 ? "s" : ""}…`); setError(null); resetWork(); setA(null); setB(null);
+    setContext(null); setContextChosen(null); setContextNames({}); setAcknowledged([]); setViewContext(false); setViewPlan(false);
+    setBusy(`Loading ${picked.length} model${picked.length > 1 ? "s" : ""}…`); setError(null); resetWork(false, true);
     try {
       const { id, files } = await api.open(picked);
       if (sceneEpoch.current !== epoch) return;
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
       if (sceneEpoch.current !== epoch) return;
+      const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch);
+      if (sceneEpoch.current !== epoch || !stats) return;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
-      setStats(await viewer.current!.load(bytes, files));
-      if (sceneEpoch.current === epoch) setSceneId(id);
+      setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
     } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
   }
 
@@ -505,7 +536,7 @@ export function App() {
   }, [report, sceneId, matches, clash, a, b]);
   async function loadReport(get: () => Promise<Report>, what: string) {
     const workspace = ++workspaceEpoch.current;
-    replaceChatWork(); ++agentRun.current; ++planRequest.current; ++contextRequest.current;
+    replaceChatWork(); retireDirectWork(); ++agentRun.current; ++planRequest.current; ++contextRequest.current; ++sceneEpoch.current;
     pilot.current?.cancel(); resetWork(); setContext(null); setContextChosen(null); setAcknowledged([]); setPlanKind("batch"); setChatAsk(undefined);
     setBusy(`Reading ${what}…`); setError(null);
     try { const r = await get(); if (workspaceEpoch.current !== workspace) return; setReport(r); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({}); setVerdicts(null); }
@@ -520,6 +551,7 @@ export function App() {
 
   /** Select a report clash and take the view to it, or (`keepPlan`) only select it while a plan stays on screen. */
   function selectClash(c: ReportClash, keepPlan = false) {
+    if (!keepPlan) clearManual();
     if (c.id !== clash?.id) { setClash(c); resetWork(keepPlan); setLightbox(null); }
     if (keepPlan) return;
     setViewPlan(false); setViewContext(false);
@@ -600,10 +632,12 @@ export function App() {
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. */
   function trackAgent() {
+    directContext.current?.retire();
+    clearManual();
     const run = ++agentRun.current;
     const epoch = sceneEpoch.current;
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
-    setError(null); setChosen(null); setManual(null); setViewPlan(false); setViewContext(false); setReplaying(false);
+    setError(null); setChosen(null); setViewPlan(false); setViewContext(false); setReplaying(false);
     const t = Date.now();
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
     setProgress(p); setNow(t);
@@ -648,9 +682,10 @@ export function App() {
   }
 
   async function propose() {
-    if (!sceneId || !a || !b) return;
+    if (!sceneId || !a || !b || busy) return;
     replaceChatWork();
-    const { onEvent, finish } = trackAgent();
+    const tracker = trackAgent(); directAgent.current = tracker;
+    const { onEvent, finish } = tracker;
     const run = agentRun.current;
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
     let result: Proposal | null = null;
@@ -669,7 +704,8 @@ export function App() {
     const epoch = sceneEpoch.current;
     const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } = await (await fetch(`/tour/${clashId}.json`)).json();
     if (sceneEpoch.current !== epoch) return;
-    const { onEvent, finish } = trackAgent();
+    const tracker = trackAgent(); directAgent.current = tracker;
+    const { onEvent, finish } = tracker;
     const run = agentRun.current;
     setReplaying(true);
     const start = Date.now();
@@ -689,7 +725,8 @@ export function App() {
     const epoch = sceneEpoch.current;
     const rec: { events: { t: number; event: PlanEvent }[] } = await (await fetch("/tour/girder-plan.json")).json();
     if (sceneEpoch.current !== epoch) return;
-    const { onEvent, finish, live } = trackPlan("root_cause");
+    const tracker = trackPlan("root_cause"); directPlan.current = tracker;
+    const { onEvent, finish, live } = tracker;
     setReplaying(true);
     const start = Date.now();
     for (const { t, event } of rec.events) {
@@ -704,6 +741,7 @@ export function App() {
 
   /** Start showing a plan being built; returns the handler for its events and a function to call when done. */
   function trackPlan(kind: "batch" | "root_cause") {
+    directContext.current?.retire();
     const epoch = sceneEpoch.current, request = ++planRequest.current;
     const live = () => sceneEpoch.current === epoch && planRequest.current === request;
     ++agentRun.current; pilot.current?.cancel();
@@ -739,10 +777,11 @@ export function App() {
 
   /** Build a plan: several ticked clashes together, or the root cause around one element. */
   async function runPlan(body: { clash_ids?: string[]; hub?: string }) {
-    if (!sceneId || !report) return;
+    if (!sceneId || !report || busy) return;
     replaceChatWork();
     setTab("plan");
-    const { onEvent, finish, live } = trackPlan(body.hub ? "root_cause" : "batch");
+    const tracker = trackPlan(body.hub ? "root_cause" : "batch"); directPlan.current = tracker;
+    const { onEvent, finish, live } = tracker;
     let p: Plan | null = null;
     try { p = await api.planStream(sceneId, { report_id: report.id, fixed: resolved, ...body }, onEvent); }
     catch (e) { if (live()) setPlanError((e as Error).message); }
@@ -750,8 +789,8 @@ export function App() {
   }
 
   async function acceptPlan() {
-    if (!sceneId || !plan) return;
-    replaceChatWork();
+    if (!sceneId || !plan || busy) return;
+    replaceChatWork(); retireDirectWork(); clearManual();
     const epoch = sceneEpoch.current;
     const live = () => sceneEpoch.current === epoch;
     const items = plan.items.filter((i) => i.option && (plan.check.passed || plan.check.items[i.key]?.passed));
@@ -797,6 +836,7 @@ export function App() {
   }
 
   function focusItem(it: PlanItem) {
+    clearManual();
     const c = report?.clashes.find((x) => it.clash_ids.includes(x.id));
     setA(it.element_a); setB(it.element_b);
     if (c) goToClash(c, { a: it.element_a, b: it.element_b, how: [] });
@@ -805,6 +845,8 @@ export function App() {
 
   /** Context events own their objective and request generation, independent of later clash selection. */
   function trackContext(objective: ContextObjective | null) {
+    directContext.current?.retire();
+    const controller = new AbortController();
     const epoch = sceneEpoch.current, request = ++contextRequest.current;
     const live = () => sceneEpoch.current === epoch && contextRequest.current === request;
     ++agentRun.current; pilot.current?.cancel();
@@ -822,6 +864,7 @@ export function App() {
     };
     const fail = (message: string) => onEvent({ type: "error", detail: message });
     const retire = () => {
+      controller.abort();
       if (!live()) return;
       ++contextRequest.current;
       const owned = run;
@@ -830,37 +873,39 @@ export function App() {
         setContext((current) => current === owned ? retired : current);
       }
     };
-    return { onEvent, fail, live, retire };
+    return { onEvent, fail, live, retire, signal: controller.signal };
   }
 
   async function exploreContext(objective?: ContextObjective) {
-    if (!sceneId) return;
+    if (!sceneId || busy) return;
     const target = objective ?? (a && b ? { element_a: a, element_b: b,
-      ...(clash && report ? { report_id: report.id, clash_id: clash.id } : {}) } : null);
+      ...(clash && report && samePair(matches?.[clash.id]?.a, matches?.[clash.id]?.b, a, b)
+        ? { report_id: report.id, clash_id: clash.id } : {}) } : null);
     if (!target) return;
     replaceChatWork();
     setTab("plan");
-    const tracker = trackContext(target);
-    try { await api.contextStream(sceneId, target, tracker.onEvent); }
-    catch (e) { tracker.fail((e as Error).message); }
+    const tracker = trackContext(target); directContext.current = tracker;
+    try { await api.contextStream(sceneId, target, tracker.onEvent, tracker.signal); }
+    catch (e) { if (!tracker.signal.aborted) tracker.fail((e as Error).message); }
   }
 
   function staleContext() {
     // The server alone decides revisions; local mutation only disables reuse of the old proposal.
-    ++contextRequest.current;
+    directContext.current?.retire(); ++contextRequest.current;
     setAcknowledged([]);
     setContext((r) => r && !r.accepted ? { ...r, phase: "done", stale: true } : r);
   }
 
   async function acceptContext() {
-    if (!sceneId || !contextProposal || context?.stale || context?.accepted || contextWorking) return;
-    replaceChatWork();
+    if (!sceneId || !contextProposal || context?.stale || context?.accepted || contextWorking || busy) return;
+    if (!contextProposal.review_conditions.every((c) => acknowledged.includes(c.id))) return;
+    replaceChatWork(); retireDirectWork(); clearManual();
     const p = contextProposal, sid = sceneId, epoch = sceneEpoch.current, request = contextRequest.current;
     const live = () => sceneEpoch.current === epoch && contextRequest.current === request;
-    if (!p.review_conditions.every((c) => acknowledged.includes(c.id))) return;
     setBusy("Rechecking and applying the complete proposal…");
     setContext((r) => r && { ...r, error: null });
     let committed = false;
+    const pics = captureContext(p);
     try {
       const applied = await api.applyContext(sid, p.id, acknowledged);
       if (!live()) return;
@@ -873,6 +918,12 @@ export function App() {
         return next;
       });
       markFixed(applied.resolved_pairs.map((pair) => [pair.element_a, pair.element_b] as const), applied.resolved_pairs.map(() => p.title));
+      const ids = clashIdsOf(applied.resolved_pairs.map((pair) => [pair.element_a, pair.element_b] as const)).flat();
+      const accepted = contextEvidence(p, applied.checks, pics);
+      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, accepted])) }));
+      // Server commit is the boundary: none of the old single/batch options can still be accepted.
+      setProposal(null); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set());
+      setContext((r) => r && { ...r, accepted: true });
       viewer.current?.preview([]);
       // Download first; a replaced scene cannot receive any of this request's geometry.
       const files = await Promise.all(applied.files.map(async (index) => ({ index, bytes: await api.file(sid, index) })));
@@ -905,6 +956,7 @@ export function App() {
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
   }
   function onChatEvent(e: ChatEvent) {
+    if (e.type === "thinking") directContext.current?.retire();
     if (e.type === "tool" && e.name === "explore_wider_fix") {
       const c = report?.clashes.find((x) => x.id === e.args.clash_id), pair = c && matches?.[c.id];
       chatContext.current = trackContext(c && pair?.a && pair.b ? { element_a: pair.a, element_b: pair.b, report_id: report!.id, clash_id: c.id } : null);
@@ -944,8 +996,8 @@ export function App() {
   const planThisTurn = useRef(false);
 
   async function accept(o: Option) {
-    if (!sceneId) return;
-    replaceChatWork();
+    if (!sceneId || busy) return;
+    replaceChatWork(); retireDirectWork(); clearManual();
     const epoch = sceneEpoch.current;
     const live = () => sceneEpoch.current === epoch;
     setBusy("Applying the fix…"); setError(null);
@@ -975,15 +1027,18 @@ export function App() {
   }
 
   async function checkManual() {
-    if (!sceneId || !a) return;
-    replaceChatWork();
-    ++agentRun.current; pilot.current?.cancel(); setProgress(null);
-    const epoch = sceneEpoch.current;
-    const v = await api.verify(sceneId, [a], [0, 0, manualDz]);
-    if (sceneEpoch.current !== epoch) return;
-    setViewContext(false); setViewPlan(false); setChosen(null);
-    setManual(v);
-    viewer.current?.preview([{ globalIds: [a], deltaM: [0, 0, manualDz] }]);
+    if (!sceneId || !a || busy) return;
+    replaceChatWork(); retireDirectWork(); clearManual();
+    ++agentRun.current; pilot.current?.cancel();
+    const epoch = sceneEpoch.current, workspace = workspaceEpoch.current, request = previewRequest.current;
+    const element = a, delta = [0, 0, manualDz];
+    const live = () => sceneEpoch.current === epoch && workspaceEpoch.current === workspace && previewRequest.current === request;
+    try {
+      const v = await api.verify(sceneId, [element], delta);
+      if (!live()) return;
+      setViewContext(false); setViewPlan(false); setChosen(null);
+      setManual(v); setManualPreview({ element, delta });
+    } catch (e) { if (live()) setError((e as Error).message); }
   }
 
   const proposing = !!progress && progress.phase !== "done";
@@ -1184,6 +1239,7 @@ export function App() {
           <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => { setTab("clash"); setViewPlan(false); setViewContext(false); }}>
             <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
           <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => {
+            clearManual();
             setTab("plan"); setViewContext(planKind === "context" && !!context); setViewPlan(planKind === "batch" && !!(plan || planRun));
           }}>
             <Network size={14} aria-hidden /> Plan{planning || contextWorking ? <i className="spinner" aria-hidden />
@@ -1193,7 +1249,7 @@ export function App() {
             <MessageSquare size={14} aria-hidden /> Chat</button>
         </div>
         <div className="chat-slot" hidden={tab !== "chat"}>
-          {context && <button className="context-chat-link btn" onClick={() => { setTab("plan"); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>
+          {context && <button className="context-chat-link btn" onClick={() => { clearManual(); setTab("plan"); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${report?.id}`} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
@@ -1201,14 +1257,14 @@ export function App() {
         </div>
         {tab === "plan" && <>
           {context && (plan || planRun) && <div className="seg plan-switch" role="group" aria-label="Plan type">
-            <button className={planKind === "context" ? "on" : ""} onClick={() => { setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>Wider fix</button>
-            <button className={planKind === "batch" ? "on" : ""} onClick={() => { setPlanKind("batch"); setViewContext(false); setViewPlan(true); }}>Clash plan</button>
+            <button className={planKind === "context" ? "on" : ""} onClick={() => { clearManual(); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>Wider fix</button>
+            <button className={planKind === "batch" ? "on" : ""} onClick={() => { clearManual(); setPlanKind("batch"); setViewContext(false); setViewPlan(true); }}>Clash plan</button>
           </div>}
           {planKind === "context" && context ? <ContextPlan run={context} names={contextNames} chosen={contextChosen} acknowledged={acknowledged} busy={!!busy} now={now}
-            onChoose={(id) => { setContextChosen(id); setAcknowledged([]); setViewContext(true); setViewPlan(false); }}
+            onChoose={(id) => { clearManual(); setContextChosen(id); setAcknowledged([]); setViewContext(true); setViewPlan(false); }}
             onAcknowledge={(id, checked) => setAcknowledged((ids) => checked ? [...new Set([...ids, id])] : ids.filter((x) => x !== id))}
             onAccept={acceptContext} onRegenerate={() => { if (context.objective) void exploreContext(context.objective); }}
-            onDiscard={() => { ++contextRequest.current; setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
+            onDiscard={() => { directContext.current?.retire(); ++contextRequest.current; clearManual(); setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
             onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />}
@@ -1267,7 +1323,7 @@ export function App() {
             </div>)}
           {proposal?.options.map((o, i) => (
             <div key={i} className={`card ${chosen === i ? "pick" : ""}`}>
-              <button className="card-body" onClick={() => setChosen(chosen === i ? null : i)} aria-pressed={chosen === i}>
+              <button className="card-body" onClick={() => { clearManual(); setChosen(chosen === i ? null : i); }} aria-pressed={chosen === i}>
                 <span className="row"><b>{i + 1} · {o.title}</b><span className="chips">
                   {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
                   <span className="chip ok"><Check size={11} aria-hidden /> verified</span></span></span>
@@ -1286,7 +1342,7 @@ export function App() {
             <label className="field">Move A vertically (m)
               <input id="manual-dz" type="number" step="0.05" value={manualDz} onChange={(e) => setManualDz(Number(e.target.value))} />
             </label>
-            <button className="btn" disabled={!a || !sceneId} onClick={checkManual}>Check this move</button>
+            <button className="btn" disabled={!a || !sceneId || !!busy} onClick={checkManual}>Check this move</button>
             {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
           </details>}
           {checked.size === 0 && report && matches && !proposal && !hideFix && (
@@ -1346,6 +1402,26 @@ function movedPairs(moved: string[], sides: string[]): [string, string][] {
 function contextShapes(p: ContextProposal) {
   return p.edits.map((edit) => ({ kind: edit.kind, moved: edit.moved, deltaM: [0, 0, 0],
     pieces: edit.preview, before: edit.before, worldMeshes: true, color: "#1f9d3a" }));
+}
+
+function samePair(a: string | null | undefined, b: string | null | undefined, x: string, y: string) {
+  return (a === x && b === y) || (a === y && b === x);
+}
+
+/** Existing report/BCF fields carry the complete coordinated change; checks come from the server commit. */
+function contextEvidence(p: ContextProposal, checks: ContextProposal["checks"], pics: { before_img?: string; after_img?: string }): Evidence {
+  const g = checks.geometry, integrity = checks.integrity;
+  const edit = p.edits.map((e, i) => `${i + 1}. ${e.label} (${e.element}; sources ${e.moved.join(", ")}): ${e.kind} ${e.kind === "trim"
+    ? `${e.end} end by ${e.by_m} m` : `delta [${e.delta_m?.join(", ")}] m${e.split_m ? `; split [${e.split_m.join(", ")}] m` : ""}`}`).join("\n");
+  const rationale = [...p.edits.map((e, i) => `${i + 1}. ${e.reason}`),
+    `Fresh geometry checks ${g.passed ? "passed" : "failed"}; original objective ${g.target_resolved ? "resolved" : "unresolved"}.`,
+    `Fresh model integrity checks ${integrity.passed ? "passed" : "failed"}.`, ...integrity.errors, ...integrity.warnings,
+    ...g.existing_conflicts.map((h) => `Unchanged baseline ${h.kind}: ${h.element} / ${h.other}, ${h.distance_m} m.`),
+    ...g.hits.map((h) => `${h.kind}: ${h.element} / ${h.other}, ${h.distance_m} m.`)].join("\n");
+  return { status: "accepted", title: p.title, kind: "context", edit, rationale,
+    moved: [...new Set(p.edits.flatMap((e) => e.moved))],
+    clearance: g.min_clearance_m == null ? "No measured nearest clearance returned" : mm(g.min_clearance_m),
+    clearance_m: g.min_clearance_m, also_needs: p.review_conditions.map((c) => c.message).join("\n"), ...pics };
 }
 
 /** Side panel widths in px: [min, max, default]. */

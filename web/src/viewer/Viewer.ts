@@ -121,12 +121,22 @@ export class Viewer {
 
   // ---------------------------------------------------------------- models
 
-  async load(files: Uint8Array[], names: string[] = []) {
-    for (const m of this.models) this.scene.remove(m.mesh);
-    this.models = [];
-    this.names = names;
+  async load(files: Uint8Array[], names: string[] = [], isCurrent: () => boolean = () => true) {
+    // Parse the entire replacement off-screen. A failed or superseded load leaves the usable scene intact.
+    const staged: LoadedModel[] = [];
+    try {
+      for (const bytes of files) {
+        staged.push(await loadIfc(bytes));
+        if (!isCurrent()) { for (const m of staged) m.mesh.dispose(); return; }
+      }
+    } catch (e) { for (const m of staged) m.mesh.dispose(); throw e; }
+    if (!isCurrent()) { for (const m of staged) m.mesh.dispose(); return; }
+    this.preview([]);
     this.clearFocusCache();
-    for (const bytes of files) this.models.push(this.adopt(await loadIfc(bytes)));
+    for (const m of this.models) { this.scene.remove(m.mesh); m.mesh.dispose(); }
+    this.models = staged.map((m) => this.adopt(m));
+    this.names = names;
+    this.hiddenModels.clear();
     this.applyMode();
     this.fitAll(false);
     return {
