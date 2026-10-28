@@ -1,6 +1,8 @@
 import json
 import threading
 
+import pytest
+
 from sightline import context_planner as planner
 from sightline.fixtures import build_clash_fixture, build_run_fixture
 from sightline.service import Workspace
@@ -124,6 +126,49 @@ def test_pagination_and_inspection_expose_run_metadata(tmp_path):
     assert page['total'] == 3 and page['next_offset'] == 1 and len(page['elements']) == 1
     item = page['elements'][0]
     assert {'bounds_m', 'run_members', 'systems', 'connections', 'capabilities', 'openings'} <= item.keys()
+
+
+@pytest.mark.parametrize('profile_class, dimensions, supported', [
+    ('IfcRectangleProfileDef', dict(XDim=.4, YDim=.3), True),
+    ('IfcCircleProfileDef', dict(Radius=.15), True),
+    ('IfcRectangleHollowProfileDef', dict(XDim=.4, YDim=.3, WallThickness=.01), False),
+    ('IfcCircleHollowProfileDef', dict(Radius=.15, WallThickness=.01), False),
+    ('IfcRoundedRectangleProfileDef', dict(XDim=.4, YDim=.3, RoundingRadius=.03), False),
+    ('IfcUShapeProfileDef', dict(Depth=.3, FlangeWidth=.4, WebThickness=.01, FlangeThickness=.01), False),
+])
+def test_model_inspection_reports_truthful_offset_profile_capability(tmp_path, profile_class, dimensions, supported):
+    from sightline import edits
+    from sightline.scene import IfcScene
+
+    source = IfcScene(build_run_fixture(tmp_path / 'run.ifc'))
+    for element in source.model.by_type('IfcDuctSegment'):
+        edits._body(element)[1].SweptArea = source.model.create_entity(
+            profile_class, ProfileType='AREA', **dimensions)
+    source.write(tmp_path / 'profile.ifc')
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(['profile.ifc'])
+    scene = ws.scene(sid)
+    main = next(e.GlobalId for e in scene.model.by_type('IfcDuctSegment') if e.Tag == 'SA-1')
+    objective = dict(element_a=main, element_b=scene.model.by_type('IfcBeam')[0].GlobalId)
+    before = scene.model.to_string()
+    # Inspect both the initial model context and explicit tool reply, including the
+    # complete run/move capability when an offset is known to lose profile topology.
+    model = Scripted([[('inspect_element', dict(element=main))], 'Done'])
+    result = planner.build(ws, sid, objective, model=model)
+    assert not result['proposals']
+    initial = json.loads(model.messages[0][1]['content'])['objective_elements'][0]
+    reply = json.loads(model.messages[1][-1]['content'])
+    for info in (initial, reply):
+        assert ('offset' in info['capabilities']) is supported
+        assert 'move' in info['capabilities'] and len(info['run_members']) == 2
+        assert info['run']['length_m'] == pytest.approx(6)
+        reasons = str(info['unsupported'])
+        if supported:
+            assert 'unsupported offset profile' not in reasons
+        else:
+            assert f'unsupported offset profile: {profile_class}' in reasons
+            assert not info['openings']
+    assert scene.model.to_string() == before and scene.revision == 0
 
 
 def test_remote_blocker_becomes_eligible_only_after_real_geometry_discovers_it(tmp_path):

@@ -144,6 +144,7 @@ class Inspection:
         run, unsupported = None, []
         try:
             run = asdict(edits.run_of(scene, gid))
+            context_eval.check_offset_profile(scene, gid)
             if scene.entity(gid).is_a() in edits.FITTING_CLASS and abs(run['direction'][2]) < 1e-6:
                 capabilities.append('offset')
         except (edits.Unsupported, RuntimeError, ValueError) as exc:
