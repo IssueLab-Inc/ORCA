@@ -166,6 +166,7 @@ export class ApiError extends Error {
 export interface PlanItem {
   key: string; element_a: string; element_b: string; label: string; clash_ids: string[]; in_report: boolean;
   distance_m: number | null; understanding: string; option: Option | null; alternatives: Option[]; tried: number; error: string;
+  others?: string[];  // more elements the same movable element runs into: one fix clears them all
 }
 export interface PlanCheck {
   passed: boolean; items: Record<string, { passed: boolean; reason: string; min_clearance_m: number | null }>;

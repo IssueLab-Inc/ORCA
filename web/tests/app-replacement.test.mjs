@@ -9,7 +9,7 @@ Error.prepareStackTrace = (error, frames) => `${error.name}: ${error.message}\n$
 const url = (js) => `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
 const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary"];
 const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
-  export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION=""; export const mm=(v)=>String(v); export const noClash=()=>null;
+  export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
   export const clashLabel=(c)=>"#"+c.number;
   export class Viewer{} export const serverPointToViewer=(v)=>v; export class Pilot{};`);
 const icons = url(["Boxes", "Brain", "Check", "CircleCheck", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2"].map((name) => `export function ${name}(){return null;}`).join("\n"));

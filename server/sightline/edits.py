@@ -396,6 +396,12 @@ def _new_fitting(model, segment, place, name: str, tag: str | None):
         ifcopenshell.api.run("spatial.assign_container", model, relating_structure=container, products=[fitting])
     for system in ifcopenshell.util.system.get_element_systems(segment):
         ifcopenshell.api.run("system.assign_system", model, products=[fitting], system=system)
+    # A segment converted from STEP carries where it came from (step.py); its bends belong to the same STEP group.
+    source = ifcopenshell.util.element.get_pset(segment, "Sightline_STEP")
+    if source:
+        pset = ifcopenshell.api.run("pset.add_pset", model, product=fitting, name="Sightline_STEP")
+        ifcopenshell.api.run("pset.edit_pset", model, pset=pset,
+                             properties={k: v for k, v in source.items() if k in ("Group", "Label", "Source")})
     ifcopenshell.api.run("geometry.edit_object_placement", model, product=fitting, matrix=place, is_si=False)
     old = _ports(segment)
     for n in range(2):

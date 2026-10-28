@@ -6,7 +6,7 @@ import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
 import type { OwnerSettings, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
-import { Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
+import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
 import { ClashPanel, Lightbox } from "./ClashPanel";
@@ -123,6 +123,8 @@ export function App() {
   const [signoffs, setSignoffs] = useState<Record<string, Signoff[]>>({});
   const [docOpen, setDocOpen] = useState(false);
   const [touring, setTouring] = useState(false);
+  const [tourWhich, setTourWhich] = useState<"northbank" | "cell">("northbank");
+  const startTour = (which: "northbank" | "cell") => { setTourWhich(which); setTouring(true); };
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
   // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
@@ -584,6 +586,11 @@ export function App() {
   // The second demo: the palletising cell, opened from its STEP file.
   const cellSample = samples.find((f) => /palletising-cell-reva\.(step|stp)$/i.test(f));
 
+  /** A clash of the cell tour, by its parts' names (the STEP's own): one of `names` on each side. */
+  function clashOfNames(a: readonly string[], b: readonly string[], r: Report | null = report): ReportClash[] {
+    return (r?.clashes ?? []).filter((c) => (a.includes(c.a.name) && b.includes(c.b.name)) || (a.includes(c.b.name) && b.includes(c.a.name)));
+  }
+
   /** A clash the tour or the golden path is about, by its two elements: the same in a check or an imported report. */
   function clashOfPair(pair: readonly string[], r: Report | null = report): ReportClash | undefined {
     return r?.clashes.find((c) => pair.includes(c.a.global_id ?? "") && pair.includes(c.b.global_id ?? "")
@@ -864,15 +871,15 @@ export function App() {
 
   /** Play a recorded proposal (the tour's fallback when the live one fails or is slow) through the same viewer and
    * pilot, at the pace it was recorded. Accepting its fix edits the model for real, like a live one. */
-  async function replayPropose(which: "duct" | "joint") {
-    const c = clashOfPair(TOUR[which]);
+  async function replayPropose(which: "duct" | "joint" | "ladder") {
+    const c = which === "ladder" ? clashOfNames(CELL.ladder, CELL.post)[0] : clashOfPair(TOUR[which]);
     if (!c || !sceneId) return;
     replaceChatWork();
     if (clash?.id !== c.id) selectClash(c);
     const epoch = sceneEpoch.current;
     // Recorded on Oct 27 from the imported report, where these were c0053 and c0051.
     const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } =
-      await (await fetch(`/tour/${which === "duct" ? "c0053" : "c0051"}.json`)).json();
+      await (await fetch(`/tour/${{ duct: "c0053", joint: "c0051", ladder: "cell-ladder" }[which]}.json`)).json();
     if (sceneEpoch.current !== epoch) return;
     const tracker = trackAgent(); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
@@ -889,11 +896,13 @@ export function App() {
     finish(null); setReplaying(false);
   }
 
-  /** Play the recorded root-cause plan for the girder (the tour's fallback), at the pace it was recorded. */
-  async function replayPlan() {
+  /** Play a recorded plan (the tour's fallback), at the pace it was recorded: the girder's root cause (Northbank) or
+   * the air pipe through both conveyor rails, fixed together (the cell). */
+  async function replayPlan(which: "girder" | "pipe" = "girder") {
     replaceChatWork();
     const epoch = sceneEpoch.current;
-    const rec: { events: { t: number; event: PlanEvent }[] } = await (await fetch("/tour/girder-plan.json")).json();
+    const rec: { events: { t: number; event: PlanEvent }[] } =
+      await (await fetch(which === "girder" ? "/tour/girder-plan.json" : "/tour/cell-pipe-plan.json")).json();
     if (sceneEpoch.current !== epoch) return;
     // It was recorded on the imported report: point its clash ids at this report's clashes of the same element pairs
     // (a fix item names its pair; a hub partner pairs with the hub).
@@ -905,7 +914,12 @@ export function App() {
       const out: Record<string, unknown> = Object.fromEntries(Object.entries(o).map(([k, v]) => [k, remap(v)]));
       const pair = typeof out.element_a === "string" && typeof out.element_b === "string" ? [out.element_a, out.element_b]
         : typeof out.global_id === "string" && "in_report" in out ? [out.global_id, TOUR.girder] : null;
-      if (pair && Array.isArray(out.clash_ids)) { out.clash_ids = pairIds(pair[0], pair[1]); out.in_report = (out.clash_ids as string[]).length > 0; }
+      if (pair && Array.isArray(out.clash_ids)) {
+        // a merged item (one element, several partners) stands for the clashes with every partner
+        const partners = [pair[1], ...(Array.isArray(out.others) ? out.others as string[] : [])];
+        out.clash_ids = partners.flatMap((p) => pairIds(pair[0], p));
+        out.in_report = (out.clash_ids as string[]).length > 0;
+      }
       if (Array.isArray(out.partners)) {
         const partners = out.partners as { clash_ids: string[]; in_report?: boolean }[];
         out.clash_ids = [...new Set(partners.flatMap((x) => x.clash_ids))];
@@ -914,7 +928,7 @@ export function App() {
       return out;
     };
     rec.events = rec.events.map((e) => ({ ...e, event: remap(e.event) as PlanEvent }));
-    const tracker = trackPlan("root_cause"); directPlan.current = tracker;
+    const tracker = trackPlan(which === "girder" ? "root_cause" : "batch"); directPlan.current = tracker;
     const { onEvent, finish, live } = tracker;
     setReplaying(true);
     const start = Date.now();
@@ -1299,6 +1313,9 @@ export function App() {
   }
   const fixedCount = Object.keys(fixes).length;
   const tourDuct = clashOfPair(TOUR.duct), tourJoint = clashOfPair(TOUR.joint);
+  const cellOpen = stepFiles.some((f) => /palletising-cell/i.test(f));
+  const tourLadder = cellOpen ? clashOfNames(CELL.ladder, CELL.post)[0] : undefined;
+  const tourPipes = cellOpen ? clashOfNames(CELL.pipe, CELL.rails) : [];
   const tourState: TourState = {
     busy: !!busy, reportOpen: !!report, modelsOpen: !!stats,
     triageStarted: !!triageRun, triageDone: !!triageRun?.done, triageCount: Object.keys(triage).length,
@@ -1312,15 +1329,19 @@ export function App() {
     patternsRead: !!verdicts, reviewedCount: Object.keys(reviewed).length, signoffs: tourDuct ? signoffs[tourDuct.id]?.length ?? 0 : 0,
     docOpen, docReady,
     duct: tourDuct ? { id: tourDuct.id, number: tourDuct.number } : null,
+    cellOpen, ladder: tourLadder ? { id: tourLadder.id, number: tourLadder.number } : null,
+    pipes: tourPipes.map((c) => ({ id: c.id, number: c.number })),
     joint: tourJoint ? { id: tourJoint.id, number: tourJoint.number } : null,
   };
   const tourActions: TourActions = {
     filterReal: () => setTriageFilter("real_clash"), clearFilter: () => setTriageFilter(null),
-    selectClash: (which) => { const c = which === "duct" ? tourDuct : tourJoint; if (c) { setTab("clash"); selectClash(c); } },
+    selectClash: (which) => { const c = { duct: tourDuct, joint: tourJoint, ladder: tourLadder }[which]; if (c) { setTab("clash"); selectClash(c); } },
+    openCell: () => { if (cellSample) void openDemo([cellSample]); },
+    fixPipe: () => { if (tourPipes.length) { setTab("plan"); void runPlan({ clash_ids: tourPipes.map((c) => c.id) }); } },
     compare: setCompare,
     overview: () => { setViewPlan(false); viewer.current?.preview([]); viewer.current?.fitAll(); },
     closeReport: () => setDocOpen(false),
-    replay: (what) => { if (what === "plan") void replayPlan(); else void replayPropose(what); },
+    replay: (what) => { if (what === "plan") void replayPlan(); else if (what === "pipe") void replayPlan("pipe"); else void replayPropose(what); },
     ask: (send) => { setTab("chat"); setChatAsk((q) => ({ text: TOUR_QUESTION, send, n: (q?.n ?? 0) + 1 })); },
     signoff: () => {
       let name = "Guest reviewer";
@@ -1407,7 +1428,7 @@ export function App() {
         <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         {!landing && <button className="btn ghost" onClick={() => setAbout(true)} aria-label="How it works" title="How it works"><Info size={15} aria-hidden /><span className="lbl"> How it works</span></button>}
-        {!landing && !touring && <button className="btn ghost" onClick={() => setTouring(true)} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
+        {!landing && !touring && <button className="btn ghost" onClick={() => startTour(cellOpen ? "cell" : "northbank")} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
         </div>
         <span className="brand"><span className="logo" aria-hidden>◎</span><b>Sightline</b></span>
         <div className="bar-side end">
@@ -1419,7 +1440,7 @@ export function App() {
         <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
         {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
-        {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip-side="bottom"
+        {sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
           data-tip={stepFiles.length ? "Download the changed models: the STEP with its fixes, and the IFC" : "Download the changed IFC files"}>
           <Download size={15} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
         </div>
@@ -1469,7 +1490,8 @@ export function App() {
             onStart: () => void openDemo(),
             onCell: cellSample ? () => void openDemo([cellSample]) : undefined,
             onGolden: startGolden,
-            onTour: () => setTouring(true),
+            onTour: () => startTour("northbank"),
+            onCellTour: cellSample ? () => startTour("cell") : undefined,
             details: <>
               Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
               checks them, in about 25 seconds. Other models: <b>Models</b>, in the header.
@@ -1660,7 +1682,7 @@ export function App() {
 
       <Tooltips />
       {about && <About triageOpen={!!triageModel?.open_weights} onClose={() => setAbout(false)} />}
-      {touring && <Tour state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}
+      {touring && <Tour key={tourWhich} which={tourWhich} state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
         triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} onReady={() => setDocReady(true)} />}

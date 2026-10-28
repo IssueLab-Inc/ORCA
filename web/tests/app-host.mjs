@@ -87,7 +87,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} }`);
   const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary"];
   const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
-    export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION=""; export const mm=(v)=>String(v); export const noClash=()=>null;
+    export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
     export const clashLabel=(c)=>"#"+c.number;
     export class Viewer {constructor(){return globalThis.${key}.viewer;}} export const serverPointToViewer=(v)=>v;
     export class Pilot { start(){} event(){} cancel(){globalThis.${key}.viewer.preview([]);} finish(fn){fn();} takeOver(){} }`);

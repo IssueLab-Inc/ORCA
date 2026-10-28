@@ -43,6 +43,7 @@ class Item:
     alternatives: list[dict] = field(default_factory=list)
     tried: int = 0
     error: str = ""
+    others: list[str] = field(default_factory=list)  # more elements the same movable element runs into: one fix for all
 
 
 @dataclass
@@ -157,7 +158,72 @@ def pairs_for(ws: Workspace, scene_id: str, report_id: str, clash_ids: list[str]
             items[key].clash_ids.append(cid)
             continue
         items[key] = Item(key, m["a"], m["b"], _label(ws, scene_id, m["a"], m["b"]), [cid], True, c.distance_m)
-    return list(items.values()), skipped
+    return merge_shared(ws, scene_id, list(items.values())), skipped
+
+
+def merge_shared(ws: Workspace, scene_id: str, items: list[Item]) -> list[Item]:
+    """One problem, one fix: pairs that share an element which can move (a pipe through two conveyor rails, a duct
+    through two beams) become one item, so one agent clears all of them at once. A shared element that stays put (a
+    girder hit by three services) is not merged: each service gets its own fix."""
+    scene = ws.scene(scene_id)
+    count: dict[str, int] = {}
+    for it in items:
+        for g in (it.element_a, it.element_b):
+            count[g] = count.get(g, 0) + 1
+    shared = sorted((g for g, n in count.items() if n > 1 and not scene.element(g).fixed), key=lambda g: -count[g])
+    used: set[str] = set()
+    out: list[Item] = []
+    for g in shared:
+        group = [it for it in items if it.key not in used and g in (it.element_a, it.element_b)]
+        if len(group) < 2:
+            continue
+        partners = [it.element_b if it.element_a == g else it.element_a for it in group]
+        first = group[0]
+        merged = Item("|".join(sorted([g, *partners])), g, partners[0], _merged_label(ws, scene_id, g, partners),
+                      [c for it in group for c in it.clash_ids], all(it.in_report for it in group),
+                      min((it.distance_m for it in group if it.distance_m is not None), default=first.distance_m),
+                      others=partners[1:])
+        out.append(merged)
+        used.update(it.key for it in group)
+    return out + [it for it in items if it.key not in used]
+
+
+def _merged_label(ws: Workspace, scene_id: str, g: str, partners: list[str]) -> str:
+    scene = ws.scene(scene_id)
+    e = scene.element(g)
+    names = [scene.element(p).name for p in partners]
+    return f"{e.ifc_class} '{e.name}' x {len(partners)} elements: {', '.join(repr(n) for n in names)}"
+
+
+def _direction(a) -> str:
+    """"up 150 mm", "down 300 mm", "sideways 120 mm", "offset down 250 mm", "trimming it": what an idea did."""
+    d = [float(x) for x in (a.delta_m or [0, 0, 0])]
+    if a.kind == "trim":
+        return "trimming it"
+    vertical = abs(d[2]) >= max(abs(d[0]), abs(d[1]))
+    size = round(max(abs(x) for x in d) * 1000) if any(d) else 0
+    move = (f"{'up' if d[2] > 0 else 'down'} {size} mm" if vertical else f"sideways {size} mm") if size else "in place"
+    return f"offset {move}" if a.kind == "offset" else move
+
+
+def failure_summary(scene, result) -> str:
+    """Why nothing passed, in plain words, one line per idea: what it did and what it hit, by name; then the agent's
+    advice. The full reasons stay with the attempts."""
+    lines = []
+    for a in result.attempts[:4]:
+        if a.reason.startswith("cannot"):
+            lines.append(f"{a.title}: {a.reason}")
+            continue
+        hit = []
+        for g in a.hit_ids[:2]:
+            try:
+                hit.append(scene.entity(g).Name or scene.entity(g).is_a()[3:])
+            except Exception:
+                continue
+        lines.append(f"{_direction(a)}: hits {', '.join(hit)}" if hit else f"{_direction(a)}: {a.reason}")
+    if getattr(result, "advice", ""):
+        lines.append(result.advice)
+    return "\n".join(lines) or "No idea passed the geometry check."
 
 
 def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: list[Item], notes: str,
@@ -167,8 +233,13 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
         emit({"type": "item", "key": it.key, "status": "thinking"})
         try:
             cid = it.clash_ids[0] if it.clash_ids and report_id else None
+            also = ""
+            if it.others:
+                scene = ws.scene(scene_id)
+                also = ("It also runs into: " + "; ".join(f"{scene.element(o).ifc_class} '{scene.element(o).name}'"
+                                                          for o in it.others) + ". One fix must clear all of them.")
             clash = ws.clash_for(it.element_a, it.element_b, it.distance_m, None,
-                                 "\n".join(filter(None, [notes, (prefer or {}).get(it.key, "")])), report_id, cid)
+                                 "\n".join(filter(None, [notes, (prefer or {}).get(it.key, ""), also])), report_id, cid)
 
             def progress(e: dict) -> None:
                 if e["type"] == "attempt":
@@ -180,7 +251,7 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
             it.option = options[0] if options else None
             it.alternatives = options[1:]
             if not options:
-                it.error = "no fix passed the check: " + "; ".join(a.reason for a in result.attempts[:3])
+                it.error = failure_summary(ws.scene(scene_id), result)
         except Exception as e:  # one clash failing must not sink the plan
             it.error = f"{type(e).__name__}: {e}"
         emit({"type": "item", "key": it.key, "status": "done", "ok": bool(it.option),

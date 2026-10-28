@@ -27,7 +27,8 @@ Three kinds of fix:
   end into a column, a brace into a plate), cut that end back so the two butt at the other's face. Nothing moves, so
   nothing along the member is disturbed. The element data says when a clash is at a joint and how much a trim takes;
   Sightline works out the length, so give only which element to trim. Prefer a trim to moves for members of the same
-  assembly or system that meet at a joint: moving a framed member drags it into everything it is fixed to.
+  assembly or system that meet at a joint: moving a framed member drags it into everything it is fixed to. Never trim
+  structure, a post or guarding to let a service (duct, pipe, cable tray) pass: move or offset the service.
 
 When you propose fixes, return JSON only:
 {

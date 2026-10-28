@@ -7,7 +7,9 @@ the titles' model, triangulate), then checks:
 - every part converted, names unique, and the classes the model picked against the parts list's own classes;
 - detection on Rev A finds every planted pair and nothing that is neither planted nor by design; Rev B none planted;
 - C2 (the CT-301 cable ladder through fence post W5): moving the ladder run 150 mm up, as Rev B does, clears it;
-- export writes the STEP again with the whole ladder 150 mm higher and every other part where it was.
+- C1 (the air pipe through both conveyor rails): Fix together makes one job and finds a verified fix;
+- C3 (a fence rail 40 mm into post SE): trimmed back to the post's face;
+- export writes the STEP again: the ladder 150 mm higher, the pipe's offset pieces added, the rail shorter.
 
     cd server
     uv run python ../evals/step_cell.py --cell ../../ClashWiseDemoModels/palletising-cell \
@@ -26,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 
-from sightline import detect, step, verify  # noqa: E402
+from sightline import detect, edits, plans, step, verify  # noqa: E402
 from sightline.meta_client import triage_model  # noqa: E402
 from sightline.service import Workspace  # noqa: E402
 
@@ -100,26 +102,74 @@ def main():
             ws.apply(sid, ladder, (0.0, 0.0, 0.15))
             after = verify.check(scene, ladder)
             hits_post = any(h.other == post and h.kind == "collision" for h in after.hits)
+
+            # C1: the air pipe through both conveyor rails. Fix together makes it one job (one movable pipe, two
+            # rails); the exact pipe (a cylinder in the STEP, an extrusion here) can be split and dropped under them.
+            c1_lines, c1_ok, kinds = [], True, []
+            if model is not None:
+                rid = ws.detect(sid)["report"]["id"]
+                pipe = gid_of["air/seg2"]
+                rails = {gid_of["cv/rail/north"], gid_of["cv/rail/south"]}
+                ids = [c.id for c in ws.report(rid).clashes if pipe in (c.a.global_id, c.b.global_id)
+                       and {c.a.global_id, c.b.global_id} & rails]
+                t2 = time.perf_counter()
+                plan = plans.build_batch(ws, sid, rid, ids)
+                kinds = [it.option["kind"] if it.option else None for it in plan.items]
+                c1_ok = len(plan.items) == 1 and kinds[0] is not None and plan.check["passed"]  # any verified fix
+                if c1_ok:
+                    plans.apply(ws, sid, [it.option for it in plan.items])
+                item = plan.items[0] if plan.items else None
+                c1_lines = [f"## C1 fix together: {'pass' if c1_ok else 'FAIL'}", "",
+                            f"- {len(ids)} clashes → {len(plan.items)} job ({item.label if item else '-'}), "
+                            f"{time.perf_counter() - t2:.0f} s.",
+                            f"- Fix: {item.option['title'] if item and item.option else (item.error if item else '-')}"
+                            f" ({kinds[0] if kinds else '-'}); checked together: "
+                            f"{'clear' if plan.check['passed'] else 'not clear'}.", ""]
+            ok &= c1_ok
+
+            # C3: the fence top rail 40 mm into post SE: trimmed back to the post's face (both bars are exact).
+            rail, post_se = gid_of["fence/rail/S5-SE"], gid_of["fence/post/SE"]
+            trim = edits.butt_trim(scene, rail, post_se)
+            ws.apply_trim(sid, rail, trim.end, trim.by_m)
+            c3_ok = abs(trim.by_m - 0.04) < 0.002
+            ok &= c3_ok
+
             out = ws.export(sid, Path(tempfile.mkdtemp()))  # written to a temporary folder: the run keeps its README
             step_out = next(p for p in out if p.suffix == ".step")
             src = {p.name: p for p in step.parts(work / "PC-03-Palletising-Cell-RevA.step")[0]}
             new = {p.name: p for p in step.parts(step_out)[0]}
             moved = {n for n in src if abs(zmin(new[n]) - zmin(src[n])) > 1e-3}
-            dz = sorted({round(zmin(new[n]) - zmin(src[n]), 1) for n in moved})
-            fix_ok = moved == set(names) and dz == [150.0] and not hits_post
+            dz = sorted({round(zmin(new[n]) - zmin(src[n]), 1) for n in moved if n in names})
+            air_before = sum(1 for n in src if src[n].group == "Compressed air")
+            air_after = sum(1 for p in step.parts(step_out)[0] if p.group == "Compressed air")
+            rail_name = scene.entity(rail).Name
+            shorter = round(length(src[rail_name]) - length(new[rail_name]), 1)
+            fix_ok = set(names) <= moved and dz == [150.0] and not hits_post and shorter == 40.0 \
+                and (air_after > air_before if kinds[:1] == ["offset"] else True)
             ok &= fix_ok
             lines += [f"## C2 fix and export: {'pass' if fix_ok else 'FAIL'}", "",
                       f"- The run that moves with `CT-301` h2 (same STEP group, touching): {len(names)} parts, "
                       f"{', '.join(names)}.",
                       f"- Check before: {_summary(before)}; after +150 mm: {_summary(after)}"
                       f"{'; still hits post W5' if hits_post else '; clear of post W5'}.",
-                      f"- Exported {', '.join(p.name for p in out)}; re-read: {len(moved)} parts moved, by {dz} mm, "
-                      f"{len(src) - len(moved)} unchanged.", ""]
+                      f"- Exported {', '.join(p.name for p in out)}; re-read: the {len(names)} ladder parts {dz} mm "
+                      f"higher; the compressed-air line {air_before} → {air_after} parts (the offset's pieces); "
+                      f"`{rail_name}` {shorter} mm shorter (C3 trim, at its {trim.end}).", "", *c1_lines]
     lines.insert(1, f"Result: {'pass' if ok else 'FAIL'}")
     (args.out / "README.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     shutil.rmtree(work, ignore_errors=True)
     sys.exit(0 if ok else 1)
+
+
+def length(part) -> float:
+    """The longest side of a part's box, in the STEP's units."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    box = Bnd_Box()
+    BRepBndLib.Add_s(part.shape, box)
+    lo, hi = box.CornerMin(), box.CornerMax()
+    return max(hi.X() - lo.X(), hi.Y() - lo.Y(), hi.Z() - lo.Z())
 
 
 def _summary(v) -> str:

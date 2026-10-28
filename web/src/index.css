@@ -384,7 +384,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .bad-note { fill: #b26a00; } .ok-note { fill: #0b7f8f; }
 .ba-tag { font-size: 9.5px; fill: var(--muted); }
 .about-h { font-size: 17px; margin: 0; letter-spacing: -.005em; }
+.pi-why { margin: 2px 0 0; padding-left: 16px; font-size: 12px; color: var(--fail); line-height: 1.45; }
+.pi-why li + li { margin-top: 2px; }
 .about-second { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.about-second-cta { display: flex; flex-direction: column; gap: 8px; flex: none; }
 .about-second h2 { margin: 2px 0 4px; font-size: 17px; }
 .about-second p { margin: 0; font-size: 13.5px; color: #3d4a58; line-height: 1.5; }
 .about-second .eyebrow { font-size: 11px; }

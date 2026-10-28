@@ -108,13 +108,18 @@ design in [docs/step.md](docs/step.md)):
 - the model names each part's IFC class from its name and group;
 - the parts are checked like any model.
 
-Fixes on STEP parts are moves: parts of one STEP group that touch move together, so a cable ladder moves as one.
-**Export** then gives your STEP back with the moved parts translated, names and colours kept, beside the IFC.
+Straight bars, rods and pipes (plain boxes and cylinders) become exact extrusions, so they take offsets and trims as
+well as moves; other parts move. Parts of one STEP group that touch move together, so a cable ladder moves as one.
+**Export** then gives your STEP back beside the IFC: moved parts translated, changed parts rebuilt, an offset's new
+pieces added to their assembly, names and colours kept.
 
 The landing's second demo opens the PC-03 robot palletising cell from its STEP file:
 - the check finds all five planted problems (13 part pairs, nothing unexpected);
 - Muse Spark fixes the cable ladder through the fence post by raising it 150 mm, the designers' own fix;
-- the exported STEP has exactly those five ladder parts moved.
+- **Fix together** on the air pipe through both conveyor rails makes one job and drops the pipe under them;
+- the exported STEP has exactly those five ladder parts moved and the pipe's offset pieces added.
+
+**Take the cell tour** on its card walks through it in 12 steps.
 
 `evals/step_cell.py` checks this against the cell's answer key.
 
