@@ -276,7 +276,7 @@ call, and `Job.learn` corrects a run that already asked, keeping the model's ans
 before the replayed "done"). The browser overlays the rest (`shownTriage` in App.tsx): a model "real"/"model error"
 gives way to Mark as not a clash (`basis: reviewed`) or noClash's geometry (incl. Sightline's no-overlap measure), with
 the model's reading kept. Northbank on Muse Spark Open with the models open: 217 in 181 s, 111 settled (50 touch, 49
-non-physical, 12 same element), 106 asked. 68 server tests.
+non-physical, 12 same element), 106 asked. 71 server tests.
 
 Guided tour (Oct 28): `web/src/Tour.tsx`, from the landing page (**Take the guided tour**) or the header (**Tour**).
 24 steps in 9 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
@@ -288,6 +288,26 @@ Live Muse steps offer **Watch a recorded run** after 45 s (plan 75 s) or on erro
 `web/public/tour/` (c0053 18 s, c0051 trim 9 s, girder plan 35 s), replayed through the same pilot/plan code and
 labelled as recorded; accepting a replayed fix edits the model for real. `plans.root_causes(only=)`: a requested hub
 may have one clash left in the report plus geometry hits (the girder after #042 is fixed).
+
+Streams on Modal (Oct 28): Modal's edge zstd-compresses responses for browsers and held NDJSON streams back until a
+buffer filled: in the browser, triage sat at 0 for 77-170 s and Muse Spark's reasoning arrived with the result (local
+runs were fine: no edge). It ignores `Cache-Control: no-transform`; `app._ndjson` sends every stream with
+`Content-Encoding: identity`, which it passes through (first verdicts 0.5-2.5 s, proposal reasoning at ~4.7 s). Test
+a stream with `Accept-Encoding: gzip, deflate, br, zstd`, as browsers send.
+
+Triage reasoning (Oct 28): Muse Spark Open streams `reasoning_content` deltas on chat completions, from ~0.6 s, also
+with strict json_schema. `MetaChatModel.complete_json_streamed` reads them; `triage_report(reasoning=True)` (the shared
+`Job`) emits `{"type": "reasoning", id, text}` every 0.6 s per clash and keeps the whole reasoning on the verdict
+(`reasoning`, ≤ 6000 chars). `Job.follow` skips reasoning sent before a subscriber joined. UI: the Triage card's
+"Muse Spark Open is reading n now" (newest four clashes, the end of what it is writing, click to open) and "How the
+triage model reasoned" in the clash panel. The tour scrolls any target out of view (window or panel) into view once
+per element, including controls that appear later.
+
+Report and triage (Oct 28): the browser sends the verdicts it shows (`triage`, without reasoning) with a report
+request, and the server uses them over its shared run, which can be gone (restart) or running again (someone pressed
+Triage again): that left "Triage the report first" with no way out during the tour. The error now offers Triage all.
+Landing (Oct 28): hero = headline, lede, the two buttons side by side and a one-line load note, beside the before/after
+picture; "Once it's open" (left / middle / right) is its own three-card row.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

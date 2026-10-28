@@ -118,3 +118,52 @@ def test_what_the_open_model_settles_is_not_asked_and_corrects_answers(tmp_path)
     replay = list(job.follow())
     assert replay[-1]["type"] == "done" and replay[-2] == {"type": "clash", "id": other.id, **v}
     assert len(replay) == len(events) + 1
+
+
+class Thinking(Scripted):
+    """A triage model that streams its reasoning before answering, like Muse Spark Open."""
+
+    def complete_json_streamed(self, system, text, images, schema, on_reasoning):
+        for piece in ("Duct crosses ", "the girder web; ", "no opening on its line."):
+            on_reasoning(piece)
+        return self.complete_json(system, text, images, schema)
+
+
+def test_reasoning_streams_and_stays_with_the_verdict(tmp_path, monkeypatch):
+    monkeypatch.setattr(triage, "REASONING_EVERY_S", 0)  # pass every piece on at once
+    report = _report(tmp_path)
+    events = []
+    results = triage.triage_report(report, Thinking(), events.append, workers=2, images=False, reasoning=True)
+    asked = [cid for cid, v in results.items() if v["source"] == "model"]
+    assert asked and all(results[cid]["reasoning"] == "Duct crosses the girder web; no opening on its line." for cid in asked)
+    said = [e for e in events if e["type"] == "reasoning"]
+    assert {e["id"] for e in said} == set(asked) and "".join(e["text"] for e in said if e["id"] == asked[0]).startswith("Duct crosses")
+    # Without `reasoning` (the eval scripts), no reasoning is asked for or kept.
+    assert not any("reasoning" in v for v in triage.triage_report(report, Thinking(), workers=2, images=False).values())
+
+
+def test_a_late_subscriber_skips_old_reasoning(tmp_path):
+    job = triage.Job(_report(tmp_path), Scripted(), {"model": "m"})
+    job._emit({"type": "start", "total": 1})
+    job._emit({"type": "reasoning", "id": "c1", "text": "old thought"})
+    job._emit({"type": "clash", "id": "c1", "verdict": "real_clash", "source": "model"})
+    follower = job.follow()
+    assert [next(follower)["type"], next(follower)["type"]] == ["start", "clash"]
+    job._emit({"type": "reasoning", "id": "c2", "text": "new thought"})
+    assert next(follower) == {"type": "reasoning", "id": "c2", "text": "new thought"}
+
+
+def test_streamed_completion_reads_reasoning_then_json():
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content)["stream"])
+        chunks = ['{"choices":[{"delta":{"reasoning_content":"Think"}}]}', '{"choices":[{"delta":{"reasoning_content":"ing."}}]}',
+                  '{"choices":[{"delta":{"content":"{\\"verdict\\": "}}]}', '{"choices":[{"delta":{"content":"\\"by_design\\"}"}}]}']
+        return httpx.Response(200, text="".join(f"data: {c}\n\n" for c in chunks) + "data: [DONE]\n\n")
+
+    model = meta_client.MetaChatModel("https://open.example/v1", "k", "muse-spark-open", reasoning_effort="")
+    model.client = httpx.Client(transport=httpx.MockTransport(handler))
+    heard = []
+    assert model.complete_json_streamed("s", "t", None, triage.SCHEMA, heard.append) == {"verdict": "by_design"}
+    assert heard == ["Think", "ing."] and sent == [True]

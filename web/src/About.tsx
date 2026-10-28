@@ -28,23 +28,29 @@ export function About({ start, onClose }: {
             Before a building goes up, every part of it is designed in 3D. Sightline finds the places where those parts
             run into each other, works out a fix, <b>proves the fix works</b>, and edits the model for you.
           </p>
-          {start && (
-            <div className="about-start">
+          {start && <>
+            <div className="about-cta">
               <button className="btn primary big" data-tour="demo" disabled={start.disabled} onClick={start.onStart}>
                 <FolderOpen size={16} aria-hidden /> {start.label}</button>
               {start.onTour && <button className="btn big" disabled={start.disabled} onClick={start.onTour}>
                 <Compass size={16} aria-hidden /> Take the guided tour</button>}
-              <div className="hint">{start.details}</div>
-              <ul className="next-steps">
-                <li><ListChecks size={15} aria-hidden /><span><b>On the left:</b> the clash list, grouped by test, with a picture of each clash.</span></li>
-                <li><Box size={15} aria-hidden /><span><b>In the middle:</b> the building in 3D, with its street and riverside.</span></li>
-                <li><Sparkles size={15} aria-hidden /><span><b>On the right:</b> pick a clash, press <b>Propose fixes</b>, and watch Sightline work.</span></li>
-              </ul>
             </div>
-          )}
+            <p className="hint about-loads">{start.details}</p>
+          </>}
         </div>
         <BeforeAfter />
       </header>
+
+      {start && (
+        <section className="about-layout" aria-label="Once the demo is open">
+          <h2 className="about-h">Once it's open</h2>
+          <ul className="next-steps">
+            <li><ListChecks size={18} aria-hidden /><span><b>On the left</b>The clash list, grouped by test, with a picture of each clash.</span></li>
+            <li><Box size={18} aria-hidden /><span><b>In the middle</b>The building in 3D, with its street and riverside.</span></li>
+            <li><Sparkles size={18} aria-hidden /><span><b>On the right</b>Pick a clash, press <i>Propose fixes</i>, and watch Sightline work.</span></li>
+          </ul>
+        </section>
+      )}
 
       <section className="about-stats" aria-label="Sightline on the demo, measured">
         <Stat value="15–25 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />

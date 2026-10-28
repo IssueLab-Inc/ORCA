@@ -54,11 +54,14 @@ export interface TriageVerdict {
   basis?: "non_physical" | "touch" | "same_element" | "no_overlap" | "reviewed";
   /** The triage model's own reading, when a settled fact overrode it. */
   model_reading?: string;
+  /** What the triage model wrote while working it out (Muse Spark Open streams it). */
+  reasoning?: string;
 }
 export interface TriageModel { model: string; open_weights: boolean; images?: boolean; note?: string }
 export type TriageEvent =
   | ({ type: "start"; total: number } & TriageModel)
   | ({ type: "clash"; id: string } & TriageVerdict)
+  | { type: "reasoning"; id: string; text: string }
   | { type: "done"; summary: Record<string, number>; seconds: number; error?: string }
   | { type: "ping" };
 export interface TriageState extends Partial<TriageModel> {
@@ -165,7 +168,7 @@ export const api = {
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
   document: (reportId: string, body: { scene_id: string | null; scope: "combined" | "team" | "model"; teams: Record<string, Team>;
                                       bcf: boolean; evidence: Record<string, Evidence>; reviews: Record<string, Signoff[]>;
-                                      marks: Record<string, string> }, onEvent: (e: DocEvent) => void) =>
+                                      marks: Record<string, string>; triage: Record<string, Omit<TriageVerdict, "reasoning">> }, onEvent: (e: DocEvent) => void) =>
     ndjson<DocEvent>(`/reports/${reportId}/document/stream`, body, (e) => { onEvent(e); return e.type !== "progress"; }),
   triage: (reportId: string, sceneId: string | null) =>
     call<TriageState>(`/reports/${reportId}/triage${sceneId ? `?scene_id=${sceneId}` : ""}`),

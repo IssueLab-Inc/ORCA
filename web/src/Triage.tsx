@@ -1,4 +1,4 @@
-import { CircleCheck, Flag, Filter, LoaderCircle, RotateCcw, ScanSearch } from "lucide-react";
+import { CircleCheck, Flag, Filter, LoaderCircle, RotateCcw, ScanSearch, Brain } from "lucide-react";
 import type { TriageKind, TriageModel, TriageVerdict } from "./api";
 
 export const TRIAGE: Record<TriageKind, { label: string; cls: string; tip: string }> = {
@@ -8,13 +8,22 @@ export const TRIAGE: Record<TriageKind, { label: string; cls: string; tip: strin
   non_physical: { label: "not physical", cls: "muted", tip: "A space, port or opening: not a physical clash" },
   unknown: { label: "no answer", cls: "muted", tip: "The triage model did not answer" },
 };
+/** The end of what the model is writing, from a word boundary, on one or two lines. */
+function tail(text: string) {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= 170) return t;
+  const cut = t.slice(-170);
+  return "…" + cut.slice(cut.indexOf(" ") + 1);
+}
+
 const ORDER: TriageKind[] = ["real_clash", "modelling_error", "by_design", "non_physical", "unknown"];
 
 export interface TriageRun extends TriageModel { total: number; started: number; done: boolean; seconds?: number; error?: string }
 
 /** Bulk triage of the whole report: run it, watch it land, filter by verdict, set the noise aside in one click. */
-export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, open }: {
+export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, open, live = [], onOpen }: {
   run: TriageRun | null; results: Record<string, TriageVerdict>; now: number; open: number;
+  live?: { id: string; name: string; text: string }[]; onOpen?: (id: string) => void;
   filter: TriageKind | null; onFilter: (k: TriageKind | null) => void; onRun: (rerun: boolean) => void;
   onSetAside: (ids: string[]) => void; onFlag: (ids: string[]) => void;
 }) {
@@ -39,10 +48,20 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
           <span style={{ width: `${run.total ? (100 * ids.length) / run.total : 0}%` }} /></div>
         <p className="hint">
           {!run.done && <LoaderCircle size={12} className="spin" aria-hidden />} {ids.length} of {run.total}
-          {run.done ? ` in ${Math.round(run.seconds ?? (now - run.started) / 1000)} s` : ` · ${Math.round((now - run.started) / 1000)} s`}
+          {run.done ? ` in ${Math.round(run.seconds ?? Math.max(0, now - run.started) / 1000)} s` : ` · ${Math.round(Math.max(0, now - run.started) / 1000)} s`}
           {byRule > 0 && ` · ${byRule} by rule`}
-          <br /><span className={`chip small ${run.open_weights ? "ok" : ""}`} title={run.note}>{run.open_weights ? "open weights" : "fallback"}</span> {who}
+          <br />{run.model
+            ? <><span className={`chip small ${run.open_weights ? "ok" : ""}`} title={run.note}>{run.open_weights ? "open weights" : "fallback"}</span> {who}</>
+            : "starting…"}
         </p>
+        {!run.done && live.length > 0 && (
+          <div className="triage-live" aria-live="off">
+            <span className="triage-live-head"><Brain size={12} aria-hidden /> {run.open_weights ? "Muse Spark Open" : "Muse Spark"} is reading {live.length} now</span>
+            {live.slice(-4).map((l) => (
+              <button key={l.id} className="triage-live-row" onClick={() => onOpen?.(l.id)} title={`Open ${l.name}`}>
+                <b>{l.name}</b><span>{tail(l.text)}</span>
+              </button>))}
+          </div>)}
         {run.note && <p className="hint small">{run.note}</p>}
         {run.error && <p className="bad small">{run.error}</p>}
         <div className="triage-chips">

@@ -323,9 +323,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .eyebrow { margin: 0; font: 600 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
 .about h1 { margin: 0; font-size: 28px; line-height: 1.2; letter-spacing: -.01em; text-wrap: balance; }
 .lede { font-size: 15.5px; color: #33414f; }
-.about-start { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
-.about-start .btn.big { padding: 10px 16px; font-size: 14.5px; }
-.about-start .hint { line-height: 1.5; }
+.about-cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.about-cta .btn.big { padding: 11px 18px; font-size: 14.5px; }
+.about-loads { line-height: 1.5; max-width: 52ch; }
 .before-after { margin: 0; padding: 14px 14px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
 .before-after svg { width: 100%; height: auto; display: block; }
 .before-after figcaption { font-size: 11.5px; text-align: center; }
@@ -361,6 +361,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 @container (max-width: 720px) {
   .about { padding: 24px 18px; }
   .about-hero, .about-two { grid-template-columns: minmax(0, 1fr); }
+  .next-steps { grid-template-columns: minmax(0, 1fr); }
   .about-steps, .disciplines { grid-template-columns: minmax(0, 1fr); }
 }
 .about-dialog .about { padding-top: 52px; }
@@ -392,9 +393,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .pane, .dock { animation: pane-in .35s ease both; }
 @keyframes pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .pane, .dock { animation: none; } }
-.next-steps { list-style: none; margin: 4px 0 0; padding: 10px 0 0; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 7px; font-size: 13px; color: #3d4a58; }
-.next-steps li { display: flex; gap: 8px; align-items: flex-start; line-height: 1.45; }
-.next-steps svg { flex: none; margin-top: 2px; color: var(--accent); }
+.next-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 13px; color: #3d4a58; }
+.next-steps li { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.next-steps li b { display: block; margin-bottom: 2px; color: var(--ink); font-size: 13.5px; }
+.next-steps svg { flex: none; margin-top: 1px; color: var(--accent); }
 .about-stats { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .stat-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
 .stat-tile b { font-size: 24px; line-height: 1.15; color: var(--accent); letter-spacing: -.01em; }
@@ -493,7 +495,21 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .tour-nav .spacer { flex: 1; }
 .tour-fallback { background: var(--warn-soft); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .tour-amber { color: #c98a00; } .tour-teal { color: #12a5b4; } .tour-magenta { color: #c2189b; }
-.about-start .btn + .btn { margin-left: 8px; }
+
 .tour-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
 .tour-stats span { background: var(--bg); border-radius: 8px; padding: 6px 8px; font-size: 11.5px; line-height: 1.3; }
 .tour-stats b { display: block; font-size: 15px; color: var(--accent); }
+
+/* Triage: what the model is reading right now (Triage.tsx), and its reasoning per clash (ClashPanel.tsx) */
+.triage-live { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; padding: 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+.triage-live-head { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.triage-live-head svg { animation: tour-pulse-op 1.6s ease-in-out infinite; }
+@keyframes tour-pulse-op { 50% { opacity: .35; } }
+.triage-live-row { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 1px; font-size: 11.5px; line-height: 1.35; padding: 3px 4px; border-radius: 5px; }
+.triage-live-row:hover, .triage-live-row:focus-visible { background: var(--surface); }
+.triage-live-row b { font-size: 11px; }
+.triage-live-row span { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.triage-reasoning summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.triage-reasoning p { white-space: pre-wrap; font-size: 11.5px; line-height: 1.45; color: var(--muted); max-height: 220px; overflow: auto; margin: 4px 0 0; }
+@media (prefers-reduced-motion: reduce) { .triage-live-head svg { animation: none; } }
+@media (max-width: 560px) { .about-cta .btn { flex: 1 1 100%; justify-content: center; } }

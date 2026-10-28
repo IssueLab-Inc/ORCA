@@ -44,6 +44,10 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
           {triage.understanding && <p>{triage.understanding}</p>}
           {triage.fix_hint && <p className="why">{triage.action === "exclude_with_rule" ? "Stop it coming back: " : "Fix: "}{triage.fix_hint}</p>}
           {triage.model_reading && <p className="why small">The triage model read it as {triage.model_reading}</p>}
+          {triage.reasoning && <details className="triage-reasoning">
+            <summary>How the triage model reasoned</summary>
+            <p>{triage.reasoning}</p>
+          </details>}
           {triage.error && <p className="bad small">{triage.error}</p>}
         </div>
       )}

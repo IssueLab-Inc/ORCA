@@ -27,6 +27,17 @@ app = FastAPI(title="ClashWise Sightline")
 ws = Workspace()
 EXPORTS = Path(tempfile.gettempdir()) / "sightline-exports"
 EXPORTS.mkdir(exist_ok=True)
+# Progress streams (newline-delimited JSON) go out uncompressed. Modal's edge zstd-compresses for browsers that accept
+# it and holds the stream back until a buffer fills: the first triage verdicts reached the browser after 77-170 s
+# instead of under a second, and Muse Spark's reasoning arrived with its result. It ignores "no-transform"; an explicit
+# "Content-Encoding: identity" makes it pass the stream through.
+NDJSON_HEADERS = {"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no", "Content-Encoding": "identity"}
+
+
+def _ndjson(events) -> StreamingResponse:
+    return StreamingResponse(events, media_type="application/x-ndjson", headers=NDJSON_HEADERS)
+
+
 propose_limit = ProposeLimit.from_env()
 chat_limit = ProposeLimit.chat_from_env()
 voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
@@ -178,8 +189,7 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
         while (event := events.get()) is not None:
             yield json.dumps(event) + "\n"
 
-    return StreamingResponse(stream(), media_type="application/x-ndjson",
-                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+    return _ndjson(stream())
 
 
 @app.post("/api/scenes/{scene_id}/apply")
@@ -408,8 +418,7 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
         for event in job.follow():
             yield json.dumps(event, default=str) + "\n"
 
-    return StreamingResponse(stream(), media_type="application/x-ndjson",
-                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+    return _ndjson(stream())
 
 
 @app.post("/api/scenes/{scene_id}/plan/stream")
@@ -446,8 +455,7 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
         while (event := events.get()) is not None:
             yield json.dumps(event, default=str) + "\n"
 
-    return StreamingResponse(stream(), media_type="application/x-ndjson",
-                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+    return _ndjson(stream())
 
 
 @app.post("/api/scenes/{scene_id}/plan/apply")
@@ -500,8 +508,7 @@ def chat_turn(body: ChatTurn, request: Request):
         while (event := events.get()) is not None:
             yield json.dumps(event, default=str) + "\n"
 
-    return StreamingResponse(stream(), media_type="application/x-ndjson",
-                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+    return _ndjson(stream())
 
 
 class DocumentRequest(BaseModel):
@@ -512,6 +519,7 @@ class DocumentRequest(BaseModel):
     evidence: dict[str, dict] = {}     # clash id -> the session's fix (status, title, edit, pictures...)
     reviews: dict[str, list[dict]] = {}  # clash id -> [{team, name, decision, note, at}]
     marks: dict[str, str] = {}         # clash id -> "by_design" | "author"
+    triage: dict[str, dict] = {}       # clash id -> the verdict the browser shows (survives a server restart or rerun)
 
 
 _documents: dict[str, tuple[bytes, str, str]] = {}
@@ -532,8 +540,12 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
     report = ws.report(_report(report_id))
     if body.scope not in ("combined", "team", "model"):
         raise HTTPException(422, "scope is combined, team or model.")
+    # The verdicts the visitor sees (with their own "not a clash" marks applied), else the server's finished run. The
+    # shared run can be gone (a restart) or running again (someone pressed Triage again) while the page still has one.
     job = _triage_jobs.get(_triage_key(report))
-    if job is None or not job.done:
+    verdicts = ({k: v for k, v in body.triage.items() if isinstance(v, dict) and v.get("verdict")} if body.triage
+                else dict(job.results) if job is not None and job.done else {})
+    if len(verdicts) < len(report.clashes) // 2:
         raise HTTPException(409, "Triage the report first: the report sorts clashes by its verdicts.")
     scene = ws.scene(body.scene_id) if body.scene_id and body.scene_id in ws.scenes else None
     refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
@@ -545,7 +557,7 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
         try:
             matches = ws.match(report_id, body.scene_id) if scene is not None else None
             data, name, media = document.generate(
-                report, dict(job.results), ws.model, scope=body.scope, model_teams=body.teams, matches=matches,
+                report, verdicts, ws.model, scope=body.scope, model_teams=body.teams, matches=matches,
                 scene=scene, evidence=body.evidence, reviews=body.reviews, marks=body.marks,
                 include_bcf=body.bcf, emit=events.put)
             doc_id = uuid.uuid4().hex
@@ -563,8 +575,7 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
         while (event := events.get()) is not None:
             yield json.dumps(event, default=str) + "\n"
 
-    return StreamingResponse(stream(), media_type="application/x-ndjson",
-                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+    return _ndjson(stream())
 
 
 @app.get("/api/documents/{doc_id}")

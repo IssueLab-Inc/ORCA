@@ -117,6 +117,42 @@ class MetaChatModel:
         raw = body["choices"][0]["message"]["content"]
         return json.loads(_strip_fence(raw))
 
+    def complete_json_streamed(self, system: str, text: str, images: list[Path] | None, schema: dict | None,
+                               on_reasoning: Callable[[str], None]) -> dict:
+        """`complete_json` over streamed chat completions, for hosts whose model sends its reasoning as
+        `reasoning_content` deltas (Muse Spark Open on Baseten): `on_reasoning` hears each piece as it is written.
+        Falls back to `complete_json` if the host refuses the stream or sends no JSON."""
+        content = [{"type": "text", "text": text}] + [_image_part(p) for p in images or []]
+        strict = bool(schema) and self.strict
+        sys_text = system if strict or not schema else (
+            system + "\n\nReply with one JSON object matching this schema:\n" + json.dumps(schema))
+        payload = {
+            "model": self.model, "stream": True, "temperature": 0.2,
+            "messages": [{"role": "system", "content": sys_text}, {"role": "user", "content": content}],
+            "response_format": ({"type": "json_schema", "json_schema": {"name": "reply", "schema": schema, "strict": True}}
+                                if strict else {"type": "json_object"}),
+            **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
+        }
+        out = ""
+        with self.client.stream("POST", f"{self.base_url}/chat/completions", json=payload,
+                                headers={"Authorization": f"Bearer {self.api_key}"}) as r:
+            if r.status_code in (400, 404, 422):  # no streaming (or no structured output) here
+                r.read()
+                return self.complete_json(system, text, images, schema)
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line.startswith("data: ") or line.strip() == "data: [DONE]":
+                    continue
+                for choice in json.loads(line[6:]).get("choices", []):
+                    delta = choice.get("delta") or {}
+                    thought = delta.get("reasoning_content") or delta.get("reasoning")
+                    if thought:
+                        on_reasoning(thought)
+                    out += delta.get("content") or ""
+        if not out.strip():
+            return self.complete_json(system, text, images, schema)
+        return json.loads(_strip_fence(out))
+
     def complete_json_reasoning(self, system: str, text: str, images: list[Path] | None, schema: dict | None,
                                 on_reasoning: Callable[[str], None]) -> dict:
         """`complete_json`, streamed through the Responses endpoint so `on_reasoning` hears each reasoning summary as

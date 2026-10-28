@@ -111,18 +111,29 @@ def same_element(c: ReportClash) -> dict:
         "composite object\").")
 
 
-def triage_one(model: ChatModel, c: ReportClash, images: bool = True) -> dict:
+def triage_one(model: ChatModel, c: ReportClash, images: bool = True,
+               on_reasoning: Callable[[str], None] | None = None) -> dict:
+    """One verdict. With `on_reasoning`, and a model that streams its reasoning, each piece of it is passed on as the
+    model writes it."""
     pics = [p for _, p in c.images] if images else []
+    if on_reasoning and hasattr(model, "complete_json_streamed"):
+        return model.complete_json_streamed(PROMPT.read_text(), describe(c), pics, SCHEMA, on_reasoning)  # type: ignore[attr-defined]
     return model.complete_json(PROMPT.read_text(), describe(c), pics, schema=SCHEMA)  # type: ignore[call-arg]
+
+
+REASONING_KEPT = 6000      # characters of a clash's reasoning kept with its verdict
+REASONING_EVERY_S = 0.6    # how often a clash's new reasoning goes to the browser
 
 
 def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
                   workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
-                  settled: dict | None = None) -> dict[str, dict]:
+                  settled: dict | None = None, reasoning: bool = False) -> dict[str, dict]:
     """A verdict for every clash in `report`. `done` holds results already known (resumed or cached); they are kept.
     `settled` holds verdicts the open model already decides (`same_element`): no model call for those.
 
-    Emits {"type": "clash", "id", "source": "rule" | "model", **verdict} as each one lands."""
+    Emits {"type": "clash", "id", "source": "rule" | "model", **verdict} as each one lands. With `reasoning`, also
+    {"type": "reasoning", "id", "text"} with what the model has written since the last one (a few times a second per
+    clash, for a model that streams its reasoning), and the verdict keeps the whole reasoning (cut to REASONING_KEPT)."""
     results: dict[str, dict] = dict(done or {})
     todo: list[ReportClash] = []
     for c in report.clashes:
@@ -139,9 +150,25 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
     def one(c: ReportClash) -> tuple[str, dict]:
         for attempt in range(3):
             started = time.perf_counter()
+            thought: list[str] = []
+            pending: list[str] = []
+            sent = [time.perf_counter()]
+
+            def heard(piece: str) -> None:
+                thought.append(piece)
+                pending.append(piece)
+                if time.perf_counter() - sent[0] >= REASONING_EVERY_S:
+                    emit({"type": "reasoning", "id": c.id, "text": "".join(pending)})
+                    pending.clear()
+                    sent[0] = time.perf_counter()
+
             try:
-                v = triage_one(model, c, images)
-                return c.id, {**v, "source": "model", "seconds": round(time.perf_counter() - started, 1)}
+                v = triage_one(model, c, images, heard if reasoning else None)
+                out = {**v, "source": "model", "seconds": round(time.perf_counter() - started, 1)}
+                if thought:
+                    whole = "".join(thought).strip()
+                    out["reasoning"] = whole if len(whole) <= REASONING_KEPT else whole[:REASONING_KEPT] + " …"
+                return c.id, out
             except Exception as e:  # rate limits, timeouts, malformed JSON: back off and retry, then give up
                 err = f"{type(e).__name__}: {e}"[:200]
                 time.sleep(2 ** attempt)
@@ -221,7 +248,7 @@ class Job:
         def work():
             try:
                 triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True),
-                              settled=dict(self.facts))
+                              settled=dict(self.facts), reasoning=True)
             except Exception as e:
                 self.error = f"{type(e).__name__}: {e}"
             self.seconds = round(time.time() - self.started, 1)
@@ -235,8 +262,11 @@ class Job:
         return self
 
     def follow(self):
-        """Every event so far, then each new one until the run ends."""
+        """Every event so far, then each new one until the run ends. Reasoning is live only: a late subscriber skips the
+        reasoning already sent (each verdict keeps its own)."""
         i = 0
+        with self._cond:
+            joined = len(self.events)
         while True:
             with self._cond:
                 while i >= len(self.events) and not self.done:
@@ -244,9 +274,10 @@ class Job:
                     if i >= len(self.events) and not self.done:
                         break  # no news for a while: yield a keep-alive
                 batch, finished = self.events[i:], self.done
+            first = i
             i += len(batch)
             if batch:
-                yield from batch
+                yield from (e for k, e in enumerate(batch, first) if k >= joined or e.get("type") != "reasoning")
             elif not finished:
                 yield {"type": "ping"}
             if finished and i >= len(self.events):

@@ -266,15 +266,21 @@ export function Tour({ state, actions, onClose }: { state: TourState; actions: T
   // Set the page up, then follow the target: it can scroll, resize, or appear later.
   useEffect(() => {
     step.enter?.(actions, stateRef.current);
-    let revealed = false;
+    // Bring each control the step points at into view once: also one that appears later (Accept, Build), but
+    // without fighting a visitor who scrolls away afterwards.
+    // For a moment after the step starts or a new control appears, keep it in view: the page may still be changing
+    // under it (another clash selected into the same panel moves everything).
+    let shown: Element | null = null;
+    let settle = Date.now() + 1500;
     const find = () => {
       const el = step.target ? document.querySelector(step.target) : null;
-      if (el && step.reveal && !revealed) {
-        const group = el.closest("details");
+      if (el && el !== shown) {
+        const group = step.reveal ? el.closest("details") : null;
         if (group && !group.open) group.open = true;
-        el.scrollIntoView({ block: "center" });
-        revealed = true;
+        shown = el;
+        settle = Date.now() + 1500;
       }
+      if (el && Date.now() < settle && !inView(el)) el.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
       const r = el?.getBoundingClientRect();
       setRect(r && r.width && r.height ? r : null);
     };
@@ -338,6 +344,25 @@ export function Tour({ state, actions, onClose }: { state: TourState; actions: T
     </div>
   );
 }
+
+/** Wholly visible: inside the window and inside every scrolling panel it sits in. */
+function inView(el: Element) {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return true;  // hidden: nothing to scroll to
+  const big = r.height > window.innerHeight * 0.6;  // the viewer or a panel: its top showing is enough
+  const fits = (top: number, bottom: number, left: number, right: number) =>
+    r.top >= top - 1 && (big ? r.top < bottom - 40 : r.bottom <= bottom + 1) && r.left >= left - 1 && r.right <= right + 1;
+  if (!fits(0, window.innerHeight, 0, window.innerWidth)) return false;
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if (o !== "auto" && o !== "scroll") continue;
+    const b = p.getBoundingClientRect();
+    if (!fits(b.top, b.bottom, b.left, b.right)) return false;
+  }
+  return true;
+}
+
+const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 /** Beside the target if there is room (right, then left), else below or above it, kept on screen. */
 function place(r: DOMRect | null, h: number) {

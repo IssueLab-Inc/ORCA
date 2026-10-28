@@ -98,6 +98,8 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
       await api.document(report.id, {
         scene_id: sceneId, scope, teams, bcf, evidence, reviews: signoffs,
         marks: Object.fromEntries(Object.entries(reviewed).map(([id, r]) => [id, r.kind])),
+        // The verdicts on screen, without the model's reasoning (kept in the browser; not needed for the report).
+        triage: Object.fromEntries(Object.entries(triage).map(([id, { reasoning: _r, ...v }]) => [id, v])),
       }, (e) => {
         if (e.type === "ready") { setReady(e); onReady?.(); }
         else if (e.type === "error") setError(e.message);
@@ -153,6 +155,8 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
           <p className="hint"><LoaderCircle size={13} className="spin" aria-hidden /> {STEP[step.step]}
             {step.total ? ` · ${step.done ?? 0} of ${step.total}` : ""}…</p>)}
         {error && <p className="bad">{error}</p>}
+        {error?.startsWith("Triage the report first") && !triageRunning &&
+          <button className="btn small" onClick={() => { setError(null); onRunTriage(); }}>Triage all</button>}
         <div className="actions">
           {ready
             ? <a className="btn primary big" data-tour="download" href={ready.url} download={ready.name}><Download size={16} aria-hidden /> Download {ready.name} ({Math.max(1, Math.round(ready.bytes / 1024))} KB)</a>

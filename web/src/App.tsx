@@ -86,6 +86,8 @@ export function App() {
   // Bulk triage of the open report (shared on the server: a run someone else started is followed, not repeated).
   const [triage, setTriage] = useState<Record<string, TriageVerdict>>({});
   const [triageRun, setTriageRun] = useState<TriageRun | null>(null);
+  // What the triage model is writing right now, per clash being read (its reasoning, newest 600 characters).
+  const [triageLive, setTriageLive] = useState<Record<string, string>>({});
   // The coordination report: which team owns each model (guessed, then confirmed), the fixes to show with their
   // before/after pictures, and the teams' reviews (kept in this browser per report).
   const [modelTeams, setModelTeams] = useState<Record<string, Team>>({});
@@ -197,12 +199,18 @@ export function App() {
     if (!report) return;
     const rid = report.id;
     if (rerun) { setTriage({}); setTriageFilter(null); }
+    setTriageLive({});
     setTriageRun((r) => r ?? { model: "", open_weights: false, total: report.clashes.length, started: Date.now(), done: false });
     try {
       await api.triageStream(rid, sceneId, (e) => {
         if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false });
-        else if (e.type === "clash") { const { type: _t, id, ...v } = e; setTriage((t) => ({ ...t, [id]: v })); }
-        else if (e.type === "done") setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error });
+        else if (e.type === "clash") {
+          const { type: _t, id, ...v } = e;
+          setTriage((t) => ({ ...t, [id]: v }));
+          setTriageLive((l) => { if (!(id in l)) return l; const { [id]: _done, ...rest } = l; return rest; });
+        }
+        else if (e.type === "reasoning") setTriageLive((l) => ({ ...l, [e.id]: ((l[e.id] ?? "") + e.text).slice(-600) }));
+        else if (e.type === "done") { setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error }); setTriageLive({}); }
       }, rerun);
     } catch (e) { setError((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
   }
@@ -841,6 +849,8 @@ export function App() {
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
               insights={<><TriageCard run={triageRun} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+                live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: report.clashes.find((c) => c.id === id)?.name ?? id }))}
+                onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
                 open={report.clashes.filter((c) => !fixes[c.id] && !reviewed[c.id]).length} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
@@ -866,9 +876,9 @@ export function App() {
             onStart: openDemo,
             onTour: () => setTouring(true),
             details: <>
-              {reportSamples.length > 0 && !report && <>Loads the Navisworks clash report <b>{reportSamples[0]}</b>, with a picture of every
-                clash, and </>}{report ? "Loads " : ""}{picked.length} building model{picked.length === 1 ? "" : "s"}: {picked.map(shortName).join(", ")}.
-              {" "}About 15 seconds. To choose other models, use <b>Models</b> in the header.
+              Loads {reportSamples.length > 0 && !report ? <>the Navisworks clash report <b>{reportSamples[0]}</b> and </> : ""}
+              {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) in about 15
+              seconds. Other models: <b>Models</b>, in the header.
             </>,
           }} />
         )}
