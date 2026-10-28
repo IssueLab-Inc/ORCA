@@ -635,7 +635,16 @@ export function App() {
       };
       if (pilot.current) pilot.current.finish(show); else show();
     };
-    return { onEvent, finish, live };
+    const retire = () => {
+      if (!live()) return;
+      ++agentRun.current; pilot.current?.cancel();
+      const owned = p;
+      if (owned.phase !== "done") {
+        const retired: Progress = { ...owned, phase: "done", checking: null };
+        setProgress((current) => current === owned ? retired : current);
+      }
+    };
+    return { onEvent, finish, live, retire };
   }
 
   async function propose() {
@@ -714,7 +723,18 @@ export function App() {
       if (e.type === "checking_plan") update((r) => ({ ...r, phase: "checking" }));
     };
     const finish = (p: Plan | null) => { if (!live()) return; if (p) setPlan(p); update((r) => ({ ...r, phase: "done" })); setNow(Date.now()); };
-    return { onEvent, finish, live };
+    const retire = () => {
+      if (!live()) return;
+      const retiredRequest = ++planRequest.current, owned = run;
+      if (owned.phase !== "done") {
+        const note = "Stopped when newer work took over.";
+        const retired: PlanRun = { ...owned, phase: "done", status: Object.fromEntries(Object.entries(owned.status).map(([key, value]) =>
+          [key, value.state === "done" ? value : { ...value, state: "done", ok: false, note }])) };
+        setPlanRun((current) => current === owned ? retired : current);
+        setPlanError((current) => planRequest.current === retiredRequest ? note : current);
+      }
+    };
+    return { onEvent, finish, live, retire };
   }
 
   /** Build a plan: several ticked clashes together, or the root cause around one element. */
@@ -791,16 +811,26 @@ export function App() {
     resetWork(); setViewPlan(false); setViewContext(true); setPlanKind("context"); setCompare("after");
     setContextChosen(null); setAcknowledged([]);
     const started = Date.now(); setNow(started);
-    setContext({ objective, started, phase: "inspecting", messages: [], result: null, error: null, stale: false });
+    let run: ContextRun = { objective, started, phase: "inspecting", messages: [], result: null, error: null, stale: false };
+    setContext(run);
     const onEvent = (event: ContextEvent) => {
       if (!live()) return;
-      setContext((r) => r && contextStep(r, event));
+      run = contextStep(run, event); setContext(run);
       if (event.type === "context_result") {
         setContextChosen(event.proposals[0]?.id ?? null); setAcknowledged([]);
       }
     };
     const fail = (message: string) => onEvent({ type: "error", detail: message });
-    return { onEvent, fail, live };
+    const retire = () => {
+      if (!live()) return;
+      ++contextRequest.current;
+      const owned = run;
+      if (owned.phase !== "done") {
+        const retired: ContextRun = { ...owned, phase: "done", error: "Search stopped when newer work took over. Regenerate for the original objective to continue." };
+        setContext((current) => current === owned ? retired : current);
+      }
+    };
+    return { onEvent, fail, live, retire };
   }
 
   async function exploreContext(objective?: ContextObjective) {
@@ -871,6 +901,7 @@ export function App() {
   function replaceChatWork() {
     // Close the turn boundary before starting direct work; old tool events cannot create a fresh tracker.
     chatOwner.current.invalidate();
+    chatAgent.current?.retire(); chatPlan.current?.retire(); chatContext.current?.retire();
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
   }
   function onChatEvent(e: ChatEvent) {
