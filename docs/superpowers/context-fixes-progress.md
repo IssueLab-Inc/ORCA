@@ -1,6 +1,6 @@
 # Context fixes program — 2026-10-28
 
-Status: foundations complete/reviewed through 3568340; planner implemented but three review findings and constraint/fixture integration remain. UI/runtime slice follows.
+Status: foundations and planner/API/chat complete and reviewed through beb05d2; UI integration and driven browser/final branch review remain.
 
 Spec: docs/superpowers/specs/2026-10-28-context-fixes.md
 Plan: docs/superpowers/plans/2026-10-28-context-fixes.md
@@ -52,3 +52,11 @@ Correction to the preceding diagnostic: Northbank peer flows are known before ed
 Port/constraint/fixture correction 8adadf1 was cherry-picked as f8743a9 onto foundations. Scoped review found an exception leak for a known physical endpoint gap; fix 3568340 now independently checks both connection owners and prevents that exception. Final scoped review approved with no Critical/Important findings; full foundations Linux suite 173 passed, focused 94 passed. All Northbank reference offsets still pass with disclosed legacy-orientation warnings. The constrained metre/mm fixture proves the duct route needs a surrounding tray relocation under explicit locks/anchors.
 
 Planner commit e24fab4 is preserved on codex/context-fix-planner; next rebase it onto corrected foundations, then fix all three Task 2 findings (inspection keyword, initial pagination, chat cancellation) and integrate constraint inspection/stronger fixture. No UI completion claim yet.
+
+## Planner final checkpoint
+
+Planner rebased ec6b442 onto foundations485361f. Fix1a91469 addresses inspection dispatch, stable long-seed pagination, request-owned disconnect cancellation/backpressure/storage boundaries, explicit constraint capabilities and real constrained fixture acceptance/export. Review found a late cancelled chat turn could erase a newer completed history; fixbeb05d2 uses isolated turn histories and generation/lock-guarded publication. Scoped re-review2 approved with no actionable findings. Full Linux205 passed in29.59s; focused46 passed.
+
+Live configured-model QA on a disposable constrained fixture: first bounded run found no passing result in6 calls/68.7s (correctly inconclusive); second run found the required duct offset+tray relocation in6 calls/2 trials/49.612s. Explicitly acknowledged all6 review conditions; whole-plan acceptance200 with geometry/integrity passed, one confirmed resolved pair, exported30272-byte IFC reloaded with6 duct fittings and tray y0.30..0.40m; replay rejected409. No live user model or existing server was modified. Private QA traces/evidence are under ignored .superpowers; no fake route or API key is shipped.
+
+Next: planner PR2 stacked on PR1, then fresh Task3 UI worker and driven browser acceptance/export with the same constrained fixture.
