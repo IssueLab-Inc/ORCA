@@ -32,6 +32,8 @@ image = (
         "SIGHTLINE_CHAT_PER_DAY": "1500",
         "SIGHTLINE_VOICE_PER_HOUR": "60",      # spoken messages per visitor (Muse Voice Transcribe, $0.18 an audio hour)
         "SIGHTLINE_VOICE_PER_DAY": "2000",
+        "SIGHTLINE_OPEN_WEIGHTS": "0",         # titles and triage on Muse Spark unless the owner switches the open-weights
+                                               # model on (owner settings; kept in the "sightline-settings" Modal Dict)
     })
     .add_local_dir(ROOT / "server" / "sightline", f"{APP_DIR}/server/sightline", ignore=["__pycache__"])
     .add_local_dir(ROOT / "web" / "dist", f"{APP_DIR}/web/dist")

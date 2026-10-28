@@ -457,6 +457,15 @@ Header, thumbnails, Site (Oct 28):
   models. Northbank: 464 clashes in 1,732 elements, ~4 s; triage 39 calls, 101 s, 5 real (answer key 3/3). Landing and
   tour numbers follow.
 
+Owner and everyone settings (Oct 28, owner decision): the open-weights model costs per hour on Baseten, so it is off
+unless switched on. `server/sightline/settings.py` holds settings for everyone (open_weights, effort, triage_effort;
+None = environment default: `SIGHTLINE_OPEN_WEIGHTS` "0", `META_REASONING_EFFORT`, `TRIAGE_REASONING_EFFORT`), stored
+in the Modal Dict `sightline-settings` (when `MODAL_TASK_ID` is set) else `SIGHTLINE_SETTINGS_FILE` (default
+`server/.sightline-settings.json`, gitignored). Precedence: the owner's header > everyone's > environment
+(`MetaChatModel.effort`, `settings.open_weights()` → `triage_model()`; off = Muse Spark with a note). Owner-only
+`GET/PUT /api/settings`. UI: Owner menu "For me" / "For everyone"; header chip shows the owner's open-weights override.
+Tests use a per-test store (`tests/conftest.py`).
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

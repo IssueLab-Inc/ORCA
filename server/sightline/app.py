@@ -11,6 +11,7 @@ import tempfile
 import threading
 import uuid
 import wave
+from dataclasses import asdict
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
-from . import chat, context_planner, detect, document, edits, owner, plans, titles, triage
+from . import chat, context_planner, detect, document, edits, owner, plans, settings, titles, triage
 from .meta_client import load_env, transcribe, triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
@@ -259,6 +260,30 @@ def owner_unlock(body: Unlock, request: Request, response: Response):
 def owner_lock(response: Response):
     response.delete_cookie(owner.COOKIE, path="/api", secure=True, httponly=True, samesite="strict")
     return {"owner": False}
+
+
+def _settings_state() -> dict:
+    host = bool(os.environ.get("TRIAGE_API_KEY") or os.environ.get("BASETEN_API_KEY"))
+    return {"everyone": asdict(settings.current()), "defaults": settings.defaults(), "host": host}
+
+
+@app.get("/api/settings")
+def get_settings():
+    """The settings for everyone (settings.py): the owner's to read and change."""
+    if not owner.is_owner():
+        raise HTTPException(403, "Only the owner can see these settings.")
+    return _settings_state()
+
+
+@app.put("/api/settings")
+def put_settings(body: dict):
+    if not owner.is_owner():
+        raise HTTPException(403, "Only the owner can change these settings.")
+    try:
+        settings.update(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _settings_state()
 
 
 @app.get("/api/samples")

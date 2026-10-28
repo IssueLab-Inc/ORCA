@@ -192,6 +192,20 @@ It runs one container on purpose: open models and edits live in server memory. P
 and per day (`SIGHTLINE_PROPOSE_PER_HOUR`, `SIGHTLINE_PROPOSE_PER_DAY`, in `server/sightline/limits.py`), because
 each one is a paid Muse Spark call; **Check this move** is not limited.
 
+### Owner settings
+
+Set `SIGHTLINE_OWNER_TOKEN` (24+ characters, in the `sightline-meta` Modal secret, never in git) and open the site with
+`#owner` to unlock the gear in the header. It has two scopes:
+- **For me:** Muse Spark and triage reasoning effort, the open-weights model on or off, and skipping the demo caps, for
+  the owner's own requests only (kept in that browser).
+- **For everyone:** Muse Spark and triage reasoning effort and the open-weights model, for every visitor
+  (`server/sightline/settings.py`, kept in the `sightline-settings` Modal Dict, or a JSON file locally, so they survive
+  restarts).
+
+The owner's own settings win for the owner; the settings for everyone win over the environment. The open-weights model
+(Muse Spark Open, which writes clash titles and runs triage) is **off** unless switched on (`SIGHTLINE_OPEN_WEIGHTS`,
+default `0`): off, titles and triage use Muse Spark.
+
 ## Tests
 
 ```bash

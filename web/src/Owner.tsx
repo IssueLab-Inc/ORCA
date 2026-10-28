@@ -1,6 +1,6 @@
 import { KeyRound, Lock, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, setOwnerSettings, type Effort, type OwnerSettings } from "./api";
+import { api, setOwnerSettings, type Effort, type EveryoneSettings, type OwnerSettings, type SettingsState } from "./api";
 import { Popover } from "./ui";
 
 const KEY = "sightline.owner";
@@ -11,7 +11,9 @@ function stored(): OwnerSettings {
 }
 
 /**
- * Settings for the deployment's owner: reasoning effort and the demo caps. Hidden from visitors: the gear shows once
+ * Settings for the deployment's owner, in two scopes. "For me": reasoning effort, the open-weights model and the demo
+ * caps for the owner's own requests (this browser, sent with each request). "For everyone": reasoning effort and the
+ * open-weights model for every visitor (kept on the server). The owner's own win for the owner. Hidden from visitors: the gear shows once
  * unlocked, or on a page opened with #owner. The token is sent once; the server answers with a cookie this page's
  * scripts cannot read, so the token is never kept in the browser.
  */
@@ -21,6 +23,9 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const asked = typeof location !== "undefined" && location.hash.includes("owner");
+  const [scope, setScope] = useState<"me" | "everyone">("me");
+  const [everyone, setEveryone] = useState<SettingsState | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => { api.owner().then(setState).catch(() => setState(null)); }, []);
   useEffect(() => {
@@ -29,12 +34,22 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
     onChange(s);
   }, [state?.owner, settings]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (state?.owner) api.settings().then(setEveryone).catch((e) => setError((e as Error).message));
+  }, [state?.owner]);
+
   if (!state?.available || (!state.owner && !asked)) return null;
 
   const change = (next: OwnerSettings) => {
     setSettings(next);
     try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* private window */ }
   };
+  const saveEveryone = async (changes: Partial<EveryoneSettings>) => {
+    setError(null); setSaved(null);
+    try { setEveryone(await api.saveSettings(changes)); setSaved("Saved for everyone"); }
+    catch (e) { setError((e as Error).message); }
+  };
+  const ow = (v: boolean) => (v ? "on" : "off");
   const unlock = async () => {
     setError(null);
     try { await api.unlock(token); setToken(""); setState({ available: true, owner: true }); }
@@ -46,22 +61,63 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
       {() => state.owner ? (
         <div className="owner-menu">
           <b>Owner settings</b>
-          <label>Muse Spark reasoning
-            <select value={settings.effort ?? ""} onChange={(e) => change({ ...settings, effort: (e.target.value || undefined) as Effort | undefined })}>
-              <option value="">Default (server: low)</option>
-              {EFFORTS.map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label>Triage reasoning
-            <select value={settings.triage_effort ?? ""} onChange={(e) => change({ ...settings, triage_effort: (e.target.value || undefined) as Effort | undefined })}>
-              <option value="">Default (the host's)</option>
-              {EFFORTS.map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label className="check"><input type="checkbox" checked={settings.no_caps !== false}
-            onChange={(e) => change({ ...settings, no_caps: e.target.checked })} /> Skip the demo caps</label>
-          <p className="hint">Only your requests use these. A triage run started now uses your triage setting for everyone
-            following it.</p>
+          <div className="seg" role="group" aria-label="Who these settings are for">
+            <button className={scope === "me" ? "on" : ""} aria-pressed={scope === "me"} onClick={() => setScope("me")}>For me</button>
+            <button className={scope === "everyone" ? "on" : ""} aria-pressed={scope === "everyone"} onClick={() => setScope("everyone")}>For everyone</button>
+          </div>
+          {scope === "me" ? (<>
+            <label>Muse Spark reasoning
+              <select value={settings.effort ?? ""} onChange={(e) => change({ ...settings, effort: (e.target.value || undefined) as Effort | undefined })}>
+                <option value="">Same as everyone</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <label>Triage reasoning
+              <select value={settings.triage_effort ?? ""} onChange={(e) => change({ ...settings, triage_effort: (e.target.value || undefined) as Effort | undefined })}>
+                <option value="">Same as everyone</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <label>Open-weights model (titles, triage)
+              <select value={settings.open_weights == null ? "" : ow(settings.open_weights)}
+                onChange={(e) => change({ ...settings, open_weights: e.target.value === "" ? undefined : e.target.value === "on" })}>
+                <option value="">Same as everyone</option>
+                <option value="on">On: Muse Spark Open</option>
+                <option value="off">Off: Muse Spark</option>
+              </select>
+            </label>
+            <label className="check"><input type="checkbox" checked={settings.no_caps !== false}
+              onChange={(e) => change({ ...settings, no_caps: e.target.checked })} /> Skip the demo caps</label>
+            <p className="hint">Only your requests use these, and they win over the settings for everyone. A triage run you
+              start uses your triage settings for everyone following it.</p>
+          </>) : everyone ? (<>
+            <label>Muse Spark reasoning
+              <select value={everyone.everyone.effort ?? ""} onChange={(e) => void saveEveryone({ effort: (e.target.value || null) as Effort | null })}>
+                <option value="">Default ({everyone.defaults.effort ?? "the API's"})</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <label>Triage reasoning
+              <select value={everyone.everyone.triage_effort ?? ""} onChange={(e) => void saveEveryone({ triage_effort: (e.target.value || null) as Effort | null })}>
+                <option value="">Default ({everyone.defaults.triage_effort ?? "the host's"})</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <label>Open-weights model (titles, triage)
+              <select disabled={!everyone.host} value={everyone.everyone.open_weights == null ? "" : ow(everyone.everyone.open_weights)}
+                onChange={(e) => void saveEveryone({ open_weights: e.target.value === "" ? null : e.target.value === "on" })}>
+                <option value="">Default ({everyone.defaults.open_weights ? "on" : "off"})</option>
+                <option value="on">On: Muse Spark Open</option>
+                <option value="off">Off: Muse Spark</option>
+              </select>
+            </label>
+            {!everyone.host && <p className="hint">No open-weights host is configured (TRIAGE_API_KEY), so titles and triage
+              use Muse Spark.</p>}
+            <p className="hint">Every visitor's requests use these, kept on the server across restarts. Runs already going
+              keep their model.</p>
+            {saved && <p className="ok small" role="status">{saved}</p>}
+          </>) : <p className="hint">Reading the settings for everyone…</p>}
+          {error && <p className="bad small">{error}</p>}
           <button className="btn small" onClick={async () => { await api.lock().catch(() => undefined); setState({ available: true, owner: false }); }}>
             <Lock size={13} aria-hidden /> Lock this browser</button>
         </div>

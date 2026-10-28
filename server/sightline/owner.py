@@ -30,6 +30,7 @@ _effort: contextvars.ContextVar[str | None] = contextvars.ContextVar("effort", d
 _triage_effort: contextvars.ContextVar[str | None] = contextvars.ContextVar("triage_effort", default=None)
 _owner: contextvars.ContextVar[bool] = contextvars.ContextVar("owner", default=False)
 _no_caps: contextvars.ContextVar[bool] = contextvars.ContextVar("no_caps", default=False)
+_open_weights: contextvars.ContextVar[bool | None] = contextvars.ContextVar("open_weights", default=None)
 
 
 def _token() -> str:
@@ -78,6 +79,8 @@ def settings(header: str | None) -> dict:
         if raw.get(k) in EFFORTS:
             out[k] = raw[k]
     out["no_caps"] = raw.get("no_caps", True) is not False
+    if isinstance(raw.get("open_weights"), bool):  # absent: follow the setting for everyone (settings.py)
+        out["open_weights"] = raw["open_weights"]
     return out
 
 
@@ -85,11 +88,11 @@ def enter(is_owner: bool, header: str | None) -> list:
     """Set this request's context: whether it is the owner's, and the owner's settings. Returns tokens for `leave`."""
     s = settings(header) if is_owner else {}
     return [_owner.set(is_owner), _effort.set(s.get("effort")), _triage_effort.set(s.get("triage_effort")),
-            _no_caps.set(is_owner and s.get("no_caps", True))]
+            _no_caps.set(is_owner and s.get("no_caps", True)), _open_weights.set(s.get("open_weights"))]
 
 
 def leave(tokens: list) -> None:
-    for var, tok in zip((_owner, _effort, _triage_effort, _no_caps), tokens):
+    for var, tok in zip((_owner, _effort, _triage_effort, _no_caps, _open_weights), tokens):
         var.reset(tok)
 
 
@@ -99,6 +102,11 @@ def is_owner() -> bool:
 
 def no_caps() -> bool:
     return _no_caps.get()
+
+
+def open_weights() -> bool | None:
+    """The owner's own choice of the open-weights model for this request, else None (settings.open_weights decides)."""
+    return _open_weights.get()
 
 
 def effort(role: str = "default") -> str | None:
