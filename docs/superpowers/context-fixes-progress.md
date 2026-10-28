@@ -1,6 +1,6 @@
 # Context fixes program — 2026-10-28
 
-Status: all three slices implemented, task-reviewed and whole-branch-reviewed; final profile fix approved through e672cb5. Preparing fast-forward-safe backports and readying the three stacked PRs.
+Status: complete. All three slices implemented, task-reviewed, whole-branch-reviewed and pushed as ready stacked PRs. No PR merge or deployment performed.
 
 Spec: docs/superpowers/specs/2026-10-28-context-fixes.md
 Plan: docs/superpowers/plans/2026-10-28-context-fixes.md
@@ -86,3 +86,15 @@ Fresh four-file Northbank checks after the fix: legacy offsets042/057/061 all re
 Restarted final backend, latest web bundle: Chat -> wider discovery -> complete tray+duct Both preview -> six-condition guard -> whole acceptance/reload -> exactly one confirmed report clash fixed -> browser IFC export/reopen all passed. Export30272bytes contains6 duct fittings and trayy0.30..0.40m; browser console errors empty. Original explicit-action, stale409 and stored-objective regeneration proofs remain valid. Actual configured model found this plain-profile arrangement in49.612s; bounded unsuccessful search remains inconclusive. No fake model route ships.
 
 PR3: https://github.com/IssueLab-Inc/clashwise-sightline/pull/3, attached and stacked on PR2. All PRs remain unmerged and undeployed. Native Windows still needs its original native PDF dependencies; all PDF tests passed in frozen-lock Linux/Pango. QA artifacts will be preserved outside the completed SDD scratch directory before cleanup.
+
+## Delivery checkpoint
+
+| Slice | PR | Branch | Final source checkpoint |
+|---|---|---|---|
+| Foundations | https://github.com/IssueLab-Inc/clashwise-sightline/pull/1 | codex/context-fix-foundations | 26a05a8 |
+| Planner/API/chat | https://github.com/IssueLab-Inc/clashwise-sightline/pull/2 | codex/context-fix-planner | f8d7bdc |
+| Product integration | https://github.com/IssueLab-Inc/clashwise-sightline/pull/3 | codex/context-fix-product | 9dd32ca, reviewed source identical to e672cb5 plus documentation |
+
+The final foundation-only backport passed189 server tests in30.92s. The complete stack passed227; web12 and build passed. Final task/whole-branch reviews have no open Critical/Important findings. Geometry/profile fixes were backported to their owning slices, then merged forward with no source-tree changes and no force pushes. All author/committer identities and absence of coauthor/session trailers were verified. All PRs are attached to the chat and ready for review in1→2→3 order.
+
+Own QA servers8001/8002 were stopped; unrelated server processes were not changed. Evidence, private reproducible fixture scripts, exported IFCs and review reports are archived under ignored `.superpowers/qa/2026-10-28-context-fixes/`; completed SDD scratch is removed. The working checkout remains on `codex/context-fix-product` for PR feedback. Next action belongs to the user: review the stacked PRs; merging/deployment needs separate authorization.
