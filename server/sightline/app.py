@@ -68,19 +68,53 @@ def _ndjson(events) -> StreamingResponse:
 
 
 class _RequestEvents:
-    """Bounded progress production with cooperative cancellation when this request closes."""
+    """Never wait for a reader, including when an emit runs under Workspace.lock.
+
+    Keep at most 64 events. On saturation discard progress (including wrapped trial
+    meshes), evicting queued progress to make room for canonical results/errors/done
+    and the end sentinel. If canonical events alone fill the queue, explicitly cancel
+    the request with an error and an end sentinel rather than silently lose a result.
+    A connected non-reader can retain this bounded queue, but cannot retain a worker.
+    """
     def __init__(self, request):
         self.request = request
         self.queue = queue.Queue(maxsize=64)
         self.cancel = threading.Event()
+        self._closed = False
+
+    @staticmethod
+    def _progress(event):
+        if event is None:
+            return False
+        if event.get('type') in ('agent', 'context_event', 'plan_event'):
+            return _RequestEvents._progress(event.get('event'))
+        return event.get('type') in {'thinking', 'tool', 'tool_result', 'trial', 'reasoning',
+                                    'ideas', 'checking', 'attempt', 'context_progress', 'item', 'checking_plan'}
 
     def put(self, event):
-        while not self.cancel.is_set():
-            try:
-                self.queue.put(event, timeout=.1)
+        # Consumers only use get_nowait; guard eviction and append with Queue's same
+        # mutex so concurrent producers cannot displace a canonical event by accident.
+        with self.queue.mutex:
+            if self.cancel.is_set() or self._closed:
                 return
-            except queue.Full:
-                continue
+            pending = self.queue.queue
+            if len(pending) == self.queue.maxsize:
+                if self._progress(event):
+                    return
+                for i, queued in enumerate(pending):
+                    if self._progress(queued):
+                        del pending[i]
+                        break
+                else:
+                    pending.clear()
+                    pending.append(dict(type='error', detail='Request cancelled: too many unread result events. Please retry.'))
+                    pending.append(None)
+                    self._closed = True
+                    self.cancel.set()
+                    return
+            pending.append(event)
+            if event is None:
+                self._closed = True
 
     async def stream(self):
         try:
@@ -617,9 +651,6 @@ def _chat_for(request: Request) -> chat.Chat:
     global _chat
     if _chat is None or _chat.ws is not ws:  # tests swap the workspace
         _chat = chat.Chat(ws)
-    who = client_id(request.headers, request.client.host if request.client else None)
-    _chat.propose_allowed = lambda: None if owner.no_caps() else propose_limit.take(who)
-    _chat.propose_allowed_many = lambda n: None if owner.no_caps() else propose_limit.take_many(who, n)
     return _chat
 
 
@@ -633,6 +664,11 @@ def chat_turn(body: ChatTurn, request: Request):
     if refused:
         raise HTTPException(429, refused)
     c = _chat_for(request)
+    # Capture identity/bypass on this request, never on the shared Chat/session.
+    who = client_id(request.headers, request.client.host if request.client else None)
+    no_caps = owner.no_caps()
+    allowed = lambda: None if no_caps else propose_limit.take(who)
+    allowed_many = lambda n: None if no_caps else propose_limit.take_many(who, n)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
     events = _RequestEvents(request)
@@ -640,7 +676,8 @@ def chat_turn(body: ChatTurn, request: Request):
 
     def work():
         try:
-            c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel)
+            c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel,
+                   propose_allowed=allowed, propose_allowed_many=allowed_many)
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         events.put({"type": "done"})

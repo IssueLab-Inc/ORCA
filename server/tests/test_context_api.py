@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from fastapi.testclient import TestClient
 from sightline import app as api, context_planner as planner, owner
 from sightline.chat import Chat, Context
@@ -71,7 +73,7 @@ def test_optional_report_seed_must_match_and_only_confirmed_pairs_resolve(tmp_pa
     assert pairs == [obj]  # the other report pair never involved edited geometry
 
 
-def test_failed_recheck_leaves_live_model_unchanged(tmp_path, monkeypatch):
+def test_failed_private_copy_commit_is_not_published(tmp_path, monkeypatch):
     client, ws, sid, obj, c = client_setup(tmp_path, monkeypatch)
     proposal = stream(client, sid, obj)['proposals'][0]
     before = ws.scene(sid).model.to_string()
@@ -274,13 +276,22 @@ def test_chat_disconnect_cancels_nested_search_before_trials_or_storage(tmp_path
     assert len(chat.sessions[next(iter(chat.sessions))].messages) == 1
 
 
-def test_chat_disconnect_unblocks_a_producer_with_a_full_event_queue(tmp_path, monkeypatch):
+def test_chat_disconnect_cancels_history_after_progress_queue_saturates(tmp_path, monkeypatch):
     import asyncio
     import threading
     from sightline import owner
-    from test_chat import Scripted as ChatScripted
     ws, sid, obj, c = setup(tmp_path)
-    outer = ChatScripted([[('set_view', {'mode': 'xray'})] * 100, 'Should never be called'])
+    entered, release = threading.Event(), threading.Event()
+    class Model:
+        calls = 0
+        def chat(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                return dict(role='assistant', tool_calls=[dict(id=f't{i}', function=dict(
+                    name='get_clash', arguments='{"clash_id":"missing"}')) for i in range(100)])
+            entered.set(); assert release.wait(3)
+            return dict(role='assistant', content='Cancelled answer must not be published')
+    outer = Model()
     chat = Chat(ws, outer)
     monkeypatch.setattr(api, 'ws', ws); monkeypatch.setattr(api, '_chat', chat)
     full, captured, threads = threading.Event(), [], []
@@ -302,13 +313,144 @@ def test_chat_disconnect_unblocks_a_producer_with_a_full_event_queue(tmp_path, m
     async def disconnect():
         response = api.chat_turn(api.ChatTurn(message='Show x-ray', scene_id=sid), request)
         assert await asyncio.to_thread(full.wait, 3)
+        assert await asyncio.to_thread(entered.wait, 3)
+        assert not captured[0].cancel.is_set()  # progress saturation alone does not cancel
         request.disconnected = True
         try:
             await asyncio.wait_for(anext(response.body_iterator), 3)
         except StopAsyncIteration:
             pass
-    asyncio.run(disconnect())
+    try:
+        asyncio.run(disconnect())
+    finally:
+        release.set()
     for thread in threads: thread.join(3)
-    assert all(not thread.is_alive() for thread in threads) and len(outer.seen) == 1
+    assert all(not thread.is_alive() for thread in threads) and outer.calls == 2
     assert captured[0].cancel.is_set() and captured[0].queue.maxsize == 64
+    assert len(next(iter(chat.sessions.values())).messages) == 1
     assert not event_type(request).cancel.is_set()  # independent requests have independent cancellation
+
+
+def test_saturated_chat_trial_emits_release_workspace_lock_and_preserve_results(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    from test_chat import Scripted as ChatScripted
+    ws, sid, obj, _ = setup(tmp_path)
+    root = tmp_path / 'reports' / 'r'; root.mkdir(parents=True)
+    root.joinpath('report.xml').write_text(_report_xml([(obj['element_a'], obj['element_b'], -.3)]))
+    rid = ws.open_report_sample('r').id
+    class Request:
+        async def is_disconnected(self): return False
+    events = api._RequestEvents(Request())
+    def propose(*args, on_event, **kwargs):
+        with ws.lock:
+            for i in range(1000):
+                on_event(dict(type='trial', index=i, pieces=[]))
+        return dict(options=[], attempts=[], understanding='Checked')
+    monkeypatch.setattr(ws, 'propose', propose)
+    chat = Chat(ws, ChatScripted([[('propose_fixes', {'clash_id': 'c0001'})], 'Finished']))
+    def work():
+        chat.turn(chat.session(None), 'Propose', Context(sid, rid), events.put, cancel=events.cancel)
+        events.put(dict(type='context_event', event=dict(type='context_result', proposals=[])))
+        events.put(dict(type='error', detail='Retained error'))
+        events.put(dict(type='done')); events.put(None)
+    thread = threading.Thread(target=work, daemon=True); thread.start(); thread.join(.5)
+    # No consumer has started: real chat -> propose -> trial callbacks must not hold the lock.
+    acquired = ws.lock.acquire(timeout=.5)
+    if acquired: ws.lock.release()
+    try:
+        assert acquired and not thread.is_alive()
+        assert events.queue.qsize() <= 64 and not events.cancel.is_set()
+        async def drain(): return [json.loads(line) async for line in events.stream()]
+        drained = asyncio.run(drain())
+        assert [e['type'] for e in drained if e['type'] in {'proposal', 'message', 'context_event', 'error', 'done'}] == [
+            'proposal', 'message', 'context_event', 'error', 'done']
+        assert drained[-3]['event']['type'] == 'context_result'
+    finally:
+        events.cancel.set(); thread.join(2)
+
+
+def test_canonical_event_overflow_explicitly_cancels_and_completes():
+    import asyncio
+    import threading
+    class Request:
+        async def is_disconnected(self): return False
+    events = api._RequestEvents(Request())
+    thread = threading.Thread(target=lambda: [events.put(dict(type='proposal', id=i)) for i in range(100)], daemon=True)
+    thread.start(); thread.join(.5)
+    try:
+        assert not thread.is_alive() and events.cancel.is_set() and events.queue.qsize() <= 64
+        async def drain(): return [json.loads(line) async for line in events.stream()]
+        drained = asyncio.run(drain())
+        assert drained[-1]['type'] == 'error' and 'cancel' in drained[-1]['detail'].lower()
+    finally:
+        events.cancel.set(); thread.join(2)
+
+
+@pytest.mark.parametrize('tool, args, units', [
+    ('propose_fixes', {'clash_id': 'c0001'}, 1),
+    ('explore_wider_fix', {'clash_id': 'c0001'}, 3),
+    ('plan_fixes_together', {'clash_ids': ['c0001']}, 2),
+    ('plan_root_cause', {'hub': 'hub'}, 3),
+])
+@pytest.mark.parametrize('owner_first', [False, True])
+def test_interleaved_chat_requests_keep_their_own_allowance(tmp_path, monkeypatch, tool, args, units, owner_first):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+    from sightline import plans
+    ws, sid, obj, _ = setup(tmp_path)
+    root = tmp_path / 'reports' / 'r'; root.mkdir(parents=True)
+    root.joinpath('report.xml').write_text(_report_xml([(obj['element_a'], obj['element_b'], -.3)]))
+    rid = ws.open_report_sample('r').id
+    entered, release = threading.Event(), threading.Event()
+    class Model:
+        def chat(self, messages, tools):
+            if messages[-1]['role'] == 'tool':
+                return dict(role='assistant', content='Finished')
+            if messages[-1]['content'].endswith('First'):
+                entered.set(); assert release.wait(3)
+            return dict(role='assistant', tool_calls=[dict(id='charge', function=dict(name=tool, arguments=json.dumps(args)))])
+    chat = Chat(ws, Model()); defaults = (chat.propose_allowed, chat.propose_allowed_many)
+    monkeypatch.setattr(api, 'ws', ws); monkeypatch.setattr(api, '_chat', chat)
+    allowance = ProposeLimit(6, 0); allowance.take_many('first', 6)
+    monkeypatch.setattr(api, 'propose_limit', allowance); monkeypatch.setattr(api, 'chat_limit', ProposeLimit())
+    monkeypatch.delenv('SIGHTLINE_TRUST_FORWARDED', raising=False)
+    monkeypatch.setattr(ws, 'propose', lambda *a, **kw: dict(options=[], attempts=[], understanding='Checked'))
+    monkeypatch.setattr(planner, 'build', lambda *a, **kw: dict(type='context_result', proposals=[]))
+    monkeypatch.setattr(plans, 'pairs_for', lambda *a: ([(obj['element_a'], obj['element_b'])] * 2, []))
+    plan = SimpleNamespace(root_cause='Cause', strategy='fix_partners', check={'passed': True}, items=[])
+    monkeypatch.setattr(plans, 'build_batch', lambda *a: plan)
+    def root_cause(*a, charge, **kw):
+        assert charge(2) is None  # delayed edit charge must use the same visitor as the initial unit
+        return plan
+    monkeypatch.setattr(plans, 'build_root_cause', root_cause)
+    monkeypatch.setattr(plans, 'to_json', lambda p: '{}')
+    threads, spawn = [], owner.spawn
+    def tracked(work):
+        thread = spawn(work); threads.append(thread); return thread
+    monkeypatch.setattr(owner, 'spawn', tracked)
+    class Request:
+        headers = {}
+        def __init__(self, host): self.client = SimpleNamespace(host=host)
+        async def is_disconnected(self): return False
+    tokens = owner.enter(owner_first, '{"effort":"high"}')
+    try:
+        first = api.chat_turn(api.ChatTurn(message='First', scene_id=sid, report_id=rid), Request('first'))
+    finally:
+        owner.leave(tokens)
+    try:
+        assert entered.wait(3)
+        second = api.chat_turn(api.ChatTurn(message='Second', scene_id=sid, report_id=rid), Request('second'))
+        threads[1].join(3); assert not threads[1].is_alive()
+    finally:
+        release.set()
+        for thread in threads: thread.join(3)
+    async def drain(response): return [json.loads(line) async for line in response.body_iterator]
+    first_events, second_events = asyncio.run(drain(first)), asyncio.run(drain(second))
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(allowance._clients['first']) == 6 and len(allowance._clients['second']) == units
+    assert (chat.propose_allowed, chat.propose_allowed_many) == defaults
+    first_result = next(e for e in first_events if e['type'] == 'tool_result')
+    assert first_result['summary'].startswith('refused') is not owner_first
+    assert not next(e for e in second_events if e['type'] == 'tool_result')['summary'].startswith('refused')
