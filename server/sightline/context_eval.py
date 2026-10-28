@@ -24,6 +24,20 @@ def element_constraints(scene: IfcScene, gid: str) -> list[str]:
     return ['KeepFixed'] if properties.get('KeepFixed') is True else []
 
 
+def check_offset_profile(scene: IfcScene, gid: str) -> None:
+    """Reject source topology the context bend generator cannot preserve.
+
+    Exact types matter: hollow and rounded profiles inherit from the plain forms,
+    but apply_offset generates only filled rectangular or circular bend sections.
+    This context-only restriction does not change legacy edits or whole-run moves.
+    """
+    profile_class = edits._body(scene.entity(gid))[1].SweptArea.is_a()
+    if profile_class not in ('IfcRectangleProfileDef', 'IfcCircleProfileDef'):
+        raise edits.Unsupported(
+            f'unsupported offset profile: {profile_class}; generated bends preserve only plain '
+            'IfcRectangleProfileDef and IfcCircleProfileDef sections')
+
+
 def _number(value, name):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
         raise ValueError(f'{name} must be a finite number')
@@ -79,6 +93,7 @@ def _validate(scene, objective, operations, discovered):
             split = _vector(op.get('split_m'), 2, 'split_m')
             if split[0] >= split[1]:
                 raise ValueError('split_m must be increasing')
+            check_offset_profile(scene, gid)
             run = edits.run_of(scene, gid)
             d = np.array(run.direction)
             if abs(d @ edits.UP) > 1e-6 or abs(delta @ d) > 1e-6:
@@ -353,7 +368,8 @@ def _integrity(before, after, originals, sources, result):
                     not np.allclose((ra.depth_m,ra.width_m), (rb.depth_m,rb.width_m), atol=.001, rtol=0)):
                 errors.append(f'connection profile mismatch between {a} and {b}')
         except edits.Unsupported:
-            # Generated bends are built from the source profile by apply_offset.
+            # Context validation restricts offset sources to exact plain rectangle/circle
+            # profiles, whose sections apply_offset preserves in generated bends.
             if a not in sources or b not in sources or sources.get(a) != sources.get(b):
                 review.append(dict(id='profile_metadata', message='Some joint profiles cannot be verified; confirm fitting compatibility.'))
         if orientation_ok and gap is not None and gap <= TOL and False not in endpoint_evidence:
