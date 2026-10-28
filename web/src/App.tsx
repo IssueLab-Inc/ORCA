@@ -217,7 +217,7 @@ export function App() {
     }
     for (const it of plan.items) {
       const moved = new Set(it.option?.moved ?? []);
-      for (const gid of [it.element_a, it.element_b]) g[gid] = moved.has(gid) ? "b" : "a";
+      for (const gid of [it.element_a, it.element_b, ...(it.others ?? [])]) g[gid] = moved.has(gid) ? "b" : "a";
       for (const gid of moved) g[gid] = "b";
     }
     return g;
@@ -523,7 +523,7 @@ export function App() {
     if (!v || !plan || !viewPlan) return;
     const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));  // moves and trims: their pairs
     const pairs = plan.items.flatMap((it) => it.option && it.option.kind !== "offset"
-      ? movedPairs(it.option.moved, [it.element_a, it.element_b]) : []);
+      ? movedPairs(it.option.moved, [it.element_a, it.element_b, ...(it.others ?? [])]) : []);
     if (meshes.length || pairs.length) v.frameFix(meshes, pairs);
     else if (plan.hub) v.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
   }, [planOptions, plan, viewPlan]);
@@ -1015,8 +1015,10 @@ export function App() {
         for (const ps of pieces) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
         return next;
       });
-      markFixed(items.map((i) => [i.element_a, i.element_b] as const), items.map((i) => i.option!.title));
-      const groups = clashIdsOf(items.map((i) => [i.element_a, i.element_b] as const));
+      // A merged item (one pipe through two rails) fixes its clashes with every partner.
+      const pairsOf = (i: PlanItem) => [i.element_b, ...(i.others ?? [])].map((o) => [i.element_a, o] as const);
+      markFixed(items.flatMap(pairsOf), items.flatMap((i) => pairsOf(i).map(() => i.option!.title)));
+      const groups = items.map((i) => clashIdsOf(pairsOf(i)).flat());
       setEvidence((ev) => {
         const next = { ...ev };
         items.forEach((it, k) => { for (const id of new Set([...groups[k], ...it.clash_ids])) next[id] = evidenceOf(it.option!, "accepted", pics); });
