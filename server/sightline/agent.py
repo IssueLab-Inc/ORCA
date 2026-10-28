@@ -313,6 +313,12 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
     new, or worse than before the trim, count against it: nothing new hit."""
     title = cand.get("title", "trim at the joint")
     tol = 0.002
+    # A trim tidies a joint between two members that stay put (a transom into a mullion). When the other side is a
+    # service that can move (a cable tray over a fence post), it moves: cutting the post would weaken the guarding.
+    if scene.element(target).fixed and not scene.element(other).fixed:
+        return Attempt(title, [0.0, 0.0, 0.0], False,
+                       f"cannot trim this element: {scene.element(other).name} can move instead; a trim only tidies a "
+                       "joint between members that stay put", "trim"), None
     try:
         cut = edits.butt_trim(scene, target, other)
         by = float(cand["by_m"]) if cand.get("by_m") is not None else cut.by_m

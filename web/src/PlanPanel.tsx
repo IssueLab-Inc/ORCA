@@ -74,7 +74,7 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
                 <div className="pi-label">{it.label.replace(/Ifc/g, "")}</div>
                 {!it.in_report && <span className="chip warn small">not in the report</span>}
                 <div className="pi-fix">{it.option ? <><b>{it.option.title}</b> <span className="why">· {editText(it)}{res?.min_clearance_m != null ? ` · ${mm(res.min_clearance_m)} clear` : ""}</span></>
-                  : it.error ? <span className="bad">{it.error}</span>
+                  : it.error ? <ul className="pi-why">{it.error.split("\n").map((line, k) => <li key={k}>{line}</li>)}</ul>
                     : <span className="why">{st?.note ?? "waiting"}</span>}</div>
                 {res && !res.passed && res.reason && <div className="bad small">{res.reason}</div>}
                 {conflict && <div className="bad small">Collides with another fix in this plan ({conflict.detail})</div>}
@@ -89,7 +89,7 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
       {plan && plan.strategy !== "as_designed" && (
         <div className="plan-actions">
           <button className="btn primary" data-tour="accept-plan" disabled={busy || !items.some((i) => i.option)} onClick={onAccept}>
-            <CircleCheck size={15} aria-hidden /> Accept {plan.check.passed ? "the plan" : `the ${ok} verified`}</button>
+            <CircleCheck size={15} aria-hidden /> {!ok ? "Nothing to accept yet" : plan.check.passed ? "Accept the plan" : `Accept the ${ok} verified`}</button>
           <button className="btn" onClick={onDiscard}><Trash2 size={15} aria-hidden /> Discard</button>
           <span className="hint">{plan.seconds.toFixed(0)} s · checked as one, so the fixes do not collide</span>
         </div>

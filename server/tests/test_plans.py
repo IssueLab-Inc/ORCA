@@ -106,3 +106,25 @@ def test_root_cause_charges_fixes_only_when_edits_are_needed(tmp_path):
     asked = []
     plan = plans.build_root_cause(ws, sid, rid2, beam, charge=lambda n: asked.append(n) or "no allowance left")
     assert asked == [2] and plan.advice == "no allowance left" and all(it.error for it in plan.items)
+
+
+def test_pairs_sharing_a_movable_element_become_one_fix():
+    from types import SimpleNamespace as NS
+    elements = {"pipe": NS(fixed=False, name="Air pipe", ifc_class="IfcPipeSegment"),
+                "rail_n": NS(fixed=True, name="Rail north", ifc_class="IfcMember"),
+                "rail_s": NS(fixed=True, name="Rail south", ifc_class="IfcMember"),
+                "girder": NS(fixed=True, name="Girder", ifc_class="IfcBeam"),
+                "duct": NS(fixed=False, name="Duct", ifc_class="IfcDuctSegment"),
+                "tray": NS(fixed=False, name="Tray", ifc_class="IfcCableCarrierSegment")}
+    ws = NS(scene=lambda sid: NS(element=lambda g: elements[g]))
+    items = [plans.Item("pipe|rail_n", "pipe", "rail_n", "", ["c1"], distance_m=-0.05),
+             plans.Item("pipe|rail_s", "pipe", "rail_s", "", ["c2"], distance_m=-0.06),
+             plans.Item("duct|girder", "duct", "girder", "", ["c3"]),
+             plans.Item("girder|tray", "girder", "tray", "", ["c4"])]
+    merged = plans.merge_shared(ws, "s", items)
+    one = [it for it in merged if it.element_a == "pipe"]
+    assert len(one) == 1 and one[0].element_b == "rail_n" and one[0].others == ["rail_s"]
+    assert one[0].clash_ids == ["c1", "c2"] and one[0].distance_m == -0.06
+    assert "2 elements" in one[0].label
+    # the girder stays put, so the duct and the tray each keep their own fix
+    assert sorted(it.key for it in merged if not it.others) == ["duct|girder", "girder|tray"]

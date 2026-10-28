@@ -16,6 +16,12 @@ export const TOUR = {
 } as const;
 export const TOUR_QUESTION = "Why are there so many clashes on Level 02? Fix the root cause.";
 
+// The machine cell's tour clashes, by their parts' names in the STEP (PC-03 Rev A, ClashWiseDemoModels).
+export const CELL = {
+  ladder: ["CT-301 run 2 along the west fence"], post: ["Fence post W5"],
+  pipe: ["PL-301 compressed air DN25 segment 2"], rails: ["CV-301 side rail north", "CV-301 side rail south"],
+} as const;
+
 /** What the tour can see of the app. */
 export interface TourState {
   busy: boolean; reportOpen: boolean; modelsOpen: boolean;
@@ -30,12 +36,15 @@ export interface TourState {
   patternsRead: boolean; reviewedCount: number; signoffs: number; docOpen: boolean; docReady: boolean;
   /** The tour's clashes in the open report: their ids and numbers (null until the check has found them). */
   duct: { id: string; number: number } | null; joint: { id: string; number: number } | null;
+  /** The machine cell from STEP is open; its tour's clashes; something has been fixed (Export has a change to give). */
+  cellOpen: boolean; ladder: { id: string; number: number } | null; pipes: { id: string; number: number }[];
 }
 
 /** What "Show me" can do for the visitor beyond clicking the control the step points at. */
 export interface TourActions {
-  filterReal: () => void; clearFilter: () => void; selectClash: (which: "duct" | "joint") => void; compare: (m: "before" | "after" | "both") => void;
-  replay: (what: "duct" | "joint" | "plan") => void; ask: (send: boolean) => void; signoff: () => void;
+  filterReal: () => void; clearFilter: () => void; selectClash: (which: "duct" | "joint" | "ladder") => void; compare: (m: "before" | "after" | "both") => void;
+  replay: (what: "duct" | "joint" | "plan" | "ladder" | "pipe") => void; ask: (send: boolean) => void; signoff: () => void;
+  openCell: () => void; fixPipe: () => void;
   overview: () => void; closeReport: () => void;
 }
 
@@ -48,15 +57,15 @@ interface Step {
   show?: { label: string; run?: (a: TourActions, s: TourState) => void; hidden?: (s: TourState) => boolean };  // no run: click the target
   enter?: (a: TourActions, s: TourState) => void;  // set the page up for this step (a filter that would hide the target)
   reveal?: boolean;                    // open the target's group in the clash list and scroll to it
-  fallback?: { what: "duct" | "joint" | "plan"; when: (s: TourState) => boolean };  // offer a recorded run
+  fallback?: { what: "duct" | "joint" | "plan" | "ladder" | "pipe"; when: (s: TourState) => boolean };  // offer a recorded run
 }
 
-const row = (which: "duct" | "joint") => (s: TourState) => `[data-clash="${s[which]?.id ?? "none"}"] .clash-main`;
+const row = (which: "duct" | "joint" | "ladder") => (s: TourState) => `[data-clash="${s[which]?.id ?? "none"}"] .clash-main`;
 const no = (c: TourState["duct"]) => (c ? <b>#{c.number}</b> : null);
 const ran = (s: TourState) => s.proposing || s.proposalDone;
 const slowProposal = (s: TourState) => !s.proposalDone && !s.replaying && (!!s.error || s.proposingFor > 45 || !s.proposing);
 
-export const STEPS: Step[] = [
+export const BUILDING_STEPS: Step[] = [
   // 1. The problem
   {
     act: "Design coordination", title: "A building, three teams, one set of models",
@@ -263,7 +272,110 @@ export const STEPS: Step[] = [
 const PAD = 6;
 const CARD_W = 340;
 
-export function Tour({ state, actions, onClose }: { state: TourState; actions: TourActions; onClose: () => void }) {
+/** The machine cell's tour: a robot palletising cell opened from its STEP file, checked, fixed and handed back as STEP. */
+export const CELL_STEPS: Step[] = [
+  {
+    act: "From STEP", title: "A robot cell, as its designers sent it",
+    body: () => <>PC-03 is a robot palletising cell: 144 parts from mechanical CAD, in one STEP file. Sightline converts it to
+      check it. Every part keeps its name and colour, straight bars and pipes stay exact, and Muse names what each part is.
+      At the end you get your STEP back with the fixes.</>,
+    target: "[data-tour=cell]", done: (s) => s.cellOpen && s.reportOpen && !s.busy,
+    show: { label: "Open it for me", run: (a) => a.openCell() },
+  },
+  {
+    act: "From STEP", title: "What Sightline found",
+    body: (s) => <>The cell checked against itself: {s.triageTotal || "about a hundred"} clashes. Most are how a cell is built:
+      anchors in their plates, the conveyor's drums in its rails, the robot working over the conveyor. Five problems were
+      planted in this revision; the check finds all of them.</>,
+    target: "[data-tour=detected]",
+  },
+  {
+    act: "Triage", title: "Sort them",
+    body: (s) => s.triageDone
+      ? <>Done: {s.triageTotal} clashes sorted by <b>{s.triageOpen ? "Muse Spark Open" : "Muse Spark"}</b>.</>
+      : <>Click <b>Triage all</b>: every clash gets a verdict, so only the real problems are left to fix.</>,
+    target: "[data-tour=triage]", done: (s) => s.triageDone,
+    show: { label: "Start it for me", run: () => (document.querySelector("[data-tour=triage] .btn.primary") as HTMLElement | null)?.click(),
+      hidden: (s) => s.triageStarted },
+  },
+  {
+    act: "Triage", title: "The real ones",
+    body: (s) => <>Click <b>Real problem</b> (red){s.realCount ? `: ${s.realCount} of ${s.triageTotal}` : ""}. The rest are by
+      design and stay in the list for the record.</>,
+    target: "[data-tour=triage-real]", done: (s) => s.filter === "real_clash",
+    show: { label: "Filter for me", run: (a) => a.filterReal() },
+  },
+  {
+    act: "A move", title: "A cable tray through a fence post",
+    body: (s) => <>Open {s.ladder ? <b>#{s.ladder.number}</b> : "the cable tray"}: the CT-301 cable ladder runs into fence post
+      W5 of the safety guarding.</>,
+    target: row("ladder"), reveal: true, done: (s) => !!s.ladder && s.clashId === s.ladder.id,
+    show: { label: "Open it for me", run: (a) => a.selectClash("ladder") },
+  },
+  {
+    act: "A move", title: "Ask for a fix",
+    body: (s) => s.proposalDone && s.options
+      ? <>Verified: the tray clears the post, and nothing else is hit. The post is guarding, so it stays; the tray moves.
+        The ladder's pieces move as one, because in the STEP they belong to one group and touch.</>
+      : <>Click <b>Propose fixes</b>. Sightline tries ideas from Muse Spark and checks each against the whole cell.</>,
+    target: "[data-tour=propose], [data-tour=fix-anyway]", done: (s) => s.proposalDone && s.options > 0,
+    show: { label: "Ask for me", hidden: ran, run: () => {
+      (document.querySelector("[data-tour=fix-anyway]") as HTMLElement | null)?.click();
+      window.setTimeout(() => (document.querySelector("[data-tour=propose]") as HTMLElement | null)?.click(), 300);
+    } },
+    fallback: { what: "ladder", when: slowProposal },
+  },
+  {
+    act: "A move", title: "Accept it",
+    body: () => <>Click <b>Accept this fix</b>. The server edits the model and the viewer reloads it.</>,
+    target: "[data-tour=accept]", reveal: true, done: (s) => !!s.ladder && s.fixed.includes(s.ladder.id), show: { label: "Accept for me" },
+  },
+  {
+    act: "Together", title: "One pipe, two rails",
+    body: (s) => <>{s.pipes.length ? <>{s.pipes.map((p, k) => <b key={p.id}>{k ? " and " : ""}#{p.number}</b>)}: </> : null}the
+      compressed-air pipe runs through both of the conveyor's side rails. Fixed one at a time, each fix would ignore the
+      other rail. <b>Fix them together</b>: Sightline sees one pipe and two rails, and makes it one job.</>,
+    target: "main.stage", done: (s) => s.planRunning || s.planReady,
+    show: { label: "Fix them together", run: (a) => a.fixPipe() },
+  },
+  {
+    act: "Together", title: "One fix for both rails",
+    body: (s) => s.planReady
+      ? <>The plan is ready: one fix for the pipe that clears both rails, checked against the whole cell.</>
+      : <>Muse Spark proposes, Sightline checks: an offset under the rails, or a move, whichever clears both.</>,
+    target: "main.stage", done: (s) => s.planReady,
+    fallback: { what: "pipe", when: (s) => !s.planReady && !s.replaying && (!!s.planError || s.planFor > 75 || !s.planRunning) },
+  },
+  {
+    act: "Together", title: "Accept the plan",
+    body: () => <>Click <b>Accept the plan</b> in the Plan tab.</>,
+    target: "[data-tour=accept-plan]", done: (s) => s.pipes.length > 0 && s.pipes.every((p) => s.fixed.includes(p.id)),
+    show: { label: "Accept for me" },
+  },
+  {
+    act: "Hand-off", title: "Your STEP back",
+    body: () => <><b>Export STEP + IFC</b> gives the cell back as STEP: the moved and offset parts written into the original
+      file, names and colours kept, the new pieces in their assemblies. The IFC comes with it for coordination tools.</>,
+    target: "[data-tour=export]",
+  },
+  {
+    act: "Sightline", title: "A machine, coordinated", enter: (a) => a.overview(),
+    body: () => <>
+      <span className="tour-stats">
+        <span><b>13 of 13</b> planted clashes found</span>
+        <span><b>0</b> unexpected</span>
+        <span><b>144</b> parts typed by Muse</span>
+        <span><b>STEP</b> in, STEP out</span>
+      </span>
+      The same agent as on buildings: Muse Spark proposes, geometry proves, and the edit goes back into the designer's own
+      file.</>,
+  },
+];
+
+export function Tour({ state, actions, onClose, which = "northbank" }: {
+  state: TourState; actions: TourActions; onClose: () => void; which?: "northbank" | "cell";
+}) {
+  const STEPS = which === "cell" ? CELL_STEPS : BUILDING_STEPS;
   const [index, setIndex] = useState(0);
   const step = STEPS[index];
   const [rect, setRect] = useState<DOMRect | null>(null);

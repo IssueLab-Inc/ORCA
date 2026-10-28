@@ -1,15 +1,18 @@
 """The operations Sightline offers, shared by the web API and the MCP server so they never drift."""
 from __future__ import annotations
 
-import os
 import json
+import os
 import shutil
 import tempfile
 import threading
+import uuid
 from collections import Counter
 
+import ifcopenshell.geom
+import ifcopenshell.util.element
 import ifcopenshell.util.system
-import uuid
+import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
@@ -219,17 +222,9 @@ class Workspace:
                 if not src:
                     continue
                 parts = json.loads(Path(src["manifest"]).read_text())["parts"]
-                moves = {}
-                for gid, info in parts.items():
-                    try:
-                        now = s.placement(gid)[:3, 3]
-                    except Exception:  # not in the model any more
-                        continue
-                    delta = [float(a - b) for a, b in zip(now, info["origin"])]
-                    if any(abs(d) > 1e-6 for d in delta):
-                        moves[gid] = delta
+                moves, replace, add = step_changes(s, i, parts)
                 stem = Path(src["step"]).stem
-                out.append(step.export(Path(src["step"]), moves, parts, out_dir / f"{stem}.sightline.step"))
+                out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.sightline.step", moves, replace, add))
             return out
 
     # Clash reports (Navisworks XML).
@@ -394,3 +389,58 @@ class Workspace:
             v = verify.check(scene, [m["a"]], clearance_m=0.0)
             hit = next((h for h in v.hits if h.other == m["b"]), None)
             return {"matched": True, "physical": True, "distance_m": hit.distance_m if hit else None}
+
+
+def _spec(scene: IfcScene, element) -> dict:
+    """An element's body for `step.export`, in metres and world axes: its extrusion when it is one, else its mesh."""
+    try:
+        _, _, item, origin, d, px, _ = edits._frames(scene, element)
+        k = scene.unit_scales[scene.index_of(element.GlobalId)]
+        area = item.SweptArea
+        if area.is_a("IfcCircleProfileDef"):
+            profile = ("circle", area.Radius * k)
+        elif area.is_a("IfcRectangleProfileDef"):
+            profile = ("rect", area.XDim * k, area.YDim * k)
+        else:
+            raise edits.Unsupported(area.is_a())
+        return {"kind": "prism", "profile": profile, "start": (np.asarray(origin) * k).tolist(),
+                "axis": np.asarray(d).tolist(), "xdir": np.asarray(px).tolist(), "depth": item.Depth * k}
+    except edits.Unsupported:
+        settings = ifcopenshell.geom.settings()
+        settings.set("use-world-coords", True)
+        geom = ifcopenshell.geom.create_shape(settings, element).geometry
+        return {"kind": "mesh", "verts": np.asarray(geom.verts, float).reshape(-1, 3).tolist(),
+                "faces": np.asarray(geom.faces, int).reshape(-1, 3).tolist()}
+
+
+def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, list]:
+    """What changed in a model converted from STEP, for `step.export`: moved parts (placement against the manifest's
+    origin), parts whose extrusion changed (an offset's first piece, a trimmed member) and new parts (the rest of an
+    offset), each new part tied to the STEP part it came from through its `Sightline_STEP` label."""
+    model = scene.models[index]
+    moves, replace, add = {}, {}, []
+    for gid, info in parts.items():
+        try:
+            element = model.by_guid(gid)
+        except RuntimeError:
+            continue
+        delta = np.asarray(scene.placement(gid)[:3, 3]) - np.asarray(info["origin"])
+        prism = info.get("prism")
+        if prism:
+            now = _spec(scene, element)
+            moved_start = np.asarray(prism["start"]) + delta
+            if now["kind"] != "prism" or abs(now["depth"] - prism["depth"]) > 1e-6 \
+                    or np.linalg.norm(np.asarray(now["start"]) - moved_start) > 1e-6:
+                replace[gid] = now
+                continue
+        if np.any(np.abs(delta) > 1e-6):
+            moves[gid] = delta.tolist()
+    known = set(parts)
+    for element in model.by_type("IfcElement"):
+        if element.GlobalId in known or element.Representation is None or element.is_a("IfcFeatureElement"):
+            continue
+        source = ifcopenshell.util.element.get_pset(element, "Sightline_STEP") or {}
+        if source.get("Label"):
+            add.append({"name": element.Name or element.is_a()[3:], "label": source["Label"],
+                        "spec": _spec(scene, element)})
+    return moves, replace, add

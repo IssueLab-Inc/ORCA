@@ -8,7 +8,7 @@ import { useEffect, type ReactNode } from "react";
 export function About({ start, onClose, triageOpen = false }: {
   // onGolden: one click opens the demo models, checks them, picks the duct-through-girder clash and proposes a fix.
   start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void;
-    onCell?: () => void };  // the second demo: the palletising cell from STEP
+    onCell?: () => void; onCellTour?: () => void };  // the second demo: the palletising cell from STEP
   onClose?: () => void;
   triageOpen?: boolean;  // titles and triage run on the open-weights model now (server: /api/models)
 }) {
@@ -55,8 +55,12 @@ export function About({ start, onClose, triageOpen = false }: {
             <p>Robot palletising cell PC-03: 144 parts, five planted problems. Sightline converts the STEP, checks it,
               moves what clashes, and gives you the STEP back with the fixes.</p>
           </div>
-          <button className="btn big" disabled={start.disabled} onClick={start.onCell}>
-            <Cpu size={16} aria-hidden /> Open the machine cell</button>
+          <div className="about-second-cta">
+            <button className="btn big" data-tour="cell" disabled={start.disabled} onClick={start.onCell}>
+              <Cpu size={16} aria-hidden /> Open the machine cell</button>
+            {start.onCellTour && <button className="btn big" disabled={start.disabled} onClick={start.onCellTour}>
+              <Compass size={16} aria-hidden /> Take the cell tour</button>}
+          </div>
         </section>
       )}
 

@@ -506,6 +506,22 @@ STEP models (Oct 28, owner decision; design in `docs/step.md`, code `server/sigh
   C2 ladder +150 mm verified and written back. In the browser Muse Spark proposed exactly that move.
 - **Modal image:** needs `libgl1` for OCP.
 
+Cell fixes and tour (Oct 28, owner feedback on Fix together for #61/#68: two agents, both failed, a wall of text):
+- **Exact STEP bars and rods:** `step._prism` writes plain cylinders and boxes as `IfcExtrudedAreaSolid` (cell: 97
+  exact, 47 meshes), so offsets and trims work on STEP parts. Export now replaces changed prototypes and adds new pieces
+  (offset middles, risers, bends) to the part's group with its name and colour (`service.step_changes`; docs/step.md).
+  Place shapes with `BRepBuilderAPI_Transform`, never `.Moved()` (names and colours are lost on write).
+- **One problem, one agent:** `plans.merge_shared` merges Fix-together pairs that share a movable element into one item
+  (`others`), and the agent is told every obstacle. A shared fixed element (the girder) is not merged.
+- **No trimming guarding for a service:** `_try_trim` refuses to trim a fixed element when the other side can move (the
+  first ladder recording cut post W5 down to the tray).
+- **Plain-words failures:** `plans.failure_summary`: one line per idea ("up 150 mm: hits …", by name) plus the advice;
+  the Plan panel lists them and says "Nothing to accept yet" when nothing verified.
+- **Cell tour:** `CELL_STEPS` in Tour.tsx (12 steps), from the landing's **Take the cell tour** or the header's Tour
+  when the cell is open (`tourWhich`). Clashes found by part names (`CELL`, `clashOfNames`); recorded runs
+  `web/public/tour/cell-ladder.json` and `cell-pipe-plan.json`.
+- **Eval:** `evals/step_cell.py`: C1 one job, verified; C2 +150; C3 trim 40 mm; exported air line 7 → 15 parts.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
@@ -520,4 +536,4 @@ Next, in order.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP machines placed
-inside building models; offsets and trims on STEP parts.
+inside building models; offsets and trims on meshed STEP parts.

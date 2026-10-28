@@ -14,8 +14,8 @@ from sightline.service import Workspace
 def write_step(path: Path, ladder_z: float = 1000.0) -> Path:
     """A tiny machine in mm: group "Frame" with a post (green) and a beam on it; group "Ladder" with two touching runs
     (one see-through), the first through the post when ladder_z is low."""
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
-    from OCP.gp import gp_Pnt
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
     from OCP.STEPCAFControl import STEPCAFControl_Writer
@@ -33,12 +33,16 @@ def write_step(path: Path, ladder_z: float = 1000.0) -> Path:
     box = lambda x, y, z, dx, dy, dz: BRepPrimAPI_MakeBox(gp_Pnt(x, y, z), dx, dy, dz).Shape()
     root = shapes.NewShape(); name(root, "Test cell")
     groups = {}
-    for g in ("Frame", "Ladder"):
+    for g in ("Frame", "Ladder", "Air"):
         groups[g] = shapes.NewShape(); name(groups[g], g)
     items = [("Frame", "Post P1", box(0, 0, 0, 100, 100, 2000), (0.1, 0.6, 0.2), 1.0),
              ("Frame", "Beam B1", box(-500, 0, 2000, 1100, 100, 200), (0.1, 0.6, 0.2), 1.0),
              ("Ladder", "Ladder run 1", box(-1000, 20, ladder_z, 1050, 60, 50), (0.8, 0.5, 0.1), 1.0),
-             ("Ladder", "Ladder run 2", box(50, 20, ladder_z, 1000, 60, 50), (0.8, 0.5, 0.1), 0.5)]
+             ("Ladder", "Ladder run 2", box(50, 20, ladder_z, 1000, 60, 50), (0.8, 0.5, 0.1), 0.5),
+             # a 40 mm rod along X through a 300 mm block: the case a local offset fixes
+             ("Air", "Air pipe 1", BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(-1000, 3000, 1550), gp_Dir(1, 0, 0)), 20, 3000).Shape(),
+              (0.2, 0.4, 0.9), 1.0),
+             ("Frame", "Block K1", box(300, 2900, 1400, 300, 200, 300), (0.1, 0.6, 0.2), 1.0)]
     for g, n, shape, rgb, alpha in items:
         label = shapes.AddShape(shape, False); name(label, n)
         if alpha < 1:
@@ -66,7 +70,7 @@ def test_conversion_keeps_names_groups_colours_and_metres(cell):
     scene = IfcScene([ifc])
     b = scene.bounds()
     by_name = {scene.entity(g).Name: g for g in b}
-    assert set(by_name) == {"Post P1", "Beam B1", "Ladder run 1", "Ladder run 2"}
+    assert set(by_name) == {"Post P1", "Beam B1", "Ladder run 1", "Ladder run 2", "Air pipe 1", "Block K1"}
     assert b[by_name["Post P1"]][1][2] == pytest.approx(2.0, abs=1e-3)       # mm → m
     assert scene.step_group(by_name["Ladder run 2"]) == "Ladder"
     run2 = scene.entity(by_name["Ladder run 2"])
@@ -76,6 +80,12 @@ def test_conversion_keeps_names_groups_colours_and_metres(cell):
     again, _ = step.convert(src, src.parent / "again")
     assert sorted(g.GlobalId for g in IfcScene([again]).model.by_type("IfcBuildingElementProxy")) == sorted(b)
     assert {p["name"] for p in manifest["parts"].values()} == set(by_name)
+    # Rods and bars become exact extrusions, so offsets and trims work on them; the rest would stay meshes.
+    pipe = scene.entity(by_name["Air pipe 1"]).Representation.Representations[0].Items[0]
+    assert pipe.is_a("IfcExtrudedAreaSolid") and pipe.SweptArea.Radius == pytest.approx(0.02)
+    assert pipe.Depth == pytest.approx(3.0)
+    post = scene.entity(by_name["Post P1"]).Representation.Representations[0].Items[0]
+    assert post.is_a("IfcExtrudedAreaSolid") and post.Depth == pytest.approx(2.0)
 
 
 def test_detection_finds_the_ladder_through_the_post(cell):
@@ -102,6 +112,8 @@ def test_export_writes_the_moves_back_into_the_step(tmp_path):
     scene = ws.scene(sid)
     run = scene.connected_run({scene.entity(g).Name: g for g in scene.bounds()}["Ladder run 1"])
     ws.apply(sid, run, (0.0, 0.0, 1.5))
+    pipe = {scene.entity(g).Name: g for g in scene.bounds()}["Air pipe 1"]
+    ws.apply_offset(sid, pipe, [1.15, 1.75], -0.3)   # under the block (x 0.3-0.6 m from the pipe's start at -1 m)
     out = ws.export(sid, tmp_path / "export")
     assert sorted(p.name for p in out) == ["Test-cell.sightline.ifc", "Test-cell.sightline.step"]
     moved = {p.name: p for p in step.parts(next(p for p in out if p.suffix == ".step"))[0]}
@@ -117,6 +129,18 @@ def test_export_writes_the_moves_back_into_the_step(tmp_path):
     assert zmin(moved["Post P1"]) == pytest.approx(zmin(before["Post P1"]))
     assert moved["Ladder run 2"].alpha == pytest.approx(0.5, abs=0.01) and moved["Post P1"].group == "Frame"
 
+    def box_of(p):
+        box = Bnd_Box(); BRepBndLib.Add_s(p.shape, box); lo, hi = box.CornerMin(), box.CornerMax()
+        return (lo.X(), lo.Y(), lo.Z()), (hi.X(), hi.Y(), hi.Z())
+    after = step.parts(next(p for p in out if p.suffix == ".step"))[0]
+    pieces = [p for p in after if p.group == "Air"]
+    assert len(pieces) >= 5                                          # the pipe split: ends, risers, middle
+    assert 100 < box_of(moved["Air pipe 1"])[1][0] < 300            # its first piece now stops short of the block
+    lowest = min(box_of(p)[0][2] for p in pieces)
+    assert lowest == pytest.approx(1550 - 20 - 300, abs=1)          # the middle runs 300 mm lower
+    assert all(p.colour == pytest.approx((0.2, 0.4, 0.9), abs=0.01) for p in pieces)
+    assert sum(box_of(moved["Block K1"]), ()) == pytest.approx(sum(box_of(before["Block K1"]), ()))
+
 
 def test_classes_come_from_the_model_and_unknown_ones_stay_proxies(tmp_path):
     src = write_step(tmp_path / "Test-cell.step")
@@ -124,8 +148,8 @@ def test_classes_come_from_the_model_and_unknown_ones_stay_proxies(tmp_path):
     class Classes:
         def complete_json(self, system, user, images, schema=None):
             return {"parts": [{"i": 0, "class": "IfcMember", "type": "POST"},
-                              {"i": 2, "class": "IfcCableCarrierSegment", "type": "CABLELADDERSEGMENT"},
-                              {"i": 3, "class": "IfcNotAClass", "type": "x"}]}
+                              {"i": 3, "class": "IfcCableCarrierSegment", "type": "CABLELADDERSEGMENT"},
+                              {"i": 4, "class": "IfcNotAClass", "type": "x"}]}
     ifc, _ = step.convert(src, tmp_path / "out", Classes())
     scene = IfcScene([ifc])
     by_name = {scene.entity(g).Name: scene.entity(g) for g in scene.bounds()}

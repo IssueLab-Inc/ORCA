@@ -207,6 +207,110 @@ def mesh(shape, scale: float) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(verts, dtype=float) * scale, np.asarray(faces, dtype=int).reshape(-1, 3)
 
 
+def _prism(shape, scale: float) -> dict | None:
+    """The part as an exact straight extrusion when it is one solid that is a cylinder rod or a box: {"profile":
+    ("circle", r) | ("rect", x, y), "start", "axis", "xdir" (unit, world), "depth"} in metres; else None (a mesh).
+    Rods and bars written this way can be offset and trimmed like any IFC member; everything else stays a mesh."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SOLID, TopAbs_VERTEX
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    solids = TopExp_Explorer(shape, TopAbs_SOLID)
+    if not solids.More():
+        return None
+    solid = solids.Current()
+    solids.Next()
+    if solids.More():
+        return None                        # several solids: a compound part stays a mesh
+    planes, cylinders = [], []
+    exp = TopExp_Explorer(solid, TopAbs_FACE)
+    while exp.More():
+        face = TopoDS.Face(exp.Current())
+        surf = BRepAdaptor_Surface(face)
+        props = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(face, props)
+        c = props.CentreOfMass()
+        centre = np.array([c.X(), c.Y(), c.Z()])
+        if surf.GetType() == GeomAbs_Plane:
+            n = surf.Plane().Axis().Direction()
+            normal = np.array([n.X(), n.Y(), n.Z()]) * (-1 if face.Orientation() == TopAbs_REVERSED else 1)
+            planes.append((centre, normal))
+        elif surf.GetType() == GeomAbs_Cylinder:
+            cyl = surf.Cylinder()
+            d, o = cyl.Axis().Direction(), cyl.Axis().Location()
+            cylinders.append((np.array([o.X(), o.Y(), o.Z()]), np.array([d.X(), d.Y(), d.Z()]), cyl.Radius()))
+        else:
+            return None
+        exp.Next()
+    vol = GProp_GProps()
+    BRepGProp.VolumeProperties_s(solid, vol)
+    volume = abs(vol.Mass())
+    tol = 1e-6
+
+    if len(cylinders) == 1 and len(planes) == 2:
+        origin, axis, r = cylinders[0]
+        (c0, n0), (c1, n1) = planes
+        if abs(abs(n0 @ axis) - 1) > tol or abs(abs(n1 @ axis) - 1) > tol:
+            return None
+        on_axis = lambda c: np.linalg.norm((c - origin) - axis * ((c - origin) @ axis))
+        if on_axis(c0) > 1e-3 * r or on_axis(c1) > 1e-3 * r:
+            return None
+        depth = abs((c1 - c0) @ axis)
+        if depth <= 0 or abs(volume - np.pi * r * r * depth) > 1e-3 * volume:
+            return None
+        axis = axis if (c1 - c0) @ axis > 0 else -axis
+        xdir = np.cross(axis, [0, 0, 1] if abs(axis[2]) < 0.9 else [1, 0, 0])
+        return {"profile": ("circle", r * scale), "start": (c0 * scale).tolist(), "axis": axis.tolist(),
+                "xdir": (xdir / np.linalg.norm(xdir)).tolist(), "depth": depth * scale}
+
+    if len(planes) == 6 and not cylinders:
+        dirs: list[np.ndarray] = []
+        for _, n in planes:
+            if not any(abs(abs(n @ d) - 1) < tol for d in dirs):
+                dirs.append(n)
+        if len(dirs) != 3 or any(abs(dirs[i] @ dirs[j]) > tol for i in range(3) for j in range(i + 1, 3)):
+            return None
+        pts = []
+        v = TopExp_Explorer(solid, TopAbs_VERTEX)
+        while v.More():
+            p = BRep_Tool.Pnt_s(TopoDS.Vertex(v.Current()))
+            pts.append((p.X(), p.Y(), p.Z()))
+            v.Next()
+        pts = np.asarray(pts)
+        lo = [float((pts @ d).min()) for d in dirs]
+        hi = [float((pts @ d).max()) for d in dirs]
+        size = [h - l for l, h in zip(lo, hi)]
+        if abs(volume - size[0] * size[1] * size[2]) > 1e-3 * volume:
+            return None
+        order = sorted(range(3), key=lambda i: -size[i])      # longest is the extrusion; the next is the profile's X
+        a, x, y = order
+        axis, xdir = dirs[a], dirs[x]
+        centre = sum(dirs[i] * (lo[i] + hi[i]) / 2 for i in range(3))
+        start = centre - axis * size[a] / 2
+        return {"profile": ("rect", size[x] * scale, size[y] * scale), "start": (start * scale).tolist(),
+                "axis": axis.tolist(), "xdir": xdir.tolist(), "depth": size[a] * scale}
+    return None
+
+
+def _extrusion(model, prism: dict, lo: np.ndarray):
+    """An IfcExtrudedAreaSolid for a `_prism`, placed relative to the part's placement at `lo` (metres)."""
+    centre = model.createIfcAxis2Placement2D(model.createIfcCartesianPoint((0.0, 0.0)), None)
+    kind = prism["profile"]
+    profile = (model.createIfcCircleProfileDef("AREA", None, centre, float(kind[1])) if kind[0] == "circle" else
+               model.createIfcRectangleProfileDef("AREA", None, centre, float(kind[1]), float(kind[2])))
+    position = model.createIfcAxis2Placement3D(
+        model.createIfcCartesianPoint(tuple(float(c) for c in np.asarray(prism["start"]) - lo)),
+        model.createIfcDirection(tuple(float(c) for c in prism["axis"])),
+        model.createIfcDirection(tuple(float(c) for c in prism["xdir"])))
+    return model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)),
+                                            float(prism["depth"]))
+
+
 # ------------------------------------------------------------------------------------------------- classes
 
 def classify(found: list[Part], model, batch: int = 200) -> None:
@@ -281,8 +385,9 @@ def write_ifc(found: list[Part], scale: float, out: Path, title: str, source: st
     styles: dict = {}
     elements, groups, manifest, triangles = [], {}, {}, 0
     for k, part in enumerate(found):
+        prism = _prism(part.shape, scale)
         verts, faces = mesh(part.shape, scale)
-        part.shape = None                 # the mesh is all that is needed from here; free the B-rep
+        part.shape = None                 # the mesh (or the prism) is all that is needed from here; free the B-rep
         if not len(faces):
             continue
         triangles += len(faces)
@@ -291,13 +396,17 @@ def write_ifc(found: list[Part], scale: float, out: Path, title: str, source: st
         lo = verts.min(axis=0)
         part.origin = [float(x) for x in lo]
         part.gid = ifcopenshell.guid.compress(uuid.uuid5(NAMESPACE, f"{digest}:{'/'.join(part.path)}").hex)
-        points = model.createIfcCartesianPointList3D([tuple(map(float, v)) for v in verts - lo])
-        faceset = model.createIfcTriangulatedFaceSet(points, None, True,
-                                                     [tuple(int(i) + 1 for i in f) for f in faces], None)
+        if prism:
+            item, kind = _extrusion(model, prism, lo), "SweptSolid"
+        else:
+            points = model.createIfcCartesianPointList3D([tuple(map(float, v)) for v in verts - lo])
+            item = model.createIfcTriangulatedFaceSet(points, None, True,
+                                                      [tuple(int(i) + 1 for i in f) for f in faces], None)
+            kind = "Tessellation"
         if part.colour:
-            model.createIfcStyledItem(faceset, [_style(model, styles, part.colour, part.alpha)], None)
-        shape = model.createIfcProductDefinitionShape(None, None, [
-            model.createIfcShapeRepresentation(body, "Body", "Tessellation", [faceset])])
+            model.createIfcStyledItem(item, [_style(model, styles, part.colour, part.alpha)], None)
+        representation = model.createIfcShapeRepresentation(body, "Body", kind, [item])
+        shape = model.createIfcProductDefinitionShape(None, None, [representation])
         placement = model.createIfcLocalPlacement(storey.ObjectPlacement, model.createIfcAxis2Placement3D(
             model.createIfcCartesianPoint(tuple(part.origin)), None, None))
         element = _element(model, part, placement, shape)
@@ -306,7 +415,9 @@ def write_ifc(found: list[Part], scale: float, out: Path, title: str, source: st
                              properties={"Group": part.group, "Label": part.path[-1], "Source": source})
         elements.append(element)
         groups.setdefault(part.group, []).append(element)
-        manifest[part.gid] = {"name": part.name, "group": part.group, "path": part.path, "origin": part.origin}
+        manifest[part.gid] = {"name": part.name, "group": part.group, "path": part.path, "origin": part.origin,
+                              "prism": prism, "colour": list(part.colour) if part.colour else None,
+                              "alpha": part.alpha}
     if not elements:
         raise StepError(f"{source} has no solid geometry.")
     model.createIfcRelContainedInSpatialStructure(ifcopenshell.guid.new(), None, None, None, elements, storey)
@@ -359,19 +470,79 @@ def convert(path: Path, out_dir: Path, classify_with=None, cache: Path | None = 
 
 # ------------------------------------------------------------------------------------------------- export
 
-def export(step_path: Path, moves: dict[str, list[float]], manifest: dict, out: Path) -> Path:
-    """Write the STEP again with each moved part translated by its delta (metres, world axes): the component's
-    location becomes parent⁻¹ · T · parent · old, so nested assemblies keep their own placements. Names and colours
-    are kept. `manifest` is the converter's (its `parts`)."""
+def _shape(spec: dict, scale: float):
+    """A B-rep in STEP units from a spec in metres: an exact cylinder or box for a "prism", else a sewn faceted solid
+    from a "mesh" (verts, faces)."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeSolid, \
+        BRepBuilderAPI_Sewing
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.TopAbs import TopAbs_SHELL
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    k = 1 / scale
+    if spec["kind"] == "prism":
+        axis, xdir = np.asarray(spec["axis"], float), np.asarray(spec["xdir"], float)
+        start = np.asarray(spec["start"], float) * k
+        profile = spec["profile"]
+        if profile[0] == "circle":
+            frame = gp_Ax2(gp_Pnt(*start), gp_Dir(*axis), gp_Dir(*xdir))
+            return BRepPrimAPI_MakeCylinder(frame, profile[1] * k, spec["depth"] * k).Shape()
+        ydir = np.cross(axis, xdir)
+        corner = start - xdir * profile[1] * k / 2 - ydir * profile[2] * k / 2
+        frame = gp_Ax2(gp_Pnt(*corner), gp_Dir(*axis), gp_Dir(*xdir))
+        return BRepPrimAPI_MakeBox(frame, profile[1] * k, profile[2] * k, spec["depth"] * k).Shape()
+    verts = np.asarray(spec["verts"], float) * k
+    sewing = BRepBuilderAPI_Sewing(1e-3)
+    for a, b, c in spec["faces"]:
+        poly = BRepBuilderAPI_MakePolygon(gp_Pnt(*verts[a]), gp_Pnt(*verts[b]), gp_Pnt(*verts[c]), True)
+        face = BRepBuilderAPI_MakeFace(poly.Wire(), True)
+        if face.IsDone():
+            sewing.Add(face.Face())
+    sewing.Perform()
+    sewn = sewing.SewedShape()
+    shells = TopExp_Explorer(sewn, TopAbs_SHELL)
+    if shells.More():
+        solid = BRepBuilderAPI_MakeSolid(TopoDS.Shell(shells.Current()))
+        if solid.IsDone():
+            return solid.Solid()
+    return sewn
+
+
+def _placed(shape, loc):
+    """`shape` with `loc` baked into its geometry. A located shape (`Moved`) loses its name and colour on the way out:
+    the STEP writer cannot match it to its label."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.gp import gp_Identity
+    trsf = loc.Transformation()
+    if trsf.Form() == gp_Identity:
+        return shape
+    return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+
+
+def export(step_path: Path, manifest: dict, out: Path, moves: dict[str, list[float]] | None = None,
+           replace: dict[str, dict] | None = None, add: list[dict] | None = None) -> Path:
+    """Write the STEP again with Sightline's edits, keeping every name and colour. `manifest` is the converter's
+    `parts`; all geometry is in metres, world axes.
+    - `moves` {gid: delta}: the part's component location becomes parent⁻¹ · T · parent · old, so nested assemblies
+      keep their own placements;
+    - `replace` {gid: spec}: the part's shape changed (an offset's first piece, a trimmed member); its prototype gets
+      the new shape, brought into the component's frame;
+    - `add` [{name, label (the original part's component entry), spec, colour, alpha}]: new parts (an offset's middle,
+      risers and bends), placed in the original part's group."""
     from OCP.gp import gp_Trsf, gp_Vec
     from OCP.IFSelect import IFSelect_RetDone
+    from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
     from OCP.STEPCAFControl import STEPCAFControl_Writer
     from OCP.STEPControl import STEPControl_AsIs
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
     from OCP.TDF import TDF_Label, TDF_Tool
     from OCP.TopLoc import TopLoc_Location
-    from OCP.XCAFDoc import XCAFDoc_Location
+    from OCP.XCAFDoc import XCAFDoc_ColorSurf, XCAFDoc_Location
 
-    doc, shapes, _colours, scale = _read(step_path)
+    doc, shapes, colours, scale = _read(step_path)
     data = doc.Main().Data()
 
     def label(entry: str):
@@ -379,20 +550,50 @@ def export(step_path: Path, moves: dict[str, list[float]], manifest: dict, out: 
         TDF_Tool.Label_s(data, entry, found, False)
         return found
 
-    for gid, delta in moves.items():
-        info = manifest.get(gid)
-        if not info or not any(abs(d) > 1e-9 for d in delta):
-            continue
-        path = info["path"]
-        parent = TopLoc_Location()
+    def parent_of(path: list[str]) -> TopLoc_Location:
+        loc = TopLoc_Location()
         for entry in path[1:-1]:                       # the assemblies above the part's own component
-            parent = parent.Multiplied(shapes.GetLocation_s(label(entry)))
-        comp = label(path[-1])
+            loc = loc.Multiplied(shapes.GetLocation_s(label(entry)))
+        return loc
+
+    for gid, delta in (moves or {}).items():
+        info = manifest.get(gid)
+        if not info or gid in (replace or {}) or not any(abs(d) > 1e-9 for d in delta):
+            continue
+        parent, comp = parent_of(info["path"]), label(info["path"][-1])
         move = gp_Trsf()
         move.SetTranslation(gp_Vec(*(d / scale for d in delta)))
-        new = parent.Inverted().Multiplied(TopLoc_Location(move)).Multiplied(parent).Multiplied(
-            shapes.GetLocation_s(comp))
-        XCAFDoc_Location.Set_s(comp, new)
+        XCAFDoc_Location.Set_s(comp, parent.Inverted().Multiplied(TopLoc_Location(move)).Multiplied(parent).Multiplied(
+            shapes.GetLocation_s(comp)))
+
+    for gid, spec in (replace or {}).items():
+        info = manifest.get(gid)
+        if not info:
+            continue
+        comp = label(info["path"][-1])
+        proto = TDF_Label()
+        shapes.GetReferredShape_s(comp, proto)
+        whole = parent_of(info["path"]).Multiplied(shapes.GetLocation_s(comp))
+        shapes.SetShape(proto, _placed(_shape(spec, scale), whole.Inverted()))
+
+    by_label = {info["path"][-1]: info for info in manifest.values()}
+    for new in add or []:
+        info = by_label.get(new.get("label", ""))
+        if not info:
+            continue
+        path = info["path"]
+        group = label(path[0])
+        if len(path) >= 3:
+            group = TDF_Label()
+            shapes.GetReferredShape_s(label(path[-2]), group)
+        local = _placed(_shape(new["spec"], scale), parent_of(path).Inverted())
+        part = shapes.AddShape(local, False)
+        TDataStd_Name.Set_s(part, TCollection_ExtendedString(new["name"]))
+        rgb, alpha = new.get("colour") or info.get("colour"), new.get("alpha", info.get("alpha", 1.0))
+        if rgb:
+            colours.SetColor(part, Quantity_ColorRGBA(*rgb, alpha) if alpha < 1 else
+                             Quantity_Color(*rgb, Quantity_TOC_RGB), XCAFDoc_ColorSurf)
+        shapes.AddComponent(group, part, TopLoc_Location())
     shapes.UpdateAssemblies()
 
     writer = STEPCAFControl_Writer()
