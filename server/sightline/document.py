@@ -324,6 +324,8 @@ def _review_table(r: Row) -> str:
 
 def _page(r: Row, n: int) -> str:
     c, ev, ai = r.clash, r.evidence or {}, r.ai or {}
+    # Coordinated captures colour edit groups, so their colours do not identify the report's A/B pair.
+    label_a, label_b = ("A", "B") if ev.get("kind") == "context" else ("A (red)", "B (green)")
     crop = _zone_crop(c.images[0][1]) if c.images else None
     pics = "".join(
         f"<figure><img src='{_e(u)}'/><figcaption>{_e(cap)}</figcaption></figure>" for u, cap in [
@@ -347,8 +349,8 @@ def _page(r: Row, n: int) -> str:
 <section class='clash'>
   <h2><span class='num'>{n}</span> {_e(c.name)} <span class='test'>{_e(c.test)}</span></h2>
   <table class='facts'>
-    <tr><th>A (red)</th><td>{_e(c.a.ifc_class)} · {_e(c.a.name)}</td><td>{_e(r.model_a)} · {_e(r.team_a)}</td></tr>
-    <tr><th>B (green)</th><td>{_e(c.b.ifc_class)} · {_e(c.b.name)}</td><td>{_e(r.model_b)} · {_e(r.team_b)}</td></tr>
+    <tr><th>{label_a}</th><td>{_e(c.a.ifc_class)} · {_e(c.a.name)}</td><td>{_e(r.model_a)} · {_e(r.team_a)}</td></tr>
+    <tr><th>{label_b}</th><td>{_e(c.b.ifc_class)} · {_e(c.b.name)}</td><td>{_e(r.model_b)} · {_e(r.team_b)}</td></tr>
     <tr><th>Distance</th><td>Navisworks {_mm(c.distance_m)}{' · tolerance ' + _mm(c.tolerance_m) if c.tolerance_m else ''}</td>
         <td>{_e(c.a.level or c.b.level or 'Level unknown')}{' · grid ' + _e(c.grid) if c.grid else ''}</td></tr>
     <tr><th>Triage</th><td>{_e(VERDICT_LABEL.get(r.verdict, r.verdict))}{' · ' + _e(r.reading.get('severity')) if r.reading.get('severity') not in (None, 'none') else ''}</td>
