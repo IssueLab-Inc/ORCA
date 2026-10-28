@@ -84,7 +84,8 @@ Findings (Oct 27, details in spikes/README.md):
 
 ## Starting a session
 
-- Work goes straight to `main` (solo repo). Run `server/` tests and the web build before pushing.
+- Follow `AGENTS.md`: large work uses `codex/` branches and a PR per slice; do not implement on `main` or merge
+  without authorization. Run the relevant server tests, web build and product runtime checks before delivery.
 - Demo models: add `IssueLab-Inc/ClashWiseDemoModels` and copy `northbank/*.ifc` into `samples/`.
 - Deploy: Modal, public, with proposal caps (owner decision Oct 27). `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` come
   from the environment, never chat. Once: `modal secret create sightline-meta META_API_KEY="$META_API_KEY"
@@ -97,7 +98,16 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 66 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). Historical Oct 27 validation: 66 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+
+Wider fixes (Oct 28): the approved program spans isolated geometry/connection checks, a bounded planner/API/chat
+slice and whole-proposal review/acceptance in the viewer. Read `docs/superpowers/specs/2026-10-28-context-fixes.md`,
+`docs/superpowers/plans/2026-10-28-context-review-fixes.md` and `docs/superpowers/context-fixes-progress.md` for the
+current delivery/verification state. Context offsets support exact plain rectangular/circular profiles on horizontal
+straight services, with vertical or lateral detours; compound/sloped routes and hollow, rounded or U profiles are
+unsupported. Structural adequacy and service performance require designer review. Exact unchanged authored external
+frame defects remain acknowledged review evidence; new geometry or connection violations reject. Earlier test counts
+below are historical snapshots, not the current suite size.
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -184,7 +194,7 @@ its check, and attempts carry `hit_ids`. `web/src/pilot.ts` plays them at a read
 queue): amber while checking, teal when clear, hits magenta, camera via `frameFix`, slow orbit (`Viewer.orbit`) while
 Muse thinks; the result shows once the steps on screen finish. Any camera move or click in the viewer
 (`Viewer.onUserCamera`) is a takeover: the pilot clears what it drew and stops, the agent keeps going; the pill's
-**Let Sightline drive** resumes from the next idea. 50 server tests.
+**Let Sightline drive** resumes from the next idea. Historical validation: 50 server tests.
 
 Start page (Oct 27): the empty viewer shows `About.tsx` (what a clash is, what Sightline does, colour legend, glossary,
 "try it" steps; written for people new to BIM) with **Open the Northbank demo**: the sample report first (its list shows
@@ -335,7 +345,7 @@ marks each request; only then is `X-Sightline-Settings` read (effort, triage_eff
 that `MetaChatModel.effort` uses (role "triage" for the triage model). `owner.spawn` / `owner.submit` carry them into
 stream workers and model-call pools. `_take` skips the demo caps for the owner. UI: `Owner.tsx`, a gear in the header
 for the owner, or on a page opened with `#owner`; chip "owner · effort …". When GitHub sign-in comes, `cookie_ok`
-becomes "signed in as an allowed login"; the rest stays. 79 server tests.
+becomes "signed in as an allowed login"; the rest stays. Historical validation: 79 server tests.
 
 See-through elements (Oct 28): web-ifc's style alpha now reaches the viewer. Each model has a second BatchedMesh,
 `glass`, for elements with alpha < 0.99 (a robot's restricted space, mesh guards, glazing), drawn without depth writes with

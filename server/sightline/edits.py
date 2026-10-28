@@ -2,7 +2,7 @@
 
 A local offset is what a designer does when a straight run meets an obstacle it cannot move (a beam, say): split the
 segment either side of the obstacle, take the middle piece up or down, and join the ends with short vertical pieces.
-Northbank's Rev04 fixes #042, #057 and #061 this way (with bends; Sightline uses square corners for now).
+Northbank's Rev04 fixes #042, #057 and #061 this way, with radiused bends.
 
     first piece (the original element, shortened) ─┐            ┌─ last piece
                                                     riser ─ middle ─ riser
@@ -10,7 +10,7 @@ Northbank's Rev04 fixes #042, #057 and #061 this way (with bends; Sightline uses
 The original element keeps its GlobalId and its first port; the new pieces are copies of it (class, type, properties,
 container, system), chained port to port, with the last piece taking over the original's far connection.
 
-Supported: a segment whose body is one extruded profile along a horizontal axis, offset vertically. Anything else
+Supported: a segment whose body is one extruded profile along a horizontal axis, offset vertically or laterally. Anything else
 raises `Unsupported` with the reason, so the agent can say why it fell back to moves.
 
 A trim is a connection fix: where one member's end runs into another (a curtain-wall transom 60 mm into the corner
@@ -69,6 +69,7 @@ class Offset:
     dz_m: float           # middle piece up (+) or down (-)
     pieces: list[str]     # GlobalIds in run order: first, (bend,) riser, (bend,) middle, ..., last
     corners: str = "square"  # "bends" (90° bend fittings) or "square"
+    lateral_m: float = 0.0
 
 
 def _profile_size(profile) -> tuple[float, float]:
@@ -127,8 +128,18 @@ def _dir(model, v):
     return model.createIfcDirection([float(x) for x in v / np.linalg.norm(v)])
 
 
-def _place_port(model, port, point_file_units, scale):
+def _place_port(model, port, point_file_units, scale, direction=None, ref=None):
     m = np.eye(4)
+    if direction is not None:
+        z = np.array(direction, dtype=float)
+        if port.FlowDirection == 'SINK':
+            z *= -1
+        z /= np.linalg.norm(z)
+        x = np.array(ref, dtype=float) if ref is not None else np.cross(
+            UP if abs(z @ UP) < .9 else np.array([1., 0., 0.]), z)
+        x -= z * (x @ z)
+        x /= np.linalg.norm(x)
+        m[:3, :3] = np.column_stack([x, np.cross(z, x), z])
     m[:3, 3] = np.asarray(point_file_units) * scale
     ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
 
@@ -142,6 +153,12 @@ FITTING_CLASS = {"IfcDuctSegment": "IfcDuctFitting", "IfcPipeSegment": "IfcPipeF
                  "IfcCableCarrierSegment": "IfcCableCarrierFitting", "IfcCableSegment": "IfcCableFitting"}
 RISER_MIN_M = 0.04       # straight riser left between two bends when the rise allows (Rev04: 40-172 mm)
 BEND_STEPS = 8           # facets per 90° bend
+OFFSET_AXIS_TOL = 1e-9   # numerical residue, metres; shared by validation and generation
+
+
+def offset_components(dz_m: float, lateral_m: float) -> tuple[float, float]:
+    """Discard negligible axes before selecting a detour plane or reporting its delta."""
+    return tuple(0.0 if abs(v) <= OFFSET_AXIS_TOL else float(v) for v in (dz_m, lateral_m))
 
 
 def default_corners() -> str:
@@ -159,8 +176,9 @@ def bend_radius(depth_m: float, dz_m: float) -> float | None:
 
 
 def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, dz_m: float,
-                 corners: str | None = None) -> Offset:
+                 corners: str | None = None, *, lateral_m: float = 0.0) -> Offset:
     """Split `global_id` at `start_m` and `end_m` (metres along it) and take the middle piece `dz_m` up or down.
+    Alternatively, `lateral_m` offsets along cross(world Z, run direction); the two offsets cannot be combined.
     Edits the model in place; wrap in `trial` to try it and undo.
 
     `corners` "bends" (default): each turn is a 90° bend fitting (IfcDuctFitting, IfcPipeFitting... of type BEND)
@@ -172,22 +190,47 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     model, s = scene.models[i], scene.unit_scales[i]
     if abs(d @ UP) > 1e-3:
         raise Unsupported("the segment is not horizontal")
-    if abs(dz_m) < 1e-3:
+    if not np.isfinite([start_m, end_m, dz_m, lateral_m]).all():
+        raise Unsupported("offset values must be finite")
+    dz_m, lateral_m = offset_components(dz_m, lateral_m)
+    if dz_m and lateral_m:
+        raise Unsupported("choose vertical or lateral, not a compound offset")
+    amount = lateral_m if lateral_m else dz_m
+    offset_axis = np.cross(UP, d) if lateral_m else UP
+    offset_axis = offset_axis / np.linalg.norm(offset_axis)
+    if abs(amount) < 1e-3:
         raise Unsupported("the offset height is zero")
     sx, sy = _profile_size(item.SweptArea)
     if abs(py @ UP) > 0.999:      # profile Y is up: risers keep profile X across the run
-        t, w, riser_ref = sy, sx, (lambda axis: px)
+        t, w = sy, sx
     elif abs(px @ UP) > 0.999:    # profile X is up (a tray drawn on its side): keep profile Y across the run
-        t, w, riser_ref = sx, sy, (lambda axis: np.cross(py, axis))
+        t, w = sx, sy
     else:
         raise Unsupported("the profile is tilted")
-    a, b, dz, L = start_m / s, end_m / s, dz_m / s, item.Depth
+    if lateral_m:
+        t, w = w, t
+    profile_x = px.copy()
+    profile_position = getattr(item.SweptArea,'Position',None)
+    if profile_position is not None and profile_position.RefDirection is not None:
+        local_x = np.asarray(profile_position.RefDirection.DirectionRatios,dtype=float)
+        local_x /= np.linalg.norm(local_x)
+        profile_x = px*local_x[0] + py*local_x[1]
+
+    def section_ref(axis, reference=px):
+        """Transport the actual profile X axis in the detour plane, without section roll."""
+        normal = np.cross(d, axis)
+        sine, cosine = np.linalg.norm(normal), float(d @ axis)
+        if sine < 1e-9:
+            return reference.copy()
+        normal /= sine
+        return reference*cosine + np.cross(normal,reference)*sine + normal*(normal @ reference)*(1-cosine)
+    a, b, dz, L = start_m / s, end_m / s, amount / s, item.Depth
     if a > b:
         a, b = b, a
     sign = 1.0 if dz > 0 else -1.0
-    u = UP * sign
+    u = offset_axis * sign
 
-    r_m = bend_radius(t * s, dz_m) if (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS else None
+    r_m = bend_radius(t * s, amount) if (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS else None
     if r_m is not None:
         R = r_m / s
         if a - R < MIN_PIECE_M / s or L - b - R < MIN_PIECE_M / s or b - a - 2 * R < MIN_PIECE_M / s:
@@ -200,9 +243,9 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
                   ("bend", origin + d * (a - R), d, u, R)]
         pieces += [("straight", origin + d * a + u * R, u, rise)] if risers else []
         pieces += [("bend", origin + d * a + u * (abs(dz) - R), u, d, R),
-                   ("straight", origin + d * (a + R) + UP * dz, d, b - a - 2 * R),
-                   ("bend", origin + d * (b - R) + UP * dz, d, -u, R)]
-        pieces += [("straight", origin + d * b + UP * dz - u * R, -u, rise)] if risers else []
+                   ("straight", origin + d * (a + R) + offset_axis * dz, d, b - a - 2 * R),
+                   ("bend", origin + d * (b - R) + offset_axis * dz, d, -u, R)]
+        pieces += [("straight", origin + d * b + offset_axis * dz - u * R, -u, rise)] if risers else []
         pieces += [("bend", origin + d * b + u * R, -u, d, R),
                    ("straight", origin + d * (b + R), d, L - b - R)]
         used = "bends"
@@ -214,8 +257,8 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         pieces = [
             ("straight", origin, d, a - t / 2),
             ("straight", origin + d * a - u * t / 2, u, abs(dz) + t),
-            ("straight", origin + d * (a + t / 2) + UP * dz, d, b - a - t),
-            ("straight", origin + d * b + UP * (dz + sign * t / 2), -u, abs(dz) + t),
+            ("straight", origin + d * (a + t / 2) + offset_axis * dz, d, b - a - t),
+            ("straight", origin + d * b + offset_axis * (dz + sign * t / 2), -u, abs(dz) + t),
             ("straight", origin + d * (b + t / 2), d, L - b - t / 2),
         ]
         used = "square"
@@ -225,6 +268,34 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     round_ = item.SweptArea.is_a("IfcCircleProfileDef")
 
     first_ports = _ports(element)
+    if len(first_ports) > 2:
+        raise Unsupported('a branched segment with more than two ports cannot be offset')
+    first_ports.sort(key=lambda p: float(scene.placement(p.GlobalId)[:3, 3] @ d) if p.ObjectPlacement else 0.)
+    original_flows = [p.FlowDirection for p in first_ports] if len(first_ports) == 2 else ['NOTDEFINED','NOTDEFINED']
+    external_frames = [scene.placement(p.GlobalId) if p.ObjectPlacement else None
+                       for p in (first_ports[0], first_ports[-1])] if len(first_ports) >= 2 else [None, None]
+    external_flows = {peer.GlobalId:peer.FlowDirection for port in first_ports
+                      if (peer := ifcopenshell.util.system.get_connected_port(port)) is not None}
+    single_far = None
+    if len(first_ports) == 1:
+        port = first_ports[0]
+        if port.ObjectPlacement is None:
+            raise Unsupported('a single port needs a physical endpoint placement')
+        frame = scene.placement(port.GlobalId)
+        endpoint_distances = [np.linalg.norm(frame[:3,3] - point*s) for point in (origin, origin+d*L)]
+        if min(endpoint_distances) > .002:
+            raise Unsupported('a single port does not align with either physical endpoint')
+        endpoint = int(np.argmin(endpoint_distances))
+        external_frames[endpoint] = frame
+        flow = port.FlowDirection
+        opposite = {'SOURCE': 'SINK', 'SINK': 'SOURCE'}.get(flow, flow or 'NOTDEFINED')
+        original_flows[endpoint], original_flows[1-endpoint] = flow, opposite
+        if endpoint == 1:
+            # Keep the authored identity and external relationship on the last piece.
+            # Unassign before copying so copies cannot inherit this external port.
+            single_far = port
+            ifcopenshell.api.run('system.unassign_port', model, element=element, port=port)
+            first_ports = []
     far = ifcopenshell.util.system.get_connected_port(first_ports[-1]) if len(first_ports) > 1 else None
     if far is not None:
         ifcopenshell.api.run("system.disconnect_port", model, port=first_ports[-1])
@@ -240,7 +311,7 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
             if element.Tag:
                 part.Tag = f"{element.Tag}-SL{straights}"
             local_start = (inv @ np.append(start, 1.0))[:3]
-            ref = px if abs(axis @ UP) < 0.5 else riser_ref(axis)
+            ref = section_ref(axis)
             position = model.createIfcAxis2Placement3D(
                 _point(model, local_start), _dir(model, inv[:3, :3] @ axis), _dir(model, inv[:3, :3] @ ref))
             solid = model.createIfcExtrudedAreaSolid(item.SweptArea, position, model.createIfcDirection((0.0, 0.0, 1.0)),
@@ -265,24 +336,52 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         chain.append(part)
 
     # Ports: one at each end of every piece, joined in run order; the last piece takes the far connection.
-    for (p0, p1), piece in zip(ends, chain):
-        ports = _ports(piece)
-        if len(ports) >= 2:
-            _place_port(model, ports[0], p0, s)
-            _place_port(model, ports[-1], p1, s)
-    for x, y in zip(chain, chain[1:]):
-        px_, py_ = _ports(x), _ports(y)
+    chain_ports = []
+    for (p0, p1), piece, shape_piece in zip(ends, chain, pieces):
+        ports = first_ports if piece == element else _ports(piece)
+        if piece != element and shape_piece[0] == 'straight':
+            ports.sort(key=lambda p: float(scene.placement(p.GlobalId)[:3, 3] @ d) if p.ObjectPlacement else 0.)
+        while len(ports) < 2:
+            port = ifcopenshell.api.run('system.add_port', model, element=piece)
+            port.Name = f'Port {len(ports)}'
+            port.FlowDirection = 'NOTDEFINED'
+            ports.append(port)
+        chain_ports.append(ports)
+        for port, flow in zip(ports,original_flows):
+            port.FlowDirection = flow
+    if single_far is not None:
+        replacement = chain_ports[-1][-1]
+        ifcopenshell.api.run('root.remove_product', model, product=replacement)
+        ifcopenshell.api.run('system.assign_port', model, element=chain[-1], port=single_far)
+        chain_ports[-1][-1] = single_far
+    for px_, py_ in zip(chain_ports, chain_ports[1:]):
         if len(px_) >= 2 and len(py_) >= 2:
             ifcopenshell.api.run("system.connect_port", model, port1=px_[-1], port2=py_[0],
                                  direction=px_[-1].FlowDirection or "NOTDEFINED")
-    last = _ports(chain[-1])
+    last = chain_ports[-1]
     if far is not None and len(last) >= 2:
         ifcopenshell.api.run("system.connect_port", model, port1=last[-1], port2=far,
                              direction=last[-1].FlowDirection or "NOTDEFINED")
+    # IFC copying/disconnection can clear the near peer as well as the far peer.
+    # Restore both authored flows; never manufacture knowledge on an untouched peer.
+    for gid,flow in external_flows.items():
+        scene.entity(gid).FlowDirection = flow
+
+    # connect_port assigns final flow directions. IFC SINK axes point into the
+    # product, SOURCE axes outward; references follow the physical profile X.
+    for (p0,p1), ports, shape_piece in zip(ends,chain_ports,pieces):
+        t0 = shape_piece[2]
+        t1 = shape_piece[3] if shape_piece[0] == 'bend' else t0
+        _place_port(model,ports[0],p0,s,-t0,section_ref(t0,profile_x))
+        _place_port(model,ports[-1],p1,s,t1,section_ref(t1,profile_x))
+    if external_frames:
+        for port, frame in zip((chain_ports[0][0], chain_ports[-1][-1]), external_frames):
+            if frame is not None:
+                ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=frame, is_si=True)
 
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)
-    return Offset(global_id, start_m, end_m, dz_m, gids, used)
+    return Offset(global_id, start_m, end_m, dz_m, gids, used, lateral_m)
 
 
 def _new_fitting(model, segment, place, name: str, tag: str | None):

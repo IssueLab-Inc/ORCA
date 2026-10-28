@@ -129,8 +129,9 @@ def build_run_fixture(path: Path, millimetres: bool = False) -> Path:
             port.Name = f"Port {n}"
             port.FlowDirection = "SINK" if n == 0 else "SOURCE"
             matrix = np.eye(4)
+            matrix[:3,:3] = np.array([[0.,0.,1.],[1.,0.,0.],[0.,1.,0.]])
             matrix[:3, 3] = (x * k, 0.0, 2.8 * k)
-            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=matrix)
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=matrix, is_si=False)
             ports.append(port)
         return e, ports
 
@@ -176,5 +177,65 @@ def build_joint_fixture(path: Path) -> Path:
     member("IfcMember", "Transom 60x120", 1.65, 0.12, 0.06, (10.065, -6.39, 11.94))
     member("IfcMember", "Mullion 60x120", 0.12, 0.06, 4.0, (10.89, -6.33, 8.0))
     member("IfcPlate", "Spandrel panel", 1.4, 0.03, 0.8, (10.0, -6.39, 12.0))
+    model.write(str(path))
+    return path
+
+
+def build_context_fixture(path: Path, millimetres: bool = False) -> Path:
+    """A constrained service corridor needing a surrounding tray relocation.
+
+    Tags CTX-DUCT/BEAM/TRAY identify the objective and enabling edit. The 400x300
+    duct runs x0..6 at z2.8, joined at x6 to a fixed terminal fitting through the
+    x6..7 end segment. Beam/corridor/terminal carry explicit KeepFixed constraints.
+    The corridor is y +/-0.6, floor top2.4, ceiling soffit3.4; a tray at x2.8..3.2,
+    y +/-0.05, z3.10..3.20 blocks the only upper route. A +0.35 y tray move enables
+    a +0.4 z duct offset at along-run distances 2 and 4 m (50 mm beam/ceiling gaps).
+    Straight translations break the fixed terminal; a second fixed near terminal
+    prevents trimming away the objective from either end. Lower/side detours must
+    cross corridor solids. This is a model-specific constraint, not a class ban.
+    """
+    from .scene import IfcScene
+    from . import edits
+    scene = IfcScene(build_run_fixture(path,millimetres))
+    model, scale = scene.model, scene.unit_scale
+    body = next(c for c in model.by_type('IfcGeometricRepresentationSubContext') if c.ContextIdentifier=='Body')
+    storey = model.by_type('IfcBuildingStorey')[0]
+    main,end = model.by_type('IfcDuctSegment')
+    main.Tag, end.Tag = 'CTX-DUCT','CTX-END'
+    beam = model.by_type('IfcBeam')[0]; beam.Tag = 'CTX-BEAM'
+    ceiling = model.by_type('IfcSlab')[0]; ceiling.Tag = 'CTX-CEILING'
+
+    def box(cls,tag,size,origin,fixed=True):
+        element = ifcopenshell.api.run('root.create_entity',model,ifc_class=cls,name=tag)
+        element.Tag = tag
+        ifcopenshell.api.run('spatial.assign_container',model,products=[element],relating_structure=storey)
+        _box(model,body,element,tuple(v/scale for v in size),tuple(v/scale for v in origin))
+        if fixed:
+            lock(element)
+        return element
+
+    def lock(element):
+        pset = ifcopenshell.api.run('pset.add_pset',model,product=element,name='Pset_SightlineConstraints')
+        ifcopenshell.api.run('pset.edit_pset',model,pset=pset,properties={'KeepFixed':True})
+
+    lock(beam); lock(ceiling)
+    box('IfcSlab','CTX-FLOOR',(8,3,.2),(-.5,-1.5,2.2))
+    for sign in (-1,1):
+        box('IfcWall',f'CTX-WALL-{sign}',(8,.2,1.4),(-.5,sign*.6-(.2 if sign<0 else 0),2.2))
+    box('IfcCableCarrierSegment','CTX-TRAY',(.4,.1,.1),(2.8,-.05,3.1),False)
+    # Tiny physical terminals are outside the offset span but touch the unchanged
+    # ends. Real port relationships anchor translation and any trim of the duct.
+    for tag,x,width,owner,index,flow in (
+            ('CTX-ANCHOR',7.,.1,end,-1,'SINK'),('CTX-NEAR-ANCHOR',0.,-.1,main,0,'SOURCE')):
+        anchor = box('IfcDuctFitting',tag,(abs(width),.4,.3),(min(x,x+width),-.2,2.65))
+        port = ifcopenshell.api.run('system.add_port',model,element=anchor)
+        port.FlowDirection = flow
+        matrix = np.eye(4); matrix[:3,:3] = np.array([[0.,0.,1.],[1.,0.,0.],[0.,1.,0.]])
+        matrix[:3,3] = [x,0,2.8]
+        ifcopenshell.api.run('geometry.edit_object_placement',model,product=port,matrix=matrix,is_si=True)
+        other = edits._ports(owner)[index]
+        ifcopenshell.api.run('system.connect_port',model,port1=other,port2=port,direction=other.FlowDirection)
+    service = ifcopenshell.api.run('system.add_system',model)
+    ifcopenshell.api.run('system.assign_system',model,products=[main,end,*model.by_type('IfcDuctFitting')],system=service)
     model.write(str(path))
     return path
