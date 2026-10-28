@@ -225,21 +225,28 @@ class _Index:
 # ------------------------------------------------------------------------------------------------- default tests
 
 def default_tests(scene: IfcScene, index: _Index | None = None) -> list[Test]:
-    """Every pair of model files, each file against itself, and duplicates across everything: hard, 1 mm."""
+    """Every pair of model files, each file against itself, and duplicates across everything: hard, 1 mm. A site model
+    (terrain, paving, planting) is context for the building, so its tests are listed but off, unless it is all there is."""
     ix = index or _Index(scene)
     files = [i for i in range(len(scene.models)) if any(f == i for f in ix.file.values())]
     counts = Counter(ix.teams[i] for i in files)
     # A discipline names a model only among several; one model on its own (a machine cell) keeps its file name.
     label = {i: ix.teams[i] if len(files) > 1 and counts[ix.teams[i]] == 1 else Path(ix.names[i]).stem for i in files}
     order = sorted(files, key=lambda i: label[i])
+    site = {i for i in files if ix.teams[i] == "Site"}
+    if site == set(files):
+        site = set()
     tests = []
     for i, j in combinations(order, 2):
         tests.append(Test(id=f"pair:{ix.names[i]}|{ix.names[j]}", name=f"{label[i]} vs {label[j]}",
-                          a=Selection(files=[ix.names[i]]), b=Selection(files=[ix.names[j]])))
+                          a=Selection(files=[ix.names[i]]), b=Selection(files=[ix.names[j]]),
+                          enabled=not ({i, j} & site)))
     for i in order:
-        tests.append(Test(id=f"self:{ix.names[i]}", name=f"{label[i]} (within)", a=Selection(files=[ix.names[i]])))
-    tests.append(Test(id="duplicates", name="Duplicates (all models)", a=Selection(), kind="duplicate",
-                      tolerance_m=DUPLICATE_M))
+        tests.append(Test(id=f"self:{ix.names[i]}", name=f"{label[i]} (within)", a=Selection(files=[ix.names[i]]),
+                          enabled=i not in site))
+    tests.append(Test(id="duplicates", name="Duplicates (all models)" if not site else "Duplicates (building models)",
+                      a=Selection(files=[ix.names[i] for i in order if i not in site]) if site else Selection(),
+                      kind="duplicate", tolerance_m=DUPLICATE_M))
     return tests
 
 
@@ -570,14 +577,17 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         if c.id not in diff["new_ids"]:
             c.status = "active"
     root = Path(tempfile.mkdtemp(prefix="sightline-run-"))
-    report = Report(id=uuid.uuid4().hex[:12], title=title or f"Coordination · {len(ix.names)} model"
-                    f"{'' if len(ix.names) == 1 else 's'}", root=root, sources=list(ix.names), clashes=clashes,
+    # The title and the element count say what the tests checked (a site model open for context is not, by default).
+    checked_ids = {g for sel in selections.values() for side in (sel["a"], sel["b"] or ()) for g in side}
+    checked = len({ix.file[g] for g in checked_ids})
+    report = Report(id=uuid.uuid4().hex[:12], title=title or f"Coordination · {checked} model"
+                    f"{'' if checked == 1 else 's'}", root=root, sources=list(ix.names), clashes=clashes,
                     temporary=True, origin="sightline")
     state = {"clashes": {c.id: {"test": tested[c.id].id, "name": tested[c.id].name, "a": c.a.global_id,
                                 "b": c.b.global_id} for c in clashes},
              "selections": selections, "numbers": numbers}
     seconds = round(time.perf_counter() - t0, 2)
-    return Run(report, coverage, {k: v for k, v in diff.items() if k != "new_ids"}, len(ix.entity), seconds,
+    return Run(report, coverage, {k: v for k, v in diff.items() if k != "new_ids"}, len(checked_ids), seconds,
                [float(x) for x in offset], state)
 
 

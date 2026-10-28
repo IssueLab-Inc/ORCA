@@ -59,8 +59,8 @@ export function About({ start, onClose }: {
       <section className="about-stats" aria-label="Sightline on the demo, measured">
         <Stat value="~40 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
         <Stat value="3 of 3" label="designer fixes matched" note="On the demo's three planted clashes, the first idea passes at the designer's own heights." />
-        <Stat value="7 s" label="to check 1,961 elements" note="Every pair of the demo's four models, and each against itself: 633 clashes." />
-        <Stat value="633" label="clashes sorted in 3½ min" note="Read by an open-weights model; alike clashes once, so 98 calls." />
+        <Stat value="4 s" label="to check 1,732 elements" note="Every pair of the demo's three building models, and each against itself: 464 clashes." />
+        <Stat value="464" label="clashes sorted in under 2 min" note="Read by an open-weights model; alike clashes once, so 39 calls." />
       </section>
 
       <section>

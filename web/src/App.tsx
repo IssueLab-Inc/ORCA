@@ -75,6 +75,11 @@ export function App() {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [naming, setNaming] = useState(0);
   const captures = useRef(new Map<string, Promise<void>>());
+  // List thumbnails of detected clashes (no pictures until opened), drawn by the viewer as rows scroll into view.
+  // "" marks a clash the viewer could not draw.
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const thumbQueue = useRef<{ report: string; clash: ReportClash }[]>([]);
+  const thumbPaused = useRef(false);
   const lastTests = useRef<DetectTest[] | null>(null);
   // The chat starts over when the user opens another report, not when the chat itself opened one (Detect from chat).
   const [chatReport, setChatReport] = useState<string | null>(null);
@@ -1214,6 +1219,36 @@ export function App() {
   const landing = !stats && !report;
   const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
+  // Thumbnails wait while the viewer is busy with something the user is watching (a proposal, a plan, a reload).
+  thumbPaused.current = proposing || planning || replaying || !!busy || !!detecting;
+  useEffect(() => { setThumbs({}); thumbQueue.current = []; }, [report?.id]);
+  useEffect(() => { if (!thumbPaused.current && thumbQueue.current.length) pumpThumbs(); });  // eslint-disable-line react-hooks/exhaustive-deps
+  const thumbSource = useRef({ report, matches });
+  thumbSource.current = { report, matches };
+  function needThumb(c: ReportClash) {
+    if (!report || c.id in thumbs || thumbQueue.current.some((q) => q.clash.id === c.id)) return;
+    thumbQueue.current.push({ report: report.id, clash: c });
+    pumpThumbs();
+  }
+  const thumbTimer = useRef<number | null>(null);
+  /** Draw one queued thumbnail per frame, newest request first (the rows on screen now). */
+  function pumpThumbs() {
+    if (thumbTimer.current != null) return;
+    thumbTimer.current = requestAnimationFrame(() => {
+      thumbTimer.current = null;
+      if (thumbPaused.current || !viewer.current) return;
+      const next = thumbQueue.current.pop();
+      if (!next) return;
+      const { report: r, matches: ms } = thumbSource.current;
+      if (next.report === r?.id) {
+        const m = ms?.[next.clash.id];
+        let url = "";
+        try { url = (m?.a && m.b && viewer.current.thumbClash(m.a, m.b)) || ""; } catch { /* drawn as an empty box */ }
+        setThumbs((t) => ({ ...t, [next.clash.id]: url }));
+      }
+      if (thumbQueue.current.length) pumpThumbs();
+    });
+  }
   const fixedCount = Object.keys(fixes).length;
   const tourDuct = clashOfPair(TOUR.duct), tourJoint = clashOfPair(TOUR.joint);
   const tourState: TourState = {
@@ -1280,7 +1315,7 @@ export function App() {
     <div className={`app ${resizing ? "resizing" : ""} ${landing ? "landing" : ""}`}
       style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}>
       <header className="bar">
-        <span className="brand"><span className="logo" aria-hidden>◎</span>ClashWise <b>Sightline</b></span>
+        <div className="bar-side">
         <Popover icon={Boxes} label="Models" text="Models" tip="bottom">
           {(close) => (<>
             <p className="pop-title">Models to open together</p>
@@ -1295,6 +1330,8 @@ export function App() {
               <FolderOpen size={14} aria-hidden /> Open {picked.length} model{picked.length === 1 ? "" : "s"}</button>
           </>)}
         </Popover>
+        {stats && <span className="stat mono" title={`${modelNames.join(", ")}: ${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>
+          {stats.elements.toLocaleString()} elements</span>}
         <Popover icon={Radar} label="Coordinate" text="Coordinate" tip="bottom">
           {(close) => (<>
             <p className="pop-title">Coordinate the open models</p>
@@ -1313,14 +1350,11 @@ export function App() {
         </Popover>
         <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
-        {!landing && <span className="crumbs">
-          {stats ? <span>{modelNames.join(" · ")}</span> : <span className="hint">No model open</span>}
-          {report && <span>· {report.title}</span>}
-          {stats && <span className="stat mono" title={`${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>{stats.elements} elements</span>}
-        </span>}
-        {!landing && <button className="btn ghost" onClick={() => setAbout(true)}><Info size={15} aria-hidden /> How it works</button>}
-        {!landing && !touring && <button className="btn ghost" onClick={() => setTouring(true)}><Compass size={15} aria-hidden /> Tour</button>}
-        <span className="spacer" />
+        {!landing && <button className="btn ghost" onClick={() => setAbout(true)} aria-label="How it works" title="How it works"><Info size={15} aria-hidden /><span className="lbl"> How it works</span></button>}
+        {!landing && !touring && <button className="btn ghost" onClick={() => setTouring(true)} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
+        </div>
+        <span className="brand"><span className="logo" aria-hidden>◎</span><b>Sightline</b></span>
+        <div className="bar-side end">
         {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch Sightline fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
@@ -1330,11 +1364,13 @@ export function App() {
           <FileText size={15} aria-hidden /> Report</button>}
         {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip="Download the changed IFC files" data-tip-side="bottom">
           <Download size={15} aria-hidden /> Export IFC</a>}
+        </div>
       </header>
 
       <aside className="pane left">
         {report
-          ? <ReportList report={shownReport ?? report} naming={naming} matches={matches} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
+          ? <ReportList report={shownReport ?? report} naming={naming} matches={matches}
+              thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}

@@ -1,5 +1,5 @@
 import { CircleCheck, Search, Wand2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Matches, type Report, type ReportClash, type TriageKind, type TriageVerdict } from "./api";
 import { ClashThumb } from "./ClashPanel";
 import { TRIAGE } from "./Triage";
@@ -36,7 +36,7 @@ function ImpactBar({ total, triage, fixes, reviewed }: { total: number; triage: 
   const hours = (triaged * 15 / 60).toFixed(1).replace(/\.0$/, "");
   return <p className="impact-bar" role="status"><span><b>{total}</b> clashes</span><span className="bad"><b>{real}</b> real</span><span><b>{need}</b> need a fix</span><span className="ok"><b>{resolved}</b> resolved</span><span className="why">≈{hours} h of manual review sorted (est. 15 min/clash)</span></p>;
 }
-export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter, naming = 0 }: {
+export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter, naming = 0, thumbs, onThumb }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
@@ -44,6 +44,8 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   insights: React.ReactNode; busy: boolean;
   triage: Record<string, TriageVerdict>; triageFilter: TriageKind | null;
   naming?: number;  // clashes Muse is still titling
+  /** Thumbnails drawn in the browser for clashes with no pictures (detected ones), and a way to ask for one. */
+  thumbs?: Record<string, string>; onThumb?: (c: ReportClash) => void;
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -127,7 +129,9 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                           title={`#${c.number}: open its ${c.images.length === 1 ? "image" : `${c.images.length} views`}`}>
                           <ClashThumb url={api.imageUrl(report.id, c.id, 0)} alt="" />
                         </button>
-                      : report.clashes.some((x) => x.images.length) && <span className="row-thumb none" aria-hidden />}
+                      : thumbs && onThumb
+                        ? <LazyThumb clash={c} url={thumbs[c.id]} onNeed={onThumb} onOpen={() => onSelect(c)} />
+                        : report.clashes.some((x) => x.images.length) && <span className="row-thumb none" aria-hidden />}
                     <button className="clash-main" onClick={() => onSelect(c)} title={fixes[c.id] ? `Fixed: ${fixes[c.id]}` : rv ? rv.note : link ? LINK_TITLE[link] : undefined}>
                       {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : rv ? <i className="tick muted" aria-label="Reviewed">✓</i> : link ? <i className={`dot ${link}`} /> : <i />}
                       <span className="clash-name">#{c.number}</span>
@@ -157,4 +161,22 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
       )}
     </div>
   );
+}
+
+/** A row's thumbnail drawn by the viewer: asked for when the row comes into view, an empty box until it lands. */
+function LazyThumb({ clash, url, onNeed, onOpen }: { clash: ReportClash; url: string | undefined; onNeed: (c: ReportClash) => void; onOpen: () => void }) {
+  const el = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const node = el.current;
+    if (url !== undefined || !node) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { io.disconnect(); onNeed(clash); }
+    }, { rootMargin: "100px" });
+    io.observe(node);
+    return () => io.disconnect();
+  }, [clash.id, url]);  // eslint-disable-line react-hooks/exhaustive-deps
+  return url
+    ? <button className="row-thumb" onClick={onOpen} aria-label={`Open ${clashLabel(clash)}`} title={`#${clash.number}: open it`}>
+        <ClashThumb url={url} alt="" /></button>
+    : <span ref={el} className="row-thumb none" aria-hidden />;
 }

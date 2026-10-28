@@ -43,8 +43,10 @@ clearance numbers. Elements are addressed by IFC GlobalId everywhere.
   Sightline takes each clash's A/B/C views in the browser for the fix agent.
 - **Detect again:** after fixes, it says which clashes were resolved.
 
-On Northbank (1,961 elements): 633 clashes in 7-12 s, including all three of the answer key's girder clashes, and every
-sampled Navisworks result that is a real overlap (117 of 117).
+A site model (terrain, paving, planting) is context: its tests are listed but off by default, so Northbank's default
+check covers Structure, MEP and Architecture (1,732 elements): 464 clashes in about 4 s, including all three of the
+answer key's girder clashes. With every test on (1,961 elements, 633 clashes, 7-12 s) it finds every sampled Navisworks
+result that is a real overlap (117 of 117).
 
 **Clashes have numbers and titles, not "Clash39".**
 - **Number:** every clash has a number, #39, unique across the whole report. For clashes Sightline finds, it is kept
@@ -128,8 +130,8 @@ Meta's API otherwise; the card says which one answered:
 
 A host without strict structured output gets JSON mode with the schema in the prompt (switched on the first 400).
 Alike clashes (the same kinds of element, named alike, about as deep; three or more) are read once, through the deepest:
-Northbank's 633 detected clashes took 98 model calls and 214 s on Muse Spark Open (13 real, including the answer key's
-three, all high and for MEP). Navisworks' 317 results: 184 by rule, 133 by the model, 119 s on Muse Spark with `reasoning_effort=low`, 189 s on Muse
+Northbank's 464 detected clashes (default tests) took 39 model calls and 101 s on Muse Spark Open: 5 real, including the
+answer key's three, all high and for MEP (all 633 with Site: 98 calls, 214 s). Navisworks' 317 results: 184 by rule, 133 by the model, 119 s on Muse Spark with `reasoning_effort=low`, 189 s on Muse
 Spark Open on Baseten (live deploy, Oct 27: median call 7.9 s but a longer tail, up to 33 s). Scored on the whole package
 the two models agree on 299 of 317 verdicts ([evals/README.md](evals/README.md#triage-of-navisworks-results)).
 

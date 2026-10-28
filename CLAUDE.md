@@ -445,6 +445,18 @@ Coordination first (Oct 28, owner decision): Sightline's own check is the golden
   model errors. Landing: "7 s to check 1,961 elements", "633 clashes sorted in 3½ min". The clash panel says when a
   verdict was "read once for n alike clashes".
 
+Header, thumbnails, Site (Oct 28):
+- **Header:** the name is "Sightline" (no "ClashWise"), centred with the logo (`.bar` is a three-column grid:
+  `.bar-side`, brand, `.bar-side.end`). No model names or report title in the header; the element count sits after
+  Models. Below 1280 px, How it works and Tour drop their text labels (`.lbl`).
+- **List thumbnails for detected clashes:** they have no pictures until opened, so `Viewer.thumbClash` draws a small view A
+  (JPEG) off screen in one task, as a row scrolls into view (`LazyThumb` in ReportList.tsx; queue in App.tsx, one per
+  frame, newest first, paused while a proposal, plan, replay, reload or check runs). `captureClash` and `thumbClash` share
+  `Viewer.posed`.
+- **Site out of the default check:** tests involving a Site model are listed but off; duplicates cover the building
+  models. Northbank: 464 clashes in 1,732 elements, ~4 s; triage 39 calls, 101 s, 5 real (answer key 3/3). Landing and
+  tour numbers follow.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
