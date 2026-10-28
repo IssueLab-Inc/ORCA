@@ -456,6 +456,55 @@ def test_successful_stream_can_drain_before_chat_history_publication(monkeypatch
     assert session._published_turn == 1 and session.messages[-1]['content'] == 'Finished'
 
 
+def test_immediate_followup_after_wire_completion_reads_the_completed_exchange():
+    import asyncio
+    import threading
+    from sightline.service import Workspace
+    inputs, errors = {}, []
+    class Model:
+        def chat(self, messages, tools):
+            question = messages[-1]['content'].split('\n\n')[-1]
+            inputs[question] = json.loads(json.dumps(messages))
+            return dict(role='assistant', content='First answer' if question == 'First question' else 'Second answer')
+    chat = Chat(Workspace(), Model()); session = chat.session(None)
+    attempted = threading.Event()
+    class SnapshotLock:
+        # Expose the follow-up's actual snapshot-lock attempt without delaying a
+        # lock holder. If free, retain the acquired lock until its snapshot is made.
+        def __init__(self, lock): self.lock = lock
+        def __enter__(self):
+            acquired = self.lock.acquire(blocking=False)
+            if threading.current_thread() is followup:
+                attempted.set()
+            if not acquired: self.lock.acquire()
+        def __exit__(self, *args): self.lock.release()
+    session._history_lock = SnapshotLock(session._history_lock)
+    def resume():
+        try:
+            chat.turn(session, 'Follow up', Context(), lambda e: None)
+        except Exception as exc:
+            errors.append(exc)
+    followup = threading.Thread(target=resume, daemon=True)
+    class Request:
+        async def is_disconnected(self): return False
+    events = api._RequestEvents(Request()); wire = []
+    def finish():
+        events.put(dict(type='done')); events.put(None)
+        async def drain(): return [json.loads(line) async for line in events.stream()]
+        wire.extend(asyncio.run(drain()))
+        assert wire[-2:] == [dict(type='message', text='First answer'), dict(type='done')]
+        followup.start()
+        assert attempted.wait(3)
+    chat.turn(session, 'First question', Context(), events.put, cancel=events.cancel, before_publish=finish)
+    followup.join(3)
+    assert not followup.is_alive() and not errors and not events.cancel.is_set()
+    prior = inputs['Follow up'][1:-1]
+    assert len(prior) == 2 and prior[0]['content'].endswith('First question')
+    assert prior[1] == dict(role='assistant', content='First answer')
+    assert session._published_turn == 2 and len(session.messages) == 5
+    assert session.messages[-1] == dict(role='assistant', content='Second answer')
+
+
 @pytest.mark.parametrize('tool, args, units', [
     ('propose_fixes', {'clash_id': 'c0001'}, 1),
     ('explore_wider_fix', {'clash_id': 'c0001'}, 3),

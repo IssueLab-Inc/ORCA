@@ -211,12 +211,16 @@ class Chat:
         if cancel.is_set():
             return ''
         self._trim(session)
-        emit({"type": "message", "text": answer})
-        # A bounded stream can still cancel on its message/done/end sentinel.
-        # Finish all fallible publication work before committing shared history.
-        if before_publish is not None:
-            before_publish()
         with target._history_lock:
+            if cancel.is_set():
+                return ''
+            # Final callbacks only enqueue bounded, nonblocking events. Hold the
+            # session snapshot lock across completion AND its guarded history commit:
+            # a follow-up after done must see this exchange in its initial snapshot.
+            emit({"type": "message", "text": answer})
+            if before_publish is not None:
+                before_publish()
+            # Message/done/end may themselves overflow the bounded queue.
             if cancel.is_set():
                 return ''
             # An older in-flight request cannot replace a newer completed conversation.
