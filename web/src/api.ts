@@ -137,7 +137,14 @@ export interface TriageState extends Partial<TriageModel> {
 
 /** The owner's settings (server: owner.py), sent with every call; the server ignores them for anyone but the owner. */
 export type Effort = "minimal" | "low" | "medium" | "high";
-export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean }
+/** The owner's own settings (this browser): absent fields follow the settings for everyone. */
+export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean }
+/** The settings for everyone (server: settings.py); null fields take the environment's default. */
+export interface EveryoneSettings { open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null }
+export interface SettingsState {
+  everyone: EveryoneSettings; defaults: { open_weights: boolean; effort: Effort | null; triage_effort: Effort | null };
+  host: boolean;  // an open-weights host key is configured
+}
 let ownerSettings: OwnerSettings | null = null;
 export function setOwnerSettings(s: OwnerSettings | null) { ownerSettings = s; }
 const settingsHeader = (): Record<string, string> => (ownerSettings ? { "X-Sightline-Settings": JSON.stringify(ownerSettings) } : {});
@@ -264,6 +271,8 @@ export const api = {
   owner: () => call<{ available: boolean; owner: boolean }>("/owner"),
   unlock: (token: string) => call<{ owner: boolean }>("/owner/unlock", { method: "POST", body: JSON.stringify({ token }) }),
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
+  settings: () => call<SettingsState>("/settings"),
+  saveSettings: (changes: Partial<EveryoneSettings>) => call<SettingsState>("/settings", { method: "PUT", body: JSON.stringify(changes) }),
   teams: (reportId: string, sceneId: string | null) =>
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
   document: (reportId: string, body: { scene_id: string | null; scope: "combined" | "team" | "model"; teams: Record<string, Team>;

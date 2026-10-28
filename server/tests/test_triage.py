@@ -60,9 +60,10 @@ def test_a_host_without_structured_output_falls_back_to_json_mode(monkeypatch):
     assert sent == ["json_schema", "json_object", "json_object"]  # remembered after the first refusal
 
 
-def test_triage_model_prefers_the_open_weights_host(monkeypatch):
+def test_triage_model_prefers_the_open_weights_host_when_switched_on(monkeypatch):
     monkeypatch.setattr(meta_client, "load_env", lambda: None)
     monkeypatch.setenv("META_API_KEY", "m")
+    monkeypatch.setenv("SIGHTLINE_OPEN_WEIGHTS", "1")
     monkeypatch.delenv("TRIAGE_API_KEY", raising=False)
     monkeypatch.delenv("BASETEN_API_KEY", raising=False)
     model, info = meta_client.triage_model()

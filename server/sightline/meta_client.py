@@ -88,9 +88,9 @@ class MetaChatModel:
 
     @property
     def effort(self) -> str | None:
-        """The owner's effort for this request (owner.py), else this model's."""
-        from . import owner
-        return owner.effort(self.role) or self.reasoning_effort
+        """The owner's effort for this request (owner.py), else the one set for everyone (settings.py), else this model's."""
+        from . import owner, settings
+        return owner.effort(self.role) or settings.effort_for(self.role) or self.reasoning_effort
 
     def _post(self, payload: dict, *, timeout_s: float | None = None) -> dict:
         r = self.client.post(f"{self.base_url}/chat/completions", json=payload,
@@ -230,12 +230,13 @@ def transcribe(wav: bytes, keywords: list[str] | None = None, client: httpx.Clie
 def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
     """The model for bulk triage and a description of it for the UI.
 
-    Muse Spark Open on Baseten (or any OpenAI-compatible host) when TRIAGE_API_KEY / BASETEN_API_KEY is set,
-    otherwise Muse Spark on Meta's API."""
+    Muse Spark Open on Baseten (or any OpenAI-compatible host) when TRIAGE_API_KEY / BASETEN_API_KEY is set and the
+    open-weights model is switched on for this request (settings.open_weights), otherwise Muse Spark on Meta's API."""
+    from . import settings
     load_env()
     key = os.environ.get("TRIAGE_API_KEY") or os.environ.get("BASETEN_API_KEY")
     images = os.environ.get("TRIAGE_IMAGES", "1") != "0"
-    if key:
+    if key and settings.open_weights():
         model = MetaChatModel(os.environ.get("TRIAGE_API_BASE_URL", "https://inference.baseten.co/v1"), key,
                               os.environ.get("TRIAGE_MODEL", "meta-models/muse-spark-open"), timeout_s,
                               reasoning_effort=os.environ.get("TRIAGE_REASONING_EFFORT", ""))
@@ -244,4 +245,5 @@ def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
     model = MetaChatModel(timeout_s=timeout_s)
     model.role = "triage"
     return model, {"model": model.model, "open_weights": False, "images": True,
-                   "note": "No open-weights host configured (TRIAGE_API_KEY); using Muse Spark."}
+                   "note": "The open-weights model is switched off; using Muse Spark." if key
+                   else "No open-weights host configured (TRIAGE_API_KEY); using Muse Spark."}
