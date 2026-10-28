@@ -1,6 +1,6 @@
 # Context fixes program — 2026-10-28
 
-Status: foundations and planner/API/chat complete and reviewed through beb05d2; UI integration and driven browser/final branch review remain.
+Status: all three slices implemented and task-reviewed through37db0e2; final whole-branch review underway before readying the three stacked PRs.
 
 Spec: docs/superpowers/specs/2026-10-28-context-fixes.md
 Plan: docs/superpowers/plans/2026-10-28-context-fixes.md
@@ -60,3 +60,15 @@ Planner rebased ec6b442 onto foundations485361f. Fix1a91469 addresses inspection
 Live configured-model QA on a disposable constrained fixture: first bounded run found no passing result in6 calls/68.7s (correctly inconclusive); second run found the required duct offset+tray relocation in6 calls/2 trials/49.612s. Explicitly acknowledged all6 review conditions; whole-plan acceptance200 with geometry/integrity passed, one confirmed resolved pair, exported30272-byte IFC reloaded with6 duct fittings and tray y0.30..0.40m; replay rejected409. No live user model or existing server was modified. Private QA traces/evidence are under ignored .superpowers; no fake route or API key is shipped.
 
 Next: planner PR2 stacked on PR1, then fresh Task3 UI worker and driven browser acceptance/export with the same constrained fixture.
+
+## Product checkpoint
+
+Foundations PR1: https://github.com/IssueLab-Inc/clashwise-sightline/pull/1. Planner PR2: https://github.com/IssueLab-Inc/clashwise-sightline/pull/2. Both attached, stacked and draft pending the completed program review. Product branch `codex/context-fix-product` implements context state, complete world-mesh preview, all-condition acknowledgement, canonical acceptance, affected IFC reload, confirmed-only report resolution, stale stored-objective regeneration and chat review without forcing a tab switch.
+
+Driven browser proof on the disposable constrained fixture: selected clash -> wider action -> two dependent edits; Before/After/Both show the tray relocation and generated duct detour together. Acceptance stays disabled with zero or one of six acknowledgements; all six enable it. A kept legacy edit advanced the live revision, so acceptance rejected the stale proposal without applying it; regeneration used the original objective and reset acknowledgements. Whole acceptance then reloaded geometry, marked exactly the confirmed report clash fixed, and browser IFC export reloaded with six duct fittings and tray y0.30..0.40m. Final initial bundle `index-B3jnM0-z.js` also completed the Chat -> wider search -> review flow, preserving the transcript when switching tabs. No browser console errors were observed. The fixture server is private QA scaffolding, not a shipped route.
+
+Task review caught obsolete pilot cleanup and late chat callbacks. Fix c629806 adds actual playback cancellation/generation isolation and abortable chat ownership; eight Node regressions and build passed. Scoped review confirmed those fixes and found that retired chat progress could stay active after direct replacement. Original worker is addressing that state transition in fix round 2, with actual App-handler regression coverage. No unreviewed product fixes have been made by the controller. Full server suite remains 205 passed; final frontend and whole-branch gates remain outstanding.
+
+Task3 fix37db0e2 retires only pending progress owned by the cancelled chat tracker, preserving completed proposals and newer work. Scoped review2 approved, no Critical/Important findings. Final fresh controller checks:205 server tests passed in30.00s;12 actual-source frontend regressions passed; production build `index-KOMhoYeQ.js` passed with the existing bundle-size warning. Latest-bundle browser proof also replaced an in-flight chat search with direct work, confirmed wider controls were enabled again, and completed a new wider proposal. The private scripted model lacks the legacy single-proposal method, so that replacement's single action reported its expected QA-stub error rather than exercising a real single proposal; no such stub ships.
+
+Latest-bundle normal flow was reloaded cleanly and completed discovery, full Both preview, six-condition guard, whole acceptance/reload and browser IFC export. Reopened export:30272bytes,6 duct fittings,tray y0.30..0.40m; no browser console errors. Evidence remains in ignored QA files. Native Windows's two original PDF dependency failures were verified separately through the Linux/Pango environment rather than suppressed in product code. Whole-branch review is independent and still pending at this checkpoint.
