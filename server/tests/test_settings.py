@@ -92,3 +92,16 @@ def test_only_the_owner_reads_and_changes_the_settings_for_everyone(monkeypatch)
     assert body["everyone"] == {"open_weights": True, "effort": None, "triage_effort": "low"} and body["host"] is True
     assert c.put("/api/settings", json={"effort": "extreme"}).status_code == 400
     assert c.get("/api/settings").json()["everyone"]["open_weights"] is True
+
+
+def test_models_says_which_model_this_request_would_use(monkeypatch):
+    monkeypatch.setattr(meta_client, "load_env", lambda: None)
+    monkeypatch.setenv("BASETEN_API_KEY", "b")
+    monkeypatch.delenv("SIGHTLINE_OPEN_WEIGHTS", raising=False)
+    monkeypatch.setenv("SIGHTLINE_OWNER_TOKEN", TOKEN)
+    c = TestClient(app_module.app, base_url="https://testserver")
+    assert c.get("/api/models").json()["triage"]["open_weights"] is False
+    settings.update({"open_weights": True})
+    assert c.get("/api/models").json()["triage"] == {"model": "meta-models/muse-spark-open", "open_weights": True, "images": True}
+    c.post("/api/owner/unlock", json={"token": TOKEN})  # the owner's own choice wins for the owner
+    assert c.get("/api/models", headers={"X-Sightline-Settings": '{"open_weights": false}'}).json()["triage"]["open_weights"] is False

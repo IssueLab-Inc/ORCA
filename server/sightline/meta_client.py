@@ -227,23 +227,29 @@ def transcribe(wav: bytes, keywords: list[str] | None = None, client: httpx.Clie
     return {"transcript": (body.get("transcript") or "").strip(), "duration_ms": body.get("audioDurationMs")}
 
 
-def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
-    """The model for bulk triage and a description of it for the UI.
-
-    Muse Spark Open on Baseten (or any OpenAI-compatible host) when TRIAGE_API_KEY / BASETEN_API_KEY is set and the
-    open-weights model is switched on for this request (settings.open_weights), otherwise Muse Spark on Meta's API."""
+def triage_model_info() -> dict:
+    """Which model titles and triages for this request, without building a client: {model, open_weights, images,
+    note?}. Muse Spark Open when its host key is set and the open-weights model is switched on (settings.open_weights:
+    the owner's own choice, else the setting for everyone, else the default), else Muse Spark."""
     from . import settings
     load_env()
     key = os.environ.get("TRIAGE_API_KEY") or os.environ.get("BASETEN_API_KEY")
-    images = os.environ.get("TRIAGE_IMAGES", "1") != "0"
     if key and settings.open_weights():
-        model = MetaChatModel(os.environ.get("TRIAGE_API_BASE_URL", "https://inference.baseten.co/v1"), key,
-                              os.environ.get("TRIAGE_MODEL", "meta-models/muse-spark-open"), timeout_s,
-                              reasoning_effort=os.environ.get("TRIAGE_REASONING_EFFORT", ""))
-        model.role = "triage"
-        return model, {"model": model.model, "open_weights": True, "images": images}
-    model = MetaChatModel(timeout_s=timeout_s)
+        return {"model": os.environ.get("TRIAGE_MODEL", "meta-models/muse-spark-open"), "open_weights": True,
+                "images": os.environ.get("TRIAGE_IMAGES", "1") != "0"}
+    return {"model": os.environ.get("META_MODEL", "muse-spark-1.3-contributor"), "open_weights": False, "images": True,
+            "note": "The open-weights model is switched off; using Muse Spark." if key
+            else "No open-weights host configured (TRIAGE_API_KEY); using Muse Spark."}
+
+
+def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
+    """The model for bulk triage and clash titles, and a description of it for the UI (`triage_model_info`)."""
+    info = triage_model_info()
+    if info["open_weights"]:
+        model = MetaChatModel(os.environ.get("TRIAGE_API_BASE_URL", "https://inference.baseten.co/v1"),
+                              os.environ.get("TRIAGE_API_KEY") or os.environ.get("BASETEN_API_KEY"), info["model"],
+                              timeout_s, reasoning_effort=os.environ.get("TRIAGE_REASONING_EFFORT", ""))
+    else:
+        model = MetaChatModel(timeout_s=timeout_s)
     model.role = "triage"
-    return model, {"model": model.model, "open_weights": False, "images": True,
-                   "note": "The open-weights model is switched off; using Muse Spark." if key
-                   else "No open-weights host configured (TRIAGE_API_KEY); using Muse Spark."}
+    return model, info

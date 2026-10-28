@@ -1,4 +1,5 @@
-import { Brain, CircleCheck, Flag, RotateCcw, ScanSearch } from "lucide-react";
+import { Brain, ChevronDown, CircleCheck, Flag, Info, RotateCcw, ScanSearch } from "lucide-react";
+import { useState } from "react";
 import type { TriageKind, TriageModel, TriageVerdict } from "./api";
 
 export const TRIAGE: Record<TriageKind, { label: string; cls: string; tip: string; colour: string; long: string }> = {
@@ -35,17 +36,25 @@ function ruleBreakdown(vs: TriageVerdict[]) {
 
 const ORDER: TriageKind[] = ["real_clash", "modelling_error", "by_design", "non_physical", "unknown"];
 
+const COMPACT = "sightline.triage.compact";
+/** The user's choice of a compact card ("1"/"0"), or null when they have not chosen (compact once a run is done). */
+function storedCompact(): boolean | null {
+  try { const v = localStorage.getItem(COMPACT); return v == null ? null : v === "1"; } catch { return null; }
+}
+
 export interface TriageRun extends TriageModel { total: number; started: number; done: boolean; seconds?: number; error?: string }
 
 /** Bulk triage of the whole report, the first step: run it, watch it land, filter by verdict, set the noise aside. */
-export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total }: {
+export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active }: {
   run: TriageRun | null; results: Record<string, TriageVerdict>; now: number; total: number;
+  active?: TriageModel | null;  // the model a run would use now (server: /api/models), before one starts
   live?: { id: string; name: string; text: string }[]; onOpen?: (id: string) => void;
   filter: TriageKind | null; onFilter: (k: TriageKind | null) => void; onRun: (rerun: boolean) => void;
   onSetAside: (ids: string[]) => void; onFlag: (ids: string[]) => void;
   resolved?: (id: string) => boolean;  // fixed, set aside or flagged already
   open?: number;
 }) {
+  const [chosen, setChosen] = useState<boolean | null>(storedCompact);
   const ids = Object.keys(results);
   const counts = Object.fromEntries(ORDER.map((k) => [k, ids.filter((id) => results[id].verdict === k).length])) as Record<TriageKind, number>;
   const noise = ids.filter((id) => ["by_design", "non_physical"].includes(results[id].verdict));
@@ -57,13 +66,21 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   const seconds = run ? Math.round(run.done ? run.seconds ?? 0 : Math.max(0, now - run.started) / 1000) : 0;
   const model = run?.model ? (run.open_weights ? "Muse Spark Open" : "Muse Spark") : "";
   const state = !run ? "idle" : run.done ? "done" : "running";
+  const compact = chosen ?? state === "done";
+  const toggle = () => {
+    setChosen(!compact);
+    try { localStorage.setItem(COMPACT, compact ? "0" : "1"); } catch { /* private window */ }
+  };
+  const about = run ? `${state === "done" ? `${seconds} s · ` : ""}${byRule} by rule · ${model || "starting"}` : "";
 
   // One bar for the whole report: a segment per verdict (click to filter), the rest still to come.
   const bar = (
     <div className="triage-bar" role="group" aria-label="Clashes by verdict">
       {ORDER.filter((k) => counts[k]).map((k) => (
         <button key={k} className={filter === k ? "on" : ""} style={{ flexGrow: counts[k], background: TRIAGE[k].colour }}
-          aria-label={`${counts[k]} ${TRIAGE[k].long.toLowerCase()}`} data-tip={`${counts[k]} ${TRIAGE[k].long.toLowerCase()}`} data-tip-side="bottom"
+          data-tour={compact && k === "real_clash" ? "triage-real" : undefined}
+          aria-label={`${counts[k]} ${TRIAGE[k].long.toLowerCase()}`} data-tip-side="bottom"
+          data-tip={`${counts[k]} ${TRIAGE[k].long.toLowerCase()}: ${WHY[k].toLowerCase()} · ${filter === k ? "click to show every clash" : "click to show only these"}`}
           onClick={() => onFilter(filter === k ? null : k)} />))}
       {n > ids.length && <span className="rest" style={{ flexGrow: n - ids.length }} />}
     </div>
@@ -81,23 +98,44 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   );
 
   return (
-    <section className={`triage ${state}`} data-tour="triage">
+    <section className={`triage ${state} ${compact ? "compact" : ""}`} data-tour="triage">
       <div className="triage-head">
         <span className="triage-icon"><ScanSearch size={15} aria-hidden /></span>
         <div>
           <h3>Triage</h3>
           <span className="triage-sub">{state === "idle" ? "Step 1 · sort the clashes" : state === "running" ? "Sorting the clashes…" : "Every clash has a verdict"}</span>
         </div>
-        {run?.done && <button className="ibtn" aria-label="Triage again" data-tip="Triage again" data-tip-side="left" onClick={() => onRun(true)}>
+        {run?.done && !compact && <button className="ibtn" aria-label="Triage again" data-tip="Triage again" data-tip-side="left" onClick={() => onRun(true)}>
           <RotateCcw size={14} aria-hidden /></button>}
+        <button className="ibtn triage-fold" aria-expanded={!compact} aria-label={compact ? "Show the triage details" : "Show only the essentials"}
+          data-tip={compact ? "Show the details" : "Show only the essentials"} data-tip-side="left" onClick={toggle}>
+          <ChevronDown size={15} aria-hidden /></button>
       </div>
+
+      {compact && state === "idle" && <button className="btn primary triage-go" onClick={() => onRun(false)}>
+        <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>}
+      {compact && state === "running" && <>
+        <div className="triage-count small"><b>{ids.length}</b> of {n} sorted <span className="hint">· {seconds} s</span>
+          <span className="triage-info" data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></div>
+        {bar}
+      </>}
+      {compact && state === "done" && <>
+        <div className="triage-count small">
+          <b className={counts.real_clash ? "bad" : "ok"}>{counts.real_clash}</b>
+          {counts.real_clash === 1 ? " needs a fix" : " need a fix"} <span className="hint">of {n}</span>
+          <span className="triage-info" data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span>
+        </div>
+        {bar}
+      </>}
+      {!compact && <>
 
       {state === "idle" && <>
         <p className="triage-lead">Most clash results are noise. Triage gives all <b>{n}</b> a verdict, so you only open the few that need a fix.</p>
         <button className="btn primary triage-go" onClick={() => onRun(false)}>
           <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>
-        <p className="hint">Sure cases (spaces, ports, touches) are settled by rule at once; Muse Spark Open, an open-weights
-          model, reads the rest, eight at a time, and alike clashes once. A minute or two for the demo.</p>
+        <p className="hint">Sure cases (spaces, ports, touches) are settled by rule at once;{" "}
+          {active?.open_weights ? "Muse Spark Open, an open-weights model," : "Muse Spark"} reads the rest, eight at a time,
+          and alike clashes once. A minute or two for the demo.</p>
       </>}
 
       {state === "running" && run && <>
@@ -164,9 +202,10 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <p className="triage-meta">
           {state === "done" && <>{seconds} s · {byRule} by rule · </>}
           {run.model
-            ? <><span className={`chip small ${run.open_weights ? "ok" : ""}`} title={run.note}>{run.open_weights ? "open weights" : "fallback"}</span> {model}</>
+            ? <><span className={`chip small ${run.open_weights ? "ok" : ""}`} title={run.note}>{run.open_weights ? "open weights" : "Meta API"}</span> {model}</>
             : "starting…"}
         </p>)}
+      </>}
     </section>
   );
 }

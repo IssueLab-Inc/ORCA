@@ -466,6 +466,25 @@ in the Modal Dict `sightline-settings` (when `MODAL_TASK_ID` is set) else `SIGHT
 `GET/PUT /api/settings`. UI: Owner menu "For me" / "For everyone"; header chip shows the owner's open-weights override.
 Tests use a per-test store (`tests/conftest.py`).
 
+Insights, Triage, thumbnails (Oct 28, owner feedback):
+- **Copy follows the active model:** `GET /api/models` (`meta_client.triage_model_info`, the same decision
+  `triage_model` uses) tells the browser whether titles and triage run on Muse Spark Open or Muse Spark; the Triage
+  card, tour and landing say which (`triageOpen`). The landing's 464-in-2-min stat says it was measured on Open.
+- **Insights doesn't jump:** patterns are read once per report and show their open clashes from `resolved` (a pattern
+  with none left stays in place, dimmed, with a ✓); root causes are re-read but keep their places (`keepPlaces` in
+  App.tsx; a hub that drops out stays as a "Done" row). Action columns and the count chip have fixed widths so a
+  change never reflows a row. Checked: rows' tops and heights identical before and after marking a pattern.
+- **Filter to a pattern or root cause:** the funnel button sets `listFocus` (App.tsx) → ReportList shows only those
+  ids with a chip ("Pattern: Beam with Beam · 133 of 133 shown ✕"). One filter at a time: it and the triage filter
+  clear each other.
+- **Compact Triage:** a chevron collapses the card to the count and the bar (segment tooltips carry verdict, meaning
+  and the click; an info icon carries time, rule count and model). Compact by default once a run is done; the choice
+  is kept (`sightline.triage.compact`). In compact the red segment is the tour's `triage-real` target.
+- **Thumbnails flashed in the viewer:** `thumbClash` renders into the visible canvas (`preserveDrawingBuffer`), and a
+  shot taken after the frame's own render showed until the next frame. `Viewer.posed` now renders the restored view
+  before returning; the queue draws one thumbnail per 60 ms (setTimeout). Checked by sampling the canvas between frames
+  while scrolling: the old build jumped 45 levels of brightness, the new one 0.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

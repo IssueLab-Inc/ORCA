@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from . import chat, context_planner, detect, document, edits, owner, plans, settings, titles, triage
-from .meta_client import load_env, transcribe, triage_model
+from .meta_client import load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
@@ -265,6 +265,12 @@ def owner_lock(response: Response):
 def _settings_state() -> dict:
     host = bool(os.environ.get("TRIAGE_API_KEY") or os.environ.get("BASETEN_API_KEY"))
     return {"everyone": asdict(settings.current()), "defaults": settings.defaults(), "host": host}
+
+
+@app.get("/api/models")
+def models():
+    """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy."""
+    return {"triage": triage_model_info()}
 
 
 @app.get("/api/settings")
