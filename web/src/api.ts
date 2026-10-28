@@ -93,7 +93,10 @@ export interface DetectCoverage {
 export interface DetectGone { id: string; test: string; a: string; b: string }
 export interface DetectDiff { new: string[]; resolved: DetectGone[]; no_longer_checked: DetectGone[]; first: boolean }
 export interface Detection { coverage: DetectCoverage[]; diff: DetectDiff; elements: number; seconds: number }
-export interface DetectSetup { tests: DetectTest[]; teams: Record<string, string>; elements: number; rules: Record<string, string> }
+export interface DetectSetup {
+  tests: DetectTest[]; teams: Record<string, string>; elements: number; rules: Record<string, string>;
+  file_elements?: Record<string, number>;  // physical elements per model file
+}
 export type DetectEvent =
   | { type: "phase"; text: string }
   | { type: "start"; elements: number; tests: { id: string; name: string; kind: string }[] }

@@ -44,7 +44,7 @@ const hasText = (node, text) => typeof node === "string" ? node.includes(text)
 
 async function appHost() {
   const c = { id: "clash", name: "Clash", a: {}, b: {}, images: [] };
-  const state = { sceneId: "scene", a: "duct", b: "beam", stats: {}, clash: c,
+  const state = { sceneId: "scene", a: "duct", b: "beam", stats: { elements: 2, triangles: 2, parseMs: 1 }, clash: c,
     report: { id: "report", title: "Report", clashes: [c] }, matches: { clash: { a: "duct", b: "beam", how: [] } } };
   const refs = []; let cursor = 0;
   globalThis.__sightlineAppHooks = {

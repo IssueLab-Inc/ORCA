@@ -57,10 +57,10 @@ const slowProposal = (s: TourState) => !s.proposalDone && !s.replaying && (!!s.e
 export const STEPS: Step[] = [
   // 1. The problem
   {
-    act: "Design coordination", title: "A building, four teams, one set of models",
-    body: () => <>Structure, MEP, Architecture and Site each model the same building. Coordination means making their
-      models agree before anything is built. Open the demo: an office building called Northbank. Sightline checks every
-      pair of models, and each model against itself.</>,
+    act: "Design coordination", title: "A building, three teams, one set of models",
+    body: () => <>Structure, MEP and Architecture each model the same building. Coordination means making their models
+      agree before anything is built. Open the demo: an office building called Northbank. Sightline checks every pair of
+      building models, and each against itself; the site model (street, riverside, trees) is there for context.</>,
     target: "[data-tour=demo]", done: (s) => s.reportOpen && s.modelsOpen && !s.busy,
     show: { label: "Open it for me" },
   },
@@ -248,8 +248,8 @@ export const STEPS: Step[] = [
     act: "Sightline", title: "Clashes fixed, proved, signed off", enter: (a) => { a.closeReport(); a.overview(); },
     body: () => <>
       <span className="tour-stats">
-        <span><b>7 s</b> to check 1,961 elements</span>
-        <span><b>3½ min</b> to triage 633 clashes</span>
+        <span><b>4 s</b> to check 1,732 elements</span>
+        <span><b>&lt; 2 min</b> to triage 464 clashes</span>
         <span><b>~40 s</b> to a verified fix</span>
         <span><b>3 of 3</b> designer fixes matched</span>
       </span>

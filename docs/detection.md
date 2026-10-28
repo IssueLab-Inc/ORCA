@@ -62,6 +62,11 @@ report does), by IFC class (include or exclude) and by system.
 - each model against itself, hard, 1 mm: "Structure (within)";
 - "Duplicates (all models)".
 
+A site model (its team guessed as Site: terrain, paving, planting) is context for the building, so its tests are listed
+but off by default, and duplicates cover the building models only (owner decision, Oct 28). On Northbank that leaves
+Structure, MEP and Architecture: 1,732 elements, 464 clashes, about 4 s. A run's title and element count say what was
+checked ("Coordination · 3 models").
+
 A one-file model (a machine cell) therefore gets its within-model test and duplicates. A clearance preset ("MEP vs
 Structure, 25 mm") is offered but not run by default.
 

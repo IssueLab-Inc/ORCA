@@ -518,6 +518,22 @@ export class Viewer {
    * crops Navisworks pictures works on these too. The view is put back as it was. Null when either element has no
    * geometry here. */
   captureClash(a: string, b: string, side = 768): { A: string; B: string; C: string } | null {
+    return this.posed(a, b, (shot, turn) => {
+      const A = shot("isolate", true, side), B = shot("context", false, side);
+      turn();
+      return { A, B, C: shot("isolate", true, side) };
+    });
+  }
+
+  /** A small picture of a clash for the list (view A's recipe, as a JPEG), taken off screen like `captureClash`. */
+  thumbClash(a: string, b: string, side = 192): string | null {
+    return this.posed(a, b, (shot) => shot("isolate", true, side, "image/jpeg"));
+  }
+
+  /** Point the camera at where `a` and `b` meet and let `take` render shots, then put everything back. It all happens
+   * in one task, so nothing on screen changes. */
+  private posed<T>(a: string, b: string, take: (shot: (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => string,
+    turn: () => void) => T): T | null {
     const boxA = this.boxOf([a]), boxB = this.boxOf([b]);
     if (boxA.isEmpty() || boxB.isEmpty()) return null;
     const zone = meetingZone(boxA, boxB);
@@ -525,12 +541,12 @@ export class Viewer {
     const saved = { position: this.camera.position.clone(), target: this.controls.target.clone(), mode: this.mode,
       focus: this.focus, flight: this.flight, marker: this.marker.visible };
     const pair = Object.values(this.focusMaterials);
-    const shot = (mode: ViewMode, seeThrough: boolean) => {
+    const shot = (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => {
       for (const m of pair) { m.transparent = seeThrough; m.opacity = seeThrough ? 0.6 : 1; m.depthWrite = !seeThrough; m.needsUpdate = true; }
       this.setMode(mode);
       this.controls.update();
       this.adjustClipRange();
-      return this.png(side);
+      return this.png(side, type);
     };
     try {
       this.flight = null;
@@ -539,14 +555,11 @@ export class Viewer {
       const [position, target] = this.zoneCamera(zone, boxA.clone().union(boxB));
       this.camera.position.copy(position);
       this.controls.target.copy(target);
-      const A = shot("isolate", true);
-      const B = shot("context", false);
-      this.camera.position.copy(position.clone().sub(target).applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2).add(target));
-      const C = shot("isolate", true);
-      return { A, B, C };
+      return take(shot, () => this.camera.position.copy(position.clone().sub(target)
+        .applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2).add(target)));
     } finally {
       for (const m of pair) { m.transparent = false; m.opacity = 1; m.depthWrite = true; m.needsUpdate = true; }
-      this.setFocus(saved.focus);
+      this.focus = saved.focus;
       this.setMode(saved.mode);
       this.camera.position.copy(saved.position);
       this.controls.target.copy(saved.target);
@@ -772,14 +785,14 @@ export class Viewer {
   }
 
   /** A PNG of the current view's centre square, `side` pixels across. */
-  private png(side: number): string {
+  private png(side: number, type = "image/png"): string {
     this.renderer.render(this.scene, this.camera);
     const src = this.renderer.domElement;
     const s = Math.min(src.width, src.height);
     const out = document.createElement("canvas");
     out.width = out.height = Math.min(side, s);
     out.getContext("2d")!.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, 0, 0, out.width, out.height);
-    return out.toDataURL("image/png");
+    return out.toDataURL(type, 0.85);
   }
 
   /** A small JPEG of the current view (for reports): the centre square, `side` pixels across. */

@@ -97,7 +97,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <button className="btn primary triage-go" onClick={() => onRun(false)}>
           <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>
         <p className="hint">Sure cases (spaces, ports, touches) are settled by rule at once; Muse Spark Open, an open-weights
-          model, reads the rest, eight at a time, and alike clashes once. About three minutes.</p>
+          model, reads the rest, eight at a time, and alike clashes once. A minute or two for the demo.</p>
       </>}
 
       {state === "running" && run && <>

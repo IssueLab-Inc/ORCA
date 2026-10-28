@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import threading
+from collections import Counter
 
 import ifcopenshell.util.system
 import uuid
@@ -216,7 +217,8 @@ class Workspace:
             ix = detect._Index(scene)
             tests = detect.default_tests(scene, ix) + detect.presets(scene, ix)
             teams = {name: team for name, team in zip(ix.names, ix.teams)}
-        return {"tests": [asdict(t) for t in tests], "teams": teams, "elements": len(ix.entity),
+            per_file = Counter(ix.names[i] for i in ix.file.values())
+        return {"tests": [asdict(t) for t in tests], "teams": teams, "elements": len(ix.entity), "file_elements": dict(per_file),
                 "rules": detect.RULE_LABEL}
 
     def detect(self, scene_id: str, tests: list[dict] | None = None, on_event=None) -> dict:

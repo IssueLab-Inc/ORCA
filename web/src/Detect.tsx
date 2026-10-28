@@ -43,7 +43,7 @@ export function DetectSetupCard({ setup, progress, onRun, disabled }: {
       <label className="detect-tol">Hard clashes deeper than
         <input type="number" min={0} step={1} value={toleranceMm} onChange={(e) => setToleranceMm(Number(e.target.value))} /> mm</label>
       <button className="btn primary triage-go" disabled={disabled || !chosen.length} onClick={() => onRun(chosen)}>
-        <Radar size={15} aria-hidden /> Check {setup.elements.toLocaleString()} elements</button>
+        <Radar size={15} aria-hidden /> Check {checkedElements(setup, chosen).toLocaleString()} elements</button>
       <p className="hint">About ten seconds for a building. Then Muse names each clash, triage sorts them, and Sightline
         proposes verified fixes.</p>
     </section>
@@ -115,4 +115,17 @@ export function DetectSummary({ detection, progress, onAgain, disabled }: {
       </>}
     </section>
   );
+}
+
+/** How many elements the chosen tests look at: the files their selections name (an open selection is every file). */
+function checkedElements(setup: DetectSetup, tests: DetectTest[]): number {
+  const per = setup.file_elements;
+  if (!per) return setup.elements;
+  const files = new Set<string>();
+  for (const t of tests) for (const sel of [t.a, t.b]) {
+    if (!sel) continue;
+    const pick = Object.keys(per).filter((f) => (!sel.files.length || sel.files.includes(f)) && (!sel.teams.length || sel.teams.includes(setup.teams[f])));
+    pick.forEach((f) => files.add(f));
+  }
+  return [...files].reduce((n, f) => n + per[f], 0);
 }

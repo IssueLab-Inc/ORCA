@@ -34,6 +34,16 @@ def test_default_tests_pair_every_model_and_check_each_against_itself(paths):
     assert [t.kind for t in tests] == ["hard", "hard", "hard", "duplicate"]
 
 
+def test_a_site_model_is_context_its_tests_are_offered_but_off(paths):
+    scene = IfcScene(paths)
+    ix = detect._Index(scene)
+    ix.teams = ["Site" if n == "Fixture-Structure.ifc" else t for n, t in zip(ix.names, ix.teams)]
+    tests = {t.name: t for t in detect.default_tests(scene, ix)}
+    assert [n for n, t in tests.items() if t.enabled] == ["MEP (within)", "Duplicates (building models)"]
+    assert tests["Duplicates (building models)"].a.files == ["Fixture-MEP.ifc"]
+    assert not tests["MEP vs Site"].enabled and not tests["Site (within)"].enabled
+
+
 def test_the_crossing_duct_is_the_only_clash_between_the_models(result):
     assert names(result, "MEP vs Structure") == [("Beam B1", "Duct D1")]
     c = next(c for c in result.report.clashes if c.test == "MEP vs Structure")
