@@ -128,6 +128,18 @@ def _profile_evidence(scene, gid):
         return None, None
 
 
+def _port_endpoint_matches(scene, owner, port):
+    """Known straight-run endpoint position, independently of flow or orientation."""
+    if port.ObjectPlacement is None:
+        return None
+    try:
+        run = edits.run_of(scene,owner)
+    except edits.Unsupported:
+        return None
+    point = scene.placement(port.GlobalId)[:3,3]
+    return any(np.linalg.norm(point-end) <= TOL for end in (run.start,run.end))
+
+
 def _physical_port_frame(scene, owner, port, circular, dimensions, generated, flow=None):
     """Compare IFC flow axes to actual extrusion endpoints or triangulated fitting caps.
 
@@ -151,7 +163,8 @@ def _physical_port_frame(scene, owner, port, circular, dimensions, generated, fl
         elif np.linalg.norm(matrix[:3,3]-run.end) <= TOL:
             normal = d
         else:
-            return False
+            # Position failures are rejected separately, never classified as frame defects.
+            return None
         return bool(outward @ normal > .999 and (circular or matrix[:3,0] @ px > .999))
     except edits.Unsupported:
         pass
@@ -193,6 +206,10 @@ def _unchanged_external_frame_defect(before, after, originals, sources, old, a, 
         if x != sa or y != sb or q != eq.GlobalId:
             continue
         bp,bq = before.entity(p),before.entity(q)
+        endpoint_evidence = [_port_endpoint_matches(before,sa,bp), _port_endpoint_matches(before,sb,bq),
+                             _port_endpoint_matches(after,a,ep), _port_endpoint_matches(after,b,eq)]
+        if False in endpoint_evidence:
+            return False
         if any(port.ObjectPlacement is None or port.FlowDirection not in ('SOURCE','SINK')
                for port in (bp,bq,ep,eq)):
             return False
@@ -226,8 +243,8 @@ def _unchanged_external_frame_defect(before, after, originals, sources, old, a, 
             return False
         return (float(mp[:3,2] @ mq[:3,2]) <= .999 or
                 ((ca is False or cb is False) and float(mp[:3,0] @ mq[:3,0]) <= .999) or
-                _physical_port_frame(before,sa,bp,ca,da,False) is False or
-                _physical_port_frame(before,sb,bq,cb,db,False) is False)
+                (endpoint_evidence[0] is True and _physical_port_frame(before,sa,bp,ca,da,False) is False) or
+                (endpoint_evidence[1] is True and _physical_port_frame(before,sb,bq,cb,db,False) is False))
     return False
 
 
@@ -267,6 +284,12 @@ def _integrity(before, after, originals, sources, result):
     for p, q, a, b in new.values():
         pair = frozenset((a,b))
         ep, eq = after.entity(p), after.entity(q)
+        endpoint_evidence = [_port_endpoint_matches(after,a,ep), _port_endpoint_matches(after,b,eq)]
+        for owner, valid in zip((a,b),endpoint_evidence):
+            if valid is False:
+                errors.append(f'connection port does not align with physical run endpoint: {owner}')
+        # None falls through to the existing missing-placement / fitting-cap evidence
+        # paths below; a supported fitting cap is not a missing straight-run endpoint.
         ca,da = _profile_evidence(before,sources.get(a,a))
         cb,db = _profile_evidence(before,sources.get(b,b))
         orientation_ok, gap = False, None
@@ -333,7 +356,7 @@ def _integrity(before, after, originals, sources, result):
             # Generated bends are built from the source profile by apply_offset.
             if a not in sources or b not in sources or sources.get(a) != sources.get(b):
                 review.append(dict(id='profile_metadata', message='Some joint profiles cannot be verified; confirm fitting compatibility.'))
-        if orientation_ok and gap is not None and gap <= TOL:
+        if orientation_ok and gap is not None and gap <= TOL and False not in endpoint_evidence:
             allowed.add(pair)
     for gid in originals:
         entity = before.entity(gid)

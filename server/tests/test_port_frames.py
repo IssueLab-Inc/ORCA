@@ -214,3 +214,28 @@ def test_profile_own_reference_direction_is_preserved_in_new_ports(tmp_path):
         expected = world[:3,:2] @ direction
         for port in edits._ports(element):
             assert loaded.placement(port.GlobalId)[:3,0] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize('mm',[False,True])
+@pytest.mark.parametrize('unknown_flow',[False,True])
+def test_untouched_peer_physical_gap_cannot_be_a_legacy_frame_defect(tmp_path,mm,unknown_flow):
+    from sightline.context_eval import evaluate_candidate, commit_candidate
+    scene = prepare(tmp_path,mm=mm)
+    main,peer = scene.model.by_type('IfcDuctSegment')
+    solid = edits._body(peer)[1]
+    solid.Position.Location.Coordinates = (6.1/scene.unit_scale,0.,2.8/scene.unit_scale)
+    if unknown_flow:
+        edits._ports(peer)[0].FlowDirection = None
+    objective = dict(element_a=main.GlobalId,element_b=scene.model.by_type('IfcBeam')[0].GlobalId)
+    operations = [dict(kind='offset',element=main.GlobalId,split_m=[2,4],
+                       delta_m=[0,0,.4],reason='Clear beam')]
+    original = scene.model.to_string()
+    result = evaluate_candidate(scene,objective,operations)
+    assert result['checks']['geometry']['target_resolved']
+    assert not result['passed'] and not result['checks']['integrity']['passed']
+    assert 'endpoint' in str(result['checks']['integrity']['errors'])
+    assert peer.GlobalId in str(result['checks']['integrity']['errors'])
+    assert not any(r['id']=='legacy_port_frames' for r in result['review_conditions'])
+    with pytest.raises(ValueError,match='endpoint'):
+        commit_candidate(scene,objective,operations)
+    assert scene.model.to_string() == original and scene.revision == 0
