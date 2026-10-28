@@ -1,8 +1,9 @@
-import { Boxes, Brain, Check, Download, FileSpreadsheet, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Boxes, Brain, Check, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
-import { api, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
+import { ReportDialog, ReviewBlock } from "./ReportDoc";
+import { api, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
@@ -83,6 +84,12 @@ export function App() {
   // Bulk triage of the open report (shared on the server: a run someone else started is followed, not repeated).
   const [triage, setTriage] = useState<Record<string, TriageVerdict>>({});
   const [triageRun, setTriageRun] = useState<TriageRun | null>(null);
+  // The coordination report: which team owns each model (guessed, then confirmed), the fixes to show with their
+  // before/after pictures, and the teams' reviews (kept in this browser per report).
+  const [modelTeams, setModelTeams] = useState<Record<string, Team>>({});
+  const [evidence, setEvidence] = useState<Record<string, Evidence>>({});
+  const [signoffs, setSignoffs] = useState<Record<string, Signoff[]>>({});
+  const [docOpen, setDocOpen] = useState(false);
   const [triageFilter, setTriageFilter] = useState<TriageKind | null>(null);
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -208,6 +215,57 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report]);
 
+  useEffect(() => {
+    if (!report) return;
+    let live = true;
+    api.teams(report.id, sceneId).then((r) => {
+      // A fresh guess once the models are open (they say more than the report does); the dialog confirms it.
+      if (live) setModelTeams(Object.fromEntries(r.models.map((m) => [m.file, m.guess])));
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [report, sceneId]);
+  const signoffKey = report ? `sightline.signoffs.${report.title}` : null;
+  useEffect(() => {
+    setEvidence({});
+    try { setSignoffs(signoffKey ? JSON.parse(localStorage.getItem(signoffKey) ?? "{}") : {}); } catch { setSignoffs({}); }
+  }, [signoffKey]);
+  function changeSignoffs(id: string, f: (s: Signoff[]) => Signoff[]) {
+    setSignoffs((all) => {
+      const next = { ...all, [id]: f(all[id] ?? []) };
+      try { if (signoffKey) localStorage.setItem(signoffKey, JSON.stringify(next)); } catch { /* private window */ }
+      return next;
+    });
+  }
+
+  const addSignoff = (id: string, so: Signoff) => changeSignoffs(id, (l) => [...l, so]);
+  const removeSignoff = (id: string, i: number) => changeSignoffs(id, (l) => l.filter((_, k) => k !== i));
+
+  /** Report clash ids of these element pairs (one pair can be reported by several tests). */
+  function clashIdsOf(pairs: (readonly [string | null, string | null])[]): string[][] {
+    if (!report || !matches) return pairs.map(() => []);
+    const key = (x: string | null | undefined, y: string | null | undefined) => [x, y].sort().join("|");
+    return pairs.map((p) => report.clashes.filter((c) => key(matches[c.id]?.a, matches[c.id]?.b) === key(p[0], p[1])).map((c) => c.id));
+  }
+
+  /** The view as it is and with the fix(es), for the report. Draws both states in turn, then puts the view back. */
+  function captureFix(options: Option[], color: string): { before_img?: string; after_img?: string } {
+    const v = viewer.current;
+    if (!v || !options.length) return {};
+    const shapes = options.map((o) => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m, pieces: o.preview, before: o.before, color }));
+    v.showOptions(shapes, "before");
+    const before_img = v.capture();
+    v.showOptions(shapes, "after");
+    const after_img = v.capture();
+    v.showOptions(shapes, compare);
+    return { before_img, after_img };
+  }
+
+  function evidenceOf(o: Option, status: Evidence["status"], pics: { before_img?: string; after_img?: string }): Evidence {
+    return { status, title: o.title, kind: o.kind, edit: editText(o), moved: o.moved,
+      clearance: o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m), clearance_m: o.min_clearance_m ?? null,
+      rationale: o.rationale, also_needs: o.also_needs, ...pics };
+  }
+
   function review(ids: string[], kind: Review["kind"], note: string) {
     setReviewed((r) => ({ ...r, ...Object.fromEntries(ids.filter((id) => !fixes[id]).map((id) => [id, { kind, note }])) }));
     setChecked((s) => { const n = new Set(s); for (const id of ids) n.delete(id); return n; });
@@ -262,6 +320,15 @@ export function App() {
     if (!option) return;
     const sides = [a, b, ...Object.keys(standIns)].filter((g): g is string => !!g);
     if (!frameFix(option, sides) && option.before?.length) viewer.current?.frameMeshes(option.before, 1.6);
+    // Once the camera has arrived: the pictures the report shows for this proposed fix (accepting replaces them).
+    const o = option, pair = [a, b] as const;
+    const timer = window.setTimeout(() => {
+      const ids = clashIdsOf([pair])[0];
+      if (!ids.length) return;
+      const pics = captureFix([o], o.moved.includes(pair[0] ?? "") ? "#d0342c" : "#1f9d3a");
+      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.filter((id) => ev[id]?.status !== "accepted").map((id) => [id, evidenceOf(o, "proposed", pics)])) }));
+    }, 1400);
+    return () => window.clearTimeout(timer);
   }, [option]);  // eslint-disable-line react-hooks/exhaustive-deps
   // A finished plan: frame everything it changes, or (nothing to change) the cluster it is about.
   useEffect(() => {
@@ -473,6 +540,7 @@ export function App() {
     if (!sceneId || !plan) return;
     const items = plan.items.filter((i) => i.option && (plan.check.passed || plan.check.items[i.key]?.passed));
     setBusy(`Applying ${items.length} fix${items.length > 1 ? "es" : ""}…`);
+    const pics = captureFix(items.map((i) => i.option!), "#1f9d3a");
     try {
       const { files, pieces } = await api.applyPlan(sceneId, items.map((i) => i.option!));
       viewer.current?.preview([]);
@@ -483,6 +551,12 @@ export function App() {
         return next;
       });
       markFixed(items.map((i) => [i.element_a, i.element_b] as const), items.map((i) => i.option!.title));
+      const groups = clashIdsOf(items.map((i) => [i.element_a, i.element_b] as const));
+      setEvidence((ev) => {
+        const next = { ...ev };
+        items.forEach((it, k) => { for (const id of new Set([...groups[k], ...it.clash_ids])) next[id] = evidenceOf(it.option!, "accepted", pics); });
+        return next;
+      });
       setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
@@ -537,8 +611,13 @@ export function App() {
   async function accept(o: Option) {
     if (!sceneId) return;
     setBusy("Applying the fix…"); setError(null);
+    const ids = clashIdsOf([[a, b]])[0];
+    const pics = ids.some((id) => evidence[id]?.after_img && evidence[id]?.title === o.title)
+      ? { before_img: evidence[ids[0]]?.before_img, after_img: evidence[ids[0]]?.after_img }
+      : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     try {
       const { files, pieces } = await api.accept(sceneId, o);
+      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
       for (const i of files) await viewer.current!.replace(i, await api.file(sceneId, i));
       if (pieces?.length) {
@@ -633,6 +712,8 @@ export function App() {
         <span className="spacer" />
         {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={openDemo}><FolderOpen size={15} aria-hidden /> {startLabel}</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
+        {report && <button className="btn" onClick={() => setDocOpen(true)} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
+          <FileText size={15} aria-hidden /> Report</button>}
         {sceneId && <a className="btn primary" href={api.exportUrl(sceneId)} data-tip="Download the changed IFC files" data-tip-side="bottom">
           <Download size={15} aria-hidden /> Export IFC</a>}
       </header>
@@ -730,7 +811,11 @@ export function App() {
         )}
         <div className="tab-body" hidden={tab !== "clash"}>
           {clash && report
-            ? <ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash, index })} fix={fixes[clash.id]} triage={triage[clash.id]} />
+            ? (<><ClashPanel reportId={report.id} clash={clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash, index })} fix={fixes[clash.id]} triage={triage[clash.id]} />
+              {(evidence[clash.id] || triage[clash.id]?.verdict === "real_clash" || (signoffs[clash.id]?.length ?? 0) > 0) &&
+                <ReviewBlock clash={clash} teams={modelTeams} signoffs={signoffs[clash.id] ?? []}
+                  onAdd={(so) => addSignoff(clash.id, so)} onRemove={(i) => removeSignoff(clash.id, i)} />}
+              </>)
             : (a || b) ? (
               <dl className="kv pair">
                 <dt><i className="sw red" />A</dt><dd className="mono">{a ?? "—"}</dd>
@@ -807,6 +892,9 @@ export function App() {
       </footer>
 
       {about && <About onClose={() => setAbout(false)} />}
+      {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={triage} triageDone={!!triageRun?.done}
+        teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
+        triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} />}
       {lightbox && report && lightbox.clash.images[lightbox.index] &&
         <Lightbox reportId={report.id} clash={lightbox.clash} index={lightbox.index} onClose={() => setLightbox(null)}
           onMove={(index) => setLightbox((l) => l && { ...l, index })} />}

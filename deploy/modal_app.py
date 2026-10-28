@@ -19,6 +19,7 @@ APP_DIR = "/app"
 
 image = (
     modal.Image.debian_slim(python_version="3.13")
+    .apt_install("libpango-1.0-0", "libpangoft2-1.0-0", "libharfbuzz0b", "libharfbuzz-subset0", "fonts-dejavu-core")  # WeasyPrint (PDF reports)
     .uv_sync(str(ROOT / "server"))
     .env({
         "SIGHTLINE_PROPOSE_PER_HOUR": "20",    # per visitor; every proposal is a paid Muse Spark call, a plan costs

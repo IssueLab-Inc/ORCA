@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.14.1",
     "python-multipart>=0.0.32",
     "uvicorn[standard]>=0.54.0",
+    "weasyprint>=70.0",
 ]
 
 [dependency-groups]

@@ -97,7 +97,7 @@ Findings (Oct 27, details in spikes/README.md):
 Done: skeleton, federated scene, neighbourhood check, agent loop (tested with a scripted model), API, MCP server,
 Northbank spikes 1–4, Modal deploy script (`deploy/modal_app.py`: one container, because scenes live in memory;
 proposal caps in `server/sightline/limits.py`). Proposal scores go in `evals/results.csv` (append-only; see
-evals/README.md). 62 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
+evals/README.md). 66 server tests (`cd server && uv run pytest -q`), web build (`cd web && npm run build`).
 
 Deployed Oct 27: https://dodzikojo--clashwise-sightline-web.us-east.modal.run (Northbank in `samples/`; a #042
 proposal took 121 s, 15 attempts, 3 verified options). Behind the cloud session's proxy the Modal CLI needs
@@ -252,6 +252,17 @@ butt the other's face. `edits.member_axis` finds the long axis, extrusion or rec
 it with what blocked the ideas when nothing passes (`NoFix`). Clash7: 86 s and 0/15 before, 13-23 s and a verified trim
 first try now. Answer key unchanged (3/3 first try, rows in results.csv). The viewer glows while the pilot drives.
 
+Reports and BCF (Oct 28): `server/sightline/document.py`, header **Report** (`web/src/ReportDoc.tsx`). Scope: one PDF,
+one per team or one per model (the user picks). Team per model is guessed from content (class histogram; name only
+breaks ties) and confirmed in the dialog. Acting team: whose element a fix changes, else triage's `responsible`, else
+structure stays > architecture > site, services move; every team with an element reviews. Real clashes and clashes with
+a fix get a page (Navisworks view cropped by colour, original + fix captured in the browser by `Viewer.capture` 1.4 s
+after an option is picked and at accept, Muse Spark's explanation marked AI-drafted, review table); model errors in a
+table for authors; noise grouped by test. DRAFT until each page has a review from every team involved (reviews:
+in-app `ReviewBlock`, name + decision, kept in localStorage per report; no login yet). BCF 2.1 zip: one topic per page,
+assigned to the acting team, comments = explanation + reviews, coloured pair and camera. Needs triage done; costs one
+proposal. HTML → PDF with WeasyPrint (Modal image apt-installs pango/harfbuzz).
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
@@ -259,7 +270,7 @@ Next, in order.
 3. ✅ Viewer: context/x-ray modes, section box, measure (above). Still to do: A/B/C capture in the browser, plan view.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
-5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. Export IFC + BCF.
+5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.

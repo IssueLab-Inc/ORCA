@@ -445,3 +445,24 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 @keyframes rec { 50% { opacity: .3; } }
 .msg .said { vertical-align: -1px; margin-right: 5px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .rec { animation: none; } .btn.mic.on { transition: none; } }
+
+/* Team reviews of a clash, and the report dialog (ReportDoc.tsx) */
+.review-block { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; margin: 10px 0; font-size: 12.5px; }
+.review-block summary { display: flex; gap: 8px; align-items: center; cursor: pointer; flex-wrap: wrap; }
+.signoffs { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.signoffs li { display: flex; gap: 6px; align-items: center; }
+.signoffs li > span { flex: 1; min-width: 0; }
+.signoffs .ok { color: var(--ok, #1d7f47); } .signoffs .bad { color: var(--bad, #b8352a); }
+.review-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.review-form select, .review-form input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; min-width: 0; flex: 1 1 90px; }
+.review-form input.wide { flex-basis: 100%; }
+.report-dialog { position: relative; padding: 22px 24px; display: flex; flex-direction: column; gap: 8px; width: min(640px, 100%) !important; }
+.report-dialog h2 { display: flex; gap: 8px; align-items: center; margin: 0; }
+.report-dialog h3 { margin: 10px 0 0; font-size: 13px; }
+.report-dialog .row { justify-content: space-between; }
+.team-table { border-collapse: collapse; font-size: 12.5px; }
+.team-table td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line); }
+.team-table select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.report-dialog .check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin-top: 6px; }
+.report-dialog .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.spin { animation: spin 1s linear infinite; vertical-align: -2px; }

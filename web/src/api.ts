@@ -120,6 +120,21 @@ export type ChatEvent =
   | { type: "error"; detail: string }
   | { type: "done" };
 
+/** Coordination reports (server: document.py). */
+export type Team = "Structure" | "MEP" | "Architecture" | "Site";
+export interface ModelTeam { file: string; guess: Team; elements: number }
+/** A fix shown in the report: what it changes, and the view of the clash as it is and with the fix. */
+export interface Evidence {
+  status: "proposed" | "accepted"; title: string; kind: FixKind; edit: string; clearance: string; clearance_m: number | null;
+  rationale: string; also_needs: string; advice?: string; moved: string[]; before_img?: string; after_img?: string;
+}
+/** A team's review of one clash, recorded in the app. */
+export interface Signoff { team: Team; name: string; decision: "approve" | "reject"; note: string; at: string }
+export type DocEvent =
+  | { type: "progress"; step: "explaining" | "summarising" | "rendering" | "bcf"; done?: number; total?: number }
+  | { type: "ready"; url: string; name: string; bytes: number }
+  | { type: "error"; message: string };
+
 /** POST and read newline-delimited JSON events until the stream ends. */
 async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void) {
   const r = await fetch(`/api${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -141,6 +156,12 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 }
 
 export const api = {
+  teams: (reportId: string, sceneId: string | null) =>
+    call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
+  document: (reportId: string, body: { scene_id: string | null; scope: "combined" | "team" | "model"; teams: Record<string, Team>;
+                                      bcf: boolean; evidence: Record<string, Evidence>; reviews: Record<string, Signoff[]>;
+                                      marks: Record<string, string> }, onEvent: (e: DocEvent) => void) =>
+    ndjson<DocEvent>(`/reports/${reportId}/document/stream`, body, (e) => { onEvent(e); return e.type !== "progress"; }),
   triage: (reportId: string) => call<TriageState>(`/reports/${reportId}/triage`),
   /** Triage every clash in the report (or follow the run already going), event by event. */
   triageStream: (reportId: string, onEvent: (e: TriageEvent) => void, rerun = false) =>

@@ -8,16 +8,17 @@ import queue
 import shutil
 import tempfile
 import threading
+import uuid
 import wave
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, edits, plans, triage
+from . import chat, document, edits, plans, triage
 from .meta_client import transcribe, triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
@@ -478,6 +479,77 @@ def chat_turn(body: ChatTurn, request: Request):
 
     return StreamingResponse(stream(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+class DocumentRequest(BaseModel):
+    scene_id: str | None = None
+    scope: str = "combined"            # combined | team | model
+    teams: dict[str, str] = {}         # model file name -> team, as the user confirmed it
+    bcf: bool = True
+    evidence: dict[str, dict] = {}     # clash id -> the session's fix (status, title, edit, pictures...)
+    reviews: dict[str, list[dict]] = {}  # clash id -> [{team, name, decision, note, at}]
+    marks: dict[str, str] = {}         # clash id -> "by_design" | "author"
+
+
+_documents: dict[str, tuple[bytes, str, str]] = {}
+
+
+@app.get("/api/reports/{report_id}/teams")
+def report_teams(report_id: str, scene_id: str | None = None):
+    """Each model in the report (and the open scene) with the team its content suggests; the user confirms."""
+    scene = ws.scene(scene_id) if scene_id and scene_id in ws.scenes else None
+    with ws.lock:
+        return {"teams": document.TEAMS, "models": document.guess_teams(ws.report(_report(report_id)), scene)}
+
+
+@app.post("/api/reports/{report_id}/document/stream")
+def document_stream(report_id: str, body: DocumentRequest, request: Request):
+    """A coordination report: PDF(s) combined, per team or per model, plus BCF. Needs the report's triage. Streams
+    progress as newline-delimited JSON, then {"type": "ready", url, name}. Costs one proposal."""
+    report = ws.report(_report(report_id))
+    if body.scope not in ("combined", "team", "model"):
+        raise HTTPException(422, "scope is combined, team or model.")
+    job = _triage_jobs.get(_triage_key(report))
+    if job is None or not job.done:
+        raise HTTPException(409, "Triage the report first: the report sorts clashes by its verdicts.")
+    scene = ws.scene(body.scene_id) if body.scene_id and body.scene_id in ws.scenes else None
+    refused = propose_limit.take(client_id(request.headers, request.client.host if request.client else None))
+    if refused:
+        raise HTTPException(429, refused)
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            matches = ws.match(report_id, body.scene_id) if scene is not None else None
+            data, name, media = document.generate(
+                report, dict(job.results), ws.model, scope=body.scope, model_teams=body.teams, matches=matches,
+                scene=scene, evidence=body.evidence, reviews=body.reviews, marks=body.marks,
+                include_bcf=body.bcf, emit=events.put)
+            doc_id = uuid.uuid4().hex
+            _documents[doc_id] = (data, name, media)
+            while len(_documents) > 24:
+                _documents.pop(next(iter(_documents)))
+            events.put({"type": "ready", "url": f"/api/documents/{doc_id}", "name": name, "bytes": len(data)})
+        except Exception as e:
+            events.put({"type": "error", "message": f"Could not build the report: {type(e).__name__}: {e}"})
+        events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream():
+        while (event := events.get()) is not None:
+            yield json.dumps(event, default=str) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/documents/{doc_id}")
+def get_document(doc_id: str):
+    if doc_id not in _documents:
+        raise HTTPException(404, "That report has expired. Build it again.")
+    data, name, media = _documents[doc_id]
+    return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.post("/api/transcribe")

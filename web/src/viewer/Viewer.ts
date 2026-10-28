@@ -681,6 +681,17 @@ export class Viewer {
     return this.renderer.domElement.toDataURL("image/png");
   }
 
+  /** A small JPEG of the current view (for reports): the centre square, `side` pixels across. */
+  capture(side = 640): string {
+    this.renderer.render(this.scene, this.camera);
+    const src = this.renderer.domElement;
+    const s = Math.min(src.width, src.height);
+    const out = document.createElement("canvas");
+    out.width = out.height = Math.min(side, s);
+    out.getContext("2d")!.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, 0, 0, out.width, out.height);
+    return out.toDataURL("image/jpeg", 0.85);
+  }
+
   dispose() {
     this.renderer.setAnimationLoop(null);
     this.resize.disconnect();
