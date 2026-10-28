@@ -20,10 +20,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import chat, document, edits, owner, plans, triage
-from .meta_client import transcribe, triage_model
+from .meta_client import load_env, transcribe, triage_model
 from .limits import ProposeLimit, client_id
 from .service import Workspace
 
+load_env()  # the repo's .env, before anything reads a setting (caps, owner token); real environment variables win
 app = FastAPI(title="ClashWise Sightline")
 
 
