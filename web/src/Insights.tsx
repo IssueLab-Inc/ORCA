@@ -27,8 +27,12 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
   const roots = rootCauses ?? [];
   const pats = patterns ?? [];
   if (rootCauses && patterns && !roots.length && !pats.length) return null;
-  const shownRoots = allRoots ? roots : roots.slice(0, 2);
-  const shownPats = allPatterns ? pats : pats.slice(0, 4);
+  // While the list is filtered to one of these, show only that one: the rest of the panel gives way to the list.
+  const rootLabel = (r: RootCause) => `Root cause: ${r.hub.name}`;
+  const patLabel = (p: Pattern) => `Pattern: ${human(p.classes[0])} with ${human(p.classes[1])}`;
+  const focused = !!focus && (roots.some((r) => rootLabel(r) === focus) || pats.some((p) => patLabel(p) === focus));
+  const shownRoots = focused ? roots.filter((r) => rootLabel(r) === focus) : allRoots ? roots : roots.slice(0, 2);
+  const shownPats = focused ? pats.filter((p) => patLabel(p) === focus) : allPatterns ? pats : pats.slice(0, 4);
   const openRoots = roots.filter((r) => !r.done).length;
   const openPats = pats.filter((p) => p.clash_ids.some((id) => !resolved.has(id))).length;
   const nRoots = rootCauses ? `${openRoots} root cause${openRoots === 1 ? "" : "s"}` : "…";
@@ -47,9 +51,9 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
         <ChevronDown size={15} className="insights-caret" aria-hidden />
       </summary>
 
-      {roots.length > 0 && <div className="insights-part">
+      {shownRoots.length > 0 && <div className="insights-part">
         <h3><Network size={14} aria-hidden /> Root causes</h3>
-        <p className="hint">One element behind several clashes: fix the cause once, not each clash.</p>
+        {!focused && <p className="hint">One element behind several clashes: fix the cause once, not each clash.</p>}
         {shownRoots.map((r) => (
           <div key={r.hub.global_id} className={`insight ${r.done ? "done" : ""}`}>
             <div className="insight-text">
@@ -62,7 +66,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
               </span>
             </div>
             <div className="insight-actions">
-              {filterButton(`Root cause: ${r.hub.name}`, r.clash_ids)}
+              {filterButton(rootLabel(r), r.clash_ids)}
               {r.done
                 ? <button className="btn small root-act" disabled data-tip="Its clashes are resolved" data-tip-side="left"><CircleCheck size={14} aria-hidden /> Done</button>
                 : <button className="btn small root-act" disabled={busy} onClick={() => onFixRoot(r.hub.global_id)}
@@ -70,20 +74,20 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
             </div>
           </div>
         ))}
-        {roots.length > 2 && <button className="more" onClick={() => setAllRoots(!allRoots)}>
+        {!focused && roots.length > 2 && <button className="more" onClick={() => setAllRoots(!allRoots)}>
           {allRoots ? <><ChevronUp size={13} aria-hidden /> Fewer</> : <><ChevronDown size={13} aria-hidden /> All {roots.length} root causes</>}</button>}
       </div>}
 
-      {pats.length > 0 && <div className="insights-part">
+      {shownPats.length > 0 && <div className="insights-part">
         <h3><Repeat2 size={14} aria-hidden /> Patterns</h3>
-        <p className="hint">The same pair of element types clashing again and again: usually one decision, not many problems.</p>
-        {!verdicts && <button className="btn small explain-all" data-tour="explain" disabled={explaining || busy} onClick={onExplain}>
+        {!focused && <p className="hint">The same pair of element types clashing again and again: usually one decision, not many problems.</p>}
+        {!verdicts && !focused && <button className="btn small explain-all" data-tour="explain" disabled={explaining || busy} onClick={onExplain}>
           {explaining ? <><i className="spinner" aria-hidden /> Muse Spark is reading the patterns…</>
             : <><Sparkles size={13} aria-hidden /> Explain the {pats.length} patterns with Muse Spark</>}</button>}
+        {!verdicts && !focused && <p className="hint small">Marks, flags and fixes for each pattern appear once they are read.</p>}
         {shownPats.map((p) => {
           const v = verdicts?.[p.id];
           const open = p.clash_ids.filter((id) => !resolved.has(id));
-          const name = `${human(p.classes[0])} with ${human(p.classes[1])}`;
           return (
             <div key={p.id} className={`insight pattern ${open.length ? "" : "done"}`} data-tour={v?.verdict === "by_design" ? "pattern-by-design" : undefined}>
               <span className="pattern-n" aria-label={`${open.length} clashes open of ${p.clashes}`}
@@ -96,7 +100,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
                 {v && <span className="hint">{v.rule ? <>Rule: <i>{v.rule}</i></> : v.action}</span>}
               </div>
               <div className="insight-actions">
-                {filterButton(`Pattern: ${name}`, p.clash_ids)}
+                {filterButton(patLabel(p), p.clash_ids)}
                 {!open.length && <span className="ibtn done-mark" aria-label="All resolved" data-tip="All resolved" data-tip-side="left"><CircleCheck size={16} aria-hidden /></span>}
                 {open.length > 0 && <>
                 <button className="ibtn" aria-label="Tick these clashes in the list" data-tip="Tick them in the list" data-tip-side="left"
@@ -112,7 +116,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
             </div>
           );
         })}
-        {pats.length > 4 && <button className="more" onClick={() => setAllPatterns(!allPatterns)}>
+        {!focused && pats.length > 4 && <button className="more" onClick={() => setAllPatterns(!allPatterns)}>
           {allPatterns ? <><ChevronUp size={13} aria-hidden /> Fewer</> : <><ChevronDown size={13} aria-hidden /> All {pats.length} patterns</>}</button>}
       </div>}
     </details>

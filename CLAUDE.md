@@ -484,6 +484,12 @@ Insights, Triage, thumbnails (Oct 28, owner feedback):
   shot taken after the frame's own render showed until the next frame. `Viewer.posed` now renders the restored view
   before returning; the queue draws one thumbnail per 60 ms (setTimeout). Checked by sampling the canvas between frames
   while scrolling: the old build jumped 45 levels of brightness, the new one 0.
+- **Patterns are read automatically** once per report and models (`explainPatterns(quiet)` in App.tsx, skipped while
+  a proposal, plan or replay runs; a failure leaves the Explain button). Their mark / flag / fix buttons need that
+  reading, which is why they seemed missing. Northbank: verdicts ~35 s after the list.
+- **A filter gives the list the room:** with a pattern or root cause filter on, Insights shows only that row (no
+  hints, toggles or other section) and Triage goes compact unless opened for that filter (`forceCompact`). Northbank:
+  the list starts ~1,300 px higher.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

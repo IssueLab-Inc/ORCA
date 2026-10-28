@@ -1,5 +1,5 @@
 import { Brain, ChevronDown, CircleCheck, Flag, Info, RotateCcw, ScanSearch } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TriageKind, TriageModel, TriageVerdict } from "./api";
 
 export const TRIAGE: Record<TriageKind, { label: string; cls: string; tip: string; colour: string; long: string }> = {
@@ -45,9 +45,10 @@ function storedCompact(): boolean | null {
 export interface TriageRun extends TriageModel { total: number; started: number; done: boolean; seconds?: number; error?: string }
 
 /** Bulk triage of the whole report, the first step: run it, watch it land, filter by verdict, set the noise aside. */
-export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active }: {
+export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active, forceCompact = false }: {
   run: TriageRun | null; results: Record<string, TriageVerdict>; now: number; total: number;
   active?: TriageModel | null;  // the model a run would use now (server: /api/models), before one starts
+  forceCompact?: boolean;       // the list is filtered to a pattern or root cause: give it the room (unless opened)
   live?: { id: string; name: string; text: string }[]; onOpen?: (id: string) => void;
   filter: TriageKind | null; onFilter: (k: TriageKind | null) => void; onRun: (rerun: boolean) => void;
   onSetAside: (ids: string[]) => void; onFlag: (ids: string[]) => void;
@@ -55,6 +56,8 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   open?: number;
 }) {
   const [chosen, setChosen] = useState<boolean | null>(storedCompact);
+  const [openedAnyway, setOpenedAnyway] = useState(false);
+  useEffect(() => { setOpenedAnyway(false); }, [forceCompact]);
   const ids = Object.keys(results);
   const counts = Object.fromEntries(ORDER.map((k) => [k, ids.filter((id) => results[id].verdict === k).length])) as Record<TriageKind, number>;
   const noise = ids.filter((id) => ["by_design", "non_physical"].includes(results[id].verdict));
@@ -66,8 +69,9 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   const seconds = run ? Math.round(run.done ? run.seconds ?? 0 : Math.max(0, now - run.started) / 1000) : 0;
   const model = run?.model ? (run.open_weights ? "Muse Spark Open" : "Muse Spark") : "";
   const state = !run ? "idle" : run.done ? "done" : "running";
-  const compact = chosen ?? state === "done";
+  const compact = forceCompact ? !openedAnyway : chosen ?? state === "done";
   const toggle = () => {
+    if (forceCompact) { setOpenedAnyway(compact); return; }  // for this filter only; the stored choice stays
     setChosen(!compact);
     try { localStorage.setItem(COMPACT, compact ? "0" : "1"); } catch { /* private window */ }
   };

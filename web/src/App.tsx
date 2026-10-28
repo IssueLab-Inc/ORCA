@@ -288,12 +288,18 @@ export function App() {
     return () => { live = false; };
   }, [report, sceneId, matches, resolved]);
 
-  async function explainPatterns() {
+  /** Muse Spark reads every pattern (one call, cached per report on the server): its verdicts bring each pattern's
+   * mark, flag and fix buttons. `quiet` (the automatic reading) leaves a failure to the Explain button, not a banner. */
+  async function explainPatterns(quiet = false) {
     if (!report || !sceneId) return;
+    const rid = report.id;
     setExplaining(true);
-    try { setVerdicts(await api.triagePatterns(report.id, sceneId, resolved)); }
-    catch (e) { setError((e as Error).message); } finally { setExplaining(false); }
+    try { const v = await api.triagePatterns(rid, sceneId, resolved); if (reportRef.current === rid) setVerdicts(v); }
+    catch (e) { if (!quiet) setError((e as Error).message); } finally { setExplaining(false); }
   }
+  const reportRef = useRef<string | null>(null);
+  reportRef.current = report?.id ?? null;
+  const explained = useRef<string | null>(null);
 
   /** Run the bulk triage, or follow the run already going for this report. */
   async function runTriage(rerun = false) {
@@ -1238,6 +1244,16 @@ export function App() {
   const landing = !stats && !report;
   const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
+  // Read the patterns as soon as they are found, once per report and models, unless a proposal or plan is running then
+  // (it is tried again when that ends). A failure leaves the Explain button for a manual try.
+  useEffect(() => {
+    const key = report && sceneId ? `${report.id}:${sceneId}` : null;
+    if (!key || !patterns?.length || verdicts || explaining || explained.current === key) return;
+    if (proposing || planning || replaying || busy) return;
+    explained.current = key;
+    void explainPatterns(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report, sceneId, patterns, verdicts, explaining, proposing, planning, replaying, busy]);
   // Thumbnails wait while the viewer is busy with something the user is watching (a proposal, a plan, a reload).
   thumbPaused.current = proposing || planning || replaying || !!busy || !!detecting;
   useEffect(() => { setThumbs({}); thumbQueue.current = []; }, [report?.id]);
@@ -1400,14 +1416,14 @@ export function App() {
               insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
                 detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
                 progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} />}
-                <TriageCard run={triageRun} active={triageModel} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+                <TriageCard run={triageRun} active={triageModel} forceCompact={!!listFocus} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
                 total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
                 resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={setListFocus}
-                busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={explainPatterns}
+                busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={() => void explainPatterns()}
                 onSelect={(ids) => setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])]))}
                 onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })} /></>} />
           : sceneId
