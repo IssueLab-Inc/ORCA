@@ -491,6 +491,21 @@ Insights, Triage, thumbnails (Oct 28, owner feedback):
   hints, toggles or other section), Triage goes compact unless opened for that filter (`forceCompact`), and the
   Coordinate card shrinks to one line (`DetectSummary compact`). Northbank: the list starts ~1,400 px higher.
 
+STEP models (Oct 28, owner decision; design in `docs/step.md`, code `server/sightline/step.py`):
+- **Conversion:** STEP → IFC on open (`cadquery-ocp` 8.0 in the same process as IfcOpenShell: checked, no conflict).
+  Parts become triangulated elements with name, colour/alpha, pset `Sightline_STEP` (Group, Label, Source); groups
+  become IfcGroups, not assemblies; GlobalIds from file hash + label path.
+- **Classes:** the titles' model picks each part's class from name and group (`domain_packs/step_classes.md`).
+- **Cache:** by file hash (`samples/step-cache` is deployed so the demo's first opening is ~1.5 s, not ~35 s).
+- **Fixes:** moves only. `IfcScene.step_run`: parts of the same STEP group that touch move together.
+- **Export:** writes `<name>.sightline.step` back (`step.export`, component locations), zipped with the IFC.
+- **Upload:** `POST /api/models/upload` (IFC/STEP, caps `SIGHTLINE_MODEL_UPLOAD_MAX_MB`,
+  `SIGHTLINE_MODEL_UPLOADS_PER_HOUR/DAY`); Models › Upload models.
+- **Second demo:** the landing's "A machine cell, from its STEP file" (`cellSample`, `openDemo([cellSample])`).
+- **Results (`evals/step_cell.py`):** Rev A 144 parts, classes 144/144, 13/13 planted, 0 unexpected; Rev B 0 planted;
+  C2 ladder +150 mm verified and written back. In the browser Muse Spark proposed exactly that move.
+- **Modal image:** needs `libgl1` for OCP.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
@@ -500,8 +515,9 @@ Next, in order.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ Sightline
-   detection (no Navisworks needed). ✅ #N numbers and Muse titles. ✅ Demo, tour and landing on detection. Next: the
-   palletising cell as a second demo.
+   detection (no Navisworks needed). ✅ #N numbers and Muse titles. ✅ Demo, tour and landing on detection. ✅ STEP
+   models and the palletising cell (from STEP) as the second demo.
 6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
-Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP models.
+Later (not in the hackathon build): ClashWise's Wise panel on each clash calls Sightline's MCP server; STEP machines placed
+inside building models; offsets and trims on STEP parts.

@@ -19,7 +19,8 @@ APP_DIR = "/app"
 
 image = (
     modal.Image.debian_slim(python_version="3.13")
-    .apt_install("libpango-1.0-0", "libpangoft2-1.0-0", "libharfbuzz0b", "libharfbuzz-subset0", "fonts-dejavu-core")  # WeasyPrint (PDF reports)
+    .apt_install("libpango-1.0-0", "libpangoft2-1.0-0", "libharfbuzz0b", "libharfbuzz-subset0", "fonts-dejavu-core",  # WeasyPrint (PDF reports)
+                 "libgl1")  # OpenCASCADE's Python bindings (STEP models) link libGL and X11
     .uv_sync(str(ROOT / "server"))
     .env({
         "SIGHTLINE_PROPOSE_PER_HOUR": "20",    # per visitor; every proposal is a paid Muse Spark call, a plan costs
@@ -32,13 +33,17 @@ image = (
         "SIGHTLINE_CHAT_PER_DAY": "1500",
         "SIGHTLINE_VOICE_PER_HOUR": "60",      # spoken messages per visitor (Muse Voice Transcribe, $0.18 an audio hour)
         "SIGHTLINE_VOICE_PER_DAY": "2000",
+        "SIGHTLINE_MODEL_UPLOADS_PER_HOUR": "10",  # visitors' own models (IFC or STEP), per visitor; for everyone
+        "SIGHTLINE_MODEL_UPLOADS_PER_DAY": "200",
         "SIGHTLINE_OPEN_WEIGHTS": "0",         # titles and triage on Muse Spark unless the owner switches the open-weights
                                                # model on (owner settings; kept in the "sightline-settings" Modal Dict)
     })
     .add_local_dir(ROOT / "server" / "sightline", f"{APP_DIR}/server/sightline", ignore=["__pycache__"])
     .add_local_dir(ROOT / "web" / "dist", f"{APP_DIR}/web/dist")
-    .add_local_dir(ROOT / "samples", f"{APP_DIR}/samples",  # models, and sample clash reports with their images
-                   ignore=lambda p: p.suffix.lower() not in {".ifc", ".xml", ".png", ".jpg", ".jpeg"})
+    # Models (IFC and STEP), sample clash reports with their images, and the STEP demo's ready conversion
+    # (samples/step-cache: the converted IFC and its manifest, so the first visitor after a restart does not wait).
+    .add_local_dir(ROOT / "samples", f"{APP_DIR}/samples",
+                   ignore=lambda p: p.suffix.lower() not in {".ifc", ".step", ".stp", ".json", ".xml", ".png", ".jpg", ".jpeg"})
 )
 
 app = modal.App("clashwise-sightline")

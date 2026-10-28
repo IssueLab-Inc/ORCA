@@ -3,6 +3,7 @@ name = "sightline-server"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "cadquery-ocp==8.0.1.1.0",
     "defusedxml>=0.7.1",
     "fastapi>=0.162.0",
     "httpx>=0.28.1",

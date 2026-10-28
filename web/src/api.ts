@@ -138,6 +138,8 @@ export interface TriageState extends Partial<TriageModel> {
 /** The owner's settings (server: owner.py), sent with every call; the server ignores them for anyone but the owner. */
 export type Effort = "minimal" | "low" | "medium" | "high";
 /** The owner's own settings (this browser): absent fields follow the settings for everyone. */
+/** An opened set of models: the scene id, the file names, and which came from STEP (index → STEP name). */
+export interface OpenedScene { id: string; files: string[]; step?: Record<string, string> }
 export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean }
 /** The settings for everyone (server: settings.py); null fields take the environment's default. */
 export interface EveryoneSettings { open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null }
@@ -314,7 +316,16 @@ export const api = {
                  clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   samples: () => call<string[]>("/samples"),
-  open: (samples: string[]) => call<{ id: string; files: string[] }>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
+  /** Open sample models (a STEP sample is converted to IFC on the server). `step`: file index → its STEP name. */
+  open: (samples: string[]) => call<OpenedScene>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
+  /** Open your own IFC or STEP files (capped per visitor and in size). */
+  uploadModels: async (files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    const r = await fetch("/api/models/upload", { method: "POST", body: form, headers: settingsHeader() });
+    if (!r.ok) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Upload failed (${r.status})`, r.status);
+    return r.json() as Promise<OpenedScene>;
+  },
   file: async (id: string, index: number) => {
     const r = await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" });
     if (!r.ok) throw new ApiError(`Model download failed (${r.status})`, r.status);

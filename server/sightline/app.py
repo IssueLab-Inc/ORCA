@@ -21,10 +21,10 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
-from . import chat, context_planner, detect, document, edits, owner, plans, settings, titles, triage
+from . import chat, context_planner, detect, document, edits, owner, plans, settings, step, titles, triage
 from .meta_client import load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
-from .service import Workspace
+from .service import MODEL_SUFFIXES, MODELS, Workspace
 
 load_env()  # the repo's .env, before anything reads a setting (caps, owner token); real environment variables win
 app = FastAPI(title="ClashWise Sightline")
@@ -148,6 +148,9 @@ detect_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_DETECT_PER_HOUR", "0")
                             int(os.environ.get("SIGHTLINE_DETECT_PER_DAY", "0")), noun="detection runs")
 voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
                            int(os.environ.get("SIGHTLINE_VOICE_PER_DAY", "0")), noun="voice messages")
+# Model uploads (IFC or STEP): each takes disk, memory and, for STEP, a conversion and one model call to name its parts.
+model_upload_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_HOUR", "0")),
+                                  int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_DAY", "0")), noun="model uploads")
 
 MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
 # Words Muse Voice Transcribe should lean toward: what people say to Sightline about a building model.
@@ -219,11 +222,13 @@ UPLOADS = Path(tempfile.gettempdir()) / "sightline-reports"
 UPLOAD_MAX_MB = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_MB", "200"))
 UPLOAD_MAX_FILES = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_FILES", "5000"))
 UPLOAD_TYPES = {".xml", ".png", ".jpg", ".jpeg"}
+MODEL_UPLOAD_MAX_MB = int(os.environ.get("SIGHTLINE_MODEL_UPLOAD_MAX_MB", str(UPLOAD_MAX_MB)))
+MODEL_UPLOAD_MAX_FILES = 8
 
 
 def _scene(scene_id: str):
     if scene_id not in ws.scenes:
-        raise HTTPException(404, "Model not loaded. Open it again from the sample list.")
+        raise HTTPException(404, "Model not loaded. Open it again.")
     return scene_id
 
 
@@ -297,12 +302,69 @@ def samples():
     return ws.list_samples()
 
 
+def _classifier():
+    """The model that names a STEP file's parts (the titles' and triage's model), or None without one."""
+    try:
+        return triage_model()[0]
+    except Exception:
+        return None
+
+
 @app.post("/api/scenes")
 def open_scene(body: Open):
+    """Open sample models. A STEP sample is converted to IFC first (cached by its contents, so only the first
+    opening pays for it)."""
     try:
-        return {"id": ws.open(body.samples), "files": body.samples}
+        needs = any(Path(n).suffix.lower() in step.SUFFIXES for n in body.samples)
+        sid = ws.open(body.samples, classify_with=_classifier() if needs else None)
+        return {"id": sid, "files": body.samples, "step": ws.step_files(sid)}
     except FileNotFoundError as e:
         raise HTTPException(404, f"No model called {e.args[0]}.")
+    except step.StepError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/models/upload")
+async def upload_models(request: Request, files: list[UploadFile] = File(...)):
+    """Open your own models: IFC, or STEP (converted to IFC to check; Export gives the STEP back with the fixes).
+    Files that share coordinates open together. Capped per visitor (SIGHTLINE_MODEL_UPLOADS_PER_HOUR/DAY) and in size
+    (SIGHTLINE_MODEL_UPLOAD_MAX_MB for all files together)."""
+    if not files or len(files) > MODEL_UPLOAD_MAX_FILES:
+        raise HTTPException(400, f"Choose 1 to {MODEL_UPLOAD_MAX_FILES} model files.")
+    names = [Path(f.filename or "").name for f in files]
+    bad = [n for n in names if Path(n).suffix.lower() not in MODEL_SUFFIXES]
+    if bad:
+        raise HTTPException(400, f"{bad[0]} is not an IFC or STEP file (.ifc, .step, .stp).")
+    refused = _take(model_upload_limit, request)
+    if refused:
+        raise HTTPException(429, refused)
+    MODELS.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(dir=MODELS))
+    total, paths = 0, []
+    try:
+        for f, name in zip(files, names):
+            dest = root / name
+            if dest in paths:
+                raise HTTPException(400, f"{name} was given twice.")
+            with dest.open("wb") as out:
+                while chunk := await f.read(1 << 20):
+                    total += len(chunk)
+                    if total > MODEL_UPLOAD_MAX_MB << 20:
+                        raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.")
+                    out.write(chunk)
+            paths.append(dest)
+        needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
+        classifier = _classifier() if needs else None
+        sid = await run_in_threadpool(lambda: ws.open_paths(paths, root, classify_with=classifier))
+        return {"id": sid, "files": names, "step": ws.step_files(sid)}
+    except HTTPException:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+    except step.StepError as e:  # open_paths already removed the folder
+        raise HTTPException(400, str(e))
+    except Exception as e:  # not a model IfcOpenShell can read
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(400, f"Could not open the models: {type(e).__name__}: {e}")
 
 
 @app.get("/api/scenes/{scene_id}/files/{index}")
