@@ -52,6 +52,18 @@ class IfcScene:
         self.unit_scales = [ifcopenshell.util.unit.calculate_unit_scale(m) for m in self.models]
         self._edited: set[int] = set()
         self._bounds: dict[str, np.ndarray] | None = None
+        self.revision = 0
+
+    def snapshot(self) -> IfcScene:
+        """Clone current in-memory IFC state, including edits not yet exported."""
+        clone = object.__new__(IfcScene)
+        clone.paths = list(self.paths)
+        clone.models = [ifcopenshell.file.from_string(m.to_string()) for m in self.models]
+        clone.unit_scales = list(self.unit_scales)
+        clone._edited = set(self._edited)
+        clone._bounds = None if self._bounds is None else {g: b.copy() for g, b in self._bounds.items()}
+        clone.revision = self.revision
+        return clone
 
     # Single-file conveniences (tests, spikes).
     @property

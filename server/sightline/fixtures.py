@@ -130,7 +130,7 @@ def build_run_fixture(path: Path, millimetres: bool = False) -> Path:
             port.FlowDirection = "SINK" if n == 0 else "SOURCE"
             matrix = np.eye(4)
             matrix[:3, 3] = (x * k, 0.0, 2.8 * k)
-            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=matrix)
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=matrix, is_si=False)
             ports.append(port)
         return e, ports
 

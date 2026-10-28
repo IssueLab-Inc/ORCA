@@ -111,6 +111,7 @@ class Workspace:
             placements = s.translate(moved, tuple(delta_m))
             for g in moved:  # kept: export writes these files
                 s.mark_edited(g)
+            s.revision += 1
         return {"placements": placements, "files": sorted({s.index_of(g) for g in moved})}
 
     def check_offset(self, scene_id: str, element: str, other: str, split_m: list[float], dz_m: float,
@@ -129,6 +130,7 @@ class Workspace:
         with self.lock:
             off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
             s.mark_edited(element)
+            s.revision += 1
         return {**asdict(off), "files": [s.index_of(element)]}
 
     def apply_trim(self, scene_id: str, element: str, end: str, by_m: float) -> dict:
@@ -137,6 +139,7 @@ class Workspace:
         with self.lock:
             t = edits.apply_trim(s, element, end, by_m)
             s.mark_edited(element)
+            s.revision += 1
         return {**asdict(t), "pieces": [element], "files": [s.index_of(element)]}
 
     def file(self, scene_id: str, index: int, out_dir: Path) -> Path:
