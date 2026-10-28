@@ -98,10 +98,11 @@ def _validate(scene, objective, operations, discovered):
             d = np.array(run.direction)
             if abs(d @ edits.UP) > 1e-6 or abs(delta @ d) > 1e-6:
                 raise ValueError('offset must be perpendicular to a horizontal run')
-            if abs(delta[2]) > 1e-9 and np.linalg.norm(delta[:2]) > 1e-9:
+            dz, lateral = edits.offset_components(float(delta[2]), float(delta @ np.cross(edits.UP,d)))
+            if dz and lateral:
                 raise ValueError('compound offsets are unsupported')
-            size = run.depth_m if abs(delta[2]) > 1e-9 else run.width_m
-            if scene.entity(gid).is_a() not in edits.FITTING_CLASS or edits.bend_radius(size, np.linalg.norm(delta)) is None:
+            size = run.depth_m if dz else run.width_m
+            if scene.entity(gid).is_a() not in edits.FITTING_CLASS or edits.bend_radius(size, abs(dz or lateral)) is None:
                 raise ValueError('offset requires supported radiused fittings; square fallback is not verified')
         if kind == 'trim':
             by = _number(op.get('by_m'), 'by_m')
@@ -405,6 +406,22 @@ def _findings(scene, changed, allowed):
     return findings, min(gaps) if gaps else None
 
 
+def _bend_clearances(scene, offset_chains, contacts):
+    """Clearance-only contact across one generated bend with validated cap joints.
+
+    Its two flanking pieces can approach within 25 mm across the inside radius.
+    This never waives hard intersections, other same-run pairs or external services.
+    Only chains generated in this trial qualify; authored fittings do not establish it.
+    """
+    allowed = set()
+    for chain in offset_chains:
+        for a, bend, b in zip(chain, chain[1:], chain[2:]):
+            if (scene.entity(bend).is_a() in edits.FITTING_CLASS.values()
+                    and frozenset((a,bend)) in contacts and frozenset((bend,b)) in contacts):
+                allowed.add(frozenset((a,b)))
+    return allowed
+
+
 def _run(scene, objective, operations, discovered):
     result = dict(passed=False, edits=[], checks=dict(
         geometry=dict(passed=False, target_resolved=False, hits=[], existing_conflicts=[], min_clearance_m=None),
@@ -415,6 +432,7 @@ def _run(scene, objective, operations, discovered):
         originals = {g for group in groups for g in group}
         baseline, _ = _findings(before, originals | {objective['element_a'], objective['element_b']}, set())
         sources = {}
+        offset_chains = []
         for op, group in zip(operations, groups):
             entry = deepcopy(op)
             entry.update(moved=group, before=edits.meshes(scene,group), label=op['reason'])
@@ -425,11 +443,14 @@ def _run(scene, objective, operations, discovered):
             elif op['kind'] == 'offset':
                 run = edits.run_of(scene,gid)
                 delta = np.array(op['delta_m'])
-                lateral = float(delta @ np.cross(edits.UP,np.array(run.direction)))
-                off = edits.apply_offset(scene,gid,*op['split_m'],float(delta[2]),corners='bends',lateral_m=lateral)
+                side = np.cross(edits.UP,np.array(run.direction))
+                dz, lateral = edits.offset_components(float(delta[2]), float(delta @ side))
+                entry['delta_m'] = (edits.UP*dz + side*lateral).tolist()
+                off = edits.apply_offset(scene,gid,*op['split_m'],dz,corners='bends',lateral_m=lateral)
                 if off.corners != 'bends':
                     raise ValueError('offset requires real fittings')
                 pieces = off.pieces
+                offset_chains.append(pieces)
             else:
                 edits.apply_trim(scene,gid,op['end'],op['by_m'])
                 pieces = [gid]
@@ -439,6 +460,7 @@ def _run(scene, objective, operations, discovered):
             result['pieces'].append(pieces)
         result['files'] = sorted({scene.index_of(g) for g in originals})
         allowed = _integrity(before,scene,originals,sources,result)
+        allowed.update(_bend_clearances(scene,offset_chains,allowed))
         # A slender butt trim may touch its objective partner; penetration is still checked.
         for op in operations:
             if op['kind'] == 'trim' and op['element'] in (objective['element_a'],objective['element_b']):

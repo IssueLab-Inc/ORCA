@@ -153,6 +153,12 @@ FITTING_CLASS = {"IfcDuctSegment": "IfcDuctFitting", "IfcPipeSegment": "IfcPipeF
                  "IfcCableCarrierSegment": "IfcCableCarrierFitting", "IfcCableSegment": "IfcCableFitting"}
 RISER_MIN_M = 0.04       # straight riser left between two bends when the rise allows (Rev04: 40-172 mm)
 BEND_STEPS = 8           # facets per 90° bend
+OFFSET_AXIS_TOL = 1e-9   # numerical residue, metres; shared by validation and generation
+
+
+def offset_components(dz_m: float, lateral_m: float) -> tuple[float, float]:
+    """Discard negligible axes before selecting a detour plane or reporting its delta."""
+    return tuple(0.0 if abs(v) <= OFFSET_AXIS_TOL else float(v) for v in (dz_m, lateral_m))
 
 
 def default_corners() -> str:
@@ -186,7 +192,8 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         raise Unsupported("the segment is not horizontal")
     if not np.isfinite([start_m, end_m, dz_m, lateral_m]).all():
         raise Unsupported("offset values must be finite")
-    if abs(dz_m) > 1e-9 and abs(lateral_m) > 1e-9:
+    dz_m, lateral_m = offset_components(dz_m, lateral_m)
+    if dz_m and lateral_m:
         raise Unsupported("choose vertical or lateral, not a compound offset")
     amount = lateral_m if lateral_m else dz_m
     offset_axis = np.cross(UP, d) if lateral_m else UP
@@ -266,9 +273,29 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     first_ports.sort(key=lambda p: float(scene.placement(p.GlobalId)[:3, 3] @ d) if p.ObjectPlacement else 0.)
     original_flows = [p.FlowDirection for p in first_ports] if len(first_ports) == 2 else ['NOTDEFINED','NOTDEFINED']
     external_frames = [scene.placement(p.GlobalId) if p.ObjectPlacement else None
-                       for p in (first_ports[0], first_ports[-1])] if len(first_ports) >= 2 else []
+                       for p in (first_ports[0], first_ports[-1])] if len(first_ports) >= 2 else [None, None]
     external_flows = {peer.GlobalId:peer.FlowDirection for port in first_ports
                       if (peer := ifcopenshell.util.system.get_connected_port(port)) is not None}
+    single_far = None
+    if len(first_ports) == 1:
+        port = first_ports[0]
+        if port.ObjectPlacement is None:
+            raise Unsupported('a single port needs a physical endpoint placement')
+        frame = scene.placement(port.GlobalId)
+        endpoint_distances = [np.linalg.norm(frame[:3,3] - point*s) for point in (origin, origin+d*L)]
+        if min(endpoint_distances) > .002:
+            raise Unsupported('a single port does not align with either physical endpoint')
+        endpoint = int(np.argmin(endpoint_distances))
+        external_frames[endpoint] = frame
+        flow = port.FlowDirection
+        opposite = {'SOURCE': 'SINK', 'SINK': 'SOURCE'}.get(flow, flow or 'NOTDEFINED')
+        original_flows[endpoint], original_flows[1-endpoint] = flow, opposite
+        if endpoint == 1:
+            # Keep the authored identity and external relationship on the last piece.
+            # Unassign before copying so copies cannot inherit this external port.
+            single_far = port
+            ifcopenshell.api.run('system.unassign_port', model, element=element, port=port)
+            first_ports = []
     far = ifcopenshell.util.system.get_connected_port(first_ports[-1]) if len(first_ports) > 1 else None
     if far is not None:
         ifcopenshell.api.run("system.disconnect_port", model, port=first_ports[-1])
@@ -322,6 +349,11 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         chain_ports.append(ports)
         for port, flow in zip(ports,original_flows):
             port.FlowDirection = flow
+    if single_far is not None:
+        replacement = chain_ports[-1][-1]
+        ifcopenshell.api.run('root.remove_product', model, product=replacement)
+        ifcopenshell.api.run('system.assign_port', model, element=chain[-1], port=single_far)
+        chain_ports[-1][-1] = single_far
     for px_, py_ in zip(chain_ports, chain_ports[1:]):
         if len(px_) >= 2 and len(py_) >= 2:
             ifcopenshell.api.run("system.connect_port", model, port1=px_[-1], port2=py_[0],
