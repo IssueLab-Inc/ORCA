@@ -6,6 +6,8 @@ export interface Option {
   min_clearance_m: number | null;
   kind: FixKind; split_m: number[] | null; preview: Piece[] | null; before: Piece[] | null;
   trim?: TrimCut | null;
+  /** A trim inside one model: tidies a joint for the model's author, not a coordination fix. */
+  cleanup?: boolean;
 }
 export interface Attempt {
   title: string; delta_m: number[]; passed: boolean; reason: string; kind: FixKind; split_m: number[] | null;

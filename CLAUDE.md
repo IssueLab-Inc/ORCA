@@ -276,7 +276,7 @@ call, and `Job.learn` corrects a run that already asked, keeping the model's ans
 before the replayed "done"). The browser overlays the rest (`shownTriage` in App.tsx): a model "real"/"model error"
 gives way to Mark as not a clash (`basis: reviewed`) or noClash's geometry (incl. Sightline's no-overlap measure), with
 the model's reading kept. Northbank on Muse Spark Open with the models open: 217 in 181 s, 111 settled (50 touch, 49
-non-physical, 12 same element), 106 asked. 71 server tests.
+non-physical, 12 same element), 106 asked.
 
 Guided tour (Oct 28): `web/src/Tour.tsx`, from the landing page (**Take the guided tour**) or the header (**Tour**).
 24 steps in 9 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
@@ -318,6 +318,13 @@ counts in its subtitle, a purpose line per part, root causes with chips (clashin
 report), patterns as "11× Mechanical fastener with Plate" and one "Explain the n patterns with Muse Spark" button.
 Tooltips: `Tooltips` (ui.tsx) draws every `data-tip` in one fixed layer above the page, flips sides when there is no
 room and clamps to the window (was CSS ::after, cut off by panel and window edges).
+
+Not a clash, don't fix (Oct 28): c0087 (pad footing C1 vs ground beam grid C, -150 mm) got "trim the pad footing 900 mm"
+as a verified option: half the pad's bearing, which geometry cannot judge. `edits.butt_trim` now refuses anything not
+slender (`SLENDER = 3`: length at least 3x across, measured off its own mesh), and `_try_trim` marks a trim within one
+model `cleanup`; `_joint_text` tells Muse so. UI: "Model cleanup, not a coordination clash" with Mark as not a clash
+above such options, a "model cleanup" chip, "Accept this cleanup". Eval `evals/not_a_clash.py` (+ `not_a_clash.csv`):
+pad/ground beam, transom/mullion, beam/column: 3/3 by design, 0/3 touch what must stay, 3/3 cleanup only. 72 server tests.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

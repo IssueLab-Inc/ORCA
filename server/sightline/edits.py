@@ -35,6 +35,7 @@ from .scene import IfcScene
 
 UP = np.array([0.0, 0.0, 1.0])
 MIN_PIECE_M = 0.05  # shortest straight piece left either side of a riser
+SLENDER = 3.0       # a trim needs a member at least this many times longer than it is across (beams, transoms, braces)
 
 
 class Unsupported(ValueError):
@@ -379,6 +380,15 @@ def member_axis(scene: IfcScene, element) -> tuple[str, np.ndarray, np.ndarray, 
     return axis, start * s, u / np.linalg.norm(u), lengths[axis] * s
 
 
+def _across(points: np.ndarray, d: np.ndarray) -> float:
+    """The widest a shape is across direction `d` (the larger of its two extents at right angles to it)."""
+    helper = np.array([0.0, 0.0, 1.0]) if abs(d[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    e1 = np.cross(d, helper)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(d, e1)
+    return float(max(np.ptp(points @ e1), np.ptp(points @ e2)))
+
+
 def butt_trim(scene: IfcScene, global_id: str, other: str) -> Trim:
     """The trim that makes `global_id` stop at `other`'s face: which end runs into it, and by how much.
 
@@ -388,6 +398,13 @@ def butt_trim(scene: IfcScene, global_id: str, other: str) -> Trim:
     _, start, d, length = member_axis(scene, element)
     settings = ifcopenshell.geom.settings()
     settings.set("use-world-coords", True)
+    # Only a slender member's end is a joint to tidy. A pad footing is as wide as it is long: cutting 900 mm off an
+    # 1800 mm pad halves its bearing and moves it off its column, which no geometry check would catch.
+    own = np.asarray(ifcopenshell.geom.create_shape(settings, element).geometry.verts, dtype=float).reshape(-1, 3)
+    across = _across(own - start, d)
+    if length < SLENDER * across:
+        raise Unsupported(f"it is not a slender member ({length:.2f} m long, {across:.2f} m across): trimming would "
+                          "cut its body, not tidy a joint")
     verts = np.asarray(ifcopenshell.geom.create_shape(settings, scene.entity(other)).geometry.verts, dtype=float).reshape(-1, 3)
     along = (verts - start) @ d
     lo, hi = float(along.min()), float(along.max())

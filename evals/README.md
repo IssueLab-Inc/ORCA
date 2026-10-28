@@ -83,3 +83,19 @@ Muse Spark Open (`meta-models/muse-spark-open` on Baseten, `runs/2026-10-27-nort
   B1 vs the lift pit wall (−471 mm, confirmed real from the images) came back by_design. Both called the same 20 clashes
   real_clash and agreed on severity for 15.
 - Verdicts: by_design 145, non_physical 130, real_clash 21, modelling_error 21 (Muse Spark: 153, 129, 23, 12).
+
+## Not a clash: don't fix
+
+`not_a_clash.py` runs joints inside one model that are built that way, where the geometry check alone would pass a
+harmful edit: a ground beam cast into its pad footing (Clash1, pad footing C1 vs ground beam grid C), a curtain-wall
+transom into its mullion (Clash7), a steel beam into its column. Scored in `not_a_clash.csv` (append-only): triage's
+verdict, the options, whether any option changes what must stay put (the pad, the mullion, the column), and whether
+every option is marked model cleanup.
+
+Before Oct 28 the agent offered "trim pad footing edge to ground beam face" (900 mm off an 1800 mm pad, half its
+bearing) and it passed the geometry check. Trims now need a slender member (`edits.SLENDER`: length at least 3x its
+width across) and a trim inside one model is marked `cleanup`.
+
+| Date | Cases | Triage by design | Touches what must stay | All options model cleanup |
+|---|---|---|---|---|
+| 2026-10-28 | 3 | 3/3 | 0/3 | 3/3 (one trim each, on the beam, transom, beam) |

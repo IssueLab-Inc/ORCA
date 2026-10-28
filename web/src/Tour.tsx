@@ -145,8 +145,9 @@ export const STEPS: Step[] = [
   {
     act: "A joint, not a move", title: "Ask again",
     body: (s) => s.proposalDone && s.options
-      ? <>A <b>trim</b>: the transom's end is cut back to butt the mullion's face. Nothing moves; the joint is made the way
-        it should be built.</>
+      ? <>A <b>trim</b>: the transom's end is cut back to butt the mullion's face. Nothing moves. Sightline marks it
+        <i> model cleanup</i>: both are in the Architecture model, so it tidies the joint for its author rather than
+        settling something between teams.</>
       : s.fixHidden
         ? <>Sightline agrees it's by design, and offers to mark it so. You can still ask: click <b>Propose a fix anyway</b>,
           then <b>Propose fixes</b>, and watch for a different kind of edit.</>
@@ -160,8 +161,8 @@ export const STEPS: Step[] = [
   },
   {
     act: "A joint, not a move", title: "Accept it",
-    body: () => <>Click <b>Accept this fix</b>. The server edits the IFC model, the viewer reloads it, and every report
-      entry for this pair is marked fixed.</>,
+    body: () => <>Click <b>Accept this cleanup</b>. The server edits the IFC model, the viewer reloads it, and every
+      report entry for this pair is marked fixed.</>,
     target: "[data-tour=accept]", reveal: true, done: (s) => s.fixed.includes(TOUR.joint), show: { label: "Accept for me" },
   },
   // 5. Root cause

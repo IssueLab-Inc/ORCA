@@ -546,3 +546,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .triage-reasoning p { white-space: pre-wrap; font-size: 11.5px; line-height: 1.45; color: var(--muted); max-height: 220px; overflow: auto; margin: 4px 0 0; }
 @media (prefers-reduced-motion: reduce) { .triage-live-head svg { animation: none; } }
 @media (max-width: 560px) { .about-cta .btn { flex: 1 1 100%; justify-content: center; } }
+
+/* A trim inside one model (App.tsx): optional tidy-up, with "not a clash" offered first */
+.cleanup-note { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--raised); border: 1px solid var(--line); font-size: 12.5px; }
+.cleanup-note p { margin: 0; line-height: 1.45; color: #3d4a58; }

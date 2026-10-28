@@ -44,6 +44,7 @@ class Option:
     preview: list[dict] | None = None   # offset and trim: world triangles of the changed pieces, for the browser
     before: list[dict] | None = None    # the changed elements as they are now (world triangles), to compare
     trim: dict | None = None            # trim only: {"end": "start" | "end", "by_m": metres}
+    cleanup: bool = False               # a trim inside one model: tidies a joint for its author, not a coordination fix
 
 
 @dataclass
@@ -89,9 +90,14 @@ def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: 
         cut = edits.butt_trim(scene, gid, other)
     except (edits.Unsupported, KeyError, RuntimeError):
         return []
-    return [f"Joint: element {label}'s {cut.end} runs {cut.by_m * 1000:.0f} mm into element {other_label} along its "
-            f"length. A \"trim\" of {label} cuts that end back to butt against {other_label}'s face: a connection "
-            f"fix, nothing moves."]
+    lines = [f"Joint: element {label}'s {cut.end} runs {cut.by_m * 1000:.0f} mm into element {other_label} along its "
+             f"length. A \"trim\" of {label} cuts that end back to butt against {other_label}'s face: a connection "
+             f"fix, nothing moves."]
+    if scene.element(gid).source == scene.element(other).source:
+        lines.append(f"Both are in the same model ({scene.element(gid).source}): an overlap at a joint like this is often "
+                     "how the parts are built (a beam cast into its footing, a transom into its mullion). A trim only tidies "
+                     "the model for its author; say so, and say in advice when the overlap is simply by design.")
+    return lines
 
 
 def _run_text(scene: IfcScene, label: str, gid: str, other: str) -> list[str]:
@@ -326,8 +332,9 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
     attempt = Attempt(title, delta, not hits, _reason(hits), "trim", None, _hit_ids(hits), trim)
     if hits:
         return attempt, None
+    same_model = scene.element(target).source == scene.element(other).source
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
-                           v.min_clearance_m, {}, "trim", None, shape, trim=trim)
+                           v.min_clearance_m, {}, "trim", None, shape, trim=trim, cleanup=same_model)
 
 
 def to_json(result: Result) -> str:

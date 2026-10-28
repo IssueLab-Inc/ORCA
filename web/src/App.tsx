@@ -974,16 +974,30 @@ export function App() {
           <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"} />
           {proposal && !proposing && <h2>Verified options</h2>}
           {proposal && !proposing && !proposal.options.length && <NoFix proposal={proposal} />}
+          {clash && proposal && !proposing && proposal.options.length > 0 && proposal.options.every((o) => o.cleanup) && (
+            <div className="cleanup-note">
+              <b>Model cleanup, not a coordination clash</b>
+              <p>Both elements are in the same model, and they overlap where one frames into the other. That is often how
+                they are built (a beam cast into its footing, a transom into its mullion). Tidy the joint if the model goes
+                to fabrication or quantities; otherwise mark it as not a clash.</p>
+              {proposal.advice && <p className="why">Muse Spark: {proposal.advice}</p>}
+              {reviewed[clash.id]
+                ? <span className="chip ok"><CircleCheck size={12} aria-hidden /> marked {reviewed[clash.id].kind === "by_design" ? "by design" : "for the author"}</span>
+                : <button className="btn small" onClick={() => review([clash.id], "by_design", "A joint inside one model: built as modelled")}>
+                  <CircleCheck size={13} aria-hidden /> Mark as not a clash</button>}
+            </div>)}
           {proposal?.options.map((o, i) => (
             <div key={i} className={`card ${chosen === i ? "pick" : ""}`}>
               <button className="card-body" onClick={() => setChosen(chosen === i ? null : i)} aria-pressed={chosen === i}>
-                <span className="row"><b>{i + 1} · {o.title}</b><span className="chip ok"><Check size={11} aria-hidden /> verified</span></span>
+                <span className="row"><b>{i + 1} · {o.title}</b><span className="chips">
+                  {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
+                  <span className="chip ok"><Check size={11} aria-hidden /> verified</span></span></span>
                 <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
                 <span className="row"><span>Clearance</span><span className="mono">{o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m)}</span></span>
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 <span className="why">{o.rationale}</span>
               </button>
-              {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> Accept this fix</button>}
+              {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
             </div>
           ))}
 

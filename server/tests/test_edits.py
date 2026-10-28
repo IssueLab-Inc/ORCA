@@ -185,6 +185,7 @@ def test_trim_cuts_a_profile_drawn_member_back_to_the_joint_and_is_undone(tmp_pa
     # Passes although it now touches the mullion (a butt joint) and still touches its panel (it did before).
     assert attempt.passed, attempt.reason
     assert option.kind == "trim" and option.trim == {"end": "end", "by_m": pytest.approx(0.06)}
+    assert option.cleanup  # both in one model: tidies a joint for its author, not a coordination fix
     assert option.delta_m == pytest.approx([-0.06, 0, 0])
     verts = np.asarray(option.preview[0]["verts"]).reshape(-1, 3)
     assert verts[:, 0].max() == pytest.approx(10.83, abs=1e-3)       # ends at the mullion's face
@@ -193,6 +194,14 @@ def test_trim_cuts_a_profile_drawn_member_back_to_the_joint_and_is_undone(tmp_pa
     edits.apply_trim(scene, transom, "end", 0.06)                      # kept
     assert scene.bounds()[transom][1][0] == pytest.approx(10.83)
     assert scene.bounds()[transom][0][0] == pytest.approx(9.24)
+
+
+def test_trim_refuses_what_is_not_a_slender_member(tmp_path):
+    # A panel 1.4 m long and 0.8 m tall is not a member with an end to tidy, like Northbank's 1.8 m square pad footing:
+    # cutting it back would change its body (a footing's bearing), which no geometry check would object to.
+    scene, _, mullion, panel = _joint(tmp_path)
+    with pytest.raises(edits.Unsupported, match="not a slender member"):
+        edits.butt_trim(scene, panel, mullion)
 
 
 def test_trim_refuses_an_overlap_mid_length(tmp_path):
