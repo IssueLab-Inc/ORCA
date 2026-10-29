@@ -498,12 +498,14 @@ def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
         raise ValueError(f"unknown kind of fix: {unknown[0]!r}")
     files: set[int] = set()
     pieces: list[list[str]] = []
+    changed: list[str] = []
     with ws.lock:
         for o in options:
             r, made = KEEP[o.get("kind", "move")](ws, scene_id, o)
             pieces.append(made)
             files.update(r["files"])
-    return {"files": sorted(files), "pieces": pieces}
+            changed += r.get("changed", made or o["moved"])
+    return {"files": sorted(files), "pieces": pieces, "changed": list(dict.fromkeys(changed))}
 
 
 def to_json(plan: Plan) -> str:

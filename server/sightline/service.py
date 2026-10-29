@@ -236,8 +236,28 @@ class Workspace:
             placements = s.translate(moved, tuple(delta_m))
             for g in moved:  # kept: export writes these files
                 s.mark_edited(g)
-            s.revision += 1
-        return {"placements": placements, "files": sorted({s.index_of(g) for g in moved})}
+            s.bump(s.index_of(g) for g in moved)
+        return {"placements": placements, "files": sorted({s.index_of(g) for g in moved}), "changed": list(moved)}
+
+    PATCH_MAX_VERTS = 500_000   # past this, the page reloads the files instead
+
+    def patch(self, scene_id: str, changed: list[str], revision_before: int) -> dict:
+        """What a page needs to update its model in place after a kept fix, instead of reloading whole files: the
+        scene's revision before and after the request, and the changed or new elements' triangles (`edits.meshes`,
+        render), taken after every edit of it. A page whose model is not at `revision_before` (it missed an edit), or
+        that gets no meshes (an element that would not triangulate, or too much to send), reloads the files."""
+        s = self.scene(scene_id)
+        out = {"scene_id": scene_id, "revision_before": revision_before, "revision": s.revision, "meshes": None,
+               # which files each revision changed: a page behind `revision_before` reloads what it missed
+               "history": [[rev, files] for rev, files in s.history]}
+        with self.lock:
+            try:
+                meshes = edits.meshes(s, list(dict.fromkeys(changed)), render=True)
+            except (RuntimeError, KeyError):
+                return out
+        if sum(len(m["verts"]) for m in meshes) // 3 <= self.PATCH_MAX_VERTS:
+            out["meshes"] = meshes
+        return out
 
     def check_offset(self, scene_id: str, element: str, other: str, split_m: list[float], dz_m: float,
                      clearance_m: float = 0.025) -> dict:
@@ -255,8 +275,8 @@ class Workspace:
         with self.lock:
             off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
             s.mark_edited(element)
-            s.revision += 1
-        return {**asdict(off), "files": [s.index_of(element)]}
+            s.bump([s.index_of(element)])
+        return {**asdict(off), "files": [s.index_of(element)], "changed": list(off.pieces)}
 
     def check_route(self, scene_id: str, element: str, other: str, steps: list[dict], clearance_m: float = 0.025) -> dict:
         """Try a route of `element` past `other` without keeping it (edits.apply_route)."""
@@ -273,8 +293,8 @@ class Workspace:
         with self.lock:
             r = edits.apply_route(s, element, steps)
             s.mark_edited(element)
-            s.revision += 1
-        return {**asdict(r), "files": [s.index_of(element)]}
+            s.bump([s.index_of(element)])
+        return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
 
     def apply_trim(self, scene_id: str, element: str, end: str, by_m: float) -> dict:
         """Keep a trim: the element's end is cut back (see edits.apply_trim)."""
@@ -282,8 +302,8 @@ class Workspace:
         with self.lock:
             t = edits.apply_trim(s, element, end, by_m)
             s.mark_edited(element)
-            s.revision += 1
-        return {**asdict(t), "pieces": [element], "files": [s.index_of(element)]}
+            s.bump([s.index_of(element)])
+        return {**asdict(t), "pieces": [element], "files": [s.index_of(element)], "changed": [element]}
 
     def file(self, scene_id: str, index: int, out_dir: Path) -> Path:
         """A model file as it is now: the original on disk, or the edited model written out."""
@@ -418,7 +438,7 @@ class Workspace:
         which came from STEP, and the last detection run."""
         self.scene(scene_id)
         return {"id": scene_id, "files": self.names.get(scene_id, []), "step": self.step_files(scene_id),
-                "detection": self.detections.get(scene_id)}
+                "detection": self.detections.get(scene_id), "revision": self.scene(scene_id).revision}
 
     @staticmethod
     def _carry(old: reports.Report | None, new: reports.Report) -> None:

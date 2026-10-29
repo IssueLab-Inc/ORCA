@@ -803,15 +803,35 @@ def trial_files(scene: IfcScene, indexes: set[int]):
         scene._bounds = before
 
 
-def meshes(scene: IfcScene, global_ids: list[str]) -> list[dict]:
-    """World-space triangles (metres, Z up) for previewing new or changed elements in the browser."""
+def meshes(scene: IfcScene, global_ids: list[str], render: bool = False) -> list[dict]:
+    """World-space triangles (metres, Z up) for previewing new or changed elements in the browser.
+
+    `render`: for drawing them into the viewer's own batches after a fix is kept, instead of an overlay: unwelded
+    (IfcOpenShell 0.9 welds by default, which smooths normals across sharp edges), with normals, the first style's
+    colour and opacity ([r, g, b, a], or None) and the element's file."""
     settings = ifcopenshell.geom.settings()
     settings.set("use-world-coords", True)
+    if render:
+        settings.set("weld-vertices", False)
+        # No per-class default colours: an unstyled element must stay as the page drew it (web-ifc: white), not turn
+        # IfcOpenShell's grey or brown, or see-through for a window, when a fix is kept.
+        settings.set("apply-default-materials", False)
     out = []
     for gid in global_ids:
         shape = ifcopenshell.geom.create_shape(settings, scene.entity(gid))
         verts = np.round(np.asarray(shape.geometry.verts, dtype=float), 4)
-        out.append({"global_id": gid, "verts": verts.tolist(), "faces": list(shape.geometry.faces)})
+        item = {"global_id": gid, "verts": verts.tolist(), "faces": list(shape.geometry.faces)}
+        if render:
+            item["normals"] = np.round(np.asarray(shape.geometry.normals, dtype=float), 3).tolist()
+            styles = shape.geometry.materials
+            if styles:
+                d, t = styles[0].diffuse, styles[0].transparency
+                alpha = 1.0 - (float(t) if np.isfinite(t) else 0.0)
+                item["color"] = [round(float(c), 4) for c in (d.r(), d.g(), d.b(), alpha)]
+            else:
+                item["color"] = None
+            item["file"] = scene.index_of(gid)
+        out.append(item)
     return out
 
 

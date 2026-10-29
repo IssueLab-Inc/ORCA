@@ -5,7 +5,7 @@ import { changeText, clearanceText, editText, framePieces, recEditText, reviewTe
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -197,6 +197,8 @@ export function App() {
   const [viewContext, setViewContext] = useState(false);
   // Invalidate callbacks immediately when replacement starts, before the new scene ID arrives.
   const sceneEpoch = useRef(0);
+  // The server's revision of the open scene this page's model shows: a kept fix is patched in place only from here.
+  const sceneRevision = useRef<number | null>(null);
   const workspaceEpoch = useRef(0);
   const chatOwner = useRef(new ChatRequestOwner());
   const contextRequest = useRef(0);
@@ -657,12 +659,13 @@ export function App() {
       : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`);
     setError(null); resetWork(false, true);
     try {
-      const { id, files, step } = existing ?? (upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]));
+      const { id, files, step, revision } = existing ?? (upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]));
       if (sceneEpoch.current !== epoch) return;
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
       if (sceneEpoch.current !== epoch) return;
       const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch);
       if (sceneEpoch.current !== epoch || !stats) return;
+      sceneRevision.current = revision ?? null;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
@@ -1140,15 +1143,12 @@ export function App() {
     setBusy(`Applying ${items.length} fix${items.length > 1 ? "es" : ""}…`);
     const pics = captureFix(items.map((i) => i.option!), "#1f9d3a");
     try {
-      const { files, pieces } = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      const kept = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
       viewer.current?.preview([]);
-      for (const i of files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, kept, pieces, live);
       if (!live()) return;
       setEdits((e) => {
         const next = { ...e };
@@ -1166,6 +1166,27 @@ export function App() {
       });
       setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
+  }
+
+  /** Bring the viewer up to a kept fix: patch the changed elements in place when the server sent them and this page's
+   * model is at the revision the fix started from (viewer/patch.ts); otherwise reload the files it changed. */
+  async function applyToViewer(sid: string, kept: { files: number[] } & Patch, pieces: string[][] | undefined, live: () => boolean) {
+    const origin = new Map((pieces ?? []).flatMap((ps) => ps.slice(1).map((g) => [g, ps[0]] as const)));
+    if (kept.meshes && kept.scene_id === sid && kept.revision_before != null && kept.revision_before === sceneRevision.current
+        && viewer.current?.patch(kept.meshes, origin)) {
+      sceneRevision.current = kept.revision ?? null;
+      return;
+    }
+    // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
+    // them when it doesn't know), so it never jumps to a revision whose edits it hasn't drawn.
+    const drawn = sceneRevision.current;
+    const missed = (kept.history ?? []).filter(([rev]) => drawn == null || rev > drawn).flatMap(([, files]) => files);
+    for (const i of [...new Set([...kept.files, ...missed])].sort((x, y) => x - y)) {
+      const bytes = await api.file(sid, i);
+      if (!live()) return;
+      await viewer.current!.replace(i, bytes, live);
+    }
+    if (live()) sceneRevision.current = kept.revision ?? null;
   }
 
   /** Mark every report clash of these element pairs as fixed (one pair can be reported by several tests). */
@@ -1270,13 +1291,7 @@ export function App() {
       setProposal(null); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setContext((r) => r && { ...r, accepted: true });
       viewer.current?.preview([]);
-      // Download first; a replaced scene cannot receive any of this request's geometry.
-      const files = await Promise.all(applied.files.map(async (index) => ({ index, bytes: await api.file(sid, index) })));
-      if (!live()) return;
-      for (const file of files) {
-        if (!live()) return;
-        await viewer.current!.replace(file.index, file.bytes, live);
-      }
+      await applyToViewer(sid, applied, applied.pieces, live);
       if (!live()) return;
       setContext((r) => r && { ...r, accepted: true });
       setViewContext(false); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
@@ -1284,7 +1299,7 @@ export function App() {
       if (!live()) return;
       const conflict = e instanceof ApiError && (e.status === 409 || e.status === 404);
       setContext((r) => r && { ...r, accepted: committed, stale: conflict,
-        error: committed ? `The proposal was accepted on the server, but the viewer could not reload all files: ${(e as Error).message}. Export IFC includes the accepted edits.`
+        error: committed ? `The proposal was accepted on the server, but the viewer could not show it: ${(e as Error).message}. Export IFC includes the accepted edits.`
           : conflict ? `Revision conflict or fresh checks failed: ${(e as Error).message}` : (e as Error).message });
       if (committed) setViewContext(false);
       if (conflict) setAcknowledged([]);
@@ -1408,11 +1423,7 @@ export function App() {
       if (!sceneId) return;
       const epoch = sceneEpoch.current, live = () => sceneEpoch.current === epoch;
       staleContext(); viewer.current?.preview([]);
-      for (const i of e.files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, e, e.pieces, live);
       if (!live()) return;
       setEdits((ed) => {
         const next = { ...ed };
@@ -1506,7 +1517,7 @@ export function App() {
     const r = resumable;
     if (!r || busy) return;
     const { saved, info } = r;
-    const id = await open(info.files, { id: info.id, files: info.files, step: info.step });
+    const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision });
     if (!id) return;
     if (saved.report_id) {
       const rep = await loadReport(() => api.report(saved.report_id!), "your clashes");
@@ -1539,16 +1550,13 @@ export function App() {
       ? { before_img: evidence[ids[0]]?.before_img, after_img: evidence[ids[0]]?.after_img }
       : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     try {
-      const { files, pieces } = await api.accept(sceneId, o);
+      const kept = await api.accept(sceneId, o);
+      const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
       setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
-      for (const i of files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, kept, pieces?.length ? [pieces] : [], live);
       if (!live()) return;
       if (pieces?.length) {
         const [first, ...added] = pieces;
