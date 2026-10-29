@@ -432,8 +432,10 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
     if strategy == "move_hub":
         first = cluster["partners"][0]
         others = ", ".join(f"{p['ifc_class']} '{p['name']}'" for p in cluster["partners"][1:])
+        # Every other partner is an obstacle of the same fix: a split hub's ends are checked against all of them.
         item = Item("|".join(sorted([hub, first["global_id"]])), hub, first["global_id"],
-                    _label(ws, scene_id, hub, first["global_id"]), cluster["clash_ids"], True, first["distance_m"])
+                    _label(ws, scene_id, hub, first["global_id"]), cluster["clash_ids"], True, first["distance_m"],
+                    others=[p["global_id"] for p in cluster["partners"][1:]])
         items = [item]
         prefer = {item.key: f"Move element A (the hub) so that it also clears: {others}. Do not move B."}
     else:
@@ -452,7 +454,8 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
     _resolve_items(ws, scene_id, report_id, items, notes, emit, prefer)
     check = _settle(ws, scene_id, items, emit)
     if strategy == "move_hub" and items[0].option:
-        # The hub moved: every partner pair must be clear, which the hub's own check (against everything) covers.
+        # The hub changed: every partner pair must be clear. A move is checked against everything; a split hub's new
+        # pieces against everything and its shortened ends against every partner (the item's `others`).
         check["covers"] = [p["global_id"] for p in cluster["partners"]]
     return Plan("root_cause", f"Root cause: {hub_el['ifc_class']} '{hub_el['name']}'", reply.get("root_cause", ""),
                 strategy, cluster, items, check, round(time.perf_counter() - started, 1))

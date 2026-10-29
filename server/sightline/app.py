@@ -556,8 +556,8 @@ class FixApply(BaseModel):
 @app.post("/api/scenes/{scene_id}/fix/apply")
 def fix_apply(scene_id: str, body: FixApply):
     """Keep one verified option of any kind (`plans.apply`, which every kind is registered with). The page's preview
-    and before meshes are dropped, and whatever depends on the requirements is decided here again, never taken from
-    the page."""
+    and before meshes are dropped: the fix is rebuilt on the server from its kind and parameters. A kind whose keeping
+    depends on the requirements decides that in its `plans.KEEP` entry, never from what the page sends."""
     o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
     if not isinstance(o.get("moved"), list) or not o["moved"]:
         raise HTTPException(400, "The fix names no element.")
