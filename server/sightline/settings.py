@@ -3,6 +3,9 @@
 - `open_weights`: whether clash titles and triage run on the open-weights model (Muse Spark Open on Baseten) when its
   key is configured. Off, they run on Muse Spark. It costs per hour on the host, so it is off unless switched on.
 - `effort` / `triage_effort`: the reasoning effort for Muse Spark (proposals, chat) and for the triage model.
+- `escalation`: whether a clash Muse Spark could not fix (or fixed with a resize or an opening) may be handed to Muse
+  Wonder for a second try: "off", "button" (offered, the default) or "auto" (a failed proposal goes on to Muse Wonder
+  at once). `escalation_effort`: Muse Wonder's reasoning effort (medium by default). Docs: docs/escalation.md.
 
 None means "the environment's default" (`defaults()`). The owner's own settings, sent with their requests, win over
 these for the owner (owner.py); these win over the environment for everyone else.
@@ -22,6 +25,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 EFFORTS = ("minimal", "low", "medium", "high")
+ESCALATION = ("off", "button", "auto")
 DICT_NAME = "sightline-settings"
 KEY = "settings"
 
@@ -31,6 +35,8 @@ class Settings:
     open_weights: bool | None = None
     effort: str | None = None
     triage_effort: str | None = None
+    escalation: str | None = None
+    escalation_effort: str | None = None
 
 
 _lock = threading.Lock()
@@ -54,7 +60,9 @@ def _clean(raw: object) -> Settings:
     ow = raw.get("open_weights")
     return Settings(open_weights=ow if isinstance(ow, bool) else None,
                     effort=raw.get("effort") if raw.get("effort") in EFFORTS else None,
-                    triage_effort=raw.get("triage_effort") if raw.get("triage_effort") in EFFORTS else None)
+                    triage_effort=raw.get("triage_effort") if raw.get("triage_effort") in EFFORTS else None,
+                    escalation=raw.get("escalation") if raw.get("escalation") in ESCALATION else None,
+                    escalation_effort=raw.get("escalation_effort") if raw.get("escalation_effort") in EFFORTS else None)
 
 
 def _load() -> Settings:
@@ -92,11 +100,13 @@ def update(changes: dict) -> Settings:
     """Change some settings (a key set to None goes back to the default). Raises ValueError on an unknown value."""
     global _current
     for k, v in changes.items():
-        if k not in ("open_weights", "effort", "triage_effort"):
+        if k not in ("open_weights", "effort", "triage_effort", "escalation", "escalation_effort"):
             raise ValueError(f"unknown setting {k!r}")
         if k == "open_weights" and v is not None and not isinstance(v, bool):
             raise ValueError("open_weights is true, false or null")
-        if k != "open_weights" and v is not None and v not in EFFORTS:
+        if k == "escalation" and v is not None and v not in ESCALATION:
+            raise ValueError(f"escalation is one of {', '.join(ESCALATION)}, or null")
+        if k not in ("open_weights", "escalation") and v is not None and v not in EFFORTS:
             raise ValueError(f"{k} is one of {', '.join(EFFORTS)}, or null")
     s = current()
     with _lock:
@@ -114,15 +124,29 @@ def reset_cache() -> None:
 
 def defaults() -> dict:
     """What the environment gives when a setting is not set."""
+    mode = os.environ.get("SIGHTLINE_ESCALATION", "button")
     return {"open_weights": os.environ.get("SIGHTLINE_OPEN_WEIGHTS", "0") == "1",
             "effort": os.environ.get("META_REASONING_EFFORT", "low") or None,
-            "triage_effort": os.environ.get("TRIAGE_REASONING_EFFORT") or None}
+            "triage_effort": os.environ.get("TRIAGE_REASONING_EFFORT") or None,
+            "escalation": mode if mode in ESCALATION else "button",
+            "escalation_effort": os.environ.get("META_ESCALATION_EFFORT", "medium") or None}
 
 
 def effort_for(role: str) -> str | None:
-    """The effort set for everyone for a model role ("triage" or anything else), else None."""
+    """The effort set for everyone for a model role ("triage", "escalation" or anything else), else None."""
     s = current()
-    return s.triage_effort if role == "triage" else s.effort
+    return {"triage": s.triage_effort, "escalation": s.escalation_effort}.get(role, s.effort)
+
+
+def escalation() -> str:
+    """Whether this request may hand a clash to Muse Wonder: the owner's own choice, else everyone's, else the
+    default ("button")."""
+    from . import owner
+    mine = owner.escalation()
+    if mine is not None:
+        return mine
+    s = current()
+    return s.escalation if s.escalation is not None else defaults()["escalation"]
 
 
 def open_weights() -> bool:

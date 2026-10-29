@@ -13,7 +13,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import edits, hosts, requirements, verify
+from . import edits, hosts, meta_client, requirements, verify
 from .meta_client import ChatModel
 from .scene import IfcScene
 
@@ -54,6 +54,7 @@ class Option:
                                         # "summary" (the edit in a few words) and "key" (what makes two the same fix)
     review: str | None = None           # who must review it before it is built ("structure", "services"), when
                                         # geometry alone cannot say it works
+    model: str = ""                     # who proposed it, as people read it ("Muse Spark", "Muse Wonder")
 
 
 @dataclass
@@ -68,6 +69,7 @@ class Attempt:
     trim: dict | None = None
     edit: dict | None = None                          # as Option.edit
     where: list[list[float]] = field(default_factory=list)  # where the worst hits are (world metres), for Muse
+    model: str = ""                                   # the model whose idea it was ("Muse Spark", "Muse Wonder")
 
 
 @dataclass
@@ -81,6 +83,10 @@ class Result:
     recommendation: dict | None = None
     requirements: str | None = None   # the requirements' label ("L3 Coordinated · Strict"), when there were some
     clearance_m: float = 0.025        # the clearance every option had to keep
+    model: str = ""                   # the model that ran these rounds ("Muse Spark", "Muse Wonder")
+    usage: dict | None = None         # its tokens and, for a model billed per token, what they cost (meta_client.Usage)
+    escalated: bool = False           # a second try on a larger model (docs/escalation.md): Spark's options and tries
+                                      # are carried in, Wonder's added
 
 
 def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025, memo: dict | None = None) -> str:
@@ -334,6 +340,8 @@ def edit_text(kind: str, delta_m: list[float], split_m: list[float] | None = Non
         return f"offset {split_m} by {delta_m[2]:+.3f} m"
     if kind == "trim":
         return f"trim the {trim['end']} end by {trim['by_m'] * 1000:.0f} mm" if trim else "trim at the joint"
+    if kind == "combined":
+        return "several elements changed together"
     return f"move {delta_m}"
 
 
@@ -366,7 +374,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             max_rounds: int = 3, want: int = 3, clearance_m: float = 0.025,
             on_event: Callable[[dict], None] | None = None, lock=None, trials: bool = False,
             policy: dict | None = None, guidance: str = "", recommend: str | None = None, doc=None,
-            hosts_model: ChatModel | None = None) -> Result:
+            hosts_model: ChatModel | None = None, brief: str = "", label: str = "") -> Result:
     """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
@@ -386,6 +394,9 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
 
     `hosts_model` (the triage model) reads, once per kind, what may be done to a host a service crosses
     (`hosts.read`) before the first round, so Muse is told whether an opening there is possible.
+
+    A second try on a larger model (escalation.py) adds `brief` to what the model reads each round (the first try's
+    ideas and why they failed, a wider neighbourhood) and `label` names the model on every event and option.
     """
     lock = lock or contextlib.nullcontext()
     system = (PACKS / f"{pack}.md").read_text() + guidance
@@ -397,10 +408,12 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     options: list[Option] = []
     understanding = ""
     advice = ""
-    emit = on_event or (lambda e: None)
+    label = label or meta_client.model_label(getattr(model, "model", "") or "")
+    emit = ((lambda e: on_event({**e, "model": label})) if on_event and label else on_event) or (lambda e: None)
     memo: dict = {}   # what the geometry tells Muse, kept between rounds (every trial is undone)
 
     def on_step(attempt: Attempt) -> None:
+        attempt.model = label
         emit({"type": "attempt", "index": len(attempts) - 1, **asdict(attempt)})
 
     for round_no in range(1, max_rounds + 1):
@@ -416,7 +429,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 except Exception as e:   # a reading that fails leaves the defaults: walls and slabs only
                     emit({"type": "note", "text": f"Could not read the host: {e}"})
         with lock:
-            text = _describe(base, clash, clearance_m, memo) + _feedback(attempts)
+            text = _describe(base, clash, clearance_m, memo) + brief + _feedback(attempts)
         if trials and on_event and getattr(model, "streams_reasoning", False):  # someone is watching: show the thinking
             reply = model.complete_json_reasoning(system, text, clash.images, None,
                                                   lambda note, r=round_no: emit({"type": "reasoning", "round": r, "text": note}))
@@ -430,10 +443,10 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         for cand in candidates:
             emit({"type": "checking", "index": len(attempts), "title": cand.get("title", ""),
                   "kind": cand.get("kind", "move")})
-            target = clash.element_a if cand.get("move", "A") == "A" else clash.element_b
+            kind = cand.get("kind") or "move"
+            target = clash.element_a if cand.get("move", "A") == "A" or kind == "combined" else clash.element_b
             other = clash.element_b if target == clash.element_a else clash.element_a
             trial = (lambda shape, i=len(attempts): emit({"type": "trial", "index": i, **shape})) if on_event and trials else None
-            kind = cand.get("kind") or "move"
             if kind not in TRIES:
                 unknown = Attempt(cand.get("title", kind), [0.0, 0.0, 0.0], False,
                                   f"unknown kind {kind!r}: use one of {', '.join(TRIES)}", kind)
@@ -464,6 +477,8 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     options.sort(key=lambda o: (tier(o.kind, o.edit), not comfortable(o), sum(abs(d) for d in o.delta_m),
                                 -(o.min_clearance_m or 1.0)))
     options = options[:want]
+    for o in options:
+        o.model = label
     for o in options:  # what each option changes, as it is now, so the UI can show before and after together
         try:
             with lock:
@@ -477,8 +492,10 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             theirs = clash.element_b if mine == clash.element_a else clash.element_a
             o.meets = requirements.meets(doc, policy[mine], policy[theirs], clearance_m, o.min_clearance_m,
                                          o.delta_m, o.kind, fitted=(o.edit or {}).get("fit") == "fitted")
+    usage = model.usage.as_dict(model.model) if isinstance(getattr(model, "usage", None), meta_client.Usage) else None
     return Result(understanding, options, attempts, advice,
-                  requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
+                  requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m,
+                  model=label, usage=usage)
 
 
 def _candidate_delta(cand: dict, scene: IfcScene | None = None, target: str | None = None) -> tuple[str, list[float]]:
@@ -507,7 +524,10 @@ def _candidate_delta(cand: dict, scene: IfcScene | None = None, target: str | No
 
 
 def _refused(scene: IfcScene, cand: dict, target: str, other: str, policy: dict) -> Attempt | None:
-    """A candidate the coordination requirements forbid, as a failed attempt (so Muse hears why), or None."""
+    """A candidate the coordination requirements forbid, as a failed attempt (so Muse hears why), or None. A combined
+    fix is refused step by step in its own trial (a step may change a third element, with a policy of its own)."""
+    if (cand.get("kind") or "move") == "combined":
+        return None
     kind, delta = _candidate_delta(cand, scene, target)
     if kind == "penetration":   # the service's team asks: its policy decides; the host's only whether it is cut
         target, other = penetration_sides(scene, target, other)
@@ -873,13 +893,190 @@ def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearanc
     return _try_move(scene, cand, target, clearance_m, on_trial)
 
 
+# A combined fix changes up to three elements together, in one trial (docs/escalation.md): the room a duct needs may
+# only come from moving the pipe beside it too. Its steps are the kinds that are pure geometry (no sizing, no reviewer).
+COMBINED_KINDS = ("move", "offset", "route")
+COMBINED_MAX = 3
+
+
+class Refused(ValueError):
+    """A combined fix (or one of its steps) that cannot be tried, with why, in words Muse can act on."""
+
+
+def combined_steps(scene: IfcScene, cand: dict, a: str, b: str) -> list[dict]:
+    """A combined candidate's steps as kept options would carry them ({kind, moved, delta_m, split_m?, edit?,
+    target}), checked: 1 to 3 steps of move / offset / route, each on its own element ("A", "B" or a GlobalId in the
+    model), never a fixed element, at least one on A or B, and none the coordination requirements forbid. Raises
+    `Refused`."""
+    raw = cand.get("steps")
+    if not isinstance(raw, list) or not 1 <= len(raw) <= COMBINED_MAX:
+        raise Refused(f"a combined fix has 1 to {COMBINED_MAX} steps: "
+                      '[{"kind": "move" | "offset" | "route", "move": "A" | "B" | "<GlobalId>", ...}]')
+    doc = requirements.current()
+    matcher = requirements.Matcher(scene, doc) if doc is not None else None
+    boxes = scene.bounds()
+    out: list[dict] = []
+    for i, st in enumerate(raw, 1):
+        if not isinstance(st, dict):
+            raise Refused(f"step {i} is not an object")
+        kind = st.get("kind") or "move"
+        if kind not in COMBINED_KINDS:
+            raise Refused(f"step {i}: a combined step is a {', '.join(COMBINED_KINDS)}, not a {kind} "
+                          "(propose that on its own)")
+        who = st.get("move", "A")
+        gid = a if who == "A" else b if who == "B" else str(who)
+        if gid not in boxes:
+            raise Refused(f"step {i}: {who!r} is not a physical element in the model (use A, B or a GlobalId listed "
+                          "around the clash)")
+        if gid in (s["target"] for s in out):
+            raise Refused(f"step {i}: each step changes a different element")
+        e = scene.element(gid)
+        if e.fixed:
+            raise Refused(f"step {i}: {e.ifc_class} '{e.name}' is structure and stays where it is")
+        try:
+            if kind == "move":
+                delta = [float(v) for v in st.get("delta_m", [])]
+                if len(delta) != 3 or not all(np.isfinite(delta)) or not any(delta):
+                    raise Refused(f"step {i}: a move needs delta_m [dx, dy, dz] in metres, not all zero")
+                step = {"kind": "move", "moved": scene.connected_run(gid), "delta_m": delta}
+            elif kind == "offset":
+                split = [float(v) for v in st.get("split_m", [])]
+                dz = float(st.get("dz_m", 0.0))
+                if len(split) != 2 or not all(np.isfinite([*split, dz])) or not dz:
+                    raise Refused(f"step {i}: an offset needs split_m [from, to] and a dz_m that is not zero")
+                step = {"kind": "offset", "moved": [gid], "split_m": split, "delta_m": [0.0, 0.0, dz]}
+            else:
+                run = edits.run_of(scene, gid)
+                steps = edits.route_steps(st.get("steps"), run.length_m)
+                up, side = edits.run_frame(run.direction)
+                big = max(steps, key=lambda x: x["up_m"] ** 2 + x["side_m"] ** 2)
+                step = {"kind": "route", "moved": [gid],
+                        "delta_m": [round(float(x), 4) for x in up * big["up_m"] + side * big["side_m"]],
+                        "edit": {"steps": steps, "summary": edits.route_summary(steps, side)}}
+        except (TypeError, ValueError) as err:
+            if isinstance(err, Refused):
+                raise
+            raise Refused(f"step {i}: {err}") from err
+        except (edits.Unsupported, KeyError) as err:
+            raise Refused(f"step {i}: cannot {kind} {e.name}: {err}") from err
+        if matcher is not None:
+            pol = requirements.policy(doc, matcher, gid)
+            why = requirements.blocked(pol, None, kind, step["delta_m"], True)
+            if why:
+                raise Refused(f"step {i} ({e.name}): {why}")
+        out.append({**step, "target": gid})
+    if not any(st["target"] in (a, b) for st in out):
+        raise Refused("one step must change A or B: moving only what is around them leaves the clash")
+    return out
+
+
+def step_candidate(st: dict) -> dict:
+    """A kept combined step back in the form Muse proposes it, to be checked again (`combined_steps`)."""
+    if st["kind"] == "offset":
+        return {"kind": "offset", "move": st["target"], "split_m": st["split_m"], "dz_m": st["delta_m"][2]}
+    if st["kind"] == "route":
+        return {"kind": "route", "move": st["target"], "steps": st["edit"]["steps"]}
+    return {"kind": "move", "move": st["target"], "delta_m": st["delta_m"]}
+
+
+def _step_summary(scene: IfcScene, st: dict) -> str:
+    name = scene.element(st["target"]).name
+    if st["kind"] == "offset":
+        return f"{name}: offset {st['delta_m'][2] * 1000:+.0f} mm at {st['split_m'][0]:.2f}-{st['split_m'][1]:.2f} m"
+    if st["kind"] == "route":
+        return f"{name}: {st['edit']['summary']}"
+    return f"{name}: move {[round(d * 1000) for d in st['delta_m']]} mm"
+
+
+def apply_combined(scene: IfcScene, steps: list[dict]) -> list[tuple[dict, list[str]]]:
+    """Make every step's edit (inside a trial, or for good): → [(step, its elements now: a moved run, or a split
+    run's pieces with the original first)]."""
+    made = []
+    for st in steps:
+        if st["kind"] == "move":
+            scene.translate(st["moved"], tuple(st["delta_m"]))
+            made.append((st, list(st["moved"])))
+        elif st["kind"] == "offset":
+            made.append((st, edits.apply_offset(scene, st["target"], st["split_m"][0], st["split_m"][1],
+                                                st["delta_m"][2]).pieces))
+        else:
+            made.append((st, edits.apply_route(scene, st["target"], st["edit"]["steps"]).pieces))
+    return made
+
+
+def check_combined(scene: IfcScene, made: list[tuple[dict, list[str]]], a: str, b: str, clearance_m: float,
+                   others: list[str] = ()) -> tuple[list[verify.Hit], float | None, int]:
+    """Check a combined fix in place: each step's elements against everything (the other steps' new places
+    included), a split run's shortened ends only against the clash's elements and the other steps' (as an offset's
+    are). → (hits, the least clearance, how many elements were checked against)."""
+    mine = {g for _, els in made for g in els}
+    hits: list[verify.Hit] = []
+    least: float | None = None
+    checked = 0
+    for st, els in made:
+        own = set(els)
+        ignore = own | ({c for g in els for c in scene.element(g).connected} - mine)
+        if st["kind"] == "move":
+            v = verify.check(scene, els, clearance_m=clearance_m, ignore=ignore)
+            hits += v.hits
+        else:
+            v = verify.check(scene, els[1:-1], clearance_m=clearance_m, ignore=ignore)
+            ends = verify.check(scene, [els[0], els[-1]], clearance_m=clearance_m, ignore=ignore)
+            meant = ({a, b, *others} | (mine - own)) - own
+            hits += v.hits + [h for h in ends.hits if h.other in meant]
+        if v.min_clearance_m is not None:
+            least = v.min_clearance_m if least is None else min(least, v.min_clearance_m)
+        checked = max(checked, v.checked_against)
+    worst: dict[str, verify.Hit] = {}   # one hit per element hit, the worst
+    for h in hits:
+        if h.other not in worst or h.distance_m < worst[h.other].distance_m:
+            worst[h.other] = h
+    return sorted(worst.values(), key=lambda h: h.distance_m), least, checked
+
+
+def _try_combined(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
+                  on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
+    """Make every step of a combined fix in one trial, check them together, undo them all. `target` and `other` are
+    A and B (a combined fix names its own elements per step)."""
+    title = cand.get("title", "combined fix")
+    try:
+        steps = combined_steps(scene, cand, target, other)
+    except Refused as e:
+        return Attempt(title, [0.0, 0.0, 0.0], False, f"cannot combine these: {e}", "combined"), None
+    big = max((st["delta_m"] for st in steps), key=lambda d: sum(x * x for x in d))
+    edit = {"steps": [{k: v for k, v in st.items() if k != "moved"} for st in steps], "pair": [target, other],
+            "summary": "; ".join(_step_summary(scene, st) for st in steps),
+            "key": json.dumps([[st["target"], st["kind"], [round(x, 2) for x in st["delta_m"]]] for st in steps])}
+    moved = list(dict.fromkeys(g for st in steps for g in st["moved"]))
+    files = {scene.index_of(g) for g in moved}
+    try:
+        with edits.trial_files(scene, files):
+            made = apply_combined(scene, steps)
+            now = [g for _, els in made for g in els]
+            shape = edits.meshes(scene, now) if on_trial else None
+            if on_trial:
+                on_trial({"kind": "combined", "moved": moved, "delta_m": big, "pieces": shape,
+                          "summary": edit["summary"]})
+            hits, least, checked = check_combined(scene, made, target, other, clearance_m, others)
+            preview = (shape or edits.meshes(scene, now)) if not hits else None
+    except edits.Unsupported as e:
+        return Attempt(title, big, False, f"cannot combine these: {e}", "combined", edit=edit), None
+    attempt = Attempt(title, big, not hits, _reason(hits), "combined", None, _hit_ids(hits), edit=edit,
+                      where=_where(hits))
+    if hits:
+        return attempt, None
+    return attempt, Option(title, moved, big, cand.get("rationale", ""), cand.get("also_needs", ""), least, {},
+                           "combined", None, preview, checked_against=checked, edit=edit)
+
+
 # Each kind of fix Muse may propose, and how to try it: (scene, candidate, target, other, clearance, on_trial,
 # others=) → (Attempt, Option or None). A kind not listed here is refused, never tried as a move.
 TRIES: dict[str, Callable] = {"move": _try_move_fix, "offset": _try_offset, "trim": _try_trim, "route": _try_route,
-                              "resize": _try_resize, "penetration": _try_penetration}
+                              "resize": _try_resize, "penetration": _try_penetration, "combined": _try_combined}
 # The candidate fields each kind is described by, carried into a recommendation (never tried) as its "edit".
 PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m"), "trim": ("by_m",),
-                                      "route": ("steps",), "resize": ("split_m", "depth_m", "keep"), "penetration": ()}
+                                      "route": ("steps",), "resize": ("split_m", "depth_m", "keep"), "penetration": (),
+                                      "combined": ("steps",)}
 
 
 def to_json(result: Result) -> str:

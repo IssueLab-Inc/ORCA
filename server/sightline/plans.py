@@ -99,10 +99,17 @@ def _in_trial_penetration(scene, it: Item, o: dict) -> tuple[list[str], set[str]
     return [service], {service}, None   # the host is not its own: the service is checked against it
 
 
+def _in_trial_combined(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    steps = agent.combined_steps(scene, {"steps": [agent.step_candidate(st) for st in o["edit"]["steps"]]},
+                                 *o["edit"]["pair"])
+    now = [g for _, els in agent.apply_combined(scene, steps) for g in els]
+    return now, set(now), None
+
+
 # How each kind of fix is applied inside a plan's trial: → (elements to check, the fix's own elements, the obstacles
 # its shortened end pieces are checked against; None when every element it changed is checked against everything).
 IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim, "route": _in_trial_route,
-            "resize": _in_trial_resize, "penetration": _in_trial_penetration}
+            "resize": _in_trial_resize, "penetration": _in_trial_penetration, "combined": _in_trial_combined}
 # The files a fix changes beyond its moved elements' (a penetration's provision for void goes in the service's file).
 EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]]}
 # Kinds whose element keeps the contacts it had (a trimmed member is framed into its neighbours, a service through a
@@ -522,9 +529,14 @@ def _keep_penetration(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list
     return ws.apply_penetration(scene_id, o["edit"]["service"], o["edit"]["host"]), []
 
 
+def _keep_combined(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    r = ws.apply_combined(scene_id, o["edit"]["steps"], *o["edit"]["pair"])
+    return r, r["changed"]
+
+
 # How each kind of fix is kept in the scene: → (the Workspace's reply, with "files"; the pieces, the original first).
 KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route": _keep_route,
-        "resize": _keep_resize, "penetration": _keep_penetration}
+        "resize": _keep_resize, "penetration": _keep_penetration, "combined": _keep_combined}
 
 
 def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:

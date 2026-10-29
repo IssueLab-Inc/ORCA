@@ -16,8 +16,8 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, hosts, reports, requirements, step, verify
-from .meta_client import ChatModel, MetaChatModel
+from . import agent, detect, edits, escalation, hosts, reports, requirements, settings, step, verify
+from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
@@ -27,6 +27,7 @@ MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
 # holds several times its file: docs/uploads.md). 0 = by count only.
 SCENE_BUDGET_MB = int(os.environ.get("SIGHTLINE_SCENE_BUDGET_MB", "0"))
 HOSTS_TIMEOUT_S = 60   # a host reading that takes longer (a cold open-weights host) leaves the defaults
+LAST_KEPT = 200        # the last try per clash pair kept for a second try to read (docs/escalation.md)
 MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
 # Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
 MODELS = Path(tempfile.gettempdir()) / "sightline-models"
@@ -42,7 +43,7 @@ SAMPLE_EXCLUDE = tuple(c.strip() for c in os.environ.get(
 class Workspace:
     def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None, max_scenes: int = MAX_SCENES,
                  max_reports: int = MAX_REPORTS, keep=None, hosts_model: ChatModel | None = None,
-                 budget_mb: int = SCENE_BUDGET_MB):
+                 budget_mb: int = SCENE_BUDGET_MB, escalation_model: ChatModel | None = None):
         self.samples = samples
         self.max_scenes = max_scenes
         self.budget = budget_mb << 20
@@ -67,6 +68,12 @@ class Workspace:
         # What reads hosts for openings (hosts.read): given, or the triage model; none when only a proposal model was
         # given (tests script that one).
         self._hosts_model = hosts_model if hosts_model is not None else (False if model is not None else None)
+        # A second try's model: given (tests script it), else a fresh Muse Wonder client per try, so its usage is that
+        # try's alone (meta_client.escalation_model).
+        self._escalation_model = escalation_model
+        # (scene id, GlobalId, GlobalId) → the last try at that pair (asdict of agent.Result), for a second try to
+        # read: what was tried and why it failed. Pairs are sorted; the oldest go past LAST_KEPT.
+        self._last: dict[tuple[str, str, str], dict] = {}
 
     @property
     def model(self) -> ChatModel:
@@ -185,13 +192,81 @@ class Workspace:
 
     def propose(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
                 images: list[str] | None = None, notes: str = "", report_id: str | None = None,
-                clash_id: str | None = None, on_event=None) -> dict:
+                clash_id: str | None = None, on_event=None, escalate_check=None) -> dict:
         """With a report clash, its Navisworks distance and images go to the model too (images are what let
-        the model find openings and free space; spikes/README.md, spike 4)."""
+        the model find openings and free space; spikes/README.md, spike 4).
+
+        When escalations are automatic (`settings.escalation()` "auto") and nothing verified, the clash goes on to a
+        second try at once, if `escalate_check` (the caller's caps: why not, or None) allows it."""
         clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id, scene_id)
-        return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
-                                    trials=on_event is not None, hosts_model=self.hosts_model,
-                                    **self.fix_settings(scene_id, element_a, element_b)))
+        result = asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
+                                      trials=on_event is not None, hosts_model=self.hosts_model,
+                                      **self.fix_settings(scene_id, element_a, element_b)))
+        self._remember(scene_id, element_a, element_b, result)
+        if (escalate_check is not None and not result["options"] and not result.get("recommendation")
+                and settings.escalation() == "auto"):
+            why = escalate_check()
+            if why:
+                if on_event:
+                    on_event({"type": "note", "text": f"No second try: {why}"})
+            else:
+                return self.escalate(scene_id, element_a, element_b, distance_m, images, notes, report_id, clash_id,
+                                     on_event)
+        return result
+
+    def _pair(self, scene_id: str, a: str, b: str) -> tuple[str, str, str]:
+        return (scene_id, *sorted((a, b)))
+
+    def _remember(self, scene_id: str, a: str, b: str, result: dict) -> None:
+        key = self._pair(scene_id, a, b)
+        self._last.pop(key, None)
+        self._last[key] = result
+        while len(self._last) > LAST_KEPT:
+            self._last.pop(next(iter(self._last)))
+
+    def last_try(self, scene_id: str, a: str, b: str) -> dict | None:
+        """The last try at this pair in this scene (a first try, or a second try with the first's carried in)."""
+        return self._last.get(self._pair(scene_id, a, b))
+
+    def escalate(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
+                 images: list[str] | None = None, notes: str = "", report_id: str | None = None,
+                 clash_id: str | None = None, on_event=None) -> dict:
+        """A second, longer try at a clash on a larger model (docs/escalation.md): it reads the last try at this pair
+        (what was tried and why it failed, the fixes found), the elements those ideas ran into and a wider
+        neighbourhood (escalation.brief), with every kind of fix there is, combined fixes included, for up to two
+        rounds through the same check. The first try's fixes stay: the reply's options are both tries' fixes in one
+        ranked list, each with the model that found it, and its attempts both tries'. Raises ValueError where the
+        requirements allow no edit (a recommendation is all there is)."""
+        clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id, scene_id)
+        fix = self.fix_settings(scene_id, element_a, element_b)
+        if fix.get("recommend"):
+            raise ValueError(f"Nothing may be edited here ({fix['recommend']}), so there is no second try to make.")
+        scene = self.scene(scene_id)
+        first = self.last_try(scene_id, element_a, element_b)
+        model = self._escalation_model or escalation_model()
+        label = model_label(getattr(model, "model", "") or "") or "Muse Wonder"
+        if on_event:
+            on_event({"type": "escalating", "model": label, "first": bool(first)})
+        clearance = fix.get("clearance_m", 0.025)
+        with self.lock:
+            brief = escalation.brief(scene, clash, first, clearance)
+        fix["guidance"] = fix.get("guidance", "") + "\n" + escalation.PACK.read_text()
+        second = asdict(agent.resolve(scene, clash, model, on_event=on_event, lock=self.lock,
+                                      trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=2,
+                                      brief=brief, label=label, **fix))
+        out = {**second, "escalated": True}
+        if first:
+            def key(o: dict):
+                clear = o.get("min_clearance_m")
+                return (agent.tier(o.get("kind"), o.get("edit")),
+                        not (clear is None or clear >= 2 * clearance - 1e-6),
+                        sum(abs(d) for d in o.get("delta_m") or []), -(clear or 1.0))
+            out["options"] = sorted([*first.get("options", []), *second["options"]], key=key)
+            out["attempts"] = [*first.get("attempts", []), *second["attempts"]]
+            out["understanding"] = second["understanding"] or first.get("understanding", "")
+            out["advice"] = second["advice"] or first.get("advice", "")
+        self._remember(scene_id, element_a, element_b, out)
+        return out
 
     def fix_settings(self, scene_id: str, element_a: str, element_b: str) -> dict:
         """What the coordination requirements set for a fix of this pair (none: today's defaults): the clearance it
@@ -332,6 +407,21 @@ class Workspace:
             s.mark_edited(element)
             s.bump([s.index_of(element)])
         return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
+
+    def apply_combined(self, scene_id: str, steps: list[dict], element_a: str, element_b: str) -> dict:
+        """Keep a combined fix (agent._try_combined): its steps are checked again as Muse would propose them (each on
+        its own element, none fixed or forbidden by the requirements, one on A or B), then made for good. Raises
+        `agent.Refused` with why."""
+        s = self.scene(scene_id)
+        with self.lock:
+            checked = agent.combined_steps(s, {"steps": [agent.step_candidate(st) for st in steps]}, element_a, element_b)
+            made = agent.apply_combined(s, checked)
+            files = sorted({s.index_of(g) for st in checked for g in st["moved"]})
+            for st in checked:
+                for g in st["moved"]:
+                    s.mark_edited(g)
+            s.bump(files)
+        return {"files": files, "changed": [g for _, els in made for g in els], "pieces": [els for _, els in made]}
 
     def check_resize(self, scene_id: str, element: str, other: str, split_m: list[float], depth_m: float,
                      keep: str = "bottom", clearance_m: float = 0.025) -> dict:

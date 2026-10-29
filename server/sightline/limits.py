@@ -34,6 +34,13 @@ class ProposeLimit:
                    int(os.environ.get("SIGHTLINE_PROPOSE_PER_DAY", "0")))
 
     @classmethod
+    def escalate_from_env(cls) -> "ProposeLimit":
+        """Second tries on Muse Wonder (docs/escalation.md): SIGHTLINE_ESCALATE_PER_HOUR per visitor,
+        SIGHTLINE_ESCALATE_PER_DAY for everyone. Each also takes one proposal."""
+        return cls(int(os.environ.get("SIGHTLINE_ESCALATE_PER_HOUR", "0")),
+                   int(os.environ.get("SIGHTLINE_ESCALATE_PER_DAY", "0")), noun="second tries with Muse Wonder")
+
+    @classmethod
     def chat_from_env(cls) -> "ProposeLimit":
         """Chat messages: SIGHTLINE_CHAT_PER_HOUR per visitor, SIGHTLINE_CHAT_PER_DAY for everyone."""
         return cls(int(os.environ.get("SIGHTLINE_CHAT_PER_HOUR", "0")),

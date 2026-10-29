@@ -42,6 +42,7 @@ class Hooks:
     """What the hosting web server lends the tools (`app.py`); `None` parts are not available there."""
     links: agents.Links | None = None                                # remote: links by token
     charge: Callable[[agents.Link, int], str | None] = lambda link, n: None   # proposals; why not, or None
+    escalate: Callable[[agents.Link], str | None] = lambda link: None       # a second try (docs/escalation.md)
     allow_call: Callable[[agents.Link], str | None] = lambda link: None     # per-link call cap
     start_triage: Callable[[str, str | None, agents.Link], Any] | None = None
     triage_state: Callable[[str, str | None], dict] | None = None
@@ -144,7 +145,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         link = call(ctx, name, args)
         result, summary, _ = T()._run(name, args, link.ctx, emit_for(link),
                                        propose_allowed=lambda: hooks.charge(link, 1),
-                                       propose_allowed_many=lambda n: hooks.charge(link, n))
+                                       propose_allowed_many=lambda n: hooks.charge(link, n),
+                                       escalate_allowed=lambda: hooks.escalate(link))
         done(link, name, summary)
         return result
 
@@ -155,7 +157,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         def work():
             result, summary, _ = T()._run(name, args, link.ctx, emit_for(link),
                                            propose_allowed=lambda: hooks.charge(link, 1),
-                                           propose_allowed_many=lambda n: hooks.charge(link, n))
+                                           propose_allowed_many=lambda n: hooks.charge(link, n),
+                                           escalate_allowed=lambda: hooks.escalate(link))
             done(link, name, summary)
             return after(result) if after else result
         return link.wait(link.start(name, work, hooks.spawn), wait_s)
@@ -365,17 +368,20 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         return run(ctx, "check_penetration", {"element": element, "host": host})
 
     @tool()
-    def propose_fixes(clash_id: str, ctx: Context, wait_s: float = 40) -> dict:
-        """Run ORCA's fix agent on a clash: it proposes moves, local offsets and trims, checks each against the whole
-        model, and returns the verified ones (numbered options). The person's page shows it working. Takes 20-60 s;
-        if it is not done within wait_s, you get a job_id for get_job. Costs one proposal from the allowance."""
+    def propose_fixes(clash_id: str, ctx: Context, wait_s: float = 40, escalate: bool = False) -> dict:
+        """Run ORCA's fix agent on a clash: it proposes moves, offsets, routes, flatter sections, trims and openings,
+        checks each against the whole model, and returns the verified ones (numbered options). The person's page
+        shows it working. Takes 20-60 s; if it is not done within wait_s, you get a job_id for get_job. Costs one
+        proposal from the allowance. With escalate true: a second, longer try on Muse Wonder that reads the last
+        try's failures and may change up to three elements together (about a minute; one escalation and one
+        proposal): use it when the first try found no fix, or only a resize or an opening."""
         def numbered(result: dict) -> dict:
             for i, o in enumerate(result.get("verified_options") or [], 1):
                 o["option"] = i
             if result.get("verified_options"):
                 result["note"] = "Apply one with apply_fix(clash_id, option). The person can also accept it in ORCA."
             return result
-        return job(ctx, "propose_fixes", {"clash_id": clash_id}, wait_s, numbered)
+        return job(ctx, "propose_fixes", {"clash_id": clash_id, "escalate": escalate}, wait_s, numbered)
 
     @tool()
     def plan_fixes_together(clash_ids: list[str], ctx: Context, wait_s: float = 40) -> dict:

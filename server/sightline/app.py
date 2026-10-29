@@ -15,6 +15,8 @@ import uuid
 import wave
 import zlib
 from dataclasses import asdict
+from functools import partial
+from typing import Callable
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
@@ -28,8 +30,8 @@ from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
 from . import (agents, chat, context_planner, detect, document, edits, mcp_server, owner, plans, requirements, settings,
-               step, titles, triage, voice_live)
-from .meta_client import load_env, transcribe, triage_model, triage_model_info
+               spend, step, titles, triage, voice_live)
+from .meta_client import escalation_info, load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
 from .service import MODEL_SUFFIXES, MODELS, Workspace
 
@@ -162,7 +164,9 @@ class _RequestEvents:
 
 
 propose_limit = ProposeLimit.from_env()
+escalate_limit = ProposeLimit.escalate_from_env()
 chat_limit = ProposeLimit.chat_from_env()
+ESCALATE_ESTIMATE_USD = 1.0   # about what a second try may cost at most (two rounds of Muse Wonder): spend.refused
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
 # Clash titles: one titling run per report (a few model calls for a whole report): SIGHTLINE_TITLES_PER_HOUR per visitor.
 title_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_TITLES_PER_HOUR", "0")),
@@ -212,6 +216,33 @@ class Propose(BaseModel):
     notes: str = ""
     report_id: str | None = None  # a clash from an open report: its distance and images go to the model
     clash_id: str | None = None
+    escalate: bool = False        # a second, longer try on Muse Wonder (docs/escalation.md), reading the last one
+
+
+def escalation_refused(who: str, exempt: bool) -> tuple[int, str] | None:
+    """Why this visitor may not make a second try now, as (HTTP status, words), or None: second tries switched off,
+    the day's Muse Wonder budget spent, or the caps (a second try is one escalation and one proposal). `exempt`: the
+    owner's own requests skip the caps and the budget."""
+    if settings.escalation() == "off":
+        return 403, "Second tries with Muse Wonder are switched off."
+    why = spend.refused(ESCALATE_ESTIMATE_USD, exempt)
+    if why:
+        return 429, why
+    if exempt:
+        return None
+    why = escalate_limit.take(who) or propose_limit.take(who)
+    return (429, why) if why else None
+
+
+def _escalation_check(request: HTTPConnection) -> Callable[[], str | None]:
+    """`escalation_refused` for this request, for work that decides later (automatic second tries, chat)."""
+    who = client_id(request.headers, request.client.host if request.client else None)
+    exempt = owner.no_caps()
+
+    def check() -> str | None:
+        r = escalation_refused(who, exempt)
+        return r[1] if r else None
+    return check
 
 
 class Offset(BaseModel):
@@ -309,7 +340,7 @@ def _settings_state() -> dict:
 def models():
     """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy, and
     how much a visitor may upload (the page checks before sending, and says so)."""
-    return {"triage": triage_model_info(), "model_upload_max_mb": MODEL_UPLOAD_MAX_MB,
+    return {"triage": triage_model_info(), "escalation": escalation_info(), "model_upload_max_mb": MODEL_UPLOAD_MAX_MB,
             "model_upload_max_files": MODEL_UPLOAD_MAX_FILES}
 
 
@@ -546,34 +577,54 @@ def verify_move(scene_id: str, body: Move):
     return ws.verify_move(_scene(scene_id), body.moved, body.delta_m, body.clearance_m)
 
 
+def _refuse_escalation(request: HTTPConnection) -> None:
+    r = escalation_refused(client_id(request.headers, request.client.host if request.client else None),
+                           owner.no_caps())
+    if r:
+        raise HTTPException(*r)
+
+
 @app.post("/api/scenes/{scene_id}/propose")
 def propose(scene_id: str, body: Propose, request: Request):
     _scene(scene_id)
+    if body.report_id:
+        _report(body.report_id)
+    if body.escalate:
+        _refuse_escalation(request)
+        try:
+            return ws.escalate(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes,
+                               report_id=body.report_id, clash_id=body.clash_id)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
     refused = _take(propose_limit, request)
     if refused:
         raise HTTPException(429, refused)
-    if body.report_id:
-        _report(body.report_id)
     return ws.propose(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes,
-                      report_id=body.report_id, clash_id=body.clash_id)
+                      report_id=body.report_id, clash_id=body.clash_id, escalate_check=_escalation_check(request))
 
 
 @app.post("/api/scenes/{scene_id}/propose/stream")
 def propose_stream(scene_id: str, body: Propose, request: Request):
     """The same as /propose, as newline-delimited JSON events while it works: the agent's progress
-    (see agent.resolve), then {"type": "result", ...} or {"type": "error", "detail": ...}."""
+    (see agent.resolve; a second try adds {"type": "escalating", "model", "first"} and names its model on every
+    event), then {"type": "result", ...} or {"type": "error", "detail": ...}."""
     _scene(scene_id)
     if body.report_id:
         _report(body.report_id)
-    refused = _take(propose_limit, request)
-    if refused:
-        raise HTTPException(429, refused)
+    if body.escalate:
+        _refuse_escalation(request)
+    else:
+        refused = _take(propose_limit, request)
+        if refused:
+            raise HTTPException(429, refused)
+    check = _escalation_check(request)
     events: queue.Queue = queue.Queue()
 
     def work():
         try:
-            result = ws.propose(scene_id, body.element_a, body.element_b, body.distance_m, notes=body.notes,
-                                report_id=body.report_id, clash_id=body.clash_id, on_event=events.put)
+            run = ws.escalate if body.escalate else partial(ws.propose, escalate_check=check)
+            result = run(scene_id, body.element_a, body.element_b, body.distance_m, notes=body.notes,
+                         report_id=body.report_id, clash_id=body.clash_id, on_event=events.put)
             events.put({"type": "result", **result})
         except Exception as e:  # the model or the check failed: tell the browser rather than cut the stream
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
@@ -1252,6 +1303,7 @@ def chat_turn(body: ChatTurn, request: Request):
     no_caps = owner.no_caps()
     allowed = lambda: None if no_caps else propose_limit.take(who)
     allowed_many = lambda n: None if no_caps else propose_limit.take_many(who, n)
+    escalate_allowed = _escalation_check(request)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
     events = _RequestEvents(request)
@@ -1264,7 +1316,8 @@ def chat_turn(body: ChatTurn, request: Request):
     def work():
         try:
             c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel,
-                   propose_allowed=allowed, propose_allowed_many=allowed_many, before_publish=finish)
+                   propose_allowed=allowed, propose_allowed_many=allowed_many, escalate_allowed=escalate_allowed,
+                   before_publish=finish)
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         finish()  # idempotent after successful completion; also close failed/cancelled turns
@@ -1537,6 +1590,10 @@ def mcp_hooks() -> mcp_server.Hooks:
     def charge(link: agents.Link, n: int) -> str | None:
         return None if link.owner else propose_limit.take_many(link.visitor, n)
 
+    def escalate(link: agents.Link) -> str | None:
+        r = escalation_refused(link.visitor, link.owner)
+        return r[1] if r else None
+
     def start_triage(report_id: str, scene_id: str | None, link: agents.Link):
         return _start_triage(ws.report(report_id), scene_id, lambda: charge(link, 1))
 
@@ -1549,7 +1606,7 @@ def mcp_hooks() -> mcp_server.Hooks:
         return _build_document(report, verdicts, scene_id, scope)
 
     return mcp_server.Hooks(
-        links=links, charge=charge, allow_call=lambda link: agent_call_limit.take(link.id),
+        links=links, charge=charge, escalate=escalate, allow_call=lambda link: agent_call_limit.take(link.id),
         start_triage=start_triage, triage_state=lambda rid, sid: triage_state(rid, sid),
         build_document=build_document, spawn=owner.spawn)
 
