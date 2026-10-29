@@ -1028,6 +1028,43 @@ a.pop-item { color: inherit; }
 }
 @media (max-width: 760px) { .lightbox { background: rgba(10, 14, 20, .95); } }
 
+/* The left pane over a report (ReportList.tsx): Clashes and Insights tabs, so the list gets the room. The Clashes view
+   keeps a short head, Triage and the search above a list that scrolls on its own; Insights holds the run's summary,
+   what the clashes add up to, root causes and patterns. */
+.left-tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--surface); flex: none; }
+.left-tabs button { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; background: none; border: 0;
+  border-bottom: 2px solid transparent; padding: 11px 8px 9px; cursor: pointer; color: var(--muted); }
+.left-tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.left-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.left-tabs .count { font-weight: 500; }
+.left-view { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
+.left-view[hidden] { display: none; }
+.left-view > .report-head, .left-view > .triage, .left-view > .insights, .left-view > .detect { flex-shrink: 0; }
+.left-view > .report-head:first-child { border-bottom: 0; padding-bottom: 2px; }
+.left-view > .report-head .live-line { font-size: 12.5px; }
+.left-view > .list-head { padding-top: 10px; }
+.left-view[data-left-view="clashes"] > .triage { margin-top: 6px; }
+.left-view[data-left-view="clashes"] > .groups { min-height: 200px; }
+.left-view[data-left-view="insights"] { padding-bottom: 14px; }
+.left-view[data-left-view="insights"] > .report-head { border-bottom: 0; }
+@media (pointer: coarse) { .left-tabs button { min-height: 44px; } }
+/* Triage folded is one line (the count is its subtitle, the button sits in the head) and its bar */
+.triage-head .triage-go { flex: none; padding: 5px 10px; font-size: 12.5px; }
+.triage-sub.count-sub { color: #33414f; display: inline-flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.triage-sub.count-sub b { font-size: 13px; }
+.triage-sub.count-sub b.bad { color: var(--fail); } .triage-sub.count-sub b.ok { color: var(--ok); }
+.triage.compact .triage-head { margin-bottom: 0; }
+.triage.compact:not(.idle) .triage-head { margin-bottom: 8px; }
+.triage.compact.idle .triage-head .triage-fold { display: none; }  /* nothing to unfold but the reasons; the button says it */
+/* The search and its filters share a row when there is room */
+.list-head { flex-direction: row !important; flex-wrap: wrap; align-items: center; gap: 6px 10px !important; }
+.list-head .search-box { flex: 1 1 170px; min-width: 0; }
+.list-head .filters { flex: 0 1 auto; }
+.list-head .list-focus { flex: 1 1 100%; margin-top: 0; }
+/* Phone: the tabs already name the report, and a status line with nothing to press gives way when the sheet is full */
+.app.phone .left-view[data-left-view="clashes"] > .report-head:first-child > :not(.live-line) { display: none; }
+.app.phone .left-view[data-left-view="clashes"] > .report-head:first-child:not(:has(.live-line)) { display: none; }
+.app.phone.snap-full .sheet-peek.quiet { display: none; }
 /* A blank project (ProjectStart.tsx): the visitor's own models */
 .project-start { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 40px max(24px, calc(50% - 320px)); background: var(--bg); }
 .project-start h1 { margin: 0; font-size: 26px; }

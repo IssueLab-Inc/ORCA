@@ -75,7 +75,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   const seconds = run ? Math.round(run.done ? run.seconds ?? 0 : Math.max(0, now - run.started) / 1000) : 0;
   const model = run?.model ? (run.open_weights ? "Muse Spark Open" : "Muse Spark") : "";
   const state = !run ? "idle" : run.done ? "done" : "running";
-  const compact = forceCompact ? !openedAnyway : chosen ?? state === "done";
+  const compact = forceCompact ? !openedAnyway : chosen ?? state !== "running";  // room for the list, open while it reads
   const toggle = () => {
     if (forceCompact) { setOpenedAnyway(compact); return; }  // for this filter only; the stored choice stays
     setChosen(!compact);
@@ -113,8 +113,16 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <span className="triage-icon"><ScanSearch size={15} aria-hidden /></span>
         <div>
           <h3>Triage</h3>
-          <span className="triage-sub">{state === "idle" ? "Step 1 · sort the clashes" : state === "running" ? "Sorting the clashes…" : "Every clash has a verdict"}</span>
+          {/* Folded, the count is the subtitle: the card is one line and its bar */}
+          {compact && state === "done" ? <span className="triage-sub count-sub">
+              <b className={counts.real_clash ? "bad" : "ok"}>{counts.real_clash}</b>{counts.real_clash === 1 ? " needs a fix" : " need a fix"} of {n}
+              <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></span>
+            : compact && state === "running" ? <span className="triage-sub count-sub"><b>{ids.length}</b> of {n} sorted · {seconds} s
+              <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></span>
+            : <span className="triage-sub">{state === "idle" ? "Step 1 · sort the clashes" : state === "running" ? "Sorting the clashes…" : "Every clash has a verdict"}</span>}
         </div>
+        {compact && state === "idle" && <button className="btn primary small triage-go" onClick={() => onRun(false)}>
+          <ScanSearch size={14} aria-hidden /> Triage all {n}</button>}
         {run?.done && !compact && <button className="ibtn" aria-label="Triage again" data-tip="Triage again" data-tip-side="left" onClick={() => onRun(true)}>
           <RotateCcw size={14} aria-hidden /></button>}
         <button className="ibtn triage-fold" aria-expanded={!compact} aria-label={compact ? "Show the triage details" : "Show only the essentials"}
@@ -122,21 +130,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
           <ChevronDown size={15} aria-hidden /></button>
       </div>
 
-      {compact && state === "idle" && <button className="btn primary triage-go" onClick={() => onRun(false)}>
-        <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>}
-      {compact && state === "running" && <>
-        <div className="triage-count small"><b>{ids.length}</b> of {n} sorted <span className="hint">· {seconds} s</span>
-          <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></div>
-        {bar}
-      </>}
-      {compact && state === "done" && <>
-        <div className="triage-count small">
-          <b className={counts.real_clash ? "bad" : "ok"}>{counts.real_clash}</b>
-          {counts.real_clash === 1 ? " needs a fix" : " need a fix"} <span className="hint">of {n}</span>
-          <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span>
-        </div>
-        {bar}
-      </>}
+      {compact && state !== "idle" && bar}
       {!compact && <>
 
       {state === "idle" && <>

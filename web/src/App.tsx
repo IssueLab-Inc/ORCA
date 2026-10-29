@@ -48,6 +48,8 @@ export function App() {
   const [listOpen, setListOpen] = useState(false);
   const [snap, setSnap] = useState<Snap>("half");
   const [menuOpen, setMenuOpen] = useState(false);
+  // The left pane's tab over a report: the clash list, or Insights (the run, root causes, patterns).
+  const [leftView, setLeftView] = useState<"clashes" | "insights">("clashes");
   const [toast, setToast] = useState<string | null>(null);
   const longPress = useRef<{ x: number; y: number; timer: number; fired: boolean } | null>(null);
   // While the agent works it drives the viewer (pilot.ts); touching the view takes it back.
@@ -182,7 +184,7 @@ export function App() {
   const [listFocus, setListFocusState] = useState<{ label: string; ids: string[] } | null>(null);
   const setTriageFilter = (k: TriageKind | null) => { setTriageFilterState(k); if (k) setListFocusState(null); };
   const setListFocus = (f: { label: string; ids: string[] } | null) => { setListFocusState(f); if (f) setTriageFilterState(null); };
-  useEffect(() => { setListFocusState(null); }, [report?.id]);
+  useEffect(() => { setListFocusState(null); setLeftView("clashes"); }, [report?.id]);
   const [planRun, setPlanRun] = useState<PlanRun | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -1701,6 +1703,8 @@ export function App() {
     compare: setCompare,
     overview: () => { setViewPlan(false); viewer.current?.preview([]); viewer.current?.fitAll(); },
     reveal: (sel, el) => {
+      const view = el?.closest("[data-left-view]")?.getAttribute("data-left-view");
+      if (view === "clashes" || view === "insights") setLeftView(view);
       if (!compact) return;
       if (!el) { if (/data-tour=["']?(report|export|requirements)\b/.test(sel) && layout === "phone") setMenuOpen(true); return; }
       if (el.closest(".pane.left")) { setListOpen(true); if (snap === "peek") setSnap("half"); }
@@ -1751,6 +1755,9 @@ export function App() {
     </div>
   );
 
+  // What is still open in Insights, for its tab: root causes not done, patterns with an open clash.
+  const insightsOpen = rootCauses && patterns
+    ? rootCauses.filter((r) => !r.done).length + patterns.filter((p) => p.clash_ids.some((id) => !resolvedSet.has(id))).length : null;
   // The right pane's tabs, also the phone sheet's Fix / Plan / Chat.
   const showClashTab = () => { setListOpen(false); setTab("clash"); setViewPlan(false); setViewContext(false); };
   const showPlanTab = () => {
@@ -1900,20 +1907,23 @@ export function App() {
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
-              insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
-                detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
-                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} compact={!!listFocus}
-                requirementsId={reqSaved?.enabled ? reqId : null} onRequirements={() => setReqOpen(true)} />}
-                <TriageCard run={triageRun} active={triageModel} forceCompact={!!listFocus} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+              view={leftView} onView={setLeftView} insightsCount={insightsOpen}
+              status={detecting && <p className="live-line"><i className="spinner" aria-hidden /> {detecting.phase}</p>}
+              triageCard={<TriageCard run={triageRun} active={triageModel} forceCompact={!!listFocus} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
                 total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")}
-                requirements={reqLabel} stale={triageStale} onRequirements={() => setReqOpen(true)} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
-                resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={setListFocus}
+                requirements={reqLabel} stale={triageStale} onRequirements={() => setReqOpen(true)} />}
+              insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
+                detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
+                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)}
+                requirementsId={reqSaved?.enabled ? reqId : null} onRequirements={() => setReqOpen(true)} />}
+                <Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
+                resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={(f) => { setListFocus(f); if (f) setLeftView("clashes"); }}
                 busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={() => void explainPatterns()}
-                onSelect={(ids) => setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])]))}
+                onSelect={(ids) => { setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])])); setLeftView("clashes"); }}
                 onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })}
                 onAddRule={sceneId ? (p, v) => void addRule(p, v) : undefined} hasRule={(p) => !!reqSaved?.enabled && hasByDesign(reqSaved.doc, p)} /></>} />
           : sceneId
@@ -2146,7 +2156,7 @@ export function App() {
       {layout === "tablet" && listOpen && !landing && <div className="drawer-scrim" aria-hidden onClick={() => setListOpen(false)} />}
       {layout === "phone" && !landing && !starting && (
         <SheetBar snap={snap} onSnap={setSnap}>
-          <div className={`sheet-peek ${peekLine.live ? "live" : ""}`} role="status">
+          <div className={`sheet-peek ${peekLine.live ? "live" : ""} ${peekLine.action || peekLine.live ? "" : "quiet"}`} role="status">
             <button type="button" className="sheet-peek-text" onClick={raise}>
               {peekLine.live && <i className="spinner" aria-hidden />}<span>{peekLine.text}</span></button>
             {peekLine.action && <button type="button" className="btn primary" data-tour={peekLine.action.tour}

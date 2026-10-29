@@ -42,6 +42,14 @@ menus and dialogs keep clear of the notch and home bar (`viewport-fit=cover`, `e
   "#1 fixed" with **Next clash** after, "#1 …" with **Propose fixes** when a clash is picked, Check for clashes when
   models are open with no report.
 
+## Room for the list
+
+The left pane over a report has two tabs, so the list never sits under three tall cards: **Clashes** (title and
+test count, Triage folded to one line, the search with its filters, then the list scrolling on its own) and
+**Insights** (the impact line, the run's summary with Detect again and coverage, root causes and patterns). Insights'
+filter and tick buttons switch back to Clashes. On a phone the title row is hidden and the sheet's status line gives
+way at full height when it has no button: an iPhone 13 at full shows 6 clashes (was 1).
+
 ## Touch
 
 - **Picking A and B:** tap an element: its card (docked above the sheet) has **Set as A** / **Set as B**, and says what

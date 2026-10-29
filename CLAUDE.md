@@ -493,9 +493,9 @@ Insights, Triage, thumbnails (Oct 28, owner feedback):
 - **Patterns are read automatically** once per report and models (`explainPatterns(quiet)` in App.tsx, skipped while
   a proposal, plan or replay runs; a failure leaves the Explain button). Their mark / flag / fix buttons need that
   reading, which is why they seemed missing. Northbank: verdicts ~35 s after the list.
-- **A filter gives the list the room:** with a pattern or root cause filter on, Insights shows only that row (no
-  hints, toggles or other section), Triage goes compact unless opened for that filter (`forceCompact`), and the
-  Coordinate card shrinks to one line (`DetectSummary compact`). Northbank: the list starts ~1,400 px higher.
+- **A filter gives the list the room:** with a pattern or root cause filter on, Triage goes compact unless opened for
+  that filter (`forceCompact`). (Superseded Oct 29 by the Clashes / Insights tabs, below: Insights and the run's
+  summary now live in their own tab.)
 
 STEP models (Oct 28, owner decision; design in `docs/step.md`, code `server/sightline/step.py`):
 - **Conversion:** STEP → IFC on open (`cadquery-ocp` 8.0 in the same process as IfcOpenShell: checked, no conflict).
@@ -684,6 +684,16 @@ Phones and tablets (Oct 29, owner decision; design in `docs/mobile.md`, code `we
 Insights patterns (Oct 29, owner feedback): each pattern is a card: the count and the pair on one line
 (`.pattern-head`), the levels/size line, Muse's verdict and the rule across the card (`.insight-more`), and a foot
 with Add to requirements and the buttons (`.pattern-foot`), so the pair's name no longer wraps beside the buttons.
+
+Room for the list (Oct 29, owner feedback: "we can barely see one clash"): the left pane over a report has two tabs
+(`ReportList` `view`, `leftView` in App.tsx). **Clashes**: the report title and test count, Triage folded to one
+line (before a run its button sits in the head; after, "7 need a fix of 464" and the bar; it opens while running),
+the search with its filters on one row, and the list, which scrolls on its own (min 200 px). **Insights**: the impact
+line, the run's summary (Coordinate the models, Detect again, coverage) and Insights. Insights no longer narrows to the
+filtered row; its filter and tick buttons switch to Clashes. The tour's `reveal` switches the tab on every layout. On a
+phone the report title row is hidden and the sheet's status line hides at full height when it has no button.
+Measured, list top / clashes in view: desktop 1440x900 from below the fold to 275 px / 14; iPhone 13 at full from 1
+row to 6.
 
 Renamed to ORCA (Oct 29, owner decision; was Sightline). Everything people see or get in their files says ORCA: the
 app, the PDF and BCF, the MCP server name `orca`, export names `<name>.orca.ifc` / `.orca.step`, the STEP pset
