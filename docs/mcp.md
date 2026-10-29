@@ -27,37 +27,31 @@ Code:
 **Remote, to the session you have open.** In ORCA, choose **Connect an agent**, then **Make a link for this session**.
 The dialog shows copy-ready settings, Muse Code's first:
 
-- **Muse Code**, either way:
-  - **The CLI.** It adds a remote server by URL (it has no header option), so the token goes in the URL. Check it
-    with `muse mcp list`, and `/mcp` in a session lists ORCA's tools.
+- **Muse Code:** add ORCA to its settings file, at `~/.config/muse/settings.json`,
+  `$XDG_CONFIG_HOME/muse/settings.json`, or `C:\Users\<you>\.config\muse\settings.json` on Windows.
+  - Keep `"schema_version": 1`, and merge the `orca` entry into whichever key the file already uses: `mcpServers`, or
+    the legacy `mcp_servers` (only one of them).
+  - Check it with `muse mcp list`; `/mcp` in a session lists ORCA's tools.
+  - (`muse mcp add` is not a subcommand, so there is no one-line form.)
 
-    ```bash
-    muse mcp add --transport http orca "https://<host>/mcp?key=<token>"
-    ```
-
-  - **The settings file.** It lives at `~/.config/muse/settings.json`, `$XDG_CONFIG_HOME/muse/settings.json`, or
-    `C:\Users\<you>\.config\muse\settings.json` on Windows. Keep `"schema_version": 1`, and merge the `orca`
-    entry into whichever key the file already uses, `mcpServers` or the legacy `mcp_servers` (only one of them):
-
-    ```json
-    {
-      "schema_version": 1,
-      "mcpServers": {
-        "orca": {
-          "transport": "streamable_http",
-          "url": "https://<host>/mcp",
-          "headers": { "Authorization": "Bearer <token>" },
-          "mode": "optional"
-        }
+  ```json
+  {
+    "schema_version": 1,
+    "mcpServers": {
+      "orca": {
+        "transport": "streamable_http",
+        "url": "https://<host>/mcp",
+        "headers": { "Authorization": "Bearer <token>" },
+        "mode": "optional"
       }
     }
-    ```
+  }
+  ```
 
   - **Why `optional`:** Muse Code's default `mode`, `required`, aborts the whole run when a server fails, and a link
     expires or can be revoked. `optional` makes Muse Code skip ORCA with a warning instead.
   - **Keeping the token out of the file:** Muse Code interpolates `${VAR}`, so you can write
-    `"Bearer ${ORCA_TOKEN}"` and set `ORCA_TOKEN` in your environment. A token in a URL can end up in request logs;
-    the header form avoids that, and either way the link expires.
+    `"Bearer ${ORCA_TOKEN}"` and set `ORCA_TOKEN` in your environment.
   - **A toolset:** select ORCA's tools with `mcp__orca__*`.
 
 ```bash

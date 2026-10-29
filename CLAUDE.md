@@ -571,8 +571,8 @@ Agents over MCP (Oct 29, owner decision; docs/mcp.md):
   - **Eviction:** `Workspace.keep` (live links' scenes and reports, `Links.kept`) is evicted last. Modal
     `max_inputs` is 64.
   - **Muse Code:**
-    - the dialog's first tab: `muse mcp add --transport http orca "<url>?key=<token>"` (its CLI has no header
-      option), and the settings JSON (`~/.config/muse/settings.json`, `schema_version` 1, `mcpServers`, `"mode":
+    - the dialog's first tab: the settings JSON only (`muse mcp add` does not exist: "unknown muse mcp subcommand",
+      owner, Oct 29) (`~/.config/muse/settings.json`, `schema_version` 1, `mcpServers`, `"mode":
       "optional"`, because `required` aborts runs when a link expires);
     - read tools carry `readOnlyHint`, so Muse Code runs them without approval prompts;
     - Muse Code supports OAuth (`muse mcp login`), which fits the later OAuth work.
