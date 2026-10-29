@@ -71,4 +71,8 @@ which goes to `POST /api/transcribe` as before. Hands-free needs the live socket
   - quick tap: latches, the second press sends;
   - hands-free: six sentences sent in order while each reply took 2.5 s, and a press closes it;
   - with the socket blocked: the upload path transcribes and sends.
-- Not yet checked: a real human voice and a real microphone; Modal's edge with a WebSocket (deploy, then try it).
+- On Modal (deployed Oct 29): the edge passes the WebSocket through without holding anything back. The same espeak
+  speech through `wss://…modal.run/api/voice/live`: ready, first partial at 1.5 s, final 0.5 s after the end; hands-free
+  sentences each at their pause. A connection from another origin is refused (HTTP 403). In Chromium against the live
+  URL, tap, captions and send all work.
+- Not yet checked: a real human voice and a real microphone.
