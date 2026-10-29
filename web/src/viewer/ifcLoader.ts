@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { IfcAPI } from "web-ifc";
+import { ROOM } from "./patch";
 
 export interface LoadedElement {
   globalId: string;
@@ -86,7 +87,9 @@ export async function loadIfc(bytes: Uint8Array): Promise<LoadedModel> {
       indexCount += p.geometry.getIndex()?.count ?? 0;
     }
     const material = new THREE.MeshStandardMaterial({ metalness: 0, roughness: 0.85, side: THREE.DoubleSide });
-    const mesh = new THREE.BatchedMesh(list.length, vertexCount, indexCount, material);
+    // Room for the pieces a kept fix adds (offset and route pieces, bends), so accepting one patches the batch in place
+    // (viewer/patch.ts) instead of regrowing it the first time.
+    const mesh = new THREE.BatchedMesh(list.length + ROOM.instances, vertexCount + ROOM.vertices, indexCount + ROOM.indices, material);
     for (const p of list) {
       const instanceId = mesh.addInstance(mesh.addGeometry(p.geometry));
       mesh.setColorAt(instanceId, new THREE.Vector4(p.color.r, p.color.g, p.color.b, p.alpha));

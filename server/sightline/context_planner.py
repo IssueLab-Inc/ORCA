@@ -79,10 +79,18 @@ class ContextError(ValueError):
         self.status = status
 
 
+# A wider fix copies the open models two or three times (snapshots); past this size it is not offered (docs/uploads.md).
+WIDER_MAX_MB = int(os.environ.get('SIGHTLINE_WIDER_FIX_MAX_MB', '100'))
+
+
 def validate_objective(ws, scene_id, objective):
-    """Reject fabricated physical IDs and optional report attribution before charging."""
+    """Reject fabricated physical IDs, optional report attribution and models too big to copy, before charging."""
     if not isinstance(objective, dict):
         raise ContextError(422, 'Objective must identify two physical elements.')
+    size = getattr(ws, 'sizes', {}).get(scene_id, 0)
+    if WIDER_MAX_MB and size > WIDER_MAX_MB << 20:
+        raise ContextError(413, f'These models are {size / 1e6:.0f} MB: a wider fix copies them several times, so it is '
+                                f'offered up to {WIDER_MAX_MB} MB. Propose fixes works at any size.')
     obj = {k: objective[k] for k in ('element_a', 'element_b', 'report_id', 'clash_id') if objective.get(k) is not None}
     with ws.lock:
         scene = ws.scene(scene_id)
@@ -407,5 +415,7 @@ def accept(ws, scene_id, proposal_id, acknowledged_conditions):
         except Exception as exc:
             raise ContextError(409, f'Fresh proposal checks failed: {exc}') from exc
         scene.__dict__ = private.__dict__.copy()
+        changed = list(dict.fromkeys([*(g for ps in result['pieces'] for g in ps),
+                                      *(g for e in result['edits'] for g in e.get('moved', []))]))
         return dict(files=result['files'], pieces=result['pieces'], edits=result['edits'],
-                    resolved_pairs=resolved, checks=result['checks'])
+                    resolved_pairs=resolved, checks=result['checks'], changed=changed)

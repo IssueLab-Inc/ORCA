@@ -272,13 +272,26 @@ def _candidates(ix: _Index, a: list[str], b: list[str] | None, margin: float) ->
     B = A if b is None else np.array([ix.boxes[g] for g in b])
     ids_b = a if b is None else b
     order = np.argsort(B[:, 0, 0])
-    bmin_x = B[order, 0, 0]
+    rank = np.empty(len(order), dtype=np.int64)
+    rank[order] = np.arange(len(order))
+    # A box that starts more than the widest box's width before this one's start cannot reach it: the window on x is
+    # [lo - widest, hi]. The few very long boxes (a slab, a long wall: wider than all but 1 in 100) would widen it for
+    # everyone, so they are checked with every box instead. Without the lower bound the sweep was quadratic (a 500 MB
+    # model: 8 minutes with nothing to find).
+    widths = B[:, 1, 0] - B[:, 0, 0]
+    cut = float(np.percentile(widths, 99)) if len(widths) > 100 else float(widths.max())
+    long_ = np.nonzero(widths > cut)[0]
+    short = order[widths[order] <= cut]
+    short_min = B[short, 0, 0]
+    widest = float(widths[short].max()) if len(short) else 0.0
     out = []
     for i, g in enumerate(a):
         lo, hi = A[i, 0] - margin, A[i, 1] + margin
-        end = np.searchsorted(bmin_x, hi[0], side="right")
-        js = order[:end]
-        js = js[(B[js, 1, 0] >= lo[0]) & (B[js, 0, 1] <= hi[1]) & (B[js, 1, 1] >= lo[1])
+        start = np.searchsorted(short_min, lo[0] - widest, side="left")
+        end = np.searchsorted(short_min, hi[0], side="right")
+        js = np.concatenate([short[start:end], long_])
+        js = js[np.argsort(rank[js], kind="stable")]   # in sweep order, as always
+        js = js[(B[js, 0, 0] <= hi[0]) & (B[js, 1, 0] >= lo[0]) & (B[js, 0, 1] <= hi[1]) & (B[js, 1, 1] >= lo[1])
                 & (B[js, 0, 2] <= hi[2]) & (B[js, 1, 2] >= lo[2])]
         for j in js:
             h = ids_b[j]

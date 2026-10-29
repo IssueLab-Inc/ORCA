@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
+import { patchModel, ROOM, type ElementMesh } from "./patch";
 
 const RED = new THREE.Color("#d0342c");
 const GREEN = new THREE.Color("#1f9d3a");
@@ -20,7 +21,7 @@ const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.g
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[] };
-/** A fix to preview: an offset's new pieces, or a move. `before`: what it changes, as it is now. */
+/** A fix to preview: a move, or any other kind's pieces as world meshes. `before`: what it changes, as it is now. */
 export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null; worldMeshes?: boolean };
 
 /**
@@ -167,6 +168,37 @@ export class Viewer {
     this.sceneSize = 0;
     this.clearFocusCache();
     this.applyMode();
+  }
+
+  /** Swap a kept fix's changed and new elements into the models in place (viewer/patch.ts), instead of reloading the
+   * files it changed. `origin` maps a new piece to the element it was split from, for its colour when it has none.
+   * False when it cannot (a mesh for a file that is not loaded, or a batch refused it): reload the files then. */
+  patch(meshes: ElementMesh[], origin: Map<string, string> = new Map()): boolean {
+    const byFile = new Map<number, ElementMesh[]>();
+    for (const m of meshes) {
+      if (m.file == null || !this.models[m.file]) return false;
+      byFile.set(m.file, [...(byFile.get(m.file) ?? []), m]);
+    }
+    try {
+      for (const [index, list] of byFile) {
+        const model = this.models[index];
+        patchModel(model, list, () => {
+          const glass = new THREE.BatchedMesh(ROOM.instances, ROOM.vertices, ROOM.indices, this.glass);
+          this.scene.add(glass);
+          return glass;
+        }, (gid) => {
+          const from = model.byGlobalId.get(origin.get(gid) ?? "");
+          return from ? { color: from.baseColor, alpha: from.baseAlpha } : null;
+        });
+      }
+    } catch (e) {
+      console.warn("Patching the model failed; reloading the files instead.", e);
+      return false;
+    }
+    this.sceneSize = 0;
+    this.clearFocusCache();  // focus geometry shares the batches' buffers, which may have moved or grown
+    this.applyMode();
+    return true;
   }
 
   /** The diagonal of everything loaded, metres (cached until the models change). */
@@ -438,9 +470,16 @@ export class Viewer {
     this.moved.clear();
     if (mode !== "before") {
       for (const opt of opts) {
-        if ((opt.worldMeshes || opt.kind === "offset" || opt.kind === "trim") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
+        if ((opt.worldMeshes || opt.kind !== "move") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
           for (const gid of opt.moved) this.hidden.add(gid);
-          this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          const solid = () => new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping });
+          if (opt.kind === "penetration") {  // the provision for void solid, the wall or slab with its hole see-through round it
+            this.addMeshes(opt.pieces.slice(0, 1), solid());
+            this.addMeshes(opt.pieces.slice(1), new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, transparent: true,
+              opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          } else {
+            this.addMeshes(opt.pieces, solid());
+          }
         } else {
           const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(opt.deltaM));
           for (const gid of opt.moved) this.moved.set(gid, t);

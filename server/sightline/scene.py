@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import os
 
@@ -43,6 +44,39 @@ FIXED_CLASSES = ("IfcBeam", "IfcColumn", "IfcSlab", "IfcWall", "IfcFooting", "If
 # Not physical: openings are voids already cut from their host, virtual elements have no material.
 NOT_PHYSICAL = ("IfcFeatureElement", "IfcVirtualElement")
 
+
+# Threads for triangulating: the CPUs this process may use (a container's share, not the host's count).
+THREADS = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+MESH_KERNEL = "hybrid-cgal-simple-opencascade"
+BOUNDS_BATCH = 2000   # elements per geometry iterator while measuring boxes
+# From this size (all files together) every element goes through CGAL, extrusions too: about twice as fast, with boxes
+# within 1 mm of OpenCASCADE's on curved sections (it facets them a little differently). Smaller models keep the
+# default kernel for everything but meshes, so their boxes and checks are exactly as before.
+BIG_MODEL_BYTES = int(os.environ.get("SIGHTLINE_BIG_MODEL_MB", "50")) << 20
+MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet")
+
+
+def meshes_only(p) -> bool:
+    """Whether every body item of `p` is a triangle or polygon mesh (nothing curved to facet, no booleans): CGAL
+    triangulates those in a fraction of OpenCASCADE's time (it sews a mesh into shells first)."""
+    reps = [r for r in (p.Representation.Representations if p.Representation else [])
+            if r.RepresentationIdentifier == "Body"]
+    items = [i for r in reps for i in r.Items]
+    return bool(items) and all(any(i.is_a(c) for c in MESH_ITEMS) for i in items) and not getattr(p, "HasOpenings", None)
+
+
+def is_provision(e) -> bool:
+    """A provision for void: the space a service asks to be opened through a wall or slab, drawn in the service's own
+    model (IFC4 PredefinedType PROVISIONFORVOID; IFC2X3 has only the ObjectType)."""
+    return bool(e.is_a("IfcBuildingElementProxy") and (
+        getattr(e, "PredefinedType", None) == "PROVISIONFORVOID"
+        or (getattr(e, "ObjectType", None) or "").replace(" ", "").lower() == "provisionforvoid"))
+
+
+def not_physical(e) -> bool:
+    """Not a thing that can clash: an opening, a virtual element, a provision for void."""
+    return any(e.is_a(c) for c in NOT_PHYSICAL) or is_provision(e)
+
 FITTINGS = ("IfcFlowFitting", "IfcDuctFitting", "IfcPipeFitting", "IfcCableCarrierFitting")
 
 
@@ -67,6 +101,7 @@ class IfcScene:
         self._edited: set[int] = set()
         self._bounds: dict[str, np.ndarray] | None = None
         self.revision = 0
+        self.history: list[tuple[int, list[int]]] = []   # (revision, files it changed), for pages that missed an edit
 
     def snapshot(self) -> IfcScene:
         """Clone current in-memory IFC state, including edits not yet exported."""
@@ -77,6 +112,7 @@ class IfcScene:
         clone._edited = set(self._edited)
         clone._bounds = None if self._bounds is None else {g: b.copy() for g, b in self._bounds.items()}
         clone.revision = self.revision
+        clone.history = list(self.history)
         return clone
 
     # Single-file conveniences (tests, spikes).
@@ -124,9 +160,9 @@ class IfcScene:
     def products(self):
         """Every physical element with a body, across all files; the set the geometry check runs over."""
         return [p for m in self.models for p in m.by_type("IfcElement")
-                if p.Representation is not None and not any(p.is_a(c) for c in NOT_PHYSICAL)]
+                if p.Representation is not None and not not_physical(p)]
 
-    def bounds(self) -> dict[str, np.ndarray]:
+    def bounds(self, progress: Callable[[int, int], None] | None = None) -> dict[str, np.ndarray]:
         """GlobalId → [[min x, y, z], [max x, y, z]] in metres at current positions.
 
         Triangulating the whole federation takes seconds, so it happens once; moves shift the cached boxes.
@@ -135,21 +171,43 @@ class IfcScene:
         if self._bounds is None:
             settings = ifcopenshell.geom.settings()
             settings.set("use-world-coords", True)
-            self._bounds = {}
-            by_file: dict[int, list] = {}
-            for p in self.products():
-                by_file.setdefault(self.index_of(p.GlobalId), []).append(p)
-            for i, include in by_file.items():
-                it = ifcopenshell.geom.iterator(settings, self.models[i], os.cpu_count() or 1, include=include)
+            bounds: dict[str, np.ndarray] = {}
+            groups: dict[tuple[int, bool], list] = {}
+            order = []
+            for i, m in enumerate(self.models):
+                for p in m.by_type("IfcElement"):
+                    if p.Representation is not None and not not_physical(p):
+                        groups.setdefault((i, meshes_only(p)), []).append(p)
+                        order.append(p.GlobalId)
+            total, done = sum(len(g) for g in groups.values()), 0
+            try:
+                big = sum(p.stat().st_size for p in self.paths) >= BIG_MODEL_BYTES
+            except OSError:
+                big = False
+            # Meshes through OpenCASCADE cost 20-30 ms each (it sews them into shells); CGAL reads them in about 1 ms with
+            # the same vertices. Everything else keeps the default kernel, so boxes do not change. In batches: an
+            # iterator holds what it made until it is dropped (a 150 MB model in one went past 4.5 GB).
+            batches = [(i, meshes, include[k:k + BOUNDS_BATCH]) for (i, meshes), include in groups.items()
+                       for k in range(0, len(include), BOUNDS_BATCH)]
+            for i, meshes, include in batches:
+                kw = {"geometry_library": MESH_KERNEL} if meshes or big else {}
+                it = ifcopenshell.geom.iterator(settings, self.models[i], THREADS, include=include, **kw)
                 if not it.initialize():
+                    done += len(include)
                     continue
                 while True:
                     shape = it.get()
                     verts = np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
                     if len(verts):
-                        self._bounds[shape.guid] = np.array([verts.min(axis=0), verts.max(axis=0)])
+                        bounds[shape.guid] = np.array([verts.min(axis=0), verts.max(axis=0)])
+                    done += 1
+                    if progress is not None and done % 500 == 0:
+                        progress(done, total)
                     if not it.next():
                         break
+            if progress is not None:
+                progress(total, total)
+            self._bounds = {g: bounds[g] for g in order if g in bounds}   # model order, whatever the kernel
         return self._bounds
 
     def refresh_bounds(self, global_ids: list[str]) -> None:
@@ -159,9 +217,17 @@ class IfcScene:
         settings = ifcopenshell.geom.settings()
         settings.set("use-world-coords", True)
         for gid in global_ids:
+            if not_physical(self.entity(gid)):   # never a box for what cannot clash: detection reads boxes as physical
+                continue
             verts = np.asarray(ifcopenshell.geom.create_shape(settings, self.entity(gid)).geometry.verts,
                                dtype=float).reshape(-1, 3)
             self._bounds[gid] = np.array([verts.min(axis=0), verts.max(axis=0)])
+
+    def bump(self, files) -> int:
+        """A kept edit: the next revision, and which files it changed (a page that missed it reloads those)."""
+        self.revision += 1
+        self.history.append((self.revision, sorted(set(files))))
+        return self.revision
 
     def mark_edited(self, global_id: str) -> None:
         """Record that the file holding this element changed, so export writes it."""

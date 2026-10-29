@@ -1,15 +1,17 @@
-import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, editText, statusLine, type Progress } from "./Activity";
+import { Activity, statusLine, type Progress } from "./Activity";
+import { changeText, clearanceText, editText, framePieces, hostRows, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
-import { addByDesign, hasByDesign, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
+import { localFile, uploadRefusal, uploadStatus } from "./uploads";
+import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
@@ -172,7 +174,11 @@ export function App() {
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
   // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
-  useEffect(() => { api.models().then((m) => setTriageModel(m.triage)).catch(() => undefined); }, [ownerSettings]);
+  useEffect(() => {
+    api.models().then((m) => { setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); }).catch(() => undefined);
+  }, [ownerSettings]);
+  // How much a visitor may upload, from the server (checked here before anything is sent).
+  const [uploadMax, setUploadMax] = useState<number | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [docReady, setDocReady] = useState(false);
   const [chatAsk, setChatAsk] = useState<{ text: string; send: boolean; n: number } | undefined>(undefined);
@@ -196,6 +202,8 @@ export function App() {
   const [viewContext, setViewContext] = useState(false);
   // Invalidate callbacks immediately when replacement starts, before the new scene ID arrives.
   const sceneEpoch = useRef(0);
+  // The server's revision of the open scene this page's model shows: a kept fix is patched in place only from here.
+  const sceneRevision = useRef<number | null>(null);
   const workspaceEpoch = useRef(0);
   const chatOwner = useRef(new ChatRequestOwner());
   const contextRequest = useRef(0);
@@ -399,6 +407,15 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqId]);
 
+  /** An opening's host reading becomes the rule for the host's group (a file is started from the models when there is
+   * none: the option names the group in that file). */
+  async function addPenRule(o: Option) {
+    let doc = reqSaved?.doc ?? null;
+    if (!doc && sceneId) doc = (await api.requirementsDefault(sceneId).catch(() => null))?.doc ?? null;
+    if (!doc || !o.edit) return;
+    setReqSaved({ doc: addPenetration(doc, o.edit, o.review ?? null), enabled: true });
+  }
+
   /** A pattern Muse read as by design becomes a by-design rule (a file is started from the models when there is none):
    * its clashes are settled at once, without asking the model again. */
   async function addRule(p: Pattern, v?: PatternVerdict) {
@@ -485,17 +502,14 @@ export function App() {
   function noteRecommendation(r: Recommendation, pair: readonly [string | null, string | null]) {
     const ids = clashIdsOf([pair])[0];
     if (!ids.length) return;
-    const d = r.delta_m ?? [0, 0, 0];
-    const edit = r.kind === "offset" ? `offset the middle ${Math.round(d[2] * 1000)} mm` : r.kind === "trim" ? "trim at the joint"
-      : `move [${d.map((x) => Math.round(x * 1000)).join(", ")}] mm`;
-    const ev: Evidence = { status: "recommended", title: r.title, kind: r.kind, edit, clearance: "", clearance_m: null,
+    const ev: Evidence = { status: "recommended", title: r.title, kind: r.kind, edit: recEditText(r), clearance: "", clearance_m: null,
       rationale: r.rationale, also_needs: r.also_needs, moved: [r.element], blocked_by: r.blocked_by };
     setEvidence((all) => ({ ...all, ...Object.fromEntries(ids.filter((id) => !all[id] || all[id].status === "recommended").map((id) => [id, ev])) }));
   }
 
   function evidenceOf(o: Option, status: Evidence["status"], pics: { before_img?: string; after_img?: string }): Evidence {
     return { status, title: o.title, kind: o.kind, edit: editText(o), moved: o.moved,
-      clearance: o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m), clearance_m: o.min_clearance_m ?? null,
+      clearance: clearanceText(o), clearance_m: o.min_clearance_m ?? null, ...(o.review ? { review: o.review } : {}),
       rationale: o.rationale, also_needs: o.also_needs, ...(o.meets?.length ? { meets: o.meets } : {}), ...pics };
   }
 
@@ -618,17 +632,17 @@ export function App() {
   useEffect(() => {
     const v = viewer.current;
     if (!v || !plan || !viewPlan) return;
-    const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));  // moves and trims: their pairs
-    const pairs = plan.items.flatMap((it) => it.option && it.option.kind !== "offset"
+    const meshes = planOptions.flatMap((o) => framePieces(o));  // moves and trims: their pairs
+    const pairs = plan.items.flatMap((it) => it.option && !framePieces(it.option).length
       ? movedPairs(it.option.moved, [it.element_a, it.element_b, ...(it.others ?? [])]) : []);
     if (meshes.length || pairs.length) v.frameFix(meshes, pairs);
     else if (plan.hub) v.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
   }, [planOptions, plan, viewPlan]);
 
   function frameFix(o: { kind: string; moved: string[]; preview: Mesh[] | null }, sides: string[]) {
-    // An offset: its risers and middle piece. A move: where it now meets the other side. A trim: the joint it changes.
-    const meshes = o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : [];
-    return !!viewer.current?.frameFix(meshes, o.kind === "offset" ? [] : movedPairs(o.moved, sides));
+    // A split run: its new pieces. A move: where it now meets the other side. A trim: the joint it changes.
+    const meshes = framePieces(o);
+    return !!viewer.current?.frameFix(meshes, meshes.length ? [] : movedPairs(o.moved, sides));
   }
 
   function clearManual() { ++previewRequest.current; setManual(null); setManualPreview(null); }
@@ -659,12 +673,27 @@ export function App() {
       : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`);
     setError(null); resetWork(false, true);
     try {
-      const { id, files, step } = existing ?? (upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]));
+      if (upload && !existing) {
+        const refusal = uploadRefusal(source as File[], uploadMax);
+        if (refusal) throw new Error(refusal);
+      }
+      const { id, files, step, revision } = existing ?? (upload
+        ? await api.uploadModelsStream(source as File[], (e) => {
+          const line = uploadStatus(e, hasStep);
+          if (line && sceneEpoch.current === epoch) setBusy(line);
+        })
+        : await api.open(source as string[]));
       if (sceneEpoch.current !== epoch) return;
-      const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
+      if (upload) setBusy("Drawing the models…");
+      // An uploaded IFC is parsed from the visitor's own file; a STEP comes back converted, samples come from the server.
+      const bytes = await Promise.all(files.map(async (_, i) => {
+        const local = upload ? localFile(source as File[], files, step, i) : null;
+        return local ? new Uint8Array(await local.arrayBuffer()) : api.file(id, i);
+      }));
       if (sceneEpoch.current !== epoch) return;
       const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch);
       if (sceneEpoch.current !== epoch || !stats) return;
+      sceneRevision.current = revision ?? null;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
@@ -1142,32 +1171,58 @@ export function App() {
     setBusy(`Applying ${items.length} fix${items.length > 1 ? "es" : ""}…`);
     const pics = captureFix(items.map((i) => i.option!), "#1f9d3a");
     try {
-      const { files, pieces } = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      const kept = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
       viewer.current?.preview([]);
-      for (const i of files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, kept, pieces, live);
       if (!live()) return;
       setEdits((e) => {
         const next = { ...e };
         for (const ps of pieces) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
         return next;
       });
-      // A merged item (one pipe through two rails) fixes its clashes with every partner.
+      // A merged item (one pipe through two rails) fixes its clashes with every partner. A penetration its host's team
+      // must cut was only asked for: its clashes stay open.
       const pairsOf = (i: PlanItem) => [i.element_b, ...(i.others ?? [])].map((o) => [i.element_a, o] as const);
-      markFixed(items.flatMap(pairsOf), items.flatMap((i) => pairsOf(i).map(() => i.option!.title)));
+      const requested = new Map((kept.not_cut ?? []).map((n) => [n.index, n.blocked_by] as const));
+      const done = items.filter((_, k) => !requested.has(k));
+      markFixed(done.flatMap(pairsOf), done.flatMap((i) => pairsOf(i).map(() => i.option!.title)));
       const groups = items.map((i) => clashIdsOf(pairsOf(i)).flat());
       setEvidence((ev) => {
         const next = { ...ev };
-        items.forEach((it, k) => { for (const id of new Set([...groups[k], ...it.clash_ids])) next[id] = evidenceOf(it.option!, "accepted", pics); });
+        items.forEach((it, k) => {
+          const why = requested.get(k);
+          for (const id of new Set([...groups[k], ...it.clash_ids])) {
+            next[id] = why == null ? evidenceOf(it.option!, "accepted", pics) : { ...evidenceOf(it.option!, "recommended", pics), blocked_by: why };
+          }
+        });
         return next;
       });
       setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
+  }
+
+  /** Bring the viewer up to a kept fix: patch the changed elements in place when the server sent them and this page's
+   * model is at the revision the fix started from (viewer/patch.ts); otherwise reload the files it changed. */
+  async function applyToViewer(sid: string, kept: { files: number[] } & Patch, pieces: string[][] | undefined, live: () => boolean) {
+    const origin = new Map((pieces ?? []).flatMap((ps) => ps.slice(1).map((g) => [g, ps[0]] as const)));
+    if (kept.meshes && kept.scene_id === sid && kept.revision_before != null && kept.revision_before === sceneRevision.current
+        && viewer.current?.patch(kept.meshes, origin)) {
+      sceneRevision.current = kept.revision ?? null;
+      return;
+    }
+    // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
+    // them when it doesn't know), so it never jumps to a revision whose edits it hasn't drawn.
+    const drawn = sceneRevision.current;
+    const missed = (kept.history ?? []).filter(([rev]) => drawn == null || rev > drawn).flatMap(([, files]) => files);
+    for (const i of [...new Set([...kept.files, ...missed])].sort((x, y) => x - y)) {
+      const bytes = await api.file(sid, i);
+      if (!live()) return;
+      await viewer.current!.replace(i, bytes, live);
+    }
+    if (live()) sceneRevision.current = kept.revision ?? null;
   }
 
   /** Mark every report clash of these element pairs as fixed (one pair can be reported by several tests). */
@@ -1272,13 +1327,7 @@ export function App() {
       setProposal(null); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setContext((r) => r && { ...r, accepted: true });
       viewer.current?.preview([]);
-      // Download first; a replaced scene cannot receive any of this request's geometry.
-      const files = await Promise.all(applied.files.map(async (index) => ({ index, bytes: await api.file(sid, index) })));
-      if (!live()) return;
-      for (const file of files) {
-        if (!live()) return;
-        await viewer.current!.replace(file.index, file.bytes, live);
-      }
+      await applyToViewer(sid, applied, applied.pieces, live);
       if (!live()) return;
       setContext((r) => r && { ...r, accepted: true });
       setViewContext(false); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
@@ -1286,7 +1335,7 @@ export function App() {
       if (!live()) return;
       const conflict = e instanceof ApiError && (e.status === 409 || e.status === 404);
       setContext((r) => r && { ...r, accepted: committed, stale: conflict,
-        error: committed ? `The proposal was accepted on the server, but the viewer could not reload all files: ${(e as Error).message}. Export IFC includes the accepted edits.`
+        error: committed ? `The proposal was accepted on the server, but the viewer could not show it: ${(e as Error).message}. Export IFC includes the accepted edits.`
           : conflict ? `Revision conflict or fresh checks failed: ${(e as Error).message}` : (e as Error).message });
       if (committed) setViewContext(false);
       if (conflict) setAcknowledged([]);
@@ -1410,11 +1459,7 @@ export function App() {
       if (!sceneId) return;
       const epoch = sceneEpoch.current, live = () => sceneEpoch.current === epoch;
       staleContext(); viewer.current?.preview([]);
-      for (const i of e.files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, e, e.pieces, live);
       if (!live()) return;
       setEdits((ed) => {
         const next = { ...ed };
@@ -1508,7 +1553,7 @@ export function App() {
     const r = resumable;
     if (!r || busy) return;
     const { saved, info } = r;
-    const id = await open(info.files, { id: info.id, files: info.files, step: info.step });
+    const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision });
     if (!id) return;
     if (saved.report_id) {
       const rep = await loadReport(() => api.report(saved.report_id!), "your clashes");
@@ -1541,22 +1586,22 @@ export function App() {
       ? { before_img: evidence[ids[0]]?.before_img, after_img: evidence[ids[0]]?.after_img }
       : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     try {
-      const { files, pieces } = await api.accept(sceneId, o);
+      const kept = await api.accept(sceneId, o);
+      const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
-      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, evidenceOf(o, "accepted", pics)])) }));
+      // A penetration the host's team must cut: asked for (its provision for void is in the model), not yet fixed.
+      const requested = kept.cut === false;
+      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, requested
+        ? { ...evidenceOf(o, "recommended", pics), blocked_by: kept.blocked_by ?? "" } : evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
-      for (const i of files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, kept, pieces?.length ? [pieces] : [], live);
       if (!live()) return;
       if (pieces?.length) {
         const [first, ...added] = pieces;
         setEdits((e) => ({ ...e, [first]: [...(e[first] ?? []), ...added] }));
       }
-      markFixed([[a, b]], [o.title]);
+      if (!requested) markFixed([[a, b]], [o.title]);
       resetWork(); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
   }
@@ -1736,11 +1781,7 @@ export function App() {
           <dt>Before</dt><dd>{measure && measure !== "busy" && measure.distance_m != null ? `overlap ${mm(measure.distance_m)}` : "clashing"}</dd>
           <dt>After</dt><dd className="ok">{option.kind === "trim" ? "clear: the two now butt at the joint"
             : `clear${option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}`}</dd>
-          <dt>Change</dt><dd>{option.kind === "offset" && option.split_m
-            ? `${(option.split_m[1] - option.split_m[0]).toFixed(2)} m of it ${option.delta_m[2] > 0 ? "raised" : "lowered"} ${Math.abs(Math.round(option.delta_m[2] * 1000))} mm; ${offsetParts(option.preview?.length ?? 5)}`
-            : option.kind === "trim" && option.trim
-              ? `one end cut back ${Math.round(option.trim.by_m * 1000)} mm; nothing moves`
-              : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
+          <dt>Change</dt><dd>{changeText(option)}</dd>
         </dl>
       ) : activeContext && contextProposal ? (
         <dl className="diff"><dt>Wider fix</dt><dd>{contextProposal.edits.length} coordinated edits shown together</dd>
@@ -1816,7 +1857,7 @@ export function App() {
     <p className="pop-title">Or your own</p>
     <button className="pop-item" disabled={!!busy} onClick={() => { close(); modelInput.current?.click(); }}>
       <Upload size={14} aria-hidden /> Upload models (IFC or STEP)…</button>
-    <p className="hint">Up to 150 MB together. A STEP machine is converted to IFC to check; Export gives your STEP back
+    <p className="hint">{uploadMax ? `Up to ${uploadMax} MB together.` : "Several files open together."} A STEP machine is converted to IFC to check; Export gives your STEP back
       with the fixes.</p>
   </>);
   const coordinateMenu = (close: () => void) => (<>
@@ -1945,7 +1986,7 @@ export function App() {
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {!stats && !report && blank && (
-          <ProjectStart busy={!!busy} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
+          <ProjectStart busy={!!busy} maxMb={uploadMax} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
             onReportFolder={() => folderInput.current?.click()} onBack={() => setBlank(false)} />
         )}
         {!stats && !busy && !blank && (
@@ -2039,6 +2080,13 @@ export function App() {
           {clash && report
             ? (<><ClashPanel reportId={report.id} clash={shownClash ?? clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash: shownClash ?? clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]}
               origin={report.origin} capturing={capturing === clash.id} />
+              {evidence[clash.id]?.status === "recommended" && evidence[clash.id].kind === "penetration" &&
+                <div className="recommended">
+                  <h3>Opening requested</h3>
+                  <p><b>{evidence[clash.id].title}</b> · <span className="mono">{evidence[clash.id].edit}</span></p>
+                  <p className="hint">The provision for void is in the model; the opening is not cut yet: {evidence[clash.id].blocked_by}.
+                    This clash stays open until it is.</p>
+                </div>}
               {(evidence[clash.id] || triage[clash.id]?.verdict === "real_clash" || (signoffs[clash.id]?.length ?? 0) > 0) &&
                 <ReviewBlock clash={clash} teams={modelTeams} signoffs={signoffs[clash.id] ?? []}
                   onAdd={(so) => addSignoff(clash.id, so)} onRemove={(i) => removeSignoff(clash.id, i)} />}
@@ -2096,15 +2144,23 @@ export function App() {
               <button className="card-body" onClick={() => { clearManual(); setChosen(chosen === i ? null : i); }} aria-pressed={chosen === i}>
                 <span className="row"><b>{i + 1} · {o.title}</b><span className="chips">
                   {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
+                  {o.review && <span className="chip warn" data-tip={reviewText(o.review)}>{o.review} review</span>}
                   <span className="chip ok"><Check size={11} aria-hidden /> verified</span></span></span>
                 <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
-                <span className="row"><span>Clearance</span><span className="mono">{o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m)}</span></span>
+                <span className="row"><span>Clearance</span><span className="mono">{clearanceText(o)}</span></span>
+                {o.review && <span className="row"><span>Review</span><span>{reviewText(o.review)}</span></span>}
+                {hostRows(o).map(([k, v]) => <span key={k} className="row"><span>{k}</span><span>{v}</span></span>)}
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 {o.meets?.length ? <span className="meets">{o.meets.map((m) => <span key={m}><Check size={11} aria-hidden /> {m}</span>)}</span> : null}
                 <span className="why">{o.rationale}</span>
                 <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} need={proposal!.clearance_m} />
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
+              {chosen === i && o.kind === "penetration" && o.edit?.reading_source === "muse" && sceneId && (
+                hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group, o.edit.host_kind)
+                  ? <span className="chip ok"><Check size={11} aria-hidden /> in the requirements</span>
+                  : <button className="btn small" onClick={() => void addPenRule(o)}
+                    data-tip="Make this reading a rule for the host's group in the coordination requirements"><ClipboardPlus size={13} aria-hidden /> Add to requirements</button>)}
             </div>
           ))}
 
@@ -2277,10 +2333,7 @@ function ProofStrip({ o, rank, options, before, need = 0.025 }: { o: Option; ran
 }
 /** The requirements allow no edit here: Muse Spark's recommendation for the designer, never tried or applied. */
 function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void }) {
-  const d = rec.delta_m ?? [0, 0, 0];
-  const size = Math.round(Math.max(...d.map(Math.abs)) * 1000);
-  const change = rec.kind === "trim" ? "trim at the joint" : rec.kind === "offset" ? `offset the middle ${d[2] >= 0 ? "up" : "down"} ${Math.abs(Math.round(d[2] * 1000))} mm`
-    : size ? `move ${size} mm` : "";
+  const change = recEditText(rec);
   return (
     <div className="recommended">
       <h3>Recommended for the designer</h3>
@@ -2356,10 +2409,6 @@ function Thinking({ notes, live, thinking }: { notes: { round: number; text: str
 }
 
 /** What an offset adds, from its piece count: square corners make 5 straights; bends add four fittings (7 or 9 pieces). */
-function offsetParts(pieces: number) {
-  return pieces > 5 ? `4 bends${pieces === 9 ? " and 2 short risers" : ""}` : "square corners";
-}
-
 /** The new root causes in the order already on screen (new ones after), with any that dropped out kept as done rows. */
 function keepPlaces(prev: RootCause[] | null, next: RootCause[]): RootCause[] {
   if (!prev) return next;

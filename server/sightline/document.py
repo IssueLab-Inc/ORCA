@@ -335,7 +335,12 @@ def _page(r: Row, n: int) -> str:
             (_data_url_ok(ev.get("after_img")), "With the fix" + (" (applied)" if ev.get("status") == "accepted" else " (proposed)")),
         ] if u)
     fix = ""
-    if ev and ev.get("status") == "recommended":  # the requirements allow no edit here: Muse's recommendation stands
+    if ev and ev.get("status") == "recommended" and ev.get("kind") == "penetration":  # asked for: the host's team cuts it
+        fix = (f"<div class='fix'><h4>Opening requested: {_e(ev.get('title'))} <span class='tag'>provision for void only</span>"
+               f"</h4><dl><dt>Opening</dt><dd>{_e(ev.get('edit'))}</dd>"
+               f"<dt>Not cut</dt><dd>{_e(ev.get('blocked_by') or 'the host may not be edited')}</dd>"
+               f"<dt>Also needs</dt><dd>{_e(ev.get('also_needs') or 'nothing noted')}</dd></dl></div>")
+    elif ev and ev.get("status") == "recommended":  # the requirements allow no edit here: Muse's recommendation stands
         fix = (f"<div class='fix'><h4>Recommended for the designer: {_e(ev.get('title'))} <span class='tag'>not edited</span></h4><dl>"
                f"<dt>Why not edited</dt><dd>{_e(ev.get('blocked_by') or 'the coordination requirements allow no edit')}</dd>"
                f"<dt>Change</dt><dd>{_e(ev.get('edit'))}</dd>"

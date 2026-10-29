@@ -39,7 +39,7 @@ PSET = STEP_PSET
 NAMESPACE = uuid.UUID("3b8f2d0e-6c1a-4f5e-9a7d-2f1c5b8e4a90")
 
 # The classes a STEP part may become (`classify`), each with its IFC4 predefined types where it has them.
-CLASSES = ("IfcMember", "IfcPlate", "IfcColumn", "IfcBeam", "IfcSlab", "IfcMechanicalFastener", "IfcPipeSegment",
+CLASSES = ("IfcMember", "IfcPlate", "IfcColumn", "IfcBeam", "IfcSlab", "IfcWall", "IfcMechanicalFastener", "IfcPipeSegment",
            "IfcPipeFitting", "IfcValve", "IfcCableCarrierSegment", "IfcCableCarrierFitting", "IfcSensor", "IfcDoor",
            "IfcFurniture", "IfcTransportElement", "IfcElectricDistributionBoard", "IfcUnitaryControlElement",
            "IfcElectricMotor", "IfcFilter", "IfcSwitchingDevice", "IfcBuildingElementPart", "IfcBuildingElementProxy")
@@ -473,8 +473,8 @@ def convert(path: Path, out_dir: Path, classify_with=None, cache: Path | None = 
 # ------------------------------------------------------------------------------------------------- export
 
 def _shape(spec: dict, scale: float):
-    """A B-rep in STEP units from a spec in metres: an exact cylinder or box for a "prism", else a sewn faceted solid
-    from a "mesh" (verts, faces)."""
+    """A B-rep in STEP units from a spec in metres: an exact cylinder or box for a "prism", a "cut" (a base spec less
+    its "tools": a host's openings), else a sewn faceted solid from a "mesh" (verts, faces)."""
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeSolid, \
         BRepBuilderAPI_Sewing
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
@@ -484,6 +484,14 @@ def _shape(spec: dict, scale: float):
     from OCP.TopoDS import TopoDS
 
     k = 1 / scale
+    if spec["kind"] == "cut":   # a host with openings cut for services: its body less each void
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+        shape = _shape(spec["base"], scale)
+        for tool in spec["tools"]:
+            cut = BRepAlgoAPI_Cut(shape, _shape(tool, scale))
+            if cut.IsDone() and not cut.Shape().IsNull():
+                shape = cut.Shape()   # a boolean OCP cannot do leaves the host whole: the IFC still has the opening
+        return shape
     if spec["kind"] == "prism":
         axis, xdir = np.asarray(spec["axis"], float), np.asarray(spec["xdir"], float)
         start = np.asarray(spec["start"], float) * k
@@ -529,10 +537,10 @@ def export(step_path: Path, manifest: dict, out: Path, moves: dict[str, list[flo
     `parts`; all geometry is in metres, world axes.
     - `moves` {gid: delta}: the part's component location becomes parent⁻¹ · T · parent · old, so nested assemblies
       keep their own placements;
-    - `replace` {gid: spec}: the part's shape changed (an offset's first piece, a trimmed member); its prototype gets
-      the new shape, brought into the component's frame;
+    - `replace` {gid: spec}: the part's shape changed (an offset's first piece, a trimmed member, a wall cut for a
+      service); its prototype gets the new shape, brought into the component's frame;
     - `add` [{name, label (the original part's component entry), spec, colour, alpha}]: new parts (an offset's middle,
-      risers and bends), placed in the original part's group."""
+      risers and bends, a provision for void), placed in the original part's group."""
     from OCP.gp import gp_Trsf, gp_Vec
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
