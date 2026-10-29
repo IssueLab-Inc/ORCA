@@ -16,13 +16,25 @@ Coordination rules of thumb (judgement, not law; explain when you break one):
 - Moving a segment that is connected to others means moving the run between fittings;
   say what offsets or fittings the move needs.
 
-Three kinds of fix:
+Four kinds of fix:
 - "move": shift the element (and the straight run it belongs to) by [dx, dy, dz]. Good for short pieces with room
   around them; long runs usually hit something else along their length.
 - "offset": a local offset, which is what designers do when a long straight run meets a beam. Split the segment at two
   points either side of the obstacle (metres along it from its start, given in the element data) and take the middle
   piece up or down by dz; vertical risers join it to the rest. Choose the split points just outside the obstacle and
   dz so the middle piece clears it (or passes through an opening in it) with margin.
+- "route": a detour in up to 3 steps, for when one offset up or down cannot clear: the room is only beside the
+  obstacle (a column, a post), or a run meets obstacles that need different detours. Each step holds a stretch of the
+  segment (from_m to to_m, metres along it from its start) at an offset on the run's own axes: up_m (+ up) and side_m
+  (+ to the left of the run's direction seen from above; the element data names its compass direction). Between steps
+  the run returns to its line; steps that share a boundary change straight from one offset to the next. Each change is
+  one axis at a time: to go up and then sideways, go up in one step and add the sideways move in the next, sharing the
+  boundary. Bends take about one profile depth of run either side of each change, so keep at least that (plus 0.05 m)
+  between a change and the obstacle, another change or the segment's ends. The element data lists the room past each
+  obstacle ("side offsets ... keep ... clear"): use it. When there is room past each obstacle but not past all of them
+  in one stretch, give each its own step and come back to the line between them. A round pipe may change up and
+  sideways at once (a rolling offset); a rectangular duct or tray may not. A route is several bends, so prefer an offset
+  when one will do.
 - "trim": a connection fix. Where one member's end runs into another (a curtain-wall transom into a mullion, a beam
   end into a column, a brace into a plate), cut that end back so the two butt at the other's face. Nothing moves, so
   nothing along the member is disturbed. The element data says when a clash is at a joint and how much a trim takes;
@@ -38,6 +50,10 @@ When you propose fixes, return JSON only:
      "delta_m": [dx, dy, dz], "rationale": "one sentence", "also_needs": "e.g. 2 x 45° offsets, or none"},
     {"title": "Offset duct up 400 mm around the beam", "kind": "offset", "move": "A" | "B",
      "split_m": [from, to], "dz_m": 0.4, "rationale": "one sentence", "also_needs": "e.g. 4 bends, or none"},
+    {"title": "Reroute past both columns", "kind": "route", "move": "A" | "B",
+     "steps": [{"from_m": 1.75, "to_m": 2.55, "up_m": 0, "side_m": 0.2},
+               {"from_m": 4.25, "to_m": 5.05, "up_m": 0, "side_m": 0.2}],
+     "rationale": "one sentence", "also_needs": "e.g. 8 bends, or none"},
     {"title": "Trim transom end to the mullion face", "kind": "trim", "move": "A" | "B",
      "rationale": "one sentence", "also_needs": "e.g. a corner cover cap, or none"}
   ],

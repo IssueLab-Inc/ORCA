@@ -78,13 +78,14 @@ export function About({ start, onClose, triageOpen = false }: {
             {start.onCell && (
               <DemoCard img="/demos/cell.webp" eyebrow="Machine · 1 STEP file" title="PC-03, a robot palletising cell"
                 alt="The PC-03 palletising cell in ORCA's viewer: a robot inside its see-through safety zone, a conveyor, fence posts and the air line."
-                blurb={<>A robot, a conveyor, safety guarding and services, from mechanical CAD. Five problems were planted in
-                  this revision.</>}
-                shows={[<>The STEP converted: <b>144 parts</b> keep their names and colours, and Muse names what each is</>,
-                  <>All <b>13 planted clashes</b> found, nothing unexpected</>,
-                  <>The cable ladder moved, the air pipe dropped under both conveyor rails as one fix, a rail trimmed</>,
+                blurb={<>A robot, a conveyor, safety guarding and services in a corner of the plant, from mechanical CAD.
+                  Seven problems were planted in this revision.</>}
+                shows={[<>The STEP converted: <b>159 parts</b> keep their names and colours, and Muse names what each is</>,
+                  <>All <b>16 planted clashes</b> found, nothing unexpected</>,
+                  <>The cable ladder moved, the air pipe dropped under both conveyor rails, a branch rerouted round two plant
+                    columns, a rail trimmed</>,
                   <>The STEP handed back with the fixes written in</>]}
-                chips={["13 of 13 found", "STEP in, STEP out"]}
+                chips={["16 of 16 found", "STEP in, STEP out"]}
                 note={<>Opens one STEP file and checks it, in a few seconds.</>}>
                 <button className="btn primary big" data-tour="cell" disabled={start.disabled} onClick={start.onCell}>
                   <Cpu size={16} aria-hidden /> Open the machine cell</button>

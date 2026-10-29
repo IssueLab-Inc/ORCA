@@ -79,9 +79,15 @@ def _in_trial_trim(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[s
     return list(o["moved"]), set(o["moved"]), None
 
 
+def _in_trial_route(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    r = edits.apply_route(scene, o["moved"][0], o["edit"]["steps"])
+    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
+    return r.pieces, set(r.pieces), {other, *it.others}
+
+
 # How each kind of fix is applied inside a plan's trial: → (elements to check, the fix's own elements, the obstacles
 # its shortened end pieces are checked against; None when every element it changed is checked against everything).
-IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim}
+IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim, "route": _in_trial_route}
 # The files a fix changes beyond its moved elements' (a penetration's opening goes in the host's file).
 EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {}
 
@@ -253,7 +259,8 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
                 also = ("It also runs into: " + "; ".join(f"{scene.element(o).ifc_class} '{scene.element(o).name}'"
                                                           for o in it.others) + ". One fix must clear all of them.")
             clash = ws.clash_for(it.element_a, it.element_b, it.distance_m, None,
-                                 "\n".join(filter(None, [notes, (prefer or {}).get(it.key, ""), also])), report_id, cid)
+                                 "\n".join(filter(None, [notes, (prefer or {}).get(it.key, ""), also])), report_id, cid,
+                                 scene_id)
             clash.others = list(it.others)
 
             def progress(e: dict) -> None:
@@ -471,8 +478,13 @@ def _keep_trim(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
     return ws.apply_trim(scene_id, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"]), []
 
 
+def _keep_route(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    r = ws.apply_route(scene_id, o["moved"][0], o["edit"]["steps"])
+    return r, r["pieces"]
+
+
 # How each kind of fix is kept in the scene: → (the Workspace's reply, with "files"; the pieces, the original first).
-KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim}
+KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route": _keep_route}
 
 
 def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:

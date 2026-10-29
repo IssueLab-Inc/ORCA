@@ -28,6 +28,7 @@ class Clash:
     images: list[Path] = field(default_factory=list)  # A, B, C when available
     notes: str = ""           # e.g. ceiling void depth, project type
     others: list[str] = field(default_factory=list)  # more elements A runs into (a plan's merged item): one fix for all
+    nearby: list[str] = field(default_factory=list)  # other clashes of A or B close by in the report: told, not required
 
 
 @dataclass
@@ -92,6 +93,7 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
     for label, this, other, more in (("A", clash.element_a, clash.element_b, clash.others),
                                      ("B", clash.element_b, clash.element_a, [])):
         lines += _run_text(scene, label, this, other, clearance_m, more)
+        lines += _nearby_text(scene, label, this, [n for n in clash.nearby if n not in (other, *more)])
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
         lines += _joint_text(scene, label, this, other, name)
     if clash.notes:
@@ -148,6 +150,7 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
                 lines.append(f"The other element has an opening on this line from z {h['bottom_m']:.3f} to "
                              f"{h['top_m']:.3f} m: offsetting {label}'s middle piece by {h['dz_min_m']:+.3f} to "
                              f"{h['dz_max_m']:+.3f} m passes it through with {clearance_m * 1000:.0f} mm all round.")
+            lines += _room_text(scene, label, gid, [other], "the other element", clearance_m, above=not holes)
     for o in others:
         if o not in b:
             continue
@@ -158,6 +161,63 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
             e = scene.element(o)
             lines.append(f"Element {label} also runs into {e.ifc_class} '{e.name}' at {lo:.2f}-{hi:.2f} m along it, "
                          f"from z {b[o][0][2]:.3f} to {b[o][1][2]:.3f} m: one fix must clear it too.")
+            lines += _room_text(scene, label, gid, [o], f"'{e.name}'", clearance_m)
+    if others:
+        together = _room_text(scene, label, gid, [other, *others], "all of them at once", clearance_m, above=False)
+        lines += together or [f"No side offset clears all of them in one stretch: give each obstacle its own step and "
+                              f"return to the line between them."]
+    return lines
+
+
+def _nearby_text(scene: IfcScene, label: str, gid: str, nearby: list[str]) -> list[str]:
+    """Other clashes of this element close by, along its run: worth clearing in the same fix, never required."""
+    try:
+        run = edits.run_of(scene, gid)
+    except (edits.Unsupported, KeyError):
+        return []
+    b = scene.bounds()
+    start, d = np.asarray(run.start), np.asarray(run.direction)
+    lines = []
+    for o in nearby:
+        if o not in b:
+            continue
+        corners = np.array([[x, y, z] for x in b[o][:, 0] for y in b[o][:, 1] for z in b[o][:, 2]])
+        along = (corners - start) @ d
+        lo, hi = max(along.min(), 0.0), min(along.max(), run.length_m)
+        if lo < hi:
+            e = scene.element(o)
+            lines.append(f"Element {label} also clashes nearby with {e.ifc_class} '{e.name}' at {lo:.2f}-{hi:.2f} m along "
+                         f"it (another clash in this report): a fix that clears both fixes both, but only this one is "
+                         f"required.")
+    return lines
+
+
+def _compass(v) -> str:
+    v = np.asarray(v, float)
+    return ("east" if v[0] > 0 else "west") if abs(v[0]) >= abs(v[1]) else ("north" if v[1] > 0 else "south")
+
+
+def _room_text(scene: IfcScene, label: str, gid: str, obstacles: list[str], what: str, clearance_m: float,
+               above: bool = True) -> list[str]:
+    """The room a route has past `obstacles`: side offsets (and up offsets when `above`) at which the run's profile
+    clears everything along their stretch (`edits.free_bands`)."""
+    try:
+        run = edits.run_of(scene, gid)
+        _, side = edits.run_frame(run.direction)
+    except (edits.Unsupported, KeyError):
+        return []
+    lines = []
+    for axis in ("side", "up") if above else ("side",):
+        try:
+            bands = edits.free_bands(scene, gid, obstacles, axis, clearance_m)
+        except RuntimeError:
+            continue
+        if bands:
+            ranges = ", ".join(f"{b['from_m']:+.2f} to {b['to_m']:+.2f}" for b in bands)
+            meaning = (f"side offsets (+ is {_compass(side)}, - {_compass(-side)})" if axis == "side"
+                       else "up offsets (+ up, - down)")
+            lines.append(f"Room past {what} for element {label}: {meaning} of {ranges} m keep {clearance_m * 1000:.0f} mm "
+                         f"clear of everything along that stretch (a route step can use them).")
     return lines
 
 
@@ -305,6 +365,13 @@ def _candidate_delta(cand: dict) -> tuple[str, list[float]]:
         return kind, [0.0, 0.0, float(cand.get("dz_m", 0.0) or 0.0)]
     if kind == "trim":
         return kind, [0.0, 0.0, 0.0]
+    if kind == "route":
+        try:
+            big = max(((float(st.get("up_m") or 0), float(st.get("side_m") or 0)) for st in cand.get("steps") or []),
+                      key=lambda x: x[0] ** 2 + x[1] ** 2, default=(0.0, 0.0))
+        except (AttributeError, TypeError, ValueError):
+            big = (0.0, 0.0)
+        return kind, [0.0, big[1], big[0]]
     try:
         return kind, [float(v) for v in cand.get("delta_m", [0, 0, 0])]
     except (TypeError, ValueError):
@@ -487,6 +554,50 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
                            v.min_clearance_m, {}, "trim", None, shape, trim=trim, cleanup=same_model, checked_against=v.checked_against)
 
 
+def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
+               on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
+    """Reroute a stretch of `target` in steps (edits.apply_route), check it, undo it: the new pieces against
+    everything, the shortened end pieces against the obstacles, as an offset. A single step straight up or down is an
+    offset, and is tried (and kept) as one."""
+    title = cand.get("title", "reroute")
+    raw = cand.get("steps")
+    try:
+        if isinstance(raw, list) and len(raw) == 1 and not float(raw[0].get("side_m") or 0) and float(raw[0].get("up_m") or 0):
+            one = raw[0]
+            return _try_offset(scene, {**cand, "kind": "offset", "split_m": [one["from_m"], one["to_m"]],
+                                       "dz_m": one["up_m"]}, target, other, clearance_m, on_trial, others=others)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        pass
+    try:
+        run = edits.run_of(scene, target)
+        steps = edits.route_steps(raw, run.length_m)
+        up, side = edits.run_frame(run.direction)
+    except (edits.Unsupported, KeyError) as e:
+        return Attempt(title, [0.0, 0.0, 0.0], False, f"cannot reroute this element: {e}", "route"), None
+    big = max(steps, key=lambda st: st["up_m"] ** 2 + st["side_m"] ** 2)
+    delta = [round(float(x), 4) for x in up * big["up_m"] + side * big["side_m"]]
+    edit = {"steps": steps, "summary": edits.route_summary(steps, side),
+            "key": json.dumps([[round(st[k], 2) for k in ("from_m", "to_m", "up_m", "side_m")] for st in steps])}
+    try:
+        with edits.trial(scene, target):
+            r = edits.apply_route(scene, target, steps)
+            shape = edits.meshes(scene, r.pieces) if on_trial else None
+            if on_trial:
+                on_trial({"kind": "route", "moved": [target], "delta_m": delta, "pieces": shape, "summary": edit["summary"]})
+            ignore = set(r.pieces) | {c for g in r.pieces for c in scene.element(g).connected}
+            v = verify.check(scene, r.pieces[1:-1], clearance_m=clearance_m, ignore=ignore)  # bends, risers, middles
+            ends = verify.check(scene, [r.pieces[0], r.pieces[-1]], clearance_m=clearance_m, ignore=ignore)
+            hits = v.hits + [h for h in ends.hits if h.other == other or h.other in others]
+            preview = (shape or edits.meshes(scene, r.pieces)) if not hits else None
+    except edits.Unsupported as e:
+        return Attempt(title, delta, False, f"cannot reroute this element: {e}", "route", edit=edit), None
+    attempt = Attempt(title, delta, not hits, _reason(hits), "route", None, _hit_ids(hits), edit=edit, where=_where(hits))
+    if hits:
+        return attempt, None
+    return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
+                           v.min_clearance_m, {}, "route", None, preview, checked_against=v.checked_against, edit=edit)
+
+
 def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                   on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
     return _try_move(scene, cand, target, clearance_m, on_trial)
@@ -494,9 +605,10 @@ def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearanc
 
 # Each kind of fix Muse may propose, and how to try it: (scene, candidate, target, other, clearance, on_trial,
 # others=) → (Attempt, Option or None). A kind not listed here is refused, never tried as a move.
-TRIES: dict[str, Callable] = {"move": _try_move_fix, "offset": _try_offset, "trim": _try_trim}
+TRIES: dict[str, Callable] = {"move": _try_move_fix, "offset": _try_offset, "trim": _try_trim, "route": _try_route}
 # The candidate fields each kind is described by, carried into a recommendation (never tried) as its "edit".
-PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m"), "trim": ("by_m",)}
+PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m"), "trim": ("by_m",),
+                                      "route": ("steps",)}
 
 
 def to_json(result: Result) -> str:

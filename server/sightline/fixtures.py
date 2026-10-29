@@ -324,3 +324,97 @@ def build_detection_fixtures(folder: Path, offset: tuple[float, float, float] = 
     s.write(str(paths[0]))
     m.write(str(paths[1]))
     return paths
+
+
+def build_route_fixture(path: Path) -> Path:
+    """Runs that only a route clears (edits.apply_route), metres, one storey. Each straight segment has ports at both
+    ends; the compound duct's far port joins a 1 m end segment.
+
+    - Compound duct (Tag RT-1, along X at y = 0, 400 wide x 300 deep, centreline z 2.8, 0-6 m): a full-height column at
+      x 3.0-3.2 stands in its line. North of it a 2.9 m plinth (x 2.6-3.6, y 0.25-0.9), south of it a wall to the slab
+      (x 2.0-4.0, y -0.9 to -0.3); slab soffit at 3.4. Up alone hits the column, sideways alone the plinth or the wall;
+      up 300 mm, then north 550 mm over the plinth (and back) clears.
+    - Two-column duct (Tag RT-2, along X at y = 5, 6 m): full-height columns south of its line at x 1.8-2.2 and 3.8-4.2
+      (y 4.6-5.1), a post between them on the north side (x 2.95-3.05, y 5.3-5.4). Only one detour round each column
+      (north 300 mm) clears: one long detour, or a move, hits the post.
+    - Sloped duct (Tag RT-3, along X at y = -5, falling 1:100 from z 2.8, 6 m) with a full-height column at x 3.0-3.2
+      in its line and room to its north.
+    - Waste pipe (Tag RT-4, DN100 PVC "Waste pipe", level along X at y = -10, z 2.0, 6 m) with a column in its line.
+    - Cold water pipe (Tag RT-5, DN50, level along X at y = -7.5, z 2.0, 6 m) with a column in its line: a round pipe
+      may change up and sideways at once (a rolling offset).
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA route fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 02")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+    def element(ifc_class, name):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        return e
+
+    def block(ifc_class, name, x0, x1, y0, y1, z0, z1):
+        _box(model, body, element(ifc_class, name), (x1 - x0, y1 - y0, z1 - z0), (x0, y0, z0))
+
+    def segment(ifc_class, name, tag, start, end, profile):
+        e = element(ifc_class, name)
+        e.Tag = tag
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+        start, end = np.asarray(start, float), np.asarray(end, float)
+        d = (end - start) / np.linalg.norm(end - start)
+        x = np.cross(UP_, d)
+        x /= np.linalg.norm(x)
+        position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(map(float, start))),
+                                                   model.createIfcDirection(tuple(map(float, d))),
+                                                   model.createIfcDirection(tuple(map(float, x))))
+        solid = model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)),
+                                                 float(np.linalg.norm(end - start)))
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+        ports = []
+        for n, (p, flow) in enumerate(((start, "SINK"), (end, "SOURCE"))):
+            port = ifcopenshell.api.run("system.add_port", model, element=e)
+            port.Name, port.FlowDirection = f"Port {n}", flow
+            m = np.eye(4)
+            z = -d if flow == "SINK" else d
+            m[:3, :3] = np.column_stack([x, np.cross(z, x), z])
+            m[:3, 3] = p
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+            ports.append(port)
+        return e, ports
+
+    rect = lambda: model.createIfcRectangleProfileDef("AREA", None, None, 0.4, 0.3)  # X across (level), Y up
+    block("IfcSlab", "Level 03 slab", -1.0, 7.0, -12.0, 7.0, 3.4, 3.6)
+    # Compound duct
+    _, (_, far) = segment("IfcDuctSegment", "Supply duct 400x300", "RT-1", (0, 0, 2.8), (6, 0, 2.8), rect())
+    _, (near, _) = segment("IfcDuctSegment", "Supply duct 400x300", "RT-1E", (6, 0, 2.8), (7, 0, 2.8), rect())
+    ifcopenshell.api.run("system.connect_port", model, port1=far, port2=near, direction="SOURCE")
+    block("IfcColumn", "Column A3", 3.0, 3.2, -0.3, 0.25, 0.0, 3.4)
+    block("IfcBuildingElementProxy", "Plinth", 2.6, 3.6, 0.25, 0.9, 0.0, 2.9)
+    block("IfcWall", "Wall W1", 2.0, 4.0, -0.9, -0.3, 0.0, 3.4)
+    # Two-column duct
+    segment("IfcDuctSegment", "Supply duct 400x300", "RT-2", (0, 5, 2.8), (6, 5, 2.8), rect())
+    block("IfcColumn", "Column B2", 1.8, 2.2, 4.6, 5.1, 0.0, 3.4)
+    block("IfcColumn", "Column B4", 3.8, 4.2, 4.6, 5.1, 0.0, 3.4)
+    block("IfcMember", "Post P1", 2.95, 3.05, 5.3, 5.4, 0.0, 3.4)
+    # Sloped duct
+    segment("IfcDuctSegment", "Exhaust duct 400x300", "RT-3", (0, -5, 2.8), (6, -5, 2.74), rect())
+    block("IfcColumn", "Column C3", 3.0, 3.2, -5.3, -4.9, 0.0, 3.4)
+    # Waste pipe
+    pipe = model.createIfcCircleProfileDef("AREA", None, None, 0.055)
+    segment("IfcPipeSegment", "Waste pipe DN100", "RT-4", (0, -10, 2.0), (6, -10, 2.0), pipe)
+    block("IfcColumn", "Column D3", 3.0, 3.2, -10.2, -9.9, 0.0, 3.4)
+    # Cold water pipe
+    segment("IfcPipeSegment", "Cold water DN50", "RT-5", (0, -7.5, 2.0), (6, -7.5, 2.0),
+            model.createIfcCircleProfileDef("AREA", None, None, 0.03))
+    block("IfcColumn", "Column E3", 3.0, 3.2, -7.7, -7.4, 0.0, 3.4)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path
+
+
+UP_ = np.array([0.0, 0.0, 1.0])
