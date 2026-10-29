@@ -6,8 +6,9 @@ const REPORT = /\.(xml|png|jpe?g)$/i;
 
 /** A blank project: the visitor's own models (IFC or STEP), dropped or chosen, then checked like the demos; or a
  *  Navisworks clash report to import. Nothing is opened until they choose. */
-export function ProjectStart({ busy, onModels, onReport, onReportFolder, onBack }: {
+export function ProjectStart({ busy, maxMb, onModels, onReport, onReportFolder, onBack }: {
   busy: boolean;
+  maxMb?: number | null;   // the server's upload cap (GET /api/models)
   onModels: (files: File[]) => void;
   onReport: (files: File[]) => void;
   onReportFolder: () => void;
@@ -41,7 +42,7 @@ export function ProjectStart({ busy, onModels, onReport, onReportFolder, onBack 
           onChange={(e) => { take(e.target.files); e.target.value = ""; }} />
         <Upload size={28} aria-hidden />
         <b>{busy ? "Opening…" : "Drop IFC or STEP files here"}</b>
-        <span className="hint">Several files open together (structure, services, architecture…). Up to 150 MB in all.</span>
+        <span className="hint">Several files open together (structure, services, architecture…).{maxMb ? ` Up to ${maxMb} MB in all.` : ""}</span>
         <button className="btn primary" type="button" disabled={busy} onClick={() => chosen?.click()}>
           <FolderOpen size={15} aria-hidden /> Choose files</button>
       </label>

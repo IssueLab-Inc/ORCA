@@ -838,3 +838,29 @@ Resize (Oct 29, owner decision; `docs/edits.md` "Resize", code `edits.resize_siz
   460 server tests; in the browser on the uploaded fixture Muse's only verified fix was "Flatten duct to 225 mm deep
   under the beam" (710 x 225 mm), accepted in place. No planted demo case.
 
+Bigger uploads (Oct 29, owner decision: target 500 MB; design and measurements in `docs/uploads.md`, `evals/README.md`
+"Big models"):
+- **Way in:** the page checks the server's cap first (`GET /api/models`: `model_upload_max_mb`; `web/src/uploads.ts`),
+  gzips each file over 1 MB (`CompressionStream`, IFC packs about 5x), sends it with XHR (upload progress) to
+  `POST /api/models/upload/stream` (NDJSON: received, STEP events, opening, `boxes` done/total, a `tick` every 5 s, done
+  or error). The server refuses before reading (411 without Content-Length, 413 over the cap), unpacks `.gz` parts in
+  a thread, 1 MiB per gunzip step, capping the unpacked size as it goes and refusing a truncated archive
+  (`app._receive_models` / `_unpack`); a 409 `requirements_unknown` re-registers and resends once (`reRegister`). An
+  uploaded IFC is drawn from the visitor's own file, not downloaded back.
+- **Boxes** (`IfcScene.bounds`): meshes through CGAL (`hybrid-cgal-simple-opencascade`, 1 ms vs 20-30 ms), every
+  element through it from 50 MB (`SIGHTLINE_BIG_MODEL_MB`), in batches of 2,000 (one iterator held a 150 MB model's
+  shapes: 4.8 GB → 1.4 GB), threads from `sched_getaffinity`, progress callback. Northbank's boxes, order and 464
+  detected clashes are identical (checked).
+- **Detection's sweep** had no lower bound (quadratic): 500 MB 482 → 18 s; Northbank identical.
+- **Holding:** `SIGHTLINE_SCENE_BUDGET_MB` (IFC bytes, Modal 300) besides the count, room made before a new scene is
+  read (`Workspace._evict`); mesh-only bodies go through CGAL by one rule (`scene.meshes_only`); wider fixes refused above
+  `SIGHTLINE_WIDER_FIX_MAX_MB` (100: they copy the models); exports older than an hour deleted.
+- **Measured** (local, 4 CPUs): 150 MB through the page 123 s, 250 MB 194 s, 500 MB 484 s (2.8 GB server peak, 1.4 GB
+  JS heap). Cap stays **150 MB** on the demo by the plan's rule (about two minutes); 500 MB is blocked by box time and
+  web-ifc drawing on the main thread (next: a Web Worker). `evals/big_models.py`, `big_models_browser.cjs`.
+- **Checked:** `tests/test_uploads.py` (7), `web/tests/uploads.test.mjs` (3); 467 server tests, 62 web tests; golden
+  path unchanged. App imports `./uploads` (both harnesses compile it).
+- **After the reviews of PRs 26-32 (Oct 29):** 491 server tests, 63 web tests; answer key 3/3 first try at Rev04 heights
+  (Muse's girder opening refused as a transfer element); `evals/step_cell.py` passes (C1, C2, C6, C7, C8, Rev B 0);
+  golden path accepted in place, no file download.
+
