@@ -8,6 +8,7 @@ import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, SavedSession, Sc
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
+import { ProjectStart } from "./ProjectStart";
 import { addByDesign, hasByDesign, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
@@ -120,6 +121,8 @@ export function App() {
   const [reqSaved, setReqSaved] = useState<SavedRequirements | null>(() => loadRequirements());
   const [reqId, setReqId] = useState<string | null>(null);
   const [reqOpen, setReqOpen] = useState(false);
+  // A blank project: the workspace without a demo, waiting for the visitor's own models (ProjectStart.tsx).
+  const [blank, setBlank] = useState(false);
   // Muse Spark's audit of the by-design rules after a triage under requirements, and whether the triage shown was
   // read under other requirements (a level, strictness or guidance since changed).
   const [triageAudit, setTriageAudit] = useState<Record<string, RuleAudit>>({});
@@ -794,7 +797,7 @@ export function App() {
     return p;
   }
 
-  function upload(list: FileList | null) {
+  function upload(list: FileList | File[] | null) {
     if (busy) return;
     const files = [...(list ?? [])].filter((f) => /\.(xml|png|jpe?g)$/i.test(f.name));
     if (!files.length) return setError("Choose a Navisworks XML report, or the folder it was exported to.");
@@ -1534,7 +1537,7 @@ export function App() {
     [report, views, titles]);
   const shownClash = clash ? shown(clash) : clash;
   // Until a report or the models are open, the page is the landing: no panels, just what ORCA is and the demo.
-  const landing = !stats && !report;
+  const landing = !stats && !report && !blank;
   const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   // Read the patterns as soon as they are found, once per report and models, unless a proposal or plan is running then
@@ -1699,7 +1702,7 @@ export function App() {
         <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         {!landing && <button className="btn ghost" onClick={() => setAbout(true)} aria-label="How it works" title="How it works"><Info size={15} aria-hidden /><span className="lbl"> How it works</span></button>}
-        {!landing && !touring && <button className="btn ghost" onClick={() => startTour(cellOpen ? "cell" : "northbank")} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
+        {!landing && !touring && (stats || report) && <button className="btn ghost" onClick={() => startTour(cellOpen ? "cell" : "northbank")} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
         </div>
         <span className="brand"><span className="logo" aria-hidden>◎</span><b>ORCA</b></span>
         <div className="bar-side end">
@@ -1762,7 +1765,11 @@ export function App() {
         {stats && <ViewerToolbar state={tool} models={modelNames} hasFocus={!!(a || b)}
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
-        {!stats && !busy && (
+        {!stats && !report && blank && (
+          <ProjectStart busy={!!busy} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
+            onReportFolder={() => folderInput.current?.click()} onBack={() => setBlank(false)} />
+        )}
+        {!stats && !busy && !blank && (
           <About triageOpen={!!triageModel?.open_weights} start={{
             label: startLabel,
             disabled: !picked.length,
@@ -1770,6 +1777,7 @@ export function App() {
             onCell: cellSample ? () => void openDemo([cellSample]) : undefined,
             onGolden: startGolden,
             onTour: () => startTour("northbank"),
+            onBlank: () => { setBlank(true); setError(null); },
             onCellTour: cellSample ? () => startTour("cell") : undefined,
             resume: resumable ? { files: resumable.info.files, clashes: resumable.clashes, fixed: Object.keys(resumable.saved.fixes ?? {}).length,
               agent: !!resumable.saved.link, agentLeft: resumable.saved.link ? timeLeft(resumable.saved.link, now) : null, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,

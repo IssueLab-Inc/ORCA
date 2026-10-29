@@ -626,6 +626,21 @@ Coordination requirements (Oct 29, owner decision; design in `docs/requirements.
 - **Web tests:** `requirements.test.mjs`; App's new imports are in both stub lists (`setRequirements` is in the api
   stubs).
 
+Small models and a blank project (Oct 29, owner feedback on an uploaded ~100 mm load-cell STEP: a huge clash ring,
+framing far out, thumbnails with the part a speck):
+- **Viewer distances were building-sized floors** (0.5 m least margin and `2r + 0.5` in `zoneCamera`, 1.5 m in
+  `flyToBox`, 2 m in `view`, the marker's 0.3 scale floor, 2.5 m context, 4 m / 1 m section box, 1 m / 0.6 m fallback
+  zones, a 10 mm near plane). Now `Viewer.reach(metres, share)` keeps each building value but never more than a share
+  of the scene's diagonal (`sceneDiag`, cached per load), and `zoneCamera`'s least margin is also bounded by the pair
+  (a quarter of their union, twice the zone). The marker keeps a constant screen size (no floor), the near plane goes
+  down to 0.5 mm. `posed` uses `zoneCamera`, so A/B/C pictures and list thumbnails follow.
+- **Checked:** a generated 5-part load cell (110 mm, 2-12 mm overlaps; the appmeas.co.uk zip sits behind a Cloudflare
+  challenge here) frames the shaft and nut filling the view, thumbnails readable; Northbank #1 and #40 frame as before.
+- **Blank project:** the landing hero's **Use your own models** (`onBlank`, `data-tour=blank`) opens the workspace with
+  `ProjectStart.tsx` in the stage: a drop zone / Choose files for IFC or STEP (→ `openDemo(files)`: upload, open, check),
+  Import a report folder, Back to the demos. `landing` is `!stats && !report && !blank`; Tour hides until something is
+  open.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

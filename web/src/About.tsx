@@ -1,4 +1,4 @@
-import { ArrowDown, Box, Check, RotateCcw, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
+import { ArrowDown, Box, Check, RotateCcw, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, Upload, X, Compass } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 /**
@@ -9,6 +9,7 @@ export function About({ start, onClose, triageOpen = false }: {
   // onGolden: one click opens the demo models, checks them, picks the duct-through-girder clash and proposes a fix.
   start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void;
     onCell?: () => void; onCellTour?: () => void;  // the second demo: the palletising cell from STEP
+    onBlank?: () => void;  // a blank project: the visitor's own models
     resume?: Resume };  // this browser's last session, still on the server
   onClose?: () => void;
   triageOpen?: boolean;  // titles and triage run on the open-weights model now (server: /api/models)
@@ -45,6 +46,8 @@ export function About({ start, onClose, triageOpen = false }: {
               <a className="btn big" href="#demos"
                 onClick={(e) => { e.preventDefault(); document.getElementById("demos")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
                 <ArrowDown size={16} aria-hidden /> Pick a demo</a>
+              {start.onBlank && <button className="btn big ghost" data-tour="blank" onClick={start.onBlank}>
+                <Upload size={16} aria-hidden /> Use your own models</button>}
             </div>
           </>}
         </div>
