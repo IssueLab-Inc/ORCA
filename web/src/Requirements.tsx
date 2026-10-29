@@ -124,7 +124,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
             <h3>Design level</h3>
             <p className="hint">How far the models have got. Early levels only care about gross overlaps; later ones about every
               millimetre and the space around services. The names fit any industry; the hints are rough equivalents.</p>
-            <div className="req-levels" role="radiogroup" aria-label="Design level">
+            <div className="req-levels" role="radiogroup" aria-label="Design level" data-tour="req-levels">
               {(scale?.levels ?? []).map((l) => (
                 <button key={l.level} role="radio" aria-checked={draft.level === l.level}
                   className={`req-level${draft.level === l.level ? " on" : ""}`} onClick={() => update({ ...draft, level: l.level })}>
@@ -134,6 +134,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                 </button>))}
             </div>
 
+            <div className="req-strict-block" data-tour="req-strict">
             <h3>Strictness</h3>
             <p className="hint">One setting for flagging and fixing. Strict flags more and fixes cautiously (more clearance, smaller
               moves, no trims); lenient flags only clear problems and allows bolder fixes.</p>
@@ -168,12 +169,13 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                   <span className="hint">ORCA's defaults find {preview.baseline.toLocaleString()} · checked in {preview.seconds} s</span></>
                 : previewError ? <span className="hint">{previewError}</span> : null}
             </p>
+            </div>
 
             <h3>Checks</h3>
             <p className="hint">What each group is checked against. Hard: any overlap past the tolerance. Clearance: a gap that must
               stay (insulation, hangers, access). Off: context only.{level && level.service_clearance_mm > 0
                 ? ` At L${level.level} a hard check between services and structure keeps ${level.service_clearance_mm} mm (scaled by strictness).` : ""}</p>
-            <div className="req-grid-wrap">
+            <div className="req-grid-wrap" data-tour="req-grid">
               <table className="req-grid">
                 <thead><tr><th />{groups.map((g) => <th key={g.id} scope="col">{g.name}</th>)}</tr></thead>
                 <tbody>{groups.map((ga, i) => (
@@ -181,10 +183,10 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                     <input className="req-group-name" value={ga.name} aria-label={`Name of group ${ga.name}`}
                       onChange={(e) => update({ ...draft, groups: draft.groups.map((g) => g.id === ga.id ? { ...g, name: e.target.value } : g) })} />
                     {(ga.classes.length > 0 || ga.teams.join(", ") !== ga.name) &&
-                      <span className="req-selects" data-tip={[...ga.teams.map((t) => `team ${t}`), ...ga.classes.map((c) => c.replace(/^Ifc/, ""))].join(", ")}>
+                      <span className="req-selects" data-tip-tap data-tip={[...ga.teams.map((t) => `team ${t}`), ...ga.classes.map((c) => c.replace(/^Ifc/, ""))].join(", ")}>
                         {ga.classes.length ? `${ga.classes.length} kinds of element` : `team ${ga.teams.join(", ")}`}</span>}</th>
                     {groups.map((gb, j) => j < i ? <td key={gb.id} className="req-none" /> : (
-                      <td key={gb.id}><Cell value={cell(ga.id, j === i ? null : gb.id)} label={`${ga.name} vs ${j === i ? "itself" : gb.name}`}
+                      <td key={gb.id} data-label={`vs ${j === i ? "itself" : gb.name}`}><Cell value={cell(ga.id, j === i ? null : gb.id)} label={`${ga.name} vs ${j === i ? "itself" : gb.name}`}
                         levelMm={j !== i && new Set([ga.role, gb.role]).has("services") && new Set([ga.role, gb.role]).has("structure")
                           ? params?.service_clearance_mm ?? 0 : 0}
                         onChange={(patch) => update(setCell(draft, ga.id, j === i ? null : gb.id, patch))} /></td>))}
@@ -247,7 +249,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
 
         {error && <p className="bad">{error}</p>}
         <div className="actions">
-          <button className="btn primary big" disabled={!draft} onClick={() => onApply(draft, enabled, false)}>
+          <button className="btn primary big" data-tour="req-apply" disabled={!draft} onClick={() => onApply(draft, enabled, false)}>
             {enabled ? "Use these requirements" : "Keep the file, use ORCA's defaults"}</button>
           {canDetectAgain && enabled && <button className="btn big" disabled={!draft} onClick={() => onApply(draft, enabled, true)}>Use them and check again</button>}
           {initial && <button className="btn ghost" onClick={() => onApply(null, false, false)}>Forget the file</button>}
@@ -263,12 +265,12 @@ function Cell({ value, label, levelMm, onChange }: { value: ReqCheck | undefined
   const v = value ?? { check: "hard", clearance_mm: null, reason: "", source: "level" } as Partial<ReqCheck>;
   const tip = [v.reason, v.source === "orca" ? "ORCA suggests" : v.source === "user" ? "Yours" : ""].filter(Boolean).join(" · ");
   return (
-    <span className={`req-cell ${v.check}`} data-tip={tip || undefined}>
+    <span className={`req-cell ${v.check}`} data-tip-tap data-tip={tip || undefined}>
       <select value={v.check} aria-label={label} onChange={(e) => onChange({ check: e.target.value as ReqCheck["check"] })}>
         <option value="hard">Hard</option><option value="clearance">Clearance</option><option value="off">Off</option></select>
       {v.check === "clearance" && <label className="req-mm"><input type="number" min={0} max={500} step={5} value={v.clearance_mm ?? 25}
         aria-label={`${label} clearance`} onChange={(e) => onChange({ clearance_mm: Number(e.target.value) })} /> mm</label>}
-      {v.check === "hard" && levelMm > 0 && <span className="req-mm" data-tip="The design level keeps this gap between services and structure">keeps {levelMm} mm</span>}
+      {v.check === "hard" && levelMm > 0 && <span className="req-mm" data-tip-tap data-tip="The design level keeps this gap between services and structure">keeps {levelMm} mm</span>}
       {v.source === "orca" && <Sparkles size={11} className="req-orca" aria-label="ORCA suggests" />}
     </span>
   );

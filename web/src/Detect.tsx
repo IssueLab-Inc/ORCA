@@ -61,7 +61,7 @@ function ReqLine({ requirements, name, onRequirements }: { requirements: string 
   if (!onRequirements && !requirements) return null;
   return (
     <p className="detect-req"><ClipboardCheck size={13} aria-hidden />
-      {requirements ? <b data-tip={name ? `Checked against "${name}"` : undefined}>{requirements}</b> : <span className="hint">ORCA's defaults · no requirements set</span>}
+      {requirements ? <b data-tip-tap data-tip={name ? `Checked against "${name}"` : undefined}>{requirements}</b> : <span className="hint">ORCA's defaults · no requirements set</span>}
       {onRequirements && <button className="btn small ghost" onClick={onRequirements}>{requirements ? "Edit" : "Set requirements"}</button>}
     </p>
   );
@@ -119,10 +119,10 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
           <p className="hint small">The requirements changed since this run: Detect again to check under {requirementsId ? "them" : "ORCA's defaults"}.</p>}
         {!d.first && (
           <div className="detect-diff">
-            <span className={`chip ${d.resolved.length ? "ok" : ""}`} data-tip={d.resolved.map((r) => r.test).join(", ") || "Nothing resolved since the last run"}>
+            <span className={`chip ${d.resolved.length ? "ok" : ""}`} data-tip-tap data-tip={d.resolved.map((r) => r.test).join(", ") || "Nothing resolved since the last run"}>
               {d.resolved.length} resolved</span>
             <span className={`chip ${d.new.length ? "warn" : ""}`}>{d.new.length} new</span>
-            {d.no_longer_checked.length > 0 && <span className="chip" data-tip="Gone because an element left the test, not because it was fixed">
+            {d.no_longer_checked.length > 0 && <span className="chip" data-tip-tap data-tip="Gone because an element left the test, not because it was fixed">
               {d.no_longer_checked.length} no longer checked</span>}
           </div>)}
         {partial.length > 0 && <p className="bad small">{partial.map((c) => c.name).join(", ")} reached the limit of results:
@@ -132,8 +132,8 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
           <table>
             <thead><tr><th>Test</th><th>Pairs</th><th>Clashes</th><th>Touch</th><th>Meant to meet</th></tr></thead>
             <tbody>{detection.coverage.map((c) => (
-              <tr key={c.test}><td>{c.name}</td><td>{c.candidate_pairs}</td><td>{c.clashes}{c.partial ? "+" : ""}</td>
-                <td>{c.touching}</td><td>{excluded(c)}</td></tr>))}</tbody>
+              <tr key={c.test}><td>{c.name}</td><td data-label="pairs">{c.candidate_pairs}</td><td data-label="clashes">{c.clashes}{c.partial ? "+" : ""}</td>
+                <td data-label="touching">{c.touching}</td><td data-label="meant to meet">{excluded(c)}</td></tr>))}</tbody>
           </table>
           <p className="hint small">A pair whose boxes never come that close cannot clash, so every other pair is covered.</p>
         </details>

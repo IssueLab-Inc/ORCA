@@ -53,7 +53,7 @@ export function ProjectStart({ busy, onModels, onReport, onReportFolder, onBack 
         <button className="btn small" disabled={busy} onClick={onReportFolder}>Import a report folder</button>
       </div>
       <p className="hint small">Your files are held for your session only and are not listed for other visitors; a server
-        restart clears them. Coordination requirements (Requirements, in the header) can be set once the models are open.</p>
+        restart clears them. Coordination requirements can be set once the models are open.</p>
     </div>
   );
 }

@@ -107,7 +107,7 @@ function ExpiryChip({ link, now }: { link: AgentLink; now: number }) {
     .toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const capped = link.expires_at >= link.max_expires_at - 1;
   return (
-    <span className={`hint agent-expiry${s < 1800 ? " soon" : ""}`} data-tip-side="bottom"
+    <span className={`hint agent-expiry${s < 1800 ? " soon" : ""}`} data-tip-tap data-tip-side="bottom"
       data-tip={`Expires ${at(link.expires_at)}. ${capped ? "It has reached its 24-hour limit." : `Each use renews it to 12 hours, until ${at(link.max_expires_at)} at the latest.`}`}>
       · {s < 1800 ? "expiring soon: " : ""}{timeLeft(link, now)} left</span>
   );

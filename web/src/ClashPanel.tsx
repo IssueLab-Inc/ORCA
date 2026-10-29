@@ -126,10 +126,18 @@ export function Lightbox({ reportId, clash, index, onClose, onMove }: {
     return () => { ro.disconnect(); };
   }, [read, marks]);
   const focus = zoom && read ? focusSquare(read, 2.4, 0.3) : null;
+  // A swipe across the picture goes to the next or previous view (touch screens; the arrow keys do it on a keyboard).
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   return (
     <div className="lightbox" role="dialog" aria-label={`#${clash.number}, view ${label}`} onClick={onClose}>
       <figure onClick={(e) => e.stopPropagation()}>
-        <div className="lb-frame">
+        <div className="lb-frame" onPointerDown={(e) => { swipe.current = { x: e.clientX, y: e.clientY }; }}
+          onPointerUp={(e) => {
+            const from = swipe.current; swipe.current = null;
+            if (!from || n < 2) return;
+            const dx = e.clientX - from.x, dy = e.clientY - from.y;
+            if (Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy)) onMove((index + (dx < 0 ? 1 : n - 1)) % n);
+          }}>
           <div className="lb-zoom" style={focus ? zoomStyle(focus) : undefined}>
             <img src={url} alt={`#${clash.number}, view ${label}`} />
             {marks && read && <canvas ref={overlay} className="lb-overlay" aria-hidden />}

@@ -294,10 +294,12 @@ the model's reading kept. Northbank on Muse Spark Open with the models open: 217
 non-physical, 12 same element), 106 asked.
 
 Guided tour (Oct 28): `web/src/Tour.tsx`, from the landing page (**Take the guided tour**) or the header (**Tour**).
-24 steps in 9 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
+30 steps in 10 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
 "hold on" (the girder has two more), a trim (Clash7 transom, c0051, accepted), root cause via chat ("Why are there so
 many clashes on Level 02? Fix the root cause." → girder plan for duct + tray + CW, accepted), patterns (Explain, mark by
-design), sign-off (review on #042, Report, build), hand-off (PDF, BCF, Export IFC), close (numbers). Each step spotlights
+design), your standard (Oct 29: Add to requirements on that pattern, open Requirements, L4, Strict with the expected
+count, the grid, Use them; targets `data-tour=add-requirement|requirements|req-levels|req-strict|req-grid|req-apply`;
+TourState `reqOpen`, `requirements`, `reqRules`; Escape closes the dialog, not the tour), sign-off (review on #042, Report, build), hand-off (PDF, BCF, Export IFC), close (numbers). Each step spotlights
 a real control (`data-tour` attributes) and moves on when the app reaches the state (`TourState`); "Show me" clicks it.
 Live Muse steps offer **Watch a recorded run** after 45 s (plan 75 s) or on error: real runs recorded on Oct 27 in
 `web/public/tour/` (c0053 18 s, c0051 trim 9 s, girder plan 35 s), replayed through the same pilot/plan code and
@@ -656,6 +658,32 @@ Next, in order.
 
 Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
 offsets and trims on meshed STEP parts.
+
+Phones and tablets (Oct 29, owner decision; design in `docs/mobile.md`, code `web/src/layout.ts`, `Sheet.tsx`,
+`AppMenu.tsx`, CSS "Responsive" at the end of `index.css`):
+- **Layouts:** above 1100 px the desktop as before (checked box for box against `main` at 1280/1440/1920). 761-1100 px
+  a tablet: model + right pane, the clash list a drawer (header **Clashes**). 760 px and below a phone: the model full
+  width with a bottom sheet (peek / half / full) holding Clashes · Fix · Plan · Chat over App's own panes (re-placed
+  by CSS, never remounted), and a peek line with the one next step (Propose fixes, Accept, Next clash). Header actions
+  sit in **Menu** (`MenuSheet`); the header's Models / Coordinate bodies are shared render functions, so tests that
+  open those popovers still work.
+- **The sheet follows activity** (`follow()` in layout.ts, one effect in App.tsx): report or models open → list;
+  a clash picked → Fix at half; proposing or planning → peek (watch the pilot); the result → half, scrolled to the
+  options. Moving it by hand wins until the next event.
+- **Touch** (`(pointer: coarse)`, any width): 44 px targets, tap an element for its card (Set as A / B, then a "now
+  pick B" toast), long press picks A then B, the rail becomes **Tools** + Go to clash + Fit on a phone, press and hold
+  any `data-tip` control to read it (`data-tip-tap` shows on a tap), popovers open as bottom sheets, dialogs go full
+  screen with a pinned title, the requirements matrix and tables stack, the lightbox swipes, hints say tap.
+- **Tour:** picks the visible copy of a target, `TourActions.reveal` opens the sheet tab / drawer / menu that hides
+  it, docks its card above or below on a phone, and says tap.
+- **Checked:** Playwright profiles iPhone 13 / SE, Pixel 7, iPad Mini (both ways), desktop: no sideways scroll, no
+  unnamed or undersized control on touch profiles, and the golden path by touch (live proposal, accept, Next clash).
+- **Web tests:** App's new imports (`./layout`, `./Sheet`, `./AppMenu`, icons `List`, `Menu`) are in both stub lists;
+  `tests/layout.test.mjs` covers the breakpoints, snapping and `follow()`.
+
+Insights patterns (Oct 29, owner feedback): each pattern is a card: the count and the pair on one line
+(`.pattern-head`), the levels/size line, Muse's verdict and the rule across the card (`.insight-more`), and a foot
+with Add to requirements and the buttons (`.pattern-foot`), so the pair's name no longer wraps beside the buttons.
 
 Renamed to ORCA (Oct 29, owner decision; was Sightline). Everything people see or get in their files says ORCA: the
 app, the PDF and BCF, the MCP server name `orca`, export names `<name>.orca.ifc` / `.orca.step`, the STEP pset

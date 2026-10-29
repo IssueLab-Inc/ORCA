@@ -1,5 +1,6 @@
 import { ArrowDown, Box, Check, RotateCcw, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, Upload, X, Compass } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
+import { useLayout } from "./layout";
 
 /**
  * What ORCA is and does, for people who have never heard of BIM or design coordination: the start page in the
@@ -21,6 +22,7 @@ export function About({ start, onClose, triageOpen = false }: {
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
 
+  const layout = useLayout(), phone = layout === "phone";
   const body = (
     <article className="about">
       {onClose && <button className="ibtn about-close" onClick={onClose} aria-label="Close"><X size={18} aria-hidden /></button>}
@@ -98,9 +100,9 @@ export function About({ start, onClose, triageOpen = false }: {
         <section className="about-layout" aria-label="Once the demo is open">
           <h2 className="about-h">Once it's open</h2>
           <ul className="next-steps">
-            <li><ListChecks size={18} aria-hidden /><span><b>On the left</b>What ORCA found: every clash numbered and named, grouped by which models it checked.</span></li>
-            <li><Box size={18} aria-hidden /><span><b>In the middle</b>The models in 3D: the building with its streets and river, or the cell.</span></li>
-            <li><Sparkles size={18} aria-hidden /><span><b>On the right</b>Pick a clash, press <i>Propose fixes</i>, and watch ORCA work.</span></li>
+            <li><ListChecks size={18} aria-hidden /><span><b>{phone ? "Clashes, below" : "On the left"}</b>What ORCA found: every clash numbered and named, grouped by which models it checked.</span></li>
+            <li><Box size={18} aria-hidden /><span><b>{phone ? "On top" : "In the middle"}</b>The models in 3D: the building with its streets and river, or the cell.</span></li>
+            <li><Sparkles size={18} aria-hidden /><span><b>{phone ? "Fix, below" : "On the right"}</b>Pick a clash, press <i>Propose fixes</i>, and watch ORCA work.</span></li>
           </ul>
         </section>
       )}
@@ -192,7 +194,7 @@ export function About({ start, onClose, triageOpen = false }: {
         <h2 className="about-h">Try it in a minute</h2>
         <ol>
           <li>{start ? <>Press <b>{start.label}</b> above.</> : <>Open the Northbank demo from the start page.</>}</li>
-          <li>ORCA checks the models. In the list on the left, under <b>MEP vs Structure</b>, pick the supply air
+          <li>ORCA checks the models. In the {layout === "desktop" ? "list on the left" : <b>Clashes</b>}{layout === "desktop" ? "" : " list"}, under <b>MEP vs Structure</b>, pick the supply air
             main running through the transfer girder, the big beam on Level 02.</li>
           <li>Press <b>Propose fixes</b> and watch ORCA try its ideas in the 3D view.</li>
         </ol>
@@ -282,7 +284,7 @@ function ResumeCard({ r, disabled }: { r: Resume; disabled: boolean }) {
       <span className="resume-icon" aria-hidden><RotateCcw size={18} /></span>
       <div className="resume-text">
         <p className="eyebrow">Pick up where you left off</p>
-        <h2 data-tip={r.files.join(", ")} data-tip-side="bottom">{projectName(r.files)}</h2>
+        <h2 data-tip-tap data-tip={r.files.join(", ")} data-tip-side="bottom">{projectName(r.files)}</h2>
         <div className="resume-meta">
           <span className="chip">{r.files.length} model{r.files.length === 1 ? "" : "s"}</span>
           {r.clashes != null && <span className="chip">{r.clashes} clashes</span>}

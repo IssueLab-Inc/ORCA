@@ -34,6 +34,9 @@ export interface TourState {
   compare: string; fixed: string[];
   planRunning: boolean; planFor: number; planReady: boolean; planError: string | null;
   patternsRead: boolean; reviewedCount: number; signoffs: number; docOpen: boolean; docReady: boolean;
+  /** Coordination requirements: the dialog is open; the ones in use ("L4 · Strict", null: ORCA's defaults); how many
+   * by-design rules they hold. */
+  reqOpen: boolean; requirements: string | null; reqRules: number;
   /** The tour's clashes in the open report: their ids and numbers (null until the check has found them). */
   duct: { id: string; number: number } | null; joint: { id: string; number: number } | null;
   /** The machine cell from STEP is open; its tour's clashes; something has been fixed (Export has a change to give). */
@@ -46,6 +49,9 @@ export interface TourActions {
   replay: (what: "duct" | "joint" | "plan" | "ladder" | "pipe") => void; ask: (send: boolean) => void; signoff: () => void;
   openCell: () => void; fixPipe: () => void;
   overview: () => void; closeReport: () => void;
+  // Phones and tablets: open what hides a step's control (the sheet's tab, the drawer, the header menu); `el` is the
+  // control when it is in the page but hidden, null when it is not in the page at all (a menu item).
+  reveal?: (selector: string, el: Element | null) => void;
 }
 
 interface Step {
@@ -59,6 +65,12 @@ interface Step {
   reveal?: boolean;                    // open the target's group in the clash list and scroll to it
   fallback?: { what: "duct" | "joint" | "plan" | "ladder" | "pipe"; when: (s: TourState) => boolean };  // offer a recorded run
 }
+
+/** Click a control inside the requirements dialog (a level card, a strictness step). */
+const press = (selector: string, text: string) => () => {
+  const el = [...document.querySelectorAll<HTMLElement>(selector)].find((x) => x.textContent?.includes(text));
+  el?.click();
+};
 
 const row = (which: "duct" | "joint" | "ladder") => (s: TourState) => `[data-clash="${s[which]?.id ?? "none"}"] .clash-main`;
 const no = (c: TourState["duct"]) => (c ? <b>#{c.number}</b> : null);
@@ -226,7 +238,50 @@ export const BUILDING_STEPS: Step[] = [
     target: "[data-tour=pattern-by-design]", done: (s) => s.reviewedCount > 0,
     show: { label: "Mark it for me", run: () => (document.querySelector("[data-tour=mark-by-design]") as HTMLElement | null)?.click() },
   },
-  // 7. Sign-off
+  // 7. The team's standard
+  {
+    act: "Your standard", title: "Make it a rule",
+    body: () => <>Marking settles these clashes once. To settle them on every run, and on the next project, click
+      <b> Add to requirements</b>: the pair becomes a rule in the team's coordination requirements. Those clashes are set
+      aside without asking the model again, and Muse Spark later checks that the rule doesn't hide a real one.</>,
+    target: "[data-tour=add-requirement]", done: (s) => s.reqRules > 0, show: { label: "Add it for me" },
+  },
+  {
+    act: "Your standard", title: "The team's requirements",
+    body: (s) => <>{s.requirements ? <>The header now says <b>{s.requirements}</b>: ORCA is following a requirements file. </> : null}
+      Open <b>Requirements</b>. It is optional, and it sets the standard everything follows: where the design is, how
+      strict to be, what is checked against what, and who moves.</>,
+    target: "[data-tour=requirements]", done: (s) => s.reqOpen, show: { label: "Open it for me" },
+  },
+  {
+    act: "Your standard", title: "Where the design is",
+    body: () => <>Five design levels, named so any industry can use them (the RIBA, LOD and product-phase hints are rough
+      equivalents). Early levels only care about gross overlaps. <b>L4 Production</b> is ready to build, so the space
+      around services matters too: pick it.</>,
+    target: "[data-tour=req-levels]", show: { label: "Pick L4 for me", run: press(".req-level", "L4") },
+  },
+  {
+    act: "Your standard", title: "How strict",
+    body: () => <>One setting covers flagging and fixing. Move it to <b>Strict</b>: more is flagged, and fixes are cautious
+      (40 mm clear, nothing moved more than 400 mm, no trims across models). The chips show the numbers it sets, and
+      ORCA runs the check to show how many clashes they would find, against its defaults.</>,
+    target: "[data-tour=req-strict]", show: { label: "Make it strict", run: press(".req-ticks button", "Strict") },
+  },
+  {
+    act: "Your standard", title: "What's checked, and who moves",
+    body: () => <>Each group is checked against the others and itself: hard, a clearance, or off. Below it, who stays put
+      and who moves, how far, and whether trims are allowed. <b>Suggest with Muse Spark</b> drafts all of it from what the
+      models contain. <b>Download</b> keeps the file for the next project.</>,
+    target: "[data-tour=req-grid]",
+  },
+  {
+    act: "Your standard", title: "Use them",
+    body: () => <>Click <b>Use these requirements</b>. From now on Muse Spark is told them when it triages and proposes, a fix
+      that breaks them is turned down before it is tried, and the report says which requirements it was checked against.
+      <b> Check again</b> later reruns the clash check under them.</>,
+    target: "[data-tour=req-apply]", done: (s) => !s.reqOpen && !!s.requirements, show: { label: "Use them for me" },
+  },
+  // 8. Sign-off
   {
     act: "People decide", title: "Each team reviews",
     body: () => <>Back to the duct. Every team with an element in a clash reviews it: here MEP and Structure. Add a review:
@@ -254,7 +309,7 @@ export const BUILDING_STEPS: Step[] = [
       to the team that acts. <b>Export IFC</b> (top right) gives the edited models.</>,
     target: "[data-tour=download]",
   },
-  // 9. Close
+  // 10. Close
   {
     act: "ORCA", title: "Clashes fixed, proved, signed off", enter: (a) => { a.closeReport(); a.overview(); },
     body: (s) => <>
@@ -271,6 +326,16 @@ export const BUILDING_STEPS: Step[] = [
 
 const PAD = 6;
 const CARD_W = 340;
+/** The card's width: its own, or the window's less a margin on a phone. */
+const cardW = () => Math.min(CARD_W, window.innerWidth - 24);
+
+/** On screen and not hidden by CSS (display, visibility), at least partly inside the window. */
+function visible(el: Element) {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const check = (el as Element & { checkVisibility?: (o: object) => boolean }).checkVisibility;
+  return check ? check.call(el, { checkVisibilityCSS: true, visibilityProperty: true }) : true;
+}
 
 /** The machine cell's tour: a robot palletising cell opened from its STEP file, checked, fixed and handed back as STEP. */
 export const CELL_STEPS: Step[] = [
@@ -394,9 +459,13 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
     // under it (another clash selected into the same panel moves everything).
     let shown: Element | null = null;
     let settle = Date.now() + 1500;
+    let revealed = false;
     const find = () => {
       const sel = typeof step.target === "function" ? step.target(stateRef.current) : step.target;
-      const el = sel ? document.querySelector(sel) : null;
+      // The control that shows: a phone has some controls twice (the sheet's tabs and the pane's own), one hidden.
+      const all = sel ? [...document.querySelectorAll(sel)] : [];
+      const el = all.find(visible) ?? null;
+      if (sel && !el && !revealed && actions.reveal) { revealed = true; actions.reveal(sel, all[0] ?? null); }
       if (el && el !== shown) {
         const group = step.reveal ? el.closest("details") : null;
         if (group && !group.open) group.open = true;
@@ -420,12 +489,24 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
   }, [done, index]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // Escape closes an open dialog (requirements, report) first, not the tour that is pointing into it.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".about-dialog")) onClose(); };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
 
-  useLayoutEffect(() => { if (card.current) setCardH(card.current.offsetHeight); });
+  useLayoutEffect(() => {
+    if (!card.current) return;
+    // On a touch screen the steps say tap, not click (the copy is written once, for a mouse).
+    if (window.matchMedia?.("(pointer: coarse)").matches) {
+      const walk = document.createTreeWalker(card.current, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const t = n.nodeValue ?? "", touch = t.replace(/\b([Cc])licked\b/g, (_, c) => (c === "C" ? "Tapped" : "tapped")).replace(/\bClick/g, "Tap").replace(/\bclicking\b/g, "tapping").replace(/\bclick/g, "tap");
+        if (touch !== t) n.nodeValue = touch;
+      }
+    }
+    setCardH(card.current.offsetHeight);
+  });
 
   const pos = place(rect, cardH);
   const offer = step.fallback && !done && step.fallback.when(state);
@@ -439,7 +520,7 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
       {rect
         ? <div className="tour-hole" style={{ left: rect.left - PAD, top: rect.top - PAD, width: rect.width + 2 * PAD, height: rect.height + 2 * PAD }} />
         : <div className="tour-dim" />}
-      <div ref={card} className="tour-card" style={{ left: pos.left, top: pos.top, width: CARD_W }}>
+      <div ref={card} className="tour-card" style={{ left: pos.left, top: pos.top, width: cardW() }}>
         <div className="row">
           <span className="tour-act">{step.act} · {index + 1} of {STEPS.length}</span>
           <button className="ibtn" aria-label="End the tour" onClick={onClose}><X size={14} aria-hidden /></button>
@@ -489,7 +570,16 @@ const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce
 
 /** Beside the target if there is room (right, then left), else below or above it, kept on screen. */
 function place(r: DOMRect | null, h: number) {
-  const vw = window.innerWidth, vh = window.innerHeight, gap = 14;
+  const vw = window.innerWidth, vh = window.innerHeight, gap = 14, CARD_W = cardW();
+  // A phone: the card spans the width, at the top or the bottom, whichever leaves the control in view.
+  if (vw <= 760) {
+    const low = Math.max(12, vh - h - 12), high = 12 + 52;
+    if (!r) return { left: 12, top: low };
+    const below = low >= r.bottom + gap, above = r.top - gap - h >= 12;
+    if (below && (!above || r.top + r.height / 2 <= vh / 2)) return { left: 12, top: low };
+    if (above) return { left: 12, top: Math.min(high, r.top - gap - h) };
+    return { left: 12, top: vh - r.bottom > r.top ? low : 12 };  // no room clear of it: the side with more room
+  }
   if (!r) return { left: (vw - CARD_W) / 2, top: Math.max(16, (vh - h) / 2) };
   const clampTop = (t: number) => Math.min(Math.max(12, t), vh - h - 12);
   const clampLeft = (l: number) => Math.min(Math.max(12, l), vw - CARD_W - 12);

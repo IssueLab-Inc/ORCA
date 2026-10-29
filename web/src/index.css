@@ -268,8 +268,17 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .insight-meta { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip.accent { background: var(--accent-soft); color: var(--accent-ink); }
 .pattern-n { flex: none; min-width: 34px; text-align: center; font-weight: 700; font-size: 13px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 6px; padding: 3px 4px; font-variant-numeric: tabular-nums; }
-.insight.pattern { align-items: flex-start; }
-.insight.pattern .pattern-n { margin-top: 1px; }
+/* A pattern card: the count with the pair on one line, the details under it across the card, the actions at its foot */
+.insight.pattern { flex-direction: column; align-items: stretch; gap: 5px; padding: 9px 10px 4px; }
+.pattern-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.pattern-head b { line-height: 1.3; min-width: 0; }
+.pattern-head b .with { font-weight: 400; color: var(--muted); }
+.insight-more { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.pattern-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; border-top: 1px solid var(--line-soft); padding-top: 2px; }
+.pattern-foot .req-add, .pattern-foot .req-added { align-self: center; margin-left: -6px; }
+.pattern-foot .req-added { margin-left: 0; }
+.insight.pattern.done .pattern-foot { opacity: 1; }
+.insight.pattern.done .pattern-foot > :not(.insight-actions) { opacity: .55; }
 .insight-actions { display: flex; gap: 0; align-items: center; }
 .insight.done > :not(.insight-actions) { opacity: .55; }
 .list-focus { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); font-size: 12.5px; }
@@ -720,6 +729,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .req-hints { display: flex; gap: 3px; flex-wrap: wrap; margin-top: auto; }
 .req-hints i { font-style: normal; font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: var(--bg); color: var(--muted); }
 .req-strict { display: flex; flex-direction: column; gap: 2px; }
+.req-strict-block { display: flex; flex-direction: column; gap: 8px; }
 .req-strict input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
 .req-ticks { display: grid; grid-template-columns: repeat(5, 1fr); }
 .req-ticks button { border: 0; background: transparent; font-size: 12px; color: var(--muted); cursor: pointer; padding: 2px 0; }
@@ -780,6 +790,243 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   .req-guidance { grid-template-columns: 1fr; }
 }
 @media (max-width: 480px) { .req-levels { grid-template-columns: 1fr; } }
+
+/* ---------------------------------------------------------------------------------------------------------------------
+   Responsive (docs/mobile.md). A desktop above 1100 px is as above. A tablet (.app.tablet, ≤ 1100 px) keeps the viewer
+   and the right pane, with the clash list as a drawer. A phone (.app.phone, ≤ 760 px) shows the model full screen with
+   a bottom sheet (Sheet.tsx) over it: a bar (handle, what is happening and the next step, Clashes / Fix / Plan / Chat)
+   and under it the open pane. Touch screens get targets a finger can hit, whatever their width.
+   ------------------------------------------------------------------------------------------------------------------ */
+.pop-scrim, .pop-sheet-head { display: none; }
+.toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 32px);
+  background: #18212c; color: #fff; font-size: 13px; line-height: 1.4; padding: 8px 14px; border-radius: 999px; box-shadow: var(--shadow);
+  animation: toast-in .2s ease both; }
+@keyframes toast-in { from { opacity: 0; translate: 0 6px; } }
+.pop-item.on { color: var(--accent-ink); }
+.pop-item .tick, .menu-section .pop-item .chip, .menu-section .pop-item .why { margin-left: auto; }
+a.pop-item { color: inherit; }
+
+/* Touch: every target at least 44 px (36 for small buttons), no keyboard hints, no text selection while orbiting */
+@media (pointer: coarse) {
+  .ibtn { width: 44px; height: 44px; }
+  .btn { min-height: 44px; }
+  .btn.small { min-height: 36px; }
+  .pop-item { min-height: 44px; }
+  .pop-item kbd { display: none; }
+  input[type="checkbox"] { width: 20px; height: 20px; }
+  .clash-main { min-height: 44px; align-items: center; }
+  .groups summary { min-height: 44px; }
+  .triage-bar { height: 16px; }
+  .triage-row { min-height: 44px; box-sizing: border-box; }
+  .insight-actions .ibtn, .req-mover-ctl .ibtn { width: 40px; height: 40px; }
+  .seg button { min-height: 40px; }
+  .stage { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .resizer { display: none; }
+}
+
+/* Phones and tablets: the page is the window (no page scroll); panes appear without the desktop's entrance motion */
+.app.phone, .app.tablet { height: 100dvh; overflow: hidden; --head-h: calc(52px + env(safe-area-inset-top)); }
+.app.phone .pane, .app.tablet .pane { animation: none; }
+.app.phone .bar, .app.tablet .bar { display: flex; gap: 6px; align-items: center; min-height: var(--head-h); height: var(--head-h);
+  padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
+.app.phone .bar .brand, .app.tablet .bar .brand { margin-right: 4px; }
+.menu-btn { gap: 6px; }
+.btn.ghost.on { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* The header's menu (AppMenu.tsx): a panel from the right with every header action, by name */
+.menu-sheet { position: fixed; inset: 0; z-index: 45; background: rgba(10, 14, 20, .4); display: flex; justify-content: flex-end; }
+.menu-panel { width: min(380px, 90vw); height: 100%; overflow: auto; overscroll-behavior: contain; background: var(--surface);
+  padding: calc(8px + env(safe-area-inset-top)) 12px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px;
+  box-shadow: -12px 0 40px rgba(0, 0, 0, .18); animation: menu-in .22s ease both; }
+@keyframes menu-in { from { transform: translateX(24px); opacity: 0; } }
+.menu-head { display: flex; align-items: center; justify-content: space-between; padding: 0 0 8px 4px; border-bottom: 1px solid var(--line-soft); }
+.menu-section { display: flex; flex-direction: column; gap: 2px; }
+.menu-section h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 6px 4px; }
+.menu-section h3 svg { color: var(--accent); }
+.menu-section .pop-title { margin: 8px 6px 4px; font-size: 12.5px; }
+.menu-section .btn { align-self: flex-start; margin: 6px 6px 2px; }
+.menu-section .hint { margin: 4px 6px; }
+.menu-section .pop-item { white-space: normal; padding: 8px; }
+@media (prefers-reduced-motion: reduce) { .menu-panel, .toast { animation: none; } }
+
+/* Tablet: viewer + right pane; the clash list slides over from the left */
+.app.tablet { grid-template-columns: minmax(0, 1fr) min(var(--right-w), 360px); }
+.app.tablet .stage { grid-column: 1; grid-row: 2; }
+.app.tablet .pane.right { grid-column: 2; grid-row: 2; }
+.app.tablet .pane.left { position: fixed; z-index: 30; top: var(--head-h); bottom: 0; left: 0; width: min(420px, 88vw);
+  transform: translateX(-102%); visibility: hidden; transition: transform .25s ease, visibility 0s .25s; box-shadow: 8px 0 32px rgba(0, 0, 0, .16);
+  padding-bottom: env(safe-area-inset-bottom); }
+.app.tablet.list-open .pane.left { transform: none; visibility: visible; transition: transform .25s ease; }
+.drawer-scrim { position: fixed; inset: var(--head-h) 0 0 0; z-index: 29; background: rgba(10, 14, 20, .28); }
+.app.tablet.landing .stage { grid-column: 1 / -1; }
+@media (prefers-reduced-motion: reduce) { .app.tablet .pane.left { transition: none; } }
+
+/* Phone: header, the model, and the sheet (peek: its bar only; half: the model keeps the top 45%; full: up to the header) */
+.app.phone { display: block; position: relative; --half: 55dvh; --peek: var(--peek-h, 132px); }
+.app.phone .bar { position: absolute; top: 0; left: 0; right: 0; z-index: 20; }
+.app.phone .stage { position: absolute; left: 0; right: 0; top: var(--head-h); bottom: var(--stage-b); }
+.app.phone.landing .stage, .app.phone.starting .stage { bottom: 0; }
+.app.phone.starting .pane { display: none; }
+.app.phone.snap-peek { --sheet-h: var(--peek); --stage-b: var(--peek); }
+.app.phone.snap-half { --sheet-h: var(--half); --stage-b: var(--half); }
+.app.phone.snap-full { --sheet-h: calc(100dvh - var(--head-h) - 8px); --stage-b: var(--half); }
+.app.phone .sheet-bar { position: absolute; left: 0; right: 0; z-index: 16; bottom: calc(var(--sheet-drag, var(--sheet-h)) - var(--peek)); }
+.app.phone .pane { position: absolute; left: 0; right: 0; bottom: 0; z-index: 15; border: 0; height: calc(var(--sheet-drag, var(--sheet-h)) - var(--peek));
+  padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+.app.phone .pane.left { padding-bottom: env(safe-area-inset-bottom); }
+.app.phone:not(.dragging) .sheet-bar, .app.phone:not(.dragging) .pane { transition: bottom .28s cubic-bezier(.2, .8, .2, 1), height .28s cubic-bezier(.2, .8, .2, 1); }
+.app.phone .stage { transition: bottom .28s cubic-bezier(.2, .8, .2, 1); }
+.app.phone.snap-peek:not(.dragging) .pane { visibility: hidden; }
+.app.phone:not(.list-open) .pane.left, .app.phone.list-open .pane.right { display: none; }
+.app.phone .pane.right > .tabs { display: none; }
+.app.phone .pane.right { padding-top: 6px; }
+.app.phone .pane.right.chatting { padding-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .app.phone .sheet-bar, .app.phone .pane, .app.phone .stage { transition: none !important; } }
+
+.sheet-bar { background: var(--surface); border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgba(16, 24, 40, .14); padding: 0 12px;
+  display: flex; flex-direction: column; touch-action: none; -webkit-user-select: none; user-select: none; }
+.sheet-handle { all: unset; box-sizing: border-box; width: 100%; height: 22px; display: grid; place-items: center; cursor: grab; }
+.sheet-handle span { width: 40px; height: 5px; border-radius: 3px; background: #c3ccd7; }
+.sheet-handle:focus-visible span { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sheet-peek { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 0 10px; }
+.sheet-peek-text { all: unset; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; line-height: 1.35; cursor: pointer; }
+.sheet-peek-text > span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sheet-peek.live .sheet-peek-text { color: var(--accent-ink); }
+.sheet-peek .btn { flex: none; }
+.sheet-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 -12px; border-top: 1px solid var(--line-soft); }
+.app.phone.snap-peek .sheet-tabs { padding-bottom: env(safe-area-inset-bottom); }
+.sheet-tabs button { all: unset; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 52px; font-size: 11.5px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.sheet-tabs button.on { color: var(--accent-ink); box-shadow: inset 0 2px var(--accent); }
+.sheet-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.sheet-tabs .badge-n { position: absolute; top: 5px; left: calc(50% + 7px); margin: 0; }
+.sheet-tabs .spinner { position: absolute; top: 7px; left: calc(50% + 10px); }
+.activity-fold { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; font-size: 12.5px; }
+.activity-fold > summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+.activity-fold[open] > summary { margin-bottom: 8px; }
+.activity-fold .activity-head b { display: none; }
+
+/* Phone: what floats over the model */
+.app.phone .rail.compact { flex-direction: row; top: 8px; left: 8px; gap: 6px; align-items: center; }
+.rail.compact .btn, .rail.compact .pop > .btn { background: var(--surface); border-color: transparent; box-shadow: var(--shadow); }
+.app.phone .overlay.live { display: none; }
+.app.phone .overlay, .app.phone .pilot { left: 8px; right: 8px; max-width: none; transform: none; }
+.app.phone .hint-bar { top: 60px; }
+.app.phone .pilot { top: 60px; }
+.app.phone .props { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 70px); overflow: auto; z-index: 7; }
+.app.phone .compare { left: 8px; right: 8px; bottom: 8px; max-width: none; flex-direction: row; align-items: center; padding: 6px 8px; }
+.app.phone .compare .diff, .app.phone .compare .hint { display: none; }
+.app.phone .compare .seg { flex: 1; }
+.app.phone .compare .seg button { flex: 1; }
+.tool-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 2px 4px; }
+.tool-modes button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+.tool-modes button b { font-size: 13.5px; color: var(--ink); }
+.tool-modes button.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent-ink); }
+.tool-modes button svg { color: var(--accent); }
+.tool-views { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 0 2px 4px; }
+
+/* Phone: a popover is a sheet from the bottom, with its name and a close button */
+@media (max-width: 760px) {
+  .pop-scrim { display: block; position: fixed; inset: 0; z-index: 49; background: rgba(10, 14, 20, .35); }
+  .pop-menu { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; z-index: 50; max-height: 82dvh; overflow: auto;
+    overscroll-behavior: contain; min-width: 0; border-radius: 16px 16px 0 0; border: 0; padding: 0 12px calc(14px + env(safe-area-inset-bottom));
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, .2); translate: none !important; animation: sheet-up .22s ease both; }
+  @keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } }
+  .pop-sheet-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1; margin: 0 -12px 6px;
+    padding: 8px 8px 8px 18px; background: var(--surface); border-bottom: 1px solid var(--line-soft); font-size: 15px; }
+  .pop-menu .pop-item { white-space: normal; }
+  .pop-menu .hint { max-width: none; }
+  .owner-pop .pop-menu { right: 0; }
+  /* iOS zooms into any field under 16 px when it takes focus */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select { font-size: 16px !important; }
+}
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) { .pop-menu { animation: none; } }
+.app.phone .resizer, .app.tablet .resizer { display: none; }
+.app.phone .props .row:last-child { order: 2; }
+.app.phone .props .kv { order: 3; }
+@media (pointer: coarse) {
+  .sheet-handle { height: 28px; }
+  .sheet-peek-text { min-height: 44px; }
+  .suggest { min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
+  .btn.mic { min-width: 44px; }
+}
+
+/* Dialogs on a phone: full screen, the title row (with Close) stays at the top while the body scrolls */
+.lb-frame { touch-action: pan-y; }
+@media (max-width: 760px) {
+  .about-dialog { padding: 0; place-items: stretch; }
+  .about-dialog > div { width: 100% !important; height: 100dvh; max-height: 100dvh; border-radius: 0; overscroll-behavior: contain; }
+  .report-dialog { padding: 0 16px calc(20px + env(safe-area-inset-bottom)) !important; }
+  .report-dialog > .row:first-child { position: sticky; top: 0; z-index: 3; background: var(--bg); margin: 0 -16px 4px; gap: 8px;
+    padding: calc(6px + env(safe-area-inset-top)) 6px 6px 16px; border-bottom: 1px solid var(--line); }
+  .report-dialog > .row:first-child h2 { font-size: 16px; min-width: 0; }
+  .about-dialog .about { padding-top: 8px; }
+  .about-close { position: sticky; top: calc(8px + env(safe-area-inset-top)); align-self: flex-end; margin: 0 -6px -50px 0; z-index: 3;
+    background: var(--surface); box-shadow: var(--shadow); }
+  .report-dialog .actions .btn, .report-dialog .actions a.btn { flex: 1 1 auto; }
+  .lightbox { padding: calc(8px + env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom)); }
+  .lb-frame { width: min(100%, calc(100dvh - 240px)); }
+  .lightbox figcaption { font-size: 12.5px; }
+  .lb-nav { flex-wrap: wrap; }
+  .team-table { width: 100%; }
+  .team-table td { display: block; padding: 2px 0; border: 0; }
+  .team-table tr { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .team-table select { width: 100%; }
+  .detect-coverage table, .detect-coverage tbody, .detect-coverage tr { display: block; }
+  .detect-coverage thead { display: none; }
+  .detect-coverage tr { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .detect-coverage td { display: inline; border: 0; padding: 0 6px 0 0; }
+  .detect-coverage td:first-child { display: block; font-weight: 600; }
+}
+/* The agent's steps as cards (a phone, or the Fix tab's fold on a tablet) */
+.activity-fold .steps, .activity-fold .steps tbody { display: block; }
+.activity-fold .steps thead { display: none; }
+.activity-fold .steps tr { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 8px; padding: 6px 0 6px 8px; border-bottom: 1px solid var(--line-soft); }
+.activity-fold .steps td { padding: 0; border: 0; }
+.activity-fold .steps td:nth-child(n+4) { grid-column: 1 / -1; }
+.activity-fold .steps tr.ok td:first-child, .activity-fold .steps tr.fail td:first-child { box-shadow: none; }
+.activity-fold .steps tr.ok { box-shadow: inset 3px 0 var(--ok); }
+.activity-fold .steps tr.fail { box-shadow: inset 3px 0 var(--fail); }
+@media (max-width: 760px) {
+  .detect-coverage td[data-label]::after { content: " " attr(data-label) " ·"; color: var(--muted); }
+  .detect-coverage td:last-child::after { content: " " attr(data-label); }
+}
+/* Requirements on a phone: the check matrix as a list per group ("vs MEP: Clearance 50 mm"), controls stacked */
+@media (max-width: 760px) {
+  .req-grid-wrap { overflow: visible; border: 0; background: transparent; }
+  .req-grid, .req-grid tbody, .req-grid tr { display: block; min-width: 0; }
+  .req-grid thead, .req-grid td.req-none { display: none; }
+  .req-grid tr { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); margin-bottom: 8px; padding: 6px 4px; }
+  .req-grid th, .req-grid td { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; white-space: normal; padding: 4px 6px; }
+  .req-grid tbody th { flex-wrap: wrap; }
+  .req-grid td::before { content: attr(data-label); font-size: 12.5px; color: var(--muted); }
+  .req-group-name { width: auto; flex: 1; }
+  .req-movers li { align-items: flex-start; flex-direction: column; }
+  .req-top .req-name { flex-basis: 100%; }
+}
+@media (max-width: 760px) {
+  .report-dialog > * { flex-shrink: 0; }  /* full height: the column scrolls, its parts never squeeze */
+}
+@media (pointer: coarse) {
+  .req-switch input { width: 44px; height: 26px; }
+  .req-switch input::after { width: 22px; height: 22px; }
+  .req-switch input:checked::after { left: 20px; }
+}
+@container (max-width: 480px) {
+  .app.landing .about { padding-top: 24px; }
+  .app.landing .about h1 { font-size: 30px; }
+}
+@container (max-width: 720px) { .next-steps { grid-template-columns: minmax(0, 1fr); } }
+@media (pointer: coarse) {
+  details > summary { min-height: 44px; }
+  .detect-coverage summary, .triage-reasoning summary, .tools summary, .activity-fold > summary, .agent-setup > summary { padding: 12px 0; }
+  .more { min-height: 40px; }
+}
+@media (pointer: coarse) {
+  .review-form select, .review-form input, .team-table select, .req-cell select, .req-movers select, .detect-tol input { min-height: 40px; }
+}
+@media (max-width: 760px) { .lightbox { background: rgba(10, 14, 20, .95); } }
 
 /* A blank project (ProjectStart.tsx): the visitor's own models */
 .project-start { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 40px max(24px, calc(50% - 320px)); background: var(--bg); }
