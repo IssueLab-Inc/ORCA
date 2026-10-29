@@ -773,20 +773,13 @@ def apply_trim(scene: IfcScene, global_id: str, end: str, by_m: float) -> Trim:
 
 # ------------------------------------------------------------------------------------------------- penetrations
 
-# What can take a hole for a service, for now: walls and slabs with an extruded body. A beam, column or footing is
-# the structural engineer's to open (slice 4b reads other hosts with Muse; these stay refused until then).
+# Walls and slabs take openings for services as a matter of course; whether anything else may (a beam's web, a
+# machine panel's gland plate) is `hosts.decide`'s call. This module only needs the host's body to be extrusions, so
+# the opening can be cut reliably.
 PENETRABLE = ("IfcWall", "IfcSlab")
-NOT_PENETRABLE = {
-    "IfcBeam": "a beam's openings are the structural engineer's to place: route round it or through an opening it has",
-    "IfcColumn": "a column is never cut for a service",
-    "IfcFooting": "a footing is never cut for a service",
-    "IfcPile": "a pile is never cut for a service",
-    "IfcMember": "a structural member's openings are the structural engineer's to place",
-    "IfcDoor": "a door is never cut for a service", "IfcWindow": "a window is never cut for a service",
-    "IfcCurtainWall": "a curtain wall is never cut for a service",
-}
 OPENING_MARGIN_M = 0.005  # beyond the clearance, all round: tessellated circles and site tolerance
 OPENING_ROUND_M = 0.01    # opening sizes are rounded up to this
+FITTED_MARGIN_M = 0.001   # a fitted opening (a cable gland, a grommet): this much round the service, to the mm
 OPENING_PROUD_M = 0.01    # the void runs this far past each face of the host
 OPENING_EDGE_M = 0.05     # the host must surround the opening by this much: a hole at its edge is a notch
 MAX_THROUGH_M = 1.0       # deeper than any wall or slab: the run lies along the host, not across it
@@ -808,21 +801,17 @@ class Penetration:
     xdir: list[float]      # the service profile's X
     clearance_m: float = 0.025
     gap_m: float = 0.0             # the least gap between the service and the opening's edge, by construction
+    fit: str = "annular"           # "annular" (clearance round it) or "fitted" (a gland fits it)
     provision: str | None = None   # the provision for void's GlobalId, once applied
     opening: str | None = None     # the host's new opening, when it was cut
 
 
 def not_penetrable(host) -> str | None:
-    """Why `host` cannot take an opening here, or None."""
-    for cls, why in NOT_PENETRABLE.items():
-        if host.is_a(cls):
-            return why
-    if not any(host.is_a(c) for c in PENETRABLE):
-        return f"only walls and slabs take an opening for a service here ({host.is_a()} is not one)"
+    """Why the geometry of `host` cannot take an opening here, or None (whether it may is `hosts.decide`'s call)."""
     rep = host.Representation
     bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
     if not bodies or not all(i.is_a("IfcExtrudedAreaSolid") for b in bodies for i in b.Items):
-        return "only a wall or slab with an extruded body can be cut here"
+        return "only a host whose body is extrusions can be cut here"
     return None
 
 
@@ -852,11 +841,13 @@ def _outline(shape: str, w: float, h: float, px, py, step_m: float = 0.03) -> li
             + [px * x + py * y for y in ys[1:-1] for x in (-w / 2, w / 2)])
 
 
-def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: float = 0.025) -> Penetration:
-    """The opening a straight service needs through a wall or slab: its section plus the clearance and 5 mm all round,
-    rounded up to 10 mm, rectangular or round like the service, square to the service and through the host's whole
-    depth (found by rays from both sides round the opening's outline) and 10 mm proud of each face. Reads the model
-    only; `apply_penetration` writes it."""
+def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: float = 0.025,
+                fit: str = "annular") -> Penetration:
+    """The opening a straight service needs through a host: its section plus the clearance and 5 mm all round, rounded
+    up to 10 mm ("annular": a sleeve or fire-stopping fills the gap), or plus 1 mm, to the mm ("fitted": a cable gland
+    or grommet); rectangular or round like the service, square to it, through the host's whole depth (found by rays
+    from both sides round the opening's outline) and 10 mm proud of each face. Reads the model only;
+    `apply_penetration` writes it."""
     host = scene.entity(host_gid)
     why = not_penetrable(host)
     if why:
@@ -866,10 +857,11 @@ def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: f
     s = scene.unit_scales[i]
     sx, sy = _profile_size(item.SweptArea)
     round_ = item.SweptArea.is_a("IfcCircleProfileDef")
-    margin = clearance_m + OPENING_MARGIN_M
+    fitted = fit == "fitted"
+    margin, step = (FITTED_MARGIN_M, 0.001) if fitted else (clearance_m + OPENING_MARGIN_M, OPENING_ROUND_M)
 
     def up(x: float) -> float:
-        return round(float(np.ceil(round(x / OPENING_ROUND_M, 6)) * OPENING_ROUND_M), 4)
+        return round(float(np.ceil(round(x / step, 6)) * step), 4)
     w, h = up(sx * s + 2 * margin), up(sy * s + 2 * margin)
     shape = "round" if round_ else "rect"
     start, length = origin * s, item.Depth * s
@@ -907,7 +899,7 @@ def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: f
     gap = min((w - sx * s) / 2, (h - sy * s) / 2)
     return Penetration(service_gid, host_gid, shape, w, h, round(through + 2 * OPENING_PROUD_M, 4),
                        np.round(start + d * a, 5).tolist(), np.asarray(d).tolist(), np.asarray(px).tolist(), clearance_m,
-                       round(float(gap), 4))
+                       round(float(gap), 4), "fitted" if fitted else "annular")
 
 
 def _void_rep(model, s: float, pen: Penetration, context):

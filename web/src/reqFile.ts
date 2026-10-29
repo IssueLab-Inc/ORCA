@@ -1,6 +1,6 @@
 /** Coordination requirements in the browser (server: requirements.py; docs/requirements.md): kept in this browser,
  *  downloaded and uploaded as a file, edited a cell at a time. Pure functions, so the panel and App share them. */
-import type { Pattern, PatternVerdict, ReqCheck, ReqMover, Requirements, Strictness } from "./api";
+import type { Pattern, PatternVerdict, ReqCheck, ReqMover, ReqPenRule, Requirements, Strictness } from "./api";
 
 export const FORMAT = "orca-requirements/1";
 const STORE = "sightline.requirements";
@@ -118,6 +118,33 @@ export function hasByDesign(doc: Requirements | null, pattern: Pick<Pattern, "cl
 
 export function removeByDesign(doc: Requirements, index: number): Requirements {
   return bump({ ...doc, by_design: doc.by_design.filter((_, i) => i !== index) });
+}
+
+/** Set a group's rule for openings (null: no rule, Muse's reading decides). */
+/** Set a rule for openings: the group's own (`kind` null), or one kind of host's in it (null patch: no rule, Muse's
+ * reading decides). */
+export function setPenetration(doc: Requirements, group: string, patch: Partial<ReqPenRule> | null, kind: string | null = null): Requirements {
+  const rules = doc.penetrations ?? [];
+  const same = (r: ReqPenRule) => r.group === group && (r.kind ?? null) === kind;
+  const found = rules.find(same);
+  const penetrations = patch === null ? rules.filter((r) => !same(r))
+    : found ? rules.map((r) => (r === found ? { ...r, ...patch } : r))
+    : [...rules, { group, rule: "review" as const, max_mm: null, reviewer: null, reason: "", source: "user" as const, ...(kind ? { kind } : {}), ...patch }];
+  return bump({ ...doc, penetrations });
+}
+
+/** An opening option's host reading as a rule for that kind of host in its group (from the option's edit: server
+ * agent._try_penetration), never for the whole group: its other kinds read differently. */
+export function addPenetration(doc: Requirements, edit: Record<string, unknown>, reviewer: string | null): Requirements {
+  if (typeof edit.host_group !== "string" || !doc.groups.some((g) => g.id === edit.host_group)) return doc;
+  if (typeof edit.host_kind !== "string" || !edit.host_kind) return doc;
+  const rule = edit.verdict === "allowed" ? "allowed" : edit.verdict === "with_review" ? "review" : "never";
+  return setPenetration(doc, edit.host_group, { rule, reviewer, reason: String(edit.host_reading ?? "").slice(0, 240), source: "orca",
+    kind_name: String(edit.host_kind_name ?? "").slice(0, 80) }, edit.host_kind);
+}
+
+export function hasPenetration(doc: Requirements | null, group: unknown, kind: unknown = null): boolean {
+  return !!doc?.penetrations?.some((r) => r.group === group && (r.kind ?? null) === (kind ?? null));
 }
 
 function bump(doc: Requirements): Requirements {

@@ -16,13 +16,14 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, reports, requirements, step, verify
+from . import agent, detect, edits, hosts, reports, requirements, step, verify
 from .meta_client import ChatModel, MetaChatModel
 from .scene import IfcScene, is_provision, step_source
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
 MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
+HOSTS_TIMEOUT_S = 60   # a host reading that takes longer (a cold open-weights host) leaves the defaults
 MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
 # Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
 MODELS = Path(tempfile.gettempdir()) / "sightline-models"
@@ -37,7 +38,7 @@ SAMPLE_EXCLUDE = tuple(c.strip() for c in os.environ.get(
 
 class Workspace:
     def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None, max_scenes: int = MAX_SCENES,
-                 max_reports: int = MAX_REPORTS, keep=None):
+                 max_reports: int = MAX_REPORTS, keep=None, hosts_model: ChatModel | None = None):
         self.samples = samples
         self.max_scenes = max_scenes
         self.max_reports = max_reports
@@ -57,12 +58,27 @@ class Workspace:
         # Geometry trials edit the model and undo; anything touching a scene's geometry holds this.
         self.lock = threading.RLock()
         self._model = model
+        # What reads hosts for openings (hosts.read): given, or the triage model; none when only a proposal model was
+        # given (tests script that one).
+        self._hosts_model = hosts_model if hosts_model is not None else (False if model is not None else None)
 
     @property
     def model(self) -> ChatModel:
         if self._model is None:
             self._model = MetaChatModel()
         return self._model
+
+    @property
+    def hosts_model(self) -> ChatModel | None:
+        """The model that reads hosts: given, or the triage model as this request resolves it (the owner's choice,
+        else everyone's), like triage and titles. Never cached: the open-weights setting may change."""
+        if self._hosts_model is not None:
+            return self._hosts_model or None
+        from .meta_client import triage_model
+        try:
+            return triage_model(timeout_s=HOSTS_TIMEOUT_S)[0]
+        except Exception:   # no key here: walls and slabs only, as without a reading
+            return None
 
     def list_samples(self) -> list[str]:
         return sorted(p.name for p in self.samples.iterdir() if p.suffix.lower() in MODEL_SUFFIXES)
@@ -154,7 +170,8 @@ class Workspace:
         the model find openings and free space; spikes/README.md, spike 4)."""
         clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id, scene_id)
         return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
-                                    trials=on_event is not None, **self.fix_settings(scene_id, element_a, element_b)))
+                                    trials=on_event is not None, hosts_model=self.hosts_model,
+                                    **self.fix_settings(scene_id, element_a, element_b)))
 
     def fix_settings(self, scene_id: str, element_a: str, element_b: str) -> dict:
         """What the coordination requirements set for a fix of this pair (none: today's defaults): the clearance it
@@ -297,11 +314,22 @@ class Workspace:
         return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
 
     def check_penetration(self, scene_id: str, service: str, host: str, clearance_m: float = 0.025) -> dict:
-        """Try an opening for `service` through `host` without keeping it (edits.penetration)."""
+        """Try an opening for `service` through `host` without keeping it (edits.penetration), after reading what may
+        be done to that kind of host (hosts.read)."""
+        s = self.scene(scene_id)
         with self.lock:
-            attempt, option = agent._try_penetration(self.scene(scene_id), {}, service, host, clearance_m)
+            prof = None if hosts.hard_rule(s, host) else hosts.profile(s, host)
+        if prof and self.hosts_model is not None:
+            try:
+                hosts.read(self.hosts_model, [prof])
+            except Exception:
+                pass   # the defaults: walls and slabs only
+        with self.lock:
+            attempt, option = agent._try_penetration(s, {}, service, host, clearance_m)
+            reading = hosts.decide(s, host, requirements.current())
         return {"passed": attempt.passed, "reason": attempt.reason, "kind": attempt.kind,
                 "summary": (attempt.edit or {}).get("summary"), "review": option.review if option else None,
+                "host": hosts.reading_text(reading), "numbers": (attempt.edit or {}).get("numbers"),
                 "min_clearance_m": option.min_clearance_m if option else None,
                 "preview": option.preview if option else None}
 
@@ -315,7 +343,14 @@ class Workspace:
         host_policy = (settings.get("policy") or {}).get(host)
         cut = requirements.can_cut(host_policy)
         with self.lock:
-            pen = edits.penetration(s, service, host, settings.get("clearance_m", 0.025))
+            reading = hosts.decide(s, host, settings.get("doc"))
+            if reading.refuses:
+                raise edits.Unsupported(f"{s.element(host).name} may not take an opening: "
+                                        f"{reading.reasoning or hosts.reading_text(reading)}")
+            pen = edits.penetration(s, service, host, settings.get("clearance_m", 0.025), reading.fit)
+            problems, _ = hosts.check_hole(s, pen, reading)
+            if problems:   # the limits as they are now (the requirements may have changed since it was proposed)
+                raise edits.Unsupported("; ".join(problems))
             edits.apply_penetration(s, pen, cut)
             s.mark_edited(service)
             if cut:

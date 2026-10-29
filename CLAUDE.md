@@ -798,3 +798,26 @@ crosses a wall or slab.
   try at Rev04 heights; `evals/step_cell.py` C7: Muse offers the opening (36 s), kept and cut, the STEP's wall 2,655
   cm³ smaller with the provision for void in Compressed air; in the browser accepted in place, no file download.
 
+Which hosts take an opening (Oct 29, owner decision; `docs/edits.md` "Which hosts", code `server/sightline/hosts.py`,
+`domain_packs/penetrations.md`): beyond walls and slabs, Muse judges which kinds of element can take a hole.
+- **Order:** hard rules (`hosts.hard_rule`: columns, doors, windows, curtain walls, piles, footings, stairs, railings,
+  lifts, services and equipment, glazing by name or material, see-through proxies, and a **transfer element**: a beam
+  or member a column or wall stands on; Northbank's girder, which column B3 stands on) > the requirements'
+  `penetrations` rules per group (allowed / review / never, largest size, reviewer; omitted from the file when empty, so
+  its id is unchanged) > Muse's reading of each kind of host > the default (walls and slabs only).
+- **Muse's reading** (`hosts.read`, triage model, strict JSON, cached by kind for the server's life, read before a
+  proposal's first round): verdict, reviewer, fit (annular or fitted gland), limits (hole share of depth, distance from
+  ends and edges, middle third), conditions. Standard `Pset_*Common` facts only: a project's own psets (Northbank's
+  answer-key pset) never reach it. `Workspace.hosts_model` (none when a test injects the proposal model).
+- **The hole** (`hosts.check_hole`) against the limits; numbers on the option card (`hostRows` in fixKinds.ts).
+  Fitted openings: service + 1 mm, may touch. Openings in anything but a wall or slab rank after (`agent.tier`).
+- **Page:** Requirements dialog "Openings for services"; an opening read by Muse has **Add to requirements**, a rule
+  for that kind of host in its group only (`kind` = `hosts.profile` key, `edit.host_kind`), never the whole group. App imports `ClipboardPlus`, `addPenetration`, `hasPenetration`, `hostRows` (stubs updated).
+- **Cell C8** (demo-models): the 400 V feed's 32 mm conduit through EP-301's 3 mm gland plate. Rev A 161 parts, Rev B
+  185, 17 planted pairs. `step_classes.md` now names conduits (CONDUITSEGMENT); `samples/step-cache` regenerated.
+- **Checked:** `tests/test_hosts.py` (12); `evals/penetration_hosts.py` 25/25 on Muse Spark (18 kinds in one call,
+  34-41 s); `evals/step_cell.py` C7 and C8 (Ø34 mm fitted gland hole, kept, exported plate cut); answer key 3/3 first try
+  at Rev04 heights; 449 server tests, 59 web tests; C8 in the browser accepted in place.
+- **Review fixes (Oct 29):** host model resolved per request (60 s timeout), Muse's limits sanitised, narrow gland
+  plates still read, keeping an opening re-checks the hole, fitted options claim no clearance.
+

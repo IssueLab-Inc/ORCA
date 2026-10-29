@@ -40,15 +40,22 @@ def test_the_opening_is_the_section_plus_the_clearance_and_5_mm_all_round_throug
 
 
 @pytest.mark.parametrize("tag, host, why", [
-    ("PN-4", "Beam B1", "beam's openings are the structural engineer's"),
-    ("PN-5", "Column C1", "column is never cut"),
     ("PN-6", "Wall W1 partition", "break out of its edge above"),
     ("PN-1", "Wall W2 core", "does not reach it"),
     ("PN-4", "Wall W1 partition", "does not pass through it"),
 ])
-def test_beams_columns_and_holes_at_an_edge_are_refused(scene, tag, host, why):
+def test_holes_at_an_edge_or_off_the_line_are_refused(scene, tag, host, why):
     with pytest.raises(edits.Unsupported, match=why):
         edits.penetration(scene, gid(scene, tag), gid(scene, host))
+
+
+@pytest.mark.parametrize("tag, host, why", [
+    ("PN-5", "Column C1", "column is never cut"),
+    ("PN-4", "Beam B1", "No reading of this kind of host"),    # a beam may, once Muse has read it (hosts.py)
+])
+def test_columns_never_and_beams_not_without_a_reading(scene, tag, host, why):
+    attempt, option = agent._try_penetration(scene, {}, gid(scene, tag), gid(scene, host), 0.025)
+    assert not attempt.passed and option is None and why in attempt.reason
 
 
 def test_cut_in_a_trial_the_service_clears_the_wall_and_both_files_are_undone(scene):
@@ -97,7 +104,7 @@ def test_the_agent_offers_a_penetration_when_the_wall_leaves_no_way_round(scene)
     model = Muse()
     result = resolve(scene, Clash(pipe, wall), model, max_rounds=2)
     assert 'A "penetration" (move: "A") asks for a Ø170 mm opening' in model.calls[0]
-    assert "it needs fire-stopping to the host's EI 60 rating" in model.calls[0]
+    assert "allowed with review, reviewed by architecture; needs fire-stopping to the host's EI 60 rating" in model.calls[0]
     assert "is a straight segment from [2.0" not in model.calls[0]   # a wall is never offered as a run to split
     o = next(o for o in result.options if o.kind == "penetration")
     assert o.moved == [wall] and o.edit["service"] == pipe and o.edit["host"] == wall    # "move": "B" named the wall

@@ -191,10 +191,17 @@ export interface ReqCheck {
 }
 export interface ReqMover { group: string; edits: "any" | "move" | "none"; max_move_mm: number | null; trims: boolean }
 export interface ReqByDesign { a_classes: string[]; b_classes: string[]; reason: string; source: ReqSource }
+/** Whether a group may take openings for services (server: requirements.PenRule); wins over Muse's reading. */
+export interface ReqPenRule {
+  group: string; rule: "allowed" | "review" | "never"; max_mm: number | null; reviewer: string | null; reason: string;
+  source: "user" | "orca";
+  kind?: string | null; kind_name?: string;   // only for one kind of host in the group (from Muse's reading of it)
+}
 export interface Requirements {
   format: "orca-requirements/1"; name: string; version: number; level: number; strictness: Strictness;
   groups: ReqGroup[]; checks: ReqCheck[]; duplicates: boolean; rules: Record<string, boolean>;
   who_moves: ReqMover[]; by_design: ReqByDesign[]; guidance: { triage: string; fixes: string }; notes: string;
+  penetrations?: ReqPenRule[];
 }
 /** The numbers a level and strictness resolve to (server: requirements.resolve). */
 export interface ReqParams {

@@ -100,6 +100,16 @@ width across) and a trim inside one model is marked `cleanup`.
 |---|---|---|---|---|
 | 2026-10-28 | 3 | 3/3 | 0/3 | 3/3 (one trim each, on the beam, transom, beam) |
 
+## Which hosts take an opening
+
+`penetration_hosts.py` reads 25 labelled hosts (16 in Northbank, 9 in the PC-03 cell) the way a proposal does
+(`hosts.decide`: hard rules, then Muse's reading of each kind of host, all kinds in one call) and scores the verdict,
+reviewer and fit against what a coordinator would accept (`penetration_hosts.csv`, append-only). Oct 29 on Muse Spark:
+25/25, 18 kinds read in 34-41 s, 7 hosts settled by hard rules (transfer girder, column, glazing, the cell's motor
+control centre, light curtain and robot restricted space). The first run scored 23/25: a ground-bearing slab read as
+not advised (the prompt now lists floor and ground slabs as reviewed by structure), and the opaque glass spandrel
+panel's label was wrong (its material is glass: never is right).
+
 ## ORCA detection
 
 `detection_navisworks.py` runs ORCA's own detection (`server/sightline/detect.py`, docs/detection.md) on Northbank
