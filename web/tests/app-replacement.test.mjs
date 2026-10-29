@@ -60,9 +60,10 @@ async function appHost() {
   const react = url("export const useState=(...a)=>globalThis.__sightlineAppHooks.useState(...a),useRef=(...a)=>globalThis.__sightlineAppHooks.useRef(...a),useMemo=(...a)=>globalThis.__sightlineAppHooks.useMemo(...a),useEffect=()=>{};");
   const api = url("export const api={proposeStream:(...a)=>globalThis.__sightlineAppApi.proposeStream(...a),contextStream:(...a)=>globalThis.__sightlineAppApi.contextStream(...a),exportUrl:()=>'/export',models:async()=>({triage:{model:'m',open_weights:false}})}; export class ApiError extends Error{} export const setRequirements=()=>{};");
   const ownership = await compiled("../src/chatRequest.ts", {});
+  const kinds = await compiled("../src/fixKinds.ts", {});
   const context = await compiled("../src/ContextPlan.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), "lucide-react": icons, "./ReportList": mocks });
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
-    "./api": api, "./chatRequest": ownership, "./ContextPlan": context };
+    "./api": api, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds };
   for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   let tree;

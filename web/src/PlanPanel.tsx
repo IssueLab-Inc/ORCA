@@ -15,6 +15,8 @@ export interface PlanRun {
 const editText = (i: PlanItem) => {
   const o = i.option;
   if (!o) return "";
+  if (o.edit?.summary) return o.edit.summary;
+  if (o.kind === "trim") return o.trim ? `trim one end ${Math.round(o.trim.by_m * 1000)} mm` : "trim at the joint";
   return o.kind === "offset" && o.split_m
     ? `offset ${(o.split_m[1] - o.split_m[0]).toFixed(2)} m of it ${o.delta_m[2] > 0 ? "up" : "down"} ${Math.abs(Math.round(o.delta_m[2] * 1000))} mm`
     : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;

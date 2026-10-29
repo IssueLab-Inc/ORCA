@@ -20,7 +20,7 @@ const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.g
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[] };
-/** A fix to preview: an offset's new pieces, or a move. `before`: what it changes, as it is now. */
+/** A fix to preview: a move, or any other kind's pieces as world meshes. `before`: what it changes, as it is now. */
 export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null; worldMeshes?: boolean };
 
 /**
@@ -438,7 +438,7 @@ export class Viewer {
     this.moved.clear();
     if (mode !== "before") {
       for (const opt of opts) {
-        if ((opt.worldMeshes || opt.kind === "offset" || opt.kind === "trim") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
+        if ((opt.worldMeshes || opt.kind !== "move") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
           for (const gid of opt.moved) this.hidden.add(gid);
           this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
         } else {

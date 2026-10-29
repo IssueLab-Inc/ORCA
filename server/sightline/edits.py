@@ -580,6 +580,23 @@ def trial(scene: IfcScene, global_id: str):
         scene._bounds = before
 
 
+@contextmanager
+def trial_files(scene: IfcScene, indexes: set[int]):
+    """Edit several files of a scene (a plan, or one fix that changes two models), then undo every edit, cached boxes
+    included. Never nest it inside `trial`: a file holds one transaction at a time."""
+    before = dict(scene.bounds())
+    models = [scene.models[i] for i in sorted(indexes)]
+    for m in models:
+        m.begin_transaction()
+    try:
+        yield
+    finally:
+        for m in models:
+            m.end_transaction()
+            m.undo()
+        scene._bounds = before
+
+
 def meshes(scene: IfcScene, global_ids: list[str]) -> list[dict]:
     """World-space triangles (metres, Z up) for previewing new or changed elements in the browser."""
     settings = ifcopenshell.geom.settings()
