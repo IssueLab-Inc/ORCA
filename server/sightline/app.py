@@ -1104,7 +1104,7 @@ async def link_events(token: str, request: Request):
 
     async def stream():
         try:
-            yield json.dumps({"type": "hello", **link.public()}) + "\n"
+            yield json.dumps({"type": "hello", "stream": q.stream_id, **link.public()}) + "\n"
             idle = 0.0
             for _ in range(int(240 / 0.1)):  # under Modal's request limit; the page reconnects
                 if await request.is_disconnected() or links.get(token, touch=False) is None:
@@ -1119,6 +1119,8 @@ async def link_events(token: str, request: Request):
                         yield json.dumps({"type": "heartbeat"}) + "\n"
                     continue
                 idle = 0.0
+                if event.get("type") == "bye":  # the page said it is closing
+                    break
                 yield json.dumps(event, default=str) + "\n"
         finally:
             link.unsubscribe(q)
@@ -1136,6 +1138,12 @@ async def link_capture(token: str, capture_id: str, request: Request):
     if not link.deliver(capture_id, data or None):
         raise HTTPException(404, "Nobody is waiting for that picture any more.")
     return {"ok": True}
+
+
+@app.post("/api/links/{token}/leave/{stream_id}")
+def link_leave(token: str, stream_id: str):
+    """The page is closing (a beacon from `pagehide`): it no longer counts as a browser following this link."""
+    return {"left": _link(token, touch=False).leave(stream_id)}
 
 
 @app.delete("/api/links/{token}")

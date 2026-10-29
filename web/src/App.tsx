@@ -1245,6 +1245,7 @@ export function App() {
   async function onAgentEvent(e: LinkEvent) {
     if (!agentLink) return;
     if (e.type === "hello") {
+      agentStream.current = e.stream;
       setAgentLinkState((l) => l && { ...l, expires_at: e.expires_at, max_expires_at: e.max_expires_at,
         clock_offset: e.server_time - Date.now() / 1000, calls: e.calls, last_call: e.last_call ?? l.last_call });
       return;
@@ -1299,6 +1300,16 @@ export function App() {
     }
     onChatEvent(e as ChatEvent);
   }
+  // When the tab closes, tell the server at once (a proxy may hold a dropped stream open for a while), so the agent
+  // is not told a browser is following.
+  const agentStream = useRef<string | null>(null);
+  useEffect(() => {
+    if (!agentLink) return;
+    const token = agentLink.token;
+    const bye = () => { if (agentStream.current) api.leaveLink(token, agentStream.current); };
+    window.addEventListener("pagehide", bye);
+    return () => window.removeEventListener("pagehide", bye);
+  }, [agentLink?.token]);
   const agentHandler = useRef(onAgentEvent);
   agentHandler.current = onAgentEvent;
   // Follow the link while it lives: the server ends each stream after a few minutes, so reconnect.

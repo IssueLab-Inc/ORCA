@@ -15,9 +15,7 @@ export function AgentDialog({ link, log, now, creating, error, canCreate, onCrea
 }) {
   const [tab, setTab] = useState<"muse-code" | "claude-code" | "claude-desktop" | "other" | "local">("muse-code");
   const snippets = link ? {
-    // Muse Code's CLI adds a remote server by URL (no header option), so the token rides in the URL there.
-    "muse-code": `muse mcp add --transport http orca "${link.mcp_url}?key=${link.token}"`,
-    "muse-code-json": JSON.stringify({ schema_version: 1, mcpServers: { orca: { transport: "streamable_http", url: link.mcp_url,
+    "muse-code": JSON.stringify({ schema_version: 1, mcpServers: { orca: { transport: "streamable_http", url: link.mcp_url,
       headers: { Authorization: `Bearer ${link.token}` }, mode: "optional" } } }, null, 2),
     "claude-code": `claude mcp add --transport http orca ${link.mcp_url} --header "Authorization: Bearer ${link.token}"`,
     "claude-desktop": JSON.stringify({ mcpServers: { orca: { command: "npx", args: ["-y", "mcp-remote", link.mcp_url,
@@ -53,12 +51,8 @@ export function AgentDialog({ link, log, now, creating, error, canCreate, onCrea
               .map(([k, label]) => <button key={k} role="tab" className={tab === k ? "on" : ""} aria-selected={tab === k} onClick={() => setTab(k)}>{label}</button>)}
           </div>
           <Snippet text={snippets![tab]} />
-          {tab === "muse-code" && <>
-            <p className="hint">Run it in a terminal, then <code>muse mcp list</code> to check ORCA is there. Or add it to your
-              settings file instead (<code>~/.config/muse/settings.json</code>; on Windows <code>C:\Users\&lt;you&gt;\.config\muse\settings.json</code>):</p>
-            <Snippet text={snippets!["muse-code-json"]} />
-          </>}
-          <p className="hint">{tab === "muse-code" ? <>Keep the file's <code>"schema_version": 1</code>, and merge the <code>orca</code> entry into
+          <p className="hint">{tab === "muse-code" ? <>Add it to Muse Code's settings file: <code>~/.config/muse/settings.json</code> (on
+              Windows <code>C:\Users\&lt;you&gt;\.config\muse\settings.json</code>), then check with <code>muse mcp list</code>. Keep the file's <code>"schema_version": 1</code>, and merge the <code>orca</code> entry into
               whichever of <code>mcpServers</code> or the older <code>mcp_servers</code> your file already uses (only one of them).{" "}
               <code>"optional"</code> lets Muse Code carry on if this link expires. To keep the token out of the file, write{" "}
               <code>{"Bearer ${ORCA_TOKEN}"}</code> and set <code>ORCA_TOKEN</code> in your environment.</>

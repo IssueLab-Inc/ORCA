@@ -210,3 +210,13 @@ def test_a_closed_page_leaves_the_agent_working_and_says_so(server):
     session = rpc(server, token, "get_session")
     assert session["browser_connected"] is False and "page is closed" in session["note"]
     assert rpc(server, token, "report_summary")["clashes"] >= 1
+
+
+def test_a_page_that_closes_stops_counting_at_once(server):
+    token, link = _link(server)
+    first, second = link.subscribe(), link.subscribe()  # two tabs follow the link
+    assert server.post(f"/api/links/{token}/leave/{first.stream_id}").json() == {"left": True}
+    assert link.browser and first.get_nowait() == {"type": "bye"}  # the other tab still counts
+    server.post(f"/api/links/{token}/leave/{second.stream_id}")
+    assert not link.browser
+    assert server.post(f"/api/links/{token}/leave/nothing").json() == {"left": False}
