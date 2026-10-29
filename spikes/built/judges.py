@@ -1,6 +1,9 @@
 """S0 for Show it built, step 4: which judge? Muse Spark (reasoning high) and Muse Wonder (low, medium), three runs
 each on the same 31 pictures, scored against labels checked by eye on zoomed crops.
 
+`python judges.py OUT ids [medium]` (or `lines`) judges the hard pictures again with a third image of the model
+view. The ids picture is `s0.ids_picture` of the ids pass, saved as ids_picture.png in each pass folder.
+
 Reads OUT/judge3.json (Spark: three verdicts and the pixel gate per picture) and OUT/wonder_judge.json (Wonder),
 which `python judges.py OUT run [low,medium]` writes.
 
@@ -36,19 +39,25 @@ LATER_BAD = {
 # outline pass agrees), which Muse Wonder read as one wide slot in all 18 of its runs on them.
 
 
-WITH_LINES = (" Image 3 is the outline drawing of image 1, made from the model itself: use it to read image 1 exactly "
+THIRD = {  # a third image to read the model view by: what it is, and the file in each pass folder
+    "lines": (" Image 3 is the outline drawing of image 1, made from the model itself: use it to read image 1 exactly "
               "(how many openings, where edges and joints are, what is one object or two). It is the same view, not a "
-              "third picture to compare.")
+              "third picture to compare.", "lines.png"),
+    "ids": (" Image 3 is the same view as image 1 with each separate object of the model in its own flat colour, made "
+            "from the model itself: use it to read image 1 exactly (how many objects and openings there are, where one "
+            "object ends and the next begins). Its colours mean nothing else, and it is not a third picture to "
+            "compare.", "ids_picture.png"),
+}
 
 
-def wonder_judge(look: Path, picture: Path, effort: str, client: httpx.Client, lines: Path | None = None) -> dict:
-    """s0.judge's prompt and schema on Muse Wonder, with the time and the cost of the call. With `lines`, the outline
-    drawing of the model view goes along as image 3, to read the model view by."""
-    images = [_image_part(look), _image_part(picture)] + ([_image_part(lines)] if lines else [])
+def wonder_judge(look: Path, picture: Path, effort: str, client: httpx.Client, third: str | None = None) -> dict:
+    """s0.judge's prompt and schema on Muse Wonder, with the time and the cost of the call. With `third` ("lines" or
+    "ids"), that pass of the model view goes along as image 3, to read the model view by."""
+    images = [_image_part(look), _image_part(picture)] + ([_image_part(look.parent / THIRD[third][1])] if third else [])
     payload = {"model": "muse-wonder-1.0", "reasoning_effort": effort,
-               "messages": [{"role": "system", "content": s0.JUDGE_SYSTEM + (WITH_LINES if lines else "")},
+               "messages": [{"role": "system", "content": s0.JUDGE_SYSTEM + (THIRD[third][0] if third else "")},
                             {"role": "user", "content": [{"type": "text", "text": "Image 1, image 2" +
-                                                          (", then image 3." if lines else ".")}, *images]}],
+                                                          (", then image 3." if third else ".")}, *images]}],
                "response_format": {"type": "json_schema",
                                    "json_schema": {"name": "reply", "schema": s0.JUDGE, "strict": True}}}
     t = time.time()
@@ -83,23 +92,25 @@ def run(efforts: list[str]) -> None:
         json.dump(list(pool.map(one, jobs)), open(OUT / "wonder_judge.json", "w"))
 
 
-def run_lines(effort: str = "medium", runs: int = 2) -> None:
+def run_third(third: str, effort: str = "medium", runs: int = 2, everything: bool = False) -> None:
     """The pictures Wonder got wrong or that are hard (the cold-water views, the five found on zoom, the ladder's
-    mesh guards) and two easy faithful ones, judged with the outline drawing as image 3."""
+    mesh guards) and two easy faithful ones, judged with a third image (`THIRD`) to read the model view by."""
     load_env()
     picks = [("cw", "keep"), ("cw", "keep2"), ("cw", "keep_r"), *LATER_BAD, ("ladder", "keep"), ("transom", "keep"),
              ("tray", "keep")]
+    if everything:
+        picks = [(r["case"], r["variant"]) for r in json.load(open(OUT / "judge3.json"))]
     client = httpx.Client()
     d = OUT / "passes"
 
     def one(j):
         case, v, k = j
         return [[case, v, effort, k], wonder_judge(d / f"{case}-R3/look.png", d / f"{case}-R3/muse-{v}-1024.png", effort,
-                                                   client, lines=d / f"{case}-R3/lines.png")]
+                                                   client, third=third)]
 
     with ThreadPoolExecutor(10) as pool:
         res = list(pool.map(one, [(c, v, k) for c, v in picks for k in range(runs)]))
-    json.dump(res, open(OUT / "wonder_lines.json", "w"))
+    json.dump(res, open(OUT / f"wonder_{third}{'_all' if everything else ''}.json", "w"))
     spark = {(r["case"], r["variant"]): r for r in json.load(open(OUT / "judge3.json"))}
     bad = {k for k, r in spark.items() if r["bad"]} | set(LATER_BAD)
     by: dict = {}
@@ -144,6 +155,24 @@ def score() -> None:
             secs = sorted(r["_secs"] for r in rs)
             print(f"\nWonder {e}: {len(rs)} calls, median {secs[len(secs) // 2]} s, max {secs[-1]} s, "
                   f"${sum(r['_usd'] for r in rs) / len(rs):.3f} a call")
+    # Per call, averaged over every run (a fairer "1 call" than the first run alone).
+    runs = {"Spark high": {k: r["verdicts"] for k, r in spark.items()}}
+    for e in ("low", "medium"):
+        runs[f"Wonder {e}"] = {k: wonder[(*k, e)] for k in spark if (*k, e) in wonder}
+    for name, f in (("Wonder medium + outline", "wonder_lines_all.json"), ("Wonder medium + ids", "wonder_ids_all.json")):
+        if (OUT / f).exists():
+            got: dict = {}
+            for (case, v, _, _), r in json.load(open(OUT / f)):
+                got.setdefault((case, v), []).append(r["verdict"])
+            runs[name] = got
+    print(f"\n{'per call, pixel gate +':34} {'bad rejected':>12} {'faithful passed':>16}  runs")
+    for name, got in runs.items():
+        if len(got) < len(spark):
+            continue
+        rate = lambda k: 1.0 if spark[k]["pixel_fail"] else sum(map(unf, got[k])) / len(got[k])  # noqa: E731
+        caught = sum(rate(k) for k in bad)
+        passed = sum(1 - rate(k) for k in spark if k not in bad)
+        print(f"{name:34} {caught:>9.1f}/{nb} {passed:>13.1f}/{ng}  {len(next(iter(got.values())))}")
     gen = {v: [k for k in spark if k[1] == v] for v in ("keep", "keep2", "keep_r")}
     print("\nfaithful restyles, by eye: images endpoint", sum(k not in bad for v in ("keep", "keep2") for k in gen[v]),
           "of", len(gen["keep"]) + len(gen["keep2"]),
@@ -153,7 +182,7 @@ def score() -> None:
 if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[2] == "run":
         run(sys.argv[3].split(",") if len(sys.argv) > 3 else ["low", "medium"])
-    if len(sys.argv) > 2 and sys.argv[2] == "lines":
-        run_lines(sys.argv[3] if len(sys.argv) > 3 else "medium")
+    if len(sys.argv) > 2 and sys.argv[2] in THIRD:
+        run_third(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "medium", everything="all" in sys.argv[4:])
     else:
         score()

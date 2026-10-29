@@ -21,7 +21,8 @@ checks below.
    (`document.py` takes `after_img`).
 
 Decided (owner, Oct 29): the fix after only (ORCA's own before and after views are already there); a clean
-presentation render, not a site photo.
+presentation render, not a site photo; a switch in the owner menu at the top right, For me and For everyone, like the
+open-weights one.
 
 ## What Muse Image can't do (Oct 29, Navisworks pictures of #042)
 
@@ -113,13 +114,30 @@ pictures drew the tray's closed bend fitting as an open channel). 19 bad, 12 fai
 - **Wonder misreads one model view, every time:** the cold-water views have two openings side by side in the girder
   web (the outline pass shows both); Wonder read one wide slot in all 18 of its runs on them, and rejected all three
   faithful pictures. That case would never get a picture.
-- **The outline drawing as image 3 fixes that misread and loses others** (11 hard pictures, two runs, medium,
-  $0.071 a call): the cold-water pictures 6 of 6 faithful, but the round column in one air-pipe picture and the opened
-  bend in one duct picture passed both runs.
+- **A third image of the model view, to read it by** (`judges.py lines|ids`), on 11 hard pictures, two runs:
+  - the outline drawing: cold-water pictures 6 of 6 passed, but the round column in one air-pipe picture passed both
+    runs ($0.071 a call);
+  - **the ids picture** (`s0.ids_picture`: each element its own flat colour, background white): cold-water pictures 4
+    of 6 passed, and the clear errors were caught 7 times in 8 (the outline 6 in 8). So it ran on all 31.
+
+Per call, averaged over every run, pixel gate included:
+
+| Judge | Bad rejected | Faithful passed | Runs |
+|---|---|---|---|
+| Spark high | 13.0/19 | 11.3/12 | 3 |
+| Wonder low | 15.7/19 | 8.7/12 | 3 |
+| Wonder medium | 17.0/19 | 8.3/12 | 3 |
+| **Wonder medium + ids picture** | **16.0/19** | **11.0/12** | 2 |
+
+**Wonder medium + ids, either of two calls unfaithful fails the picture: 17/19 bad rejected, 10/12 faithful passed.**
+The two it lets through are the duct views' opened tray bend, which no judge caught reliably (and a real tray bend is
+open). Its other slips, one run each: the invented support (look only), the round column, and two false rejects (a
+cold-water picture, a tray picture). Median 35 s, 70 s at worst, $0.073 a call.
 
 A false reject costs a retry or, at worst, no picture (the true view still shows); a false accept puts a wrong
-picture beside the model. So the judge is **Muse Wonder, medium, one call per picture, without the outline**. Spent on
-this: $11.25 for 211 Wonder calls.
+picture beside the model. So the judge is **Muse Wonder, medium, with the ids picture as image 3, two calls in
+parallel, either unfaithful fails**. One call is the cheaper setting (16.0/19, 11.0/12). Spent on Wonder: $17.44 for
+295 calls.
 
 **Not run:** radius 2 and 5 m (3 m throughout); a penetration (needs the edits work); Wonder at high effort. The
 faithful labels are by eye on zoomed crops for every disputed picture, at thumbnail size for the rest. The capture
@@ -131,24 +149,27 @@ with the scene and the GPU draws the passes.
 ### Capture (browser)
 
 `Viewer.captureBuilt(fix)` in one task, the view put back (like `posed`): the cutaway viewpoint above, then the look
-(1024 px), ids, normals and the fix's own pieces. Classes for the cut costs come from the server with the scene
+(1024 px), ids, normals and the fix's own pieces; the server colours the ids pass for the judge
+(`s0.ids_picture`). Classes for the cut costs come from the server with the scene
 (`describe` today is one call per element). The page sends look, lines (or ids and normals, and the server draws the
 lines), the legend and what was taken away.
 
 ### Generate and check (server)
 
 - `server/sightline/built.py`: two pictures at once through Responses (`image_generation`, `reasoning_strength`
-  high), so one usually passes without a second round; each through the pixel gate, then one Muse Wonder judge
-  (medium) each, in parallel. The first that passes is shown; with none, one more pair with the judge's differences in
-  the prompt ("don't drop the mesh guard panels on the right"), then "Muse Image couldn't keep to the model here" and
-  the true view only.
-- About a minute to a checked picture (23 s to draw, median 32 s to judge, 81 s at worst); the panel streams the
+  high), so one usually passes without a second round; each through the pixel gate, then two Muse Wonder judges
+  (medium, look + picture + ids picture), all four calls in parallel. The first picture both judges pass is shown;
+  with none, one more pair with the judges' differences in the prompt ("don't drop the mesh guard panels on the
+  right"), then "Muse Image couldn't keep to the model here" and the true view only.
+- About a minute to a checked picture (23 s to draw, median 35 s to judge, 70 s at worst); the panel streams the
   stages.
-- Cost: $0.14 a click ($0.02 in pictures, $0.12 in judging), $0.28 with the second pair. Wonder has no contributor
-  tier, so built views share the escalation's daily spend limit (`docs/escalation.md`), and the owner's caps apply.
-  Without Wonder (off, or over the limit): Muse Spark, any of three calls, with the label saying the check was the
-  lighter one. Cached by a hash of the look, lines and prompt version, so the PDF, replays and the tour reuse a
-  picture.
+- Cost: $0.31 a click ($0.02 in pictures, $0.29 in judging), $0.62 with the second pair; $0.17 with one judge call.
+- **Who gets it:** a switch in the owner menu at the top right (`settings.py` `built_views`, For me and For everyone,
+  like `open_weights`; env `SIGHTLINE_BUILT_VIEWS`, default off). Off for everyone, the button isn't shown to
+  visitors; the owner can keep it on for themselves. Wonder has no contributor tier, so built views also share the
+  escalation's daily spend limit (`docs/escalation.md`), and the caps apply to visitors. Without Wonder (over the
+  limit): Muse Spark, any of three calls, with the label saying the check was the lighter one. Cached by a hash of the
+  look, lines and prompt version, so the PDF, replays and the tour reuse a picture.
 - Not offered for trims and cleanups: a 30 mm cut-back is invisible at the scale of the view (the transom).
 
 ### API and UI
@@ -182,6 +203,5 @@ Branch `feature/show-it-built`, one PR.
 ## Open questions
 
 1. PDF built views: opt-in per report, or automatic for accepted fixes?
-2. Is $0.14–0.28 a click acceptable for the public demo, or should built views be owner-only or capped low?
-3. The cold-water misread: try the ids pass (one colour per element) as image 3 instead of the outline, or accept
-   that some views never get a picture.
+2. Two judge calls ($0.31 a click) or one ($0.17)?
+3. The opened tray bend: accept it (a real tray bend is open), or say "solid fittings stay closed" in the prompt.

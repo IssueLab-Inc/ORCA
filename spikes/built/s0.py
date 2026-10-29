@@ -77,6 +77,24 @@ def model_lines(ids: np.ndarray, normals: np.ndarray, crease_deg: float = 25) ->
     return out
 
 
+def ids_picture(ids: np.ndarray) -> Image.Image:
+    """The ids pass as a picture a reader can use: each element its own flat colour (hues spread by the golden
+    ratio, so neighbours differ), the background white."""
+    keys, inv = np.unique(ids, return_inverse=True)
+    hue = (np.arange(len(keys)) * 0.618034) % 1.0
+    sat = 0.55 + 0.4 * ((np.arange(len(keys)) * 0.381966) % 1.0)
+    val = 0.6 + 0.35 * ((np.arange(len(keys)) * 0.7548777) % 1.0)
+    hsv = np.stack([hue, sat, val], -1)
+    i = np.floor(hsv[:, 0] * 6).astype(int) % 6
+    f = hsv[:, 0] * 6 - np.floor(hsv[:, 0] * 6)
+    v, s_ = hsv[:, 2], hsv[:, 1]
+    p_, q, t = v * (1 - s_), v * (1 - f * s_), v * (1 - (1 - f) * s_)
+    rgb = np.choose(i[:, None], [np.stack(c, -1) for c in
+                                 ((v, t, p_), (q, v, p_), (p_, v, t), (p_, q, v), (t, p_, v), (v, p_, q))])
+    rgb[keys == 0] = 1.0
+    return Image.fromarray((rgb[inv.reshape(ids.shape)] * 255).astype(np.uint8))
+
+
 def dilate(mask: np.ndarray, r: int) -> np.ndarray:
     out = mask.copy()
     for _ in range(r):
