@@ -91,14 +91,18 @@ other obstacles).
 when the obstacle has no opening, the up offsets) at which the run's profile, with the clearance all round, passes that
 stretch clear of everything, not only the obstacle. Rays run along the stretch round the profile's outline (every
 30 mm) and at its centre; a ray inside a solid counts as blocked (its middle in an element's box); a band counts only if
-the run can reach it square from its line at both ends of the stretch. On the cell's C6: beside column C3, side offsets
+the run can reach it square from its line at both ends of the stretch. Only triangles that reach the stretch are kept, binned by where they sit
+across the run so each ray tests its own cell (a mesh is triangulated with CGAL); past 200,000 triangles the room is
+not told. It is worked out once per proposal, not every round. A dense 28,800-triangle mesh beside a run: 52 s
+before, 0.6 s now, with the same bands on every fixture and cell case. On the cell's C6: beside column C3, side offsets
 +0.20 to +0.29 m (between the column and the fence); past both columns at once, none (ES-2 is between them). For a single
-proposal on a report clash, the moving element's other clashes within 3 m are named too (`Workspace._nearby`): a route
-may clear them together, but only the asked clash is required (never the fixed side's: a girder's other services are
-their own clashes).
+proposal on a report clash, the moving element's other clashes within 3 m of where the pair meet are named too
+(`Workspace._nearby`, per side: each element hears of its own): a route may clear them together, but only the asked
+clash is required (never the fixed side's: a girder's other services are their own clashes).
 
 **Demo case:** the cell's C6 (demo-models repo): PL-302 runs along the plant's south wall through columns C3 and C4.
 Offsets over or under fail (the columns run full height), a whole-run move or one long detour hits the ES-2 emergency
 stop between them; a detour of 200 mm round each column clears with 33 mm to spare.
 
-**Not yet:** 45° pieces, falling drainage, diagonal ("rolling") changes, and routes in the wider-fix planner.
+**Not yet:** 45° pieces, falling drainage, and routes in the wider-fix planner. (Diagonal "rolling" changes are
+done, for round pipes only.)
