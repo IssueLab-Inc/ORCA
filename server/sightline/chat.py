@@ -449,14 +449,18 @@ class Chat:
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "propose_fixes":
             second = bool(args.get("escalate"))
-            refused = escalate_ok() if second else allowed()
-            if refused:
-                return {"error": refused}, "refused: " + ("no second try" if second else "allowance used"), []
             r, sid = self._report(ctx), self._scene(ctx)
             c = r.clash(args["clash_id"])
             m = self._matches(ctx).get(c.id, {})
             if not (m.get("a") and m.get("b")):
                 return {"error": "both elements must be in the open model"}, "not in the model", []
+            recommend = second and ws.fix_settings(sid, m["a"], m["b"]).get("recommend")
+            if recommend:   # nothing may be edited: no second try to make, and nothing charged for one
+                return ({"error": f"Nothing may be edited here ({recommend}); a first try gives the recommendation."},
+                        "no second try: recommendation only", [])
+            refused = escalate_ok() if second else allowed()
+            if refused:
+                return {"error": refused}, "refused: " + ("no second try" if second else "allowance used"), []
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
             on_event = lambda e: emit({"type": "agent", "event": e})   # noqa: E731
             if second:
@@ -475,7 +479,7 @@ class Chat:
             if result.get("escalated"):
                 note += " This was a second try on Muse Wonder: the first try's fixes are included."
             elif (not summary or all(o["kind"] in ("resize", "penetration") for o in summary)) and \
-                    settings.escalation() != "off":
+                    not result.get("recommendation") and settings.escalation() != "off":
                 note += (" A second, longer try on Muse Wonder is possible (propose_fixes with escalate true) if the "
                          "user wants one.")
             return ({"understanding": result["understanding"], "verified_options": summary, "failed": failed[:8],

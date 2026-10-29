@@ -34,7 +34,8 @@ export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m:
  * route: a detour of several steps; resize: a flatter section past the obstacle; penetration: an opening through it. */
 /** A kept fix: the files it changed, a split run's pieces, and how to patch the page's model (Patch). A penetration whose
  * host the requirements lock comes back `cut: false`, with who cuts it. */
-export type Kept = { files: number[]; pieces?: string[]; cut?: boolean; blocked_by?: string } & Patch;
+/** A kept fix: `pieces`, its split run (the original first); `groups`, every run it split (a combined fix's several). */
+export type Kept = { files: number[]; pieces?: string[]; groups?: string[][]; cut?: boolean; blocked_by?: string } & Patch;
 export type FixKind = "move" | "offset" | "trim" | "route" | "resize" | "penetration" | "combined";
 export interface TrimCut { end: "start" | "end"; by_m: number }
 /** Under requirements that allow no edit: Muse Spark's best idea for the designer, never tried or applied. */
@@ -96,7 +97,8 @@ export type AgentEvent = (
   | ({ type: "trial" } & Trial)
   | ({ type: "attempt"; index: number } & Attempt)
   | ({ type: "result" } & Proposal)
-  | { type: "escalating"; model: string; first: boolean }  // a second try starts, on this model
+  // A second try starts, on this model; with the first try as it stands (null: none to read).
+  | { type: "escalating"; model: string; first: boolean; first_try?: { understanding: string; advice?: string; attempts: Attempt[] } | null }
   | { type: "note"; text: string }
   | { type: "error"; detail: string }) & { model?: string };   // a second try names its model on every event
 
@@ -317,6 +319,7 @@ export interface PlanItem {
   key: string; element_a: string; element_b: string; label: string; clash_ids: string[]; in_report: boolean;
   distance_m: number | null; understanding: string; option: Option | null; alternatives: Option[]; tried: number; error: string;
   others?: string[];  // more elements the same movable element runs into: one fix clears them all
+  recommended?: boolean;  // the requirements allow no edit here: a recommendation, no second try
 }
 export interface PlanCheck {
   passed: boolean; items: Record<string, { passed: boolean; reason: string; min_clearance_m: number | null }>;

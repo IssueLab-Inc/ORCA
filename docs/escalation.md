@@ -1,7 +1,7 @@
-# Escalating to Muse Wonder (draft plan)
+# Escalating to Muse Wonder
 
-**Status (Oct 29):** draft, not built. Waits on the Advanced IFC edits (`docs/edits.md` on `feature/fix-kinds`, then
-reroute, resize and penetration), which give Wonder the edits it needs: an opening in structure, a reroute, a resize.
+**Status (Oct 29):** built (below: "What was built" and "E0 results"). The design that follows is the plan it was built
+from; where the two differ, "What was built" says what the code does.
 
 When Muse Spark's propose → verify loop ends with no verified fix, the clash gets a second, longer try: Muse Wonder
 (`muse-wonder-1.0`), with everything ORCA learned on the first try and every registered kind of edit. It runs
@@ -17,7 +17,7 @@ through the same geometry check: nothing reaches the user unverified, and the he
 - A small question: 9.3 s on Responses (effort low, 225 reasoning tokens), 5.1 s on chat completions.
 - Reasoning tokens count against `max_completion_tokens`: a 20-token cap came back with `content: null`. Never set a
   tight cap.
-- **Not yet tried: Wonder on a real clash Spark can't fix.** That is step 1 (E0).
+- Wonder on real clashes Spark can't fix: E0, below.
 
 ## When it runs
 
@@ -84,7 +84,8 @@ model's author** carries both runs.
 
 - `SIGHTLINE_ESCALATE_PER_HOUR` per visitor (default 3) and `SIGHTLINE_ESCALATE_PER_DAY` for everyone (default 30);
   an escalation also takes one proposal. The owner has no caps; MCP links charge the link's creator.
-- A spend guard: `SIGHTLINE_ESCALATE_MAX_USD_DAY`, from the recorded usage, stops escalations for the day.
+- A spend guard: `SIGHTLINE_WONDER_MAX_USD_DAY` (built as one budget for every Muse Wonder call, Show it built's
+  judges included), from the recorded usage, stops escalations for the day.
 
 ## UI
 
@@ -145,8 +146,83 @@ Branch `feature/wonder-escalation`, one PR.
   picture and model agree.
 - Test cases that need each new kind, for E0.
 
+## What was built (Oct 29)
+
+- **Model:** `meta_client.escalation_model()` (`META_ESCALATION_MODEL`, default `muse-wonder-1.0`, 240 s timeout, role
+  `"escalation"`, default effort medium). `escalation_info()` tells the page the model, its label and the mode.
+  `MetaChatModel.usage` counts every call's tokens (chat completions' `usage`; Responses' final event, however it
+  ended: completed, incomplete or failed); `PRICES` is by id prefix, so any Wonder version is billed. A run's usage is
+  the difference over that run (`Usage.snapshot`), reported only for a model billed per token (Muse Spark's one client
+  is shared by every visitor).
+- **Budget:** `spend.py`, one day's limit for every Muse Wonder call (`SIGHTLINE_WONDER_MAX_USD_DAY`, default $25;
+  in memory, UTC day). Work asks `spend.refused(estimate)` first and holds its estimate while it runs
+  (`spend.held`, $1 a second try: `escalation.ESTIMATE_USD`), so tries started together cannot all pass on a nearly
+  spent day. The owner is exempt from the limit, not from the count.
+- **Setting:** `settings.escalation()` off / button / auto (`SIGHTLINE_ESCALATION`, default button) and
+  `escalation_effort`, for me and for everyone in the owner menu.
+- **The brief:** `escalation.brief` = the first try (understanding, advice, each idea with why it failed and what it
+  hit by name, the fixes it verified), the elements it ran into most with the openings and room past each
+  (`blockers`), every element within 5 m (`neighbourhood`: class, name, level, box, whether a combined fix may move it,
+  whether it is joined to A or B), and the kinds of fix from the registry. Prompt: `domain_packs/escalation.md`.
+- **The combined kind** (`agent._try_combined`, registered in `TRIES`/`PARAMS`/`IN_TRIAL`/`KEEP`/`SIZED`): 1 to 3
+  steps (move, offset, route), each on its own element, one on A or B, tried in one trial and checked together
+  (`check_combined`: each step's elements against everything, a split run's shortened ends against A, B and the other
+  steps). Never structure (`agent.stays`: the fixed classes by inheritance, IFC2X3's `IfcWallStandardCase` included,
+  and piles), nothing but services besides A and B, and a moved run must hold neither; the requirements apply to
+  every element a step moves. Ranks after a single element's fix (`TIERS` 0.5) and ends the search. Kept all or
+  nothing (`edits.kept_files`), with each split run's pieces returned on its own (`groups`). A plan checks it the same
+  way (`plans._in_trial_combined` returns its own check).
+- **The second try:** `Workspace.escalate`: reads the last try at the pair (`last_try`, kept per scene and pair, 200
+  at most, dropped with its scene), but only while it still holds: once an edit was kept in the scene or the
+  requirements changed, its options were verified against a model or rules that are gone, so the second try starts
+  without it. Two rounds on Wonder; the result's options are both tries' in one ranked list, each with its `model`,
+  and its attempts both tries'. A first try that a plan made (a Fix-together item) is remembered too. Refused where
+  nothing may be edited (409, before any cap is taken). `propose` with `auto`: a second try at once when nothing
+  verified, if the caller's caps allow; if it fails, the first try's result comes back with a note.
+- **API:** `POST /propose` and `/propose/stream` with `escalate: true` (events: `escalating` with the model and the
+  first try's ideas, then the second try's events, each with `model`); `GET /api/models` has `escalation`. Caps:
+  `SIGHTLINE_ESCALATE_PER_HOUR` / `_PER_DAY`, plus one proposal, both taken or neither
+  (`ProposeLimit.take_all`).
+- **Page:** NoFix's **Ask Muse Wonder**; under verified options **Look for a better fix with Muse Wonder**; a failed
+  Fix-together item's **Ask Muse Wonder** (it reads the plan's try at that pair); model chips on options and
+  ideas; the pilot names the model and numbers the second try's ideas after the first's; the owner sees tokens and
+  cost. A second try that fails or is refused puts the first try's options back.
+- **Chat and MCP:** `propose_fixes(escalate=true)`; chat suggests it only when there is no fix and no
+  recommendation.
+- **Tests:** `tests/test_escalation.py` (combined fixes, guards, atomic keep, the second try, staleness, caps, budget,
+  usage, chat, API) and `tests/test_plans.py` (a combined fix in a plan; a plan item remembered).
+
+## E0 results (Oct 29, `evals/escalation.py`, `evals/runs/2026-10-29-escalation/`)
+
+21 real clashes (Northbank's answer key and B1, the cell's planted C1-C8), one Muse Spark proposal each: 6 with no
+verified fix, 2 fixed only with an opening (C7, C8), 1 lost to a Meta 500 in the sweep. On the 6, three arms of two
+rounds each:
+
+| Case | Spark again | Spark + brief | Wonder + brief | Wonder s / $ |
+|---|---|---|---|---|
+| Cell C4 robot reach × post N3 | no fix | no fix | move post 300 mm and lift 180 mm | 113 / 0.26 |
+| Cell C4 × post N4 | no fix | move post 400 mm onto plinth | move post 400 mm and lift 120 mm | 112 / 0.19 |
+| Cell C4 × base plate N3 | no fix | move base 1250 mm | move base 500 mm, lift 200 mm | 143 / 0.35 |
+| Cell C4 × base plate N4 | no fix | move base 350 mm onto plinth | move base 500 mm, lift 150 mm | 117 / 0.30 |
+| Cell C5 HMI × panel space | no fix | no fix | no fix | 124 / 0.33 |
+| Northbank B1 pad footing × lift pit wall | no fix | no fix | move the pad footing 1.30 m west | 45 / 0.12 |
+| **Verified** | **0 of 6** | **3 of 6** | **5 of 6** | 19 min, **$2.01** in all |
+
+- **Decision:** ship it as built (the button; auto for the owner to try). Wonder with the brief verified two more
+  than Spark with it, the rule set above.
+- **The brief is most of the gain on Spark:** 0 → 3 of 6. Next: give it to Spark's own second round (free on the
+  contributor tier) and keep Wonder for what is left.
+- **Read the C4 fixes with care.** Four of Wonder's five lift a fence post or base plate 120-200 mm off its slab:
+  the move check counts the post's embedment in the slab as a clash once the post moves (as the C5 HMI's floor
+  contact), so lifting dodges it. Geometrically verified, not buildable as drawn. The fix belongs in the check (a
+  move keeps the contacts the element already had, as a trim and a penetration do), not in the prompt.
+- **B1 moves a pad footing:** verified, but structure; `review` should say so (follow-up: the same "structure
+  review" chip a penetration in structure gets).
+- **Better fix** on C7 and C8 (openings): Wonder found no plain fix either. Northbank's answer key stays 3/3 first
+  try at Rev04 heights on Spark.
+
 ## Open questions
 
-1. Cap defaults and the daily spend limit.
+1. Cap defaults and the daily spend limit: 3 an hour per visitor, 30 a day, $25 a day for now.
 
 Decided (Oct 29): a button by default; also offered after a successful run, to look for a better fix.

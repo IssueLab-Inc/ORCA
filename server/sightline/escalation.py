@@ -21,6 +21,8 @@ NEAR_M = 5.0        # the neighbourhood: elements whose boxes come this close to
 NEAR_MAX = 80       # at most this many of them, nearest first
 BLOCKERS = 3        # the elements the first try ran into most: openings and room past each are worked out
 MAX_CHARS = 60_000  # about 15k tokens of brief; the 1M context needs no trimming, but every token is billed
+ESTIMATE_USD = 1.0  # about what a second try may cost at most (two rounds of Muse Wonder): held against the day's
+                    # budget while it runs (spend.held), so tries started together cannot all pass the check
 
 
 def zone(scene: IfcScene, a: str, b: str) -> np.ndarray:
@@ -37,7 +39,7 @@ def _gap(box: np.ndarray, z: np.ndarray) -> float:
 
 def neighbourhood(scene: IfcScene, a: str, b: str, near_m: float = NEAR_M, most: int = NEAR_MAX) -> list[str]:
     """The elements around the clash, nearest first: GlobalId, class, name, level, box, how far from where A and B
-    meet, and whether it stays (structure) or is joined to A or B."""
+    meet, whether a combined fix may move it (services only) and whether it is joined to A or B."""
     boxes = scene.bounds()
     if a not in boxes or b not in boxes:
         return []
@@ -51,7 +53,8 @@ def neighbourhood(scene: IfcScene, a: str, b: str, near_m: float = NEAR_M, most:
              "[min x, y, z] to [max x, y, z] m):"]
     for d, g in near:
         e = scene.element(g)
-        tags = (["stays (structure)"] if e.fixed else []) + (["joined to A or B"] if g in joined else [])
+        tags = (["stays (structure)"] if agent.stays(scene, g) else ["may move (a service)"] if agent.is_service(scene, g)
+                else ["stays"]) + (["joined to A or B"] if g in joined else [])
         lo, hi = np.round(boxes[g], 3).tolist()
         lines.append(f"- {g} {e.ifc_class} '{e.name}', level {e.storey}, {lo} to {hi}, {d:.2f} m away"
                      + (f" ({', '.join(tags)})" if tags else ""))
@@ -119,8 +122,9 @@ def blockers(scene: IfcScene, clash: agent.Clash, first: dict | None, clearance_
         if g not in boxes:
             continue
         e = scene.element(g)
+        movable = not agent.stays(scene, g) and agent.is_service(scene, g)
         lines.append(f"The first try ran into {e.ifc_class} '{e.name}' ({g}) {n} time{'s' if n != 1 else ''}"
-                     + (" (it stays: structure)." if e.fixed else " (a service: it may move in a combined fix)."))
+                     + (" (a service: it may move in a combined fix)." if movable else " (it stays where it is)."))
         for label, run in (("A", clash.element_a), ("B", clash.element_b)):
             if scene.element(run).fixed:
                 continue

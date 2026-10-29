@@ -49,9 +49,9 @@ def load_env(path: Path = ENV_FILE) -> None:
             os.environ.setdefault(key.strip(), value.strip())
 
 
-# Models billed per token on the Meta Model API: USD per input and per output token (reasoning counts as output).
-# Muse Spark's contributor tier and the open-weights host are not counted here.
-PRICES = {"muse-wonder-1.0": (4 / 1e6, 20 / 1e6)}
+# Models billed per token on the Meta Model API, by id prefix (any Muse Wonder version): USD per input and per output
+# token (reasoning counts as output). Muse Spark's contributor tier and the open-weights host are not counted here.
+PRICES = {"muse-wonder": (4 / 1e6, 20 / 1e6)}
 LABELS = {"muse-wonder": "Muse Wonder", "muse-spark": "Muse Spark", "meta-models/muse-spark-open": "Muse Spark Open"}
 
 
@@ -85,15 +85,20 @@ class Usage:
             self.reasoning_tokens += tokens[2]
         return tokens
 
-    def as_dict(self, model_id: str) -> dict:
-        return {"model": model_id, "calls": self.calls, "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens, "reasoning_tokens": self.reasoning_tokens,
-                "usd": round(cost(model_id, self.input_tokens, self.output_tokens), 4)}
+    def snapshot(self) -> tuple[int, int, int, int]:
+        with self._lock:
+            return self.calls, self.input_tokens, self.output_tokens, self.reasoning_tokens
+
+    def as_dict(self, model_id: str, since: tuple[int, int, int, int] = (0, 0, 0, 0)) -> dict:
+        """The usage (since a `snapshot`, for one run on a model other runs share), and what it cost."""
+        calls, tin, tout, reasoning = (now - then for now, then in zip(self.snapshot(), since))
+        return {"model": model_id, "calls": calls, "input_tokens": tin, "output_tokens": tout,
+                "reasoning_tokens": reasoning, "usd": round(cost(model_id, tin, tout), 4)}
 
 
 def cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
     """What a call cost in USD (0 for a model not billed per token here)."""
-    price_in, price_out = PRICES.get(model_id, (0.0, 0.0))
+    price_in, price_out = next((p for prefix, p in PRICES.items() if model_id.startswith(prefix)), (0.0, 0.0))
     return input_tokens * price_in + output_tokens * price_out
 
 
@@ -261,9 +266,9 @@ class MetaChatModel:
                     on_reasoning(event["text"].strip())
                 elif kind == "response.output_text.delta":
                     out += event.get("delta", "")
-                elif kind == "response.completed":
-                    self._count((event.get("response") or {}).get("usage"))
-                elif kind in ("response.failed", "error"):
+                elif kind in ("response.completed", "response.incomplete", "response.failed"):
+                    self._count((event.get("response") or {}).get("usage"))   # billed however it ended
+                if kind in ("response.failed", "error"):
                     raise RuntimeError(f"{model_label(self.model)} failed: {json.dumps(event)[:300]}")
         return json.loads(_strip_fence(out))
 

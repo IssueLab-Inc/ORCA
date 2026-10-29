@@ -1,4 +1,4 @@
-import { CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Trash2, Wand2 } from "lucide-react";
+import { CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { Plan, PlanItem } from "./api";
 import { mm } from "./ReportList";
 
@@ -22,10 +22,12 @@ const editText = (i: PlanItem) => {
     : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
 };
 
-export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, error }: {
+export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, error }: {
   run: PlanRun | null; plan: Plan | null; now: number; busy: boolean; error?: string | null;
   onAccept: () => void; onDiscard: () => void; onFocus: (item: PlanItem) => void;
   onAsDesigned: (clashIds: string[], note: string) => void;
+  /** A second try on a larger model for one failed item (never automatic in a plan: the cost multiplies). */
+  onEscalate?: (item: PlanItem) => void; wonder?: string;
 }) {
   if (!run && !plan) {
     return (
@@ -80,6 +82,10 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
                     : <span className="why">{st?.note ?? "waiting"}</span>}</div>
                 {res && !res.passed && res.reason && <div className="bad small">{res.reason}</div>}
                 {conflict && <div className="bad small">Collides with another fix in this plan ({conflict.detail})</div>}
+                {plan && !it.option && !it.recommended && onEscalate && (
+                  <button className="link better-fix" disabled={busy} onClick={() => onEscalate(it)}
+                    data-tip={`A larger model takes a second, longer look at this clash with everything this try learned. About a minute.`}>
+                    <Sparkles size={13} aria-hidden /> Ask {wonder ?? "Muse Wonder"}</button>)}
               </div>
               <button className="ibtn" aria-label="Go to this clash" data-tip="Go to this clash" data-tip-side="left" onClick={() => onFocus(it)}>
                 <LocateFixed size={16} aria-hidden /></button>

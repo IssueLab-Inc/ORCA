@@ -16,7 +16,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, escalation, hosts, reports, requirements, settings, step, verify
+from . import agent, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
 
@@ -73,7 +73,8 @@ class Workspace:
         self._escalation_model = escalation_model
         # (scene id, GlobalId, GlobalId) → the last try at that pair (asdict of agent.Result), for a second try to
         # read: what was tried and why it failed. Pairs are sorted; the oldest go past LAST_KEPT.
-        self._last: dict[tuple[str, str, str], dict] = {}
+        self._last: dict[tuple[str, str, str], tuple[tuple, dict]] = {}   # → (what it was tried on, the try)
+        self._last_lock = threading.Lock()
 
     @property
     def model(self) -> ChatModel:
@@ -159,6 +160,9 @@ class Workspace:
             self.sources.pop(old, None)
             self.names.pop(old, None)
             self.detections.pop(old, None)
+            with self._last_lock:
+                for key in [k for k in self._last if k[0] == old]:
+                    self._last.pop(key, None)
             if old in self._roots:
                 shutil.rmtree(self._roots.pop(old), ignore_errors=True)
 
@@ -199,34 +203,52 @@ class Workspace:
         When escalations are automatic (`settings.escalation()` "auto") and nothing verified, the clash goes on to a
         second try at once, if `escalate_check` (the caller's caps: why not, or None) allows it."""
         clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id, scene_id)
+        stamp = self._stamp(scene_id)
         result = asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
                                       trials=on_event is not None, hosts_model=self.hosts_model,
                                       **self.fix_settings(scene_id, element_a, element_b)))
-        self._remember(scene_id, element_a, element_b, result)
+        self._remember(scene_id, element_a, element_b, result, stamp)
         if (escalate_check is not None and not result["options"] and not result.get("recommendation")
                 and settings.escalation() == "auto"):
             why = escalate_check()
             if why:
                 if on_event:
                     on_event({"type": "note", "text": f"No second try: {why}"})
-            else:
+                return result
+            try:
                 return self.escalate(scene_id, element_a, element_b, distance_m, images, notes, report_id, clash_id,
                                      on_event)
+            except Exception as e:  # noqa: BLE001 - the first try stands; say why the second didn't happen
+                note = f"The second try failed ({type(e).__name__}: {str(e)[:160]}); this is the first try's result."
+                if on_event:
+                    on_event({"type": "note", "text": note})
+                return {**result, "note": note}
         return result
 
     def _pair(self, scene_id: str, a: str, b: str) -> tuple[str, str, str]:
         return (scene_id, *sorted((a, b)))
 
-    def _remember(self, scene_id: str, a: str, b: str, result: dict) -> None:
+    def _stamp(self, scene_id: str) -> tuple:
+        """What a try's options were verified on: the scene's revision (every kept edit bumps it) and the
+        coordination requirements in force."""
+        return (self.scene(scene_id).revision, requirements.current_id())
+
+    def _remember(self, scene_id: str, a: str, b: str, result: dict, stamp: tuple) -> None:
         key = self._pair(scene_id, a, b)
-        self._last.pop(key, None)
-        self._last[key] = result
-        while len(self._last) > LAST_KEPT:
-            self._last.pop(next(iter(self._last)))
+        with self._last_lock:
+            self._last.pop(key, None)
+            self._last[key] = (stamp, result)
+            while len(self._last) > LAST_KEPT:
+                self._last.pop(next(iter(self._last)), None)
 
     def last_try(self, scene_id: str, a: str, b: str) -> dict | None:
-        """The last try at this pair in this scene (a first try, or a second try with the first's carried in)."""
-        return self._last.get(self._pair(scene_id, a, b))
+        """The last try at this pair in this scene (a first try, or a second try with the first's carried in), while
+        its options still hold: none once an edit was kept in the scene or the requirements changed since, because
+        its verified options were checked against a model or rules that are gone."""
+        hit = self._last.get(self._pair(scene_id, a, b))
+        if hit is None or scene_id not in self.scenes or hit[0] != self._stamp(scene_id):
+            return None
+        return hit[1]
 
     def escalate(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
                  images: list[str] | None = None, notes: str = "", report_id: str | None = None,
@@ -243,17 +265,22 @@ class Workspace:
             raise ValueError(f"Nothing may be edited here ({fix['recommend']}), so there is no second try to make.")
         scene = self.scene(scene_id)
         first = self.last_try(scene_id, element_a, element_b)
+        stamp = self._stamp(scene_id)
         model = self._escalation_model or escalation_model()
         label = model_label(getattr(model, "model", "") or "") or "Muse Wonder"
         if on_event:
-            on_event({"type": "escalating", "model": label, "first": bool(first)})
+            # The first try as it stands (its ideas and what it understood), so a page that didn't watch it (chat)
+            # shows the second's ideas after the right ones.
+            on_event({"type": "escalating", "model": label, "first": bool(first),
+                      "first_try": {k: first.get(k) for k in ("understanding", "advice", "attempts")} if first else None})
         clearance = fix.get("clearance_m", 0.025)
         with self.lock:
             brief = escalation.brief(scene, clash, first, clearance)
         fix["guidance"] = fix.get("guidance", "") + "\n" + escalation.PACK.read_text()
-        second = asdict(agent.resolve(scene, clash, model, on_event=on_event, lock=self.lock,
-                                      trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=2,
-                                      brief=brief, label=label, **fix))
+        with spend.held(escalation.ESTIMATE_USD):
+            second = asdict(agent.resolve(scene, clash, model, on_event=on_event, lock=self.lock,
+                                          trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=2,
+                                          brief=brief, label=label, **fix))
         out = {**second, "escalated": True}
         if first:
             def key(o: dict):
@@ -265,7 +292,7 @@ class Workspace:
             out["attempts"] = [*first.get("attempts", []), *second["attempts"]]
             out["understanding"] = second["understanding"] or first.get("understanding", "")
             out["advice"] = second["advice"] or first.get("advice", "")
-        self._remember(scene_id, element_a, element_b, out)
+        self._remember(scene_id, element_a, element_b, out, stamp)
         return out
 
     def fix_settings(self, scene_id: str, element_a: str, element_b: str) -> dict:
@@ -415,13 +442,16 @@ class Workspace:
         s = self.scene(scene_id)
         with self.lock:
             checked = agent.combined_steps(s, {"steps": [agent.step_candidate(st) for st in steps]}, element_a, element_b)
-            made = agent.apply_combined(s, checked)
             files = sorted({s.index_of(g) for st in checked for g in st["moved"]})
+            with edits.kept_files(s, set(files)):   # all the steps or none: a step that fails undoes the others
+                made = agent.apply_combined(s, checked)
             for st in checked:
                 for g in st["moved"]:
                     s.mark_edited(g)
             s.bump(files)
-        return {"files": files, "changed": [g for _, els in made for g in els], "pieces": [els for _, els in made]}
+        # Pieces per split run, the original first (a moved run has none: it is the same elements, elsewhere).
+        return {"files": files, "changed": [g for _, els in made for g in els],
+                "pieces": [els for st, els in made if st["kind"] != "move"]}
 
     def check_resize(self, scene_id: str, element: str, other: str, split_m: list[float], depth_m: float,
                      keep: str = "bottom", clearance_m: float = 0.025) -> dict:

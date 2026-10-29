@@ -58,8 +58,20 @@ def summary_of(result: dict, seconds: float) -> dict:
             "failures": [f"{a['title']}: {a['reason']}" for a in result["attempts"] if not a["passed"]][:6]}
 
 
-def run_arm(ws: Workspace, sid: str, a: str, b: str, model, first: dict | None, brief: bool, label: str) -> dict:
-    """One arm from the same first try, two rounds, the requirements none (as in the app without a file)."""
+def run_arm(ws: Workspace, sid: str, a: str, b: str, model, first: dict | None, brief: bool, label: str,
+            tries: int = 2) -> dict:
+    """One arm from the same first try, two rounds, the requirements none (as in the app without a file). A model
+    call that fails (a timeout) is tried once more, then recorded as the arm's error."""
+    for n in range(tries):
+        try:
+            return _arm(ws, sid, a, b, model, first, brief, label)
+        except Exception as e:  # noqa: BLE001
+            err = f"{type(e).__name__}: {e}"[:300]
+            print(f"  {label} arm failed ({err}); {'again' if n + 1 < tries else 'recorded'}", flush=True)
+    return {"error": err, "verified": False, "options": 0, "tried": 0, "seconds": 0, "best": None, "usage": None}
+
+
+def _arm(ws: Workspace, sid: str, a: str, b: str, model, first: dict | None, brief: bool, label: str) -> dict:
     scene = ws.scene(sid)
     clash = ws.clash_for(a, b, scene_id=sid)
     fix = ws.fix_settings(sid, a, b)
@@ -81,7 +93,7 @@ def cases_cell(cell: Path, work: Path, classifier) -> tuple[Workspace, str, list
     from celllayout import build
     from verify_cell import PLANTED
     shutil.copy(cell / "STEP" / "PC-03-Palletising-Cell-RevA.step", work)
-    ws = Workspace(samples=work)
+    ws = Workspace(samples=work, model=MetaChatModel(timeout_s=240), hosts_model=classifier)
     sid = ws.open(["PC-03-Palletising-Cell-RevA.step"], classify_with=classifier)
     scene = ws.scene(sid)
     key_of = {p.name: p.key for p in build("A").parts}
@@ -93,7 +105,7 @@ def cases_cell(cell: Path, work: Path, classifier) -> tuple[Workspace, str, list
 def cases_northbank(folder: Path, work: Path) -> tuple[Workspace, str, list[tuple[str, str, str]]]:
     for name in NORTHBANK:
         shutil.copy(folder / name, work)
-    ws = Workspace(samples=work)
+    ws = Workspace(samples=work, model=MetaChatModel(timeout_s=240), hosts_model=triage_model(timeout_s=60)[0])
     sid = ws.open(NORTHBANK)
     boxes = ws.scene(sid).bounds()
     import numpy as np
@@ -110,10 +122,10 @@ def main():
     ap.add_argument("--northbank", type=Path, default=DEMO / "northbank" / "IFC")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--reuse", action="store_true", help="take the sweep from OUT/sweep.json instead of running it")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     work_cell, work_nb = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
-    spark = MetaChatModel()
     started = time.perf_counter()
     sets = [cases_cell(args.cell, work_cell, triage_model()[0]), cases_northbank(args.northbank, work_nb)]
     print(f"opened in {time.perf_counter() - started:.0f} s", flush=True)
@@ -129,8 +141,16 @@ def main():
         except Exception as e:  # a case that cannot be proposed at all is recorded, not fatal
             return label, {"error": f"{type(e).__name__}: {e}"}, None
         return label, summary_of(r, time.perf_counter() - t), r
-    with ThreadPoolExecutor(args.workers) as pool:
-        swept = list(pool.map(sweep, jobs))
+    saved = args.out / "sweep.json"
+    if args.reuse and saved.exists():
+        old = json.loads(saved.read_text())
+        swept = [(label, old[label]["summary"], old[label]["first"]) for _, _, label, _, _ in jobs]
+    else:
+        with ThreadPoolExecutor(args.workers) as pool:
+            swept = list(pool.map(sweep, jobs))
+        strip = lambda r: r and {**r, "options": [{k: v for k, v in o.items() if k not in ("preview", "before")}  # noqa: E731
+                                                  for o in r["options"]]}
+        saved.write_text(json.dumps({label: {"summary": s, "first": strip(r)} for label, s, r in swept}, default=str))
     for (label, s, _), _ in zip(swept, jobs):
         print("sweep", label, "->", "ERROR" if "error" in s else (s["best"]["kind"] if s["verified"] else "no fix"), flush=True)
 
@@ -142,8 +162,8 @@ def main():
     def arms(item):
         (ws, sid, label, a, b), first = item
         out = {}
-        out["spark_again"] = run_arm(ws, sid, a, b, MetaChatModel(), first, False, "Muse Spark")
-        out["spark_brief"] = run_arm(ws, sid, a, b, MetaChatModel(), first, True, "Muse Spark")
+        out["spark_again"] = run_arm(ws, sid, a, b, MetaChatModel(timeout_s=240), first, False, "Muse Spark")
+        out["spark_brief"] = run_arm(ws, sid, a, b, MetaChatModel(timeout_s=240), first, True, "Muse Spark")
         out["wonder_brief"] = run_arm(ws, sid, a, b, escalation_model(), first, True, "Muse Wonder")
         return label, out
 
@@ -153,8 +173,8 @@ def main():
     with ThreadPoolExecutor(args.workers) as pool:
         for label, out in [*pool.map(arms, no_fix), *pool.map(better, partial)]:
             rows[label].update(out)
-            print(label, {k: (v["best"] or {}).get("kind") if v["verified"] else "no fix" for k, v in out.items()},
-                  flush=True)
+            print(label, {k: ("error" if v.get("error") else (v["best"] or {}).get("kind") if v["verified"] else "no fix")
+                          for k, v in out.items()}, flush=True)
 
     (args.out / "results.json").write_text(json.dumps(rows, indent=2, default=str))
     write_summary(args.out, rows, time.perf_counter() - started)
@@ -183,7 +203,8 @@ def write_summary(out: Path, rows: dict, seconds: float) -> None:
         lines += ["", "## No fix after the sweep: three arms, two rounds each", "",
                   "| Case | Spark again | Spark + brief | Wonder + brief | Wonder s / $ |", "|---|---|---|---|---|"]
         for k, v in set_.items():
-            cell = lambda a: (f"{v[a]['best']['kind']}: {v[a]['best']['title']}" if v[a]["verified"] else "no fix")  # noqa: E731
+            cell = lambda a: ("error" if v[a].get("error") else  # noqa: E731
+                              f"{v[a]['best']['kind']}: {v[a]['best']['title']}" if v[a]["verified"] else "no fix")
             u = v["wonder_brief"].get("usage") or {}
             lines.append(f"| {k} | {cell('spark_again')} | {cell('spark_brief')} | {cell('wonder_brief')} | "
                          f"{v['wonder_brief']['seconds']} / {u.get('usd', 0):.2f} |")

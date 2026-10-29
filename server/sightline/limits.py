@@ -66,8 +66,8 @@ class ProposeLimit:
         everyone.extend([now] * n)
         return None
 
-    def take(self, client: str) -> str | None:
-        """Count one proposal for `client`, or return why it is refused (nothing is counted then)."""
+    def refusal(self, client: str) -> str | None:
+        """Why one more for `client` would be refused now, or None; nothing is counted."""
         now = self.clock()
         mine = self._trim(self._clients.setdefault(client, deque()), now - HOUR)
         everyone = self._trim(self._all, now - DAY)
@@ -75,8 +75,27 @@ class ProposeLimit:
             return f"The demo has used today's {self.noun}. Try again tomorrow, or run ORCA locally with your own key."
         if self.per_client_hour and len(mine) >= self.per_client_hour:
             return f"You've used {self.per_client_hour} {self.noun} this hour. Try again later."
-        mine.append(now)
-        everyone.append(now)
+        return None
+
+    def take(self, client: str) -> str | None:
+        """Count one proposal for `client`, or return why it is refused (nothing is counted then)."""
+        why = self.refusal(client)
+        if why:
+            return why
+        now = self.clock()
+        self._clients[client].append(now)
+        self._all.append(now)
+        return None
+
+    @staticmethod
+    def take_all(client: str, *limits: "ProposeLimit") -> str | None:
+        """One of each, or none: the first refusal, with nothing counted on any of them."""
+        for limit in limits:
+            why = limit.refusal(client)
+            if why:
+                return why
+        for limit in limits:
+            limit.take(client)
         return None
 
 

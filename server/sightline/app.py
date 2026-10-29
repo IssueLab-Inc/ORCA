@@ -29,8 +29,8 @@ from pydantic import BaseModel, ConfigDict
 from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
-from . import (agents, chat, context_planner, detect, document, edits, mcp_server, owner, plans, requirements, settings,
-               spend, step, titles, triage, voice_live)
+from . import (agents, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
+               requirements, settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
 from .service import MODEL_SUFFIXES, MODELS, Workspace
@@ -166,7 +166,6 @@ class _RequestEvents:
 propose_limit = ProposeLimit.from_env()
 escalate_limit = ProposeLimit.escalate_from_env()
 chat_limit = ProposeLimit.chat_from_env()
-ESCALATE_ESTIMATE_USD = 1.0   # about what a second try may cost at most (two rounds of Muse Wonder): spend.refused
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
 # Clash titles: one titling run per report (a few model calls for a whole report): SIGHTLINE_TITLES_PER_HOUR per visitor.
 title_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_TITLES_PER_HOUR", "0")),
@@ -225,12 +224,12 @@ def escalation_refused(who: str, exempt: bool) -> tuple[int, str] | None:
     owner's own requests skip the caps and the budget."""
     if settings.escalation() == "off":
         return 403, "Second tries with Muse Wonder are switched off."
-    why = spend.refused(ESCALATE_ESTIMATE_USD, exempt)
+    why = spend.refused(escalation.ESTIMATE_USD, exempt)
     if why:
         return 429, why
     if exempt:
         return None
-    why = escalate_limit.take(who) or propose_limit.take(who)
+    why = ProposeLimit.take_all(who, escalate_limit, propose_limit)
     return (429, why) if why else None
 
 
@@ -577,7 +576,12 @@ def verify_move(scene_id: str, body: Move):
     return ws.verify_move(_scene(scene_id), body.moved, body.delta_m, body.clearance_m)
 
 
-def _refuse_escalation(request: HTTPConnection) -> None:
+def _refuse_escalation(request: HTTPConnection, scene_id: str, body: "Propose") -> None:
+    """Refuse a second try that cannot be made (nothing may be edited: 409) before charging anything, then one that
+    the switch, the budget or the caps refuse."""
+    recommend = ws.fix_settings(scene_id, body.element_a, body.element_b).get("recommend")
+    if recommend:
+        raise HTTPException(409, f"Nothing may be edited here ({recommend}), so there is no second try to make.")
     r = escalation_refused(client_id(request.headers, request.client.host if request.client else None),
                            owner.no_caps())
     if r:
@@ -590,7 +594,7 @@ def propose(scene_id: str, body: Propose, request: Request):
     if body.report_id:
         _report(body.report_id)
     if body.escalate:
-        _refuse_escalation(request)
+        _refuse_escalation(request, _scene(scene_id), body)
         try:
             return ws.escalate(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes,
                                report_id=body.report_id, clash_id=body.clash_id)
@@ -612,7 +616,7 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
     if body.report_id:
         _report(body.report_id)
     if body.escalate:
-        _refuse_escalation(request)
+        _refuse_escalation(request, _scene(scene_id), body)
     else:
         refused = _take(propose_limit, request)
         if refused:
@@ -750,7 +754,8 @@ def fix_apply(scene_id: str, body: FixApply):
         raise HTTPException(422, f"Cannot apply this fix: {e}")
     except (ValueError, KeyError, TypeError, IndexError) as e:
         raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
-    out = {**r, "pieces": r["pieces"][0]}
+    # `pieces`: the first run's, as one fix of one run has always replied; `groups`: every run's (a combined fix).
+    out = {**r, "pieces": r["pieces"][0], "groups": r["groups"][0]}
     if r.get("not_cut"):   # a penetration requested, not cut: the clash stays open until the host's team cuts it
         out.update(cut=False, blocked_by=r["not_cut"][0]["blocked_by"])
     return out

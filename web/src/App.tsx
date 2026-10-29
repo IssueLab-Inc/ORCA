@@ -994,14 +994,22 @@ export function App() {
     setProposal(first ? { understanding: first.understanding, options: [], attempts: first.attempts, advice: first.advice }
       : { understanding: "", options: [], attempts: [] });
     setThoughts([]);
-    pilot.current?.start();
+    pilot.current?.start(first ? wonder : undefined);
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
     let attempts = first?.attempts.length ?? 0;
     const onEvent = (e: AgentEvent) => {
       if (!live()) return;
       pilot.current?.event(e);
       // A second try starting in the same stream (automatic): its ideas are numbered after the first's.
-      if (e.type === "escalating") { update({ model: e.model, offset: attempts, round: 1, modelSeconds: [] }); setThoughts([]); }
+      if (e.type === "escalating") {
+        const seed = !first && !attempts && e.first_try?.attempts.length ? e.first_try : null;
+        if (seed) {   // a try the page didn't watch (a plan's item): its ideas lead the table
+          attempts = seed.attempts.length;
+          setProposal((q) => q && { ...q, understanding: seed.understanding, advice: seed.advice, attempts: seed.attempts });
+        }
+        update({ model: e.model, offset: attempts, round: 1, modelSeconds: [] }); setThoughts([]);
+        pilot.current?.model(e.model, attempts);
+      }
       else if (e.model && e.model !== p.model && p.offset == null) update({ model: e.model });
       if (e.type === "attempt") attempts += 1;
       if (e.type === "note") setThoughts((t) => [...t, { round: p.round, text: e.text }]);   // e.g. why no second try
@@ -1022,6 +1030,8 @@ export function App() {
       const show = () => {
         if (!live()) return;
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
+        // A second try that failed or was refused: the first try's fixes stand.
+        else if (first) { setProposal(first); setChosen(first.options.length ? 0 : null); }
         if (result?.recommendation) noteRecommendation(result.recommendation, [a, b] as const);
         update({ phase: "done", checking: null }); setNow(Date.now());
       };
@@ -1044,18 +1054,28 @@ export function App() {
   /** A second, longer try on Muse Wonder, reading this try (docs/escalation.md): after no fix, or for a better one. */
   function escalate() { return runProposal(true); }
 
-  async function runProposal(second: boolean) {
-    if (!sceneId || !a || !b || busy) return;
+  /** A failed Fix-together item: its clash, then a second try on it (reading the plan's try at that pair). */
+  function escalateItem(it: PlanItem) {
+    const c = report?.clashes.find((x) => it.clash_ids.includes(x.id)) ?? null;
+    if (c) selectClash(c); else { resetWork(); setA(it.element_a); setB(it.element_b); }
+    setViewPlan(false); showClashTab();
+    void runProposal(true, { a: it.element_a, b: it.element_b, clash: c });
+  }
+
+  /** `pick`: a pair other than the one shown (a plan's item; the page's selection catches up as this runs). */
+  async function runProposal(second: boolean, pick?: { a: string; b: string; clash: ReportClash | null }) {
+    const ea = pick ? pick.a : a, eb = pick ? pick.b : b, on = pick ? pick.clash : clash;
+    if (!sceneId || !ea || !eb || busy) return;
     replaceChatWork();
-    const tracker = trackAgent(second ? proposal : null); directAgent.current = tracker;
+    const tracker = trackAgent(second && !pick ? proposal : null); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
-    const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
+    const from = on && report ? { report_id: report.id, clash_id: on.id } : undefined;
     // A clash ORCA found: give the agent its views, as a Navisworks report would (waiting a few seconds at most).
-    if (clash && report?.origin === "sightline" && !clash.images.length && !views[clash.id])
-      await Promise.race([captureViews(report.id, clash.id, a, b), new Promise((r) => setTimeout(r, 4000))]);
+    if (on && report?.origin === "sightline" && !on.images.length && !views[on.id])
+      await Promise.race([captureViews(report.id, on.id, ea, eb), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
-    try { result = await api.proposeStream(sceneId, a, b, from, onEvent, second); }
+    try { result = await api.proposeStream(sceneId, ea, eb, from, onEvent, second); }
     catch (e) { if (agentRun.current === run) setError((e as Error).message); }
     finally { finish(result); }
   }
@@ -1370,6 +1390,7 @@ export function App() {
     chatOwner.current.invalidate();
     chatAgent.current?.retire(); chatPlan.current?.retire(); chatContext.current?.retire();
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
+    chatEscalating.current = false;
   }
   function onChatEvent(e: ChatEvent) {
     if (e.type === "thinking") directContext.current?.retire();
@@ -1396,8 +1417,13 @@ export function App() {
     }
     if (e.type === "agent") {
       // A second try from chat: the first try's ideas stay; its own round 1 is not a new proposal.
-      if (e.event.type === "escalating" && !chatAgent.current) { chatAgent.current = trackAgent(proposal); chatEscalating.current = true; }
-      else if (e.event.type === "escalating") chatEscalating.current = true;
+      // Seeded from the server's own first try (the page's may be another clash's, or older than this turn).
+      if (e.event.type === "escalating" && !chatAgent.current) {
+        const f = e.event.first_try;
+        chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: [] }
+          : { understanding: "", attempts: [], options: [] });
+        chatEscalating.current = true;
+      } else if (e.event.type === "escalating") chatEscalating.current = true;
       if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent();
       chatAgent.current?.onEvent(e.event);
     }
@@ -1411,6 +1437,12 @@ export function App() {
     if (e.type === "tool_result" && e.name === "explore_wider_fix" && chatContext.current?.live()) {
       setContext((r) => r && r.phase !== "done" ? { ...r, phase: "done", error: e.summary } : r);
     }
+    // A proposal tool that ended without its proposal (a second try that failed): put back what stood before.
+    if (e.type === "tool_result" && e.name === "propose_fixes" && chatAgent.current) {
+      chatAgent.current.finish(null); chatAgent.current = null;
+    }
+    if (e.type === "tool_result" && e.name === "propose_fixes") chatEscalating.current = false;
+    if (e.type === "done" || e.type === "error") chatEscalating.current = false;
     if (e.type === "done") { planThisTurn.current = false; chatContext.current = null; }
     if (e.type === "plan_event") chatPlan.current?.onEvent(e.event);
     if (e.type === "plan") { (chatPlan.current ?? trackPlan(e.kind)).finish(e); chatPlan.current = null; }
@@ -1611,7 +1643,8 @@ export function App() {
       : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     try {
       const kept = await api.accept(sceneId, o);
-      const pieces = kept.pieces;
+      // Each split run's pieces, the original first (a combined fix can split several runs).
+      const groups = kept.groups ?? (kept.pieces?.length ? [kept.pieces] : []);
       if (!live()) return;
       staleContext();
       // A penetration the host's team must cut: asked for (its provision for void is in the model), not yet fixed.
@@ -1619,12 +1652,13 @@ export function App() {
       setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, requested
         ? { ...evidenceOf(o, "recommended", pics), blocked_by: kept.blocked_by ?? "" } : evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
-      await applyToViewer(sceneId, kept, pieces?.length ? [pieces] : [], live);
+      await applyToViewer(sceneId, kept, groups, live);
       if (!live()) return;
-      if (pieces?.length) {
-        const [first, ...added] = pieces;
-        setEdits((e) => ({ ...e, [first]: [...(e[first] ?? []), ...added] }));
-      }
+      setEdits((e) => {
+        const next = { ...e };
+        for (const ps of groups) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
+        return next;
+      });
       if (!requested) markFixed([[a, b]], [o.title]);
       resetWork(); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
@@ -2100,6 +2134,7 @@ export function App() {
             onAccept={acceptContext} onRegenerate={() => { if (context.objective) void exploreContext(context.objective); }}
             onDiscard={() => { directContext.current?.retire(); ++contextRequest.current; clearManual(); setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
+            onEscalate={canEscalate ? escalateItem : undefined} wonder={wonder}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
             onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />}
         </>}

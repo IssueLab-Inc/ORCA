@@ -66,7 +66,7 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
               <tr key={i} className={t.passed ? "ok" : "fail"}>
                 <td className="mono" data-label="#">{i + 1}</td>
                 <td data-label="Kind"><span className={`badge ${t.kind}`}>{kindLabel(t.kind)}</span></td>
-                <td data-label="Idea">{t.title}{models.size > 1 && <span className={`chip model ${t.model === "Muse Wonder" ? "wonder" : ""}`}>{t.model || "Muse Spark"}</span>}</td>
+                <td data-label="Idea">{t.title}{models.size > 1 && <span className={`chip model ${t.model && t.model !== "Muse Spark" ? "wonder" : ""}`}>{t.model || "Muse Spark"}</span>}</td>
                 <td className="mono" data-label="Edit">{editText(t)}</td>
                 <td data-label="Check">{t.passed ? <span className="ok">✓ verified</span>
                   : <span className="bad" title={t.reason}>✗ {first}{more ? ` +${more} more` : ""}</span>}</td>

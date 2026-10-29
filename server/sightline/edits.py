@@ -1274,6 +1274,26 @@ def trial(scene: IfcScene, global_id: str):
 
 
 @contextmanager
+def kept_files(scene: IfcScene, indexes: set[int]):
+    """Edit several files of a scene for good, all or nothing: an error part way undoes every edit made so far (cached
+    boxes included) and is raised again. Never nest it inside `trial` or `trial_files`."""
+    before = dict(scene.bounds())
+    models = [scene.models[i] for i in sorted(indexes)]
+    for m in models:
+        m.begin_transaction()
+    try:
+        yield
+    except BaseException:
+        for m in models:
+            m.end_transaction()
+            m.undo()
+        scene._bounds = before
+        raise
+    for m in models:
+        m.end_transaction()
+
+
+@contextmanager
 def trial_files(scene: IfcScene, indexes: set[int]):
     """Edit several files of a scene (a plan, or one fix that changes two models), then undo every edit, cached boxes
     included. Never nest it inside `trial`: a file holds one transaction at a time."""

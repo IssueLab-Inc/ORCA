@@ -140,7 +140,8 @@ def test_a_second_try_reads_the_first_and_names_its_model(tmp_path):
     assert second["escalated"] and second["model"] == "Muse Wonder"
     assert [o["kind"] for o in second["options"]] == ["combined"] and second["options"][0]["model"] == "Muse Wonder"
     assert [a["model"] for a in second["attempts"]] == ["", "Muse Wonder"]   # the first try's, then the second's
-    assert events[0] == {"type": "escalating", "model": "Muse Wonder", "first": True}
+    assert events[0]["type"] == "escalating" and events[0]["model"] == "Muse Wonder" and events[0]["first"]
+    assert [a["title"] for a in events[0]["first_try"]["attempts"]] == ["Drop duct 400 mm"]
     assert all(e.get("model") == "Muse Wonder" for e in events[1:])
     assert ws.last_try(sid, beam, duct)["escalated"]   # either order of the pair
 
@@ -268,8 +269,10 @@ def test_the_chat_asks_for_a_second_try_only_when_allowed(tmp_path, monkeypatch)
 
     calls = []
     empty = {"understanding": "u", "options": [], "attempts": [], "advice": "a"}
+    rules = {}
     ws = SimpleNamespace(propose=lambda *a, **k: calls.append(("propose", k.get("escalate_check"))) or empty,
-                         escalate=lambda *a, **k: calls.append(("escalate", None)) or {**empty, "escalated": True})
+                         escalate=lambda *a, **k: calls.append(("escalate", None)) or {**empty, "escalated": True},
+                         fix_settings=lambda *a: rules)
     c = chat.Chat(ws)
     clash = SimpleNamespace(id="c1")
     monkeypatch.setattr(chat.Chat, "_report", lambda self, ctx: SimpleNamespace(id="r", clash=lambda cid: clash))
@@ -286,6 +289,141 @@ def test_the_chat_asks_for_a_second_try_only_when_allowed(tmp_path, monkeypatch)
     out, _, _ = c._run("propose_fixes", {"clash_id": "c1", "escalate": True}, ctx, lambda e: None,
                        escalate_allowed=lambda: None)
     assert calls[-1][0] == "escalate" and "second try on Muse Wonder" in out["note"]
+    rules["recommend"] = "L5 As-built: report only"   # nothing may be edited: refused before any cap is asked
+    asked = []
+    out, summary, _ = c._run("propose_fixes", {"clash_id": "c1", "escalate": True}, ctx, lambda e: None,
+                             escalate_allowed=lambda: asked.append(1))
+    assert "Nothing may be edited" in out["error"] and not asked and summary == "no second try: recommendation only"
+    rules.clear()
     settings.update({"escalation": "off"})
     out, _, _ = c._run("propose_fixes", {"clash_id": "c1"}, ctx, lambda e: None)
     assert "escalate true" not in out["note"]
+
+
+# ------------------------------------------------------------------------------------------------- after the review
+
+def test_a_first_try_is_not_carried_once_an_edit_was_kept_or_the_rules_changed(tmp_path, monkeypatch):
+    build_clash_fixture(tmp_path / "f.ifc")
+    spark = Script({"candidates": [{"title": "Drop duct 800 mm", "move": "A", "delta_m": [0, 0, -0.8]}]},
+                   {"candidates": [{"title": "Drop duct 800 mm", "move": "A", "delta_m": [0, 0, -0.8]}]})
+    ws = Workspace(samples=tmp_path, model=spark, escalation_model=Script(), )
+    sid = ws.open(["f.ifc"])
+    duct, beam, _ = _ids(ws.scene(sid))
+    first = ws.propose(sid, duct, beam)
+    assert ws.last_try(sid, duct, beam) is not None
+
+    plans.apply(ws, sid, [first["options"][0]])   # kept: the scene moves on a revision
+    assert ws.last_try(sid, duct, beam) is None
+    second = ws.escalate(sid, duct, beam)
+    assert not second["options"]                  # "Drop duct 800 mm" is not offered again as verified
+
+    ws.propose(sid, duct, beam)
+    from sightline import requirements
+    monkeypatch.setattr(requirements, "current_id", lambda: "other-rules")
+    assert ws.last_try(sid, duct, beam) is None
+
+
+def test_combined_steps_never_move_structure_or_anything_but_services_beside_a_and_b(tmp_path, monkeypatch):
+    import ifcopenshell
+    s = IfcScene(build_clash_fixture(tmp_path / "f.ifc"))
+    duct, beam, pipe = _ids(s)
+    move_pipe = {"kind": "move", "move": pipe, "delta_m": [0, 0, -0.5]}
+    move_duct = {"kind": "move", "move": "A", "delta_m": [0, 0, -0.4]}
+    monkeypatch.setattr(agent, "is_service", lambda scene, gid: gid != pipe)   # the pipe as if it were a door
+    with pytest.raises(agent.Refused, match="only services move"):
+        agent.combined_steps(s, {"steps": [move_pipe, move_duct]}, duct, beam)
+    old = ifcopenshell.file(schema="IFC2X3")
+    for cls in ("IfcWallStandardCase", "IfcPile", "IfcBeam"):
+        monkeypatch.setattr(s, "entity", lambda gid, e=old.create_entity(cls): e)
+        assert agent.stays(s, pipe), cls
+
+
+def test_a_combined_fix_kept_part_way_is_undone(tmp_path, monkeypatch):
+    from sightline import edits
+    build_clash_fixture(tmp_path / "f.ifc")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["f.ifc"])
+    s = ws.scene(sid)
+    duct, beam, pipe = _ids(s)
+    option = {"kind": "combined", "moved": [pipe, duct], "delta_m": [0, 0, -0.5], "title": "t",
+              "edit": {"pair": [duct, beam], "steps": [
+                  {"kind": "move", "target": pipe, "delta_m": [0, 0, -0.5]},
+                  {"kind": "offset", "target": duct, "split_m": [2.0, 4.0], "delta_m": [0, 0, -0.4]}]}}
+
+    def fails(*a, **k):
+        raise edits.Unsupported("not here")
+    monkeypatch.setattr(edits, "apply_offset", fails)
+    revision = s.revision
+    with pytest.raises(edits.Unsupported):
+        plans.apply(ws, sid, [option])
+    assert s.placement(pipe)[2, 3] == pytest.approx(2.25) and s.revision == revision   # the pipe's move undone
+
+
+def test_the_apply_endpoint_returns_every_run_of_a_combined_fix(tmp_path, monkeypatch):
+    from sightline.fixtures import build_run_fixture
+    build_run_fixture(tmp_path / "run.ifc")
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))
+    c = TestClient(app_module.app)
+    sid = c.post("/api/scenes", json={"samples": ["run.ifc"]}).json()["id"]
+    m = app_module.ws.scene(sid).model
+    main = next(e for e in m.by_type("IfcDuctSegment") if e.Tag == "SA-1").GlobalId
+    beam = m.by_type("IfcBeam")[0].GlobalId
+    option = {"kind": "combined", "moved": [main], "delta_m": [0, 0, 0.4], "title": "t",
+              "edit": {"pair": [main, beam], "steps": [
+                  {"kind": "offset", "target": main, "split_m": [2.0, 4.0], "delta_m": [0, 0, 0.4]}]}}
+    r = c.post(f"/api/scenes/{sid}/fix/apply", json={"option": option}).json()
+    assert len(r["groups"]) == 1 and r["groups"][0][0] == main and len(r["groups"][0]) == 9
+    assert r["pieces"] == r["groups"][0]   # the split run's pieces, the original first
+
+
+def test_an_automatic_second_try_that_fails_keeps_the_first(tmp_path):
+    build_clash_fixture(tmp_path / "f.ifc")
+
+    class Broken:
+        def complete_json(self, *a, **k):
+            raise RuntimeError("Muse Wonder failed")
+    ws = Workspace(samples=tmp_path, model=Script(DROP_INTO_PIPE), escalation_model=Broken())
+    sid = ws.open(["f.ifc"])
+    duct, beam, _ = _ids(ws.scene(sid))
+    settings.update({"escalation": "auto"})
+    events = []
+    out = ws.propose(sid, duct, beam, on_event=events.append, escalate_check=lambda: None)
+    assert out["understanding"] == "The duct crosses the beam." and "second try failed" in out["note"]
+    assert any(e.get("type") == "note" and "second try failed" in e["text"] for e in events)
+
+
+def test_a_second_try_takes_both_caps_or_neither():
+    from sightline.limits import ProposeLimit
+    second, proposals = ProposeLimit(5, 0), ProposeLimit(1, 0)
+    assert ProposeLimit.take_all("v", second, proposals) is None
+    assert ProposeLimit.take_all("v", second, proposals)        # no proposal left this hour
+    assert len(second._clients["v"]) == 1                        # and no second try was counted for it
+
+
+def test_running_work_holds_its_estimate_and_any_wonder_version_is_priced(monkeypatch):
+    monkeypatch.setenv("SIGHTLINE_WONDER_MAX_USD_DAY", "2")
+    spend.charge(0.5)
+    with spend.held(1.0):
+        assert spend.refused(1.0)                  # 0.5 spent + 1.0 running + 1.0 asked > 2
+        assert spend.refused(0.4) is None
+    assert spend.refused(1.0) is None
+    assert meta_client.cost("muse-wonder-1.1-preview", 1000, 1000) == pytest.approx(0.024)
+    assert meta_client.cost("muse-spark-1.3-contributor", 1000, 1000) == 0
+
+
+def test_a_spark_run_reports_no_usage_of_its_shared_client(tmp_path):
+    s = IfcScene(build_clash_fixture(tmp_path / "f.ifc"))
+    duct, beam, _ = _ids(s)
+    spark = meta_client.MetaChatModel(api_key="k", model="muse-spark-1.3-contributor")
+    spark._count({"prompt_tokens": 5000, "completion_tokens": 100})   # another visitor's call
+    spark.complete_json = lambda *a, **k: {"candidates": []}
+    assert agent.resolve(s, agent.Clash(duct, beam), spark, max_rounds=1).usage is None
+    wonder = meta_client.MetaChatModel(api_key="k", model="muse-wonder-1.0")
+    wonder._count({"prompt_tokens": 5000, "completion_tokens": 100})   # before this run
+
+    def reply(*a, **k):
+        wonder._count({"prompt_tokens": 1000, "completion_tokens": 200})
+        return {"candidates": []}
+    wonder.complete_json = reply
+    u = agent.resolve(s, agent.Clash(duct, beam), wonder, max_rounds=1).usage
+    assert (u["calls"], u["input_tokens"], u["output_tokens"]) == (1, 1000, 200)

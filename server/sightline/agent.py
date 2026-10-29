@@ -15,7 +15,7 @@ import numpy as np
 
 from . import edits, hosts, meta_client, requirements, verify
 from .meta_client import ChatModel
-from .scene import IfcScene
+from .scene import FIXED_CLASSES, IfcScene
 
 PACKS = Path(__file__).parent / "domain_packs"
 
@@ -117,6 +117,16 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025, memo: d
 def is_service(scene: IfcScene, gid: str) -> bool:
     """A duct, pipe, cable carrier or other distribution element: what a penetration lets through."""
     return scene.entity(gid).is_a("IfcDistributionElement")
+
+
+# Structure a combined fix never moves, by inheritance (IFC2X3's IfcWallStandardCase is a wall), piles included.
+STAYS = (*FIXED_CLASSES, "IfcPile")
+
+
+def stays(scene: IfcScene, gid: str) -> bool:
+    """Structure: a combined fix's steps never move it, nor a run that holds it."""
+    ent = scene.entity(gid)
+    return any(ent.is_a(c) for c in STAYS)
 
 
 def penetration_pairs(scene: IfcScene, clash: Clash) -> list[tuple[str, str, str, str]]:
@@ -361,7 +371,8 @@ def _feedback(attempts: list[Attempt]) -> str:
 
 # Kinds that change more than where something is rank below plain geometry fixes, whatever their size: a resize changes
 # how a service performs, a penetration needs another team to build it. Neither ends the search on its own either.
-TIERS = {"resize": 1, "penetration": 2}
+# A combined fix (a second try's: two or three elements at once) ranks after one element's but ends the search.
+TIERS = {"combined": 0.5, "resize": 1, "penetration": 2}
 
 
 def tier(kind: str | None, edit: dict | None = None) -> float:
@@ -399,6 +410,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     ideas and why they failed, a wider neighbourhood) and `label` names the model on every event and option.
     """
     lock = lock or contextlib.nullcontext()
+    usage_from = model.usage.snapshot() if isinstance(getattr(model, "usage", None), meta_client.Usage) else None
     system = (PACKS / f"{pack}.md").read_text() + guidance
     if recommend:
         return _recommend(scene, clash, model, system + requirements.RECOMMEND.format(why=recommend), recommend,
@@ -466,7 +478,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 _keep(options, option)
         # One round with a verified option is enough: another round costs a full model call (tens of seconds). Only
         # a plain geometry fix ends the search at once; a resize or a penetration gets one more round to beat it.
-        if any(tier(o.kind) == 0 for o in options) or (options and round_no >= 2):
+        if any(tier(o.kind) < 1 for o in options) or (options and round_no >= 2):
             break
 
     # Rank: plain geometry fixes before a resize before a penetration; then options with comfortable clearance (twice
@@ -492,7 +504,10 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             theirs = clash.element_b if mine == clash.element_a else clash.element_a
             o.meets = requirements.meets(doc, policy[mine], policy[theirs], clearance_m, o.min_clearance_m,
                                          o.delta_m, o.kind, fitted=(o.edit or {}).get("fit") == "fitted")
-    usage = model.usage.as_dict(model.model) if isinstance(getattr(model, "usage", None), meta_client.Usage) else None
+    # What this run cost, for a model billed per token (a second try's own model); none for Muse Spark, whose one
+    # client every visitor's runs share.
+    usage = (model.usage.as_dict(model.model, usage_from) if usage_from is not None
+             and meta_client.cost(model.model, 1, 1) > 0 else None)
     return Result(understanding, options, attempts, advice,
                   requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m,
                   model=label, usage=usage)
@@ -931,8 +946,10 @@ def combined_steps(scene: IfcScene, cand: dict, a: str, b: str) -> list[dict]:
         if gid in (s["target"] for s in out):
             raise Refused(f"step {i}: each step changes a different element")
         e = scene.element(gid)
-        if e.fixed:
+        if stays(scene, gid):
             raise Refused(f"step {i}: {e.ifc_class} '{e.name}' is structure and stays where it is")
+        if gid not in (a, b) and not is_service(scene, gid):
+            raise Refused(f"step {i}: besides A and B only services move; {e.ifc_class} '{e.name}' stays where it is")
         try:
             if kind == "move":
                 delta = [float(v) for v in st.get("delta_m", [])]
@@ -959,11 +976,19 @@ def combined_steps(scene: IfcScene, cand: dict, a: str, b: str) -> list[dict]:
             raise Refused(f"step {i}: {err}") from err
         except (edits.Unsupported, KeyError) as err:
             raise Refused(f"step {i}: cannot {kind} {e.name}: {err}") from err
+        for g in step["moved"]:   # a move takes its whole run: none of it may be structure, nor anything else
+            if g == gid:          # beside a service unless the target is A or B
+                continue
+            if stays(scene, g) or (gid not in (a, b) and not is_service(scene, g)):
+                other = scene.element(g)
+                raise Refused(f"step {i}: moving {e.name} would take {other.ifc_class} '{other.name}' with it, "
+                              "which stays where it is")
         if matcher is not None:
-            pol = requirements.policy(doc, matcher, gid)
-            why = requirements.blocked(pol, None, kind, step["delta_m"], True)
-            if why:
-                raise Refused(f"step {i} ({e.name}): {why}")
+            for g in step["moved"]:
+                pol = requirements.policy(doc, matcher, g)
+                why = requirements.blocked(pol, None, kind, step["delta_m"], True)
+                if why:
+                    raise Refused(f"step {i} ({scene.element(g).name}): {why}")
         out.append({**step, "target": gid})
     if not any(st["target"] in (a, b) for st in out):
         raise Refused("one step must change A or B: moving only what is around them leaves the clash")
