@@ -237,6 +237,18 @@ voice drives everything chat can. Caps `SIGHTLINE_VOICE_PER_HOUR/DAY`, 60 s / 3 
 fake microphone (format accepted, audio duration right); recognition itself is untested here: no speech audio could be
 fetched or generated in the cloud session.
 
+Live voice (Oct 29; design in `docs/voice.md`, code `server/sightline/voice_live.py`, `LiveVoice` in `web/src/voice.ts`):
+Muse has no text-to-speech, so voice got real-time recognition instead. The mic streams 16 kHz PCM (an AudioWorklet
+resamples) over `/api/voice/live`, which relays to `wss://api.meta.ai/v1/asr/realtime` (the key goes in Meta's first
+frame, so the browser cannot connect itself). **Hold to talk** is the default: captions in the message box while held,
+sent on release (final ~0.3 s after); a quick tap latches. **Hands-free** (toggle, `sightline.voice.handsfree`,
+`ENDPOINTING`): each sentence is sent at the pause, queued while ORCA answers. One session = one voice cap use; same
+origin only; the owner cookie reaches sockets via `_OwnerContext`; the socket failing falls back to the upload path.
+Audio may run 1.5 s ahead of the clock (Meta garbles a 5 s burst, takes 3 s). Speech recognition is now tested with
+espeak-ng speech (`apt-get install espeak-ng` works in the cloud session) through the relay and in Chromium with a fake
+microphone; keywords turned "supply adequate" into "supply air duct". Status notes sit above the input so the mic
+doesn't move. Not yet checked: a human voice, and WebSockets through Modal's edge.
+
 Export (Oct 27): edits accumulate in the scene's in-memory models (moves, offsets, trims, plans); export writes each
 edited discipline file once, with all its edits (a zip when several changed). Only kept fixes mark a file edited:
 `IfcScene.translate` no longer does (trials move and move back with it), `Workspace.apply` / `apply_offset` /
