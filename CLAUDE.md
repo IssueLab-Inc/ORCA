@@ -522,6 +522,12 @@ Cell fixes and tour (Oct 28, owner feedback on Fix together for #61/#68: two age
   `web/public/tour/cell-ladder.json` and `cell-pipe-plan.json`.
 - **Eval:** `evals/step_cell.py`: C1 one job, verified; C2 +150; C3 trim 40 mm; exported air line 7 → 15 parts.
 
+Landing demo cards (Oct 29, owner decision): the hero keeps "Watch Sightline fix a clash" and a "Pick a demo" link; below
+it, two equal cards (`DemoCard` in About.tsx: picture, what it is, what it shows, measured chips, Open + Tour; the
+`data-tour` demo/cell targets moved with their buttons). The README's "Two demos" table uses the same pictures and
+numbers: change both together. Pictures are captured in Sightline's own viewer (not the DemoModels renders, which
+predate the event) by `web/scripts/capture-demos.cjs` → `web/public/demos/*.webp`; recapture after visual changes.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting

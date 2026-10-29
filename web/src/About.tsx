@@ -1,4 +1,4 @@
-import { Box, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
+import { ArrowDown, Box, Check, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 /**
@@ -36,30 +36,51 @@ export function About({ start, onClose, triageOpen = false }: {
             <div className="about-cta">
               {start.onGolden && <button className="btn primary big" data-tour="golden" disabled={start.disabled} onClick={start.onGolden}>
                 <Play size={16} aria-hidden /> Watch Sightline fix a clash</button>}
-              <button className="btn big" data-tour="demo" disabled={start.disabled} onClick={start.onStart}>
-                <FolderOpen size={16} aria-hidden /> {start.label}</button>
-              {start.onTour && <button className="btn big" disabled={start.disabled} onClick={start.onTour}>
-                <Compass size={16} aria-hidden /> Take the guided tour</button>}
+              <a className="btn big" href="#demos"
+                onClick={(e) => { e.preventDefault(); document.getElementById("demos")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
+                <ArrowDown size={16} aria-hidden /> Pick a demo</a>
             </div>
-            <p className="hint about-loads">{start.details}</p>
           </>}
         </div>
         <BeforeAfter />
       </header>
 
-      {start?.onCell && (
-        <section className="about-second" aria-label="Second demo">
-          <div>
-            <p className="eyebrow">Second demo · from STEP</p>
-            <h2>A machine cell, from its STEP file</h2>
-            <p>Robot palletising cell PC-03: 144 parts, five planted problems. Sightline converts the STEP, checks it,
-              moves what clashes, and gives you the STEP back with the fixes.</p>
-          </div>
-          <div className="about-second-cta">
-            <button className="btn big" data-tour="cell" disabled={start.disabled} onClick={start.onCell}>
-              <Cpu size={16} aria-hidden /> Open the machine cell</button>
-            {start.onCellTour && <button className="btn big" disabled={start.disabled} onClick={start.onCellTour}>
-              <Compass size={16} aria-hidden /> Take the cell tour</button>}
+      {start && (
+        <section className="about-demos-wrap" id="demos" aria-label="The demos">
+          <h2 className="about-h">Pick a demo</h2>
+          <div className={`about-demos${start.onCell ? "" : " one"}`}>
+            <DemoCard img="/demos/northbank.webp" eyebrow="Building · 4 IFC models" title="Northbank, a riverside office site"
+              alt="The Northbank demo in Sightline's viewer: an office building among its neighbours, with streets, trees and the river."
+              blurb={<>Structure, building services, architecture and site, modelled by four teams. On Level 02 a transfer
+                girder is hit by a duct, a cable tray and a water main.</>}
+              shows={[<>Every pair of models checked: <b>464 clashes in 1,732 elements, in 4 s</b></>,
+                <>Triage sorts the real problems from the noise</>,
+                <>The duct raised through the girder's web opening, at the designer's own height</>,
+                <>One root-cause plan for all three services</>]}
+              chips={["~40 s to a verified fix", "3 of 3 designer fixes"]}
+              note={start.details}>
+              <button className="btn primary big" data-tour="demo" disabled={start.disabled} onClick={start.onStart}>
+                <FolderOpen size={16} aria-hidden /> {start.label}</button>
+              {start.onTour && <button className="btn big" disabled={start.disabled} onClick={start.onTour}>
+                <Compass size={16} aria-hidden /> Take the guided tour</button>}
+            </DemoCard>
+            {start.onCell && (
+              <DemoCard img="/demos/cell.webp" eyebrow="Machine · 1 STEP file" title="PC-03, a robot palletising cell"
+                alt="The PC-03 palletising cell in Sightline's viewer: a robot inside its see-through safety zone, a conveyor, fence posts and the air line."
+                blurb={<>A robot, a conveyor, safety guarding and services, from mechanical CAD. Five problems were planted in
+                  this revision.</>}
+                shows={[<>The STEP converted: <b>144 parts</b> keep their names and colours, and Muse names what each is</>,
+                  <>All <b>13 planted clashes</b> found, nothing unexpected</>,
+                  <>The cable ladder moved, the air pipe dropped under both conveyor rails as one fix, a rail trimmed</>,
+                  <>The STEP handed back with the fixes written in</>]}
+                chips={["13 of 13 found", "STEP in, STEP out"]}
+                note={<>Opens one STEP file and checks it, in a few seconds.</>}>
+                <button className="btn primary big" data-tour="cell" disabled={start.disabled} onClick={start.onCell}>
+                  <Cpu size={16} aria-hidden /> Open the machine cell</button>
+                {start.onCellTour && <button className="btn big" disabled={start.disabled} onClick={start.onCellTour}>
+                  <Compass size={16} aria-hidden /> Take the cell tour</button>}
+              </DemoCard>
+            )}
           </div>
         </section>
       )}
@@ -69,18 +90,21 @@ export function About({ start, onClose, triageOpen = false }: {
           <h2 className="about-h">Once it's open</h2>
           <ul className="next-steps">
             <li><ListChecks size={18} aria-hidden /><span><b>On the left</b>What Sightline found: every clash numbered and named, grouped by which models it checked.</span></li>
-            <li><Box size={18} aria-hidden /><span><b>In the middle</b>The building in 3D, with its street and riverside.</span></li>
+            <li><Box size={18} aria-hidden /><span><b>In the middle</b>The models in 3D: the building with its streets and river, or the cell.</span></li>
             <li><Sparkles size={18} aria-hidden /><span><b>On the right</b>Pick a clash, press <i>Propose fixes</i>, and watch Sightline work.</span></li>
           </ul>
         </section>
       )}
 
-      <section className="about-stats" aria-label="Sightline on the demo, measured">
+      <section aria-label="Sightline on the demo, measured">
+        <h2 className="about-h">Measured on Northbank</h2>
+        <div className="about-stats">
         <Stat value="~40 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
         <Stat value="3 of 3" label="designer fixes matched" note="On the demo's three planted clashes, the first idea passes at the designer's own heights." />
         <Stat value="4 s" label="to check 1,732 elements" note="Every pair of the demo's three building models, and each against itself: 464 clashes." />
         <Stat value="464" label="clashes sorted in under 2 min" note={triageOpen ? "Read by an open-weights model; alike clashes once, so 39 calls."
           : "Measured on Muse Spark Open, the open-weights model; alike clashes are read once (39 calls)."} />
+        </div>
       </section>
 
       <section>
@@ -224,6 +248,31 @@ function Step({ n, icon, title, children }: { n: number; icon: ReactNode; title:
 
 /** Side view of the demo's clash: the girder in section (an I with a gap in its web where the opening is), the duct
  * running through the solid web, then raised through the opening with square risers, as Sightline's offset does. */
+/** One demo on the start page: what you see when it opens, what it is, what it shows, and how to start it. */
+function DemoCard({ img, alt, eyebrow, title, blurb, shows, chips, note, children }: {
+  img: string; alt: string; eyebrow: string; title: string; blurb: ReactNode; shows: ReactNode[]; chips: string[];
+  note?: ReactNode; children: ReactNode;
+}) {
+  return (
+    <article className="demo-card">
+      <img src={img} alt={alt} width={1200} height={750} loading="lazy" />
+      <div className="demo-body">
+        <p className="eyebrow">{eyebrow}</p>
+        <h3>{title}</h3>
+        <p className="demo-blurb">{blurb}</p>
+        <ul className="demo-shows" aria-label="What it shows">
+          {shows.map((x, i) => <li key={i}><Check size={14} aria-hidden /><span>{x}</span></li>)}
+        </ul>
+        <div className="chips demo-chips">{chips.map((c) => <span key={c} className="chip accent">{c}</span>)}</div>
+        <div className="demo-foot">
+          {note && <p className="hint demo-note">{note}</p>}
+          <div className="demo-actions">{children}</div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function BeforeAfter() {
   const girder = (cx: number, label = false) => (
     <g fill="#1f9d3a">
