@@ -402,8 +402,13 @@ def apply_route(scene: IfcScene, global_id: str, steps: list[dict], corners: str
     for at, du, dv in _transitions(steps):
         if abs(du) > 1e-4 and abs(dv) > 1e-4:
             if not round_:   # a rectangular section would twist through a bend in a tilted plane
+                if all(abs(at - st["from_m"]) > 1e-3 for st in steps):   # it is coming back to its line
+                    raise Unsupported(f"at {at:.2f} m the route comes back to its line up and sideways at once: come "
+                                      "back one axis at a time too (end with a step that keeps the up offset without "
+                                      "the sideways one, sharing the boundary, so it steps back sideways, then down)")
                 raise Unsupported(f"at {at:.2f} m the route changes up and sideways at once: change one axis at a time "
-                                  "(go up in one step, then sideways in the next, sharing the boundary)")
+                                  "(go up in one step, then sideways in the next, sharing the boundary; come back the "
+                                  "same way: a step back sideways only, then down)")
             jump = float(np.hypot(du, dv))   # a round pipe takes a rolling offset: one bend plane, on the diagonal
             moves.append((at, (up * du + side * dv) / jump, jump, (sx, sx)))
         elif abs(du) > 1e-4:
@@ -877,6 +882,19 @@ def _first_hit(origins: np.ndarray, d: np.ndarray, tris: np.ndarray) -> np.ndarr
     return t.min(axis=1) if t.shape[1] else np.full(len(origins), np.inf)
 
 
+FREE_BANDS_MAX_TRIS = 200_000   # past this many triangles in the stretch, the room beside an obstacle is not told
+MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet")
+
+
+def _kernel(p) -> str:
+    """The geometry kernel to triangulate `p` with: CGAL for a body of meshes only (OpenCASCADE sews a mesh into
+    shells first: seconds for a dense one), else OpenCASCADE, so curved and cut shapes are as before."""
+    reps = [r for r in (p.Representation.Representations if p.Representation else []) if r.RepresentationIdentifier == "Body"]
+    items = [i for r in reps for i in r.Items]
+    meshes = bool(items) and all(any(i.is_a(c) for c in MESH_ITEMS) for i in items) and not getattr(p, "HasOpenings", None)
+    return "hybrid-cgal-simple-opencascade" if meshes else "opencascade"
+
+
 def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = "side", clearance_m: float = 0.025,
                reach_m: float = 1.0, step_m: float = 0.01) -> list[dict]:
     """Offsets of a straight segment, on its own "up" or "side" axis (`run_frame`), at which its profile (with
@@ -915,7 +933,7 @@ def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = 
             continue
         solids.append(boxes[g])
         try:
-            shape = ifcopenshell.geom.create_shape(settings, p)
+            shape = ifcopenshell.geom.create_shape(settings, p, geometry_library=_kernel(p))
         except RuntimeError:
             continue
         verts = np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
@@ -923,27 +941,64 @@ def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = 
     if not tris:
         return []
     tris = np.concatenate(tris)
+    # Only triangles that reach the stretch along the run, and the band the rays sweep across it, can be hit. A dense
+    # mesh nearby (a meshed motor, a detailed fitting) is cut down to the part that matters, or, past a budget, the
+    # room is not told at all: this runs while the scene is locked.
+    rel = tris - start
+    tt, ta, tc = rel @ d, rel @ a, rel @ c
+    eps = 1e-6   # a triangle touching a ray's edge still counts, as it does in the ray test
+    keep = ((tt.max(1) >= lo - eps) & (tt.min(1) <= hi + eps) & (tc.max(1) >= -half_c - eps) & (tc.min(1) <= half_c + eps)
+            & (ta.max(1) >= -reach_m - half_a - eps) & (ta.min(1) <= reach_m + half_a + eps))
+    tris, ta, tc = tris[keep], ta[keep], tc[keep]
+    if len(tris) > FREE_BANDS_MAX_TRIS:
+        return []
+    # Each ray runs along the run at one point of the cross-section (a, c): it can only meet triangles whose own
+    # cross-section span covers that point. Bin the triangles on a grid there, so a ray tests only its own cell.
+    a0, c0, cell = -reach_m - half_a - 2 * eps, -half_c - 2 * eps, 0.03
+    na = int(np.ceil((2 * (reach_m + half_a) + 4 * eps) / cell)) + 1
+    nc = int(np.ceil((2 * half_c + 4 * eps) / cell)) + 1
+    ia0 = np.clip(np.floor((ta.min(1) - eps - a0) / cell).astype(int), 0, na - 1)
+    ia1 = np.clip(np.floor((ta.max(1) + eps - a0) / cell).astype(int), 0, na - 1)
+    ic0 = np.clip(np.floor((tc.min(1) - eps - c0) / cell).astype(int), 0, nc - 1)
+    ic1 = np.clip(np.floor((tc.max(1) + eps - c0) / cell).astype(int), 0, nc - 1)
+    wc = ic1 - ic0 + 1
+    count = (ia1 - ia0 + 1) * wc
+    owner = np.repeat(np.arange(len(tris)), count)
+    k = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
+    cells = (np.repeat(ia0, count) + k // np.repeat(wc, count)) * nc + np.repeat(ic0, count) + k % np.repeat(wc, count)
+    order = np.argsort(cells, kind="stable")
+    cells, owner = cells[order], owner[order]
+    solids = np.array(solids) if solids else np.zeros((0, 2, 3))
     offsets = np.arange(-reach_m, reach_m + 1e-9, step_m)
     # The profile's outline every 30 mm, and its centre: anything that crosses the stretch crosses the outline (a 100 mm
-    # post between the corners of a 400 mm duct would slip past corner rays alone).
+    # post between the corners of a 400 mm duct would slip past corner rays alone). The centre goes first: one hit is
+    # enough to rule an offset out.
     along_a = np.linspace(-half_a, half_a, max(2, int(np.ceil(2 * half_a / 0.03)) + 1))
     along_c = np.linspace(-half_c, half_c, max(2, int(np.ceil(2 * half_c / 0.03)) + 1))
-    samples = ([(sa, sc) for sa in along_a for sc in (-half_c, half_c)] + [(sa, sc) for sc in along_c[1:-1]
-               for sa in (-half_a, half_a)] + [(0.0, 0.0)])
+    samples = np.array([(0.0, 0.0)] + [(sa, sc) for sa in along_a for sc in (-half_c, half_c)]
+                       + [(sa, sc) for sc in along_c[1:-1] for sa in (-half_a, half_a)])
     base = start + d * lo
-    origins = np.array([base + a * (v + sa) + c * sc for v in offsets for sa, sc in samples])
-    blocked = np.zeros(len(origins), dtype=bool)
-    for k in range(0, len(origins), 256):
-        blocked[k:k + 256] = _hits(origins[k:k + 256], d, tris, hi - lo)
-    # A ray wholly inside a solid (along a wall) crosses none of its faces: its middle inside an element's box counts.
-    middles = origins + d * (hi - lo) / 2
-    for bmin, bmax in solids:
-        blocked |= ((middles > bmin) & (middles < bmax)).all(axis=1)
-    free = ~blocked.reshape(len(offsets), len(samples)).any(axis=1)
+    free = np.ones(len(offsets), dtype=bool)
+    for k, v in enumerate(offsets):
+        ray_a, ray_c = v + samples[:, 0], samples[:, 1]
+        origins = base + np.outer(ray_a, a) + np.outer(ray_c, c)
+        # A ray wholly inside a solid (along a wall) crosses none of its faces: its middle inside an element's box counts.
+        middles = origins + d * (hi - lo) / 2
+        if len(solids) and ((middles[:, None, :] > solids[None, :, 0]) & (middles[:, None, :] < solids[None, :, 1])).all(2).any():
+            free[k] = False
+            continue
+        ray_cells = (np.clip(np.floor((ray_a - a0) / cell).astype(int), 0, na - 1) * nc
+                     + np.clip(np.floor((ray_c - c0) / cell).astype(int), 0, nc - 1))
+        first = np.searchsorted(cells, ray_cells, side="left")
+        last = np.searchsorted(cells, ray_cells, side="right")
+        for r in range(len(samples)):
+            if last[r] > first[r] and _hits(origins[r:r + 1], d, tris[owner[first[r]:last[r]]], hi - lo).any():
+                free[k] = False
+                break
     # And the route must get there: from the line, square to it, at both ends of the stretch, nothing in the way.
     for sign in (1.0, -1.0):
         starts = np.array([start + d * t + c * sc for t in (lo, hi) for sc in (-half_c, 0.0, half_c)])
-        room = _first_hit(starts, a * sign, tris).min() - half_a
+        room = (_first_hit(starts, a * sign, tris).min() if len(tris) else np.inf) - half_a
         for bmin, bmax in solids:   # a solid the line itself starts in leaves no room that way
             if ((starts > bmin) & (starts < bmax)).all(axis=1).any():
                 room = 0.0
