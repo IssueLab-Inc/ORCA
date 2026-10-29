@@ -215,8 +215,73 @@ def test_a_single_proposal_hears_of_the_runs_other_clash_nearby(tmp_path):
     report = ws.report(ws.detect(sid)["report"]["id"])
     c = next(c for c in report.clashes if {c.a.global_id, c.b.global_id} == {duct, b2})
     clash = ws.clash_for(c.a.global_id, c.b.global_id, None, None, "", report.id, c.id, sid)
-    assert clash.nearby == [b4]
+    assert clash.nearby == {duct: [b4]}
     text = agent._describe(scene, clash)
     assert "also clashes nearby with IfcColumn 'Column B4' at 3.80-4.20 m along it" in text
     # The fixed side's other clashes are not this fix's: a column's other partners are never named.
-    assert all(not scene.element(g).fixed for g in [duct]) and b2 not in clash.nearby
+    assert all(not scene.element(g).fixed for g in [duct]) and b2 not in clash.nearby.get(duct, [])
+
+
+def test_a_single_step_on_a_sloped_run_or_drainage_keeps_the_routes_own_rules(scene):
+    sloped, col = by_tag(scene, "RT-3"), by_name(scene, "Column C3")
+    attempt, _ = agent._try_route(scene, {"steps": [{"from_m": 2.4, "to_m": 3.8, "up_m": -0.5}]}, sloped, col, 0.025)
+    assert attempt.kind == "route" and "not horizontal" not in attempt.reason   # built by apply_route, keeping its fall
+    waste, col_d = by_tag(scene, "RT-4"), by_name(scene, "Column D3")
+    attempt, _ = agent._try_route(scene, {"steps": [{"from_m": 2.4, "to_m": 3.8, "up_m": 0.3}]}, waste, col_d, 0.025)
+    assert attempt.kind == "route" and "drainage cannot step up or down" in attempt.reason
+
+
+def test_coming_back_on_both_axes_at_once_says_how_to_come_back(scene):
+    duct = by_tag(scene, "RT-1")
+    with pytest.raises(edits.Unsupported, match="comes back to its line up and sideways at once"):
+        edits.apply_route(scene, duct, [{"from_m": 1.5, "to_m": 2.4, "up_m": 0.35},
+                                        {"from_m": 2.4, "to_m": 4.6, "up_m": 0.35, "side_m": 0.55}])
+
+
+def test_the_room_beside_a_dense_mesh_is_scanned_in_time(tmp_path):
+    import time
+    import ifcopenshell
+    import ifcopenshell.api
+    path = build_route_fixture(tmp_path / "dense.ifc")
+    m = ifcopenshell.open(str(path))
+    body = next(c for c in m.by_type("IfcGeometricRepresentationSubContext") if c.ContextIdentifier == "Body")
+    panel = ifcopenshell.api.run("root.create_entity", m, ifc_class="IfcBuildingElementProxy", name="Dense panel")
+    ifcopenshell.api.run("spatial.assign_container", m, relating_structure=m.by_type("IfcBuildingStorey")[0], products=[panel])
+    n = 60   # 7,200 triangles, in RT-2's stretch beside the run (the old scan took about 13 s)
+    xs, zs = np.linspace(2.5, 3.5, n + 1), np.linspace(2.5, 3.1, n + 1)
+    pts = [(float(x), 5.55 + 0.01 * float(np.sin(7 * x + 5 * z)), float(z)) for z in zs for x in xs]
+    faces = [f for j in range(n) for i in range(n) for p in [j * (n + 1) + i + 1]
+             for f in ((p, p + 1, p + n + 2), (p, p + n + 2, p + n + 1))]
+    item = m.createIfcTriangulatedFaceSet(m.createIfcCartesianPointList3D(pts), None, None, faces, None)
+    panel.Representation = m.createIfcProductDefinitionShape(None, None, [m.createIfcShapeRepresentation(
+        body, "Body", "Tessellation", [item])])
+    ifcopenshell.api.run("geometry.edit_object_placement", m, product=panel)
+    m.write(str(path))
+    s = IfcScene(path)
+    s.bounds()
+    duct, b2, b4 = by_tag(s, "RT-2"), by_name(s, "Column B2"), by_name(s, "Column B4")
+    t0 = time.perf_counter()
+    bands = edits.free_bands(s, duct, [b2, b4], "side")
+    assert time.perf_counter() - t0 < 5
+    assert not [b for b in bands if b["from_m"] <= 0.55 <= b["to_m"]]   # the panel's offset is not free
+
+
+def test_nearby_clashes_are_each_sides_own_and_near_where_they_meet(tmp_path):
+    from types import SimpleNamespace as NS
+    from sightline.service import Workspace
+    box = lambda x0, x1, y0, y1: np.array([[x0, y0, 0.0], [x1, y1, 1.0]])
+    boxes = {"duct": box(0, 14, -0.2, 0.2), "pipe": box(0.9, 1.1, -3, 3), "wall": box(0.8, 1.2, 2, 2.5)}
+    boxes.update({f"beam{x}": box(x - 0.1, x + 0.1, -1, 1) for x in (1, 2.5, 6, 9, 12.5)})
+    fixed = {g: g.startswith(("beam", "wall")) for g in boxes}
+    scene = NS(bounds=lambda: boxes, element=lambda g: NS(fixed=fixed[g]))
+    side = lambda g, cls="IfcBeam": NS(global_id=g, ifc_class=cls)
+    clashes = [NS(a=side("duct", "IfcDuctSegment"), b=side(f"beam{x}"), distance_m=-0.05) for x in (1, 2.5, 6, 9, 12.5)]
+    clashes += [NS(a=side("duct", "IfcDuctSegment"), b=side("pipe", "IfcPipeSegment"), distance_m=-0.02),
+                NS(a=side("pipe", "IfcPipeSegment"), b=side("wall", "IfcWall"), distance_m=-0.1)]
+    ws = Workspace(tmp_path)
+    ws.scenes["s"] = scene
+    # On duct x beam@1: the pipe crossing right there, then beam@2.5; beams at 6, 9 and 12.5 m are too far away.
+    assert ws._nearby("s", NS(clashes=clashes), "duct", "beam1") == {"duct": ["pipe", "beam2.5"]}
+    # On duct x pipe (both movable): each side hears of its own partners only.
+    near = ws._nearby("s", NS(clashes=clashes), "duct", "pipe")
+    assert near["pipe"] == ["wall"] and "wall" not in near["duct"] and near["duct"][0] == "beam1"

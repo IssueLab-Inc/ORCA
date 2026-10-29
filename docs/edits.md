@@ -92,17 +92,21 @@ other obstacles).
 when the obstacle has no opening, the up offsets) at which the run's profile, with the clearance all round, passes that
 stretch clear of everything, not only the obstacle. Rays run along the stretch round the profile's outline (every
 30 mm) and at its centre; a ray inside a solid counts as blocked (its middle in an element's box); a band counts only if
-the run can reach it square from its line at both ends of the stretch. On the cell's C6: beside column C3, side offsets
+the run can reach it square from its line at both ends of the stretch. Only triangles that reach the stretch are kept, binned by where they sit
+across the run so each ray tests its own cell (a mesh is triangulated with CGAL); past 200,000 triangles the room is
+not told. It is worked out once per proposal, not every round. A dense 28,800-triangle mesh beside a run: 52 s
+before, 0.6 s now, with the same bands on every fixture and cell case. On the cell's C6: beside column C3, side offsets
 +0.20 to +0.29 m (between the column and the fence); past both columns at once, none (ES-2 is between them). For a single
-proposal on a report clash, the moving element's other clashes within 3 m are named too (`Workspace._nearby`): a route
-may clear them together, but only the asked clash is required (never the fixed side's: a girder's other services are
-their own clashes).
+proposal on a report clash, the moving element's other clashes within 3 m of where the pair meet are named too
+(`Workspace._nearby`, per side: each element hears of its own): a route may clear them together, but only the asked
+clash is required (never the fixed side's: a girder's other services are their own clashes).
 
 **Demo case:** the cell's C6 (demo-models repo): PL-302 runs along the plant's south wall through columns C3 and C4.
 Offsets over or under fail (the columns run full height), a whole-run move or one long detour hits the ES-2 emergency
 stop between them; a detour of 200 mm round each column clears with 33 mm to spare.
 
-**Not yet:** 45° pieces, falling drainage, diagonal ("rolling") changes, and routes in the wider-fix planner.
+**Not yet:** 45° pieces, falling drainage, and routes in the wider-fix planner. (Diagonal "rolling" changes are
+done, for round pipes only.)
 
 ## Penetration (Oct 29)
 
@@ -180,8 +184,14 @@ and re-parse it in the browser. Now every way of keeping a fix answers with what
   taken after every edit of the request (`edits.meshes(render=True)`: unwelded, with normals, the style's colour and
   opacity, and the element's file). No meshes when one will not triangulate or there are more than 500,000 vertices.
 - **Page:** `applyToViewer` (App.tsx) patches when the reply has meshes for this scene and the page's model is at
-  `revision_before` (from opening: `revision` in the open, upload and scene-info replies); otherwise it reloads the
-  changed files as before. Either way it then knows the new revision.
+  `revision_before` (from opening: `revision` in the open, upload and scene-info replies, resume included); otherwise
+  it reloads this fix's files and every file changed by an edit it missed (`history`: which files each revision
+  changed, `IfcScene.bump`; all edited files when the page doesn't know its revision). Either way it then knows the new
+  revision.
+- **One request, one revision range:** `_with_patch` and the MCP `apply_fix` / `apply_plan` read `revision_before`,
+  keep the fix and take the patch under the workspace lock, so another tab's edit never lands in between.
+- **Colours:** the patch's meshes carry only the model's own styles (no IfcOpenShell class defaults), so an unstyled
+  element keeps the colour the page drew it in.
 - **Viewer:** `viewer/patch.ts` (`patchModel`, pure over the loaded model): an element keeps its instance and gets the
   new geometry (add, point the instance at it, then delete the old one: deleting first would delete the instance); a
   new piece gets its own instance, coloured from its mesh or the element it came from, in the see-through batch when

@@ -29,7 +29,8 @@ class Clash:
     images: list[Path] = field(default_factory=list)  # A, B, C when available
     notes: str = ""           # e.g. ceiling void depth, project type
     others: list[str] = field(default_factory=list)  # more elements A runs into (a plan's merged item): one fix for all
-    nearby: list[str] = field(default_factory=list)  # other clashes of A or B close by in the report: told, not required
+    # Other clashes of A or B close by in the report, per side (GlobalId → its partners): told, not required.
+    nearby: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -83,7 +84,9 @@ class Result:
     clearance_m: float = 0.025        # the clearance every option had to keep
 
 
-def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
+def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025, memo: dict | None = None) -> str:
+    """What Muse reads about the clash. `memo` keeps what the geometry said between rounds of one proposal (the room
+    past an obstacle costs a ray scan; nothing changes between rounds: every trial is undone)."""
     a, b = scene.element(clash.element_a), scene.element(clash.element_b)
     lines = [
         f"Element A (red): {a.ifc_class} '{a.name}', level {a.storey}, GlobalId {a.global_id}",
@@ -95,8 +98,8 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
                                      ("B", clash.element_b, clash.element_a, [])):
         if any(scene.entity(this).is_a(c) for c in edits.PENETRABLE):   # a wall or slab is not split or rerouted
             continue
-        lines += _run_text(scene, label, this, other, clearance_m, more)
-        lines += _nearby_text(scene, label, this, [n for n in clash.nearby if n not in (other, *more)])
+        lines += _run_text(scene, label, this, other, clearance_m, more, memo)
+        lines += _nearby_text(scene, label, this, [n for n in clash.nearby.get(this, []) if n not in (other, *more)])
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
         lines += _joint_text(scene, label, this, other, name)
         lines += _penetration_text(scene, label, this, other, name, clearance_m)
@@ -143,7 +146,7 @@ def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: 
 
 
 def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = 0.025,
-              others: list[str] = ()) -> list[str]:
+              others: list[str] = (), memo: dict | None = None) -> list[str]:
     """A straight segment's geometry, and where the other element (and any `others` it also runs into) sits along it:
     what a local offset needs."""
     try:
@@ -175,7 +178,7 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
                 lines.append(f"The other element has an opening on this line from z {h['bottom_m']:.3f} to "
                              f"{h['top_m']:.3f} m: offsetting {label}'s middle piece by {h['dz_min_m']:+.3f} to "
                              f"{h['dz_max_m']:+.3f} m passes it through with {clearance_m * 1000:.0f} mm all round.")
-            lines += _room_text(scene, label, gid, [other], "the other element", clearance_m, above=not holes)
+            lines += _room_text(scene, label, gid, [other], "the other element", clearance_m, above=not holes, memo=memo)
     for o in others:
         if o not in b:
             continue
@@ -186,9 +189,10 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
             e = scene.element(o)
             lines.append(f"Element {label} also runs into {e.ifc_class} '{e.name}' at {lo:.2f}-{hi:.2f} m along it, "
                          f"from z {b[o][0][2]:.3f} to {b[o][1][2]:.3f} m: one fix must clear it too.")
-            lines += _room_text(scene, label, gid, [o], f"'{e.name}'", clearance_m)
+            lines += _room_text(scene, label, gid, [o], f"'{e.name}'", clearance_m, memo=memo)
     if others:
-        together = _room_text(scene, label, gid, [other, *others], "all of them at once", clearance_m, above=False)
+        together = _room_text(scene, label, gid, [other, *others], "all of them at once", clearance_m, above=False,
+                              memo=memo)
         lines += together or [f"No side offset clears all of them in one stretch: give each obstacle its own step and "
                               f"return to the line between them."]
     return lines
@@ -223,9 +227,12 @@ def _compass(v) -> str:
 
 
 def _room_text(scene: IfcScene, label: str, gid: str, obstacles: list[str], what: str, clearance_m: float,
-               above: bool = True) -> list[str]:
+               above: bool = True, memo: dict | None = None) -> list[str]:
     """The room a route has past `obstacles`: side offsets (and up offsets when `above`) at which the run's profile
-    clears everything along their stretch (`edits.free_bands`)."""
+    clears everything along their stretch (`edits.free_bands`), once per proposal when given a `memo`."""
+    key = ("room", gid, tuple(obstacles), what, clearance_m, above)
+    if memo is not None and key in memo:
+        return memo[key]
     try:
         run = edits.run_of(scene, gid)
         _, side = edits.run_frame(run.direction)
@@ -243,6 +250,8 @@ def _room_text(scene: IfcScene, label: str, gid: str, obstacles: list[str], what
                        else "up offsets (+ up, - down)")
             lines.append(f"Room past {what} for element {label}: {meaning} of {ranges} m keep {clearance_m * 1000:.0f} mm "
                          f"clear of everything along that stretch (a route step can use them).")
+    if memo is not None:
+        memo[key] = lines
     return lines
 
 
@@ -313,6 +322,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     understanding = ""
     advice = ""
     emit = on_event or (lambda e: None)
+    memo: dict = {}   # what the geometry tells Muse, kept between rounds (every trial is undone)
 
     def on_step(attempt: Attempt) -> None:
         emit({"type": "attempt", "index": len(attempts) - 1, **asdict(attempt)})
@@ -321,7 +331,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         emit({"type": "thinking", "round": round_no})
         started = time.perf_counter()
         with lock:
-            text = _describe(base, clash, clearance_m) + _feedback(attempts)
+            text = _describe(base, clash, clearance_m, memo) + _feedback(attempts)
         if trials and on_event and getattr(model, "streams_reasoning", False):  # someone is watching: show the thinking
             reply = model.complete_json_reasoning(system, text, clash.images, None,
                                                   lambda note, r=round_no: emit({"type": "reasoning", "round": r, "text": note}))
@@ -591,11 +601,15 @@ def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m
     title = cand.get("title", "reroute")
     raw = cand.get("steps")
     try:
-        if isinstance(raw, list) and len(raw) == 1 and not float(raw[0].get("side_m") or 0) and float(raw[0].get("up_m") or 0):
+        # Only a level run that is not drainage: an offset takes neither a slope nor the drainage rule a route keeps.
+        level = abs(float(np.asarray(edits.run_of(scene, target).direction)[2])) < 1e-3 and not edits.is_gravity(
+            scene.entity(target))
+        if (level and isinstance(raw, list) and len(raw) == 1 and not float(raw[0].get("side_m") or 0)
+                and float(raw[0].get("up_m") or 0)):
             one = raw[0]
             return _try_offset(scene, {**cand, "kind": "offset", "split_m": [one["from_m"], one["to_m"]],
                                        "dz_m": one["up_m"]}, target, other, clearance_m, on_trial, others=others)
-    except (AttributeError, KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError, edits.Unsupported):
         pass
     try:
         run = edits.run_of(scene, target)
