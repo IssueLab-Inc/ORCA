@@ -96,15 +96,6 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
                 title={open.length < p.clashes ? `${open.length} of ${p.clashes} still open` : undefined}>{open.length ? open.length : p.clashes}×</span>
               <div className="insight-text">
                 <b title={`${p.classes[0]} with ${p.classes[1]}`}>{human(p.classes[0])} <span className="with">with</span> {human(p.classes[1])}</b>
-                <span className="hint">{p.levels.length} level{p.levels.length === 1 ? "" : "s"} · {p.min_mm === p.max_mm ? `${p.min_mm} mm every time` : `${p.min_mm} to ${p.max_mm} mm`}
-                  {p.cross_discipline ? " · across disciplines" : ""}</span>
-                {v && <span className="verdict"><span className={`chip small ${VERDICT[v.verdict].cls}`}>{VERDICT[v.verdict].label}</span> {v.cause}</span>}
-                {v && <span className="hint">{v.rule ? <>Rule: <i>{v.rule}</i></> : v.action}</span>}
-                {v?.verdict === "by_design" && onAddRule && (hasRule(p)
-                  ? <span className="chip small ok req-added"><ClipboardCheck size={11} aria-hidden /> in your requirements</span>
-                  : <button className="btn small ghost req-add" data-tour="add-requirement"
-                    data-tip="Make it a rule in your coordination requirements: these pairs are settled as by design without the model, here and on every project you reuse the file on. Muse Spark still checks the rule."
-                    onClick={() => onAddRule(p, v)}><ClipboardPlus size={12} aria-hidden /> Add to requirements</button>)}
               </div>
               <div className="insight-actions">
                 {filterButton(patLabel(p), p.clash_ids)}
@@ -119,6 +110,18 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
                 {v?.verdict === "real_problem" && <button className="ibtn" disabled={busy} aria-label="Fix these together" data-tip="Fix these together (up to 8 pairs)" data-tip-side="left"
                   onClick={() => onFixAll(open)}><Wand2 size={16} aria-hidden /></button>}
                 </>}
+              </div>
+              {/* What the pattern is and Muse's reading take the row's whole width, under the count and the buttons */}
+              <div className="insight-more">
+                <span className="hint">{p.levels.length} level{p.levels.length === 1 ? "" : "s"} · {p.min_mm === p.max_mm ? `${p.min_mm} mm every time` : `${p.min_mm} to ${p.max_mm} mm`}
+                  {p.cross_discipline ? " · across disciplines" : ""}</span>
+                {v && <><span className="verdict"><span className={`chip small ${VERDICT[v.verdict].cls}`}>{VERDICT[v.verdict].label}</span> {v.cause}</span>
+                <span className="hint">{v.rule ? <>Rule: <i>{v.rule}</i></> : v.action}</span>
+                {v.verdict === "by_design" && onAddRule && (hasRule(p)
+                  ? <span className="chip small ok req-added"><ClipboardCheck size={11} aria-hidden /> in your requirements</span>
+                  : <button className="btn small ghost req-add" data-tour="add-requirement"
+                    data-tip="Make it a rule in your coordination requirements: these pairs are settled as by design without the model, here and on every project you reuse the file on. Muse Spark still checks the rule."
+                    onClick={() => onAddRule(p, v)}><ClipboardPlus size={12} aria-hidden /> Add to requirements</button>)}</>}
               </div>
             </div>
           );
