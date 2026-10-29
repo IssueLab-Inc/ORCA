@@ -15,7 +15,10 @@ export function AgentDialog({ link, log, now, creating, error, canCreate, onCrea
 }) {
   const [tab, setTab] = useState<"muse-code" | "claude-code" | "claude-desktop" | "other" | "local">("muse-code");
   const snippets = link ? {
-    "muse-code": `Remote MCP server (Streamable HTTP)\nName:   orca\nURL:    ${link.mcp_url}\nHeader: Authorization: Bearer ${link.token}`,
+    // Muse Code's CLI adds a remote server by URL (no header option), so the token rides in the URL there.
+    "muse-code": `muse mcp add --transport http orca "${link.mcp_url}?key=${link.token}"`,
+    "muse-code-json": JSON.stringify({ schema_version: 1, mcpServers: { orca: { transport: "streamable_http", url: link.mcp_url,
+      headers: { Authorization: `Bearer ${link.token}` }, mode: "optional" } } }, null, 2),
     "claude-code": `claude mcp add --transport http orca ${link.mcp_url} --header "Authorization: Bearer ${link.token}"`,
     "claude-desktop": JSON.stringify({ mcpServers: { orca: { command: "npx", args: ["-y", "mcp-remote", link.mcp_url,
       "--header", `Authorization: Bearer ${link.token}`] } } }, null, 2),
@@ -37,20 +40,28 @@ export function AgentDialog({ link, log, now, creating, error, canCreate, onCrea
             {creating ? <LoaderCircle size={15} className="spin" aria-hidden /> : <Plug size={15} aria-hidden />} Make a link for this session</button>
           {!canCreate && <p className="hint">Open models first: the agent works on what you have open.</p>}
           <p className="hint">The link is a secret: whoever has it can act on this session until it expires (12 hours after
-            its last use) or you revoke it. Fixes it asks for count against the demo's allowance, like yours.</p>
+            it was last used, 24 hours at most) or you revoke it. Fixes it asks for count against the demo's allowance, like yours.</p>
         </> : <>
           <div className="agent-status">
             <span className={`dot ${last && now / 1000 - last.at < 60 ? "on" : ""}`} aria-hidden />
             {last ? <span><Bot size={14} aria-hidden /> Agent connected · last call <b>{last.tool}</b> {ago(now / 1000 - last.at)}</span>
               : <span><LoaderCircle size={13} className="spin" aria-hidden /> Waiting for an agent…</span>}
-            <span className="hint">· expires {new Date(link.expires_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+            <ExpiryChip link={link} now={now} />
           </div>
           <div className="seg" role="tablist" aria-label="Agent">
             {([["muse-code", "Muse Code"], ["claude-code", "Claude Code"], ["claude-desktop", "Claude Desktop"], ["other", "Other agents"], ["local", "Local (stdio)"]] as const)
               .map(([k, label]) => <button key={k} role="tab" className={tab === k ? "on" : ""} aria-selected={tab === k} onClick={() => setTab(k)}>{label}</button>)}
           </div>
           <Snippet text={snippets![tab]} />
-          <p className="hint">{tab === "muse-code" ? "In Muse Code, add a remote MCP server with this URL and header, then ask it about your clashes."
+          {tab === "muse-code" && <>
+            <p className="hint">Run it in a terminal, then <code>muse mcp list</code> to check ORCA is there. Or add it to your
+              settings file instead (<code>~/.config/muse/settings.json</code>; on Windows <code>C:\Users\&lt;you&gt;\.config\muse\settings.json</code>):</p>
+            <Snippet text={snippets!["muse-code-json"]} />
+          </>}
+          <p className="hint">{tab === "muse-code" ? <>Keep the file's <code>"schema_version": 1</code>, and merge the <code>orca</code> entry into
+              whichever of <code>mcpServers</code> or the older <code>mcp_servers</code> your file already uses (only one of them).{" "}
+              <code>"optional"</code> lets Muse Code carry on if this link expires. To keep the token out of the file, write{" "}
+              <code>{"Bearer ${ORCA_TOKEN}"}</code> and set <code>ORCA_TOKEN</code> in your environment.</>
             : tab === "claude-code" ? "Run it in a terminal, then ask Claude about your clashes."
             : tab === "claude-desktop" ? "Add it to claude_desktop_config.json (Settings › Developer › Edit config), then restart Claude."
             : tab === "other" ? "Any MCP client that speaks Streamable HTTP."
@@ -66,6 +77,31 @@ export function AgentDialog({ link, log, now, creating, error, canCreate, onCrea
         {error && <p className="agent-error" role="alert">{error}</p>}
       </div>
     </div>
+  );
+}
+
+/** Seconds this link has left, on the server's clock (the visitor's may be off). */
+export function secondsLeft(link: AgentLink, now: number): number {
+  return link.expires_at - (now / 1000 + (link.clock_offset ?? 0));
+}
+
+/** "11 h 52 min", "40 min", "under a minute". */
+export function timeLeft(link: AgentLink, now: number): string {
+  const s = secondsLeft(link, now);
+  if (s <= 60) return "under a minute";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h} h ${String(m).padStart(2, "0")} min` : `${m} min`;
+}
+
+function ExpiryChip({ link, now }: { link: AgentLink; now: number }) {
+  const s = secondsLeft(link, now);
+  const at = (t: number) => new Date((t - (link.clock_offset ?? 0)) * 1000)
+    .toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const capped = link.expires_at >= link.max_expires_at - 1;
+  return (
+    <span className={`hint agent-expiry${s < 1800 ? " soon" : ""}`} data-tip-side="bottom"
+      data-tip={`Expires ${at(link.expires_at)}. ${capped ? "It has reached its 24-hour limit." : `Each use renews it to 12 hours, until ${at(link.max_expires_at)} at the latest.`}`}>
+      · {s < 1800 ? "expiring soon: " : ""}{timeLeft(link, now)} left</span>
   );
 }
 

@@ -93,3 +93,28 @@ def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypat
     moved = ifcopenshell.file.from_string(files.read("structure.orca.ifc").decode())
     x = ifcopenshell.util.placement.get_local_placement(moved.by_guid(other_beam).ObjectPlacement)[0, 3]
     assert x == pytest.approx(0.5)                                                # the kept move, not the tried one
+
+
+def test_a_page_can_reopen_a_scene_the_server_still_holds(tmp_path, monkeypatch):
+    build_clash_fixture(tmp_path / "fixture-clash.ifc")
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))
+    c = TestClient(app_module.app)
+    sid = c.post("/api/scenes", json={"samples": ["fixture-clash.ifc"]}).json()["id"]
+    info = c.get(f"/api/scenes/{sid}").json()
+    assert info["files"] == ["fixture-clash.ifc"] and info["step"] == {} and info["detection"] is None
+    c.post(f"/api/scenes/{sid}/detect/stream", json={}).read()
+    detection = c.get(f"/api/scenes/{sid}").json()["detection"]
+    assert detection["report_id"] in app_module.ws.reports and detection["coverage"]
+    assert c.get("/api/scenes/nothing-here").status_code == 404
+
+
+def test_eviction_spares_what_live_links_point_at(tmp_path):
+    for name in ("a.ifc", "b.ifc", "c.ifc"):
+        build_clash_fixture(tmp_path / name)
+    kept: set[str] = set()
+    ws = Workspace(samples=tmp_path, max_scenes=2, keep=lambda: kept)
+    first = ws.open(["a.ifc"])
+    kept.add(first)                       # an agent link points at the oldest scene
+    second = ws.open(["b.ifc"])
+    ws.open(["c.ifc"])                    # one too many: the unlinked one goes, not the oldest
+    assert first in ws.scenes and second not in ws.scenes

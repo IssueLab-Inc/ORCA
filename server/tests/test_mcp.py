@@ -66,6 +66,10 @@ def test_tools_are_registered():
     assert {"get_session", "open_models", "detect_clashes", "list_clashes", "get_clash_images", "capture_view",
             "check_move", "check_offset", "propose_fixes", "get_job", "apply_fix", "apply_plan", "triage",
             "generate_report", "export_models", "show_clash", "set_view"} <= names
+    read_only = {t.name for t in tools if t.annotations and t.annotations.read_only_hint}
+    assert {"get_session", "list_clashes", "get_clash_images", "check_move", "check_offset", "capture_view"} <= read_only
+    assert not read_only & {"propose_fixes", "apply_fix", "apply_plan", "detect_clashes", "triage", "generate_report",
+                            "open_models", "find_patterns"}  # these change the model or the report, or spend
 
 
 def test_mcp_needs_a_live_link_token(server):
@@ -98,6 +102,7 @@ def test_an_agent_finds_checks_proposes_applies_and_exports(server):
 
     applied = rpc(server, token, "apply_fix", {"clash_id": cid, "option": 1})
     assert applied["applied"] == "Drop duct 800 mm" and cid in link.ctx.fixed
+    assert server.get(f"/api/links/{token}").json()["applied"] == {cid: "Drop duct 800 mm"}  # for a page that resumes
     events = []
     while not page.empty():
         events.append(page.get_nowait())
@@ -180,3 +185,28 @@ def test_stdio_works_on_its_own_session(tmp_path):
     assert call("open_models", {"names": ["fixture-clash.ifc"]})["status"] == "open"
     assert local.ctx.scene_id in ws.scenes and local.ctx.report_id in ws.reports
     assert call("report_summary")["clashes"] >= 1
+
+
+def test_the_expiry_slides_with_use_and_stops_at_a_day(server, monkeypatch):
+    token, link = _link(server)
+    state = server.get(f"/api/links/{token}").json()
+    assert state["max_expires_at"] == pytest.approx(link.created + agents.MAX_AGE)
+    assert abs(state["server_time"] - time.time()) < 5
+    page = link.subscribe()
+    clock = [time.time() + 3 * 3600]
+    monkeypatch.setattr(agents.time, "time", lambda: clock[0])
+    rpc(server, token, "get_session")                       # three hours later: an agent call renews it to 12 h
+    assert link.expires == pytest.approx(clock[0] + agents.TTL)
+    assert page.get_nowait()["expires_at"] == pytest.approx(link.expires)
+    clock[0] = link.created + 14 * 3600                     # renewed again, but never past a day from creation
+    rpc(server, token, "get_session")
+    assert link.expires == pytest.approx(link.created + agents.MAX_AGE)
+    assert server.get(f"/api/links/{token}").json()["expires_at"] == pytest.approx(link.expires)
+
+
+def test_a_closed_page_leaves_the_agent_working_and_says_so(server):
+    token, link = _link(server)
+    rpc(server, token, "open_models", {"names": ["fixture-clash.ifc"]})
+    session = rpc(server, token, "get_session")
+    assert session["browser_connected"] is False and "page is closed" in session["note"]
+    assert rpc(server, token, "report_summary")["clashes"] >= 1

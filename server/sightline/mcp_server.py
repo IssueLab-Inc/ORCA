@@ -23,6 +23,7 @@ from typing import Any, Callable, Literal
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
+from mcp_types import ToolAnnotations
 
 from . import agents, chat, edits, plans
 from .service import Workspace
@@ -67,9 +68,12 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
 
     # ------------------------------------------------------------------ plumbing
 
-    def tool(**kw):
+    def tool(read_only: bool = False, **kw):
         """Register a tool whose expected failures (a bad id, nothing open, a refused allowance, an expired link)
-        reach the agent as their own words; anything else stays a crash, logged here."""
+        reach the agent as their own words; anything else stays a crash, logged here. `read_only`: it changes neither
+        the model, the open report nor the allowance (clients such as Muse Code run those without asking)."""
+        kw.setdefault("annotations", ToolAnnotations(read_only_hint=read_only, destructive_hint=False if read_only else None,
+                                                     open_world_hint=False))
         def register(fn):
             @functools.wraps(fn)
             def guarded(*args, **kwargs):
@@ -109,7 +113,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             raise PermissionError(refused)
         link.calls += 1
         link.last_call = {"tool": tool, "at": time.time()}
-        link.publish({"type": "agent_call", "tool": tool, "args": _short(args or {})})
+        link.publish({"type": "agent_call", "tool": tool, "args": _short(args or {}), "expires_at": link.expires})
         return link
 
     def done(link: agents.Link, tool: str, summary: str) -> None:
@@ -154,7 +158,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
 
     # ------------------------------------------------------------------ the session
 
-    @tool()
+    @tool(read_only=True)
     def get_session(ctx: Context) -> dict:
         """What is open in this ORCA session: the models, the clash report (how many clashes, how found), the clash
         the person has selected, what is fixed, whether triage has run, and whether their browser is connected."""
@@ -176,10 +180,13 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         if out["models"] is None:
             out["next"] = ("Ask the person to open models in ORCA, or call open_models." if link.browser
                            else "Call list_models, then open_models.")
+        elif not link.browser and hooks.links is not None:
+            out["note"] = ("The person's ORCA page is closed: capture_view, pictures of clashes ORCA found, show_clash "
+                           "and set_view need it open (they can resume the session in ORCA); everything else works.")
         done(link, "get_session", "session read")
         return out
 
-    @tool()
+    @tool(read_only=True)
     def list_models(ctx: Context) -> list[str]:
         """The models ORCA can open: IFC files, and STEP files (converted to IFC when they open)."""
         call(ctx, "list_models")
@@ -220,26 +227,26 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         which clashes were resolved."""
         return run(ctx, "detect_clashes", {} if tolerance_mm is None else {"tolerance_mm": tolerance_mm})
 
-    @tool()
+    @tool(read_only=True)
     def report_summary(ctx: Context) -> dict:
         """Counts for the open clash report: per test and per element class pair (deepest overlap, how many only
         touch, whether a non-physical element is involved), how many are fixed."""
         return run(ctx, "report_summary")
 
-    @tool()
+    @tool(read_only=True)
     def list_clashes(ctx: Context, query: str = "", test: str = "", in_model_only: bool = False, limit: int = 30) -> dict:
         """Clashes in the open report, filtered by words (names, classes, levels, #numbers), test name or whether
         both elements are in the open model. Each row has its id, number, title, the two elements and the depth."""
         return run(ctx, "list_clashes", {"query": query, "test": test or None, "in_model_only": in_model_only,
                                          "limit": limit})
 
-    @tool()
+    @tool(read_only=True)
     def get_clash(clash_id: str, ctx: Context) -> dict:
         """Everything about one clash (id or #number): both elements, depth, clash point, the elements' ids in the
         model, whether it is fixed, and which pictures it has."""
         return run(ctx, "get_clash", {"clash_id": clash_id})
 
-    @tool(structured_output=False)
+    @tool(read_only=True, structured_output=False)
     def get_clash_images(clash_id: str, ctx: Context) -> list:
         """The clash's pictures: A the pair, B with what is around it, C a second angle. Element A is red, B green.
         For a clash ORCA found, the person's page takes them if they do not exist yet (it needs the browser)."""
@@ -259,17 +266,17 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             out += [f"View {label}:", Image(path=Path(path))]
         return out
 
-    @tool()
+    @tool(read_only=True)
     def measure_clash(clash_id: str, ctx: Context) -> dict:
         """ORCA's own measure of a clash in the open model: signed distance in metres (negative = overlap)."""
         return run(ctx, "measure_clash", {"clash_id": clash_id})
 
-    @tool()
+    @tool(read_only=True)
     def show_clash(clash_id: str, ctx: Context) -> dict:
         """Select a clash in the person's page and fly their camera to it."""
         return run(ctx, "show_clash", {"clash_id": clash_id})
 
-    @tool()
+    @tool(read_only=True)
     def set_view(ctx: Context, mode: Literal["shaded", "xray", "context", "isolate"] | None = None,
                  section_box: bool | None = None) -> dict:
         """Change the person's 3D view: shaded, x-ray, context (what is near the clash) or isolate, and the section
@@ -277,7 +284,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         args = {k: v for k, v in (("mode", mode), ("section_box", section_box)) if v is not None}
         return run(ctx, "set_view", args)
 
-    @tool(structured_output=False)
+    @tool(read_only=True, structured_output=False)
     def capture_view(ctx: Context) -> list:
         """A picture of what the person's 3D view shows right now (needs their browser)."""
         link = call(ctx, "capture_view")
@@ -291,18 +298,18 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
 
     # ------------------------------------------------------------------ the model
 
-    @tool()
+    @tool(read_only=True)
     def describe_element(global_id: str, ctx: Context) -> dict:
         """An element of the open model: class, name, tag, level, file, what it connects to, and for a straight
         duct, pipe or tray segment its run (start, end, length, profile)."""
         return run(ctx, "describe_element", {"global_id": global_id})
 
-    @tool()
+    @tool(read_only=True)
     def find_elements(query: str, ctx: Context, ifc_class: str = "", limit: int = 20) -> dict:
         """Search the open model's elements by words in their name, tag or class."""
         return run(ctx, "find_elements", {"query": query, "ifc_class": ifc_class or None, "limit": limit})
 
-    @tool()
+    @tool(read_only=True)
     def find_openings(element: str, obstacle: str, ctx: Context) -> dict:
         """Openings through `obstacle` in line with the straight segment `element`, with the offset heights (dz,
         metres) that pass the segment through each with 25 mm clearance."""
@@ -310,13 +317,13 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
 
     # ------------------------------------------------------------------ fixes
 
-    @tool()
+    @tool(read_only=True)
     def check_move(global_ids: list[str], delta_m: list[float], ctx: Context) -> dict:
         """Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it: passes,
         or what it would hit and how deep."""
         return run(ctx, "check_move", {"global_ids": global_ids, "delta_m": delta_m})
 
-    @tool()
+    @tool(read_only=True)
     def check_offset(element: str, obstacle: str, split_m: list[float], dz_m: float, ctx: Context) -> dict:
         """Check a local offset without keeping it: split the straight segment `element` at two points (metres along
         it from its start) around `obstacle`, and raise (+) or lower (-) the middle piece by dz_m with bends."""
@@ -341,7 +348,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         movable element become one job. Returns a plan_id for apply_plan. Costs one proposal per distinct pair."""
         return job(ctx, "plan_fixes_together", {"clash_ids": clash_ids}, wait_s, lambda r: _with_plan_id(r, link_of(ctx)))
 
-    @tool()
+    @tool(read_only=True)
     def find_root_causes(ctx: Context) -> dict:
         """Elements in several real clashes at once (likely root causes), with clashes the geometry finds that the
         report missed."""
@@ -359,7 +366,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         with the clash rule or action to take."""
         return run(ctx, "find_patterns")
 
-    @tool()
+    @tool(read_only=True)
     def get_job(job_id: str, ctx: Context, wait_s: float = 30) -> dict:
         """The result of a long tool call (propose_fixes, a plan, triage, the report), waiting up to wait_s."""
         link = call(ctx, "get_job", {"job_id": job_id})
@@ -381,7 +388,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         o = options[option - 1]
         out = plans.apply(W(), link.ctx.scene_id, [o])
         pairs = [[proposal["element_a"], proposal["element_b"]]]
-        _applied(link, out, pairs, [o["title"]], [c.id])
+        _applied(link, out, pairs, [o["title"]], [c.id], {c.id: o["title"]})
         done(link, "apply_fix", f"applied '{o['title']}'")
         return {"applied": o["title"], "kind": o["kind"], "clash": c.label, "files_changed": len(out["files"])}
 
@@ -400,12 +407,16 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
         pairs = [[it["element_a"], o] for it in items for o in [it["element_b"], *(it.get("others") or [])]]
         titles = [it["option"]["title"] for it in items for _ in [it["element_b"], *(it.get("others") or [])]]
-        _applied(link, out, pairs, titles, [cid for it in items for cid in it["clash_ids"]])
+        _applied(link, out, pairs, titles, [cid for it in items for cid in it["clash_ids"]],
+                 {cid: it["option"]["title"] for it in items for cid in it["clash_ids"]})
         done(link, "apply_plan", f"applied {len(items)} fix(es)")
         return {"applied": [it["option"]["title"] for it in items], "files_changed": len(out["files"])}
 
-    def _applied(link: agents.Link, out: dict, pairs: list, titles: list, clash_ids: list) -> None:
+    def _applied(link: agents.Link, out: dict, pairs: list, titles: list, clash_ids: list,
+                 fixed: dict[str, str]) -> None:
+        """Tell the page what changed, and remember the agent's fixes (a page that resumes later marks them)."""
         link.ctx.fixed = list(dict.fromkeys([*link.ctx.fixed, *clash_ids]))
+        link.applied.update(fixed)
         link.publish({"type": "ui", "action": "applied", "files": out["files"], "pieces": out["pieces"],
                       "pairs": pairs, "titles": titles, "clash_ids": clash_ids})
 

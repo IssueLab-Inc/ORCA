@@ -27,8 +27,38 @@ Code:
 **Remote, to the session you have open.** In ORCA, choose **Connect an agent**, then **Make a link for this session**.
 The dialog shows copy-ready settings, Muse Code's first:
 
-- **Muse Code:** add a remote MCP server (Streamable HTTP) named `orca` with URL `https://<host>/mcp` and header
-  `Authorization: Bearer <token>`.
+- **Muse Code**, either way:
+  - **The CLI.** It adds a remote server by URL (it has no header option), so the token goes in the URL. Check it
+    with `muse mcp list`, and `/mcp` in a session lists ORCA's tools.
+
+    ```bash
+    muse mcp add --transport http orca "https://<host>/mcp?key=<token>"
+    ```
+
+  - **The settings file.** It lives at `~/.config/muse/settings.json`, `$XDG_CONFIG_HOME/muse/settings.json`, or
+    `C:\Users\<you>\.config\muse\settings.json` on Windows. Keep `"schema_version": 1`, and merge the `orca`
+    entry into whichever key the file already uses, `mcpServers` or the legacy `mcp_servers` (only one of them):
+
+    ```json
+    {
+      "schema_version": 1,
+      "mcpServers": {
+        "orca": {
+          "transport": "streamable_http",
+          "url": "https://<host>/mcp",
+          "headers": { "Authorization": "Bearer <token>" },
+          "mode": "optional"
+        }
+      }
+    }
+    ```
+
+  - **Why `optional`:** Muse Code's default `mode`, `required`, aborts the whole run when a server fails, and a link
+    expires or can be revoked. `optional` makes Muse Code skip ORCA with a warning instead.
+  - **Keeping the token out of the file:** Muse Code interpolates `${VAR}`, so you can write
+    `"Bearer ${ORCA_TOKEN}"` and set `ORCA_TOKEN` in your environment. A token in a URL can end up in request logs;
+    the header form avoids that, and either way the link expires.
+  - **A toolset:** select ORCA's tools with `mcp__orca__*`.
 
 ```bash
 # Claude Code
@@ -61,6 +91,16 @@ cd server && uv run python -m sightline.mcp_server
 | Fixes | `check_move`, `check_offset` (test the agent's own idea), `propose_fixes` (ORCA's fix agent), `plan_fixes_together`, `plan_root_cause`, `get_job`, `apply_fix`, `apply_plan` |
 | The person's view | `show_clash`, `set_view`, `capture_view` (a picture of what they see) |
 | Hand-off | `generate_report` (PDF + BCF, download link), `export_models` (IFC, and STEP for STEP models) |
+
+**Read-only tools.** The tools that change neither the model, the open report nor the allowance declare it
+(`readOnlyHint`):
+- `get_session`, `list_models`, `report_summary`, `list_clashes`, `get_clash`, `get_clash_images`, `measure_clash`;
+- `describe_element`, `find_elements`, `find_openings`, `find_root_causes`;
+- `check_move`, `check_offset`, `get_job`;
+- `show_clash`, `set_view`, `capture_view`.
+
+Muse Code runs those without an approval prompt under on-request approvals. The rest ask: proposals, plans, applying,
+detection, triage, the report, opening models, and `find_patterns` (a model call).
 
 The tool layer is shared with the in-app chat (`chat.Chat._run`), so the chat and an outside agent can do the same
 things the same way.
@@ -101,6 +141,20 @@ things the same way.
 - **The page's stream.** The page follows its link with `GET /api/links/{token}/events`, an NDJSON stream sent
   uncompressed (`Content-Encoding: identity`). It ends every 4 minutes, and the page reconnects.
 
+## When the tab closes
+
+- **The agent keeps working.** The link and the models live on the server, not in the tab. Reading, checking,
+  proposing, applying, triage, the report and export all carry on.
+- **Only the page tools stop:** `capture_view`, pictures of clashes ORCA found, `show_clash` and `set_view`.
+  `get_session` says the page is closed.
+- **Resume.** The browser keeps the session (models, report, fixes, link) in `localStorage`. Opening ORCA again shows
+  "Pick up where you left off" while the server still holds it. **Resume** reopens the same models, with every
+  applied fix, the agent's included, and the page follows the link again.
+- **Eviction.** The demo keeps 8 model sets in memory. Those that live links point at are evicted last.
+- **What ends a session:** a server restart, or eviction when every held set is linked.
+- **Time left.** The dialog shows the link's time left, kept current from the server. Each agent call renews it to
+  12 hours, never past 24 hours from when it was made.
+
 ## Measured (Oct 29, local)
 
 **Remote.** A real MCP client (the `mcp` Python package over Streamable HTTP), with a browser following the same link
@@ -120,4 +174,5 @@ on the PC-03 cell:
 - **Accounts:** GitHub sign-in on top of links, so projects and links survive a restart. Today `owner.cookie_ok`
   becomes "signed in as an allowed login".
 - **Saved projects:** persistence on Modal.
-- **OAuth on `/mcp`:** so claude.ai's custom connectors (which expect OAuth) can connect without a pasted token.
+- **OAuth on `/mcp`:** so clients sign in instead of pasting a token. Muse Code already supports OAuth 2.1 for remote
+  servers (`muse mcp login <server>`, with dynamic client registration), and claude.ai's custom connectors expect it.

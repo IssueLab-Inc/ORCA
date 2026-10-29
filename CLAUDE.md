@@ -556,6 +556,26 @@ Agents over MCP (Oct 29, owner decision; docs/mcp.md):
 
   Stdio opened the cell from STEP.
 - **Later:** accounts (GitHub sign-in) and saved projects; OAuth on `/mcp` for claude.ai connectors.
+- **Time left and resume (Oct 29, owner feedback):**
+  - **Time left:** "expires 06:49 PM" had the creation time's clock digits (12 h later), and it never refreshed. The
+    dialog now shows time left ("11 h 52 min left", the exact time in a tooltip, "expiring soon" in the last 30 min),
+    on the server's clock (`server_time` → `clock_offset`).
+  - **Kept current:** from `hello`, each `agent_call` (`expires_at`), and `GET /api/links/{token}` every 60 s. That
+    GET does not renew; a context PUT or an agent call does.
+  - **Resume:** the session (scene, report, files, fixes, link) is kept in `localStorage` (`sightline.session`), and
+    the landing shows "Pick up where you left off" while `GET /api/scenes/{id}` (`Workspace.scene_info`: files,
+    STEP names, last detection) answers.
+    - `resumeSession` reopens it through `open(files, existing)`, plus `loadReport`, the saved fixes and the
+      fixes the link's agent applied while no page was open (`Link.applied`), and reattaches the link.
+  - **A closed tab** doesn't stop the agent: `get_session` adds a note naming the page-only tools.
+  - **Eviction:** `Workspace.keep` (live links' scenes and reports, `Links.kept`) is evicted last. Modal
+    `max_inputs` is 64.
+  - **Muse Code:**
+    - the dialog's first tab: `muse mcp add --transport http orca "<url>?key=<token>"` (its CLI has no header
+      option), and the settings JSON (`~/.config/muse/settings.json`, `schema_version` 1, `mcpServers`, `"mode":
+      "optional"`, because `required` aborts runs when a link expires);
+    - read tools carry `readOnlyHint`, so Muse Code runs them without approval prompts;
+    - Muse Code supports OAuth (`muse mcp login`), which fits the later OAuth work.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
