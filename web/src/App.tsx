@@ -1554,7 +1554,7 @@ export function App() {
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {!landing && <button className={`btn ${agentLink ? "agent-pill" : "ghost"}`} onClick={() => setAgentOpen(true)}
           aria-label={agentLink ? "Agent connected" : "Connect an agent"} data-tip-side="bottom"
-          data-tip={agentLink ? "An agent works on this session over MCP" : "Let an AI agent (Claude, Meta's coding agent) work on this session over MCP"}>
+          data-tip={agentLink ? "An agent works on this session over MCP" : "Let an AI agent (Muse Code, Claude) work on this session over MCP"}>
           {agentLink ? <><Bot size={15} aria-hidden /><span className="lbl"> {agentLink.last_call ? `Agent · ${agentLink.last_call.tool}` : "Agent · waiting"}</span></>
             : <><Plug size={15} aria-hidden /><span className="lbl"> Connect an agent</span></>}</button>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">

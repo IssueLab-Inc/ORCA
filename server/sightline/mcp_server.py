@@ -1,4 +1,4 @@
-"""ORCA as an MCP server, for agents (Claude, Meta's coding agent, an IDE): the coordination run you have open, its
+"""ORCA as an MCP server, for agents (Muse Code, Claude, an IDE): the coordination run you have open, its
 clashes, the model, verified fixes, pictures, the report.
 
 Two ways in:

@@ -1,8 +1,8 @@
 # ORCA for agents (MCP)
 
 Any MCP client can work on an ORCA session:
+- Muse Code (Meta's coding agent);
 - Claude Code or Desktop;
-- Meta's coding agent;
 - an IDE.
 
 The agent sees the models, the clashes and their pictures. It can:
@@ -25,7 +25,10 @@ Code:
 ## Connecting
 
 **Remote, to the session you have open.** In ORCA, choose **Connect an agent**, then **Make a link for this session**.
-The dialog shows copy-ready settings:
+The dialog shows copy-ready settings, Muse Code's first:
+
+- **Muse Code:** add a remote MCP server (Streamable HTTP) named `orca` with URL `https://<host>/mcp` and header
+  `Authorization: Bearer <token>`.
 
 ```bash
 # Claude Code

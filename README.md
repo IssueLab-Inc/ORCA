@@ -239,7 +239,7 @@ Uploads stay in a temp folder while the report is open (`SIGHTLINE_UPLOAD_MAX_MB
 
 ### Connect an agent (MCP)
 
-Any MCP client (Claude Code or Desktop, Meta's coding agent, an IDE) can work on your ORCA session. In the app choose
+Any MCP client (Muse Code, Claude Code or Desktop, an IDE) can work on your ORCA session. In the app choose
 **Connect an agent** and paste the settings it shows, for example:
 
 ```bash
