@@ -12,7 +12,6 @@ accordingly, and checks the combined result.
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -61,20 +60,35 @@ class Plan:
 
 # ---------------------------------------------------------------------------------------------------------- checks
 
-@contextlib.contextmanager
-def _trial(scene, indexes: set[int]):
-    """Edit several files of a scene, then undo every edit (cached boxes included)."""
-    before = dict(scene.bounds())
-    models = [scene.models[i] for i in sorted(indexes)]
-    for m in models:
-        m.begin_transaction()
-    try:
-        yield
-    finally:
-        for m in models:
-            m.end_transaction()
-            m.undo()
-        scene._bounds = before
+_trial = edits.trial_files
+
+
+def _in_trial_move(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    scene.translate(o["moved"], tuple(o["delta_m"]))
+    return list(o["moved"]), set(o["moved"]), None
+
+
+def _in_trial_offset(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    off = edits.apply_offset(scene, o["moved"][0], o["split_m"][0], o["split_m"][1], o["delta_m"][2])
+    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
+    return off.pieces, set(off.pieces), {other, *it.others}
+
+
+def _in_trial_trim(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    edits.apply_trim(scene, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
+    return list(o["moved"]), set(o["moved"]), None
+
+
+# How each kind of fix is applied inside a plan's trial: → (elements to check, the fix's own elements, the obstacles
+# its shortened end pieces are checked against; None when every element it changed is checked against everything).
+IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim}
+# The files a fix changes beyond its moved elements' (a penetration's opening goes in the host's file).
+EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {}
+
+
+def option_files(scene, o: dict) -> set[int]:
+    """The indexes of the files a fix changes."""
+    return {scene.index_of(g) for g in [*o["moved"], *EXTRA_FILES.get(o["kind"], lambda _: [])(o)]}
 
 
 def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m: float | None = None) -> dict:
@@ -89,33 +103,27 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
     need = {it.key: clearance_m if clearance_m is not None else
             ws.fix_settings(scene_id, it.element_a, it.element_b).get("clearance_m", 0.025) for it in live}
     with ws.lock:
-        files = {scene.index_of(g) for it in live for g in it.option["moved"]}
+        for it in live:
+            if it.option["kind"] not in IN_TRIAL:
+                raise ValueError(f"unknown kind of fix: {it.option['kind']!r}")
+        files = set().union(*(option_files(scene, it.option) for it in live))
         # A trimmed member already touches what it is framed into: only contacts new or worse than these count.
         before = {it.key: {h.other: h.distance_m for h in verify.check(scene, it.option["moved"], clearance_m=need[it.key]).hits}
                   for it in live if it.option["kind"] == "trim"}
         with _trial(scene, files):
-            changed: dict[str, tuple[list[str], set[str], str | None]] = {}  # key → (check these, own elements, obstacle)
+            # key → (check these, own elements, obstacles of the shortened ends)
+            changed: dict[str, tuple[list[str], set[str], set[str] | None]] = {}
             for it in live:
-                o = it.option
-                if o["kind"] == "offset":
-                    off = edits.apply_offset(scene, o["moved"][0], o["split_m"][0], o["split_m"][1], o["delta_m"][2])
-                    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
-                    changed[it.key] = (off.pieces, set(off.pieces), other)
-                elif o["kind"] == "trim":
-                    edits.apply_trim(scene, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
-                    changed[it.key] = (list(o["moved"]), set(o["moved"]), None)
-                else:
-                    scene.translate(o["moved"], tuple(o["delta_m"]))
-                    changed[it.key] = (list(o["moved"]), set(o["moved"]), None)
+                changed[it.key] = IN_TRIAL[it.option["kind"]](scene, it, it.option)
             owner = {g: key for key, (_, own, _) in changed.items() for g in own}
             for it in live:
                 clearance_m = need[it.key]
-                check_ids, own, obstacle = changed[it.key]
+                check_ids, own, obstacles = changed[it.key]
                 ignore = own | {c for g in own for c in scene.element(g).connected if c not in owner}
-                if obstacle:  # an offset: new pieces against everything, the shortened ends only against the obstacle
+                if obstacles:  # split runs: new pieces against everything, the shortened ends only against the obstacles
                     v = verify.check(scene, check_ids[1:-1], clearance_m=clearance_m, ignore=ignore)
                     ends = verify.check(scene, [check_ids[0], check_ids[-1]], clearance_m=clearance_m, ignore=ignore)
-                    hits = v.hits + [h for h in ends.hits if h.other == obstacle or h.other in owner]
+                    hits = v.hits + [h for h in ends.hits if h.other in obstacles or h.other in owner]
                 else:
                     v = verify.check(scene, check_ids, clearance_m=clearance_m, ignore=ignore)
                     hits = v.hits
@@ -202,6 +210,8 @@ def _merged_label(ws: Workspace, scene_id: str, g: str, partners: list[str]) -> 
 def _direction(a) -> str:
     """"up 150 mm", "down 300 mm", "sideways 120 mm", "offset down 250 mm", "trimming it": what an idea did."""
     d = [float(x) for x in (a.delta_m or [0, 0, 0])]
+    if getattr(a, "edit", None) and a.edit.get("summary"):
+        return a.edit["summary"]
     if a.kind == "trim":
         return "trimming it"
     vertical = abs(d[2]) >= max(abs(d[0]), abs(d[1]))
@@ -244,6 +254,7 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
                                                           for o in it.others) + ". One fix must clear all of them.")
             clash = ws.clash_for(it.element_a, it.element_b, it.distance_m, None,
                                  "\n".join(filter(None, [notes, (prefer or {}).get(it.key, ""), also])), report_id, cid)
+            clash.others = list(it.others)
 
             def progress(e: dict) -> None:
                 if e["type"] == "attempt":
@@ -447,21 +458,35 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
                 strategy, cluster, items, check, round(time.perf_counter() - started, 1))
 
 
+def _keep_move(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    return ws.apply(scene_id, o["moved"], o["delta_m"]), []
+
+
+def _keep_offset(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2])
+    return r, r["pieces"]
+
+
+def _keep_trim(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    return ws.apply_trim(scene_id, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"]), []
+
+
+# How each kind of fix is kept in the scene: → (the Workspace's reply, with "files"; the pieces, the original first).
+KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim}
+
+
 def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
-    """Keep every fix of an accepted plan. Returns the files changed and, per offset, its pieces."""
+    """Keep every fix of an accepted plan (or one accepted option). Returns the files changed and, per fix that
+    split an element, its pieces."""
+    unknown = [o["kind"] for o in options if o.get("kind", "move") not in KEEP]
+    if unknown:
+        raise ValueError(f"unknown kind of fix: {unknown[0]!r}")
     files: set[int] = set()
     pieces: list[list[str]] = []
     with ws.lock:
         for o in options:
-            if o["kind"] == "offset":
-                r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2])
-                pieces.append(r["pieces"])
-            elif o["kind"] == "trim":
-                r = ws.apply_trim(scene_id, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
-                pieces.append([])
-            else:
-                r = ws.apply(scene_id, o["moved"], o["delta_m"])
-                pieces.append([])
+            r, made = KEEP[o.get("kind", "move")](ws, scene_id, o)
+            pieces.append(made)
             files.update(r["files"])
     return {"files": sorted(files), "pieces": pieces}
 

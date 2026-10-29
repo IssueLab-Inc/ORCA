@@ -1,6 +1,7 @@
 import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, editText, statusLine, type Progress } from "./Activity";
+import { Activity, statusLine, type Progress } from "./Activity";
+import { changeText, clearanceText, editText, framePieces, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
@@ -485,17 +486,14 @@ export function App() {
   function noteRecommendation(r: Recommendation, pair: readonly [string | null, string | null]) {
     const ids = clashIdsOf([pair])[0];
     if (!ids.length) return;
-    const d = r.delta_m ?? [0, 0, 0];
-    const edit = r.kind === "offset" ? `offset the middle ${Math.round(d[2] * 1000)} mm` : r.kind === "trim" ? "trim at the joint"
-      : `move [${d.map((x) => Math.round(x * 1000)).join(", ")}] mm`;
-    const ev: Evidence = { status: "recommended", title: r.title, kind: r.kind, edit, clearance: "", clearance_m: null,
+    const ev: Evidence = { status: "recommended", title: r.title, kind: r.kind, edit: recEditText(r), clearance: "", clearance_m: null,
       rationale: r.rationale, also_needs: r.also_needs, moved: [r.element], blocked_by: r.blocked_by };
     setEvidence((all) => ({ ...all, ...Object.fromEntries(ids.filter((id) => !all[id] || all[id].status === "recommended").map((id) => [id, ev])) }));
   }
 
   function evidenceOf(o: Option, status: Evidence["status"], pics: { before_img?: string; after_img?: string }): Evidence {
     return { status, title: o.title, kind: o.kind, edit: editText(o), moved: o.moved,
-      clearance: o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m), clearance_m: o.min_clearance_m ?? null,
+      clearance: clearanceText(o), clearance_m: o.min_clearance_m ?? null, ...(o.review ? { review: o.review } : {}),
       rationale: o.rationale, also_needs: o.also_needs, ...(o.meets?.length ? { meets: o.meets } : {}), ...pics };
   }
 
@@ -618,17 +616,17 @@ export function App() {
   useEffect(() => {
     const v = viewer.current;
     if (!v || !plan || !viewPlan) return;
-    const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));  // moves and trims: their pairs
-    const pairs = plan.items.flatMap((it) => it.option && it.option.kind !== "offset"
+    const meshes = planOptions.flatMap((o) => framePieces(o));  // moves and trims: their pairs
+    const pairs = plan.items.flatMap((it) => it.option && !framePieces(it.option).length
       ? movedPairs(it.option.moved, [it.element_a, it.element_b, ...(it.others ?? [])]) : []);
     if (meshes.length || pairs.length) v.frameFix(meshes, pairs);
     else if (plan.hub) v.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
   }, [planOptions, plan, viewPlan]);
 
   function frameFix(o: { kind: string; moved: string[]; preview: Mesh[] | null }, sides: string[]) {
-    // An offset: its risers and middle piece. A move: where it now meets the other side. A trim: the joint it changes.
-    const meshes = o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : [];
-    return !!viewer.current?.frameFix(meshes, o.kind === "offset" ? [] : movedPairs(o.moved, sides));
+    // A split run: its new pieces. A move: where it now meets the other side. A trim: the joint it changes.
+    const meshes = framePieces(o);
+    return !!viewer.current?.frameFix(meshes, meshes.length ? [] : movedPairs(o.moved, sides));
   }
 
   function clearManual() { ++previewRequest.current; setManual(null); setManualPreview(null); }
@@ -1736,11 +1734,7 @@ export function App() {
           <dt>Before</dt><dd>{measure && measure !== "busy" && measure.distance_m != null ? `overlap ${mm(measure.distance_m)}` : "clashing"}</dd>
           <dt>After</dt><dd className="ok">{option.kind === "trim" ? "clear: the two now butt at the joint"
             : `clear${option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}`}</dd>
-          <dt>Change</dt><dd>{option.kind === "offset" && option.split_m
-            ? `${(option.split_m[1] - option.split_m[0]).toFixed(2)} m of it ${option.delta_m[2] > 0 ? "raised" : "lowered"} ${Math.abs(Math.round(option.delta_m[2] * 1000))} mm; ${offsetParts(option.preview?.length ?? 5)}`
-            : option.kind === "trim" && option.trim
-              ? `one end cut back ${Math.round(option.trim.by_m * 1000)} mm; nothing moves`
-              : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
+          <dt>Change</dt><dd>{changeText(option)}</dd>
         </dl>
       ) : activeContext && contextProposal ? (
         <dl className="diff"><dt>Wider fix</dt><dd>{contextProposal.edits.length} coordinated edits shown together</dd>
@@ -2096,9 +2090,11 @@ export function App() {
               <button className="card-body" onClick={() => { clearManual(); setChosen(chosen === i ? null : i); }} aria-pressed={chosen === i}>
                 <span className="row"><b>{i + 1} · {o.title}</b><span className="chips">
                   {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
+                  {o.review && <span className="chip warn" data-tip={reviewText(o.review)}>{o.review} review</span>}
                   <span className="chip ok"><Check size={11} aria-hidden /> verified</span></span></span>
                 <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
-                <span className="row"><span>Clearance</span><span className="mono">{o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m)}</span></span>
+                <span className="row"><span>Clearance</span><span className="mono">{clearanceText(o)}</span></span>
+                {o.review && <span className="row"><span>Review</span><span>{reviewText(o.review)}</span></span>}
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 {o.meets?.length ? <span className="meets">{o.meets.map((m) => <span key={m}><Check size={11} aria-hidden /> {m}</span>)}</span> : null}
                 <span className="why">{o.rationale}</span>
@@ -2277,10 +2273,7 @@ function ProofStrip({ o, rank, options, before, need = 0.025 }: { o: Option; ran
 }
 /** The requirements allow no edit here: Muse Spark's recommendation for the designer, never tried or applied. */
 function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void }) {
-  const d = rec.delta_m ?? [0, 0, 0];
-  const size = Math.round(Math.max(...d.map(Math.abs)) * 1000);
-  const change = rec.kind === "trim" ? "trim at the joint" : rec.kind === "offset" ? `offset the middle ${d[2] >= 0 ? "up" : "down"} ${Math.abs(Math.round(d[2] * 1000))} mm`
-    : size ? `move ${size} mm` : "";
+  const change = recEditText(rec);
   return (
     <div className="recommended">
       <h3>Recommended for the designer</h3>
@@ -2356,10 +2349,6 @@ function Thinking({ notes, live, thinking }: { notes: { round: number; text: str
 }
 
 /** What an offset adds, from its piece count: square corners make 5 straights; bends add four fittings (7 or 9 pieces). */
-function offsetParts(pieces: number) {
-  return pieces > 5 ? `4 bends${pieces === 9 ? " and 2 short risers" : ""}` : "square corners";
-}
-
 /** The new root causes in the order already on screen (new ones after), with any that dropped out kept as done rows. */
 function keepPlaces(prev: RootCause[] | null, next: RootCause[]): RootCause[] {
   if (!prev) return next;

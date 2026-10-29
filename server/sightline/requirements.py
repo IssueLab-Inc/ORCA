@@ -626,6 +626,15 @@ def fix_clearance(doc: Doc, matcher: Matcher, a: str, b: str) -> float:
     return need / 1000
 
 
+# Kinds whose change has a size the "largest move" limit applies to: how far any part of the element goes.
+SIZED = ("move", "offset", "route", "resize")
+
+
+def change_size(kind: str, delta_m: list[float]) -> float:
+    """How far a fix takes the element, metres: the length of its move, or of an offset's (vertical or lateral) shift."""
+    return sum(float(d) * float(d) for d in (delta_m or [])) ** 0.5
+
+
 def blocked(pol_a: Policy, pol_b: Policy | None, kind: str, delta_m: list[float], same_model: bool) -> str | None:
     """Why the requirements forbid a candidate on the element with policy `pol_a`, or None. Said so Muse can avoid
     it next round."""
@@ -639,8 +648,8 @@ def blocked(pol_a: Policy, pol_b: Policy | None, kind: str, delta_m: list[float]
             return f"blocked by requirements: no trims on {pol_a.group_name}"
         if pol_a.trims == "cleanup" and not same_model:
             return "blocked by requirements: trims only tidy a joint within one model"
-    if pol_a.max_move_m and kind in ("move", "offset"):
-        size = (sum(d * d for d in delta_m) ** 0.5) if kind == "move" else abs(delta_m[2] if len(delta_m) > 2 else 0)
+    if pol_a.max_move_m and kind in SIZED:
+        size = change_size(kind, delta_m)
         if size > pol_a.max_move_m + 1e-6:
             return (f"blocked by requirements: {size * 1000:.0f} mm is more than the {pol_a.max_move_m * 1000:.0f} mm "
                     f"a fix may move {pol_a.group_name}")
@@ -658,8 +667,8 @@ def meets(doc: Doc, pol: Policy, other: Policy, clearance_m: float, min_clearanc
         out.append(f"nearest {min_clearance_m * 1000:.0f} mm ≥ {need:.0f} mm required ({STRICTNESS[doc.strictness]['name']})")
     if pol.group_name and other.group_name and pol.group != other.group:
         out.append(f"edits {pol.group_name} only; {other.group_name} untouched")
-    if pol.max_move_m:
-        size = (sum(d * d for d in delta_m) ** 0.5) if kind == "move" else abs(delta_m[2] if len(delta_m) > 2 else 0)
+    if pol.max_move_m and (kind or "move") in SIZED:
+        size = change_size(kind, delta_m)
         out.append(f"{size * 1000:.0f} mm within the {pol.max_move_m * 1000:.0f} mm limit")
     return out
 

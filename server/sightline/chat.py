@@ -422,6 +422,7 @@ class Chat:
                                 on_event=lambda e: emit({"type": "agent", "event": e}))
             emit({"type": "proposal", "clash_id": c.id, "element_a": m["a"], "element_b": m["b"], **result})
             summary = [{"title": o["title"], "kind": o["kind"], "delta_m": o["delta_m"], "split_m": o["split_m"],
+                        "edit": (o.get("edit") or {}).get("summary"), "review": o.get("review"),
                         "clearance_mm": None if o["min_clearance_m"] is None else round(o["min_clearance_m"] * 1000)}
                        for o in result["options"]]
             failed = [{"title": a["title"], "reason": a["reason"]} for a in result["attempts"] if not a["passed"]]

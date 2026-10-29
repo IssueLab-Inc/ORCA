@@ -27,6 +27,7 @@ class Clash:
     distance_m: float | None = None
     images: list[Path] = field(default_factory=list)  # A, B, C when available
     notes: str = ""           # e.g. ceiling void depth, project type
+    others: list[str] = field(default_factory=list)  # more elements A runs into (a plan's merged item): one fix for all
 
 
 @dataclass
@@ -47,6 +48,10 @@ class Option:
     cleanup: bool = False               # a trim inside one model: tidies a joint for its author, not a coordination fix
     checked_against: int = 0            # elements the geometry check tested this fix against (proof strip)
     meets: list[str] = field(default_factory=list)  # the coordination requirements it meets, in plain words
+    edit: dict | None = None            # the newer kinds' parameters (route steps, a resize, a penetration), with
+                                        # "summary" (the edit in a few words) and "key" (what makes two the same fix)
+    review: str | None = None           # who must review it before it is built ("structure", "services"), when
+                                        # geometry alone cannot say it works
 
 
 @dataclass
@@ -59,6 +64,8 @@ class Attempt:
     split_m: list[float] | None = None
     hit_ids: list[str] = field(default_factory=list)  # GlobalIds it hit, worst first (at most 8), for the viewer
     trim: dict | None = None
+    edit: dict | None = None                          # as Option.edit
+    where: list[list[float]] = field(default_factory=list)  # where the worst hits are (world metres), for Muse
 
 
 @dataclass
@@ -82,8 +89,9 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
     ]
     if clash.distance_m is not None:
         lines.append(f"Reported signed distance: {clash.distance_m * 1000:.1f} mm (negative = overlap)")
-    for label, this, other in (("A", clash.element_a, clash.element_b), ("B", clash.element_b, clash.element_a)):
-        lines += _run_text(scene, label, this, other, clearance_m)
+    for label, this, other, more in (("A", clash.element_a, clash.element_b, clash.others),
+                                     ("B", clash.element_b, clash.element_a, [])):
+        lines += _run_text(scene, label, this, other, clearance_m, more)
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
         lines += _joint_text(scene, label, this, other, name)
     if clash.notes:
@@ -107,8 +115,10 @@ def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: 
     return lines
 
 
-def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = 0.025) -> list[str]:
-    """A straight segment's geometry, and where the other element sits along it: what a local offset needs."""
+def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = 0.025,
+              others: list[str] = ()) -> list[str]:
+    """A straight segment's geometry, and where the other element (and any `others` it also runs into) sits along it:
+    what a local offset needs."""
     try:
         run = edits.run_of(scene, gid)
     except (edits.Unsupported, KeyError):
@@ -138,16 +148,52 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
                 lines.append(f"The other element has an opening on this line from z {h['bottom_m']:.3f} to "
                              f"{h['top_m']:.3f} m: offsetting {label}'s middle piece by {h['dz_min_m']:+.3f} to "
                              f"{h['dz_max_m']:+.3f} m passes it through with {clearance_m * 1000:.0f} mm all round.")
+    for o in others:
+        if o not in b:
+            continue
+        corners = np.array([[x, y, z] for x in b[o][:, 0] for y in b[o][:, 1] for z in b[o][:, 2]])
+        along = (corners - start) @ d
+        lo, hi = max(along.min(), 0.0), min(along.max(), run.length_m)
+        if lo < hi:
+            e = scene.element(o)
+            lines.append(f"Element {label} also runs into {e.ifc_class} '{e.name}' at {lo:.2f}-{hi:.2f} m along it, "
+                         f"from z {b[o][0][2]:.3f} to {b[o][1][2]:.3f} m: one fix must clear it too.")
     return lines
+
+
+def edit_text(kind: str, delta_m: list[float], split_m: list[float] | None = None, trim: dict | None = None,
+              edit: dict | None = None) -> str:
+    """The edit an idea makes, in a few words: Muse's feedback, plan summaries and chat use it."""
+    if edit and edit.get("summary"):
+        return edit["summary"]
+    if kind == "offset":
+        return f"offset {split_m} by {delta_m[2]:+.3f} m"
+    if kind == "trim":
+        return f"trim the {trim['end']} end by {trim['by_m'] * 1000:.0f} mm" if trim else "trim at the joint"
+    return f"move {delta_m}"
 
 
 def _feedback(attempts: list[Attempt]) -> str:
     if not attempts:
         return ""
-    def what(t: Attempt) -> str:
-        return f"offset {t.split_m} by {t.delta_m[2]:+.3f} m" if t.kind == "offset" else f"move {t.delta_m}"
-    tried = "\n".join(f"- {t.title} ({what(t)}): {'passed' if t.passed else 'FAILED, ' + t.reason}" for t in attempts)
-    return f"\n\nAlready tried:\n{tried}\nPropose different moves."
+
+    def outcome(t: Attempt) -> str:
+        if t.passed:
+            return "passed"
+        where = f" at {', '.join(str(p) for p in t.where)}" if t.where else ""
+        return f"FAILED, {t.reason}{where}"
+    tried = "\n".join(f"- {t.title} ({edit_text(t.kind, t.delta_m, t.split_m, t.trim, t.edit)}): {outcome(t)}"
+                      for t in attempts)
+    return f"\n\nAlready tried:\n{tried}\nPropose different fixes."
+
+
+# Kinds that change more than where something is rank below plain geometry fixes, whatever their size: a resize changes
+# how a service performs, a penetration needs another team to build it. Neither ends the search on its own either.
+TIERS = {"resize": 1, "penetration": 2}
+
+
+def tier(kind: str | None) -> int:
+    return TIERS.get(kind or "move", 0)
 
 
 def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = "construction",
@@ -207,29 +253,36 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             target = clash.element_a if cand.get("move", "A") == "A" else clash.element_b
             other = clash.element_b if target == clash.element_a else clash.element_a
             trial = (lambda shape, i=len(attempts): emit({"type": "trial", "index": i, **shape})) if on_event and trials else None
-            kind = cand.get("kind")
+            kind = cand.get("kind") or "move"
+            if kind not in TRIES:
+                unknown = Attempt(cand.get("title", kind), [0.0, 0.0, 0.0], False,
+                                  f"unknown kind {kind!r}: use one of {', '.join(TRIES)}", kind)
+                attempts.append(unknown)
+                on_step(unknown)
+                continue
             refused = _refused(base, cand, target, other, policy) if policy else None
             if refused:
                 attempts.append(refused)
                 on_step(refused)
                 continue
-            try_fix = _try_offset if kind == "offset" else _try_trim if kind == "trim" else None
             with lock:
-                attempt, option = (try_fix(base, cand, target, other, clearance_m, trial) if try_fix
-                                   else _try_move(base, cand, target, clearance_m, trial))
+                attempt, option = TRIES[kind](base, cand, target, other, clearance_m, trial, others=clash.others)
             attempts.append(attempt)
             on_step(attempt)
             if option:
                 _keep(options, option)
-        # One round with a verified option is enough: another round costs a full model call (tens of seconds).
-        if options:
+        # One round with a verified option is enough: another round costs a full model call (tens of seconds). Only
+        # a plain geometry fix ends the search at once; a resize or a penetration gets one more round to beat it.
+        if any(tier(o.kind) == 0 for o in options) or (options and round_no >= 2):
             break
 
-    # Rank: options with comfortable clearance (twice the minimum, or nothing near) first, then the smallest change,
-    # then the most clearance. Simple and explainable; the UI shows both numbers.
+    # Rank: plain geometry fixes before a resize before a penetration; then options with comfortable clearance (twice
+    # the minimum, or nothing near), then the smallest change, then the most clearance. Simple and explainable; the
+    # UI shows both numbers.
     def comfortable(o: Option) -> bool:
         return o.min_clearance_m is None or o.min_clearance_m >= 2 * clearance_m - 1e-6
-    options.sort(key=lambda o: (not comfortable(o), sum(abs(d) for d in o.delta_m), -(o.min_clearance_m or 1.0)))
+    options.sort(key=lambda o: (tier(o.kind), not comfortable(o), sum(abs(d) for d in o.delta_m),
+                                -(o.min_clearance_m or 1.0)))
     options = options[:want]
     for o in options:  # what each option changes, as it is now, so the UI can show before and after together
         try:
@@ -266,7 +319,8 @@ def _refused(scene: IfcScene, cand: dict, target: str, other: str, policy: dict)
     if not why:
         return None
     return Attempt(cand.get("title", kind), delta, False, why, kind,
-                   [float(v) for v in cand.get("split_m", [])] if kind == "offset" else None)
+                   [float(v) for v in cand.get("split_m", [])] if kind == "offset" else None,
+                   edit={k: cand[k] for k in PARAMS.get(kind, ()) if k in cand} or None)
 
 
 def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: str, why: str, clearance_m: float,
@@ -292,7 +346,8 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
         kind, delta = _candidate_delta(best)
         target = clash.element_a if best.get("move", "A") == "A" else clash.element_b
         rec = {"title": best.get("title", ""), "kind": kind, "element": target, "delta_m": delta,
-               "split_m": best.get("split_m"), "rationale": best.get("rationale", ""),
+               "split_m": best.get("split_m"), "edit": {k: best[k] for k in PARAMS.get(kind, ()) if k in best},
+               "rationale": best.get("rationale", ""),
                "also_needs": best.get("also_needs", ""), "blocked_by": why,
                "others": [c.get("title", "") for c in candidates[1:3]]}
     return Result(reply.get("understanding", ""), [], [], reply.get("advice", ""), recommendation=rec,
@@ -313,7 +368,8 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
         v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
     finally:
         scene.translate(run, tuple(-d for d in delta))
-    attempt = Attempt(cand.get("title", "move"), delta, v.passed, _reason(v.hits), hit_ids=_hit_ids(v.hits))
+    attempt = Attempt(cand.get("title", "move"), delta, v.passed, _reason(v.hits), hit_ids=_hit_ids(v.hits),
+                      where=_where(v.hits))
     if not v.passed:
         return attempt, None
     return attempt, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""), cand.get("also_needs", ""),
@@ -330,6 +386,12 @@ def _reason(hits: list[verify.Hit]) -> str:
                      for (kind, cls), ds in groups.items())
 
 
+def _where(hits: list[verify.Hit], limit: int = 3) -> list[list[float]]:
+    """Where the worst hits are, world metres to the centimetre: tells Muse which part of an idea ran into something."""
+    return [[round(float(c), 2) for c in h.location] for h in sorted(hits, key=lambda h: h.distance_m)
+            if h.location is not None][:limit]
+
+
 def _hit_ids(hits: list[verify.Hit], limit: int = 8) -> list[str]:
     """The elements hit, worst first, each once."""
     out: list[str] = []
@@ -340,9 +402,11 @@ def _hit_ids(hits: list[verify.Hit], limit: int = 8) -> list[str]:
 
 
 def _keep(options: list[Option], new: Option) -> None:
-    """Add a verified option unless it is the same fix as one already kept (same kind and change, within 10 mm)."""
+    """Add a verified option unless it is the same fix as one already kept (same kind and change, within 10 mm, and
+    the same edit key: two routes can share their largest offset and still differ)."""
     for i, o in enumerate(options):
-        if o.kind == new.kind and o.moved == new.moved and all(abs(x - y) < 0.01 for x, y in zip(o.delta_m, new.delta_m)):
+        if (o.kind == new.kind and o.moved == new.moved and all(abs(x - y) < 0.01 for x, y in zip(o.delta_m, new.delta_m))
+                and (o.edit or {}).get("key") == (new.edit or {}).get("key")):
             if (new.min_clearance_m or 1.0) > (o.min_clearance_m or 1.0):
                 options[i] = new
             return
@@ -350,11 +414,11 @@ def _keep(options: list[Option], new: Option) -> None:
 
 
 def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
-                on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
+                on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
     """Split `target` around the obstacle and raise or lower the middle, check it, undo it.
 
     Only the new pieces (risers and middle) are checked against everything; the shortened end pieces only against
-    the obstacle, since they lost length and cannot have gained a clash anywhere else.
+    the obstacles (`other` and `others`), since they lost length and cannot have gained a clash anywhere else.
     """
     title = cand.get("title", "local offset")
     split = [float(v) for v in cand.get("split_m", [])]
@@ -371,12 +435,12 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_
             ignore = set(off.pieces) | {c for g in off.pieces for c in scene.element(g).connected}
             v = verify.check(scene, off.pieces[1:-1], clearance_m=clearance_m, ignore=ignore)  # bends, risers, middle
             ends = verify.check(scene, [off.pieces[0], off.pieces[-1]], clearance_m=clearance_m, ignore=ignore)
-            hits = v.hits + [h for h in ends.hits if h.other == other]
+            hits = v.hits + [h for h in ends.hits if h.other == other or h.other in others]
             preview = (shape or edits.meshes(scene, off.pieces)) if not hits else None
     except edits.Unsupported as e:
         return Attempt(title, delta, False, f"cannot offset this element: {e}", "offset", split), None
     reason = _reason(hits)
-    attempt = Attempt(title, delta, not hits, reason, "offset", split, _hit_ids(hits))
+    attempt = Attempt(title, delta, not hits, reason, "offset", split, _hit_ids(hits), where=_where(hits))
     if hits:
         return attempt, None
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
@@ -384,7 +448,7 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_
 
 
 def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
-              on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
+              on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
     """Cut `target`'s end back to butt against `other`, check it, undo it.
 
     A joint is meant to touch: the trimmed end may touch `other` but not run into it. Elsewhere the member already
@@ -415,12 +479,24 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
     hits = [h for h in v.hits
             if (h.distance_m < -tol if h.other == other else h.other not in before or h.distance_m < before[h.other] - tol)]
     trim = {"end": cut.end, "by_m": round(by, 4)}
-    attempt = Attempt(title, delta, not hits, _reason(hits), "trim", None, _hit_ids(hits), trim)
+    attempt = Attempt(title, delta, not hits, _reason(hits), "trim", None, _hit_ids(hits), trim, where=_where(hits))
     if hits:
         return attempt, None
     same_model = scene.element(target).source == scene.element(other).source
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
                            v.min_clearance_m, {}, "trim", None, shape, trim=trim, cleanup=same_model, checked_against=v.checked_against)
+
+
+def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
+                  on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
+    return _try_move(scene, cand, target, clearance_m, on_trial)
+
+
+# Each kind of fix Muse may propose, and how to try it: (scene, candidate, target, other, clearance, on_trial,
+# others=) → (Attempt, Option or None). A kind not listed here is refused, never tried as a move.
+TRIES: dict[str, Callable] = {"move": _try_move_fix, "offset": _try_offset, "trim": _try_trim}
+# The candidate fields each kind is described by, carried into a recommendation (never tried) as its "edit".
+PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m"), "trim": ("by_m",)}
 
 
 def to_json(result: Result) -> str:

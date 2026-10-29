@@ -448,6 +448,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .about-dialog .about { padding-top: 52px; }
 
 .badge.trim { background: #e3f4f6; color: #0b6c78; }
+.badge.route { background: #e8eefb; color: #2f4f9e; }
+.badge.resize { background: #f1e8fb; color: #64309a; }
+.badge.penetration { background: #fbebe4; color: #9a3b18; }
 
 /* When nothing passed (App.tsx NoFix) */
 .nofix { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-soft); border: 1px solid #ecd9b4; font-size: 12.5px; line-height: 1.5; }

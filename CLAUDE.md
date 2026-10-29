@@ -716,3 +716,20 @@ app, the PDF and BCF, the MCP server name `orca`, export names `<name>.orca.ifc`
 `sightline` (`server/sightline`), env vars `SIGHTLINE_*`, the Modal secret `sightline-meta` and Dict
 `sightline-settings`, the header `X-Sightline-Settings`, the owner cookie `sightline_owner`, browser storage keys
 `sightline.*`, a report's `origin: "sightline"`, and the model convention `Pset_SightlineConstraints`.
+
+Fix kinds in one registry (Oct 29, owner decision; design in `docs/edits.md`): groundwork for reroute, resize and
+penetration requests (planned, in that order, in `docs/edits.md`).
+- **Registered once per layer:** `agent.TRIES` / `agent.PARAMS` (try an idea), `plans.IN_TRIAL` / `plans.EXTRA_FILES`
+  (a plan's joint check), `plans.KEEP` behind `plans.apply` (keep it; the plan, MCP `apply_fix` and the new
+  `POST /api/scenes/{sid}/fix/apply` all use it), `requirements.SIZED` / `change_size`, and `web/src/fixKinds.ts`
+  (name, edit text, clearance, framing, review). A kind nobody registered is refused ("unknown kind"), never tried as
+  a move.
+- **Newer kinds** carry `edit` (parameters, `summary`, `key`) and `review` (who must review before building).
+- **Ranking:** `agent.TIERS`: plain geometry fixes, then resize, then penetration; a round with only those doesn't
+  end the search.
+- **Several obstacles:** `Clash.others` (a plan's merged item): placed along the run in Muse's text, and a split run's
+  end pieces are checked against all of them (before, only the first). Failed attempts tell Muse where they hit
+  (`Attempt.where`).
+- **Fixed on the way:** the "largest move" limit measured a lateral offset as 0 mm; it now measures how far it goes.
+- **Checked:** answer key 3/3 first try at Rev04 heights (rows in `evals/results.csv`); 399 server tests, 53 web tests.
+- **Web tests:** App imports `./fixKinds`; both stub harnesses compile the real module (`compiled("../src/fixKinds.ts")`).

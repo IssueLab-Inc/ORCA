@@ -549,6 +549,27 @@ def apply_offset(scene_id: str, body: Offset):
         raise HTTPException(422, f"Cannot offset this element: {e}")
 
 
+class FixApply(BaseModel):
+    option: dict
+
+
+@app.post("/api/scenes/{scene_id}/fix/apply")
+def fix_apply(scene_id: str, body: FixApply):
+    """Keep one verified option of any kind (`plans.apply`, which every kind is registered with). The page's preview
+    and before meshes are dropped, and whatever depends on the requirements is decided here again, never taken from
+    the page."""
+    o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
+    if not isinstance(o.get("moved"), list) or not o["moved"]:
+        raise HTTPException(400, "The fix names no element.")
+    try:
+        r = plans.apply(ws, _scene(scene_id), [o])
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot apply this fix: {e}")
+    except (ValueError, KeyError, TypeError, IndexError) as e:
+        raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
+    return {"files": r["files"], "pieces": r["pieces"][0]}
+
+
 @app.get("/api/scenes/{scene_id}/export")
 def export(scene_id: str):
     """The edited file. With edits in several discipline files, they come back as one zip."""
@@ -1066,6 +1087,8 @@ def plan_apply(scene_id: str, body: PlanApply):
         return plans.apply(ws, _scene(scene_id), body.options)
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot apply the plan: {e}")
+    except ValueError as e:
+        raise HTTPException(400, f"Cannot apply the plan: {e}")
 
 
 _chat: chat.Chat | None = None

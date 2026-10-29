@@ -93,9 +93,10 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     export class Pilot { start(){} event(){} cancel(){globalThis.${key}.viewer.preview([]);} finish(fn){fn();} takeOver(){} }`);
   const icons = url(["Bot", "Plug", "Boxes", "Brain", "Check", "CircleCheck", "ClipboardCheck", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu"].map((name) => `export function ${name}(){return null;}`).join("\n"));
   const ownership = await compiled("../src/chatRequest.ts");
+  const kinds = await compiled("../src/fixKinds.ts", {});
   const context = await compiled("../src/ContextPlan.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), "lucide-react": icons, "./ReportList": mocks });
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
-    "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context };
+    "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds };
   for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   function render() {
