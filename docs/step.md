@@ -54,8 +54,9 @@ opens, checked like any model, and written back as STEP with the fixes. Code: `s
 
 ## Upload
 
-- `POST /api/models/upload`: one to eight `.ifc`, `.step` or `.stp` files, opened together.
-- Caps: `SIGHTLINE_MODEL_UPLOAD_MAX_MB` (default as report uploads, 150 on the demo) and
+- `POST /api/models/upload` (or `/upload/stream`, with progress): one to eight `.ifc`, `.step` or `.stp` files, each as
+  is or gzipped by the page, opened together ([uploads.md](uploads.md)).
+- Caps: `SIGHTLINE_MODEL_UPLOAD_MAX_MB` (default as report uploads, 150 on the demo; on the unpacked size) and
   `SIGHTLINE_MODEL_UPLOADS_PER_HOUR/DAY` (10/200 on the demo, none for the owner).
 - An upload lives in its scene's temporary folder, deleted when the scene is dropped.
 - UI: Models › Upload models (IFC or STEP)…

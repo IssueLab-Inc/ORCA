@@ -23,6 +23,9 @@ from .scene import IfcScene, is_provision, step_source
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
 MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
+# Open model sets also held within a size budget: the IFC bytes they were opened from, a stand-in for memory (a scene
+# holds several times its file: docs/uploads.md). 0 = by count only.
+SCENE_BUDGET_MB = int(os.environ.get("SIGHTLINE_SCENE_BUDGET_MB", "0"))
 MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
 # Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
 MODELS = Path(tempfile.gettempdir()) / "sightline-models"
@@ -37,9 +40,12 @@ SAMPLE_EXCLUDE = tuple(c.strip() for c in os.environ.get(
 
 class Workspace:
     def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None, max_scenes: int = MAX_SCENES,
-                 max_reports: int = MAX_REPORTS, keep=None, hosts_model: ChatModel | None = None):
+                 max_reports: int = MAX_REPORTS, keep=None, hosts_model: ChatModel | None = None,
+                 budget_mb: int = SCENE_BUDGET_MB):
         self.samples = samples
         self.max_scenes = max_scenes
+        self.budget = budget_mb << 20
+        self.sizes: dict[str, int] = {}   # scene id → the IFC bytes it was opened from
         self.max_reports = max_reports
         # Ids (scenes or reports) to evict last: what live agent links point at (app.py). Called at eviction time.
         self.keep = keep or (lambda: set())
@@ -111,7 +117,8 @@ class Workspace:
                     ifc_paths.append(path)
             on_event({"type": "opening", "files": len(ifc_paths)})
             scene = IfcScene(ifc_paths)
-            scene.bounds()  # pay the one-off triangulation now, not on the first check
+            # Pay the one-off triangulation now, not on the first check; a big model reports how far it has got.
+            scene.bounds(lambda done, total: on_event({"type": "boxes", "done": done, "total": total}))
         except BaseException:
             if root is not None:
                 shutil.rmtree(root, ignore_errors=True)
@@ -120,11 +127,14 @@ class Workspace:
         self.scenes[scene_id] = scene
         self.sources[scene_id] = sources
         self.names[scene_id] = [p.name for p in paths]
+        self.sizes[scene_id] = sum(p.stat().st_size for p in ifc_paths)
         if root is not None:
             self._roots[scene_id] = root
-        while self.max_scenes and len(self.scenes) > self.max_scenes:
+        while len(self.scenes) > 1 and ((self.max_scenes and len(self.scenes) > self.max_scenes)
+                                        or (self.budget and sum(self.sizes.values()) > self.budget)):
             old = self._oldest(self.scenes, scene_id)
             del self.scenes[old]
+            self.sizes.pop(old, None)
             self.sources.pop(old, None)
             self.names.pop(old, None)
             self.detections.pop(old, None)

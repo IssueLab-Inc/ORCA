@@ -222,6 +222,22 @@ export type Effort = "minimal" | "low" | "medium" | "high";
 /** The owner's own settings (this browser): absent fields follow the settings for everyone. */
 /** An opened set of models: the scene id, the file names, and which came from STEP (index → STEP name). */
 export interface OpenedScene { id: string; files: string[]; step?: Record<string, string>; revision?: number }
+/** How an upload is going (server: app.upload_models_stream): packing here, sending, then the server opening it. */
+export type UploadEvent =
+  | { type: "packing"; done: number; total: number; name: string }
+  | { type: "upload"; loaded: number; total: number }
+  | { type: "received"; bytes: number }
+  | { type: "opening"; files: number }
+  | { type: "boxes"; done: number; total: number }
+  | { type: "tick" }
+  | { type: string; [k: string]: unknown };   // the STEP conversion's own events
+
+/** A file gzipped for the upload (the server unpacks `.gz` parts), or the file itself when the browser cannot or it is
+ * small. */
+async function pack(file: File): Promise<Blob> {
+  if (typeof CompressionStream === "undefined" || file.size < 1 << 20) return file;
+  return new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+}
 export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean }
 /** The settings for everyone (server: settings.py); null fields take the environment's default. */
 export interface EveryoneSettings { open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null }
@@ -426,7 +442,7 @@ export const api = {
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
   settings: () => call<SettingsState>("/settings"),
   /** Which model this browser's titles and triage would use now (the owner's choice, else the setting for everyone). */
-  models: () => call<{ triage: TriageModel }>("/models"),
+  models: () => call<{ triage: TriageModel; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
   saveSettings: (changes: Partial<EveryoneSettings>) => call<SettingsState>("/settings", { method: "PUT", body: JSON.stringify(changes) }),
   teams: (reportId: string, sceneId: string | null) =>
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
@@ -474,6 +490,54 @@ export const api = {
     const r = await send("/api/models/upload", { method: "POST", body: form, headers: settingsHeader() });
     if (!r.ok) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Upload failed (${r.status})`, r.status);
     return r.json() as Promise<OpenedScene>;
+  },
+  /** Upload your own models with progress (UploadEvent): each file gzipped here first when the browser can (IFC text
+   * packs 5-10x), sent with XMLHttpRequest for upload progress, then the server's opening streamed back. */
+  uploadModelsStream: async (files: File[], onEvent: (e: UploadEvent) => void): Promise<OpenedScene> => {
+    const form = new FormData();
+    for (const [i, f] of files.entries()) {
+      onEvent({ type: "packing", done: i, total: files.length, name: f.name });
+      const packed = await pack(f);
+      form.append("files", packed, packed === f ? f.name : `${f.name}.gz`);
+    }
+    return new Promise<OpenedScene>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/models/upload/stream");
+      for (const [k, v] of Object.entries(settingsHeader())) xhr.setRequestHeader(k, v);
+      let seen = 0, opened: OpenedScene | null = null, failed: Error | null = null;
+      const read = () => {
+        const text = xhr.responseText;
+        for (let nl = text.indexOf("\n", seen); nl >= 0; nl = text.indexOf("\n", seen)) {
+          const line = text.slice(seen, nl);
+          seen = nl + 1;
+          if (!line.trim()) continue;
+          const e = JSON.parse(line) as UploadEvent;
+          if (e.type === "done") {
+            const d = e as unknown as OpenedScene;
+            opened = { id: d.id, files: d.files, step: d.step, revision: d.revision };
+          } else if (e.type === "error") {
+            const x = e as unknown as { status: number; detail: string };
+            failed = new ApiError(x.detail, x.status);
+          } else onEvent(e);
+        }
+      };
+      xhr.upload.onprogress = (e) => onEvent({ type: "upload", loaded: e.loaded, total: e.total });
+      xhr.onprogress = () => { if (xhr.status === 200) read(); };
+      xhr.onload = () => {
+        if (xhr.status !== 200) {
+          let detail = `Upload failed (${xhr.status})`;
+          try { detail = JSON.parse(xhr.responseText).detail ?? detail; } catch { /* not JSON */ }
+          reject(new ApiError(detail, xhr.status));
+          return;
+        }
+        read();
+        if (failed) reject(failed);
+        else if (opened) resolve(opened);
+        else reject(new Error("The server stopped before the models opened. Try again."));
+      };
+      xhr.onerror = () => reject(new Error("The upload stopped: the connection dropped."));
+      xhr.send(form);
+    });
   },
   file: async (id: string, index: number) => {
     const r = await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" });

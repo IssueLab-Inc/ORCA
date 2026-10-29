@@ -33,6 +33,8 @@ image = (
         "SIGHTLINE_CHAT_PER_DAY": "1500",
         "SIGHTLINE_VOICE_PER_HOUR": "60",      # spoken messages per visitor (Muse Voice Transcribe, $0.18 an audio hour)
         "SIGHTLINE_VOICE_PER_DAY": "2000",
+        "SIGHTLINE_MODEL_UPLOAD_MAX_MB": "150",   # opens through the page in about two minutes (docs/uploads.md)
+        "SIGHTLINE_SCENE_BUDGET_MB": "300",       # open models' IFC bytes held: two of the biggest, about 2.5 GB
         "SIGHTLINE_MODEL_UPLOADS_PER_HOUR": "10",  # visitors' own models (IFC or STEP), per visitor; for everyone
         "SIGHTLINE_MODEL_UPLOADS_PER_DAY": "200",
         "SIGHTLINE_LINKS_PER_HOUR": "10",      # agent links (MCP) a visitor can make; for everyone a day

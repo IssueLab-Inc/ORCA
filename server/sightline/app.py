@@ -10,8 +10,10 @@ import queue
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 import wave
+import zlib
 from dataclasses import asdict
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
@@ -305,8 +307,10 @@ def _settings_state() -> dict:
 
 @app.get("/api/models")
 def models():
-    """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy."""
-    return {"triage": triage_model_info()}
+    """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy, and
+    how much a visitor may upload (the page checks before sending, and says so)."""
+    return {"triage": triage_model_info(), "model_upload_max_mb": MODEL_UPLOAD_MAX_MB,
+            "model_upload_max_files": MODEL_UPLOAD_MAX_FILES}
 
 
 @app.get("/api/settings")
@@ -355,17 +359,29 @@ def open_scene(body: Open):
         raise HTTPException(400, str(e))
 
 
-@app.post("/api/models/upload")
-async def upload_models(request: Request, files: list[UploadFile] = File(...)):
-    """Open your own models: IFC, or STEP (converted to IFC to check; Export gives the STEP back with the fixes).
-    Files that share coordinates open together. Capped per visitor (SIGHTLINE_MODEL_UPLOADS_PER_HOUR/DAY) and in size
-    (SIGHTLINE_MODEL_UPLOAD_MAX_MB for all files together)."""
+async def _receive_models(request: Request) -> tuple[Path, list[Path], list[str]]:
+    """Check, receive and unpack an upload of model files: IFC or STEP, each as is or gzipped by the page (`.gz`, the
+    name without it). Refused before the body is read when its length alone is over the cap; the cap
+    (SIGHTLINE_MODEL_UPLOAD_MAX_MB, all files together) counts the unpacked size. Returns the folder (deleted with
+    the scene, or here on failure), the paths and the names."""
+    cap = MODEL_UPLOAD_MAX_MB << 20
+    try:
+        length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        length = 0
+    if length > cap + (1 << 20):   # compressed or not, the body is never bigger than what it unpacks to (plus a form)
+        raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.")
+    form = await request.form(max_files=MODEL_UPLOAD_MAX_FILES + 1)
+    files = [v for v in form.getlist("files") if not isinstance(v, str)]
     if not files or len(files) > MODEL_UPLOAD_MAX_FILES:
         raise HTTPException(400, f"Choose 1 to {MODEL_UPLOAD_MAX_FILES} model files.")
-    names = [Path(f.filename or "").name for f in files]
+    packed = [Path(f.filename or "").name for f in files]
+    names = [n[:-3] if n.lower().endswith(".gz") else n for n in packed]
     bad = [n for n in names if Path(n).suffix.lower() not in MODEL_SUFFIXES]
     if bad:
         raise HTTPException(400, f"{bad[0]} is not an IFC or STEP file (.ifc, .step, .stp).")
+    if len(set(names)) < len(names):
+        raise HTTPException(400, "A file was given twice.")
     refused = _take(model_upload_limit, request)
     if refused:
         raise HTTPException(429, refused)
@@ -373,29 +389,85 @@ async def upload_models(request: Request, files: list[UploadFile] = File(...)):
     root = Path(tempfile.mkdtemp(dir=MODELS))
     total, paths = 0, []
     try:
-        for f, name in zip(files, names):
+        for f, name, sent in zip(files, names, packed):
             dest = root / name
-            if dest in paths:
-                raise HTTPException(400, f"{name} was given twice.")
+            unzip = zlib.decompressobj(16 + zlib.MAX_WBITS) if sent != name else None
             with dest.open("wb") as out:
                 while chunk := await f.read(1 << 20):
-                    total += len(chunk)
-                    if total > MODEL_UPLOAD_MAX_MB << 20:
+                    data = unzip.decompress(chunk) if unzip else chunk
+                    total += len(data)
+                    if total > cap:
                         raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.")
-                    out.write(chunk)
+                    out.write(data)
+                if unzip:
+                    out.write(unzip.flush())
             paths.append(dest)
+        return root, paths, names
+    except zlib.error:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(400, "A compressed model file could not be unpacked.")
+    except BaseException:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+
+
+@app.post("/api/models/upload")
+async def upload_models(request: Request):
+    """Open your own models: IFC, or STEP (converted to IFC to check; Export gives the STEP back with the fixes).
+    Files that share coordinates open together. Capped per visitor (SIGHTLINE_MODEL_UPLOADS_PER_HOUR/DAY) and in size
+    (SIGHTLINE_MODEL_UPLOAD_MAX_MB for all files together, unpacked). `/upload/stream` does the same with progress."""
+    root, paths, names = await _receive_models(request)
+    try:
         needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
         classifier = _classifier() if needs else None
         sid = await run_in_threadpool(lambda: ws.open_paths(paths, root, classify_with=classifier))
         return {"id": sid, "files": names, "step": ws.step_files(sid), "revision": ws.scene(sid).revision}
-    except HTTPException:
-        shutil.rmtree(root, ignore_errors=True)
-        raise
     except step.StepError as e:  # open_paths already removed the folder
         raise HTTPException(400, str(e))
     except Exception as e:  # not a model IfcOpenShell can read
         shutil.rmtree(root, ignore_errors=True)
         raise HTTPException(400, f"Could not open the models: {type(e).__name__}: {e}")
+
+
+@app.post("/api/models/upload/stream")
+async def upload_models_stream(request: Request):
+    """The same as /upload, answered as newline-delimited JSON once the files are in, so a big model's opening shows
+    progress and never meets an idle timeout: {"type": "received", "bytes"}, the STEP conversion's events, {"type":
+    "opening"}, {"type": "boxes", "done", "total"} (elements measured), {"type": "tick"} every 5 s, then {"type":
+    "done", "id", "files", "step", "revision"} or {"type": "error", "status", "detail"}. Refusals before the files
+    are in (size, count, type, allowance) are plain HTTP errors."""
+    root, paths, names = await _receive_models(request)
+    events: queue.Queue = queue.Queue()
+    events.put({"type": "received", "bytes": sum(p.stat().st_size for p in paths)})
+
+    def work():
+        try:
+            needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
+            classifier = _classifier() if needs else None
+            sid = ws.open_paths(paths, root, classify_with=classifier, on_event=events.put)
+            events.put({"type": "done", "id": sid, "files": names, "step": ws.step_files(sid),
+                        "revision": ws.scene(sid).revision})
+        except step.StepError as e:  # open_paths already removed the folder
+            events.put({"type": "error", "status": 400, "detail": str(e)})
+        except Exception as e:  # not a model IfcOpenShell can read
+            shutil.rmtree(root, ignore_errors=True)
+            events.put({"type": "error", "status": 400, "detail": f"Could not open the models: {type(e).__name__}: {e}"})
+        events.put(None)
+
+    owner.spawn(work)
+
+    def stream():
+        while True:
+            try:
+                event = events.get(timeout=5)
+            except queue.Empty:   # opening a big model can take minutes: keep the connection busy
+                yield json.dumps({"type": "tick"}) + "\n"
+                continue
+            if event is None:
+                return
+            yield json.dumps(event) + "\n"
+
+    return _ndjson(stream())
 
 
 @app.get("/api/scenes/{scene_id}")
@@ -404,8 +476,26 @@ def scene_info(scene_id: str):
     return ws.scene_info(_scene(scene_id))
 
 
+EXPORTS_KEEP_S = 3600   # written models and exports older than this are deleted (a big model's export is big)
+
+
+def _tidy_exports() -> None:
+    cutoff = time.time() - EXPORTS_KEEP_S
+    for p in EXPORTS.iterdir():
+        try:
+            if p.stat().st_mtime >= cutoff:
+                continue
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                p.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
 @app.get("/api/scenes/{scene_id}/files/{index}")
 def scene_file(scene_id: str, index: int):
+    _tidy_exports()
     paths = ws.scene(_scene(scene_id)).paths
     if not 0 <= index < len(paths):
         raise HTTPException(404, "No such file in this model set.")
@@ -585,6 +675,7 @@ def fix_apply(scene_id: str, body: FixApply):
 @app.get("/api/scenes/{scene_id}/export")
 def export(scene_id: str):
     """The edited file. With edits in several discipline files, they come back as one zip."""
+    _tidy_exports()
     out = EXPORTS / scene_id
     out.mkdir(exist_ok=True)
     paths = ws.export(_scene(scene_id), out)

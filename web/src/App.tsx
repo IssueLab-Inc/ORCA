@@ -10,6 +10,7 @@ import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
+import { localFile, uploadRefusal, uploadStatus } from "./uploads";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
@@ -173,7 +174,11 @@ export function App() {
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
   // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
-  useEffect(() => { api.models().then((m) => setTriageModel(m.triage)).catch(() => undefined); }, [ownerSettings]);
+  useEffect(() => {
+    api.models().then((m) => { setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); }).catch(() => undefined);
+  }, [ownerSettings]);
+  // How much a visitor may upload, from the server (checked here before anything is sent).
+  const [uploadMax, setUploadMax] = useState<number | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [docReady, setDocReady] = useState(false);
   const [chatAsk, setChatAsk] = useState<{ text: string; send: boolean; n: number } | undefined>(undefined);
@@ -668,9 +673,23 @@ export function App() {
       : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`);
     setError(null); resetWork(false, true);
     try {
-      const { id, files, step, revision } = existing ?? (upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]));
+      if (upload && !existing) {
+        const refusal = uploadRefusal(source as File[], uploadMax);
+        if (refusal) throw new Error(refusal);
+      }
+      const { id, files, step, revision } = existing ?? (upload
+        ? await api.uploadModelsStream(source as File[], (e) => {
+          const line = uploadStatus(e, hasStep);
+          if (line && sceneEpoch.current === epoch) setBusy(line);
+        })
+        : await api.open(source as string[]));
       if (sceneEpoch.current !== epoch) return;
-      const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
+      if (upload) setBusy("Drawing the models…");
+      // An uploaded IFC is parsed from the visitor's own file; a STEP comes back converted, samples come from the server.
+      const bytes = await Promise.all(files.map(async (_, i) => {
+        const local = upload ? localFile(source as File[], files, step, i) : null;
+        return local ? new Uint8Array(await local.arrayBuffer()) : api.file(id, i);
+      }));
       if (sceneEpoch.current !== epoch) return;
       const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch);
       if (sceneEpoch.current !== epoch || !stats) return;
@@ -1834,7 +1853,7 @@ export function App() {
     <p className="pop-title">Or your own</p>
     <button className="pop-item" disabled={!!busy} onClick={() => { close(); modelInput.current?.click(); }}>
       <Upload size={14} aria-hidden /> Upload models (IFC or STEP)…</button>
-    <p className="hint">Up to 150 MB together. A STEP machine is converted to IFC to check; Export gives your STEP back
+    <p className="hint">{uploadMax ? `Up to ${uploadMax} MB together.` : "Several files open together."} A STEP machine is converted to IFC to check; Export gives your STEP back
       with the fixes.</p>
   </>);
   const coordinateMenu = (close: () => void) => (<>
@@ -1963,7 +1982,7 @@ export function App() {
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {!stats && !report && blank && (
-          <ProjectStart busy={!!busy} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
+          <ProjectStart busy={!!busy} maxMb={uploadMax} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
             onReportFolder={() => folderInput.current?.click()} onBack={() => setBlank(false)} />
         )}
         {!stats && !busy && !blank && (
