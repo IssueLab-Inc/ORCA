@@ -729,6 +729,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .req-hints { display: flex; gap: 3px; flex-wrap: wrap; margin-top: auto; }
 .req-hints i { font-style: normal; font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: var(--bg); color: var(--muted); }
 .req-strict { display: flex; flex-direction: column; gap: 2px; }
+.req-strict-block { display: flex; flex-direction: column; gap: 8px; }
 .req-strict input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
 .req-ticks { display: grid; grid-template-columns: repeat(5, 1fr); }
 .req-ticks button { border: 0; background: transparent; font-size: 12px; color: var(--muted); cursor: pointer; padding: 2px 0; }

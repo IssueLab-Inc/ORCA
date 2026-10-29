@@ -143,10 +143,20 @@ server's numbers. The level names fit any industry; the hints are rough equivale
 - **The browser** keeps the file and whether it is in use (`sightline.requirements`). Download and Upload make it a
   file to reuse. Accounts come later.
 
+## In the tour
+
+The Northbank tour's act "Your standard" (after the patterns, Oct 29):
+- Add to requirements on the pattern just marked by design;
+- open Requirements; pick L4 Production; move to Strict and read the numbers and the expected count;
+- the grid and who moves (Suggest with Muse Spark and Download are pointed out, not run: a draft takes up to 85 s);
+- Use these requirements.
+
+The rest of the tour runs under them: the report says it was checked against L4 Production · Strict. The tour does not
+check again, which would renumber the clashes and need triage again.
+
 ## Not yet
 
 - Requirements per element (by GlobalId).
 - Importing Navisworks clash-test definitions.
-- A tour act.
 - STEP part groups as selectors.
 - Requirements on the chat's own words ("use strict").
