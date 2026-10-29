@@ -237,9 +237,10 @@ export type DocEvent =
   | { type: "error"; message: string };
 
 /** POST and read newline-delimited JSON events until the stream ends. */
-async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void, signal?: AbortSignal) {
-  const r = await fetch(`/api${path}`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body), signal });
-  if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
+async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void, signal?: AbortSignal, method = "POST") {
+  const r = await fetch(`/api${path}`, method === "GET" ? { headers: jsonHeaders(), signal }
+    : { method, headers: jsonHeaders(), body: JSON.stringify(body), signal });
+  if (!r.ok || !r.body) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`, r.status);
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -259,7 +260,35 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
+/** An agent link (server: agents.py): an MCP client holding the token works on this session; the page follows it. */
+export interface AgentLink {
+  token: string; mcp_url: string; id: string; expires_at: number; calls: number; browser: boolean;
+  last_call: { tool: string; at: number } | null;
+}
+export interface LinkContext { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] }
+/** What the agent does, for the page to follow: its calls, requests for pictures, and the chat's ui events. */
+export type LinkEvent =
+  | { type: "hello"; calls: number; last_call: AgentLink["last_call"] }
+  | { type: "heartbeat" } | { type: "revoked" }
+  | { type: "agent_call"; tool: string; args: Record<string, unknown> }
+  | { type: "agent_result"; tool: string; summary: string }
+  | { type: "capture_request"; id: string; what: "view" | "clash"; report_id?: string; clash_id?: string; a?: string; b?: string }
+  | { type: "ui"; action: "open_models"; names: string[] }
+  | { type: "ui"; action: "applied"; files: number[]; pieces: string[][]; pairs: [string, string][]; titles: string[]; clash_ids: string[] }
+  | { type: "ui"; action: "follow_triage" }
+  | ChatEvent;
+
 export const api = {
+  createLink: (ctx: LinkContext) => call<AgentLink>("/links", { method: "POST", body: JSON.stringify(ctx) }),
+  linkState: (token: string) => call<Omit<AgentLink, "token" | "mcp_url">>(`/links/${encodeURIComponent(token)}`),
+  linkContext: (token: string, ctx: LinkContext) =>
+    call<unknown>(`/links/${encodeURIComponent(token)}/context`, { method: "PUT", body: JSON.stringify(ctx) }),
+  revokeLink: (token: string) => call<{ revoked: boolean }>(`/links/${encodeURIComponent(token)}`, { method: "DELETE" }),
+  /** Follow the link until the server ends the stream (a few minutes) or `signal` aborts; the caller reconnects. */
+  linkEvents: (token: string, onEvent: (e: LinkEvent) => void, signal?: AbortSignal) =>
+    ndjson<LinkEvent>(`/links/${encodeURIComponent(token)}/events`, null, (e) => { onEvent(e); }, signal, "GET"),
+  linkCapture: (token: string, id: string, png: Blob | null) =>
+    fetch(`/api/links/${encodeURIComponent(token)}/captures/${id}`, { method: "POST", body: png ?? new Blob([]) }),
   contextStream: async (sceneId: string, objective: ContextObjective, onEvent: (e: ContextEvent) => void, signal?: AbortSignal) => {
     let finished = false;
     try {

@@ -1,14 +1,15 @@
-import { Boxes, Brain, Check, CircleCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Check, CircleCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { OwnerSettings, TriageModel } from "./api";
+import type { AgentLink, LinkEvent, OwnerSettings, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
+import { AgentDialog, type AgentLogEntry } from "./Agent";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
 import { ContextPlan, contextStep, type ContextRun } from "./ContextPlan";
@@ -125,6 +126,18 @@ export function App() {
   const [touring, setTouring] = useState(false);
   const [tourWhich, setTourWhich] = useState<"northbank" | "cell">("northbank");
   const startTour = (which: "northbank" | "cell") => { setTourWhich(which); setTouring(true); };
+  // An agent connected over MCP (Agent.tsx; server: agents.py, mcp_server.py). The link is kept for this tab only.
+  const [agentLink, setAgentLinkState] = useState<AgentLink | null>(() => {
+    try { const s = sessionStorage.getItem("sightline.agent"); return s ? JSON.parse(s) as AgentLink : null; } catch { return null; }
+  });
+  const setAgentLink = (l: AgentLink | null) => {
+    setAgentLinkState(l);
+    try { if (l) sessionStorage.setItem("sightline.agent", JSON.stringify(l)); else sessionStorage.removeItem("sightline.agent"); } catch { /* private window */ }
+  };
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
   // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
@@ -1204,6 +1217,109 @@ export function App() {
   const chatPlan = useRef<ReturnType<typeof trackPlan> | null>(null);
   const planThisTurn = useRef(false);
 
+  // ------------------------------------------------------------------ an agent over MCP
+  async function connectAgent() {
+    setAgentBusy(true); setAgentError(null);
+    try {
+      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved }));
+      setAgentLog([]);
+    } catch (e) { setAgentError((e as Error).message); } finally { setAgentBusy(false); }
+  }
+  async function disconnectAgent() {
+    if (agentLink) await api.revokeLink(agentLink.token).catch(() => undefined);
+    setAgentLink(null); setAgentLog([]);
+  }
+  // The agent sees what this page has open: keep the link's context current.
+  useEffect(() => {
+    if (!agentLink) return;
+    const t = setTimeout(() => {
+      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })
+        .catch((e) => { if (e instanceof ApiError && e.status === 404) setAgentLink(null); });
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved]);
+  /** What the agent does, carried out here: the chat's ui events, opened models, applied fixes, pictures. */
+  async function onAgentEvent(e: LinkEvent) {
+    if (!agentLink) return;
+    if (e.type === "hello" || e.type === "heartbeat") return;
+    if (e.type === "revoked") { setAgentLink(null); return; }
+    if (e.type === "agent_call") {
+      setAgentLinkState((l) => l && { ...l, last_call: { tool: e.tool, at: Date.now() / 1000 } });
+      setAgentLog((log) => [...log.slice(-40), { at: Date.now() / 1000, tool: e.tool, text: "…" }]);
+      return;
+    }
+    if (e.type === "agent_result") {
+      setAgentLog((log) => {
+        const i = log.map((x) => x.tool).lastIndexOf(e.tool);
+        if (i < 0) return [...log, { at: Date.now() / 1000, tool: e.tool, text: e.summary }];
+        const next = [...log]; next[i] = { ...next[i], text: e.summary }; return next;
+      });
+      return;
+    }
+    if (e.type === "capture_request") {
+      let png: Blob | null = null;
+      try {
+        if (e.what === "view") {
+          const url = viewer.current?.capture(1024);
+          png = url ? await (await fetch(url)).blob() : null;
+        } else if (e.report_id && e.clash_id && e.a && e.b) {
+          await captureViews(e.report_id, e.clash_id, e.a, e.b);  // saved on the report, where the agent reads them
+        }
+      } finally { await api.linkCapture(agentLink.token, e.id, png).catch(() => undefined); }
+      return;
+    }
+    if (e.type === "ui" && e.action === "open_models") { if (!busy) void openDemo(e.names); return; }
+    if (e.type === "ui" && e.action === "follow_triage") { if (!triageRun || triageRun.done) void runTriage(false); return; }
+    if (e.type === "ui" && e.action === "applied") {
+      if (!sceneId) return;
+      const epoch = sceneEpoch.current, live = () => sceneEpoch.current === epoch;
+      staleContext(); viewer.current?.preview([]);
+      for (const i of e.files) {
+        const bytes = await api.file(sceneId, i);
+        if (!live()) return;
+        await viewer.current!.replace(i, bytes, live);
+      }
+      if (!live()) return;
+      setEdits((ed) => {
+        const next = { ...ed };
+        for (const ps of e.pieces) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
+        return next;
+      });
+      markFixed(e.pairs, e.titles);
+      resetWork(); setRemeasure((n) => n + 1);  // as when the person accepts: the options are spent
+      return;
+    }
+    onChatEvent(e as ChatEvent);
+  }
+  const agentHandler = useRef(onAgentEvent);
+  agentHandler.current = onAgentEvent;
+  // Follow the link while it lives: the server ends each stream after a few minutes, so reconnect.
+  useEffect(() => {
+    if (!agentLink) return;
+    const token = agentLink.token, stop = new AbortController();
+    void (async () => {
+      for (let tries = 0; !stop.signal.aborted; tries++) {
+        try {
+          await api.linkEvents(token, (e) => { void agentHandler.current(e); }, stop.signal);
+          tries = 0;
+        } catch (e) {
+          if (stop.signal.aborted) return;
+          if (e instanceof ApiError && e.status === 404) { setAgentLink(null); return; }
+        }
+        await new Promise((r) => setTimeout(r, Math.min(15000, 1000 * 2 ** Math.min(tries, 4))));
+      }
+    })();
+    return () => stop.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentLink?.token]);
+  // A clock for "last call 4 s ago" while the dialog or the pill shows it.
+  useEffect(() => {
+    if (!agentLink) return;
+    const t = setInterval(() => setNow(Date.now()), 2000);
+    return () => clearInterval(t);
+  }, [agentLink]);
+
   async function accept(o: Option) {
     if (!sceneId || busy) return;
     replaceChatWork(); retireDirectWork(); clearManual();
@@ -1436,6 +1552,11 @@ export function App() {
         <div className="bar-side end">
         {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
+        {!landing && <button className={`btn ${agentLink ? "agent-pill" : "ghost"}`} onClick={() => setAgentOpen(true)}
+          aria-label={agentLink ? "Agent connected" : "Connect an agent"} data-tip-side="bottom"
+          data-tip={agentLink ? "An agent works on this session over MCP" : "Let an AI agent (Claude, Meta's coding agent) work on this session over MCP"}>
+          {agentLink ? <><Bot size={15} aria-hidden /><span className="lbl"> {agentLink.last_call ? `Agent · ${agentLink.last_call.tool}` : "Agent · waiting"}</span></>
+            : <><Plug size={15} aria-hidden /><span className="lbl"> Connect an agent</span></>}</button>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
           owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
           {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}</span>}
@@ -1684,6 +1805,8 @@ export function App() {
 
       <Tooltips />
       {about && <About triageOpen={!!triageModel?.open_weights} onClose={() => setAbout(false)} />}
+      {agentOpen && <AgentDialog link={agentLink} log={agentLog} now={now} creating={agentBusy} error={agentError}
+        canCreate={!!sceneId} onCreate={() => void connectAgent()} onRevoke={() => void disconnectAgent()} onClose={() => setAgentOpen(false)} />}
       {touring && <Tour key={tourWhich} which={tourWhich} state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}

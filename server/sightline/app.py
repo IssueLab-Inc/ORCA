@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import os
@@ -19,9 +20,11 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, ConfigDict
+from starlette.routing import Route
 
-from . import chat, context_planner, detect, document, edits, owner, plans, settings, step, titles, triage
+from . import agents, chat, context_planner, detect, document, edits, mcp_server, owner, plans, settings, step, titles, triage
 from .meta_client import load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
 from .service import MODEL_SUFFIXES, MODELS, Workspace
@@ -742,14 +745,28 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
     proposal, following one already started is free. With `scene_id`, what the open model already settles (one
     element on both sides) is not asked of the model, and corrects a run that did ask."""
     report = ws.report(_report(report_id))
+    try:
+        job = _start_triage(report, scene_id, lambda: _take(propose_limit, request), rerun)
+    except PermissionError as e:
+        raise HTTPException(429, str(e))
+
+    def stream():
+        for event in job.follow():
+            yield json.dumps(event, default=str) + "\n"
+
+    return _ndjson(stream())
+
+
+def _start_triage(report, scene_id: str | None, charge, rerun: bool = False) -> triage.Job:
+    """The report's shared triage run: the one under way or done, else a new one (`charge` once: why not, or None)."""
     key = _triage_key(report)
-    facts = _triage_facts(report_id, scene_id)
+    facts = _triage_facts(report.id, scene_id)
     with _triage_lock:
         job = _triage_jobs.get(key)
         if job is None or (rerun and job.done):
-            refused = _take(propose_limit, request)
+            refused = charge()
             if refused:
-                raise HTTPException(429, refused)
+                raise PermissionError(refused)
             model, info = triage_model()
             job = triage.Job(report, model, info, int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8")))
             job.learn(facts)
@@ -757,12 +774,7 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
             while len(_triage_jobs) > 16:
                 _triage_jobs.pop(next(iter(_triage_jobs)))
     job.learn(facts)
-
-    def stream():
-        for event in job.follow():
-            yield json.dumps(event, default=str) + "\n"
-
-    return _ndjson(stream())
+    return job
 
 
 _title_jobs: dict[str, titles.Job] = {}
@@ -951,16 +963,9 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
 
     def work():
         try:
-            matches = ws.match(report_id, body.scene_id) if scene is not None else None
-            data, name, media = document.generate(
-                report, verdicts, ws.model, scope=body.scope, model_teams=body.teams, matches=matches,
-                scene=scene, evidence=body.evidence, reviews=body.reviews, marks=body.marks,
-                include_bcf=body.bcf, emit=events.put)
-            doc_id = uuid.uuid4().hex
-            _documents[doc_id] = (data, name, media)
-            while len(_documents) > 24:
-                _documents.pop(next(iter(_documents)))
-            events.put({"type": "ready", "url": f"/api/documents/{doc_id}", "name": name, "bytes": len(data)})
+            doc = _build_document(report, verdicts, body.scene_id if scene is not None else None, body.scope, teams=body.teams, evidence=body.evidence,
+                                  reviews=body.reviews, marks=body.marks, bcf=body.bcf, emit=events.put)
+            events.put({"type": "ready", "url": doc["path"], "name": doc["name"], "bytes": doc["bytes"]})
         except Exception as e:
             events.put({"type": "error", "message": f"Could not build the report: {type(e).__name__}: {e}"})
         events.put(None)
@@ -972,6 +977,24 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
             yield json.dumps(event, default=str) + "\n"
 
     return _ndjson(stream())
+
+
+def _build_document(report, verdicts: dict, scene_id: str | None, scope: str, *, teams: dict | None = None,
+                    evidence: dict | None = None, reviews: dict | None = None, marks: dict | None = None,
+                    bcf: bool = True, emit=None) -> dict:
+    """Build a report and keep it for download: {path (the download route), name, bytes, file (a local copy)}."""
+    scene = ws.scene(scene_id) if scene_id and scene_id in ws.scenes else None
+    matches = ws.match(report.id, scene_id) if scene is not None else None
+    data, name, media = document.generate(
+        report, verdicts, ws.model, scope=scope, model_teams=teams or {}, matches=matches, scene=scene,
+        evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None))
+    doc_id = uuid.uuid4().hex
+    _documents[doc_id] = (data, name, media)
+    while len(_documents) > 24:
+        _documents.pop(next(iter(_documents)))
+    local = EXPORTS / f"{doc_id}-{name}"
+    local.write_bytes(data)
+    return {"path": f"/api/documents/{doc_id}", "name": name, "bytes": len(data), "file": str(local)}
 
 
 @app.get("/api/documents/{doc_id}")
@@ -1010,6 +1033,182 @@ async def transcribe_voice(request: Request, audio: UploadFile = File(...), repo
         return await run_in_threadpool(transcribe, data, words)
     except Exception as e:  # the key, the network or the service: say so rather than fail silently
         raise HTTPException(502, f"Transcription failed: {type(e).__name__}")
+
+# ---------------------------------------------------------------------------------------------------------- agents
+# "Connect an agent": a link (a secret token) lets an MCP client work on this visitor's session (agents.py), and the
+# page follows what it does. The MCP server itself is mounted at /mcp below (mcp_server.py).
+
+links = agents.Links()
+link_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_LINKS_PER_HOUR", "0")),
+                          int(os.environ.get("SIGHTLINE_LINKS_PER_DAY", "0")), noun="agent links")
+agent_call_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_AGENT_CALLS_PER_HOUR", "0")), 0, noun="agent calls")
+MAX_CAPTURE_BYTES = 6_000_000
+
+
+class LinkContext(BaseModel):
+    scene_id: str | None = None
+    report_id: str | None = None
+    clash_id: str | None = None
+    fixed: list[str] = []
+
+
+def _link(token: str) -> agents.Link:
+    link = links.get(token)
+    if link is None:
+        raise HTTPException(404, "This agent link has expired or was revoked.")
+    return link
+
+
+@app.post("/api/links")
+def create_link(body: LinkContext, request: Request):
+    """A new agent link for what this visitor has open. The token is shown once; only its hash is kept."""
+    refused = _take(link_limit, request)
+    if refused:
+        raise HTTPException(429, refused)
+    who = client_id(request.headers, request.client.host if request.client else None)
+    token, link = links.create(who, owner.no_caps(), chat.Context(body.scene_id, body.report_id, body.clash_id,
+                                                                  list(body.fixed)))
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    return {"token": token, "mcp_url": f"{proto}://{host}/mcp", **link.public()}
+
+
+@app.get("/api/links/{token}")
+def link_state(token: str):
+    return _link(token).public()
+
+
+@app.put("/api/links/{token}/context")
+def link_context(token: str, body: LinkContext):
+    """The page keeps the link's view of the session current: what is open, selected and fixed."""
+    link = _link(token)
+    link.ctx.scene_id, link.ctx.report_id, link.ctx.clash_id = body.scene_id, body.report_id, body.clash_id
+    link.ctx.fixed = list(body.fixed)
+    return link.public()
+
+
+@app.get("/api/links/{token}/events")
+async def link_events(token: str, request: Request):
+    """What the agent does, for the page to follow (newline-delimited JSON): ui actions, agent calls, capture
+    requests, a heartbeat every 15 s. Ends after a few minutes; the page reconnects."""
+    link = _link(token)
+    q = link.subscribe()
+
+    async def stream():
+        try:
+            yield json.dumps({"type": "hello", **link.public()}) + "\n"
+            idle = 0.0
+            for _ in range(int(240 / 0.1)):  # under Modal's request limit; the page reconnects
+                if await request.is_disconnected() or links.get(token, touch=False) is None:
+                    break
+                try:
+                    event = q.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.1)
+                    idle += 0.1
+                    if idle >= 15:
+                        idle = 0.0
+                        yield json.dumps({"type": "heartbeat"}) + "\n"
+                    continue
+                idle = 0.0
+                yield json.dumps(event, default=str) + "\n"
+        finally:
+            link.unsubscribe(q)
+
+    return _ndjson(stream())
+
+
+@app.post("/api/links/{token}/captures/{capture_id}")
+async def link_capture(token: str, capture_id: str, request: Request):
+    """The page's answer to a capture request: a PNG of its view, or nothing (a clash's views went to the report)."""
+    link = _link(token)
+    data = await request.body()
+    if len(data) > MAX_CAPTURE_BYTES:
+        raise HTTPException(413, "That picture is too large.")
+    if not link.deliver(capture_id, data or None):
+        raise HTTPException(404, "Nobody is waiting for that picture any more.")
+    return {"ok": True}
+
+
+@app.delete("/api/links/{token}")
+def revoke_link(token: str):
+    return {"revoked": links.revoke(token)}
+
+
+def mcp_hooks() -> mcp_server.Hooks:
+    """What the MCP tools borrow from this server: links, the demo caps, triage and reports."""
+    def charge(link: agents.Link, n: int) -> str | None:
+        return None if link.owner else propose_limit.take_many(link.visitor, n)
+
+    def start_triage(report_id: str, scene_id: str | None, link: agents.Link):
+        return _start_triage(ws.report(report_id), scene_id, lambda: charge(link, 1))
+
+    def build_document(report_id: str, scene_id: str | None, scope: str) -> dict:
+        report = ws.report(report_id)
+        job = _triage_jobs.get(_triage_key(report))
+        verdicts = dict(job.results) if job is not None and job.done else {}
+        if len(verdicts) < len(report.clashes) // 2:
+            raise RuntimeError("Triage the report first (the triage tool): the report sorts clashes by its verdicts.")
+        return _build_document(report, verdicts, scene_id, scope)
+
+    return mcp_server.Hooks(
+        links=links, charge=charge, allow_call=lambda link: agent_call_limit.take(link.id),
+        start_triage=start_triage, triage_state=lambda rid, sid: triage_state(rid, sid),
+        build_document=build_document, spawn=owner.spawn)
+
+
+_mcp = mcp_server.build(lambda: ws, mcp_hooks())
+
+
+def _mcp_transport():
+    """The streamable-HTTP app for /mcp, with a new session manager (one per server start: it runs only once). One
+    plain JSON response per call, no long-held stream: Modal cuts requests at ten minutes, and its edge buffers
+    streams. Token-gated (`_McpGate`), so the transport's DNS-rebinding check (meant for localhost servers) is off."""
+    return _mcp.streamable_http_app(stateless_http=True, json_response=True,
+                                    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
+
+
+class _McpGate:
+    """/mcp for agents with a live link token: 401 otherwise. A `?key=` token becomes the Authorization header the
+    tools read; responses go out uncompressed (Modal's edge)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        token = agents.token_from(headers, scope.get("query_string", b"").decode("latin-1"))
+        if links.get(token, touch=False) is None:
+            body = json.dumps({"error": "An ORCA agent link token is required: open ORCA, choose 'Connect an agent', "
+                                        "and send it as 'Authorization: Bearer <token>'."}).encode()
+            await send({"type": "http.response.start", "status": 401, "headers": [
+                (b"content-type", b"application/json"), (b"www-authenticate", b'Bearer realm="orca"')]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        if "authorization" not in headers:
+            scope = {**scope, "headers": [*scope.get("headers", []), (b"authorization", f"Bearer {token}".encode())]}
+
+        async def send_identity(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", []), (b"content-encoding", b"identity")]}
+            await send(message)
+        await self.inner(scope, receive, send_identity)
+
+
+_mcp_gate = _McpGate(None)
+app.router.routes.insert(0, Route("/mcp", endpoint=_mcp_gate, methods=["GET", "POST", "DELETE"]))
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app):
+    _mcp_gate.inner = _mcp_transport()
+    async with _mcp.session_manager.run():
+        yield
+
+
+app.router.lifespan_context = _lifespan
 
 # Last, so /api routes win over static files.
 if (WEB_DIST / "index.html").exists():

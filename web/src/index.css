@@ -659,3 +659,17 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .clash-name { font-variant-numeric: tabular-nums; }
 .report-head .naming { color: var(--accent); }
 .clash-panel h2 .num { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* Connect an agent (Agent.tsx): the link's settings for each client, its status, what the agent did */
+.agent-dialog .seg { margin-top: 6px; }
+.agent-status { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
+.agent-status svg { vertical-align: -2px; }
+.agent-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.agent-status .dot.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.snippet { position: relative; }
+.snippet pre { margin: 0; padding: 10px 40px 10px 12px; background: #0f1720; color: #dfe7ef; border-radius: 8px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
+.snippet .ibtn { position: absolute; top: 6px; right: 6px; color: #dfe7ef; }
+.agent-log { margin: 0; padding-left: 18px; font-size: 12.5px; display: flex; flex-direction: column; gap: 3px; }
+.agent-log b { font-family: var(--mono); font-weight: 600; font-size: 11.5px; }
+.btn.agent-pill { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.agent-error { margin: 0; color: var(--fail); font-size: 13px; }

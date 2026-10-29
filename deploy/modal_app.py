@@ -35,6 +35,9 @@ image = (
         "SIGHTLINE_VOICE_PER_DAY": "2000",
         "SIGHTLINE_MODEL_UPLOADS_PER_HOUR": "10",  # visitors' own models (IFC or STEP), per visitor; for everyone
         "SIGHTLINE_MODEL_UPLOADS_PER_DAY": "200",
+        "SIGHTLINE_LINKS_PER_HOUR": "10",      # agent links (MCP) a visitor can make; for everyone a day
+        "SIGHTLINE_LINKS_PER_DAY": "500",
+        "SIGHTLINE_AGENT_CALLS_PER_HOUR": "600",  # MCP tool calls per link (fixes are also charged as proposals)
         "SIGHTLINE_OPEN_WEIGHTS": "0",         # titles and triage on Muse Spark unless the owner switches the open-weights
                                                # model on (owner settings; kept in the "sightline-settings" Modal Dict)
     })

@@ -530,6 +530,33 @@ it, two equal cards (`DemoCard` in About.tsx: picture, what it is, what it shows
 numbers: change both together. Pictures are captured in ORCA's own viewer (not the DemoModels renders, which
 predate the event) by `web/scripts/capture-demos.cjs` → `web/public/demos/*.webp`; recapture after visual changes.
 
+Agents over MCP (Oct 29, owner decision; docs/mcp.md):
+- **Connect an agent:** a pairing link (`agents.py`: `orca_` token, sha256 kept, 12 h sliding, 24 h max, revocable,
+  in memory) ties an MCP client to the visitor's session.
+  - The page PUTs its context (scene, report, clash, fixed) and follows `GET /api/links/{token}/events` (NDJSON,
+    reconnects every 4 min).
+  - Events: the chat's ui events, plus `open_models`, `applied`, `follow_triage`, `capture_request`, `agent_call` /
+    `agent_result`.
+  - UI: `web/src/Agent.tsx`, the header button and pill. Handled by `onAgentEvent` in App.tsx, which reuses
+    `onChatEvent`.
+- **The MCP server:** `mcp_server.build(ws | getter, Hooks, local=)`, 28 tools.
+  - It reuses `chat.Chat._run` (one tool layer with the chat), plus session, pictures, jobs, apply_fix / apply_plan,
+    triage, report and export.
+  - Remote at `/mcp`: a Starlette `Route` inserted first, `_McpGate` (401 without a live token, `?key=` → header,
+    `Content-Encoding: identity`).
+  - Stateless with JSON responses. A new session manager per lifespan (`_mcp_transport`; it runs only once).
+  - Stdio: `python -m sightline.mcp_server`, with its own local link.
+  - Expected failures are `ToolError`s, so the agent reads why.
+  - Long work is a job (`wait_s`, then `get_job`).
+- **Caps:** `SIGHTLINE_LINKS_PER_HOUR`/`DAY`, `SIGHTLINE_AGENT_CALLS_PER_HOUR`. Proposals are charged to the link's
+  creator, and the owner's links have no caps.
+- **Measured (local):** a real `mcp` client plus a browser on the same link ran #58 end to end:
+  - show → A/B/C taken by the page in 8 s → capture_view → propose (an offset, verified, 28 s) → apply_fix;
+  - the page shows "1 fixed".
+
+  Stdio opened the cell from STEP.
+- **Later:** accounts (GitHub sign-in) and saved projects; OAuth on `/mcp` for claude.ai connectors.
+
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
