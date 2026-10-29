@@ -36,12 +36,20 @@ function ImpactBar({ total, triage, fixes, reviewed }: { total: number; triage: 
   const hours = (triaged * 15 / 60).toFixed(1).replace(/\.0$/, "");
   return <p className="impact-bar" role="status"><span><b>{total}</b> clashes</span><span className="bad"><b>{real}</b> real</span><span><b>{need}</b> need a fix</span><span className="ok"><b>{resolved}</b> resolved</span><span className="why">≈{hours} h of manual review sorted (est. 15 min/clash)</span></p>;
 }
-export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, insights, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus }: {
+/** The left pane over an open report, in two tabs so the list gets the room: **Clashes** (a short head, Triage and the
+ * list, which scrolls on its own) and **Insights** (the run, what the clashes add up to, root causes and patterns). */
+export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, triageCard, insights,
+  insightsCount = null, view = "clashes", onView, status, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
   checked: Set<string>; onCheck: (ids: string[], on: boolean) => void; onFixChecked: () => void;
-  insights: React.ReactNode; busy: boolean;
+  triageCard?: React.ReactNode;  // Triage: the first step, and the list's verdict filter
+  insights: React.ReactNode;     // the Insights tab: the run's summary, root causes, patterns
+  insightsCount?: number | null; // what is still open there (root causes + patterns), for the tab
+  view?: "clashes" | "insights"; onView?: (v: "clashes" | "insights") => void;
+  status?: React.ReactNode;      // a check running again, shown over the list
+  busy: boolean;
   triage: Record<string, TriageVerdict>; triageFilter: TriageKind | null;
   naming?: number;  // clashes Muse is still titling
   /** Thumbnails drawn in the browser for clashes with no pictures (detected ones), and a way to ask for one. */
@@ -83,16 +91,37 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   const fixable = (c: ReportClash) => linkState(matches, c.id) === "both" && !fixes[c.id] && !reviewed[c.id]
     && !noClash(c, matches?.[c.id], null, triage[c.id]);
 
+  const tab = (v: "clashes" | "insights", label: string, n: number | null, tour?: string) => (
+    <button role="tab" aria-selected={view === v} className={view === v ? "on" : ""} data-tour={tour} onClick={() => onView?.(v)}>
+      {label}{n != null && <span className={view === v ? "badge-n" : "count"}>{n}</span>}</button>
+  );
   return (
     <div className="report">
-      <div className="report-head">
+      <div className="left-tabs" role="tablist" aria-label="The report">
+        {tab("clashes", "Clashes", report.clashes.length)}
+        {tab("insights", "Insights", insightsCount, "tab-insights")}
+      </div>
+
+      <div className="left-view" data-left-view="insights" hidden={view !== "insights"}>
+        <div className="report-head">
+          <div className="row"><h2>{report.title}</h2></div>
+          <ImpactBar total={report.clashes.length} triage={triage} fixes={fixes} reviewed={reviewed} />
+        </div>
+        {insights}
+      </div>
+
+      <div className="left-view" data-left-view="clashes" hidden={view !== "clashes"}>
+      <div className="report-head" data-tour="detected">
         <div className="row"><h2>{report.title}</h2>
           <span className="chips">{fixedCount > 0 && <span className="chip ok"><CircleCheck size={12} aria-hidden /> {fixedCount} fixed</span>}
             {reviewedCount > 0 && <span className="chip">{reviewedCount} reviewed</span>}</span></div>
-        <p className="hint">{report.clashes.length} clashes · {new Set(report.clashes.map((c) => c.test)).size} tests
+        <p className="hint">{new Set(report.clashes.map((c) => c.test)).size} tests
           {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}
           {naming > 0 && <span className="naming"> · Muse is naming {naming}…</span>}</p>
-        <ImpactBar total={report.clashes.length} triage={triage} fixes={fixes} reviewed={reviewed} />
+        {status}
+      </div>
+      {triageCard}
+      <div className="report-head list-head">
         <div className="search-box">
           <Search size={15} aria-hidden />
           <input type="search" placeholder="Filter by #, title, element, level…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter clashes" />
@@ -108,8 +137,6 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
             <X size={14} aria-hidden /></button>
         </div>}
       </div>
-
-      {insights}
 
       <div className="groups">
         {groups.map(([test, cs]) => {
@@ -159,6 +186,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
           );
         })}
         {!shown && <p className="hint">No clash matches the filter.</p>}
+      </div>
       </div>
 
       {checked.size > 0 && (

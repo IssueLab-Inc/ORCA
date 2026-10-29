@@ -29,12 +29,10 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
   const roots = rootCauses ?? [];
   const pats = patterns ?? [];
   if (rootCauses && patterns && !roots.length && !pats.length) return null;
-  // While the list is filtered to one of these, show only that one: the rest of the panel gives way to the list.
   const rootLabel = (r: RootCause) => `Root cause: ${r.hub.name}`;
   const patLabel = (p: Pattern) => `Pattern: ${human(p.classes[0])} with ${human(p.classes[1])}`;
-  const focused = !!focus && (roots.some((r) => rootLabel(r) === focus) || pats.some((p) => patLabel(p) === focus));
-  const shownRoots = focused ? roots.filter((r) => rootLabel(r) === focus) : allRoots ? roots : roots.slice(0, 2);
-  const shownPats = focused ? pats.filter((p) => patLabel(p) === focus) : allPatterns ? pats : pats.slice(0, 4);
+  const shownRoots = allRoots ? roots : roots.slice(0, 2);
+  const shownPats = allPatterns ? pats : pats.slice(0, 4);
   const openRoots = roots.filter((r) => !r.done).length;
   const openPats = pats.filter((p) => p.clash_ids.some((id) => !resolved.has(id))).length;
   const nRoots = rootCauses ? `${openRoots} root cause${openRoots === 1 ? "" : "s"}` : "…";
@@ -55,7 +53,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
 
       {shownRoots.length > 0 && <div className="insights-part">
         <h3><Network size={14} aria-hidden /> Root causes</h3>
-        {!focused && <p className="hint">One element behind several clashes: fix the cause once, not each clash.</p>}
+        <p className="hint">One element behind several clashes: fix the cause once, not each clash.</p>
         {shownRoots.map((r) => (
           <div key={r.hub.global_id} className={`insight ${r.done ? "done" : ""}`}>
             <div className="insight-text">
@@ -76,17 +74,17 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
             </div>
           </div>
         ))}
-        {!focused && roots.length > 2 && <button className="more" onClick={() => setAllRoots(!allRoots)}>
+        {roots.length > 2 && <button className="more" onClick={() => setAllRoots(!allRoots)}>
           {allRoots ? <><ChevronUp size={13} aria-hidden /> Fewer</> : <><ChevronDown size={13} aria-hidden /> All {roots.length} root causes</>}</button>}
       </div>}
 
       {shownPats.length > 0 && <div className="insights-part">
         <h3><Repeat2 size={14} aria-hidden /> Patterns</h3>
-        {!focused && <p className="hint">The same pair of element types clashing again and again: usually one decision, not many problems.</p>}
-        {!verdicts && !focused && <button className="btn small explain-all" data-tour="explain" disabled={explaining || busy} onClick={onExplain}>
+        <p className="hint">The same pair of element types clashing again and again: usually one decision, not many problems.</p>
+        {!verdicts && <button className="btn small explain-all" data-tour="explain" disabled={explaining || busy} onClick={onExplain}>
           {explaining ? <><i className="spinner" aria-hidden /> Muse Spark is reading the patterns…</>
             : <><Sparkles size={13} aria-hidden /> Explain the {pats.length} patterns with Muse Spark</>}</button>}
-        {!verdicts && !focused && <p className="hint small">Marks, flags and fixes for each pattern appear once they are read.</p>}
+        {!verdicts && <p className="hint small">Marks, flags and fixes for each pattern appear once they are read.</p>}
         {shownPats.map((p) => {
           const v = verdicts?.[p.id];
           const open = p.clash_ids.filter((id) => !resolved.has(id));
@@ -128,7 +126,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
             </div>
           );
         })}
-        {!focused && pats.length > 4 && <button className="more" onClick={() => setAllPatterns(!allPatterns)}>
+        {pats.length > 4 && <button className="more" onClick={() => setAllPatterns(!allPatterns)}>
           {allPatterns ? <><ChevronUp size={13} aria-hidden /> Fewer</> : <><ChevronDown size={13} aria-hidden /> All {pats.length} patterns</>}</button>}
       </div>}
     </details>
