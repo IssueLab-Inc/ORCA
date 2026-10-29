@@ -85,11 +85,22 @@ def _in_trial_route(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[
     return r.pieces, set(r.pieces), {other, *it.others}
 
 
+def _in_trial_penetration(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    service, host = o["edit"]["service"], o["edit"]["host"]
+    pen = edits.penetration(scene, service, host, o["edit"].get("clearance_m", 0.025))
+    edits.apply_penetration(scene, pen, cut=True)
+    return [service], {service}, None   # the host is not its own: the service is checked against it
+
+
 # How each kind of fix is applied inside a plan's trial: → (elements to check, the fix's own elements, the obstacles
 # its shortened end pieces are checked against; None when every element it changed is checked against everything).
-IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim, "route": _in_trial_route}
-# The files a fix changes beyond its moved elements' (a penetration's opening goes in the host's file).
-EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {}
+IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim, "route": _in_trial_route,
+            "penetration": _in_trial_penetration}
+# The files a fix changes beyond its moved elements' (a penetration's provision for void goes in the service's file).
+EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]]}
+# Kinds whose element keeps the contacts it had (a trimmed member is framed into its neighbours, a service through a
+# wall stays where it is): only contacts new or worse count, and the partner must clear (a trim may touch it).
+KEEPS_CONTACTS = {"trim": lambda o: o["moved"], "penetration": lambda o: [o["edit"]["service"]]}
 
 
 def option_files(scene, o: dict) -> set[int]:
@@ -114,8 +125,9 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                 raise ValueError(f"unknown kind of fix: {it.option['kind']!r}")
         files = set().union(*(option_files(scene, it.option) for it in live))
         # A trimmed member already touches what it is framed into: only contacts new or worse than these count.
-        before = {it.key: {h.other: h.distance_m for h in verify.check(scene, it.option["moved"], clearance_m=need[it.key]).hits}
-                  for it in live if it.option["kind"] == "trim"}
+        before = {it.key: {h.other: h.distance_m for h in verify.check(
+                      scene, KEEPS_CONTACTS[it.option["kind"]](it.option), clearance_m=need[it.key]).hits}
+                  for it in live if it.option["kind"] in KEEPS_CONTACTS}
         with _trial(scene, files):
             # key → (check these, own elements, obstacles of the shortened ends)
             changed: dict[str, tuple[list[str], set[str], set[str] | None]] = {}
@@ -133,10 +145,15 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                 else:
                     v = verify.check(scene, check_ids, clearance_m=clearance_m, ignore=ignore)
                     hits = v.hits
-                if it.key in before:  # a trim butts its partner and keeps the contacts it had
-                    partner = it.element_b if it.option["moved"][0] == it.element_a else it.element_a
+                if it.key in before:  # it keeps the contacts it had; a trim may butt its partner, a service must clear
+                    mine = KEEPS_CONTACTS[it.option["kind"]](it.option)[0]
+                    partner = it.element_b if mine == it.element_a else it.element_a
+                    touch = it.option["kind"] == "trim"
                     was = before[it.key]
-                    hits = [h for h in hits if (h.distance_m < -0.002 if h.other == partner
+                    # Every element the item is for must clear (a merged item's others too); the rest only must not
+                    # get worse.
+                    meant = {partner, *it.others}
+                    hits = [h for h in hits if ((h.distance_m < -0.002 or not touch) if h.other in meant
                                                 else h.other not in was or h.distance_m < was[h.other] - 0.002)]
                 for h in hits:
                     if h.other in owner and owner[h.other] != it.key:
@@ -486,26 +503,34 @@ def _keep_route(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]
     return r, r["pieces"]
 
 
+def _keep_penetration(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    return ws.apply_penetration(scene_id, o["edit"]["service"], o["edit"]["host"]), []
+
+
 # How each kind of fix is kept in the scene: → (the Workspace's reply, with "files"; the pieces, the original first).
-KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route": _keep_route}
+KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route": _keep_route,
+        "penetration": _keep_penetration}
 
 
 def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
-    """Keep every fix of an accepted plan (or one accepted option). Returns the files changed and, per fix that
-    split an element, its pieces."""
+    """Keep every fix of an accepted plan (or one accepted option). Returns the files changed, per fix that split an
+    element its pieces, and the penetrations only requested (`not_cut`: the host's team cuts the opening)."""
     unknown = [o["kind"] for o in options if o.get("kind", "move") not in KEEP]
     if unknown:
         raise ValueError(f"unknown kind of fix: {unknown[0]!r}")
     files: set[int] = set()
     pieces: list[list[str]] = []
     changed: list[str] = []
+    not_cut: list[dict] = []
     with ws.lock:
-        for o in options:
+        for k, o in enumerate(options):
             r, made = KEEP[o.get("kind", "move")](ws, scene_id, o)
             pieces.append(made)
             files.update(r["files"])
             changed += r.get("changed", made or o["moved"])
-    return {"files": sorted(files), "pieces": pieces, "changed": list(dict.fromkeys(changed))}
+            if r.get("cut") is False:   # a penetration its host's team must cut: the clash stays open
+                not_cut.append({"index": k, "blocked_by": r["blocked_by"]})
+    return {"files": sorted(files), "pieces": pieces, "changed": list(dict.fromkeys(changed)), "not_cut": not_cut}
 
 
 def to_json(plan: Plan) -> str:

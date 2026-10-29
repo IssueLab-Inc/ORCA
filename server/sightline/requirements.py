@@ -641,7 +641,7 @@ def blocked(pol_a: Policy, pol_b: Policy | None, kind: str, delta_m: list[float]
     kind = kind or "move"
     if pol_a.edits == "none":
         return f"blocked by requirements: {pol_a.group_name} may not be edited"
-    if pol_a.edits == "move" and kind != "move":
+    if pol_a.edits == "move" and kind not in ("move", "penetration"):   # a penetration only asks: the service stays
         return f"blocked by requirements: {pol_a.group_name} may only be moved whole (no {kind}s)"
     if kind == "trim":
         if pol_a.trims == "no":
@@ -656,6 +656,12 @@ def blocked(pol_a: Policy, pol_b: Policy | None, kind: str, delta_m: list[float]
     return None
 
 
+def can_cut(pol: Policy | None) -> bool:
+    """Whether a penetration's opening may be cut in its host (else only the provision for void is written): no
+    requirements, or the host's group may be edited in any way."""
+    return pol is None or pol.edits == "any"
+
+
 def meets(doc: Doc, pol: Policy, other: Policy, clearance_m: float, min_clearance_m: float | None,
           delta_m: list[float], kind: str) -> list[str]:
     """Which requirements a verified option meets, in plain words, from the geometry check and the policy."""
@@ -665,7 +671,10 @@ def meets(doc: Doc, pol: Policy, other: Policy, clearance_m: float, min_clearanc
         out.append(f"clear of everything by more than {need:.0f} mm ({STRICTNESS[doc.strictness]['name']})")
     else:
         out.append(f"nearest {min_clearance_m * 1000:.0f} mm ≥ {need:.0f} mm required ({STRICTNESS[doc.strictness]['name']})")
-    if pol.group_name and other.group_name and pol.group != other.group:
+    if kind == "penetration":   # `pol` is the service's, `other` the host's
+        out.append(f"opening cut in {other.group_name}, which may be edited" if other.edits == "any" else
+                   f"provision for void only: {other.group_name} may not be edited, so its team cuts the opening")
+    elif pol.group_name and other.group_name and pol.group != other.group:
         out.append(f"edits {pol.group_name} only; {other.group_name} untouched")
     if pol.max_move_m and (kind or "move") in SIZED:
         size = change_size(kind, delta_m)

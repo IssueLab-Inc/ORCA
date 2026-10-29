@@ -418,3 +418,100 @@ def build_route_fixture(path: Path) -> Path:
 
 
 UP_ = np.array([0.0, 0.0, 1.0])
+
+
+def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]:
+    """Services through walls and slabs (edits.penetration), metres, one storey, two files: structure and services.
+
+    Structure: wall W1 (x 2.0-2.2, y -3 to 3, z 0-3.4, fire rated EI 60, not load-bearing), wall W2 (x 6.0-6.3,
+    load-bearing), slab S1 (z 3.4-3.6 over x -1 to 9, y -4 to 8), beam B1 (x 3.0-3.3, y 5-7, z 2.8-3.4) and column C1
+    (x 4.0-4.3, y 6.85-7.15). Services, each a straight segment with a port at both ends:
+    - pipe P1 (DN100, Tag PN-1) along X at y 0, z 2.0, x 0-4: through W1;
+    - duct D1 (400 x 300, PN-2) along X at y -2, z 1.5, x 0-4: through W1;
+    - riser R1 (DN100, PN-3) vertical at (5, 5), z 2.5-4.5: through S1;
+    - pipe P2 (DN100, PN-4) along X at y 6, z 3.1, x 2-4: through beam B1 (refused);
+    - pipe P3 (DN100, PN-5) along Y at x 4.15, z 1.0, y 6-8: through column C1 (refused);
+    - pipe P4 (DN100, PN-6) along X at y 2, z 3.33, x 0-4: through W1 at its top (the opening would break out).
+    - pipe P5 (DN50, PN-7) along X at y 1, z 1.0, x 5-7: through load-bearing W2.
+    - pipe P6 (DN50, PN-11) along X at y -2.6, z 0.8, x 1-7: through both W1 and W2.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for name in ("structure", "services"):
+        model = ifcopenshell.api.run("project.create_file", version=version)
+        if version == "IFC2X3":   # IFC2X3 requires owner history on every rooted entity
+            person = model.createIfcPerson(None, "Test", None, None, None, None, None, None)
+            org = model.createIfcOrganization(None, "ORCA", None, None, None)
+            app = model.createIfcApplication(org, "1", "ORCA tests", "ORCA")
+            history = model.createIfcOwnerHistory(model.createIfcPersonAndOrganization(person, org, None), app,
+                                                  None, "ADDED", None, None, None, 0)
+            ifcopenshell.api.owner.settings.get_user = lambda f, h=history: h.OwningUser
+            ifcopenshell.api.owner.settings.get_application = lambda f, h=history: h.OwningApplication
+        project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name=f"ORCA penetration {name}")
+        ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+        ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+        body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                    context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+        storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 01")
+        ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+        def element(ifc_class, label):
+            e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=label)
+            ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+            return e
+
+        def block(ifc_class, label, x0, x1, y0, y1, z0, z1, pset=None):
+            e = element(ifc_class, label)
+            _box(model, body, e, (x1 - x0, y1 - y0, z1 - z0), (x0, y0, z0))
+            if pset:
+                p = ifcopenshell.api.run("pset.add_pset", model, product=e, name=pset[0])
+                ifcopenshell.api.run("pset.edit_pset", model, pset=p, properties=pset[1])
+
+        def segment(ifc_class, label, tag, start, end, profile):
+            e = element(ifc_class if version != "IFC2X3" else "IfcFlowSegment", label)
+            e.Tag = tag
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+            start, end = np.asarray(start, float), np.asarray(end, float)
+            d = (end - start) / np.linalg.norm(end - start)
+            x = np.cross(UP_ if abs(d[2]) < 0.9 else np.array([1.0, 0.0, 0.0]), d)
+            x /= np.linalg.norm(x)
+            position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(map(float, start))),
+                                                       model.createIfcDirection(tuple(map(float, d))),
+                                                       model.createIfcDirection(tuple(map(float, x))))
+            solid = model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)),
+                                                     float(np.linalg.norm(end - start)))
+            e.Representation = model.createIfcProductDefinitionShape(
+                None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+            for n, (p, flow) in enumerate(((start, "SINK"), (end, "SOURCE"))):
+                port = ifcopenshell.api.run("system.add_port", model, element=e)
+                port.Name, port.FlowDirection = f"Port {n}", flow
+                m = np.eye(4)
+                m[:3, 3] = p
+                ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+
+        centred = lambda: model.createIfcAxis2Placement2D(model.createIfcCartesianPoint((0.0, 0.0)), None)
+        pipe = lambda r: model.createIfcCircleProfileDef("AREA", None, centred(), r)
+        if name == "structure":
+            block("IfcWall", "Wall W1 partition", 2.0, 2.2, -3.0, 3.0, 0.0, 3.4,
+                  ("Pset_WallCommon", {"FireRating": "EI 60", "LoadBearing": False}))
+            block("IfcWall", "Wall W2 core", 6.0, 6.3, -3.0, 3.0, 0.0, 3.4, ("Pset_WallCommon", {"LoadBearing": True}))
+            block("IfcSlab", "Slab S1", -1.0, 9.0, -4.0, 8.0, 3.4, 3.6)
+            block("IfcBeam", "Beam B1", 3.0, 3.3, 5.0, 7.0, 2.8, 3.4)
+            block("IfcColumn", "Column C1", 4.0, 4.3, 6.85, 7.15, 0.0, 3.4)
+        else:
+            segment("IfcPipeSegment", "Heating flow DN100", "PN-1", (0, 0, 2.0), (4, 0, 2.0), pipe(0.055))
+            segment("IfcDuctSegment", "Supply duct 400x300", "PN-2", (0, -2, 1.5), (4, -2, 1.5),
+                    model.createIfcRectangleProfileDef("AREA", None, centred(), 0.4, 0.3))
+            segment("IfcPipeSegment", "Riser DN100", "PN-3", (5, 5, 2.5), (5, 5, 4.5), pipe(0.055))
+            segment("IfcPipeSegment", "Pipe through beam DN100", "PN-4", (2, 6, 3.1), (4, 6, 3.1), pipe(0.055))
+            segment("IfcPipeSegment", "Pipe through column DN100", "PN-5", (4.15, 6, 1.0), (4.15, 8, 1.0), pipe(0.055))
+            segment("IfcPipeSegment", "Pipe at wall head DN100", "PN-6", (0, 2, 3.33), (4, 2, 3.33), pipe(0.055))
+            segment("IfcPipeSegment", "Cold water DN50", "PN-7", (5, 1, 1.0), (7, 1, 1.0), pipe(0.03))
+            segment("IfcPipeSegment", "Hot water DN50", "PN-11", (1, -2.6, 0.8), (7, -2.6, 0.8), pipe(0.03))
+        path = folder / f"pen-{name}.ifc"
+        model.write(str(path))
+        paths.append(path)
+    if version == "IFC2X3":
+        import importlib
+        importlib.reload(ifcopenshell.api.owner.settings)
+    return paths

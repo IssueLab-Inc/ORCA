@@ -18,7 +18,7 @@ test("framing shows a split run's new pieces, an opening whole, and a move or tr
   const preview = ["first", "bend", "middle", "bend", "last"];
   assert.deepEqual(kinds.framePieces({ kind: "route", preview }), ["bend", "middle", "bend"]);
   assert.deepEqual(kinds.framePieces({ kind: "offset", preview }), ["bend", "middle", "bend"]);
-  assert.deepEqual(kinds.framePieces({ kind: "penetration", preview: ["opening"] }), ["opening"]);
+  assert.deepEqual(kinds.framePieces({ kind: "penetration", preview: ["provision", "wall"] }), ["provision"]);
   assert.deepEqual(kinds.framePieces({ kind: "trim", preview: ["member"] }), []);
   assert.deepEqual(kinds.framePieces({ kind: "move", preview: null }), []);
 });

@@ -87,7 +87,11 @@ TOOLS = [
          "steps": {"type": "array", "items": {"type": "object", "properties": {
              "from_m": {"type": "number"}, "to_m": {"type": "number"}, "up_m": {"type": "number"},
              "side_m": {"type": "number"}}, "required": ["from_m", "to_m"]}}}, ["element", "obstacle", "steps"]),
-    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes and trims at joints, checks each "
+    _fn("check_penetration", "Check an opening for the straight service `element` through the wall or slab `host` "
+        "without keeping it: sized from the service with the clearance all round, cut in a trial, the service checked "
+        "against the host and everything else. Says who must review it (structure for slabs and load-bearing walls).",
+        {"element": {"type": "string"}, "host": {"type": "string"}}, ["element", "host"]),
+    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes, trims at joints and openings through walls and slabs, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
         "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
         {"clash_id": {"type": "string"}}, ["clash_id"]),
@@ -417,6 +421,10 @@ class Chat:
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "check_route":
             v = ws.check_route(self._scene(ctx), args["element"], args["obstacle"], list(args["steps"]))
+            v.pop("preview", None)
+            return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
+        if name == "check_penetration":
+            v = ws.check_penetration(self._scene(ctx), args["element"], args["host"])
             v.pop("preview", None)
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "propose_fixes":

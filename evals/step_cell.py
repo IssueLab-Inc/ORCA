@@ -11,7 +11,10 @@ the titles' model, triangulate), then checks:
 - C3 (a fence rail 40 mm into post SE): trimmed back to the post's face;
 - C6 (the PL-302 branch through plant columns C3 and C4): the designer's route (200 mm out round each column) passes
   the check; Fix together on both clashes makes one job, and Muse's fix is a verified route;
-- export writes the STEP again: the ladder 150 mm higher, the pipe's offset pieces added, the rail shorter.
+- C7 (the plant's compressed-air main through the west wall): only an opening clears; a single proposal offers a
+  penetration, and kept (no requirements) the opening is cut;
+- export writes the STEP again: the ladder 150 mm higher, the pipe's offset pieces added, the rail shorter, the west
+  wall cut and the provision for void added to the compressed-air group, see-through.
 
     cd server
     uv run python ../evals/step_cell.py --cell $DEMO_MODELS/palletising-cell \
@@ -166,6 +169,34 @@ def main():
             ok &= c6_ok
             c6_lines = [f"## C6 route: {'pass' if c6_ok else 'FAIL'}", "", *c6_lines, ""]
 
+            # C7: the plant's compressed-air main runs through the west wall with no opening. The wall is full height
+            # and runs the length of the plant: nothing goes round it, so an opening is asked for (and, with no
+            # requirements, cut).
+            main, wall = gid_of["air/main"], gid_of["bldg/wall/west"]
+            pen = edits.penetration(scene, main, wall)
+            c7_lines, c7_kinds = [f"- The opening the main needs: {edits.size_text(pen)}, {pen.depth_m * 1000:.0f} mm "
+                                  f"deep (the wall and 10 mm proud of each face)."], []
+            if model is not None:
+                rid7 = ws.detect(sid)["report"]["id"]
+                c7 = next(c for c in ws.report(rid7).clashes if {c.a.global_id, c.b.global_id} == {main, wall})
+                t7 = time.perf_counter()
+                r7 = ws.propose(sid, c7.a.global_id, c7.b.global_id, report_id=rid7, clash_id=c7.id)
+                c7_kinds = [o["kind"] for o in r7["options"]]
+                first = next((o for o in r7["options"] if o["kind"] == "penetration"), None)
+                c7_lines += [f"- Single proposal on #{c7.number}: {time.perf_counter() - t7:.0f} s, "
+                             f"{len(r7['attempts'])} ideas tried, options {c7_kinds or 'none'}"
+                             + (f"; first penetration: {first['title']} ({first['edit']['summary']}, "
+                                f"review: {first['review']}, also needs: {first['also_needs'] or 'nothing'})" if first else "")
+                             + "."]
+                c7_lines += [f"  - option {k + 1}: {o['title']} ({o['kind']}, {len(o['moved'])} element(s), "
+                             f"{[round(v, 2) for v in o['delta_m']]})" for k, o in enumerate(r7["options"])]
+            kept7 = ws.apply_penetration(sid, main, wall)
+            c7_clear = not [h for h in verify.check(scene, [main]).hits if h.other == wall]
+            c7_ok = kept7["cut"] and c7_clear and (model is None or "penetration" in c7_kinds)
+            c7_lines += [f"- Kept: provision for void written, opening {'cut' if kept7['cut'] else 'not cut'}; the main "
+                         f"{'clears' if c7_clear else 'still hits'} the wall."]
+            ok &= c7_ok
+
             # C3: the fence top rail 40 mm into post SE: trimmed back to the post's face (both bars are exact).
             rail, post_se = gid_of["fence/rail/S5-SE"], gid_of["fence/post/SE"]
             trim = edits.butt_trim(scene, rail, post_se)
@@ -183,6 +214,16 @@ def main():
             air_after = sum(1 for p in step.parts(step_out)[0] if p.group == "Compressed air")
             rail_name = scene.entity(rail).Name
             shorter = round(length(src[rail_name]) - length(new[rail_name]), 1)
+            wall_name = scene.entity(wall).Name
+            cut_cm3 = round(volume(src[wall_name]) - volume(new[wall_name]), 0)
+            provision = [p for p in step.parts(step_out)[0] if p.name.startswith("Provision for void")]
+            c7_step = cut_cm3 > 0 and len(provision) == 1 and provision[0].alpha < 0.5
+            c7_lines += [f"- Exported STEP: `{wall_name}` {cut_cm3:.0f} cm³ smaller (the opening cut), "
+                         f"{len(provision)} provision for void part"
+                         + (f" in {provision[0].group} (alpha {provision[0].alpha:.2f})" if provision else "") + "."]
+            c7_ok &= c7_step
+            ok &= c7_step
+            c7_lines = [f"## C7 penetration: {'pass' if c7_ok else 'FAIL'}", "", *c7_lines, ""]
             fix_ok = set(names) <= moved and dz == [150.0] and not hits_post and shorter == 40.0 \
                 and (air_after > air_before if kinds[:1] == ["offset"] or c6_kind == "route" else True)
             ok &= fix_ok
@@ -194,12 +235,22 @@ def main():
                       f"- Exported {', '.join(p.name for p in out)}; re-read: the {len(names)} ladder parts {dz} mm "
                       f"higher; the compressed-air line {air_before} → {air_after} parts"
                       f"{' (the offset' + chr(39) + 's pieces)' if air_after > air_before else ''}; "
-                      f"`{rail_name}` {shorter} mm shorter (C3 trim, at its {trim.end}).", "", *c1_lines, *c6_lines]
+                      f"`{rail_name}` {shorter} mm shorter (C3 trim, at its {trim.end}).", "", *c1_lines, *c6_lines,
+                      *c7_lines]
     lines.insert(1, f"Result: {'pass' if ok else 'FAIL'}")
     (args.out / "README.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     shutil.rmtree(work, ignore_errors=True)
     sys.exit(0 if ok else 1)
+
+
+def volume(part) -> float:
+    """A part's volume in cm³ (the STEP is in millimetres)."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(part.shape, props)
+    return props.Mass() / 1000
 
 
 def length(part) -> float:

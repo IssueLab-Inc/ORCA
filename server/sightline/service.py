@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import agent, detect, edits, reports, requirements, step, verify
 from .meta_client import ChatModel, MetaChatModel
-from .scene import IfcScene, step_source
+from .scene import IfcScene, is_provision, step_source
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
@@ -296,6 +296,37 @@ class Workspace:
             s.bump([s.index_of(element)])
         return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
 
+    def check_penetration(self, scene_id: str, service: str, host: str, clearance_m: float = 0.025) -> dict:
+        """Try an opening for `service` through `host` without keeping it (edits.penetration)."""
+        with self.lock:
+            attempt, option = agent._try_penetration(self.scene(scene_id), {}, service, host, clearance_m)
+        return {"passed": attempt.passed, "reason": attempt.reason, "kind": attempt.kind,
+                "summary": (attempt.edit or {}).get("summary"), "review": option.review if option else None,
+                "min_clearance_m": option.min_clearance_m if option else None,
+                "preview": option.preview if option else None}
+
+    def apply_penetration(self, scene_id: str, service: str, host: str) -> dict:
+        """Keep a penetration request: a provision for void in the service's model, always; the opening cut in the
+        host only when the coordination requirements let its team's model be edited (none: it is cut). Sized again
+        here with the clearance the requirements ask for. Not cut, the clash stays open: `cut` False and `blocked_by`
+        say who cuts it."""
+        s = self.scene(scene_id)
+        settings = self.fix_settings(scene_id, service, host)
+        host_policy = (settings.get("policy") or {}).get(host)
+        cut = requirements.can_cut(host_policy)
+        with self.lock:
+            pen = edits.penetration(s, service, host, settings.get("clearance_m", 0.025))
+            edits.apply_penetration(s, pen, cut)
+            s.mark_edited(service)
+            if cut:
+                s.mark_edited(host)
+            files = sorted({s.index_of(service), *([s.index_of(host)] if cut else [])})
+            s.bump(files)
+        out = {**asdict(pen), "cut": cut, "files": files, "changed": [pen.provision, *([host] if cut else [])]}
+        if not cut:
+            out["blocked_by"] = f"{host_policy.group_name} may not be edited: its team cuts the opening"
+        return out
+
     def apply_trim(self, scene_id: str, element: str, end: str, by_m: float) -> dict:
         """Keep a trim: the element's end is cut back (see edits.apply_trim)."""
         s = self.scene(scene_id)
@@ -556,8 +587,9 @@ def _spec(scene: IfcScene, element) -> dict:
 
 def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, list]:
     """What changed in a model converted from STEP, for `step.export`: moved parts (placement against the manifest's
-    origin), parts whose extrusion changed (an offset's first piece, a trimmed member) and new parts (the rest of an
-    offset), each new part tied to the STEP part it came from through its `ORCA_STEP` label."""
+    origin), parts whose extrusion changed (an offset's first piece, a trimmed member) or that were cut for a service,
+    and new parts (the rest of an offset, a provision for void), each new part tied to the STEP part it came from
+    through its `ORCA_STEP` label."""
     model = scene.models[index]
     moves, replace, add = {}, {}, []
     for gid, info in parts.items():
@@ -566,6 +598,10 @@ def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, 
         except RuntimeError:
             continue
         delta = np.asarray(scene.placement(gid)[:3, 3]) - np.asarray(info["origin"])
+        voids = [r.RelatedOpeningElement for r in getattr(element, "HasOpenings", None) or []]
+        if voids:   # cut for a service (a STEP part never had openings of its own)
+            replace[gid] = {"kind": "cut", "base": _spec(scene, element), "tools": [_spec(scene, o) for o in voids]}
+            continue
         prism = info.get("prism")
         if prism:
             now = _spec(scene, element)
@@ -583,5 +619,6 @@ def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, 
         source = step_source(element)
         if source.get("Label"):
             add.append({"name": element.Name or element.is_a()[3:], "label": source["Label"],
-                        "spec": _spec(scene, element)})
+                        "spec": _spec(scene, element),
+                        **({"colour": edits.PFV_COLOUR, "alpha": edits.PFV_ALPHA} if is_provision(element) else {})})
     return moves, replace, add

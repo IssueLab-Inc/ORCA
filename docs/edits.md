@@ -13,6 +13,7 @@ before anyone sees it. This page is the design of the kinds of fix and how a new
 | `offset` | Splits a straight segment either side of an obstacle and takes the middle up or down (or sideways), with bends | Oct 27 |
 | `trim` | Cuts a slender member's end back to butt another's face | Oct 27 |
 | `route` | Holds stretches of a straight segment at offsets (up and/or sideways) in up to 3 steps, with bends | Oct 29 |
+| `penetration` | Asks for an opening where a straight service crosses a wall or slab: a provision for void always, the opening cut when the host's team allows edits | Oct 29 |
 
 ## One registry (Oct 29)
 
@@ -106,6 +107,75 @@ stop between them; a detour of 200 mm round each column clears with 33 mm to spa
 
 **Not yet:** 45° pieces, falling drainage, and routes in the wider-fix planner. (Diagonal "rolling" changes are
 done, for round pipes only.)
+
+## Penetration (Oct 29)
+
+Services cross walls and floors all the time; what they need is an opening, and someone else builds it. A
+penetration asks for one instead of moving the service.
+
+**When** (`edits.penetration`, `not_penetrable`): a straight service (an extruded segment, any direction, so a riser
+through a slab too) crosses an `IfcWall` or `IfcSlab` whose body is extrusions. Beams, columns, footings, piles,
+members, doors, windows and curtain walls are refused with the reason (slice 4b reads other hosts with Muse; the
+Northbank girder is never cut). So is a crossing that runs more than 1 m inside the host (along it, not through it),
+one the service doesn't reach or pass through, a service that stops inside the host (it runs into the wall:
+move or shorten it), and an opening the host would not surround by 50 mm (a hole at its
+edge is a notch).
+
+**The opening:** the service's section plus the clearance and 5 mm all round (tessellated circles, site tolerance),
+rounded up to 10 mm, round or rectangular like the service and square to it. Its depth comes from rays along the
+service round the opening's outline (every 30 mm) from both sides of the host: the host's whole depth and 10 mm proud
+of each face. The cell's air main (DN50, 60 mm) through the 200 mm west wall: Ø130 mm, 220 mm deep.
+
+**Written** (`edits.apply_penetration`):
+- **Always** a provision for void in the service's model: an `IfcBuildingElementProxy`, PredefinedType
+  PROVISIONFORVOID (IFC2X3: ObjectType "ProvisionForVoid"), in the service's storey, with `Pset_ProvisionForVoid`
+  (Shape, Diameter or Width/Height, Depth, System) and a see-through orange style, so the page draws it in the glass
+  batch. From STEP it carries the service's `ORCA_STEP` label.
+- **When cut** an `IfcOpeningElement` with the same solid in the host's model, voiding it (`feature.add_feature`), and
+  the host's box refreshed.
+- A provision for void is never physical (`scene.not_physical`): no box, never in `products()`, so detection, checks,
+  root causes and requirements never see it.
+- **One request:** the provision carries `ORCA_Provision` (Service, Host). Asking again reuses it (`provision_for`);
+  while the host still may not be cut, a new proposal is told the opening was already requested and refuses it.
+
+**Trying it** (`agent._try_penetration`): both files in one `trial_files`, always cut, then the service is checked:
+it must clear the host by the clearance (and every other element a plan's merged item is for: one opening does not
+clear a second wall), and only contacts new or worse than before count elsewhere (the service
+stays where it is: a valve already beside it is not this fix's). The option's clearance is the opening's gap round
+the service. Muse names the service as `move`; a wall or slab named instead is taken as the host
+(`penetration_sides`). The option's `moved` is the host (its geometry changes in the viewer), its `edit` names
+service and host, and the preview is the provision for void and the host with its hole (the page frames the first).
+
+**Who reviews it** (`penetration_review`): structure for a slab or a load-bearing wall (`Pset_WallCommon.LoadBearing`),
+else architecture; a `FireRating` adds fire-stopping to `also_needs`. Ranked below every plain geometry fix
+(`TIERS`), and a round that verified only a penetration gets one more round to find one.
+
+**What Muse is told** (`agent._penetration_text`): that the service crosses the host's full depth, the opening a
+penetration asks for, who cuts and reviews it, and, when the service runs out of both faces, that a fix which stops it
+crossing (a move along it) cuts it off from what it serves. Walls and slabs are no longer described as runs to split.
+Prompt: `construction.md` "penetration".
+
+**Kept** (`Workspace.apply_penetration`, behind `plans.KEEP`): sized again with the clearance the requirements ask
+for. The opening is cut when there are no requirements, or the host's group may be edited in any way
+(`requirements.can_cut`); otherwise only the provision for void is written, the reply says `cut: false` with
+`blocked_by`, and the clash stays open: the page records the fix as requested (evidence "recommended", "Opening
+requested" in the clash panel, the PDF and BCF as for a recommendation), plans and the MCP `apply_fix` /
+`apply_plan` leave its clashes unmarked (`not_cut`). Under "move only" requirements a penetration is still allowed
+(it only asks); under "no edits" for the service it is blocked. `meets` says whether the opening was cut.
+
+**STEP:** export cuts the host's prism with each opening (`BRepAlgoAPI_Cut`; a boolean OCP cannot do leaves it whole,
+the IFC still has the opening) and adds the provision for void as a part of the service's group, see-through orange.
+
+**Demo case:** the cell's C7 (demo-models repo): the plant's existing compressed-air main runs through the full-height
+west wall with no opening. Nothing goes round it; the opening is the fix (Rev B has a 150 mm one).
+
+**Measured** (`evals/step_cell.py`, three runs on the cell after its other fixes): the opening offered every time
+(34-42 s), kept and cut, the STEP's wall 2,655 cm³ smaller. Twice Muse also offered a whole-run move of the air
+system that pulls the main out of the wall (it verifies, and as a plain fix ranks first); once after the "keeps
+crossing" line was added. Geometry cannot tell that the main serves something beyond the wall; the person picks.
+
+**Not yet:** other hosts (beams, plates, enclosures: slice 4b), sleeves and fire-stopping as elements, openings for
+several services at once, and penetrations in the wider-fix planner.
 
 ## Keeping a fix: the model updates in place (Oct 29)
 

@@ -472,7 +472,14 @@ export class Viewer {
       for (const opt of opts) {
         if ((opt.worldMeshes || opt.kind !== "move") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
           for (const gid of opt.moved) this.hidden.add(gid);
-          this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          const solid = () => new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping });
+          if (opt.kind === "penetration") {  // the provision for void solid, the wall or slab with its hole see-through round it
+            this.addMeshes(opt.pieces.slice(0, 1), solid());
+            this.addMeshes(opt.pieces.slice(1), new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, transparent: true,
+              opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          } else {
+            this.addMeshes(opt.pieces, solid());
+          }
         } else {
           const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(opt.deltaM));
           for (const gid of opt.moved) this.moved.set(gid, t);
