@@ -21,12 +21,18 @@ through the same geometry check: nothing reaches the user unverified, and the he
 
 ## When it runs
 
-- **Button** (default): NoFix ("No edit passed the geometry check") gets **Ask Muse Wonder**, with one line on what it
-  does ("A larger Meta model takes a second, longer look, with everything ORCA tried. About a minute.").
+- **Button** (default, owner decision Oct 29): NoFix ("No edit passed the geometry check") gets **Ask Muse Wonder**,
+  with one line on what it does ("A larger Meta model takes a second, longer look, with everything ORCA tried. About a
+  minute.").
+- **After a successful run too** (owner decision Oct 29): under the options, a quieter **Look for a better fix with
+  Muse Wonder**. Wonder then gets Spark's options as well as its failures and is asked to beat them (a plain fix where
+  Spark found only a resize or a penetration, more clearance, a smaller change). Its options join Spark's in one
+  ranked list, each with its model chip; nothing Spark verified is dropped.
 - Owner setting `escalation`: `off` / `button` / `auto` (settings.py, For me and For everyone; env
-  `SIGHTLINE_ESCALATION`, default `button`). `auto` escalates once when Spark ends with no verified option.
-- Not offered: when Spark found an option; for a requirements recommendation (nothing may be edited: `_recommend`);
-  for a clash that is not a clash.
+  `SIGHTLINE_ESCALATION`, default `button`). `auto` escalates once when Spark ends with no verified option (never
+  after a successful run: that stays a choice).
+- Not offered: for a requirements recommendation (nothing may be edited: `_recommend`); for a clash that is not a
+  clash.
 - Plans: a Fix-together item that failed (`plans.failure_summary`) gets the same button; never automatic in a plan
   (the cost multiplies).
 
@@ -100,6 +106,8 @@ Run this before building anything.
   limit for each.
 - **Measure:** verified or not, time to the first verified option, rounds, tokens, cost. The answer key (3/3 at Rev04
   heights) must not change.
+- **Also:** on clashes Spark does fix, does Wonder find a better one (plain where Spark's was a resize or a
+  penetration, more clearance, a smaller change), and how often? That sizes the "better fix" link.
 - **Decide:** ship the Wonder button if Wonder with the brief verifies clearly more than Spark with the brief (at
   least two more cases, or cases where Spark with the brief verified none). If the brief alone closes the gap, give
   the brief to Spark first and keep Wonder for what is left.
@@ -113,9 +121,11 @@ Branch `feature/wonder-escalation`, one PR.
 2. Server: `escalation.py` (the brief), `Workspace` keeps the last result per pair, `propose/stream` takes
    `escalate: true`, usage and the `"escalation"` role in `meta_client`, caps, the setting. Tests with a scripted
    model: the kind list comes from the registry; refused when Spark found an option; caps and spend guard; usage adds
-   up; a reviewed kind is never applied without approval.
+   up; after a successful run Spark's options are kept and ranked with Wonder's; a reviewed kind is never applied
+   without approval.
 3. The compound kind, if the edits work didn't add it.
-4. Web: the NoFix button, model chip, needs-approval chip, activity labels, phone peek. If App's imports change, add
+4. Web: the NoFix button, the "Look for a better fix" link under the options, model chip, needs-approval chip,
+   activity labels, phone peek. If App's imports change, add
    them to both stub lists (`web/tests/app-host.mjs`, `app-replacement.test.mjs`).
 5. Chat and MCP tools.
 6. Runtime check: one escalation end to end in the browser on Northbank and on the cell, the PDF page showing the
@@ -132,6 +142,6 @@ Branch `feature/wonder-escalation`, one PR.
 
 ## Open questions
 
-1. Default trigger: button or automatic?
-2. Cap defaults and the daily spend limit.
-3. Offer it also when Spark verified only a resize or a penetration (to look for a plain fix)?
+1. Cap defaults and the daily spend limit.
+
+Decided (Oct 29): a button by default; also offered after a successful run, to look for a better fix.

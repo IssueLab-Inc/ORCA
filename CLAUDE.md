@@ -671,7 +671,9 @@ Next, in order.
 6. Planned after the Advanced IFC edits (reroute, resize, penetration; `feature/fix-kinds` first), drafts only:
    escalating no-fix clashes to Muse Wonder (`docs/escalation.md`) and Show it built, Muse Image restyling ORCA's view
    of a verified fix, checked against the model (`docs/show-it-built.md`). Muse Image cannot design a fix (Oct 29:
-   it redraws the geometry and invents numbers); it only restyles one.
+   it redraws the geometry and invents numbers); it only restyles one. S0 passed on ORCA's own views (Oct 29,
+   `spikes/built/`): a cutaway chosen by the page, look + outline drawing, and a pixel gate plus three Muse Spark
+   judges rejected 14/14 known-bad pictures and passed 15/17 faithful ones.
 7. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
