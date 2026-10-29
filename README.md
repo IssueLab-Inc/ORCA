@@ -37,11 +37,13 @@ by a supply-air duct, a cable tray and a cold water main: the answer key.
 
 **PC-03, a robot palletising cell** (machine, 1 STEP file)
 
-A robot, a conveyor, safety guarding and services, from mechanical CAD, with five planted problems.
+A robot, a conveyor, safety guarding and services in a corner of the plant, from mechanical CAD, with seven planted
+problems.
 
-- The STEP converted: 144 parts keep their names and colours, and Muse Spark names what each is (144 of 144 right).
-- All 13 planted clashes found, nothing unexpected.
-- The cable ladder moved, the air pipe dropped under both conveyor rails as one fix, a rail trimmed.
+- The STEP converted: 159 parts keep their names and colours, and Muse Spark names what each is (159 of 159 right).
+- All 16 planted clashes found, nothing unexpected.
+- The cable ladder moved, the air pipe dropped under both conveyor rails as one fix, a branch rerouted round two plant
+  columns, a rail trimmed.
 - The STEP handed back with the fixes written in.
 
 </td>
@@ -65,10 +67,13 @@ Browser (React + three.js + web-ifc)          Server (Python, FastAPI)
 The agent loop is **propose → verify → retry → rank**: Muse Spark proposes fixes from the images, the
 element data and a domain pack (construction rules of thumb, in `server/sightline/domain_packs/`); the
 geometry check tests each one; failures are fed back with what they hit; only verified options are shown.
-A fix is a **move** (an element and its straight run) or a **local offset** (`server/sightline/edits.py`): split a
-segment either side of an obstacle, raise or lower the middle piece, join it with risers, re-chain the ports, as a
-designer would around a beam. Openings through the obstacle are measured on the run's line and given to the model as
-heights. **Accept this fix** keeps it in the server's model; **Export edited IFC** downloads the changed files.
+A fix is a **move** (an element and its straight run), a **local offset** (split a segment either side of an
+obstacle, raise or lower the middle piece, join it with bends and risers, re-chain the ports, as a designer would
+around a beam; `server/sightline/edits.py`), a **reroute** (up to three such steps, up and/or sideways, for obstacles an offset
+can't pass: room only beside a column, or obstacles needing different detours), or a **trim** at a joint. Openings
+through the obstacle, and the room beside it, are measured on the run's line and given to the model. Every kind is
+registered once (design: [docs/edits.md](docs/edits.md)). **Accept this fix** keeps it in the server's model; **Export
+edited IFC** downloads the changed files.
 
 The browser previews moves instantly; the server makes the real edit and is the only source of
 clearance numbers. Elements are addressed by IFC GlobalId everywhere.
@@ -159,9 +164,11 @@ well as moves; other parts move. Parts of one STEP group that touch move togethe
 pieces added to their assembly, names and colours kept.
 
 The second demo ([above](#two-demos)) opens the PC-03 robot palletising cell from its STEP file:
-- the check finds all five planted problems (13 part pairs, nothing unexpected);
+- the check finds all seven planted problems (16 part pairs, nothing unexpected);
 - Muse Spark fixes the cable ladder through the fence post by raising it 150 mm, the designers' own fix;
 - **Fix together** on the air pipe through both conveyor rails makes one job and drops the pipe under them;
+- **Fix together** on the branch through two plant columns makes one **reroute**: a detour round each column, the
+  only fix that clears (the columns run full height, and an emergency stop stands between them);
 - the exported STEP has exactly those five ladder parts moved and the pipe's offset pieces added.
 
 **Take the cell tour** on its card walks through it in 12 steps.

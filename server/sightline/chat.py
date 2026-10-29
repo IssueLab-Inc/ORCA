@@ -80,7 +80,14 @@ TOOLS = [
         {"element": {"type": "string"}, "obstacle": {"type": "string"},
          "split_m": {"type": "array", "items": {"type": "number"}}, "dz_m": {"type": "number"}},
         ["element", "obstacle", "split_m", "dz_m"]),
-    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets and trims at joints, checks each "
+    _fn("check_route", "Check a route without keeping it: hold stretches of the straight segment `element` at offsets "
+        "(steps: from_m/to_m metres along it, up_m and side_m metres on its own axes: up, and side to the left of its "
+        "direction seen from above), with 90° bends, past `obstacle`. Each change is one axis at a time.",
+        {"element": {"type": "string"}, "obstacle": {"type": "string"},
+         "steps": {"type": "array", "items": {"type": "object", "properties": {
+             "from_m": {"type": "number"}, "to_m": {"type": "number"}, "up_m": {"type": "number"},
+             "side_m": {"type": "number"}}, "required": ["from_m", "to_m"]}}}, ["element", "obstacle", "steps"]),
+    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes and trims at joints, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
         "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
         {"clash_id": {"type": "string"}}, ["clash_id"]),
@@ -406,6 +413,10 @@ class Chat:
         if name == "check_offset":
             v = ws.check_offset(self._scene(ctx), args["element"], args["obstacle"],
                                 [float(x) for x in args["split_m"]], float(args["dz_m"]))
+            v.pop("preview", None)
+            return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
+        if name == "check_route":
+            v = ws.check_route(self._scene(ctx), args["element"], args["obstacle"], list(args["steps"]))
             v.pop("preview", None)
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "propose_fixes":

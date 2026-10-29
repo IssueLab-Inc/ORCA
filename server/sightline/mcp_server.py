@@ -31,7 +31,7 @@ from .service import Workspace
 INSTRUCTIONS = """ORCA is an AI design coordinator for 3D models (buildings from IFC, machines from STEP). It finds
 clashes between models, proposes fixes that edit real model elements, and checks every fix with geometry before
 anyone sees it. Start with get_session to see what is open. Then report_summary or list_clashes, get_clash and
-get_clash_images to understand a clash, and check_move / check_offset to test your own idea, or propose_fixes to run
+get_clash_images to understand a clash, and check_move / check_offset / check_route to test your own idea, or propose_fixes to run
 ORCA's fix agent. Nothing changes the model until apply_fix or apply_plan. Distances are metres, Z up; a negative
 distance is an overlap. When a person has ORCA open with this link, show_clash and set_view move their view and
 capture_view shows you what they see."""
@@ -337,6 +337,14 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         """Check a local offset without keeping it: split the straight segment `element` at two points (metres along
         it from its start) around `obstacle`, and raise (+) or lower (-) the middle piece by dz_m with bends."""
         return run(ctx, "check_offset", {"element": element, "obstacle": obstacle, "split_m": split_m, "dz_m": dz_m})
+
+    @tool(read_only=True)
+    def check_route(element: str, obstacle: str, steps: list[dict], ctx: Context) -> dict:
+        """Check a route without keeping it: hold stretches of the straight segment `element` at offsets past
+        `obstacle`. Each step is {from_m, to_m, up_m, side_m}: metres along it from its start, and metres on its own
+        axes (up; side = to the left of its direction seen from above). Steps that share a boundary change straight
+        from one offset to the next; each change is one axis at a time. 90° bends join them."""
+        return run(ctx, "check_route", {"element": element, "obstacle": obstacle, "steps": steps})
 
     @tool()
     def propose_fixes(clash_id: str, ctx: Context, wait_s: float = 40) -> dict:

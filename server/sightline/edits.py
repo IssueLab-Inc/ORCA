@@ -20,6 +20,7 @@ changes. Any straight extrusion can be trimmed, at either end, whatever its prof
 from __future__ import annotations
 
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -70,6 +71,14 @@ class Offset:
     pieces: list[str]     # GlobalIds in run order: first, (bend,) riser, (bend,) middle, ..., last
     corners: str = "square"  # "bends" (90° bend fittings) or "square"
     lateral_m: float = 0.0
+
+
+@dataclass
+class Route:
+    element: str          # the segment that was split; it keeps the first piece
+    steps: list[dict]     # [{"from_m", "to_m", "up_m", "side_m"}], sorted, as applied
+    pieces: list[str]     # GlobalIds in run order, the original first
+    corners: str = "bends"
 
 
 def _profile_size(profile) -> tuple[float, float]:
@@ -215,15 +224,6 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         local_x = np.asarray(profile_position.RefDirection.DirectionRatios,dtype=float)
         local_x /= np.linalg.norm(local_x)
         profile_x = px*local_x[0] + py*local_x[1]
-
-    def section_ref(axis, reference=px):
-        """Transport the actual profile X axis in the detour plane, without section roll."""
-        normal = np.cross(d, axis)
-        sine, cosine = np.linalg.norm(normal), float(d @ axis)
-        if sine < 1e-9:
-            return reference.copy()
-        normal /= sine
-        return reference*cosine + np.cross(normal,reference)*sine + normal*(normal @ reference)*(1-cosine)
     a, b, dz, L = start_m / s, end_m / s, amount / s, item.Depth
     if a > b:
         a, b = b, a
@@ -240,13 +240,13 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         risers = rise > 1e-3 / s
         # World (file units) pieces in run order: straights (start, axis, length) and bends (start, from, to, radius).
         pieces = [("straight", origin, d, a - R),
-                  ("bend", origin + d * (a - R), d, u, R)]
+                  ("bend", origin + d * (a - R), d, u, R, w, t)]
         pieces += [("straight", origin + d * a + u * R, u, rise)] if risers else []
-        pieces += [("bend", origin + d * a + u * (abs(dz) - R), u, d, R),
+        pieces += [("bend", origin + d * a + u * (abs(dz) - R), u, d, R, w, t),
                    ("straight", origin + d * (a + R) + offset_axis * dz, d, b - a - 2 * R),
-                   ("bend", origin + d * (b - R) + offset_axis * dz, d, -u, R)]
+                   ("bend", origin + d * (b - R) + offset_axis * dz, d, -u, R, w, t)]
         pieces += [("straight", origin + d * b + offset_axis * dz - u * R, -u, rise)] if risers else []
-        pieces += [("bend", origin + d * b + u * R, -u, d, R),
+        pieces += [("bend", origin + d * b + u * R, -u, d, R, w, t),
                    ("straight", origin + d * (b + R), d, L - b - R)]
         used = "bends"
     else:
@@ -262,6 +262,212 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
             ("straight", origin + d * (b + t / 2), d, L - b - t / 2),
         ]
         used = "square"
+    gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces)
+    return Offset(global_id, start_m, end_m, dz_m, gids, used, lateral_m)
+
+
+ROUTE_STEPS = 3                      # most steps one route may take
+ROUTE_SLOPE = np.sin(np.radians(15))  # steepest run a route may take, as |sin| of its slope
+GRAVITY_SYSTEMS = {"DRAINAGE", "RAINWATER", "SEWAGE", "STORMWATER", "WASTEWATER"}
+GRAVITY_WORDS = re.compile(r"drain|waste|soil|sewer|sewage|storm|rain ?water|condensate|gutter", re.I)
+
+
+def run_frame(direction) -> tuple[np.ndarray, np.ndarray]:
+    """A run's own "up" (world Z made square to it) and "side" (cross(up, run): left of it, seen from above): the axes
+    a route's offsets are measured on. For a level run, up is Z and side is today's lateral."""
+    d = np.asarray(direction, float)
+    up = UP - d * float(UP @ d)
+    if np.linalg.norm(up) < 1e-6:
+        raise Unsupported("a vertical run cannot be rerouted yet")
+    up /= np.linalg.norm(up)
+    return up, np.cross(up, d)
+
+
+def is_gravity(element) -> bool:
+    """A gravity drainage pipe: its systems say so, or its names do (drain, waste, soil, storm...). Such a pipe must
+    keep falling: stepping it up or down would trap what it carries."""
+    if not element.is_a("IfcPipeSegment") and not element.is_a("IfcFlowSegment"):
+        return False
+    if getattr(element, "PredefinedType", None) in ("GUTTER", "CULVERT"):
+        return True
+    systems = ifcopenshell.util.system.get_element_systems(element)
+    if any(getattr(x, "PredefinedType", None) in GRAVITY_SYSTEMS for x in systems):
+        return True
+    words = [element.Name, getattr(element, "ObjectType", None), *[x.Name for x in systems]]
+    return any(w and GRAVITY_WORDS.search(w) for w in words)
+
+
+def route_steps(steps, length_m: float) -> list[dict]:
+    """Check and sort a route's steps: [{"from_m", "to_m", "up_m", "side_m"}], metres along and off the run. Raises
+    `Unsupported` with what is wrong, in words Muse can act on."""
+    if not isinstance(steps, list) or not steps:
+        raise Unsupported('a route needs steps: [{"from_m", "to_m", "up_m", "side_m"}]')
+    if len(steps) > ROUTE_STEPS:
+        raise Unsupported(f"a route takes at most {ROUTE_STEPS} steps")
+    out = []
+    for st in steps:
+        try:
+            a, b = float(st["from_m"]), float(st["to_m"])
+            u, v = float(st.get("up_m", 0) or 0), float(st.get("side_m", 0) or 0)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise Unsupported('each step needs from_m and to_m, and up_m and/or side_m (metres)')
+        if not np.isfinite([a, b, u, v]).all():
+            raise Unsupported("route values must be finite")
+        a, b = min(a, b), max(a, b)
+        if a <= 0 or b >= length_m:
+            raise Unsupported(f"a step must lie inside the run (0 to {length_m:.2f} m), not {a:.2f}-{b:.2f} m")
+        if abs(u) < 1e-3 and abs(v) < 1e-3:
+            raise Unsupported("a step must go up, down or sideways")
+        out.append({"from_m": round(a, 4), "to_m": round(b, 4), "up_m": round(u, 4), "side_m": round(v, 4)})
+    out.sort(key=lambda st: st["from_m"])
+    for x, y in zip(out, out[1:]):
+        if y["from_m"] < x["to_m"] - 1e-3:
+            raise Unsupported(f"steps overlap ({x['from_m']:.2f}-{x['to_m']:.2f} and {y['from_m']:.2f}-{y['to_m']:.2f} m)")
+    return out
+
+
+def _transitions(steps: list[dict]) -> list[tuple[float, float, float]]:
+    """Where a route changes its offset: (metres along, change up, change sideways), in order. Steps that share a
+    boundary change straight from one offset to the next; otherwise the route returns to the line between them."""
+    out, cur, at = [], (0.0, 0.0), None
+    for st in steps:
+        if at is not None and st["from_m"] > at + 1e-3:   # back to the line before this step
+            out.append((at, -cur[0], -cur[1]))
+            cur = (0.0, 0.0)
+        out.append((st["from_m"], st["up_m"] - cur[0], st["side_m"] - cur[1]))
+        cur, at = (st["up_m"], st["side_m"]), st["to_m"]
+    out.append((at, -cur[0], -cur[1]))
+    return [t for t in out if abs(t[1]) > 1e-4 or abs(t[2]) > 1e-4]
+
+
+def route_summary(steps: list[dict], side_world=None) -> str:
+    """A route in a few words: "200 mm north at 0.30-1.20 m, then 200 mm north at 2.80-3.70 m"."""
+    def compass(sign: float) -> str:
+        if side_world is None:
+            return "sideways" if sign > 0 else "the other way"
+        v = np.asarray(side_world, float) * sign
+        return ("east" if v[0] > 0 else "west") if abs(v[0]) > abs(v[1]) else ("north" if v[1] > 0 else "south")
+    parts = []
+    for st in steps:
+        moves = []
+        if abs(st["up_m"]) >= 1e-3:
+            moves.append(f"{abs(st['up_m']) * 1000:.0f} mm {'up' if st['up_m'] > 0 else 'down'}")
+        if abs(st["side_m"]) >= 1e-3:
+            moves.append(f"{abs(st['side_m']) * 1000:.0f} mm {compass(1 if st['side_m'] > 0 else -1)}")
+        parts.append(f"{' and '.join(moves)} at {st['from_m']:.2f}-{st['to_m']:.2f} m")
+    return "reroute " + ", then ".join(parts)
+
+
+def apply_route(scene: IfcScene, global_id: str, steps: list[dict], corners: str | None = None) -> Route:
+    """Reroute a stretch of a straight segment: hold it at an offset (up and/or sideways, on the run's own axes,
+    `run_frame`) over each step's stretch, and join the offsets with 90° bends and short risers, each transition
+    changing one axis (so "up, then sideways" is two steps; a round pipe may change both at once, a rolling offset).
+    A level or mildly sloped run (up to 15°) keeps its fall
+    on every piece parallel to it. Gravity drainage may only step sideways, and only when level.
+
+    The element keeps the first piece (its GlobalId and first port); the rest are copies and bend fittings, chained
+    port to port (`_build_chain`). Edits the model in place; wrap in `trial` to try it and undo."""
+    element = scene.entity(global_id)
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    s = scene.unit_scales[i]
+    slope = abs(float(d @ UP))
+    up, side = run_frame(d)
+    if slope > ROUTE_SLOPE:
+        raise Unsupported(f"the run slopes {np.degrees(np.arcsin(min(slope, 1.0))):.0f}°: a route takes runs up to 15°")
+    length_m = item.Depth * s
+    steps = route_steps(steps, length_m)
+    if is_gravity(element):
+        if slope > 1e-3:
+            raise Unsupported("a falling drainage pipe cannot be rerouted here: its fall is the designer's to keep")
+        if any(abs(st["up_m"]) >= 1e-3 for st in steps):
+            raise Unsupported("drainage cannot step up or down (it would trap what it carries): go sideways")
+    sx, sy = _profile_size(item.SweptArea)
+    round_ = item.SweptArea.is_a("IfcCircleProfileDef")
+    if round_:
+        vertical, across = sx, sx
+    elif abs(py @ up) > 0.999:
+        vertical, across = sy, sx
+    elif abs(px @ up) > 0.999:
+        vertical, across = sx, sy
+    else:
+        raise Unsupported("the profile is tilted against the run's up direction")
+    profile_x = px.copy()
+    position = getattr(item.SweptArea, "Position", None)
+    if position is not None and position.RefDirection is not None:
+        local_x = np.asarray(position.RefDirection.DirectionRatios, dtype=float)
+        local_x /= np.linalg.norm(local_x)
+        profile_x = px * local_x[0] + py * local_x[1]
+
+    moves = []   # (metres along, unit axis, jump metres, (width, depth) of the section in that bend plane, file units)
+    for at, du, dv in _transitions(steps):
+        if abs(du) > 1e-4 and abs(dv) > 1e-4:
+            if not round_:   # a rectangular section would twist through a bend in a tilted plane
+                if all(abs(at - st["from_m"]) > 1e-3 for st in steps):   # it is coming back to its line
+                    raise Unsupported(f"at {at:.2f} m the route comes back to its line up and sideways at once: come "
+                                      "back one axis at a time too (end with a step that keeps the up offset without "
+                                      "the sideways one, sharing the boundary, so it steps back sideways, then down)")
+                raise Unsupported(f"at {at:.2f} m the route changes up and sideways at once: change one axis at a time "
+                                  "(go up in one step, then sideways in the next, sharing the boundary; come back the "
+                                  "same way: a step back sideways only, then down)")
+            jump = float(np.hypot(du, dv))   # a round pipe takes a rolling offset: one bend plane, on the diagonal
+            moves.append((at, (up * du + side * dv) / jump, jump, (sx, sx)))
+        elif abs(du) > 1e-4:
+            moves.append((at, up * np.sign(du), abs(du), (across, vertical)))
+        else:
+            moves.append((at, side * np.sign(dv), abs(dv), (vertical, across)))
+    use_bends = (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS
+    radii = [bend_radius(wt[1] * s, jump) for _, _, jump, wt in moves] if use_bends else []
+    use_bends = use_bends and all(r is not None for r in radii)
+    # Room along the run: each transition takes its bend radius (or half the section, square) before and after it.
+    reach = [r for r in radii] if use_bends else [wt[1] * s / 2 for _, _, _, wt in moves]
+    ends = [0.0] + [x for (at, _, _, _), r in zip(moves, reach) for x in (at - r, at + r)] + [length_m]
+    for lo, hi in zip(ends[::2], ends[1::2]):
+        if hi - lo < MIN_PIECE_M - 1e-9:
+            raise Unsupported(f"the steps leave a straight piece shorter than {MIN_PIECE_M * 1000:.0f} mm at "
+                              f"{lo:.2f}-{hi:.2f} m (run {length_m:.2f} m; each turn takes "
+                              f"{max(reach) * 1000:.0f} mm of run either side)")
+
+    pieces, along, cur = [], 0.0, np.zeros(3)
+    for (at, axis, jump, (w, t)), r in zip(moves, reach):
+        b, J, rr = at / s, axis * (jump / s), r / s
+        if use_bends:
+            pieces.append(("straight", origin + d * along + cur, d, b - rr - along))
+            pieces.append(("bend", origin + d * (b - rr) + cur, d, axis, rr, w, t))
+            if jump / s - 2 * rr > 1e-3 / s:
+                pieces.append(("straight", origin + d * b + cur + axis * rr, axis, jump / s - 2 * rr))
+            pieces.append(("bend", origin + d * b + cur + J - axis * rr, axis, d, rr, w, t))
+            along = b + rr
+        else:   # square corners: risers overlap the straights by half the section
+            half = t / 2
+            pieces.append(("straight", origin + d * along + cur, d, b - half - along))
+            pieces.append(("straight", origin + d * b + cur - axis * half, axis, jump / s + 2 * half))
+            along = b + half
+        cur = cur + J
+    pieces.append(("straight", origin + d * along + cur, d, item.Depth - along))
+    gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces)
+    return Route(global_id, steps, gids, "bends" if use_bends else "square")
+
+
+def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple]) -> list[str]:
+    """Turn `element` into the chain of `pieces` (world, file units): the first piece is the element itself, shortened
+    (it must be the straight from its origin along `d`); straights are copies of it with the same profile, bends are
+    new fittings. Ports are added and chained in order, the last piece takes over the element's far connection, and
+    the authored external port frames and flows are kept. Pieces: ("straight", start, axis, length) and ("bend", start,
+    from, to, radius, width, depth) (width across the bend's plane, depth in it). Returns the GlobalIds in order."""
+    i = scene.index_of(element.GlobalId)
+    model, s = scene.models[i], scene.unit_scales[i]
+    L = item.Depth
+    origin = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+              @ ifcopenshell.util.placement.get_axis2placement(item.Position))[:3, 3]
+
+    def section_ref(axis, reference=px):
+        """Transport the actual profile X axis in the detour plane, without section roll."""
+        normal = np.cross(d, axis)
+        sine, cosine = np.linalg.norm(normal), float(d @ axis)
+        if sine < 1e-9:
+            return reference.copy()
+        normal /= sine
+        return reference*cosine + np.cross(normal,reference)*sine + normal*(normal @ reference)*(1-cosine)
     inv = np.linalg.inv(place)
     body, _ = _body(element)
     styles = [x for x in model.get_inverse(item) if x.is_a("IfcStyledItem")]
@@ -319,7 +525,7 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
             rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "SweptSolid", [solid])
             ends.append((start, start + axis * length))
         else:
-            _, start, t0, t1, R = piece
+            _, start, t0, t1, R, w, t = piece
             bends += 1
             part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} bend", 
                                 f"{element.Tag}-BR{bends}" if element.Tag else None)
@@ -381,7 +587,7 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
 
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)
-    return Offset(global_id, start_m, end_m, dz_m, gids, used, lateral_m)
+    return gids
 
 
 def _new_fitting(model, segment, place, name: str, tag: str | None):
@@ -624,8 +830,9 @@ def openings(scene: IfcScene, global_id: str) -> list[dict]:
     return out
 
 
-def _hits(origins: np.ndarray, d: np.ndarray, tris: np.ndarray) -> np.ndarray:
-    """Which rays (origins + t·d, t > 0) hit any triangle (Möller–Trumbore, vectorised over rays and triangles)."""
+def _hits(origins: np.ndarray, d: np.ndarray, tris: np.ndarray, length: float | None = None) -> np.ndarray:
+    """Which rays (origins + t·d, t > 0, and t < `length` when given) hit any triangle (Möller–Trumbore, vectorised
+    over rays and triangles)."""
     v0, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
     p = np.cross(d, e2)
     det = np.einsum("ij,ij->i", e1, p)
@@ -637,7 +844,160 @@ def _hits(origins: np.ndarray, d: np.ndarray, tris: np.ndarray) -> np.ndarray:
     q = np.cross(s, e1[None])
     v = (q @ d) * inv
     t = np.einsum("rtk,tk->rt", q, e2) * inv
-    return np.any((u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (t > 1e-9), axis=1)
+    near = (t < length) if length is not None else True
+    return np.any((u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (t > 1e-9) & near, axis=1)
+
+
+def _first_hit(origins: np.ndarray, d: np.ndarray, tris: np.ndarray) -> np.ndarray:
+    """How far each ray (origins + t·d) goes before it hits a triangle (inf when it hits none)."""
+    v0, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+    p = np.cross(d, e2)
+    det = np.einsum("ij,ij->i", e1, p)
+    ok = np.abs(det) > 1e-12
+    v0, e1, e2, p, det = v0[ok], e1[ok], e2[ok], p[ok], det[ok]
+    inv = 1.0 / det
+    s = origins[:, None, :] - v0[None]
+    u = np.einsum("rtk,tk->rt", s, p) * inv
+    q = np.cross(s, e1[None])
+    v = (q @ d) * inv
+    t = np.einsum("rtk,tk->rt", q, e2) * inv
+    t = np.where((u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (t > 1e-9), t, np.inf)
+    return t.min(axis=1) if t.shape[1] else np.full(len(origins), np.inf)
+
+
+FREE_BANDS_MAX_TRIS = 200_000   # past this many triangles in the stretch, the room beside an obstacle is not told
+MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet")
+
+
+def _kernel(p) -> str:
+    """The geometry kernel to triangulate `p` with: CGAL for a body of meshes only (OpenCASCADE sews a mesh into
+    shells first: seconds for a dense one), else OpenCASCADE, so curved and cut shapes are as before."""
+    reps = [r for r in (p.Representation.Representations if p.Representation else []) if r.RepresentationIdentifier == "Body"]
+    items = [i for r in reps for i in r.Items]
+    meshes = bool(items) and all(any(i.is_a(c) for c in MESH_ITEMS) for i in items) and not getattr(p, "HasOpenings", None)
+    return "hybrid-cgal-simple-opencascade" if meshes else "opencascade"
+
+
+def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = "side", clearance_m: float = 0.025,
+               reach_m: float = 1.0, step_m: float = 0.01) -> list[dict]:
+    """Offsets of a straight segment, on its own "up" or "side" axis (`run_frame`), at which its profile (with
+    `clearance_m` all round) passes the stretch where `obstacles` sit along it without touching anything there: the
+    room a route has beside or above them. Rays run along the segment through that stretch, round the profile's
+    outline and at its centre, against every physical element nearby (not only the obstacles: a fence beside a column
+    counts), and only bands the run can reach from its line at both ends of the stretch count. Returns
+    [{"from_m", "to_m"}] offset bands (of the centreline), not counting where it is now."""
+    run = run_of(scene, run_gid)
+    start, d = np.asarray(run.start), np.asarray(run.direction)
+    up, side = run_frame(d)
+    a, c = (side, up) if axis == "side" else (up, side)
+    half_a = (run.width_m if axis == "side" else run.depth_m) / 2 + clearance_m
+    half_c = (run.depth_m if axis == "side" else run.width_m) / 2 + clearance_m
+    boxes = scene.bounds()
+    spans = []
+    for o in obstacles:
+        if o in boxes:
+            corners = np.array([[x, y, z] for x in boxes[o][:, 0] for y in boxes[o][:, 1] for z in boxes[o][:, 2]])
+            along = (corners - start) @ d
+            spans.append((max(along.min(), 0.0), min(along.max(), run.length_m)))
+    if not spans:
+        return []
+    lo, hi = min(x for x, _ in spans) - 0.05, max(y for _, y in spans) + 0.05
+    # Everything physical near that stretch, except the segment and what it is joined to.
+    own = {run_gid, *scene.element(run_gid).connected}
+    corridor = np.array([start + d * t + a * ra + c * rc for t in (lo, hi) for ra in (-reach_m - half_a, reach_m + half_a)
+                         for rc in (-half_c, half_c)])
+    cmin, cmax = corridor.min(axis=0), corridor.max(axis=0)
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    tris, solids = [], []
+    for p in scene.products():
+        g = p.GlobalId
+        if g in own or g not in boxes or (boxes[g][1] < cmin).any() or (boxes[g][0] > cmax).any():
+            continue
+        solids.append(boxes[g])
+        try:
+            shape = ifcopenshell.geom.create_shape(settings, p, geometry_library=_kernel(p))
+        except RuntimeError:
+            continue
+        verts = np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
+        tris.append(verts[np.asarray(shape.geometry.faces).reshape(-1, 3)])
+    if not tris:
+        return []
+    tris = np.concatenate(tris)
+    # Only triangles that reach the stretch along the run, and the band the rays sweep across it, can be hit. A dense
+    # mesh nearby (a meshed motor, a detailed fitting) is cut down to the part that matters, or, past a budget, the
+    # room is not told at all: this runs while the scene is locked.
+    rel = tris - start
+    tt, ta, tc = rel @ d, rel @ a, rel @ c
+    eps = 1e-6   # a triangle touching a ray's edge still counts, as it does in the ray test
+    keep = ((tt.max(1) >= lo - eps) & (tt.min(1) <= hi + eps) & (tc.max(1) >= -half_c - eps) & (tc.min(1) <= half_c + eps)
+            & (ta.max(1) >= -reach_m - half_a - eps) & (ta.min(1) <= reach_m + half_a + eps))
+    tris, ta, tc = tris[keep], ta[keep], tc[keep]
+    if len(tris) > FREE_BANDS_MAX_TRIS:
+        return []
+    # Each ray runs along the run at one point of the cross-section (a, c): it can only meet triangles whose own
+    # cross-section span covers that point. Bin the triangles on a grid there, so a ray tests only its own cell.
+    a0, c0, cell = -reach_m - half_a - 2 * eps, -half_c - 2 * eps, 0.03
+    na = int(np.ceil((2 * (reach_m + half_a) + 4 * eps) / cell)) + 1
+    nc = int(np.ceil((2 * half_c + 4 * eps) / cell)) + 1
+    ia0 = np.clip(np.floor((ta.min(1) - eps - a0) / cell).astype(int), 0, na - 1)
+    ia1 = np.clip(np.floor((ta.max(1) + eps - a0) / cell).astype(int), 0, na - 1)
+    ic0 = np.clip(np.floor((tc.min(1) - eps - c0) / cell).astype(int), 0, nc - 1)
+    ic1 = np.clip(np.floor((tc.max(1) + eps - c0) / cell).astype(int), 0, nc - 1)
+    wc = ic1 - ic0 + 1
+    count = (ia1 - ia0 + 1) * wc
+    owner = np.repeat(np.arange(len(tris)), count)
+    k = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
+    cells = (np.repeat(ia0, count) + k // np.repeat(wc, count)) * nc + np.repeat(ic0, count) + k % np.repeat(wc, count)
+    order = np.argsort(cells, kind="stable")
+    cells, owner = cells[order], owner[order]
+    solids = np.array(solids) if solids else np.zeros((0, 2, 3))
+    offsets = np.arange(-reach_m, reach_m + 1e-9, step_m)
+    # The profile's outline every 30 mm, and its centre: anything that crosses the stretch crosses the outline (a 100 mm
+    # post between the corners of a 400 mm duct would slip past corner rays alone). The centre goes first: one hit is
+    # enough to rule an offset out.
+    along_a = np.linspace(-half_a, half_a, max(2, int(np.ceil(2 * half_a / 0.03)) + 1))
+    along_c = np.linspace(-half_c, half_c, max(2, int(np.ceil(2 * half_c / 0.03)) + 1))
+    samples = np.array([(0.0, 0.0)] + [(sa, sc) for sa in along_a for sc in (-half_c, half_c)]
+                       + [(sa, sc) for sc in along_c[1:-1] for sa in (-half_a, half_a)])
+    base = start + d * lo
+    free = np.ones(len(offsets), dtype=bool)
+    for k, v in enumerate(offsets):
+        ray_a, ray_c = v + samples[:, 0], samples[:, 1]
+        origins = base + np.outer(ray_a, a) + np.outer(ray_c, c)
+        # A ray wholly inside a solid (along a wall) crosses none of its faces: its middle inside an element's box counts.
+        middles = origins + d * (hi - lo) / 2
+        if len(solids) and ((middles[:, None, :] > solids[None, :, 0]) & (middles[:, None, :] < solids[None, :, 1])).all(2).any():
+            free[k] = False
+            continue
+        ray_cells = (np.clip(np.floor((ray_a - a0) / cell).astype(int), 0, na - 1) * nc
+                     + np.clip(np.floor((ray_c - c0) / cell).astype(int), 0, nc - 1))
+        first = np.searchsorted(cells, ray_cells, side="left")
+        last = np.searchsorted(cells, ray_cells, side="right")
+        for r in range(len(samples)):
+            if last[r] > first[r] and _hits(origins[r:r + 1], d, tris[owner[first[r]:last[r]]], hi - lo).any():
+                free[k] = False
+                break
+    # And the route must get there: from the line, square to it, at both ends of the stretch, nothing in the way.
+    for sign in (1.0, -1.0):
+        starts = np.array([start + d * t + c * sc for t in (lo, hi) for sc in (-half_c, 0.0, half_c)])
+        room = (_first_hit(starts, a * sign, tris).min() if len(tris) else np.inf) - half_a
+        for bmin, bmax in solids:   # a solid the line itself starts in leaves no room that way
+            if ((starts > bmin) & (starts < bmax)).all(axis=1).any():
+                room = 0.0
+        free &= ~((np.sign(offsets) == sign) & (np.abs(offsets) > room))
+    out, i = [], 0
+    while i < len(offsets):
+        if free[i]:
+            j = i
+            while j + 1 < len(offsets) and free[j + 1]:
+                j += 1
+            if not (offsets[i] <= 0 <= offsets[j]):
+                out.append({"from_m": round(float(offsets[i]), 3), "to_m": round(float(offsets[j]), 3)})
+            i = j + 1
+        else:
+            i += 1
+    return out
 
 
 def passages(scene: IfcScene, run_gid: str, obstacle_gid: str, clearance_m: float = 0.025,

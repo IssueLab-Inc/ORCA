@@ -152,7 +152,7 @@ class Workspace:
                 clash_id: str | None = None, on_event=None) -> dict:
         """With a report clash, its Navisworks distance and images go to the model too (images are what let
         the model find openings and free space; spikes/README.md, spike 4)."""
-        clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id)
+        clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id, scene_id)
         return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
                                     trials=on_event is not None, **self.fix_settings(scene_id, element_a, element_b)))
 
@@ -179,7 +179,7 @@ class Workspace:
 
     def clash_for(self, element_a: str, element_b: str, distance_m: float | None = None,
                   images: list[str] | None = None, notes: str = "", report_id: str | None = None,
-                  clash_id: str | None = None) -> agent.Clash:
+                  clash_id: str | None = None, scene_id: str | None = None) -> agent.Clash:
         pics = [Path(p) for p in images or []]
         if report_id and clash_id:
             c = self.report(report_id).clash(clash_id)
@@ -190,7 +190,45 @@ class Workspace:
                       else f"From a Navisworks clash report: {c.test}, {c.name}.")
             seen = " Images are views of this clash." if pics else ""
             notes = "\n".join(filter(None, [notes, source + seen]))
+            nearby = self._nearby(scene_id, self.report(report_id), element_a, element_b) if scene_id in self.scenes else {}
+            return agent.Clash(element_a, element_b, distance_m, pics, notes, nearby=nearby)
         return agent.Clash(element_a, element_b, distance_m, pics, notes)
+
+    NEARBY_M = 3.0   # how close another clash of the same element must be to be worth telling Muse about
+    NOT_PHYSICAL_CLASSES = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
+    NEARBY_MAX = 3
+
+    def _nearby(self, scene_id: str, report, element_a: str, element_b: str) -> dict[str, list[str]]:
+        """Per side that can move, its other hard clashes in the report with physical partners, nearest first (at most
+        3, within 3 m of where A and B meet): one route may clear them together. Told to Muse, never required."""
+        def gap(x, y):
+            return float(np.linalg.norm(np.maximum(0, np.maximum(x[0] - y[1], y[0] - x[1]))))
+        scene = self.scenes[scene_id]
+        # Only partners of a side that can move: a girder's other services are its own clashes, not this fix's.
+        movable = {g for g in (element_a, element_b) if g in scene.bounds() and not scene.element(g).fixed}
+        found: dict[str, set[str]] = {}
+        for c in report.clashes:
+            ga, gb = c.a.global_id, c.b.global_id
+            if not ga or not gb or (c.distance_m is not None and c.distance_m > -0.001) or {ga, gb} == {element_a, element_b}:
+                continue
+            for mine, partner, cls in ((ga, gb, c.b.ifc_class), (gb, ga, c.a.ifc_class)):
+                if (mine in movable and partner not in (element_a, element_b)
+                        and cls not in self.NOT_PHYSICAL_CLASSES):
+                    found.setdefault(mine, set()).add(partner)
+        boxes = scene.bounds()
+        if not found or element_a not in boxes or element_b not in boxes:
+            return {}
+        # Where A and B meet: their boxes' overlap, or the gap between them on an axis where they do not overlap.
+        lo = np.maximum(boxes[element_a][0], boxes[element_b][0])
+        hi = np.minimum(boxes[element_a][1], boxes[element_b][1])
+        zone = np.array([np.minimum(lo, hi), np.maximum(lo, hi)])
+        out = {}
+        for mine, partners in found.items():
+            near = sorted((gap(boxes[p], zone), p) for p in partners if p in boxes)
+            kept = [p for dist, p in near if dist <= self.NEARBY_M][:self.NEARBY_MAX]
+            if kept:
+                out[mine] = kept
+        return out
 
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
         s = self.scene(scene_id)
@@ -219,6 +257,24 @@ class Workspace:
             s.mark_edited(element)
             s.revision += 1
         return {**asdict(off), "files": [s.index_of(element)]}
+
+    def check_route(self, scene_id: str, element: str, other: str, steps: list[dict], clearance_m: float = 0.025) -> dict:
+        """Try a route of `element` past `other` without keeping it (edits.apply_route)."""
+        with self.lock:
+            attempt, option = agent._try_route(self.scene(scene_id), {"steps": steps}, element, other, clearance_m)
+        return {"passed": attempt.passed, "reason": attempt.reason, "kind": attempt.kind,
+                "summary": (attempt.edit or {}).get("summary"),
+                "min_clearance_m": option.min_clearance_m if option else None,
+                "preview": option.preview if option else None}
+
+    def apply_route(self, scene_id: str, element: str, steps: list[dict]) -> dict:
+        """Keep a route: the element is shortened and its detour pieces are added to its file."""
+        s = self.scene(scene_id)
+        with self.lock:
+            r = edits.apply_route(s, element, steps)
+            s.mark_edited(element)
+            s.revision += 1
+        return {**asdict(r), "files": [s.index_of(element)]}
 
     def apply_trim(self, scene_id: str, element: str, end: str, by_m: float) -> dict:
         """Keep a trim: the element's end is cut back (see edits.apply_trim)."""

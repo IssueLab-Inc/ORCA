@@ -733,3 +733,29 @@ penetration requests (planned, in that order, in `docs/edits.md`).
 - **Fixed on the way:** the "largest move" limit measured a lateral offset as 0 mm; it now measures how far it goes.
 - **Checked:** answer key 3/3 first try at Rev04 heights (rows in `evals/results.csv`); 399 server tests, 53 web tests.
 - **Web tests:** App imports `./fixKinds`; both stub harnesses compile the real module (`compiled("../src/fixKinds.ts")`).
+
+Reroute (Oct 29, owner decision; design in `docs/edits.md`, code `edits.apply_route`, `agent._try_route`): the fourth
+kind of fix, for what one offset can't pass.
+- **Shape:** `{"kind": "route", "steps": [{from_m, to_m, up_m, side_m}]}`, up to 3 steps on the run's own axes
+  (`edits.run_frame`: up square to the run; side = left of its direction, named by compass in Muse's text). Steps that
+  share a boundary change straight from one offset to the next; each change is one axis (a round pipe may roll: both
+  at once). One step straight up is tried and kept as an offset.
+- **Geometry:** 90° bends and risers per change (`bend_radius` on its own jump, the section's size in its own plane;
+  square corners for the whole route if any bend would fold). `_build_chain` (moved out of `apply_offset` unchanged)
+  chains copies, fittings and ports for both; a one-step route builds exactly the offset's meshes. Slopes up to 15°
+  keep their fall; vertical runs and falling drainage are refused; level drainage only steps sideways (`is_gravity`).
+- **What Muse reads:** `edits.free_bands` (room beside or above each obstacle, clear of everything along that stretch:
+  rays round the profile's outline every 30 mm, a ray inside a solid counts as blocked, only bands reachable from the
+  line count), "no side offset clears all of them in one stretch" when only separate detours fit, and for a single
+  report clash the movable element's other clashes within 3 m (`Workspace._nearby`, told, never required; never the
+  fixed side's partners). Prompt: `construction.md` "route".
+- **Everywhere:** `TRIES`/`PARAMS`/`IN_TRIAL`/`KEEP` entries, `Workspace.check_route`/`apply_route`, chat and MCP
+  `check_route`; the page needed nothing new (slice 0's `fixKinds.ts` and `/fix/apply`).
+- **STEP:** `IfcWall` is now a class STEP parts may take (`step.CLASSES`, `step_classes.md`).
+- **Demo case:** the cell's C6 (demo-models repo, Oct 29: plant walls drawn see-through, columns C3/C4, PL-302, ES-2;
+  Rev A 159 parts, 16 planted pairs). Only a detour round each column clears.
+  - In the browser, a single proposal on #22 (PL-302 × C3) got "Reroute pipe north past C3 and C4" (250 mm round each,
+    53 mm clear) in 37 s, accepted through `/fix/apply`.
+  - `evals/step_cell.py`: C6 Fix together → one job, a verified route in 31 s; classes 159/159; 16/16 planted.
+- **Checked:** answer key still 3/3 first try at Rev04 heights; 418 server tests, 53 web tests; landing and README cell numbers and
+  `web/public/demos/cell.webp` updated.

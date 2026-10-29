@@ -39,7 +39,7 @@ PSET = STEP_PSET
 NAMESPACE = uuid.UUID("3b8f2d0e-6c1a-4f5e-9a7d-2f1c5b8e4a90")
 
 # The classes a STEP part may become (`classify`), each with its IFC4 predefined types where it has them.
-CLASSES = ("IfcMember", "IfcPlate", "IfcColumn", "IfcBeam", "IfcSlab", "IfcMechanicalFastener", "IfcPipeSegment",
+CLASSES = ("IfcMember", "IfcPlate", "IfcColumn", "IfcBeam", "IfcSlab", "IfcWall", "IfcMechanicalFastener", "IfcPipeSegment",
            "IfcPipeFitting", "IfcValve", "IfcCableCarrierSegment", "IfcCableCarrierFitting", "IfcSensor", "IfcDoor",
            "IfcFurniture", "IfcTransportElement", "IfcElectricDistributionBoard", "IfcUnitaryControlElement",
            "IfcElectricMotor", "IfcFilter", "IfcSwitchingDevice", "IfcBuildingElementPart", "IfcBuildingElementProxy")

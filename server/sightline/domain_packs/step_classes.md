@@ -11,7 +11,8 @@ For every number, give:
   - a gate or door is IfcDoor; a pallet or rack is IfcFurniture; a conveyor or belt is IfcTransportElement;
   - a control cabinet or motor control centre is IfcElectricDistributionBoard; a controller or HMI is
     IfcUnitaryControlElement; a motor or gearbox is IfcElectricMotor; a filter or FRL unit is IfcFilter;
-  - a floor or slab is IfcSlab; a pedestal or column is IfcColumn; a beam is IfcBeam;
+  - a floor or slab is IfcSlab; a wall (blockwork, concrete, a partition) is IfcWall; a pedestal or column is
+    IfcColumn; a beam is IfcBeam;
   - a component of a larger machine (a drum, a roller) is IfcBuildingElementPart;
   - a robot, an end effector, a product or load, or a safety or working zone (reach envelope, keep-out or clearance
     space) is IfcBuildingElementProxy.
