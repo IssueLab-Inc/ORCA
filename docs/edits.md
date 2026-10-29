@@ -118,8 +118,14 @@ and re-parse it in the browser. Now every way of keeping a fix answers with what
   taken after every edit of the request (`edits.meshes(render=True)`: unwelded, with normals, the style's colour and
   opacity, and the element's file). No meshes when one will not triangulate or there are more than 500,000 vertices.
 - **Page:** `applyToViewer` (App.tsx) patches when the reply has meshes for this scene and the page's model is at
-  `revision_before` (from opening: `revision` in the open, upload and scene-info replies); otherwise it reloads the
-  changed files as before. Either way it then knows the new revision.
+  `revision_before` (from opening: `revision` in the open, upload and scene-info replies, resume included); otherwise
+  it reloads this fix's files and every file changed by an edit it missed (`history`: which files each revision
+  changed, `IfcScene.bump`; all edited files when the page doesn't know its revision). Either way it then knows the new
+  revision.
+- **One request, one revision range:** `_with_patch` and the MCP `apply_fix` / `apply_plan` read `revision_before`,
+  keep the fix and take the patch under the workspace lock, so another tab's edit never lands in between.
+- **Colours:** the patch's meshes carry only the model's own styles (no IfcOpenShell class defaults), so an unstyled
+  element keeps the colour the page drew it in.
 - **Viewer:** `viewer/patch.ts` (`patchModel`, pure over the loaded model): an element keeps its instance and gets the
   new geometry (add, point the instance at it, then delete the old one: deleting first would delete the instance); a
   new piece gets its own instance, coloured from its mesh or the element it came from, in the see-through batch when

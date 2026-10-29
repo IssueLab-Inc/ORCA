@@ -403,9 +403,10 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         if not 1 <= option <= len(options):
             raise LookupError(f"no verified option {option} for {c.label}: run propose_fixes first")
         o = options[option - 1]
-        before = W().scene(link.ctx.scene_id).revision
-        out = plans.apply(W(), link.ctx.scene_id, [o])
-        out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
+        with W().lock:   # one request's edits between `before` and the patch
+            before = W().scene(link.ctx.scene_id).revision
+            out = plans.apply(W(), link.ctx.scene_id, [o])
+            out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
         pairs = [[proposal["element_a"], proposal["element_b"]]]
         _applied(link, out, pairs, [o["title"]], [c.id], {c.id: o["title"]})
         done(link, "apply_fix", f"applied '{o['title']}'")
@@ -423,9 +424,10 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
                                                                   or check.get("items", {}).get(it["key"], {}).get("passed"))]
         if not items:
             raise LookupError("this plan has no verified fix to apply")
-        before = W().scene(link.ctx.scene_id).revision
-        out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
-        out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
+        with W().lock:   # one request's edits between `before` and the patch
+            before = W().scene(link.ctx.scene_id).revision
+            out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
+            out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
         pairs = [[it["element_a"], o] for it in items for o in [it["element_b"], *(it.get("others") or [])]]
         titles = [it["option"]["title"] for it in items for _ in [it["element_b"], *(it.get("others") or [])]]
         _applied(link, out, pairs, titles, [cid for it in items for cid in it["clash_ids"]],
@@ -440,7 +442,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         link.applied.update(fixed)
         link.publish({"type": "ui", "action": "applied", "files": out["files"], "pieces": out["pieces"],
                       "pairs": pairs, "titles": titles, "clash_ids": clash_ids,
-                      **{k: out.get(k) for k in ("scene_id", "revision_before", "revision", "meshes")}})
+                      **{k: out.get(k) for k in ("scene_id", "revision_before", "revision", "meshes", "history")}})
 
     # ------------------------------------------------------------------ triage, report, export
 

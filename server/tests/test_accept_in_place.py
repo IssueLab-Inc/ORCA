@@ -72,3 +72,21 @@ def test_no_meshes_when_an_element_will_not_triangulate_or_there_is_too_much(cli
     monkeypatch.setattr(edits, "meshes", broken)
     kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, 0.2]}).json()
     assert kept["meshes"] is None and kept["files"] == [0]
+
+
+def test_every_reply_says_which_files_each_revision_changed(client):
+    c, ws = client
+    r, scene, main = open_run(c)
+    c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]})
+    kept = c.post(f"/api/scenes/{r['id']}/offset/apply", json={"element": main, "split_m": [2.6, 3.4], "dz_m": 0.6}).json()
+    # A page still at revision 0 missed the move: it reloads file 0 as well as this fix's own.
+    assert kept["revision_before"] == 1 and kept["history"] == [[1, [0]], [2, [0]]]
+    assert scene.snapshot().history == scene.history
+
+
+def test_an_unstyled_element_keeps_no_colour_when_a_fix_is_kept(client):
+    c, ws = client
+    r, scene, main = open_run(c)
+    assert not scene.entity(main).Representation.Representations[0].Items[0].StyledByItem   # the fixture's duct
+    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]}).json()
+    assert kept["meshes"][0]["color"] is None   # the page keeps the colour it drew, not IfcOpenShell's class default

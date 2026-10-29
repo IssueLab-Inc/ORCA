@@ -813,6 +813,9 @@ def meshes(scene: IfcScene, global_ids: list[str], render: bool = False) -> list
     settings.set("use-world-coords", True)
     if render:
         settings.set("weld-vertices", False)
+        # No per-class default colours: an unstyled element must stay as the page drew it (web-ifc: white), not turn
+        # IfcOpenShell's grey or brown, or see-through for a window, when a fix is kept.
+        settings.set("apply-default-materials", False)
     out = []
     for gid in global_ids:
         shape = ifcopenshell.geom.create_shape(settings, scene.entity(gid))

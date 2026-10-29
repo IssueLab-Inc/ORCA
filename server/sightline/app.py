@@ -469,9 +469,10 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
 def _with_patch(scene_id: str, kept) -> dict:
     """Keep a fix (`kept()` returns the Workspace's reply, with "changed") and add what the page needs to update its
     model in place (`Workspace.patch`)."""
-    before = ws.scene(scene_id).revision
-    r = kept()
-    return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
+    with ws.lock:   # one request's edits between `before` and the patch, never another tab's
+        before = ws.scene(scene_id).revision
+        r = kept()
+        return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
 
 
 @app.post("/api/scenes/{scene_id}/apply")

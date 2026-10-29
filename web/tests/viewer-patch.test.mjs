@@ -71,11 +71,12 @@ test("room is made by packing out what earlier patches freed before growing the 
   assert.ok(m.mesh.unusedVertexCount >= 24 && m.mesh.unusedVertexCount >= before);
 });
 
-test("accepting patches the model in place at this page's revision, and reloads the file when it missed an edit", async () => {
-  for (const [known, patched, downloads] of [[3, 1, 0], [2, 0, 1]]) {
+test("accepting patches the model in place at this page's revision, and reloads what it missed when it missed an edit", async () => {
+  // Revision 2 changed file 1 (an agent's fix the page never heard of), 3 and 4 file 0.
+  for (const [known, patched, downloads] of [[3, 1, 0], [2, 0, 1], [1, 0, 2]]) {
     let fetched = 0;
     const kept = { files: [0], pieces: ["duct", "duct-2"], scene_id: "scene", revision_before: 3, revision: 4,
-      meshes: [box("duct", [0, 0, 0]), box("duct-2", [1, 0, 0])] };
+      meshes: [box("duct", [0, 0, 0]), box("duct-2", [1, 0, 0])], history: [[2, [1]], [3, [0]], [4, [0]]] };
     const host = await appHost({ api: { accept: async () => kept, file: async () => { fetched++; return new Uint8Array([1]); } } });
     const calls = [];
     host.viewer.patch = (meshes, origin) => { calls.push({ meshes, origin }); return true; };
