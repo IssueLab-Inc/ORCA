@@ -1194,7 +1194,11 @@ export function App() {
       sceneRevision.current = kept.revision ?? null;
       return;
     }
-    for (const i of kept.files) {
+    // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
+    // them when it doesn't know), so it never jumps to a revision whose edits it hasn't drawn.
+    const drawn = sceneRevision.current;
+    const missed = (kept.history ?? []).filter(([rev]) => drawn == null || rev > drawn).flatMap(([, files]) => files);
+    for (const i of [...new Set([...kept.files, ...missed])].sort((x, y) => x - y)) {
       const bytes = await api.file(sid, i);
       if (!live()) return;
       await viewer.current!.replace(i, bytes, live);
@@ -1530,7 +1534,7 @@ export function App() {
     const r = resumable;
     if (!r || busy) return;
     const { saved, info } = r;
-    const id = await open(info.files, { id: info.id, files: info.files, step: info.step });
+    const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision });
     if (!id) return;
     if (saved.report_id) {
       const rep = await loadReport(() => api.report(saved.report_id!), "your clashes");
@@ -2134,7 +2138,7 @@ export function App() {
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
               {chosen === i && o.kind === "penetration" && o.edit?.reading_source === "muse" && sceneId && (
-                hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group)
+                hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group, o.edit.host_kind)
                   ? <span className="chip ok"><Check size={11} aria-hidden /> in the requirements</span>
                   : <button className="btn small" onClick={() => void addPenRule(o)}
                     data-tip="Make this reading a rule for the host's group in the coordination requirements"><ClipboardPlus size={13} aria-hidden /> Add to requirements</button>)}

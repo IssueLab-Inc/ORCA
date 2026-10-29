@@ -73,7 +73,10 @@ export interface ContextApplied extends Patch {
 }
 /** What a kept fix sends back so the page can update its model in place instead of reloading the files it changed
  * (server: Workspace.patch). A page whose model is not at `revision_before`, or that gets no meshes, reloads. */
-export interface Patch { scene_id?: string; revision_before?: number; revision?: number; meshes?: ElementMesh[] | null }
+export interface Patch {
+  scene_id?: string; revision_before?: number; revision?: number; meshes?: ElementMesh[] | null;
+  history?: [number, number[]][];   // (revision, files it changed): a page that missed an edit reloads those
+}
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent =
   | { type: "thinking"; round: number }
@@ -192,6 +195,7 @@ export interface ReqByDesign { a_classes: string[]; b_classes: string[]; reason:
 export interface ReqPenRule {
   group: string; rule: "allowed" | "review" | "never"; max_mm: number | null; reviewer: string | null; reason: string;
   source: "user" | "orca";
+  kind?: string | null; kind_name?: string;   // only for one kind of host in the group (from Muse's reading of it)
 }
 export interface Requirements {
   format: "orca-requirements/1"; name: string; version: number; level: number; strictness: Strictness;
