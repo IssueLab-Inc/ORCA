@@ -237,7 +237,28 @@ S section, E edges, M measure, Esc clears. Double-click picks element A, then B.
 Uploads stay in a temp folder while the report is open (`SIGHTLINE_UPLOAD_MAX_MB`, default 200;
 `SIGHTLINE_UPLOAD_MAX_FILES`, default 5000; `SIGHTLINE_MAX_REPORTS` open at once).
 
-MCP server (stdio), for agents:
+### Connect an agent (MCP)
+
+Any MCP client (Muse Code, Claude Code or Desktop, an IDE) can work on your ORCA session. In the app choose
+**Connect an agent** and paste the settings it shows, for example:
+
+```bash
+claude mcp add --transport http orca https://<host>/mcp --header "Authorization: Bearer <token>"
+```
+
+The agent sees what you have open (models, clashes, their pictures). It can:
+- check its own ideas against the model;
+- run ORCA's fix agent;
+- apply fixes;
+- triage;
+- build the report;
+- export.
+
+Your page follows it: the camera goes to the clash it shows, and its fixes appear as it applies them. The link is a
+secret that expires 12 hours after its last use; **Revoke** ends it. Fixes it asks for count against the demo's
+allowance. The tools, links and security are in [docs/mcp.md](docs/mcp.md).
+
+Locally, with its own session and no browser:
 
 ```bash
 cd server && uv run python -m sightline.mcp_server
