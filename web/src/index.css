@@ -524,10 +524,17 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 @media (prefers-reduced-motion: reduce) { .lb-zoom, .clash-thumb { transition: none; } }
 
 /* Voice (Chat.tsx + voice.ts): the mic glows with the input level while listening */
-.btn.mic { padding: 6px 10px; display: inline-flex; align-items: center; gap: 5px; }
+.btn.mic { padding: 6px 10px; display: inline-flex; align-items: center; gap: 5px;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .btn.mic.on { --level: 0; background: #d0342c; border-color: #d0342c; color: #fff; font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 calc(2px + var(--level) * 9px) rgba(208, 52, 44, .22); transition: box-shadow .08s linear; }
-.voice-note { margin: 4px 0 0; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.btn.mic.on.speaking { box-shadow: 0 0 0 calc(4px + var(--level) * 9px) rgba(208, 52, 44, .32); }
+/* Hands-free: on, the mic stays open and each sentence goes when the speaker pauses */
+.btn.mic-mode { padding: 6px 8px; display: inline-flex; align-items: center; color: var(--muted); }
+.btn.mic-mode.on { color: #b8352a; border-color: #d0342c; background: #fdf0ef; }
+/* Live captions: what Muse Voice Transcribe has heard so far, in the message box */
+.chat-input textarea.live { border-color: #d0342c; background: #fffafa; color: var(--ink); font-style: italic; }
+.voice-note { margin: 0 0 4px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .voice-note.live { color: #b8352a; }
 .rec { width: 8px; height: 8px; border-radius: 50%; background: #d0342c; animation: rec 1s ease-in-out infinite; }
 @keyframes rec { 50% { opacity: .3; } }
@@ -949,7 +956,7 @@ a.pop-item { color: inherit; }
   .sheet-handle { height: 28px; }
   .sheet-peek-text { min-height: 44px; }
   .suggest { min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
-  .btn.mic { min-width: 44px; }
+  .btn.mic, .btn.mic-mode { min-width: 44px; }
 }
 
 /* Dialogs on a phone: full screen, the title row (with Close) stays at the top while the body scrolls */

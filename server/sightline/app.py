@@ -16,16 +16,17 @@ from dataclasses import asdict
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, ConfigDict
+from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
 from . import (agents, chat, context_planner, detect, document, edits, mcp_server, owner, plans, requirements, settings,
-               step, titles, triage)
+               step, titles, triage, voice_live)
 from .meta_client import load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
 from .service import MODEL_SUFFIXES, MODELS, Workspace
@@ -41,7 +42,7 @@ class _OwnerContext:
         self.inner = inner
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
+        if scope["type"] not in ("http", "websocket"):
             return await self.inner(scope, receive, send)
         headers = dict(scope.get("headers") or [])
         jar = SimpleCookie()
@@ -51,6 +52,11 @@ class _OwnerContext:
             pass
         signed = jar[owner.COOKIE].value if owner.COOKIE in jar else None
         tokens = owner.enter(owner.cookie_ok(signed), headers.get(owner.HEADER.encode(), b"").decode("utf-8", "replace") or None)
+        if scope["type"] == "websocket":  # live voice: only whether it is the owner (no caps) matters
+            try:
+                return await self.inner(scope, receive, send)
+            finally:
+                owner.leave(tokens)
         # Everyone's coordination requirements (requirements.py): an id the page registered. One this server does not
         # know (a restart) is refused, so the page registers its file again rather than run without it.
         rid = headers.get(requirements.HEADER.encode(), b"").decode("latin-1").strip() or None
@@ -175,6 +181,9 @@ preview_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_PREVIEW_PER_HOUR", "6
                              int(os.environ.get("SIGHTLINE_PREVIEW_PER_DAY", "0")), noun="requirement previews")
 
 MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
+# Live voice (voice_live.py): hold to talk runs as long as a recording may; hands-free keeps the mic open longer.
+VOICE_HOLD_MAX_S = 60
+VOICE_HANDS_FREE_MAX_S = float(os.environ.get("SIGHTLINE_VOICE_LIVE_MAX_S", "120"))
 # Words Muse Voice Transcribe should lean toward: what people say to ORCA about a building model.
 VOICE_WORDS = ["ORCA", "Orca", "Northbank", "clash", "clashes", "duct", "ductwork", "supply air", "cable tray", "pipe",
                "transfer girder", "girder", "beam", "column", "slab", "mullion", "transom", "curtain wall", "web opening",
@@ -254,7 +263,7 @@ def _scene(scene_id: str):
     return scene_id
 
 
-def _take(limit: ProposeLimit, request: Request) -> str | None:
+def _take(limit: ProposeLimit, request: HTTPConnection) -> str | None:
     """One use of a demo cap for this visitor: why not, or None. The owner has none (unless they switch them on)."""
     if owner.no_caps():
         return None
@@ -1210,16 +1219,46 @@ async def transcribe_voice(request: Request, audio: UploadFile = File(...), repo
     refused = _take(voice_limit, request)
     if refused:
         raise HTTPException(429, refused)
+    try:
+        return await run_in_threadpool(transcribe, data, _voice_words(report_id))
+    except Exception as e:  # the key, the network or the service: say so rather than fail silently
+        raise HTTPException(502, f"Transcription failed: {type(e).__name__}")
+
+
+def _voice_words(report_id: str | None) -> list[str]:
+    """Words Muse Voice Transcribe should lean toward: BIM words, and what people call the open report's clashes."""
     words = list(VOICE_WORDS)
     if report_id and report_id in ws.reports:
         # What people say about a report's clashes: the elements' names (and Muse's titles), not their numbers.
         clashes = ws.report(report_id).clashes
         names = {e.name for c in clashes for e in (c.a, c.b) if e.name} | {c.title for c in clashes if c.title}
         words += sorted(names, key=lambda n: (len(n), n))[:40]
+    return words
+
+
+@app.websocket("/api/voice/live")
+async def voice_live_socket(socket: WebSocket):
+    """Talk to ORCA live (voice_live.py): the words come back as they are said. The first frame says how
+    (`{mode: "hold" | "hands_free", report_id}`); one session is one voice message against the caps, hands-free too."""
+    if not voice_live.same_origin(socket.headers):
+        await socket.close(code=1008)  # before accepting: the browser sees a refused handshake
+        return
+    await socket.accept()
     try:
-        return await run_in_threadpool(transcribe, data, words)
-    except Exception as e:  # the key, the network or the service: say so rather than fail silently
-        raise HTTPException(502, f"Transcription failed: {type(e).__name__}")
+        first = await asyncio.wait_for(socket.receive_json(), 10)
+    except Exception:
+        await socket.close(code=1008)
+        return
+    first = first if isinstance(first, dict) else {}
+    hands_free = first.get("mode") == "hands_free"
+    refused = _take(voice_limit, socket)
+    if refused:
+        await socket.send_json({"type": "error", "detail": refused})
+        await socket.close(code=1000)
+        return
+    report_id = first.get("report_id") if isinstance(first.get("report_id"), str) else None
+    await voice_live.relay(socket, voice_live.MODES["hands_free" if hands_free else "hold"], _voice_words(report_id),
+                           VOICE_HANDS_FREE_MAX_S if hands_free else VOICE_HOLD_MAX_S)
 
 # ---------------------------------------------------------------------------------------------------------- agents
 # "Connect an agent": a link (a secret token) lets an MCP client work on this visitor's session (agents.py), and the

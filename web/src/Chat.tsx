@@ -1,8 +1,8 @@
-import { Mic, Square } from "lucide-react";
+import { AudioLines, Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type ChatEvent } from "./api";
 import type { ChatRequest, ChatRequestOwner } from "./chatRequest";
-import { MAX_SECONDS, VoiceRecorder } from "./voice";
+import { LiveVoice, type LiveVoiceError, MAX_SECONDS, type VoiceMode, VoiceRecorder } from "./voice";
 
 /** One step the assistant took, shown under its answer. */
 export interface Step { name: string; args: Record<string, unknown>; summary?: string }
@@ -91,40 +91,151 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
     if (mounted.current) setTurns((ts) => ts.map((t) => t.request === request ? f(t) : t));
   };
 
-  // Voice: record, transcribe with Muse Voice Transcribe, then send the words like a typed message.
-  const recorder = useRef<VoiceRecorder | null>(null);
-  const [voice, setVoice] = useState<{ state: "idle" | "listening" | "transcribing"; since: number; level: number; note?: string }>(
+  // Voice. Live (the default): the words show in the box as they are said (Muse Voice Transcribe, realtime) and go as
+  // a spoken message on release. Hold the mic to talk; a quick tap keeps it open until the next tap. Hands-free keeps
+  // the mic open and sends each sentence when the speaker pauses. If the live socket can't open, the mic records a
+  // clip for the upload path instead (tap to stop).
+  type VoiceState = "idle" | "connecting" | "listening" | "finishing" | "transcribing";
+  const [voice, setVoice] = useState<{ state: VoiceState; since: number; level: number; latched?: boolean; note?: string }>(
     { state: "idle", since: 0, level: 0 });
+  const [caption, setCaption] = useState("");
+  const [speaking, setSpeaking] = useState(false);
+  const [handsFree, setHandsFree] = useState(() => { try { return localStorage.getItem("sightline.voice.handsfree") === "1"; } catch { return false; } });
+  const [queue, setQueue] = useState<string[]>([]);  // hands-free sentences said while ORCA was still answering
+  const live = useRef<LiveVoice | null>(null);
+  const recorder = useRef<VoiceRecorder | null>(null);
+  const press = useRef<{ at: number; release: "none" | "send" | "latch" }>({ at: 0, release: "none" });
+  const heard = useRef(0);  // when hands-free last heard speech
   const [, setTick] = useState(0);
-  useEffect(() => () => { recorder.current?.cancel(); }, []);
+  const voiceOn = voice.state !== "idle";
+  const idle = (note?: string) => { setVoice({ state: "idle", since: 0, level: 0, note }); setCaption(""); setSpeaking(false); };
+  useEffect(() => () => { live.current?.cancel(); recorder.current?.cancel(); }, []);
   useEffect(() => {
     if (voice.state !== "listening") return;
     const t = setInterval(() => {
       setTick((n) => n + 1);
-      if (Date.now() - voice.since > MAX_SECONDS * 1000) void stopListening();  // a minute at most
+      if (recorder.current && Date.now() - voice.since > MAX_SECONDS * 1000) void stopRecording();  // a minute at most
+      if (handsFree && live.current && Date.now() - heard.current > 30_000) live.current.finish();  // 30 s of quiet
     }, 250);
     return () => { clearInterval(t); };
-  }, [voice.state, voice.since]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [voice.state, voice.since, handsFree]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!handsFree || !voiceOn) return;
+    const away = () => { if (document.hidden) live.current?.finish(); };  // hands-free stops when the tab is put away
+    document.addEventListener("visibilitychange", away);
+    return () => { document.removeEventListener("visibilitychange", away); };
+  }, [handsFree, voiceOn]);
+  useEffect(() => {
+    if (!queue.length || busy || !ready) return;
+    const [next, ...rest] = queue;
+    setQueue(rest);
+    void send(next, true);
+  }, [queue, busy, ready]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function startListening() {
-    if (busy || voice.state !== "idle") return;
+  function toggleHandsFree() {
+    const on = !handsFree;
+    setHandsFree(on);
+    try { localStorage.setItem("sightline.voice.handsfree", on ? "1" : "0"); } catch { /* private window */ }
+  }
+
+  async function startVoice(mode: VoiceMode) {
+    const session = new LiveVoice(), current = owner.capture(), reportId = context().report_id;
+    live.current = session;
+    let said = "";
+    const mine = () => mounted.current && live.current === session;
+    setVoice({ state: "connecting", since: Date.now(), level: 0 });
+    setCaption("");
+    heard.current = Date.now();
+    try {
+      await session.start(mode, reportId, {
+        onLevel: (level) => { if (mine()) setVoice((v) => (v.state === "listening" ? { ...v, level } : v)); },
+        onPartial: (text) => { if (mine()) setCaption(text); },
+        onSpeech: (on) => { if (mine()) { setSpeaking(on); heard.current = Date.now(); } },
+        onFinal: (text) => {
+          if (!mine()) return;
+          if (mode === "hold") { said = text; return; }
+          setCaption("");
+          // Each sentence is its own message (send takes its own lease); a word alone is more likely a cough.
+          if (text.split(/\s+/).filter(Boolean).length >= 2) setQueue((q) => [...q, text]);
+        },
+        onLimit: () => { if (mine()) setVoice((v) => ({ ...v, note: mode === "hold" ? "That's the longest a voice message can be." : "Hands-free stopped after its time limit. Tap the mic to go on." })); },
+        onError: (detail) => { if (mine()) setVoice((v) => ({ ...v, note: detail })); },
+        onEnd: () => {
+          if (!mine()) return;
+          live.current = null;
+          setVoice((v) => ({ state: "idle", since: 0, level: 0, note: v.note }));
+          setCaption("");
+          setSpeaking(false);
+          if (mode !== "hold" || !current()) return;
+          if (said) void send(said, true);
+          else setVoice((v) => ({ ...v, note: v.note ?? "Didn't catch that. Try again, a little closer to the mic." }));
+        },
+      });
+    } catch (e) {
+      if (!mine()) return;
+      live.current = null;
+      const err = e as LiveVoiceError;
+      if (err.kind === "fallback" && mode === "hold" && VoiceRecorder.supported()) { await startRecording(); return; }
+      idle(err.kind === "fallback" ? "Live voice is unavailable right now." : err.message);
+      return;
+    }
+    if (!mine()) { session.cancel(); return; }
+    setVoice({ state: "listening", since: Date.now(), level: 0, latched: press.current.release === "latch" });
+    if (press.current.release === "send") finishVoice();  // let go while it was connecting
+  }
+
+  function finishVoice() {
+    if (live.current) {
+      live.current.finish();
+      setVoice((v) => ({ ...v, state: "finishing", level: 0 }));
+    } else if (recorder.current) {
+      void stopRecording();
+    }
+  }
+
+  // The mic button: hold to talk, a quick tap to keep it open, the next press to send. Hands-free: a press opens or
+  // closes the mic.
+  function micDown() {
+    if (voice.state === "connecting") {  // a second press while it connects: send as soon as it is ready
+      press.current = { at: 0, release: "send" };
+      return;
+    }
+    if (voice.state === "listening") {  // latched or hands-free: this press ends it
+      press.current = { at: 0, release: "none" };
+      finishVoice();
+      return;
+    }
+    if (voice.state !== "idle" || !ready || (busy && !handsFree)) return;
+    press.current = { at: Date.now(), release: "none" };
+    if (handsFree) { press.current.release = "latch"; void startVoice("hands_free"); return; }
+    void startVoice("hold");
+  }
+
+  function micUp() {
+    if (!press.current.at || handsFree) return;
+    const quick = Date.now() - press.current.at < 300;
+    press.current = { at: 0, release: quick ? "latch" : "send" };
+    if (quick) setVoice((v) => ({ ...v, latched: true }));
+    else if (voice.state === "listening") finishVoice();
+  }
+
+  // The upload path, when the live socket can't open.
+  async function startRecording() {
     const r = new VoiceRecorder();
     const current = owner.capture();
     try {
       await r.start((level) => setVoice((v) => (v.state === "listening" ? { ...v, level } : v)));
     } catch (e) {
       if (!mounted.current || !current()) return;
-      const denied = (e as Error).name === "NotAllowedError";
-      setVoice({ state: "idle", since: 0, level: 0, note: denied ? "Microphone access was blocked. Allow it in the browser to talk to ORCA."
-        : "No microphone found." });
+      idle((e as LiveVoiceError).message);
       return;
     }
     if (!mounted.current || !current()) { r.cancel(); return; }
     recorder.current = r;
-    setVoice({ state: "listening", since: Date.now(), level: 0 });
+    setVoice({ state: "listening", since: Date.now(), level: 0, latched: true });
   }
 
-  async function stopListening() {
+  async function stopRecording() {
     const r = recorder.current;
     if (!r) return;
     recorder.current = null;
@@ -133,13 +244,12 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
     try {
       const { transcript } = await api.transcribe(await r.stop(), reportId);
       if (!mounted.current) return;
-      if (!current()) { setVoice({ state: "idle", since: 0, level: 0 }); return; }
-      setVoice({ state: "idle", since: 0, level: 0, note: transcript ? undefined : "Didn't catch that. Try again, a little closer to the mic." });
+      if (!current()) { idle(); return; }
+      idle(transcript ? undefined : "Didn't catch that. Try again, a little closer to the mic.");
       if (transcript) await send(transcript, true);
     } catch (e) {
       if (!mounted.current) return;
-      if (!current()) { setVoice({ state: "idle", since: 0, level: 0 }); return; }
-      setVoice({ state: "idle", since: 0, level: 0, note: (e as Error).message });
+      idle(current() ? (e as Error).message : undefined);
     }
   }
 
@@ -218,22 +328,46 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
         ))}
         <div ref={end} />
       </div>
-      <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
-        <textarea value={draft} rows={2} placeholder={ready ? "Ask about the clashes…" : "Open the models first"}
-          disabled={!ready} onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft); } }} aria-label="Message" />
-        <button className="btn primary" data-tour="chat-send" disabled={!ready || busy || !draft.trim()}>{busy ? "…" : "Send"}</button>
-        {VoiceRecorder.supported() && (voice.state === "listening"
-          ? <button type="button" className="btn mic on" onClick={() => void stopListening()} aria-label="Stop and send"
-              data-tip="Stop and send" data-tip-side="top" style={{ "--level": voice.level } as React.CSSProperties}>
-              <Square size={13} aria-hidden /> {Math.floor((Date.now() - voice.since) / 1000)} s</button>
-          : <button type="button" className="btn mic" onClick={() => void startListening()} disabled={!ready || busy || voice.state === "transcribing"}
-              aria-label="Speak to ORCA" data-tip="Speak to ORCA (Muse Voice Transcribe)" data-tip-side="top">
-              {voice.state === "transcribing" ? <i className="spinner" aria-hidden /> : <Mic size={15} aria-hidden />}</button>)}
-      </form>
-      {voice.state === "listening" && <p className="voice-note live"><i className="rec" aria-hidden /> Listening… say what you want, then press stop.</p>}
+      {/* The voice status sits above the input so the mic stays where the finger is. */}
+      {voice.state === "connecting" && <p className="voice-note live"><i className="rec" aria-hidden /> Connecting to Muse Voice Transcribe… start talking.</p>}
+      {voice.state === "listening" && <p className="voice-note live"><i className="rec" aria-hidden /> {
+        recorder.current ? "Recording… press the mic again to send."
+          : handsFree ? "Hands-free: talk, and each sentence goes when you pause. Press the mic to stop."
+            : voice.latched ? "Listening… press the mic again to send." : "Listening… let go to send."}</p>}
+      {voice.state === "finishing" && <p className="voice-note"><i className="spinner" aria-hidden /> Getting your last words…</p>}
       {voice.state === "transcribing" && <p className="voice-note">Turning your words into text…</p>}
-      {voice.state === "idle" && voice.note && <p className="voice-note bad">{voice.note}</p>}
+      {queue.length > 0 && <p className="voice-note">Next: “{queue[0]}”{queue.length > 1 ? ` and ${queue.length - 1} more` : ""}</p>}
+      {voice.note && <p className={`voice-note${voice.state === "idle" ? " bad" : ""}`}>{voice.note}</p>}
+      <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
+        <textarea value={voiceOn && voice.state !== "transcribing" ? caption : draft} rows={2}
+          className={voiceOn && voice.state !== "transcribing" ? "live" : undefined} readOnly={voiceOn}
+          placeholder={!ready ? "Open the models first" : voice.state === "connecting" ? "Connecting… start talking"
+            : voiceOn ? "Listening…" : "Ask about the clashes…"}
+          disabled={!ready} onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!voiceOn) send(draft); } }} aria-label="Message" />
+        <button className="btn primary" data-tour="chat-send" disabled={!ready || busy || voiceOn || !draft.trim()}>{busy ? "…" : "Send"}</button>
+        {(LiveVoice.supported() || VoiceRecorder.supported()) && <>
+          <button type="button" className={`btn mic${voice.state === "listening" ? " on" : ""}${speaking ? " speaking" : ""}`}
+            disabled={voice.state === "finishing" || voice.state === "transcribing" || (!voiceOn && (!ready || (busy && !handsFree)))}
+            onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); micDown(); }}
+            onPointerUp={() => micUp()} onPointerCancel={() => micUp()} onContextMenu={(e) => e.preventDefault()}
+            onKeyDown={(e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); micDown(); } }}
+            onKeyUp={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); micUp(); } }}
+            aria-pressed={voiceOn} data-tip-side="top" style={{ "--level": voice.level } as React.CSSProperties}
+            aria-label={voiceOn ? (handsFree ? "Stop listening" : "Stop and send") : handsFree ? "Start hands-free" : "Hold to talk to ORCA"}
+            data-tip={voiceOn ? (handsFree ? "Stop listening" : "Release, or press again, to send")
+              : handsFree ? "Press once, then just talk: each sentence goes when you pause (Muse Voice Transcribe, live)"
+                : "Hold to talk, release to send (Muse Voice Transcribe, live). A quick tap keeps the mic open."}>
+            {voice.state === "listening" ? <><Square size={13} aria-hidden /> {Math.floor((Date.now() - voice.since) / 1000)} s</>
+              : voiceOn ? <i className="spinner" aria-hidden /> : <Mic size={15} aria-hidden />}</button>
+          {LiveVoice.supported() && (
+            <button type="button" className={`btn mic-mode${handsFree ? " on" : ""}`} aria-pressed={handsFree} disabled={voiceOn}
+              onClick={toggleHandsFree} aria-label="Hands-free" data-tip-side="top"
+              data-tip={handsFree ? "Hands-free is on: press the mic once, then just talk. Press here to go back to hold to talk."
+                : "Hands-free: keep the mic open and send each sentence when you pause"}>
+              <AudioLines size={15} aria-hidden /></button>)}
+        </>}
+      </form>
     </div>
   );
 }

@@ -114,8 +114,8 @@ async function chatHost(owner, pageEvents) {
   globalThis.__sightlineTestApi = { chat: (body, callback, signal) => new Promise((resolve) => requests.push({ body, callback, signal, resolve })) };
   const mockReact = moduleUrl("export const useState=(...a)=>globalThis.__sightlineHooks.useState(...a), useRef=(...a)=>globalThis.__sightlineHooks.useRef(...a), useEffect=(...a)=>globalThis.__sightlineHooks.useEffect(...a);");
   const mockApi = moduleUrl("export const api={chat:(...a)=>globalThis.__sightlineTestApi.chat(...a)};");
-  const mockVoice = moduleUrl("export const MAX_SECONDS=60; export class VoiceRecorder {static supported(){return false;}}");
-  const mockIcons = moduleUrl("export const Mic=()=>null, Square=()=>null;");
+  const mockVoice = moduleUrl("export const MAX_SECONDS=60; export class VoiceRecorder {static supported(){return false;}} export class LiveVoice {static supported(){return false;}}");
+  const mockIcons = moduleUrl("export const AudioLines=()=>null, Mic=()=>null, Square=()=>null;");
   const input = await readFile(new URL("../src/Chat.tsx", import.meta.url), "utf8");
   let { outputText } = ts.transpileModule(input, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX } });
   for (const [name, url] of Object.entries({ react: mockReact, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
