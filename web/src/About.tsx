@@ -256,26 +256,44 @@ function Step({ n, icon, title, children }: { n: number; icon: ReactNode; title:
  * running through the solid web, then raised through the opening with square risers, as ORCA's offset does. */
 /** A session this browser had open, which the server still holds: reopen it (models, clashes, fixes, agent link). */
 export interface Resume {
-  files: string[]; clashes: number | null; fixed: number; agent: boolean; savedAt: number;
+  files: string[]; clashes: number | null; fixed: number; agent: boolean; agentLeft?: string | null; savedAt: number;
   onResume: () => void; onFresh: () => void;
+}
+
+/** The project a set of model files belongs to: their shared prefix ("Northbank-MEP", "Northbank-Site" → "Northbank"),
+ * else the first file and how many more. */
+export function projectName(files: string[]): string {
+  const names = files.map((f) => f.replace(/\.(ifc|step|stp)$/i, ""));
+  if (names.length <= 1) return names[0] ?? "Your models";
+  let prefix = names[0];
+  for (const n of names.slice(1)) while (!n.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  const cut = prefix.match(/^(.*[A-Za-z0-9])[\s_.-]/)?.[1] ?? (names.every((n) => n === prefix) ? prefix : "");
+  return cut.length >= 3 ? cut : `${names[0]} + ${names.length - 1} more`;
 }
 
 function ResumeCard({ r, disabled }: { r: Resume; disabled: boolean }) {
   const mins = Math.max(1, Math.round((Date.now() / 1000 - r.savedAt) / 60));
   const when = mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} h ago` : "yesterday";
   return (
-    <section className="resume-card" aria-label="Your last session">
-      <div>
-        <p className="eyebrow">Pick up where you left off · {when}</p>
-        <h2>{r.files.map((f) => f.replace(/\.(ifc|step|stp)$/i, "")).join(", ")}</h2>
-        <p className="hint">{[r.clashes != null ? `${r.clashes} clashes` : null, r.fixed ? `${r.fixed} fixed` : null,
-          r.agent ? "agent connected" : null].filter(Boolean).join(" · ")}</p>
+    <div className="resume-card" role="region" aria-label="Your last session">
+      <span className="resume-icon" aria-hidden><RotateCcw size={18} /></span>
+      <div className="resume-text">
+        <p className="eyebrow">Pick up where you left off</p>
+        <h2 data-tip={r.files.join(", ")} data-tip-side="bottom">{projectName(r.files)}</h2>
+        <div className="resume-meta">
+          <span className="chip">{r.files.length} model{r.files.length === 1 ? "" : "s"}</span>
+          {r.clashes != null && <span className="chip">{r.clashes} clashes</span>}
+          {r.fixed > 0 && <span className="chip ok">{r.fixed} fixed</span>}
+          {r.agent && <span className="chip ok">Agent connected{r.agentLeft ? ` · ${r.agentLeft} left` : ""}</span>}
+          <span className="hint">{when}</span>
+        </div>
       </div>
-      <div className="demo-actions">
-        <button className="btn primary big" disabled={disabled} onClick={r.onResume}><RotateCcw size={16} aria-hidden /> Resume</button>
-        <button className="btn big" onClick={r.onFresh}>Start fresh</button>
+      <div className="resume-actions">
+        <button className="btn primary big" disabled={disabled} onClick={r.onResume}>Resume</button>
+        <button className="btn ghost big" onClick={r.onFresh}
+          data-tip={r.agent ? "Forget this session here and end its agent link" : "Forget this session here"}>Start fresh</button>
       </div>
-    </section>
+    </div>
   );
 }
 

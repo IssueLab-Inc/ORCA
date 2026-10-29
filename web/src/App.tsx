@@ -1360,7 +1360,9 @@ export function App() {
         const r = s.report_id ? await api.report(s.report_id).catch(() => null) : null;
         // The link, if it still lives, and the fixes its agent applied while no page was open.
         const state = s.link ? await api.linkState(s.link.token).catch(() => null) : null;
-        setResumable({ saved: { ...s, link: state ? s.link : null, fixes: { ...s.fixes, ...(state?.applied ?? {}) } },
+        const link = state && s.link ? { ...s.link, expires_at: state.expires_at, max_expires_at: state.max_expires_at,
+                                         clock_offset: state.server_time - Date.now() / 1000 } : null;
+        setResumable({ saved: { ...s, link, fixes: { ...s.fixes, ...(state?.applied ?? {}) } },
                        info, clashes: r ? r.clashes.length : null });
       } catch { try { localStorage.removeItem(SESSION_KEY); } catch { /* private window */ } }
     })();
@@ -1393,7 +1395,10 @@ export function App() {
     }
     if (saved.link) setAgentLinkState(saved.link);
   }
+  /** Forget the saved session here, and end its agent link: nothing would follow it any more. */
   function startFresh() {
+    const link = resumable?.saved.link;
+    if (link) void api.revokeLink(link.token).catch(() => undefined);
     try { localStorage.removeItem(SESSION_KEY); } catch { /* private window */ }
     setResumable(null);
   }
@@ -1694,7 +1699,7 @@ export function App() {
             onTour: () => startTour("northbank"),
             onCellTour: cellSample ? () => startTour("cell") : undefined,
             resume: resumable ? { files: resumable.info.files, clashes: resumable.clashes, fixed: Object.keys(resumable.saved.fixes ?? {}).length,
-              agent: !!resumable.saved.link, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,
+              agent: !!resumable.saved.link, agentLeft: resumable.saved.link ? timeLeft(resumable.saved.link, now) : null, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,
             details: <>
               Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
               checks them, in about 25 seconds. Other models: <b>Models</b>, in the header.
