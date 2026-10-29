@@ -71,3 +71,17 @@ test("this browser keeps the file and whether it is in use", () => {
   store.set("sightline.requirements", "{broken");
   assert.equal(req.load(storage), null);
 });
+
+test("a group's rule for openings is set, cleared, and added from an opening's host reading", () => {
+  let d = req.setPenetration(doc(), "structure", { rule: "never" });
+  assert.deepEqual(d.penetrations, [{ group: "structure", rule: "never", max_mm: null, reviewer: null, reason: "", source: "user" }]);
+  d = req.setPenetration(d, "structure", { rule: "review", max_mm: 150 });
+  assert.equal(d.penetrations[0].max_mm, 150);
+  assert.equal(req.setPenetration(d, "structure", null).penetrations.length, 0);   // Muse decides again
+  const edit = { host_group: "structure", verdict: "with_review", host_reading: "allowed with review, reviewed by structure" };
+  const added = req.addPenetration(doc(), edit, "structure");
+  assert.deepEqual(added.penetrations, [{ group: "structure", rule: "review", max_mm: null, reviewer: "structure",
+    reason: "allowed with review, reviewed by structure", source: "orca" }]);
+  assert.ok(req.hasPenetration(added, "structure") && !req.hasPenetration(added, "mep"));
+  assert.equal(req.addPenetration(doc(), { ...edit, host_group: "nowhere" }, null).penetrations, undefined);  // no such group
+});

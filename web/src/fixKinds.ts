@@ -51,6 +51,19 @@ export function framePieces<M>(o: { kind: string; preview: M[] | null }): M[] {
   return [];
 }
 
+/** An opening's host, for the option card: what may be done to it (ORCA's reading of that kind of host, or the
+ * requirements) and the hole against its limits. */
+export function hostRows(o: Pick<Option, "kind" | "edit">): [string, string][] {
+  if (o.kind !== "penetration" || !o.edit) return [];
+  const out: [string, string][] = [];
+  const { host_reading: reading, numbers, reading_source: source } = o.edit;
+  if (typeof reading === "string" && reading) {
+    out.push(["Host", reading + (source === "requirements" ? " (requirements)" : source === "muse" ? " (Muse Spark's reading)" : "")]);
+  }
+  if (Array.isArray(numbers) && numbers.length) out.push(["Hole", numbers.join("; ")]);
+  return out;
+}
+
 function offsetParts(pieces: number) {
   return pieces > 5 ? `4 bends${pieces === 9 ? " and 2 short risers" : ""}` : "square corners";
 }

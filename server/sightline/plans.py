@@ -87,7 +87,7 @@ def _in_trial_route(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[
 
 def _in_trial_penetration(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
     service, host = o["edit"]["service"], o["edit"]["host"]
-    pen = edits.penetration(scene, service, host, o["edit"].get("clearance_m", 0.025))
+    pen = edits.penetration(scene, service, host, o["edit"].get("clearance_m", 0.025), o["edit"].get("fit", "annular"))
     edits.apply_penetration(scene, pen, cut=True)
     return [service], {service}, None   # the host is not its own: the service is checked against it
 
@@ -145,10 +145,11 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                 else:
                     v = verify.check(scene, check_ids, clearance_m=clearance_m, ignore=ignore)
                     hits = v.hits
-                if it.key in before:  # it keeps the contacts it had; a trim may butt its partner, a service must clear
+                if it.key in before:  # it keeps the contacts it had; a trim may butt its partner (and a service its
+                    # fitted gland); a service through an annular opening must clear
                     mine = KEEPS_CONTACTS[it.option["kind"]](it.option)[0]
                     partner = it.element_b if mine == it.element_a else it.element_a
-                    touch = it.option["kind"] == "trim"
+                    touch = it.option["kind"] == "trim" or (it.option.get("edit") or {}).get("fit") == "fitted"
                     was = before[it.key]
                     hits = [h for h in hits if ((h.distance_m < -0.002 or not touch) if h.other == partner
                                                 else h.other not in was or h.distance_m < was[h.other] - 0.002)]
@@ -281,6 +282,7 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
                 if e["type"] == "attempt":
                     emit({"type": "item", "key": it.key, "status": "checking", "attempt": e["title"], "passed": e["passed"]})
             result = agent.resolve(ws.scene(scene_id), clash, ws.model, on_event=progress, lock=ws.lock, max_rounds=2,
+                                   hosts_model=ws.hosts_model,
                                    **ws.fix_settings(scene_id, it.element_a, it.element_b))
             it.understanding = result.understanding
             it.tried = len(result.attempts)

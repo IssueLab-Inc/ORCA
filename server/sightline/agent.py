@@ -11,10 +11,9 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Callable
 
-import ifcopenshell.util.element
 import numpy as np
 
-from . import edits, requirements, verify
+from . import edits, hosts, requirements, verify
 from .meta_client import ChatModel
 from .scene import IfcScene
 
@@ -105,18 +104,49 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
     return "\n".join(lines)
 
 
+def is_service(scene: IfcScene, gid: str) -> bool:
+    """A duct, pipe, cable carrier or other distribution element: what a penetration lets through."""
+    return scene.entity(gid).is_a("IfcDistributionElement")
+
+
+def penetration_pairs(scene: IfcScene, clash: Clash) -> list[tuple[str, str, str, str]]:
+    """(service label, service, host label, host) where a straight service crosses the other element through its
+    depth: where a penetration could go, whatever may be done to that host."""
+    out = []
+    for label, gid, host_label, host in (("A", clash.element_a, "B", clash.element_b), ("B", clash.element_b, "A", clash.element_a)):
+        try:
+            if is_service(scene, gid) and not is_service(scene, host):
+                edits.penetration(scene, gid, host)
+                out.append((label, gid, host_label, host))
+        except (edits.Unsupported, KeyError, RuntimeError):
+            continue
+    return out
+
+
 def _penetration_text(scene: IfcScene, label: str, gid: str, host: str, host_label: str, clearance_m: float) -> list[str]:
-    """When element `label` is a straight service crossing a wall or slab, the opening a penetration would ask for."""
+    """When element `label` is a straight service crossing the other element, what an opening there would be, and
+    what may be done to that host (`hosts.decide`)."""
     try:
-        pen = edits.penetration(scene, gid, host, clearance_m)
+        if not is_service(scene, gid) or is_service(scene, host):
+            return []
+        reading = hosts.decide(scene, host, requirements.current())
+        pen = edits.penetration(scene, gid, host, clearance_m, reading.fit)
     except (edits.Unsupported, KeyError, RuntimeError):
         return []
-    review, needs = penetration_review(scene, host)
-    who = {"structure": "a structural engineer reviews it", "architecture": "the architect reviews it"}[review]
-    lines = [f"Element {label} crosses element {host_label} ({scene.element(host).ifc_class}) through its full depth "
-             f"({pen.depth_m - 2 * edits.OPENING_PROUD_M:.2f} m). A \"penetration\" (move: \"{label}\") asks for a "
-             f"{edits.size_text(pen)} opening ({clearance_m * 1000:.0f} mm clear all round): {host_label}'s team cuts it, "
-             f"{who}" + (f", and it needs {needs}" if needs else "") + "."]
+    what = f"{scene.element(host).ifc_class} '{scene.element(host).name}'"
+    if reading.refuses:
+        return [f"Element {label} crosses element {host_label} ({what}) through its depth, but {host_label} may not take an "
+                f"opening ({reading.verdict.replace('_', ' ')}: {reading.reasoning or hosts.reading_text(reading)}). "
+                f"Do not propose a penetration of {host_label}."]
+    problems, numbers = hosts.check_hole(scene, pen, reading)
+    fit = ("a fitted gland, 1 mm round it" if pen.fit == "fitted" else f"{clearance_m * 1000:.0f} mm clear all round")
+    lines = [f"Element {label} crosses element {host_label} ({what}) through its full depth "
+             f"({pen.depth_m - 2 * edits.OPENING_PROUD_M:.3f} m). A \"penetration\" (move: \"{label}\") asks for a "
+             f"{edits.size_text(pen)} opening ({fit}): {host_label}'s team cuts it. Reading of this kind of host: "
+             f"{hosts.reading_text(reading)}."]
+    if problems:
+        lines.append(f"Here the opening breaks its limits: {'; '.join(problems)}. Do not propose a penetration of "
+                     f"{host_label} at this point.")
     run = edits.run_of(scene, gid)
     along = float(np.asarray(pen.start) @ np.asarray(run.direction) - np.asarray(run.start) @ np.asarray(run.direction))
     if along > 0 and along + pen.depth_m < run.length_m:   # it runs out of both faces: it serves something beyond
@@ -277,14 +307,17 @@ def _feedback(attempts: list[Attempt]) -> str:
 TIERS = {"resize": 1, "penetration": 2}
 
 
-def tier(kind: str | None) -> int:
-    return TIERS.get(kind or "move", 0)
+def tier(kind: str | None, edit: dict | None = None) -> float:
+    """How an option ranks by kind; an opening in anything but a wall or slab (a beam's web, a plate) after one in a
+    wall or slab."""
+    return TIERS.get(kind or "move", 0) + (0.5 if kind == "penetration" and edit and not edit.get("plain_host", True) else 0)
 
 
 def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = "construction",
             max_rounds: int = 3, want: int = 3, clearance_m: float = 0.025,
             on_event: Callable[[dict], None] | None = None, lock=None, trials: bool = False,
-            policy: dict | None = None, guidance: str = "", recommend: str | None = None, doc=None) -> Result:
+            policy: dict | None = None, guidance: str = "", recommend: str | None = None, doc=None,
+            hosts_model: ChatModel | None = None) -> Result:
     """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
@@ -301,6 +334,9 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     candidate they forbid before it is tried, as a failed attempt Muse is told about; `guidance` is added to the
     system prompt; each verified option says what it `meets` of `doc`; with `recommend` (why nothing may be edited),
     Muse Spark is still asked, once, and its best idea comes back as a recommendation, never tried or applied.
+
+    `hosts_model` (the triage model) reads, once per kind, what may be done to a host a service crosses
+    (`hosts.read`) before the first round, so Muse is told whether an opening there is possible.
     """
     lock = lock or contextlib.nullcontext()
     system = (PACKS / f"{pack}.md").read_text() + guidance
@@ -320,6 +356,15 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     for round_no in range(1, max_rounds + 1):
         emit({"type": "thinking", "round": round_no})
         started = time.perf_counter()
+        if round_no == 1 and hosts_model is not None:   # what may be done to a host the service crosses, once per kind
+            with lock:
+                profiles = [hosts.profile(base, host) for *_, host in penetration_pairs(base, clash)
+                            if not hosts.hard_rule(base, host)]
+            if profiles:
+                try:
+                    hosts.read(hosts_model, profiles)
+                except Exception as e:   # a reading that fails leaves the defaults: walls and slabs only
+                    emit({"type": "note", "text": f"Could not read the host: {e}"})
         with lock:
             text = _describe(base, clash, clearance_m) + _feedback(attempts)
         if trials and on_event and getattr(model, "streams_reasoning", False):  # someone is watching: show the thinking
@@ -366,7 +411,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     # UI shows both numbers.
     def comfortable(o: Option) -> bool:
         return o.min_clearance_m is None or o.min_clearance_m >= 2 * clearance_m - 1e-6
-    options.sort(key=lambda o: (tier(o.kind), not comfortable(o), sum(abs(d) for d in o.delta_m),
+    options.sort(key=lambda o: (tier(o.kind, o.edit), not comfortable(o), sum(abs(d) for d in o.delta_m),
                                 -(o.min_clearance_m or 1.0)))
     options = options[:want]
     for o in options:  # what each option changes, as it is now, so the UI can show before and after together
@@ -628,41 +673,52 @@ def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m
 
 
 def penetration_sides(scene: IfcScene, target: str, other: str) -> tuple[str, str]:
-    """(service, host) of a penetration: Muse names the service as the element that "moves" (its team asks), but a
-    wall or slab named instead is taken as the host."""
-    host_like = lambda g: any(scene.entity(g).is_a(c) for c in edits.PENETRABLE)
-    if host_like(target) and not host_like(other):
+    """(service, host) of a penetration: Muse names the service as the element that "moves" (its team asks); when it
+    names the host instead (the one that is not a service), the two are swapped."""
+    if not is_service(scene, target) and is_service(scene, other):
         return other, target
     return target, other
 
 
-def penetration_review(scene: IfcScene, host: str) -> tuple[str, str]:
-    """Who must review an opening in `host` before it is built, and what else it needs: structure for a slab or a
-    load-bearing wall, else architecture; fire-stopping when the host has a fire rating."""
-    e = scene.entity(host)
-    props = ifcopenshell.util.element.get_psets(e)
-    common = props.get("Pset_SlabCommon" if e.is_a("IfcSlab") else "Pset_WallCommon", {})
-    review = "structure" if e.is_a("IfcSlab") or common.get("LoadBearing") else "architecture"
-    rating = common.get("FireRating")
-    return review, (f"fire-stopping to the host's {rating} rating" if rating else "")
+def _group_of(scene: IfcScene, gid: str) -> str | None:
+    doc = requirements.current() or requirements.default_doc(scene)
+    g = requirements.Matcher(scene, doc).group_of(gid)
+    return g.id if g else None
 
 
 def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                      on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
-    """Ask for an opening through a wall or slab (edits.penetration): cut it in a trial (provision for void in the
-    service's model, the opening in the host's), check the service clears the host by the clearance and hits nothing
-    new, undo. Kept, the host is cut only when the requirements allow its team's model to be edited (`plans.KEEP`)."""
+    """Ask for an opening through the host (edits.penetration) where `hosts.decide` allows one: cut it in a trial
+    (provision for void in the service's model, the opening in the host's), check the hole against the host's limits
+    (`hosts.check_hole`) and the service against the host (clear by the clearance, or touching a fitted gland) and
+    everything else (nothing new), undo. Kept, the host is cut only when the requirements allow its team's model to
+    be edited (`plans.KEEP`)."""
     title = cand.get("title", "request a penetration")
     zero = [0.0, 0.0, 0.0]
     try:
         service, host = penetration_sides(scene, target, other)
-        pen = edits.penetration(scene, service, host, clearance_m)
+        if not is_service(scene, service):
+            raise edits.Unsupported("an opening is for a service (a duct, pipe or cable carrier) to pass through")
+        reading = hosts.decide(scene, host, requirements.current())
+        if reading.refuses:
+            raise edits.Unsupported(f"{scene.element(host).name} {reading.verdict.replace('_', ' ')}: "
+                                    f"{reading.reasoning or hosts.reading_text(reading)}")
+        pen = edits.penetration(scene, service, host, clearance_m, reading.fit)
+        problems, numbers = hosts.check_hole(scene, pen, reading)
+        if problems:
+            raise edits.Unsupported("; ".join(problems))
     except (edits.Unsupported, KeyError) as e:
         return Attempt(title, zero, False, f"cannot request an opening here: {e}", "penetration"), None
     h = scene.element(host)
     summary = f"{edits.size_text(pen)} opening through {h.ifc_class[3:]} '{h.name}'"
     edit = {"service": service, "host": host, "shape": pen.shape, "width_m": pen.width_m, "height_m": pen.height_m,
-            "depth_m": pen.depth_m, "clearance_m": clearance_m, "summary": summary, "key": f"{host}|{edits.size_text(pen)}"}
+            "depth_m": pen.depth_m, "clearance_m": clearance_m, "fit": pen.fit, "summary": summary,
+            "key": f"{host}|{edits.size_text(pen)}", "host_reading": hosts.reading_text(reading),
+            "reading_source": reading.source, "verdict": reading.verdict, "numbers": numbers,
+            "plain_host": any(scene.entity(host).is_a(c) for c in edits.PENETRABLE),
+            # The host's group under the requirements in use, or those the page would start from the models: "Add to
+            # requirements" turns the reading into a rule for it.
+            "host_group": _group_of(scene, host)}
     ignore = set(scene.element(service).connected)
     before = {x.other: x.distance_m for x in verify.check(scene, [service], clearance_m=clearance_m, ignore=ignore).hits}
     files = {scene.index_of(service), scene.index_of(host)}
@@ -672,16 +728,20 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
         if on_trial:
             on_trial({"kind": "penetration", "moved": [host], "delta_m": zero, "pieces": shape, "summary": summary})
         v = verify.check(scene, [service], clearance_m=clearance_m, ignore=ignore)
-    # The service stays where it is: what it touched before (a valve beside it) is not this fix's; the host must clear.
-    hits = [x for x in v.hits if x.other == host or x.other not in before or x.distance_m < before[x.other] - 0.002]
+    # The service stays where it is: what it touched before (a valve beside it) is not this fix's. The host must clear
+    # by the clearance, or, through a fitted gland, touch at most.
+    def counts(x) -> bool:
+        if x.other == host:
+            return pen.fit != "fitted" or x.distance_m < -0.001
+        return x.other not in before or x.distance_m < before[x.other] - 0.002
+    hits = [x for x in v.hits if counts(x)]
     attempt = Attempt(title, zero, not hits, _reason(hits), "penetration", None, _hit_ids(hits), edit=edit, where=_where(hits))
     if hits:
         return attempt, None
-    review, needs = penetration_review(scene, host)
-    also = "; ".join(x for x in (cand.get("also_needs", ""), needs) if x)
+    also = "; ".join(x for x in (cand.get("also_needs", ""), *reading.conditions) if x)
     # Its clearance is the opening's gap round the service (what it was sized for), not a contact the service already had.
     return attempt, Option(title, [host], zero, cand.get("rationale", ""), also, pen.gap_m, {}, "penetration",
-                           None, shape, checked_against=v.checked_against, edit=edit, review=review)
+                           None, shape, checked_against=v.checked_against, edit=edit, review=reading.reviewer)
 
 
 def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,

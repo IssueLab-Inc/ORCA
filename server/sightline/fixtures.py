@@ -433,6 +433,10 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
     - pipe P3 (DN100, PN-5) along Y at x 4.15, z 1.0, y 6-8: through column C1 (refused);
     - pipe P4 (DN100, PN-6) along X at y 2, z 3.33, x 0-4: through W1 at its top (the opening would break out).
     - pipe P5 (DN50, PN-7) along X at y 1, z 1.0, x 5-7: through load-bearing W2.
+    Beyond the slab: transfer beam B2 (x 10.0-10.3, y 0-4, z 2.8-3.4) with column C2 standing on it (y 1.85-2.15,
+    z 3.4-6.4), and pipe P6 (DN100, PN-8) along X at y 3, z 3.1, x 9.5-11 through it; a 3 mm gland plate GP1 (x 12-12.6,
+    y 0-0.4, z 1.997-2.0) with a 32 mm conduit (PN-9) down through it at (12.3, 0.2), z 1.9-2.6; a glazing unit (x 14-14.02,
+    y -1 to 1, z 0-2.5) with pipe P7 (DN50, PN-10) along X at y 0, z 1.0, x 13.5-14.5 through it.
     """
     folder.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -497,6 +501,10 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
             block("IfcSlab", "Slab S1", -1.0, 9.0, -4.0, 8.0, 3.4, 3.6)
             block("IfcBeam", "Beam B1", 3.0, 3.3, 5.0, 7.0, 2.8, 3.4)
             block("IfcColumn", "Column C1", 4.0, 4.3, 6.85, 7.15, 0.0, 3.4)
+            block("IfcBeam", "Transfer beam B2", 10.0, 10.3, 0.0, 4.0, 2.8, 3.4)
+            block("IfcColumn", "Column C2 on B2", 10.0, 10.3, 1.85, 2.15, 3.4, 6.4)
+            block("IfcPlate", "Gland plate GP1", 12.0, 12.6, 0.0, 0.4, 1.997, 2.0)
+            block("IfcPlate", "Vision glazing unit G1", 14.0, 14.02, -1.0, 1.0, 0.0, 2.5)
         else:
             segment("IfcPipeSegment", "Heating flow DN100", "PN-1", (0, 0, 2.0), (4, 0, 2.0), pipe(0.055))
             segment("IfcDuctSegment", "Supply duct 400x300", "PN-2", (0, -2, 1.5), (4, -2, 1.5),
@@ -506,6 +514,9 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
             segment("IfcPipeSegment", "Pipe through column DN100", "PN-5", (4.15, 6, 1.0), (4.15, 8, 1.0), pipe(0.055))
             segment("IfcPipeSegment", "Pipe at wall head DN100", "PN-6", (0, 2, 3.33), (4, 2, 3.33), pipe(0.055))
             segment("IfcPipeSegment", "Cold water DN50", "PN-7", (5, 1, 1.0), (7, 1, 1.0), pipe(0.03))
+            segment("IfcPipeSegment", "Pipe through transfer beam DN100", "PN-8", (9.5, 3, 3.1), (11, 3, 3.1), pipe(0.055))
+            segment("IfcCableCarrierSegment", "Feed conduit 32", "PN-9", (12.3, 0.2, 2.6), (12.3, 0.2, 1.9), pipe(0.016))
+            segment("IfcPipeSegment", "Pipe through glazing DN50", "PN-10", (13.5, 0, 1.0), (14.5, 0, 1.0), pipe(0.03))
         path = folder / f"pen-{name}.ifc"
         model.write(str(path))
         paths.append(path)

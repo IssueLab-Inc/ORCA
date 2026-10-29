@@ -1,7 +1,7 @@
 """The PC-03 palletising cell opened from STEP: conversion, detection, a move fix, and the STEP written back.
 
 The demo-models repo's `palletising-cell/` writes the same cell as STEP and IFC from one parts list, with an answer key
-(`verify_cell.PLANTED`: seven planted problems, 16 part pairs in Rev A, none in Rev B; `BY_DESIGN`: contacts the cell is
+(`verify_cell.PLANTED`: eight planted problems, 17 part pairs in Rev A, none in Rev B; `BY_DESIGN`: contacts the cell is
 built with). This opens the STEP files the way the app does (`Workspace.open`: convert, name the parts' classes with
 the titles' model, triangulate), then checks:
 - every part converted, names unique, and the classes the model picked against the parts list's own classes;
@@ -14,7 +14,9 @@ the titles' model, triangulate), then checks:
 - C7 (the plant's compressed-air main through the west wall): only an opening clears; a single proposal offers a
   penetration, and kept (no requirements) the opening is cut;
 - export writes the STEP again: the ladder 150 mm higher, the pipe's offset pieces added, the rail shorter, the west
-  wall cut and the provision for void added to the compressed-air group, see-through.
+  wall cut and the provision for void added to the compressed-air group, see-through;
+- C8 (the 400 V feed conduit through EP-301's top gland plate): Muse reads the gland plate (allowed, a fitted gland),
+  a single proposal offers the gland hole, kept and cut; the exported plate has the hole.
 
     cd server
     uv run python ../evals/step_cell.py --cell $DEMO_MODELS/palletising-cell \
@@ -197,6 +199,32 @@ def main():
                          f"{'clears' if c7_clear else 'still hits'} the wall."]
             ok &= c7_ok
 
+            # C8: the plant's 400 V feed drops into EP-301 through its top gland plate, which has no hole. Muse reads the
+            # gland plate (made to be drilled for cables, with a fitted gland) and the opening is a gland hole.
+            conduit, plate = gid_of["elec/c302"], gid_of["gland/ep301-top"]
+            c8_lines, c8_option = [], None
+            if model is not None:
+                rid8 = ws.detect(sid)["report"]["id"]
+                c8 = next(c for c in ws.report(rid8).clashes if {c.a.global_id, c.b.global_id} == {conduit, plate})
+                t8 = time.perf_counter()
+                r8 = ws.propose(sid, c8.a.global_id, c8.b.global_id, report_id=rid8, clash_id=c8.id)
+                c8_option = next((o for o in r8["options"] if o["kind"] == "penetration"), None)
+                c8_lines += [f"- Single proposal on #{c8.number}: {time.perf_counter() - t8:.0f} s, {len(r8['attempts'])} ideas "
+                             f"tried, options {[o['kind'] for o in r8['options']] or 'none'}."]
+                if c8_option:
+                    e8 = c8_option["edit"]
+                    c8_lines += [f"- {c8_option['title']}: {e8['summary']} ({e8['fit']}); host: {e8['host_reading']} "
+                                 f"({e8['reading_source']}); hole: {'; '.join(e8['numbers'])}; review: "
+                                 f"{c8_option['review'] or 'none'}; also needs: {c8_option['also_needs'] or 'nothing'}."]
+            kept8 = ws.apply_penetration(sid, conduit, plate)
+            c8_clear = not [h for h in verify.check(scene, [conduit], clearance_m=0.0).hits
+                            if h.other == plate and h.distance_m < -0.001]
+            c8_ok = kept8["cut"] and kept8["fit"] == "fitted" and c8_clear and (model is None or c8_option is not None)
+            c8_lines += [f"- Kept: a {kept8['width_m'] * 1000:.0f} mm {kept8['shape']} {kept8['fit']} hole, "
+                         f"{'cut' if kept8['cut'] else 'not cut'}; the conduit "
+                         f"{'clears' if c8_clear else 'still runs into'} the plate."]
+            ok &= c8_ok
+
             # C3: the fence top rail 40 mm into post SE: trimmed back to the post's face (both bars are exact).
             rail, post_se = gid_of["fence/rail/S5-SE"], gid_of["fence/post/SE"]
             trim = edits.butt_trim(scene, rail, post_se)
@@ -217,13 +245,21 @@ def main():
             wall_name = scene.entity(wall).Name
             cut_cm3 = round(volume(src[wall_name]) - volume(new[wall_name]), 0)
             provision = [p for p in step.parts(step_out)[0] if p.name.startswith("Provision for void")]
-            c7_step = cut_cm3 > 0 and len(provision) == 1 and provision[0].alpha < 0.5
+            c7_step = cut_cm3 > 0 and len(provision) == 2 and all(p.alpha < 0.5 for p in provision)
             c7_lines += [f"- Exported STEP: `{wall_name}` {cut_cm3:.0f} cm³ smaller (the opening cut), "
-                         f"{len(provision)} provision for void part"
-                         + (f" in {provision[0].group} (alpha {provision[0].alpha:.2f})" if provision else "") + "."]
+                         f"{len(provision)} provision for void parts (C7 and C8)"
+                         + (f" in {', '.join(sorted({p.group for p in provision}))} (alpha {provision[0].alpha:.2f})"
+                            if provision else "") + "."]
             c7_ok &= c7_step
             ok &= c7_step
             c7_lines = [f"## C7 penetration: {'pass' if c7_ok else 'FAIL'}", "", *c7_lines, ""]
+            plate_name = scene.entity(plate).Name
+            gland_cm3 = round(volume(src[plate_name]) - volume(new[plate_name]), 2)
+            c8_step = gland_cm3 > 0
+            c8_lines += [f"- Exported STEP: `{plate_name}` {gland_cm3} cm³ smaller (the gland hole)."]
+            c8_ok &= c8_step
+            ok &= c8_step
+            c8_lines = [f"## C8 gland hole: {'pass' if c8_ok else 'FAIL'}", "", *c8_lines, ""]
             fix_ok = set(names) <= moved and dz == [150.0] and not hits_post and shorter == 40.0 \
                 and (air_after > air_before if kinds[:1] == ["offset"] or c6_kind == "route" else True)
             ok &= fix_ok
@@ -236,7 +272,7 @@ def main():
                       f"higher; the compressed-air line {air_before} → {air_after} parts"
                       f"{' (the offset' + chr(39) + 's pieces)' if air_after > air_before else ''}; "
                       f"`{rail_name}` {shorter} mm shorter (C3 trim, at its {trim.end}).", "", *c1_lines, *c6_lines,
-                      *c7_lines]
+                      *c7_lines, *c8_lines]
     lines.insert(1, f"Result: {'pass' if ok else 'FAIL'}")
     (args.out / "README.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

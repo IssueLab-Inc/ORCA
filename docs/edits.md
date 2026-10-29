@@ -110,11 +110,10 @@ Services cross walls and floors all the time; what they need is an opening, and 
 penetration asks for one instead of moving the service.
 
 **When** (`edits.penetration`, `not_penetrable`): a straight service (an extruded segment, any direction, so a riser
-through a slab too) crosses an `IfcWall` or `IfcSlab` whose body is extrusions. Beams, columns, footings, piles,
-members, doors, windows and curtain walls are refused with the reason (slice 4b reads other hosts with Muse; the
-Northbank girder is never cut). So is a crossing that runs more than 1 m inside the host (along it, not through it),
-one the service doesn't reach or pass through, and an opening the host would not surround by 50 mm (a hole at its
-edge is a notch).
+through a slab too) crosses a host whose body is extrusions. Which hosts may take one is `hosts.decide`'s call (next
+section; on Oct 29 at first walls and slabs only). Refused by geometry: a crossing that runs more than 1 m inside the
+host (along it, not through it), one the service doesn't reach or pass through, and an opening the host would not
+surround by 50 mm (a hole at its edge is a notch).
 
 **The opening:** the service's section plus the clearance and 5 mm all round (tessellated circles, site tolerance),
 rounded up to 10 mm, round or rectangular like the service and square to it. Its depth comes from rays along the
@@ -166,8 +165,58 @@ west wall with no opening. Nothing goes round it; the opening is the fix (Rev B 
 system that pulls the main out of the wall (it verifies, and as a plain fix ranks first); once after the "keeps
 crossing" line was added. Geometry cannot tell that the main serves something beyond the wall; the person picks.
 
-**Not yet:** other hosts (beams, plates, enclosures: slice 4b), sleeves and fire-stopping as elements, openings for
-several services at once, and penetrations in the wider-fix planner.
+**Not yet:** sleeves and fire-stopping as elements, openings for several services at once, and penetrations in the
+wider-fix planner.
+
+## Which hosts (Oct 29, owner decision)
+
+A wall or floor is opened for services all the time; a transfer girder never; a steel beam's web sometimes, within
+limits; a machine panel's gland plate is made to be drilled. `server/sightline/hosts.py` decides, strictest first:
+
+1. **Hard rules** (`hosts.hard_rule`, no model call, nothing overrides them): columns, doors, windows, curtain walls,
+   piles, footings, stairs, ramps, railings, lifts; services and equipment (`IfcDistributionElement`: a pipe is never
+   cut for another pipe, a motor control centre is entered through its gland plate); glazing (a plate or window whose
+   name or material says glass: Northbank's opaque glass spandrels too); see-through proxies (clearance zones, a robot's
+   restricted space); anything not physical; and a **transfer element**: a beam or member that a column or wall stands
+   on (its foot within 5 mm of the beam's top, overlapping in plan). That last rule, not Muse, keeps the Northbank
+   girder (column B3 stands on it) out of every proposal on the golden path.
+2. **The requirements** (`penetrations` in `orca-requirements/1`, optional): per group, allowed / review / never, the
+   largest opening and the reviewer. They win over Muse; a file without the section keeps its id. The fixes prompt
+   lists them. The dialog has "Openings for services" (Muse decides / Allowed / With review / Never, size, reviewer),
+   and an opening option read by Muse has **Add to requirements** (the reading becomes the rule for its host's group,
+   `edit.host_group`).
+3. **Muse's reading of each kind of host** (`hosts.read`, `domain_packs/penetrations.md`, strict JSON, on the triage
+   model): verdict (allowed, with_review, not_advised, never), reviewer, fit (annular: a clearance filled by a sleeve or
+   fire-stopping; fitted: a gland or grommet), limits (largest hole for the host's depth, distance from its ends in
+   depths, from its edges, the middle third of a beam's depth), conditions, reasoning. Read once per kind (class, type,
+   name words, materials, thickness, standard `Pset_*Common` properties, discipline, STEP assembly), cached for the
+   server's life, before a proposal's first round when a service crosses a host (`agent.penetration_pairs`). Facts are
+   text only, and a project's own property sets never reach it (Northbank's demo property set holds its
+   answer key). A failed reading leaves the default: walls and slabs as in 4a, nothing else.
+
+**The hole against the limits** (`hosts.check_hole`): the host's depth is its smaller size in the hole's plane (a
+beam's depth for a pipe through its web), its ends those of its longer size; edges by rays from just outside the hole.
+A hole that breaks a limit is refused with the numbers; a passing one carries them (`edit.numbers`: "hole 170 mm in
+600 mm of host (28%)", "915 mm from its nearest end"), shown on the option card with the reading.
+
+**Fitted openings:** the service plus 1 mm round, to the mm (a 32 mm conduit: Ø34), and the service may touch the host
+(the gland seals it); in a plan's joint check too.
+
+**Ranking:** an opening in anything but a wall or slab ranks after one in a wall or slab (`agent.tier`).
+
+**Muse is told** (`_penetration_text`) the reading in a sentence, or that the host may not take an opening and why
+("never: It is a transfer element: UC 254x254x89 - B3 stands on it. Do not propose a penetration of B."), and when the
+hole would break a limit at this point.
+
+**Measured** (`evals/penetration_hosts.py`, 25 labelled hosts from Northbank and the cell, `penetration_hosts.csv`):
+25/25 as a coordinator would say on Muse Spark, 18 kinds read in one call in 34-41 s; 7 settled by hard rules. Walls
+and slabs with review by structure or architecture, an external wall by architecture, the lift pit wall not advised
+(tanking), steel beams with review or not advised, base plates, stiffeners and mullions never, the gland plate allowed
+and fitted, the guard panel with safety review. Readings vary run to run within those labels (a secondary beam with
+review or not advised).
+
+**Demo case:** the cell's C8 (demo-models repo): the plant's 400 V feed drops in a 32 mm conduit into EP-301 through its
+top gland plate (3 mm) with no hole. The fix is a gland hole.
 
 ## Keeping a fix: the model updates in place (Oct 29)
 

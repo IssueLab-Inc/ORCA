@@ -132,6 +132,22 @@ class ByDesign:
     source: str = "user"
 
 
+PEN_RULES = ("allowed", "review", "never")
+PEN_REVIEWERS = ("structure", "architecture", "fire", "safety", "services")
+
+
+@dataclass
+class PenRule:
+    """Whether a group's elements may take an opening for a service (docs/edits.md "Which hosts"): wins over Muse's
+    reading of the kind of host, never over the hard rules."""
+    group: str
+    rule: str = "review"            # allowed | review | never
+    max_mm: float | None = None     # the largest opening, any side or diameter
+    reviewer: str | None = None     # who reviews one: structure, architecture, fire, safety, services
+    reason: str = ""
+    source: str = "user"            # user | orca (added from Muse's reading)
+
+
 @dataclass
 class Doc:
     name: str = "Coordination requirements"
@@ -146,12 +162,16 @@ class Doc:
     by_design: list[ByDesign] = field(default_factory=list)
     guidance: dict[str, str] = field(default_factory=lambda: {"triage": "", "fixes": ""})
     notes: str = ""
+    penetrations: list[PenRule] = field(default_factory=list)
 
     def group(self, gid: str) -> Group | None:
         return next((g for g in self.groups if g.id == gid), None)
 
     def to_dict(self) -> dict:
-        return {"format": FORMAT, **asdict(self)}
+        d = {"format": FORMAT, **asdict(self)}
+        if not self.penetrations:   # a file without the section keeps its id (content-addressed: docs/requirements.md)
+            d.pop("penetrations")
+        return d
 
 
 _CLASS = re.compile(r"^Ifc[A-Za-z0-9]{2,60}$")
@@ -260,13 +280,24 @@ def parse(data: Any, classes: set[str] | None = None, teams: set[str] | None = N
                                     r.get("source") if r.get("source") in ("orca", "user", "triage") else "user"))
         if len(designs) >= 40:
             break
+    pens: list[PenRule] = []
+    for r in data.get("penetrations") or []:
+        if not isinstance(r, dict):
+            continue
+        gid = slug(r.get("group") or "")
+        if gid not in ids or any(x.group == gid for x in pens):
+            continue
+        pens.append(PenRule(gid, r.get("rule") if r.get("rule") in PEN_RULES else "review",
+                            _num(r.get("max_mm"), 10, 5000) or None,
+                            r.get("reviewer") if r.get("reviewer") in PEN_REVIEWERS else None, _text(r.get("reason"), 240),
+                            r.get("source") if r.get("source") in ("orca", "user") else "user"))
     guidance = data.get("guidance") if isinstance(data.get("guidance"), dict) else {}
     return Doc(name=_text(data.get("name") or "Coordination requirements", 80),
                version=int(_num(data.get("version", 1), 1, 10_000) or 1), level=level, strictness=strictness,
                groups=groups, checks=checks, duplicates=bool(data.get("duplicates", True)), rules=rules,
                who_moves=movers, by_design=designs,
                guidance={k: _text(guidance.get(k), MAX_GUIDANCE) for k in ("triage", "fixes")},
-               notes=_text(data.get("notes"), 2000))
+               notes=_text(data.get("notes"), 2000), penetrations=pens)
 
 
 def canonical(doc: Doc) -> str:
@@ -656,6 +687,21 @@ def blocked(pol_a: Policy, pol_b: Policy | None, kind: str, delta_m: list[float]
     return None
 
 
+@dataclass
+class PenAnswer:
+    rule: str
+    max_mm: float | None
+    reviewer: str | None
+    group_name: str
+
+
+def penetration_rule(doc: Doc, matcher: Matcher, gid: str) -> PenAnswer | None:
+    """The requirements' penetration rule for the group `gid` is in, or None."""
+    g = matcher.group_of(gid)
+    r = next((x for x in doc.penetrations if g and x.group == g.id), None)
+    return PenAnswer(r.rule, r.max_mm, r.reviewer, g.name) if r else None
+
+
 def can_cut(pol: Policy | None) -> bool:
     """Whether a penetration's opening may be cut in its host (else only the provision for void is written): no
     requirements, or the host's group may be edited in any way."""
@@ -770,6 +816,12 @@ def prompt_text(doc: Doc, role: str, rules: bool = True) -> str:
             limits.append("at this level fixes are whole moves only")
         if limits:
             lines.append("- Limits: " + "; ".join(limits) + ".")
+        if doc.penetrations:
+            lines.append("- Openings for services: " + "; ".join(
+                f"{names.get(r.group, r.group)} " + {"allowed": "may take them", "review": "may take them, reviewed",
+                                                     "never": "never takes one"}[r.rule]
+                + (f" up to {r.max_mm:.0f} mm" if r.max_mm and r.rule != "never" else "")
+                + (f" by {r.reviewer}" if r.reviewer and r.rule != "never" else "") for r in doc.penetrations) + ".")
     text = doc.guidance.get(role, "").strip()
     if text:
         lines.append(f"- The team's guidance: {text}")

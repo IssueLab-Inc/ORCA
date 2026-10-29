@@ -6,7 +6,8 @@ For every number, give:
   - a post, rail, brace, stringer, frame member or guide is IfcMember; a plate, sheet, panel or base plate is IfcPlate;
   - a bolt, anchor or screw is IfcMechanicalFastener;
   - a straight pipe or tube is IfcPipeSegment, its bend or tee IfcPipeFitting, a valve IfcValve;
-  - a cable tray or ladder run is IfcCableCarrierSegment, its bend or riser fitting IfcCableCarrierFitting;
+  - a cable tray, ladder or conduit run is IfcCableCarrierSegment (a conduit: CONDUITSEGMENT), its bend or riser
+    fitting IfcCableCarrierFitting;
   - a light curtain, scanner or switch sensor is IfcSensor; an interlock or switch is IfcSwitchingDevice;
   - a gate or door is IfcDoor; a pallet or rack is IfcFurniture; a conveyor or belt is IfcTransportElement;
   - a control cabinet or motor control centre is IfcElectricDistributionBoard; a controller or HMI is
@@ -17,7 +18,7 @@ For every number, give:
   - a robot, an end effector, a product or load, or a safety or working zone (reach envelope, keep-out or clearance
     space) is IfcBuildingElementProxy.
 - `type`: a short type in plain words, or the IFC predefined type when you are sure of it (POST, ANCHORBOLT,
-  RIGIDSEGMENT, BEND, CABLELADDERSEGMENT, GATE, FLOOR, SHEET, BRACE). For a proxy, say what it is: "Industrial robot",
+  RIGIDSEGMENT, BEND, CABLELADDERSEGMENT, CONDUITSEGMENT, GATE, FLOOR, SHEET, BRACE). For a proxy, say what it is: "Industrial robot",
   "Clearance zone", "Product carton".
 
 Use only the name and groups; never invent. When a name says nothing, use IfcBuildingElementProxy and the group's name.

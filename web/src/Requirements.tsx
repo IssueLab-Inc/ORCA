@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowDown, ArrowUp, ClipboardCheck, Download, LoaderCircle, RotateCcw, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, type ReqCheck, type ReqParams, type ReqPreview, type ReqScale, type Requirements, type RuleAudit, type Strictness } from "./api";
-import { cellFor, download, parseUpload, removeByDesign, setCell, setMover, shiftMover, STRICTNESS, STRICTNESS_NAME } from "./reqFile";
+import { api, type ReqCheck, type ReqParams, type ReqPenRule, type ReqPreview, type ReqScale, type Requirements, type RuleAudit, type Strictness } from "./api";
+import { cellFor, download, parseUpload, removeByDesign, setCell, setMover, setPenetration, shiftMover, STRICTNESS, STRICTNESS_NAME } from "./reqFile";
 
 const RULES: [string, string][] = [["same_element", "Same element"], ["connected", "Joined by ports"],
   ["assembly", "Parts of one assembly"], ["host", "A door or window in its wall"]];
@@ -214,6 +214,33 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                   </span>
                 </li>))}
             </ol>
+
+            <h3>Openings for services</h3>
+            <p className="hint">Whether a group's elements may take an opening for a duct, pipe or cable to pass through.
+              Without a rule, ORCA asks Muse Spark about each kind of element (a partition, a beam's web, a gland plate);
+              columns, glazing, equipment and transfer beams never take one.</p>
+            <ul className="req-pens">
+              {draft.groups.map((g) => {
+                const r = draft.penetrations?.find((x) => x.group === g.id);
+                return (
+                  <li key={g.id}>
+                    <span className="req-mover-name">{g.name}{r?.source === "orca" && <Sparkles size={11} className="req-orca" aria-label="From Muse Spark's reading" />}</span>
+                    <span className="req-mover-ctl">
+                      <select value={r?.rule ?? ""} aria-label={`Openings in ${g.name}`}
+                        onChange={(e) => update(setPenetration(draft, g.id, e.target.value ? { rule: e.target.value as ReqPenRule["rule"], source: "user" } : null))}>
+                        <option value="">Muse decides</option><option value="allowed">Allowed</option>
+                        <option value="review">With review</option><option value="never">Never</option></select>
+                      {r && r.rule !== "never" && <label className="req-mm" data-tip="The largest opening, any side or diameter (empty: no limit)">≤
+                        <input type="number" min={10} step={10} value={r.max_mm ?? ""} placeholder="any" aria-label={`Largest opening in ${g.name}`}
+                          onChange={(e) => update(setPenetration(draft, g.id, { max_mm: e.target.value ? Number(e.target.value) : null }))} /> mm</label>}
+                      {r && r.rule === "review" && <select value={r.reviewer ?? ""} aria-label={`Who reviews openings in ${g.name}`}
+                        onChange={(e) => update(setPenetration(draft, g.id, { reviewer: e.target.value || null }))}>
+                        <option value="">Reviewer…</option>{["structure", "architecture", "fire", "safety", "services"].map((x) =>
+                          <option key={x} value={x}>{x}</option>)}</select>}
+                    </span>
+                  </li>);
+              })}
+            </ul>
 
             <h3>Never a clash</h3>
             <p className="hint">Pairs that are meant to meet. They are counted, not reported, or settled at triage without a model

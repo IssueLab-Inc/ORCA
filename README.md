@@ -37,13 +37,13 @@ by a supply-air duct, a cable tray and a cold water main: the answer key.
 
 **PC-03, a robot palletising cell** (machine, 1 STEP file)
 
-A robot, a conveyor, safety guarding and services in a corner of the plant, from mechanical CAD, with seven planted
+A robot, a conveyor, safety guarding and services in a corner of the plant, from mechanical CAD, with eight planted
 problems.
 
-- The STEP converted: 159 parts keep their names and colours, and Muse Spark names what each is (159 of 159 right).
-- All 16 planted clashes found, nothing unexpected.
+- The STEP converted: 161 parts keep their names and colours, and Muse Spark names what each is (160-161 of 161 right).
+- All 17 planted clashes found, nothing unexpected.
 - The cable ladder moved, the air pipe dropped under both conveyor rails as one fix, a branch rerouted round two plant
-  columns, a rail trimmed.
+  columns, a rail trimmed, openings asked for through the plant wall and the motor control centre's gland plate.
 - The STEP handed back with the fixes written in.
 
 </td>
@@ -164,12 +164,15 @@ well as moves; other parts move. Parts of one STEP group that touch move togethe
 pieces added to their assembly, names and colours kept.
 
 The second demo ([above](#two-demos)) opens the PC-03 robot palletising cell from its STEP file:
-- the check finds all seven planted problems (16 part pairs, nothing unexpected);
+- the check finds all eight planted problems (17 part pairs, nothing unexpected);
 - Muse Spark fixes the cable ladder through the fence post by raising it 150 mm, the designers' own fix;
 - **Fix together** on the air pipe through both conveyor rails makes one job and drops the pipe under them;
 - **Fix together** on the branch through two plant columns makes one **reroute**: a detour round each column, the
   only fix that clears (the columns run full height, and an emergency stop stands between them);
-- the exported STEP has exactly those five ladder parts moved and the pipe's offset pieces added.
+- the air main through the plant's west wall and the feed conduit through the panel's gland plate get **openings**: a
+  Ø130 mm one in the wall (with clearance, reviewed), a Ø34 mm gland hole in the plate (fitted), each with a provision for
+  void;
+- the exported STEP has exactly those five ladder parts moved, the pipe's offset pieces added and the openings cut.
 
 **Take the cell tour** on its card walks through it in 12 steps.
 

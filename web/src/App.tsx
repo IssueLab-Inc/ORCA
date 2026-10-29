@@ -1,7 +1,7 @@
-import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
-import { changeText, clearanceText, editText, framePieces, recEditText, reviewText } from "./fixKinds";
+import { changeText, clearanceText, editText, framePieces, hostRows, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
@@ -10,7 +10,7 @@ import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
-import { addByDesign, hasByDesign, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
+import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
@@ -401,6 +401,15 @@ export function App() {
     void runDetect(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqId]);
+
+  /** An opening's host reading becomes the rule for the host's group (a file is started from the models when there is
+   * none: the option names the group in that file). */
+  async function addPenRule(o: Option) {
+    let doc = reqSaved?.doc ?? null;
+    if (!doc && sceneId) doc = (await api.requirementsDefault(sceneId).catch(() => null))?.doc ?? null;
+    if (!doc || !o.edit) return;
+    setReqSaved({ doc: addPenetration(doc, o.edit, o.review ?? null), enabled: true });
+  }
 
   /** A pattern Muse read as by design becomes a by-design rule (a file is started from the models when there is none):
    * its clashes are settled at once, without asking the model again. */
@@ -2117,12 +2126,18 @@ export function App() {
                 <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
                 <span className="row"><span>Clearance</span><span className="mono">{clearanceText(o)}</span></span>
                 {o.review && <span className="row"><span>Review</span><span>{reviewText(o.review)}</span></span>}
+                {hostRows(o).map(([k, v]) => <span key={k} className="row"><span>{k}</span><span>{v}</span></span>)}
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 {o.meets?.length ? <span className="meets">{o.meets.map((m) => <span key={m}><Check size={11} aria-hidden /> {m}</span>)}</span> : null}
                 <span className="why">{o.rationale}</span>
                 <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} need={proposal!.clearance_m} />
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
+              {chosen === i && o.kind === "penetration" && o.edit?.reading_source === "muse" && sceneId && (
+                hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group)
+                  ? <span className="chip ok"><Check size={11} aria-hidden /> in the requirements</span>
+                  : <button className="btn small" onClick={() => void addPenRule(o)}
+                    data-tip="Make this reading a rule for the host's group in the coordination requirements"><ClipboardPlus size={13} aria-hidden /> Add to requirements</button>)}
             </div>
           ))}
 

@@ -35,3 +35,11 @@ test("clearance, change and recommendation lines for every kind", () => {
   assert.match(kinds.reviewText("structure"), /structural engineer/);
   assert.equal(kinds.reviewText(null), "");
 });
+
+test("an opening's card shows its host's reading and the hole against its limits", () => {
+  const o = { kind: "penetration", edit: { host_reading: "allowed with review, reviewed by structure (a hole at most 40% of its depth)",
+    reading_source: "muse", numbers: ["hole 170 mm in 600 mm of host (28%)", "915 mm from its nearest end"] } };
+  assert.deepEqual(kinds.hostRows(o), [["Host", "allowed with review, reviewed by structure (a hole at most 40% of its depth) (Muse Spark's reading)"],
+    ["Hole", "hole 170 mm in 600 mm of host (28%); 915 mm from its nearest end"]]);
+  assert.deepEqual(kinds.hostRows({ kind: "offset", edit: o.edit }), []);
+});
