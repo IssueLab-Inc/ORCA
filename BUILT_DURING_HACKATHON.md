@@ -6,19 +6,24 @@ the record.
 
 ## New during the event
 
-- The Sightline web app (`web/`): IFC viewer, picking, isolation, move previews, options panel.
-- The Sightline server (`server/`): scene over IfcOpenShell, connected runs, element moves and IFC
-  export, the geometry check, the propose → verify → retry → rank agent, the construction domain pack,
-  the web API and the MCP server.
-- The Meta model integration (Muse Spark).
-- The spikes, tests and the synthetic test model.
+- The ORCA web app (`web/`): the IFC viewer (modes, section box, measure, captures), the clash list, triage, insights,
+  the clash panel, chat and voice, the plan panel, the report dialog, the guided tours and the landing page.
+- The ORCA server (`server/`):
+  - the scene over IfcOpenShell, the geometry check, ORCA's own clash detection;
+  - edits: moves, local offsets with bends, trims, wider fixes;
+  - the propose → verify → retry → rank agent, plans and root causes, triage and clash titles;
+  - Navisworks report import, the PDF report and BCF, IFC export;
+  - STEP conversion and STEP write-back;
+  - the web API, the MCP server, owner settings and demo caps.
+- The Meta model integration (Muse Spark, Muse Spark Open, Muse Voice Transcribe).
+- The domain packs, spikes, tests, evals and the synthetic test models.
+- The PC-03 palletising cell demo models (generated during the event by IssueLab's own scripts, in a private repo).
 
 ## Pre-existing, not built during the event
 
-- **ClashWise** (clashwise.ai), IssueLab's clash-management product, private. Sightline does not include
-  ClashWise code. Connecting the two (ClashWise's Wise assistant calling Sightline's MCP server) is planned
-  after the hackathon and is not part of this submission.
-- **The Northbank demo models**, used as demo data, from `IssueLab-Inc/ClashWiseDemoModels`.
+- **The Northbank demo models**, used as demo data: generated before the event by IssueLab's own scripts, in a private
+  repo. They are synthetic; no customer data.
 - Open-source libraries listed in the README.
 
-If any module is later adapted from ClashWise, it is listed here with its source before it is committed.
+No earlier IssueLab product code is included. If any module is ever adapted from earlier work, it is listed here with
+its source before it is committed.

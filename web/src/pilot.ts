@@ -88,14 +88,14 @@ export class Pilot {
     this.driving = false;
     this.queue = [];
     this.clear();
-    this.status("idle", "You have the view. Sightline is still working.");
+    this.status("idle", "You have the view. ORCA is still working.");
   }
 
   /** Give the view back to the agent from its next step. */
   resume() {
     if (!this.active || this.driving) return;
     this.driving = true;
-    this.status("thinking", "Sightline will show its next idea here.");
+    this.status("thinking", "ORCA will show its next idea here.");
     this.viewer()?.orbit(true);
   }
 

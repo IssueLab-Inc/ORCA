@@ -25,7 +25,7 @@ matching the web opening it was meant to pass through.
 **Finding: whole-element moves are not enough.** Moving the whole tray or the whole cold-water run fails
 everywhere (other ducts along their length; wall openings they pass through). The designer's Rev04 fixes all
 three with a **local offset**: split either side of the girder (about x 2.6–4.4 m), raise the middle piece
-(duct +400, tray +250, cold water +280 mm) and add short angled pieces with bends. Sightline needs that edit,
+(duct +400, tray +250, cold water +280 mm) and add short angled pieces with bends. ORCA needs that edit,
 and Rev04 is the benchmark to compare its proposals against.
 
 **Finding: the full model hides the clash.** With everything visible, the girder is behind the façade and

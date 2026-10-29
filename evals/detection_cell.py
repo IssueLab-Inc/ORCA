@@ -1,23 +1,26 @@
-"""Sightline detection on the PC-03 palletising cell, a machine model (ClashWiseDemoModels `palletising-cell/`).
+"""ORCA detection on the PC-03 palletising cell, a machine model (the demo-models repo's `palletising-cell/`).
 
 The cell is generated with an answer key: Rev A has five planted problems (13 part pairs, `verify_cell.PLANTED`) and
 Rev B fixes all of them; every other overlap is a contact the cell is built with (`verify_cell.BY_DESIGN`: anchor bolts
 in their plates and the floor, the conveyor's drums in its rails, the robot working over the conveyor and pallets).
-Sightline's default tests on the one-file model (the model against itself, and duplicates) must find every planted pair
+ORCA's default tests on the one-file model (the model against itself, and duplicates) must find every planted pair
 in Rev A, none in Rev B, and nothing that is neither planted nor by design.
 
     cd server
-    uv run python ../evals/detection_cell.py --cell ../../ClashWiseDemoModels/palletising-cell \
+    uv run python ../evals/detection_cell.py --cell $DEMO_MODELS/palletising-cell \
         --out ../evals/runs/<date>-cell-detection
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# A clone of IssueLab's demo-models repo (CLAUDE.md, "Demo data"): $DEMO_MODELS, else ../demo-models.
+DEMO = Path(os.environ.get("DEMO_MODELS", ROOT.parent / "demo-models"))
 sys.path.insert(0, str(ROOT / "server"))
 
 from sightline import detect  # noqa: E402
@@ -26,7 +29,7 @@ from sightline.scene import IfcScene  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cell", type=Path, default=ROOT.parent / "ClashWiseDemoModels/palletising-cell")
+    ap.add_argument("--cell", type=Path, default=DEMO / "palletising-cell")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     sys.path.insert(0, str(args.cell / "Code"))
@@ -35,7 +38,7 @@ def main():
     from verify_cell import PLANTED, by_design
 
     args.out.mkdir(parents=True, exist_ok=True)
-    lines = ["# Sightline detection on the PC-03 palletising cell", ""]
+    lines = ["# ORCA detection on the PC-03 palletising cell", ""]
     ok = True
     for rev in ("A", "B"):
         keys = {gid(p.key): p.key for p in build(rev).parts}
@@ -59,7 +62,7 @@ def main():
                     f"{', '.join(f'{v} {detect.RULE_LABEL[k]}' for k, v in c.excluded.items()) or '0'} |"
                     for c in run.coverage], ""]
         if hit:
-            lines += ["| Problem | Parts | Sightline mm |", "|---|---|---|",
+            lines += ["| Problem | Parts | ORCA mm |", "|---|---|---|",
                       *[f"| {label} | {' × '.join(sorted(p))} | {found[p].distance_m * 1000:.1f} |"
                         for p, label in sorted(hit.items(), key=lambda kv: (kv[1], sorted(kv[0])))], ""]
         lines += [f"Unexpected: {' × '.join(p)}" for p in unexpected]

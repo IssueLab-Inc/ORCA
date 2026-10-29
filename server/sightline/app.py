@@ -27,7 +27,7 @@ from .limits import ProposeLimit, client_id
 from .service import MODEL_SUFFIXES, MODELS, Workspace
 
 load_env()  # the repo's .env, before anything reads a setting (caps, owner token); real environment variables win
-app = FastAPI(title="ClashWise Sightline")
+app = FastAPI(title="ORCA")
 
 
 class _OwnerContext:
@@ -153,8 +153,8 @@ model_upload_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PE
                                   int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_DAY", "0")), noun="model uploads")
 
 MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
-# Words Muse Voice Transcribe should lean toward: what people say to Sightline about a building model.
-VOICE_WORDS = ["Sightline", "Northbank", "clash", "clashes", "duct", "ductwork", "supply air", "cable tray", "pipe",
+# Words Muse Voice Transcribe should lean toward: what people say to ORCA about a building model.
+VOICE_WORDS = ["ORCA", "Orca", "Northbank", "clash", "clashes", "duct", "ductwork", "supply air", "cable tray", "pipe",
                "transfer girder", "girder", "beam", "column", "slab", "mullion", "transom", "curtain wall", "web opening",
                "offset", "trim", "clearance", "Level 01", "Level 02", "Level 03", "MEP", "IFC", "BCF", "Navisworks",
                "triage", "root cause", "x-ray", "section box", "isolate", "Muse Spark"]
@@ -604,7 +604,7 @@ MAX_VIEW_BYTES = 4_000_000
 
 @app.post("/api/reports/{report_id}/clashes/{clash_id}/images")
 async def save_view(report_id: str, clash_id: str, label: str = Form(...), image: UploadFile = File(...)):
-    """A view of a clash Sightline detected, captured in the browser (A, B or C)."""
+    """A view of a clash ORCA detected, captured in the browser (A, B or C)."""
     data = await image.read(MAX_VIEW_BYTES + 1)
     if len(data) > MAX_VIEW_BYTES:
         raise HTTPException(413, "That picture is too large.")
@@ -622,7 +622,7 @@ async def save_view(report_id: str, clash_id: str, label: str = Form(...), image
 
 @app.get("/api/scenes/{scene_id}/detect/tests")
 def detect_tests(scene_id: str):
-    """The clash tests Sightline would run on the open models (docs/detection.md)."""
+    """The clash tests ORCA would run on the open models (docs/detection.md)."""
     return ws.detect_tests(_scene(scene_id))
 
 
@@ -984,7 +984,7 @@ def get_document(doc_id: str):
 
 @app.post("/api/transcribe")
 async def transcribe_voice(request: Request, audio: UploadFile = File(...), report_id: str | None = Form(None)):
-    """A spoken message to Sightline (Muse Voice Transcribe): a WAV clip in, its transcript out. The browser sends the
+    """A spoken message to ORCA (Muse Voice Transcribe): a WAV clip in, its transcript out. The browser sends the
     transcript to the chat, so voice can do whatever the chat can. Biased toward BIM words and the open report's
     clash names."""
     data = await audio.read(MAX_VOICE_BYTES + 1)

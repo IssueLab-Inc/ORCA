@@ -51,7 +51,7 @@ class ProposeLimit:
         mine = self._trim(self._clients.setdefault(client, deque()), now - HOUR)
         everyone = self._trim(self._all, now - DAY)
         if self.per_day and len(everyone) + n > self.per_day:
-            return f"The demo has too few {self.noun} left today for {n} more. Try fewer, or run Sightline locally."
+            return f"The demo has too few {self.noun} left today for {n} more. Try fewer, or run ORCA locally."
         if self.per_client_hour and len(mine) + n > self.per_client_hour:
             left = max(self.per_client_hour - len(mine), 0)
             return f"That needs {n} {self.noun}; you have {left} left this hour. Pick fewer clashes or try later."
@@ -65,7 +65,7 @@ class ProposeLimit:
         mine = self._trim(self._clients.setdefault(client, deque()), now - HOUR)
         everyone = self._trim(self._all, now - DAY)
         if self.per_day and len(everyone) >= self.per_day:
-            return f"The demo has used today's {self.noun}. Try again tomorrow, or run Sightline locally with your own key."
+            return f"The demo has used today's {self.noun}. Try again tomorrow, or run ORCA locally with your own key."
         if self.per_client_hour and len(mine) >= self.per_client_hour:
             return f"You've used {self.per_client_hour} {self.noun} this hour. Try again later."
         mine.append(now)

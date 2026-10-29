@@ -2,12 +2,16 @@
 import json
 from pathlib import Path
 
+import ifcopenshell
+import ifcopenshell.api
+import ifcopenshell.guid
+import ifcopenshell.util.element
 import pytest
 from fastapi.testclient import TestClient
 
 from sightline import app as app_module
 from sightline import detect, step
-from sightline.scene import IfcScene
+from sightline.scene import IfcScene, step_source
 from sightline.service import Workspace
 
 
@@ -77,6 +81,7 @@ def test_conversion_keeps_names_groups_colours_and_metres(cell):
     styles = [s for s in scene.model.by_type("IfcSurfaceStyleRendering") if s.Transparency]
     assert any(s.Transparency == pytest.approx(0.5, abs=0.01) for s in styles)
     assert run2.is_a("IfcBuildingElementProxy") and run2.ObjectType == "Ladder"   # no classifier: proxy, group name
+    assert step_source(run2)["Group"] == "Ladder" and "ORCA_STEP" in ifcopenshell.util.element.get_psets(run2)
     again, _ = step.convert(src, src.parent / "again")
     assert sorted(g.GlobalId for g in IfcScene([again]).model.by_type("IfcBuildingElementProxy")) == sorted(b)
     assert {p["name"] for p in manifest["parts"].values()} == set(by_name)
@@ -115,7 +120,7 @@ def test_export_writes_the_moves_back_into_the_step(tmp_path):
     pipe = {scene.entity(g).Name: g for g in scene.bounds()}["Air pipe 1"]
     ws.apply_offset(sid, pipe, [1.15, 1.75], -0.3)   # under the block (x 0.3-0.6 m from the pipe's start at -1 m)
     out = ws.export(sid, tmp_path / "export")
-    assert sorted(p.name for p in out) == ["Test-cell.sightline.ifc", "Test-cell.sightline.step"]
+    assert sorted(p.name for p in out) == ["Test-cell.orca.ifc", "Test-cell.orca.step"]
     moved = {p.name: p for p in step.parts(next(p for p in out if p.suffix == ".step"))[0]}
     before = {p.name: p for p in step.parts(src)[0]}
 
@@ -179,3 +184,12 @@ def test_uploads_are_capped_per_visitor(tmp_path, monkeypatch):
     c = TestClient(app_module.app)
     assert c.post("/api/models/upload", files=[("files", ("Test-cell.step", src.read_bytes()))]).status_code == 200
     assert c.post("/api/models/upload", files=[("files", ("Test-cell.step", src.read_bytes()))]).status_code == 429
+
+
+def test_parts_from_older_conversions_still_read_their_group():
+    """Caches written before the rename carry the pset as Sightline_STEP."""
+    model = ifcopenshell.file(schema="IFC4")
+    part = model.createIfcBuildingElementProxy(ifcopenshell.guid.new(), Name="Old part")
+    pset = ifcopenshell.api.run("pset.add_pset", model, product=part, name="Sightline_STEP")
+    ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={"Group": "Frame", "Label": "0:1:1:2"})
+    assert step_source(part) == {"Group": "Frame", "Label": "0:1:1:2", "id": pset.id()}

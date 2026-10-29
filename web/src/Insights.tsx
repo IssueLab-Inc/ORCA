@@ -11,7 +11,7 @@ const VERDICT: Record<PatternVerdict["verdict"], { label: string; cls: string }>
   by_design: { label: "by design", cls: "" }, modelling_error: { label: "model error", cls: "warn" }, real_problem: { label: "real problem", cls: "bad" },
 };
 
-/** What Sightline sees across the report: elements behind several clashes, and clashes that repeat the same way. */
+/** What ORCA sees across the report: elements behind several clashes, and clashes that repeat the same way. */
 export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onFixRoot, onExplain, onSelect, onReview, onFixAll,
   resolved, focus, onFocus }: {
   rootCauses: RootCause[] | null; patterns: Pattern[] | null; verdicts: Record<string, PatternVerdict> | null;

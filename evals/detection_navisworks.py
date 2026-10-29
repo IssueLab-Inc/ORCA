@@ -1,14 +1,14 @@
-"""Sightline detection against Navisworks on Northbank (docs/detection.md, "How we know it works").
+"""ORCA detection against Navisworks on Northbank (docs/detection.md, "How we know it works").
 
 Navisworks ran 1,275 automatic class-pair tests on Northbank and stored 7,668 results; the three-view package samples
 up to 5 per test with pictures (317). This eval:
-  1. runs Sightline's default tests (every pair of models, each model against itself, duplicates; hard, 1 mm) and times
+  1. runs ORCA's default tests (every pair of models, each model against itself, duplicates; hard, 1 mm) and times
      them;
-  2. takes every sampled Navisworks result and says whether Sightline reports the same pair, and if not, why: a side that
+  2. takes every sampled Navisworks result and says whether ORCA reports the same pair, and if not, why: a side that
      is not physical (port, space, opening), one element on both sides, a touch, a pair meant to meet (joined by ports,
-     one assembly, a door in its wall), or Sightline measuring no overlap;
+     one assembly, a door in its wall), or ORCA measuring no overlap;
   3. checks the answer key (#042, #057, #061 on the Level 02 transfer girder);
-  4. lines up Navisworks' stored counts with Sightline's per pair of disciplines (Navisworks also counts ports, spaces
+  4. lines up Navisworks' stored counts with ORCA's per pair of disciplines (Navisworks also counts ports, spaces
      and sub-objects, so these are context, not a score).
 
     cd server
@@ -17,6 +17,7 @@ up to 5 per test with pictures (317). This eval:
 from __future__ import annotations
 
 import argparse
+import os
 import collections
 import csv
 import json
@@ -26,6 +27,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# A clone of IssueLab's demo-models repo (CLAUDE.md, "Demo data"): $DEMO_MODELS, else ../demo-models.
+DEMO = Path(os.environ.get("DEMO_MODELS", ROOT.parent / "demo-models"))
 sys.path.insert(0, str(ROOT / "server"))
 
 from sightline import detect, reports  # noqa: E402
@@ -62,7 +65,7 @@ def main():
     matches = ws.match(nav.id, sid)
 
     def why_not(a: str, b: str) -> tuple[str, float | None]:
-        """Why Sightline does not report a pair Navisworks did: measured on its own, at tolerance 0."""
+        """Why ORCA does not report a pair Navisworks did: measured on its own, at tolerance 0."""
         rule = ix.excluded_by(a, b, {r: True for r in detect.RULES})
         if rule:
             return f"meant to meet: {detect.RULE_LABEL[rule]}", None
@@ -70,10 +73,10 @@ def main():
                            tolerance_m=0.0)
         hit = detect.run(scene, [pair]).report.clashes
         if not hit:
-            return "Sightline measures no overlap", None
+            return "ORCA measures no overlap", None
         depth = -hit[0].distance_m
         if depth <= TOUCH_M:
-            return "touch at 1 mm (Sightline)", depth
+            return "touch at 1 mm (ORCA)", depth
         return "missed", depth
 
     rows = []
@@ -104,7 +107,7 @@ def main():
     outcomes = collections.Counter(r["outcome"] for r in rows)
     physical = [r for r in rows if r["outcome"] not in ("not physical (never reported)", "one element on both sides",
                                                           "not in the open models")]
-    overlapping = [r for r in physical if r["outcome"] not in ("touch at 1 mm (Navisworks)", "touch at 1 mm (Sightline)")
+    overlapping = [r for r in physical if r["outcome"] not in ("touch at 1 mm (Navisworks)", "touch at 1 mm (ORCA)")
                    and not r["outcome"].startswith("meant to meet")]
     recall = sum(r["outcome"] == "found" for r in overlapping)
 
@@ -115,14 +118,14 @@ def main():
         key[label] = {"sightline_mm": None if c is None else round(c.distance_m * 1000, 1),
                       "test": None if c is None else c.test, "navisworks_sampled": nav_has}
 
-    # Navisworks' stored counts per pair of disciplines, against Sightline's per pair of model files.
+    # Navisworks' stored counts per pair of disciplines, against ORCA's per pair of model files.
     team = dict(zip(ix.names, ix.teams))
     by_disc_s = collections.Counter()
     for c in run.report.clashes:
         by_disc_s[tuple(sorted((team[c.a.file], team[c.b.file])))] += 1
     by_disc_n = collections.Counter()
     nonphys_stored = total_stored = 0
-    manifest = args.manifest or next(iter(sorted((ROOT.parent / "ClashWiseDemoModels/northbank/StructuredOutputs")
+    manifest = args.manifest or next(iter(sorted((DEMO / "northbank/StructuredOutputs")
                                                   .glob("*/manifest.json"))), None)
     if manifest and manifest.exists():
         for t in json.loads(manifest.read_text())["tests"]:
@@ -147,8 +150,8 @@ def main():
                    "outcomes": outcomes, "recall": [recall, len(overlapping)]}, f, indent=1)
 
     lines = [
-        "# Sightline detection vs Navisworks, Northbank", "",
-        f"Sightline's default tests (hard, 1 mm) on {run.elements} elements in {len(MODELS)} models: "
+        "# ORCA detection vs Navisworks, Northbank", "",
+        f"ORCA's default tests (hard, 1 mm) on {run.elements} elements in {len(MODELS)} models: "
         f"**{len(run.report.clashes)} clashes in {elapsed:.1f} s** (from opening the models: element boxes, "
         "triangle tree, all tests).", "",
         "| Test | Elements A | Elements B | Pairs checked | Clashes | Touching | Meant to meet | Seconds |",
@@ -157,27 +160,27 @@ def main():
           f"{', '.join(f'{v} {detect.RULE_LABEL[k]}' for k, v in c.excluded.items()) or '0'} | {c.seconds} |"
           for c in run.coverage], "",
         "## Answer key", "",
-        "| | Sightline | Test | In Navisworks' sample |", "|---|---|---|---|",
+        "| | ORCA | Test | In Navisworks' sample |", "|---|---|---|---|",
         *[f"| {k} | {v['sightline_mm']} mm | {v['test']} | {'yes' if v['navisworks_sampled'] else 'no'} |"
           for k, v in key.items()], "",
         f"## The {len(rows)} sampled Navisworks results", "",
         f"Of the {len(overlapping)} that are physical, on two elements and overlap deeper than 1 mm in Navisworks and "
-        f"Sightline and are not meant to meet, Sightline reports **{recall}**.", "",
+        f"ORCA and are not meant to meet, ORCA reports **{recall}**.", "",
         "| Outcome | Results |", "|---|---|",
         *[f"| {k} | {v} |" for k, v in outcomes.most_common()], "",
     ]
     missed = [r for r in rows if r["outcome"] == "missed"]
     if missed:
-        lines += ["### Missed", "", "| Test | A | B | Navisworks mm | Sightline mm (tolerance 0) |", "|---|---|---|---|---|",
+        lines += ["### Missed", "", "| Test | A | B | Navisworks mm | ORCA mm (tolerance 0) |", "|---|---|---|---|---|",
                   *[f"| {r['test']} | {r['a']} | {r['b']} | {r['navisworks_mm']} | {r.get('sightline_mm')} |" for r in missed], ""]
     if by_disc_n:
         lines += ["## Counts per pair of disciplines", "",
                   "Navisworks' stored results include ports, spaces and sub-objects of one element, and one element pair "
-                  "can give several results; Sightline reports each physical element pair once. Context, not a score.", "",
+                  "can give several results; ORCA reports each physical element pair once. Context, not a score.", "",
                   f"Navisworks stored {total_stored} results; {nonphys_stored} of them are in tests of a space, port or "
-                  "opening, which Sightline never reports. The rest, by pair of disciplines (still including touches, "
+                  "opening, which ORCA never reports. The rest, by pair of disciplines (still including touches, "
                   "one element's own parts and repeated pairs):", "",
-                  "| Disciplines | Navisworks stored | Sightline |", "|---|---|---|",
+                  "| Disciplines | Navisworks stored | ORCA |", "|---|---|---|",
                   *[f"| {' / '.join(k)} | {by_disc_n.get(k, 0)} | {by_disc_s.get(k, 0)} |"
                     for k in sorted(set(by_disc_n) | set(by_disc_s))], ""]
     (args.out / "summary.md").write_text("\n".join(lines))

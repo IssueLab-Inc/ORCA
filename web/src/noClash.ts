@@ -29,7 +29,7 @@ export function noClash(c: ReportClash, match?: Matches[string], measure?: Measu
       why: `${np ? `One side is a ${np.ifc_class!.replace(/^Ifc/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()}` : "One side is not a physical element"}: it takes no space on site, so nothing collides.` };
   if (!overlap && c.distance_m != null && Math.abs(c.distance_m) <= TOUCH_M)
     return { label: "touch", title: "They only touch",
-      why: `Navisworks reports ${Math.round(Math.abs(c.distance_m) * 1000)} mm${m?.matched && m.physical ? " and Sightline measures no overlap" : ""}: the two meet face to face, which is how parts are built.` };
+      why: `Navisworks reports ${Math.round(Math.abs(c.distance_m) * 1000)} mm${m?.matched && m.physical ? " and ORCA measures no overlap" : ""}: the two meet face to face, which is how parts are built.` };
   if (m?.matched && m.physical && m.distance_m == null && c.distance_m != null && c.distance_m < -TOUCH_M)
     return { label: "no overlap", title: "No overlap in this model",
       why: `Navisworks reported ${Math.round(c.distance_m * 1000)} mm, but the open model shows no overlap: it was fixed since, or the model differs from the one Navisworks checked.` };

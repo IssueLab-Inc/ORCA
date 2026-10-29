@@ -80,7 +80,7 @@ export type TitleEvent =
   | { type: "done"; titled: number; seconds: number; error?: string };
 export interface Report { id: string; title: string; sources: string[]; clashes: ReportClash[]; origin?: "navisworks" | "sightline" }
 
-/** Sightline detection (server: detect.py; design in docs/detection.md). */
+/** ORCA detection (server: detect.py; design in docs/detection.md). */
 export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[] }
 export interface DetectTest {
   id: string; name: string; a: DetectSelection; b: DetectSelection | null; kind: "hard" | "clearance" | "duplicate";
@@ -114,7 +114,7 @@ export interface TriageVerdict {
   verdict: TriageKind; severity?: "high" | "medium" | "low" | "none"; responsible?: string; action?: string;
   understanding?: string; fix_hint?: string; confidence?: number; source: "rule" | "model"; seconds?: number; error?: string;
   /** What settled a "not a clash" verdict without the model (or overrode it): non_physical, touch, same_element,
-   *  no_overlap (Sightline's measure) or reviewed (marked in this browser). */
+   *  no_overlap (ORCA's measure) or reviewed (marked in this browser). */
   basis?: "non_physical" | "touch" | "same_element" | "no_overlap" | "reviewed";
   /** The triage model's own reading, when a settled fact overrode it. */
   model_reading?: string;
@@ -359,7 +359,7 @@ export const api = {
         if (e.type === "result") return e;
         onEvent(e);
       }
-      if (done) throw new Error("The server stopped before Sightline finished. Try again.");
+      if (done) throw new Error("The server stopped before ORCA finished. Try again.");
     }
   },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
@@ -372,7 +372,7 @@ export const api = {
     : call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
-  /** Sightline's own detection; resolves with the "done" event (the report and its coverage). */
+  /** ORCA's own detection; resolves with the "done" event (the report and its coverage). */
   detect: async (sceneId: string, tests: DetectTest[] | null, onEvent: (e: DetectEvent) => void) => {
     let done: Extract<DetectEvent, { type: "done" }> | null = null;
     await ndjson<DetectEvent>(`/scenes/${sceneId}/detect/stream`, { tests }, (e) => {
@@ -387,7 +387,7 @@ export const api = {
   /** Muse titles the report's clashes; one run per report is shared, so this may join one already going. */
   titles: (reportId: string, onEvent: (e: TitleEvent) => void) =>
     ndjson<TitleEvent>(`/reports/${reportId}/titles/stream`, {}, (e) => { onEvent(e); return e.type === "done"; }),
-  /** A view of a clash Sightline found (A, B or C), captured in the browser for the fix agent, triage and the PDF. */
+  /** A view of a clash ORCA found (A, B or C), captured in the browser for the fix agent, triage and the PDF. */
   saveView: async (reportId: string, clashId: string, label: string, png: Blob) => {
     const form = new FormData();
     form.append("label", label);

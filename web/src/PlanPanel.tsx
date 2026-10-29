@@ -28,7 +28,7 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
   if (!run && !plan) {
     return (
       <div className="plan-empty">
-        <p className="hint">Tick several clashes in the list and choose <b>Fix together</b>, or pick a root cause: Sightline
+        <p className="hint">Tick several clashes in the list and choose <b>Fix together</b>, or pick a root cause: ORCA
           proposes a fix for each and checks them all together, so they do not collide.</p>
       </div>
     );

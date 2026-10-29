@@ -29,9 +29,9 @@ const BASIS: Record<NonNullable<TriageVerdict["basis"]>, string> = {
 export function ClashPanel({ reportId, clash, match, measure, onImage, fix, triage, origin = "navisworks", capturing = false }: {
   reportId: string; clash: ReportClash; match: Matches[string] | undefined; measure: Measure | null | "busy";
   onImage: (index: number) => void; fix?: string; triage?: TriageVerdict; origin?: "navisworks" | "sightline";
-  capturing?: boolean;  // the A/B/C views of a clash Sightline found are being taken
+  capturing?: boolean;  // the A/B/C views of a clash ORCA found are being taken
 }) {
-  const found = origin === "sightline";  // Sightline detected it: its depth is how far one must move to clear the other
+  const found = origin === "sightline";  // ORCA detected it: its depth is how far one must move to clear the other
   return (
     <section className="clash-panel">
       <div className="row"><h2><span className="num">#{clash.number}</span> {clash.title ?? clash.name}</h2>{fix ? <span className="chip ok">✓ fixed</span> : clash.status && <span className="chip">{clash.status}</span>}</div>
@@ -67,8 +67,8 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
         </div>
       )}
       <dl className="kv">
-        <dt>{found ? "Found by Sightline" : "Navisworks"}</dt><dd className="mono">{mm(clash.distance_m)}{clash.tolerance_m ? ` (${clash.test_type === "clearance" ? "clearance" : "tolerance"} ${mm(clash.tolerance_m)})` : ""}</dd>
-        <dt>{found ? "Now" : "Sightline"}</dt><dd className="mono">{
+        <dt>{found ? "Found by ORCA" : "Navisworks"}</dt><dd className="mono">{mm(clash.distance_m)}{clash.tolerance_m ? ` (${clash.test_type === "clearance" ? "clearance" : "tolerance"} ${mm(clash.tolerance_m)})` : ""}</dd>
+        <dt>{found ? "Now" : "ORCA"}</dt><dd className="mono">{
           measure === "busy" ? "measuring…"
             : !measure ? "open the models to measure"
               : !measure.matched ? "not in the open model"

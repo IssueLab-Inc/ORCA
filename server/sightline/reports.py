@@ -1,9 +1,9 @@
-"""Navisworks clash reports (XML) as Sightline reads them: tests, clashes, the two elements and their images.
+"""Navisworks clash reports (XML) as ORCA reads them: tests, clashes, the two elements and their images.
 
 Reads the Navisworks XML report format (`exchange/batchtest/clashtests/clashtest/clashresults/clashresult`).
 Two flavours of element properties are understood:
 - grouped smart tags, "<node> / <category> / <property>" (e.g. "Supply air main / Element / GlobalId"), as written by
-  the ClashWise three-view export; the clashed element is the first group with a non-spatial IFC class;
+  the three-view export of IssueLab's demo package; the clashed element is the first group with a non-spatial IFC class;
 - the standard export's flat tags ("Item Name", "Item Type", an IFC GUID property), with the selection-tree path.
 
 Images come from each result's `href`, relative to its XML file. When the image sits next to the other views of the
@@ -50,7 +50,7 @@ class ReportClash:
     a: ReportElement
     b: ReportElement
     images: list[tuple[str, Path]] = field(default_factory=list)  # (label, file) on the server
-    source: str = ""          # the XML file it came from ("sightline" for a clash Sightline found)
+    source: str = ""          # the XML file it came from ("sightline" for a clash ORCA found)
     number: int = 0           # #N, unique across the whole report (not per test); people say "#39"
     title: str | None = None  # a short title written by Muse from the clash's facts, when there is one
     ref: str | None = None    # the source tool's own label (Navisworks "Clash39", repeated in every test)
@@ -77,7 +77,7 @@ class Report:
     sources: list[str]
     clashes: list[ReportClash]
     temporary: bool = False   # uploaded: the folder is deleted when the report is closed
-    origin: str = "navisworks"  # "sightline" when Sightline detected the clashes itself (detect.py)
+    origin: str = "navisworks"  # "sightline" when ORCA detected the clashes itself (detect.py)
 
     def clash(self, clash_id: str) -> ReportClash:
         """By id, or by number as people say it ("#39" or "39")."""

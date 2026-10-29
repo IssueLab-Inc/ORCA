@@ -2,7 +2,7 @@ import { ArrowDown, Box, Check, Cpu, Download, Eye, FolderOpen, ListChecks, Mess
 import { useEffect, type ReactNode } from "react";
 
 /**
- * What Sightline is and does, for people who have never heard of BIM or design coordination: the start page in the
+ * What ORCA is and does, for people who have never heard of BIM or design coordination: the start page in the
  * empty viewer (with the demo button) and the "How it works" dialog from the header.
  */
 export function About({ start, onClose, triageOpen = false }: {
@@ -25,17 +25,20 @@ export function About({ start, onClose, triageOpen = false }: {
 
       <header className="about-hero">
         <div>
-          <p className="eyebrow">ClashWise Sightline</p>
+          <p className="eyebrow">ORCA · by IssueLab</p>
           <h1>An AI design coordinator for 3D models</h1>
           <p className="lede">
-            Before anything is built, every part of it is designed in 3D, by several teams at once. Sightline checks
+            Before anything is built, every part of it is designed in 3D, by several teams at once. ORCA checks
             their models against each other, finds where they conflict, works out a fix, <b>proves the fix works</b>,
             and edits the model for you.
+          </p>
+          <p className="orca-loop" aria-label="ORCA stands for Observe, Resolve, Check, Apply">
+            <span><b>O</b>bserve</span><span><b>R</b>esolve</span><span><b>C</b>heck</span><span><b>A</b>pply</span>
           </p>
           {start && <>
             <div className="about-cta">
               {start.onGolden && <button className="btn primary big" data-tour="golden" disabled={start.disabled} onClick={start.onGolden}>
-                <Play size={16} aria-hidden /> Watch Sightline fix a clash</button>}
+                <Play size={16} aria-hidden /> Watch ORCA fix a clash</button>}
               <a className="btn big" href="#demos"
                 onClick={(e) => { e.preventDefault(); document.getElementById("demos")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
                 <ArrowDown size={16} aria-hidden /> Pick a demo</a>
@@ -50,7 +53,7 @@ export function About({ start, onClose, triageOpen = false }: {
           <h2 className="about-h">Pick a demo</h2>
           <div className={`about-demos${start.onCell ? "" : " one"}`}>
             <DemoCard img="/demos/northbank.webp" eyebrow="Building · 4 IFC models" title="Northbank, a riverside office site"
-              alt="The Northbank demo in Sightline's viewer: an office building among its neighbours, with streets, trees and the river."
+              alt="The Northbank demo in ORCA's viewer: an office building among its neighbours, with streets, trees and the river."
               blurb={<>Structure, building services, architecture and site, modelled by four teams. On Level 02 a transfer
                 girder is hit by a duct, a cable tray and a water main.</>}
               shows={[<>Every pair of models checked: <b>464 clashes in 1,732 elements, in 4 s</b></>,
@@ -66,7 +69,7 @@ export function About({ start, onClose, triageOpen = false }: {
             </DemoCard>
             {start.onCell && (
               <DemoCard img="/demos/cell.webp" eyebrow="Machine · 1 STEP file" title="PC-03, a robot palletising cell"
-                alt="The PC-03 palletising cell in Sightline's viewer: a robot inside its see-through safety zone, a conveyor, fence posts and the air line."
+                alt="The PC-03 palletising cell in ORCA's viewer: a robot inside its see-through safety zone, a conveyor, fence posts and the air line."
                 blurb={<>A robot, a conveyor, safety guarding and services, from mechanical CAD. Five problems were planted in
                   this revision.</>}
                 shows={[<>The STEP converted: <b>144 parts</b> keep their names and colours, and Muse names what each is</>,
@@ -89,14 +92,14 @@ export function About({ start, onClose, triageOpen = false }: {
         <section className="about-layout" aria-label="Once the demo is open">
           <h2 className="about-h">Once it's open</h2>
           <ul className="next-steps">
-            <li><ListChecks size={18} aria-hidden /><span><b>On the left</b>What Sightline found: every clash numbered and named, grouped by which models it checked.</span></li>
+            <li><ListChecks size={18} aria-hidden /><span><b>On the left</b>What ORCA found: every clash numbered and named, grouped by which models it checked.</span></li>
             <li><Box size={18} aria-hidden /><span><b>In the middle</b>The models in 3D: the building with its streets and river, or the cell.</span></li>
-            <li><Sparkles size={18} aria-hidden /><span><b>On the right</b>Pick a clash, press <i>Propose fixes</i>, and watch Sightline work.</span></li>
+            <li><Sparkles size={18} aria-hidden /><span><b>On the right</b>Pick a clash, press <i>Propose fixes</i>, and watch ORCA work.</span></li>
           </ul>
         </section>
       )}
 
-      <section aria-label="Sightline on the demo, measured">
+      <section aria-label="ORCA on the demo, measured">
         <h2 className="about-h">Measured on Northbank</h2>
         <div className="about-stats">
         <Stat value="~40 s" label="to a verified fix" note="From pressing Propose to an edit checked against all four models." />
@@ -129,10 +132,10 @@ export function About({ start, onClose, triageOpen = false }: {
       </section>
 
       <section>
-        <h2 className="about-h">What Sightline does</h2>
+        <h2 className="about-h">What ORCA does</h2>
         <ol className="about-steps">
           <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Checks the models and sorts what it finds">
-            Sightline checks every pair of models and each model against itself, and numbers each clash.{" "}
+            ORCA checks every pair of models and each model against itself, and numbers each clash.{" "}
             {triageOpen ? <><b>Muse Spark Open</b>, an open-weights model,</> : <b>Muse Spark</b>} names every one and gives
             it a verdict: a real problem, by design, or a modelling mistake. Alike clashes (forty bolts in forty plates) are
             read once.
@@ -174,7 +177,7 @@ export function About({ start, onClose, triageOpen = false }: {
             <dt>Design coordination</dt><dd>Making several teams' models agree before anything is built.</dd>
             <dt>Clash</dt><dd>One place where two parts of the models conflict. Each has a number, like #3.</dd>
             <dt>Check</dt><dd>One pair of things checked against each other: two models, or one model against itself.</dd>
-            <dt>Clearance</dt><dd>Space left between two things once a clash is fixed. Sightline asks for at least 25 mm.</dd>
+            <dt>Clearance</dt><dd>Space left between two things once a clash is fixed. ORCA asks for at least 25 mm.</dd>
           </dl>
         </div>
       </section>
@@ -183,9 +186,9 @@ export function About({ start, onClose, triageOpen = false }: {
         <h2 className="about-h">Try it in a minute</h2>
         <ol>
           <li>{start ? <>Press <b>{start.label}</b> above.</> : <>Open the Northbank demo from the start page.</>}</li>
-          <li>Sightline checks the models. In the list on the left, under <b>MEP vs Structure</b>, pick the supply air
+          <li>ORCA checks the models. In the list on the left, under <b>MEP vs Structure</b>, pick the supply air
             main running through the transfer girder, the big beam on Level 02.</li>
-          <li>Press <b>Propose fixes</b> and watch Sightline try its ideas in the 3D view.</li>
+          <li>Press <b>Propose fixes</b> and watch ORCA try its ideas in the 3D view.</li>
         </ol>
         <p className="hint"><MessageSquare size={13} aria-hidden /> Or ask it in <b>Chat</b>, typed or spoken: “Which clashes are real problems?”
           · <ScanSearch size={13} aria-hidden /> <b>Triage all</b> sorts every clash the check found.</p>
@@ -203,7 +206,7 @@ export function About({ start, onClose, triageOpen = false }: {
 
       <p className="about-foot hint">
         Northbank is a fictional three-storey office with its street and riverside, modelled by IssueLab for demos: no
-        real project data. Its models are built with three planted clashes that have a known answer. Sightline also
+        real project data. Its models are built with three planted clashes that have a known answer. ORCA also
         imports Navisworks clash reports.
         Fixes are limited to 20 per visitor an hour.
       </p>
@@ -212,7 +215,7 @@ export function About({ start, onClose, triageOpen = false }: {
 
   if (!onClose) return <div className="about-page" onClick={(e) => e.stopPropagation()}>{body}</div>;
   return (
-    <div className="about-dialog" role="dialog" aria-modal="true" aria-label="How Sightline works" onClick={onClose}>
+    <div className="about-dialog" role="dialog" aria-modal="true" aria-label="How ORCA works" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}>{body}</div>
     </div>
   );
@@ -247,7 +250,7 @@ function Step({ n, icon, title, children }: { n: number; icon: ReactNode; title:
 }
 
 /** Side view of the demo's clash: the girder in section (an I with a gap in its web where the opening is), the duct
- * running through the solid web, then raised through the opening with square risers, as Sightline's offset does. */
+ * running through the solid web, then raised through the opening with square risers, as ORCA's offset does. */
 /** One demo on the start page: what you see when it opens, what it is, what it shows, and how to start it. */
 function DemoCard({ img, alt, eyebrow, title, blurb, shows, chips, note, children }: {
   img: string; alt: string; eyebrow: string; title: string; blurb: ReactNode; shows: ReactNode[]; chips: string[];
@@ -286,7 +289,7 @@ function BeforeAfter() {
   return (
     <figure className="before-after">
       <svg viewBox="0 0 400 190" role="img" aria-labelledby="ba-title">
-        <title id="ba-title">Before: an air duct runs through the solid web of a steel beam. After: Sightline raises that
+        <title id="ba-title">Before: an air duct runs through the solid web of a steel beam. After: ORCA raises that
           part of the duct through the opening in the beam, with room to spare.</title>
         <text x={100} y={11} textAnchor="middle" className="ba-label">Before</text>
         <rect x={8} y={92} width={184} height={26} rx={2} fill="#d0342c" />

@@ -31,7 +31,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import numpy as np
 
-from .scene import IfcScene
+from .scene import STEP_PSET, IfcScene, step_source
 
 UP = np.array([0.0, 0.0, 1.0])
 MIN_PIECE_M = 0.05  # shortest straight piece left either side of a riser
@@ -397,9 +397,9 @@ def _new_fitting(model, segment, place, name: str, tag: str | None):
     for system in ifcopenshell.util.system.get_element_systems(segment):
         ifcopenshell.api.run("system.assign_system", model, products=[fitting], system=system)
     # A segment converted from STEP carries where it came from (step.py); its bends belong to the same STEP group.
-    source = ifcopenshell.util.element.get_pset(segment, "Sightline_STEP")
+    source = step_source(segment)
     if source:
-        pset = ifcopenshell.api.run("pset.add_pset", model, product=fitting, name="Sightline_STEP")
+        pset = ifcopenshell.api.run("pset.add_pset", model, product=fitting, name=STEP_PSET)
         ifcopenshell.api.run("pset.edit_pset", model, pset=pset,
                              properties={k: v for k, v in source.items() if k in ("Group", "Label", "Source")})
     ifcopenshell.api.run("geometry.edit_object_placement", model, product=fitting, matrix=place, is_si=False)

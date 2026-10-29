@@ -1,4 +1,4 @@
-"""Sightline detection (docs/detection.md) on small synthetic models: one case per rule and measure."""
+"""ORCA detection (docs/detection.md) on small synthetic models: one case per rule and measure."""
 from pathlib import Path
 
 import pytest
@@ -183,7 +183,7 @@ def test_a_run_is_a_report_the_rest_of_sightline_reads(paths, tmp_path):
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 16
     assert ws.save_capture(rid, duct.id, "A", png) == ["A"]
     assert ws.clash_for(duct.a.global_id, duct.b.global_id, report_id=rid, clash_id=duct.id).images
-    assert "Found by Sightline" in ws.clash_for(duct.a.global_id, duct.b.global_id, report_id=rid,
+    assert "Found by ORCA" in ws.clash_for(duct.a.global_id, duct.b.global_id, report_id=rid,
                                                 clash_id=duct.id).notes
     # The next run on the same scene compares with this one, and keeps the views taken of clashes still there.
     again = ws.detect(sid)

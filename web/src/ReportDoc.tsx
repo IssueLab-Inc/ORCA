@@ -164,7 +164,7 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
               {busy ? <><i className="spinner" aria-hidden /> Building…</> : <><FileText size={16} aria-hidden /> Build the report</>}</button>}
           {ready && <button className="btn" onClick={() => setReady(null)}>Change and build again</button>}
         </div>
-        <p className="hint">Explanations are drafted by Muse Spark and marked as such; a fix marked verified passed Sightline's
+        <p className="hint">Explanations are drafted by Muse Spark and marked as such; a fix marked verified passed ORCA's
           geometry check against the whole model. Building costs one proposal from the demo allowance.</p>
       </div>
     </div>

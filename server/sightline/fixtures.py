@@ -44,7 +44,7 @@ def build_clash_fixture(path: Path, millimetres: bool = False,
     """
     k = 1000.0 if millimetres else 1.0
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
-    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="Sightline fixture")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA fixture")
     length = ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT",
                                   prefix="MILLI" if millimetres else None)
     ifcopenshell.api.run("unit.assign_unit", model, units=[length])
@@ -95,7 +95,7 @@ def build_run_fixture(path: Path, millimetres: bool = False) -> Path:
     """
     k = 1000.0 if millimetres else 1.0
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
-    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="Sightline offset fixture")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA offset fixture")
     length = ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT",
                                   prefix="MILLI" if millimetres else None)
     ifcopenshell.api.run("unit.assign_unit", model, units=[length])
@@ -153,7 +153,7 @@ def build_joint_fixture(path: Path) -> Path:
     be there). Metres throughout.
     """
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
-    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="Sightline joint fixture")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA joint fixture")
     ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
     ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
     body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
@@ -242,7 +242,7 @@ def build_context_fixture(path: Path, millimetres: bool = False) -> Path:
 
 
 def build_detection_fixtures(folder: Path, offset: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> list[Path]:
-    """A structure model and a services model with one of every case Sightline detection has to get right
+    """A structure model and a services model with one of every case ORCA detection has to get right
     (docs/detection.md), in metres, everything shifted by `offset` (to test models far from the origin):
 
     Structure vs services: the duct runs 300 mm through the beam (a clash); one pipe sits on the beam (a touch), another

@@ -1,6 +1,6 @@
 """Triage a Navisworks clash-sample package with Muse Spark: is each result a real clash, and what should happen?
 
-The package is the three-view export in ClashWiseDemoModels (`northbank/StructuredOutputs/<run>/`): per clash,
+The package is the three-view export in the demo-models repo (`northbank/StructuredOutputs/<run>/`): per clash,
 `clash.xml` plus A-transparent / B-context / C-alternate PNGs (item 1 red, item 2 green). Each clash goes to the
 model as text (classes, names, levels, signed distance) plus the three images, with strict structured output.
 

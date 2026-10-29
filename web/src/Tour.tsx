@@ -1,5 +1,5 @@
 /**
- * The guided tour: the Sightline story told on the real app. Each step points at a real control and waits for the
+ * The guided tour: the ORCA story told on the real app. Each step points at a real control and waits for the
  * visitor to use it (the step moves on when the app reaches the state it describes); "Show me" does the click for
  * anyone who would rather watch. Live steps that call Muse Spark offer a recorded run when the live one fails or is slow
  * (web/public/tour/*.json: real runs, replayed through the same viewer and pilot, and labelled as recorded).
@@ -7,7 +7,7 @@
 import { ArrowLeft, ArrowRight, Hand, PlayCircle, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-// The tour's clashes, by their two elements (GlobalIds): the same whether Sightline's check found them or a report
+// The tour's clashes, by their two elements (GlobalIds): the same whether ORCA's check found them or a report
 // was imported, whatever number they get.
 export const TOUR = {
   duct: ["2AbvqKF25LGeR0M34N_jld", "1eVHoPtl1IhAbbhivqVqb0"],   // supply air main through the Level 02 transfer girder (#042)
@@ -16,7 +16,7 @@ export const TOUR = {
 } as const;
 export const TOUR_QUESTION = "Why are there so many clashes on Level 02? Fix the root cause.";
 
-// The machine cell's tour clashes, by their parts' names in the STEP (PC-03 Rev A, ClashWiseDemoModels).
+// The machine cell's tour clashes, by their parts' names in the STEP (PC-03 Rev A).
 export const CELL = {
   ladder: ["CT-301 run 2 along the west fence"], post: ["Fence post W5"],
   pipe: ["PL-301 compressed air DN25 segment 2"], rails: ["CV-301 side rail north", "CV-301 side rail south"],
@@ -70,14 +70,14 @@ export const BUILDING_STEPS: Step[] = [
   {
     act: "Design coordination", title: "A building, three teams, one set of models",
     body: () => <>Structure, MEP and Architecture each model the same building. Coordination means making their models
-      agree before anything is built. Open the demo: an office building called Northbank. Sightline checks every pair of
+      agree before anything is built. Open the demo: an office building called Northbank. ORCA checks every pair of
       building models, and each against itself; the site model (street, riverside, trees) is there for context.</>,
     target: "[data-tour=demo]", done: (s) => s.reportOpen && s.modelsOpen && !s.busy,
     show: { label: "Open it for me" },
   },
   {
     act: "Design coordination", title: "Hundreds of clashes. Most are detail",
-    body: (s) => <>Sightline found {s.triageTotal || "hundreds of"} clashes, each with a number and a name Muse writes from
+    body: (s) => <>ORCA found {s.triageTotal || "hundreds of"} clashes, each with a number and a name Muse writes from
       its facts. What was checked, and what was left out on purpose (pieces joined by ports, a door in its wall), is under
       <b> What was checked</b>. A coordinator would open them one by one: bolts in their plates, beams into columns, a
       duct through a girder. Only a few need anyone to change anything.</>,
@@ -114,24 +114,24 @@ export const BUILDING_STEPS: Step[] = [
     show: { label: "Open it for me", run: (a) => a.selectClash("duct") },
   },
   {
-    act: "One fix, live", title: "What Sightline knows",
-    body: () => <>Sightline's three views of the clash (red is A, green is B), taken as you opened it, the two elements in
+    act: "One fix, live", title: "What ORCA knows",
+    body: () => <>ORCA's three views of the clash (red is A, green is B), taken as you opened it, the two elements in
       the IFC models, and how far one must move to clear the other. The viewer has gone to where they meet.</>,
     target: ".clash-panel",
   },
   {
     act: "One fix, live", title: "Ask for a fix",
     body: () => <>Click <b>Propose fixes</b>. Muse Spark reads the clash and suggests edits to the real IFC elements;
-      Sightline checks every one against the whole building before you see it.</>,
+      ORCA checks every one against the whole building before you see it.</>,
     target: "[data-tour=propose]", done: ran, show: { label: "Ask for me" },
   },
   {
-    act: "One fix, live", title: "Sightline takes the camera",
+    act: "One fix, live", title: "ORCA takes the camera",
     body: (s) => s.proposalDone
       ? <>{s.options ? <>Done: <b>{s.options} verified option{s.options > 1 ? "s" : ""}</b>.</> : "No option passed this time."}</>
-      : <>The glowing border means Sightline is driving. Muse Spark's reasoning appears as it thinks, then each idea is tried
+      : <>The glowing border means ORCA is driving. Muse Spark's reasoning appears as it thinks, then each idea is tried
         in the model: <b className="tour-amber">amber</b> while it is checked, <b className="tour-teal">teal</b> when clear,
-        <b className="tour-magenta"> magenta</b> for what it would hit. Touch the model to take over; Sightline keeps working.</>,
+        <b className="tour-magenta"> magenta</b> for what it would hit. Touch the model to take over; ORCA keeps working.</>,
     target: "main.stage", done: (s) => s.proposalDone && s.options > 0,
     fallback: { what: "duct", when: slowProposal },
   },
@@ -146,7 +146,7 @@ export const BUILDING_STEPS: Step[] = [
   {
     act: "One fix, live", title: "Hold on: it isn't only this duct",
     body: () => <>The same girder is also hit by a cable tray and a cold water main: the next two in the list. (Navisworks
-      never reported the cold water main; Sightline's check did.) Fixed one at a time, the three fixes could run into each
+      never reported the cold water main; ORCA's check did.) Fixed one at a time, the three fixes could run into each
       other. Leave this one for now: we'll come back to the girder and fix all three together.</>,
     target: ".pane.right",
   },
@@ -162,11 +162,11 @@ export const BUILDING_STEPS: Step[] = [
   {
     act: "A joint, not a move", title: "Ask again",
     body: (s) => s.proposalDone && s.options
-      ? <>A <b>trim</b>: the transom's end is cut back to butt the mullion's face. Nothing moves. Sightline marks it
+      ? <>A <b>trim</b>: the transom's end is cut back to butt the mullion's face. Nothing moves. ORCA marks it
         <i> model cleanup</i>: both are in the Architecture model, so it tidies the joint for its author rather than
         settling something between teams.</>
       : s.fixHidden
-        ? <>Sightline agrees it's by design, and offers to mark it so. You can still ask: click <b>Propose a fix anyway</b>,
+        ? <>ORCA agrees it's by design, and offers to mark it so. You can still ask: click <b>Propose a fix anyway</b>,
           then <b>Propose fixes</b>, and watch for a different kind of edit.</>
         : <>Click <b>Propose fixes</b> and watch for a different kind of edit.</>,
     target: "[data-tour=propose], [data-tour=fix-anyway]", done: (s) => s.proposalDone && s.options > 0,
@@ -184,14 +184,14 @@ export const BUILDING_STEPS: Step[] = [
   },
   // 5. Root cause
   {
-    act: "The root cause", title: "Ask Sightline, like a colleague",
+    act: "The root cause", title: "Ask ORCA, like a colleague",
     body: () => <>Open <b>Chat</b>. It can read every clash and the models, check them again, measure, propose and plan,
       and it drives the page. The mic button takes voice too.</>,
     target: "[data-tour=tab-chat]", done: (s) => s.tab === "chat", show: { label: "Open it for me" },
   },
   {
     act: "The root cause", title: "Why so many on Level 02?",
-    body: () => <>Ask: <i>"{TOUR_QUESTION}"</i> Sightline finds the element at the centre of the clashes (the girder),
+    body: () => <>Ask: <i>"{TOUR_QUESTION}"</i> ORCA finds the element at the centre of the clashes (the girder),
       works out why, and plans fixes for everything that hits it, checked together.</>,
     target: "[data-tour=chat-send]", done: (s) => s.planRunning || s.planReady,
     show: { label: "Ask for me", run: (a) => a.ask(true) }, enter: (a) => a.ask(false),
@@ -201,7 +201,7 @@ export const BUILDING_STEPS: Step[] = [
     body: (s) => s.planReady
       ? <>The plan is ready: the duct, the cable tray and the cold water main each get an offset through the girder's web
         openings, and the three are checked as one. That's the fix the designers made in their next revision.</>
-      : <>Sightline names the cause, then runs a fix agent for each service in parallel and checks all the fixes together,
+      : <>ORCA names the cause, then runs a fix agent for each service in parallel and checks all the fixes together,
         so one can't collide with another.</>,
     target: "main.stage", done: (s) => s.planReady,
     fallback: { what: "plan", when: (s) => !s.planReady && !s.replaying && (!!s.planError || s.planFor > 75 || !s.planRunning) },
@@ -222,7 +222,7 @@ export const BUILDING_STEPS: Step[] = [
   {
     act: "Not everything needs a fix", title: "By design",
     body: () => <>Bolts in their plates, columns through slabs: that's how they're built. Mark the pattern <b>by design</b>
-      (the tick); it leaves the open list, and Sightline suggests the rule that stops it coming back.</>,
+      (the tick); it leaves the open list, and ORCA suggests the rule that stops it coming back.</>,
     target: "[data-tour=pattern-by-design]", done: (s) => s.reviewedCount > 0,
     show: { label: "Mark it for me", run: () => (document.querySelector("[data-tour=mark-by-design]") as HTMLElement | null)?.click() },
   },
@@ -256,7 +256,7 @@ export const BUILDING_STEPS: Step[] = [
   },
   // 9. Close
   {
-    act: "Sightline", title: "Clashes fixed, proved, signed off", enter: (a) => { a.closeReport(); a.overview(); },
+    act: "ORCA", title: "Clashes fixed, proved, signed off", enter: (a) => { a.closeReport(); a.overview(); },
     body: (s) => <>
       <span className="tour-stats">
         <span><b>4 s</b> to check 1,732 elements</span>
@@ -276,14 +276,14 @@ const CARD_W = 340;
 export const CELL_STEPS: Step[] = [
   {
     act: "From STEP", title: "A robot cell, as its designers sent it",
-    body: () => <>PC-03 is a robot palletising cell: 144 parts from mechanical CAD, in one STEP file. Sightline converts it to
+    body: () => <>PC-03 is a robot palletising cell: 144 parts from mechanical CAD, in one STEP file. ORCA converts it to
       check it. Every part keeps its name and colour, straight bars and pipes stay exact, and Muse names what each part is.
       At the end you get your STEP back with the fixes.</>,
     target: "[data-tour=cell]", done: (s) => s.cellOpen && s.reportOpen && !s.busy,
     show: { label: "Open it for me", run: (a) => a.openCell() },
   },
   {
-    act: "From STEP", title: "What Sightline found",
+    act: "From STEP", title: "What ORCA found",
     body: (s) => <>The cell checked against itself: {s.triageTotal || "about a hundred"} clashes. Most are how a cell is built:
       anchors in their plates, the conveyor's drums in its rails, the robot working over the conveyor. Five problems were
       planted in this revision; the check finds all of them.</>,
@@ -317,7 +317,7 @@ export const CELL_STEPS: Step[] = [
     body: (s) => s.proposalDone && s.options
       ? <>Verified: the tray clears the post, and nothing else is hit. The post is guarding, so it stays; the tray moves.
         The ladder's pieces move as one, because in the STEP they belong to one group and touch.</>
-      : <>Click <b>Propose fixes</b>. Sightline tries ideas from Muse Spark and checks each against the whole cell.</>,
+      : <>Click <b>Propose fixes</b>. ORCA tries ideas from Muse Spark and checks each against the whole cell.</>,
     target: "[data-tour=propose], [data-tour=fix-anyway]", done: (s) => s.proposalDone && s.options > 0,
     show: { label: "Ask for me", hidden: ran, run: () => {
       (document.querySelector("[data-tour=fix-anyway]") as HTMLElement | null)?.click();
@@ -334,7 +334,7 @@ export const CELL_STEPS: Step[] = [
     act: "Together", title: "One pipe, two rails",
     body: (s) => <>{s.pipes.length ? <>{s.pipes.map((p, k) => <b key={p.id}>{k ? " and " : ""}#{p.number}</b>)}: </> : null}the
       compressed-air pipe runs through both of the conveyor's side rails. Fixed one at a time, each fix would ignore the
-      other rail. <b>Fix them together</b>: Sightline sees one pipe and two rails, and makes it one job.</>,
+      other rail. <b>Fix them together</b>: ORCA sees one pipe and two rails, and makes it one job.</>,
     target: "main.stage", done: (s) => s.planRunning || s.planReady,
     show: { label: "Fix them together", run: (a) => a.fixPipe() },
   },
@@ -342,7 +342,7 @@ export const CELL_STEPS: Step[] = [
     act: "Together", title: "One fix for both rails",
     body: (s) => s.planReady
       ? <>The plan is ready: one fix for the pipe that clears both rails, checked against the whole cell.</>
-      : <>Muse Spark proposes, Sightline checks: an offset under the rails, or a move, whichever clears both.</>,
+      : <>Muse Spark proposes, ORCA checks: an offset under the rails, or a move, whichever clears both.</>,
     target: "main.stage", done: (s) => s.planReady,
     fallback: { what: "pipe", when: (s) => !s.planReady && !s.replaying && (!!s.planError || s.planFor > 75 || !s.planRunning) },
   },
@@ -359,7 +359,7 @@ export const CELL_STEPS: Step[] = [
     target: "[data-tour=export]",
   },
   {
-    act: "Sightline", title: "A machine, coordinated", enter: (a) => a.overview(),
+    act: "ORCA", title: "A machine, coordinated", enter: (a) => a.overview(),
     body: () => <>
       <span className="tour-stats">
         <span><b>13 of 13</b> planted clashes found</span>

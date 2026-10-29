@@ -45,7 +45,7 @@ TOOLS = [
         'elements when needed. Use when the user asks to move other objects or a single-element fix is blocked. '
         'Costs three proposal units; shows whole proposals for designer review. You cannot accept them.',
         {'clash_id': {'type': 'string'}}, ['clash_id']),
-    _fn("detect_clashes", "Find the clashes in the open models with Sightline's own detection, no Navisworks report "
+    _fn("detect_clashes", "Find the clashes in the open models with ORCA's own detection, no Navisworks report "
         "needed: every pair of models and each model against itself (hard clashes deeper than the tolerance, 1 mm by "
         "default) and duplicates. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and touches "
         "are counted, not reported. Takes about 10 s and opens the result as the user's clash report, replacing the open "
@@ -62,7 +62,7 @@ TOOLS = [
         "the open model and fixed.", {"clash_id": {"type": "string"}}, ["clash_id"]),
     _fn("look_at_clash_images", "Attach the clash's Navisworks images (A: the pair, B: with context, C: second "
         "angle) so you can see it. Element A is red, element B green.", {"clash_id": {"type": "string"}}, ["clash_id"]),
-    _fn("measure_clash", "Sightline's own geometry measure of a clash (signed distance, metres; negative = overlap).",
+    _fn("measure_clash", "ORCA's own geometry measure of a clash (signed distance, metres; negative = overlap).",
         {"clash_id": {"type": "string"}}, ["clash_id"]),
     _fn("describe_element", "An element of the open model: class, name, tag, level, file, connected elements, and for "
         "a straight duct/pipe/tray segment its run (start, end, length, profile).", {"global_id": {"type": "string"}},
@@ -80,7 +80,7 @@ TOOLS = [
         {"element": {"type": "string"}, "obstacle": {"type": "string"},
          "split_m": {"type": "array", "items": {"type": "number"}}, "dz_m": {"type": "number"}},
         ["element", "obstacle", "split_m", "dz_m"]),
-    _fn("propose_fixes", "Run Sightline's fix agent on a clash: it proposes moves, local offsets and trims at joints, checks each "
+    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets and trims at joints, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
         "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
         {"clash_id": {"type": "string"}}, ["clash_id"]),
@@ -240,7 +240,7 @@ class Chat:
         parts.append("a model is open" if ctx.scene_id in self.ws.scenes else "no model is open")
         if ctx.report_id in self.ws.reports:
             r = self.ws.report(ctx.report_id)
-            source = "found by Sightline's own detection" if r.origin == "sightline" else "from Navisworks"
+            source = "found by ORCA's own detection" if r.origin == "sightline" else "from Navisworks"
             parts.append(f"clash report '{r.title}' is open ({len(r.clashes)} clashes, {source})")
         else:
             parts.append("no clash report is open")
@@ -322,7 +322,7 @@ class Chat:
                            "new": len(diff["new"]), "resolved": len(diff["resolved"]),
                            "no_longer_checked": len(diff["no_longer_checked"])},
                        "note": "The result is now the open clash report. Triage sorts real problems from noise."}
-            return summary, f"{n} clashes found by Sightline in {out['seconds']} s", []
+            return summary, f"{n} clashes found by ORCA in {out['seconds']} s", []
         if name == "report_summary":
             r, matches = self._report(ctx), self._matches(ctx)
             tests = Counter(c.test for c in r.clashes)

@@ -1,4 +1,4 @@
-// The two demo pictures on the landing page and in the README, captured in Sightline's own viewer.
+// The two demo pictures on the landing page and in the README, captured in ORCA's own viewer.
 //
 // Opens each demo the way a visitor does, waits for the check, picks a view, saves the canvas with the viewer's own
 // Screenshot button, then crops it to 16:10 and writes WebP with Pillow (from the server's environment).

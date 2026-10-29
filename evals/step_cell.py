@@ -1,6 +1,6 @@
 """The PC-03 palletising cell opened from STEP: conversion, detection, a move fix, and the STEP written back.
 
-ClashWiseDemoModels `palletising-cell/` writes the same cell as STEP and IFC from one parts list, with an answer key
+The demo-models repo's `palletising-cell/` writes the same cell as STEP and IFC from one parts list, with an answer key
 (`verify_cell.PLANTED`: five planted problems, 13 part pairs in Rev A, none in Rev B; `BY_DESIGN`: contacts the cell is
 built with). This opens the STEP files the way the app does (`Workspace.open`: convert, name the parts' classes with
 the titles' model, triangulate), then checks:
@@ -12,12 +12,13 @@ the titles' model, triangulate), then checks:
 - export writes the STEP again: the ladder 150 mm higher, the pipe's offset pieces added, the rail shorter.
 
     cd server
-    uv run python ../evals/step_cell.py --cell ../../ClashWiseDemoModels/palletising-cell \
+    uv run python ../evals/step_cell.py --cell $DEMO_MODELS/palletising-cell \
         --out ../evals/runs/<date>-cell-step
 """
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import shutil
 import sys
@@ -26,6 +27,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# A clone of IssueLab's demo-models repo (CLAUDE.md, "Demo data"): $DEMO_MODELS, else ../demo-models.
+DEMO = Path(os.environ.get("DEMO_MODELS", ROOT.parent / "demo-models"))
 sys.path.insert(0, str(ROOT / "server"))
 
 from sightline import detect, edits, plans, step, verify  # noqa: E402
@@ -43,7 +46,7 @@ def zmin(part) -> float:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cell", type=Path, default=ROOT.parent / "ClashWiseDemoModels/palletising-cell")
+    ap.add_argument("--cell", type=Path, default=DEMO / "palletising-cell")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--no-classes", action="store_true", help="convert without the model (every part a proxy)")
     args = ap.parse_args()
@@ -153,7 +156,8 @@ def main():
                       f"- Check before: {_summary(before)}; after +150 mm: {_summary(after)}"
                       f"{'; still hits post W5' if hits_post else '; clear of post W5'}.",
                       f"- Exported {', '.join(p.name for p in out)}; re-read: the {len(names)} ladder parts {dz} mm "
-                      f"higher; the compressed-air line {air_before} → {air_after} parts (the offset's pieces); "
+                      f"higher; the compressed-air line {air_before} → {air_after} parts"
+                      f"{' (the offset' + chr(39) + 's pieces)' if air_after > air_before else ''}; "
                       f"`{rail_name}` {shorter} mm shorter (C3 trim, at its {trim.end}).", "", *c1_lines]
     lines.insert(1, f"Result: {'pass' if ok else 'FAIL'}")
     (args.out / "README.md").write_text("\n".join(lines) + "\n")
