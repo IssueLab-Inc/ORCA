@@ -24,7 +24,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, ConfigDict
 from starlette.routing import Route
 
-from . import agents, chat, context_planner, detect, document, edits, mcp_server, owner, plans, settings, step, titles, triage
+from . import (agents, chat, context_planner, detect, document, edits, mcp_server, owner, plans, requirements, settings,
+               step, titles, triage)
 from .meta_client import load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
 from .service import MODEL_SUFFIXES, MODELS, Workspace
@@ -50,9 +51,21 @@ class _OwnerContext:
             pass
         signed = jar[owner.COOKIE].value if owner.COOKIE in jar else None
         tokens = owner.enter(owner.cookie_ok(signed), headers.get(owner.HEADER.encode(), b"").decode("utf-8", "replace") or None)
+        # Everyone's coordination requirements (requirements.py): an id the page registered. One this server does not
+        # know (a restart) is refused, so the page registers its file again rather than run without it.
+        rid = headers.get(requirements.HEADER.encode(), b"").decode("latin-1").strip() or None
+        if rid and requirements.lookup(rid) is None and scope.get("path", "").startswith("/api/"):
+            owner.leave(tokens)
+            body = json.dumps({"detail": "requirements_unknown"}).encode()
+            await send({"type": "http.response.start", "status": 409,
+                        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        token = requirements.enter(rid)
         try:
             await self.inner(scope, receive, send)
         finally:
+            requirements.leave(token)
             owner.leave(tokens)
 
 
@@ -154,6 +167,12 @@ voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
 # Model uploads (IFC or STEP): each takes disk, memory and, for STEP, a conversion and one model call to name its parts.
 model_upload_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_HOUR", "0")),
                                   int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_DAY", "0")), noun="model uploads")
+
+# Coordination requirements (requirements.py): registering a file is cheap, a preview runs a detection.
+requirements_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_REQUIREMENTS_PER_HOUR", "120")),
+                                  int(os.environ.get("SIGHTLINE_REQUIREMENTS_PER_DAY", "0")), noun="requirements files")
+preview_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_PREVIEW_PER_HOUR", "60")),
+                             int(os.environ.get("SIGHTLINE_PREVIEW_PER_DAY", "0")), noun="requirement previews")
 
 MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
 # Words Muse Voice Transcribe should lean toward: what people say to ORCA about a building model.
@@ -666,6 +685,111 @@ def detect_stream(scene_id: str, body: DetectRequest, request: Request):
     return _ndjson(stream())
 
 
+# ------------------------------------------------------------------------------------------------- requirements
+
+class RequirementsDraft(BaseModel):
+    level: int = 3
+    strictness: str = "balanced"
+    name: str = "Coordination requirements"
+
+
+@app.get("/api/requirements/scale")
+def requirements_scale():
+    """The design levels and strictness steps, and what each sets (docs/requirements.md)."""
+    return requirements.scale()
+
+
+def _requirements_out(doc) -> dict:
+    return {"id": requirements.doc_id(doc), "doc": doc.to_dict(), "params": asdict(requirements.resolve(doc)),
+            "label": requirements.label(doc), "model_key": requirements.model_key(doc)}
+
+
+@app.post("/api/requirements")
+async def register_requirements(request: Request):
+    """Register a requirements file (the body): returns its id, to send as X-Sightline-Requirements, the file as
+    ORCA reads it, and the numbers its level and strictness resolve to."""
+    raw = await request.body()
+    if len(raw) > requirements.MAX_BYTES:
+        raise HTTPException(413, f"A requirements file is at most {requirements.MAX_BYTES // 1024} KB.")
+    try:
+        doc = requirements.parse(json.loads(raw or b"{}"))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(422, str(e))
+    if requirements.lookup(requirements.doc_id(doc)) is None:
+        refused = _take(requirements_limit, request)
+        if refused:
+            raise HTTPException(429, refused)
+    requirements.register(doc)
+    return _requirements_out(doc)
+
+
+@app.get("/api/scenes/{scene_id}/requirements/default")
+def requirements_default(scene_id: str):
+    """A starting point from the open models (L3 Coordinated, balanced: what ORCA checks without requirements), and
+    what the models contain."""
+    scene = ws.scene(_scene(scene_id))
+    # Read-only (classes, teams, systems), so it does not wait for a preview or a fix trial holding the lock.
+    doc = requirements.default_doc(scene)
+    inv = requirements.inventory(scene)
+    return {**_requirements_out(doc), "inventory": inv}
+
+
+@app.post("/api/scenes/{scene_id}/requirements/suggest")
+def requirements_suggest(scene_id: str, body: RequirementsDraft, request: Request):
+    """Muse Spark drafts requirements for the open models at a level and strictness. One model call: counts as one
+    proposal."""
+    scene = ws.scene(_scene(scene_id))
+    refused = _take(propose_limit, request)
+    if refused:
+        raise HTTPException(429, refused)
+    inv = requirements.inventory(scene)
+    try:
+        doc, summary = requirements.suggest(ws.model, inv, body.level, body.strictness, body.name)
+    except Exception as e:
+        raise HTTPException(502, f"Muse Spark could not draft requirements: {type(e).__name__}: {e}")
+    return {**_requirements_out(doc), "summary": summary, "inventory": inv}
+
+
+_previews: dict[tuple, dict] = {}
+
+
+@app.post("/api/scenes/{scene_id}/requirements/preview")
+async def requirements_preview(scene_id: str, request: Request):
+    """How many clashes a requirements file (the body) would find in the open models, and how many ORCA's defaults
+    find, without opening a report. Runs the detection (seconds); repeated files are answered from a cache."""
+    _scene(scene_id)
+    raw = await request.body()
+    if len(raw) > requirements.MAX_BYTES:
+        raise HTTPException(413, "Too large.")
+    try:
+        doc = requirements.parse(json.loads(raw or b"{}"))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(422, str(e))
+
+    def count(tests) -> dict:
+        key = (scene_id, json.dumps([asdict(t) for t in tests] if tests is not None else None, sort_keys=True, default=str))
+        if key not in _previews:
+            scene = ws.scene(scene_id)
+            with ws.lock:
+                run = detect.run(scene, tests)
+            _previews[key] = {"clashes": len(run.report.clashes), "seconds": run.seconds,
+                              "tests": [{"name": c.name, "kind": c.kind, "clashes": c.clashes} for c in run.coverage]}
+            while len(_previews) > 64:
+                _previews.pop(next(iter(_previews)))
+        return _previews[key]
+
+    tests = requirements.compile_tests(doc, ws.scene(scene_id))
+    cached = all(k in _previews for k in [(scene_id, json.dumps([asdict(t) for t in tests], sort_keys=True, default=str)),
+                                          (scene_id, json.dumps(None))])
+    if not cached:
+        refused = _take(preview_limit, request)
+        if refused:
+            raise HTTPException(429, refused)
+    found = await run_in_threadpool(count, tests)
+    baseline = await run_in_threadpool(count, None)
+    return {**found, "baseline": baseline["clashes"], "params": asdict(requirements.resolve(doc))}
+
+
 @app.get("/api/reports/{report_id}/match/{scene_id}")
 def match(report_id: str, scene_id: str):
     return ws.match(_report(report_id), _scene(scene_id))
@@ -699,7 +823,8 @@ def patterns(report_id: str, scene_id: str, fixed: str = ""):
 def triage_patterns(report_id: str, scene_id: str, body: PatternTriage, request: Request):
     """Ask Muse Spark what each pattern is (one call for all). Counts as one proposal."""
     pats = plans.patterns(ws, _scene(scene_id), _report(report_id), body.fixed)
-    key = (report_id, scene_id, tuple(p["id"] for p in pats))
+    doc = requirements.current()
+    key = (report_id, scene_id, tuple(p["id"] for p in pats), requirements.model_key(doc) if doc else None)
     if key not in _pattern_triage:
         refused = _take(propose_limit, request)
         if refused:
@@ -713,9 +838,45 @@ _triage_jobs: dict[str, triage.Job] = {}
 _triage_lock = threading.Lock()
 
 
-def _triage_key(report) -> str:
-    """A sample report is the same files for every visitor (clash ids are positions), so its triage is shared."""
-    return report.id if report.temporary else f"sample:{report.root}"
+def _triage_key(report, doc=None) -> str:
+    """A sample report is the same files for every visitor (clash ids are positions), so its triage is shared. Under
+    coordination requirements, a run is shared only with the same prompt (`model_key`) and the same rules."""
+    base = report.id if report.temporary else f"sample:{report.root}"
+    return base if doc is None else f"{base}|{requirements.model_key(doc)}|{requirements.rules_key(doc)}"
+
+
+def _triage_donor(report, doc) -> triage.Job | None:
+    """A finished run of this report under the same triage prompt, whose model readings a run under other rules can
+    keep (adding a rule from Insights must not re-ask the model about everything)."""
+    base = _triage_key(report)
+    prefix = base if doc is None else f"{base}|{requirements.model_key(doc)}|"
+    for key, job in reversed(list(_triage_jobs.items())):
+        if job.done and not job.error and (key.startswith(prefix) if doc is not None else key == base):
+            return job
+    return None
+
+
+def _ruled(doc, clash, verdict: dict | None) -> dict:
+    """A reading shown under requirements it was not read under: a by-design rule now in force settles it (keeping the
+    model's reading); a requirement verdict whose rule is gone is shown as not yet read."""
+    rule = requirements.settle(doc, clash)
+    if rule:
+        out = {**rule, "source": "rule"}
+        if verdict and verdict.get("source") == "model" and verdict.get("understanding"):
+            out["model_reading"] = f"{verdict.get('verdict', '').replace('_', ' ')}: {verdict['understanding']}"
+        return out
+    if verdict and verdict.get("basis") == "requirement":
+        return {"verdict": "unknown", "source": "rule", "error": "Its requirements rule is gone: triage again to read it."}
+    return verdict or {"verdict": "unknown", "source": "rule"}
+
+
+def _triage_latest(report) -> triage.Job | None:
+    """The latest run of this report under any requirements: shown, marked stale, until one under these is started."""
+    base = _triage_key(report)
+    for key, job in reversed(list(_triage_jobs.items())):
+        if key == base or key.startswith(base + "|"):
+            return job
+    return None
 
 
 def _triage_facts(report_id: str, scene_id: str | None) -> dict[str, dict]:
@@ -737,11 +898,26 @@ def _triage_facts(report_id: str, scene_id: str | None) -> dict[str, dict]:
 
 @app.get("/api/reports/{report_id}/triage")
 def triage_state(report_id: str, scene_id: str | None = None):
-    """The bulk triage of this report so far ({"results": {}} when it has not been run)."""
-    job = _triage_jobs.get(_triage_key(ws.report(_report(report_id))))
+    """The bulk triage of this report so far ({"results": {}} when it has not been run). Under requirements that only
+    change rules since a finished run, a run under them starts at once from its readings (no model call for those,
+    no charge); under a different prompt, the last run is returned marked "stale" until one is started."""
+    report = ws.report(_report(report_id))
+    doc = requirements.current()
+    job = _triage_jobs.get(_triage_key(report, doc))
+    if job is None and doc is not None and _triage_donor(report, doc) is not None:
+        job = _start_triage(report, scene_id, lambda: None)
     if job:
         job.learn(_triage_facts(report_id, scene_id))
-    return job.state() if job else {"results": {}, "done": False, "started": False}
+        return job.state()
+    latest = _triage_latest(report)
+    if latest is not None:
+        state = latest.state()
+        if doc is not None:  # its readings, with the rules in force now (no model call): a rule added applies at once
+            state["results"] = {c.id: _ruled(doc, c, state["results"].get(c.id)) for c in report.clashes
+                                if c.id in state["results"] or requirements.settle(doc, c)}
+            state["summary"] = triage.summary(state["results"])
+        return {**state, "stale": True}
+    return {"results": {}, "done": False, "started": False}
 
 
 @app.post("/api/reports/{report_id}/triage/stream")
@@ -765,16 +941,21 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
 
 def _start_triage(report, scene_id: str | None, charge, rerun: bool = False) -> triage.Job:
     """The report's shared triage run: the one under way or done, else a new one (`charge` once: why not, or None)."""
-    key = _triage_key(report)
+    doc = requirements.current()
+    key = _triage_key(report, doc)
     facts = _triage_facts(report.id, scene_id)
     with _triage_lock:
         job = _triage_jobs.get(key)
         if job is None or (rerun and job.done):
-            refused = charge()
+            donor = None if rerun else _triage_donor(report, doc) if doc is not None else None
+            refused = None if donor is not None else charge()  # carrying readings over to new rules is free
             if refused:
                 raise PermissionError(refused)
             model, info = triage_model()
-            job = triage.Job(report, model, info, int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8")))
+            if doc is not None:
+                info = {**info, "requirements": ws.requirements_info(doc)}
+            job = triage.Job(report, model, info, int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8")),
+                             requirements=doc, seed=donor.results if donor is not None else None)
             job.learn(facts)
             _triage_jobs[key] = job.start()
             while len(_triage_jobs) > 16:
@@ -956,7 +1137,7 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
         raise HTTPException(422, "scope is combined, team or model.")
     # The verdicts the visitor sees (with their own "not a clash" marks applied), else the server's finished run. The
     # shared run can be gone (a restart) or running again (someone pressed Triage again) while the page still has one.
-    job = _triage_jobs.get(_triage_key(report))
+    job = _triage_jobs.get(_triage_key(report, requirements.current())) or _triage_latest(report)
     verdicts = ({k: v for k, v in body.triage.items() if isinstance(v, dict) and v.get("verdict")} if body.triage
                 else dict(job.results) if job is not None and job.done else {})
     if len(verdicts) < len(report.clashes) // 2:
@@ -1076,6 +1257,7 @@ def create_link(body: LinkContext, request: Request):
     who = client_id(request.headers, request.client.host if request.client else None)
     token, link = links.create(who, owner.no_caps(), chat.Context(body.scene_id, body.report_id, body.clash_id,
                                                                   list(body.fixed)))
+    link.requirements = requirements.current_id()
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
     return {"token": token, "mcp_url": f"{proto}://{host}/mcp", **link.public()}
@@ -1092,6 +1274,7 @@ def link_context(token: str, body: LinkContext):
     link = _link(token)
     link.ctx.scene_id, link.ctx.report_id, link.ctx.clash_id = body.scene_id, body.report_id, body.clash_id
     link.ctx.fixed = list(body.fixed)
+    link.requirements = requirements.current_id()  # the page sends its requirements with every call, this one too
     return link.public()
 
 
@@ -1161,7 +1344,7 @@ def mcp_hooks() -> mcp_server.Hooks:
 
     def build_document(report_id: str, scene_id: str | None, scope: str) -> dict:
         report = ws.report(report_id)
-        job = _triage_jobs.get(_triage_key(report))
+        job = _triage_jobs.get(_triage_key(report, requirements.current())) or _triage_latest(report)
         verdicts = dict(job.results) if job is not None and job.done else {}
         if len(verdicts) < len(report.clashes) // 2:
             raise RuntimeError("Triage the report first (the triage tool): the report sorts clashes by its verdicts.")

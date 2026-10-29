@@ -25,7 +25,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
 from mcp_types import ToolAnnotations
 
-from . import agents, chat, edits, plans
+from . import agents, chat, edits, plans, requirements
 from .service import Workspace
 
 INSTRUCTIONS = """ORCA is an AI design coordinator for 3D models (buildings from IFC, machines from STEP). It finds
@@ -78,7 +78,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             @functools.wraps(fn)
             def guarded(*args, **kwargs):
                 try:
-                    return fn(*args, **kwargs)
+                    with requirements.using(_link_requirements([*args, *kwargs.values()])):
+                        return fn(*args, **kwargs)
                 except ToolError:
                     raise
                 except KeyError as e:
@@ -88,6 +89,14 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
                     raise ToolError(str(e)) from e
             return mcp.tool(**kw)(guarded)
         return register
+
+    def _link_requirements(values: list) -> str | None:
+        """The coordination requirements of the link a tool call came on (what its page set), else none."""
+        ctx = next((v for v in values if isinstance(v, Context)), None)
+        try:
+            return link_of(ctx).requirements
+        except PermissionError:
+            return None
 
     def link_of(ctx: Context | None) -> agents.Link:
         if hooks.links is None:

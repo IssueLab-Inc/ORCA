@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CircleCheck, Loader2, Radar, RotateCcw } from "lucide-react";
+import { CircleCheck, ClipboardCheck, Loader2, Radar, RotateCcw } from "lucide-react";
 import type { DetectCoverage, DetectSetup, DetectTest, Detection } from "./api";
 
 /** Live progress of a detection run: the current phase, and each test as it finishes. */
@@ -15,8 +15,9 @@ function excluded(c: DetectCoverage) {
 }
 
 /** Before any report is open: what ORCA will check in the open models, and the button to run it. */
-export function DetectSetupCard({ setup, progress, onRun, disabled }: {
+export function DetectSetupCard({ setup, progress, onRun, disabled, requirements = null, onRequirements }: {
   setup: DetectSetup | null; progress: DetectProgress | null; onRun: (tests: DetectTest[]) => void; disabled: boolean;
+  requirements?: string | null; onRequirements?: () => void;  // the coordination requirements in use ("L3 · Strict")
 }) {
   const [picked, setPicked] = useState<Record<string, boolean>>({});  // the user's ticks over each test's default
   const [toleranceMm, setToleranceMm] = useState(1);
@@ -25,14 +26,19 @@ export function DetectSetupCard({ setup, progress, onRun, disabled }: {
   if (!setup) return <section className="triage detect"><DetectHead sub="Reading the models…" /></section>;
   const enabled = (t: DetectTest) => picked[t.id] ?? t.enabled;
   const toggle = (t: DetectTest) => setPicked((p) => ({ ...p, [t.id]: !enabled(t) }));
+  // Under requirements the tests are what they compile to, tolerance included: only ticks are offered here.
+  const ruled = !!setup.requirements;
   const chosen = setup.tests.filter(enabled).map((t) => ({ ...t, enabled: true,
-    tolerance_m: t.kind === "hard" ? Math.max(0, toleranceMm) / 1000 : t.tolerance_m }));
+    tolerance_m: t.kind === "hard" && !ruled ? Math.max(0, toleranceMm) / 1000 : t.tolerance_m }));
   return (
     <section className="triage detect idle" data-tour="detect">
-      <DetectHead sub="Every pair of models, and each model against itself" />
-      <p className="triage-lead">ORCA checks every pair of models and each model against itself, and reports
+      <DetectHead sub={ruled ? `The checks your requirements ask for` : "Every pair of models, and each model against itself"} />
+      {ruled ? <p className="triage-lead">ORCA runs the checks in <b>{setup.requirements!.name}</b> ({requirements ?? setup.requirements!.label}):
+        each group against the others and itself, at the tolerances and clearances they set.</p>
+        : <p className="triage-lead">ORCA checks every pair of models and each model against itself, and reports
         overlaps deeper than the tolerance. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and
-        touches are counted, not reported.</p>
+        touches are counted, not reported.</p>}
+      <ReqLine requirements={ruled ? requirements ?? setup.requirements!.label : null} onRequirements={onRequirements} />
       <ul className="detect-tests">
         {setup.tests.map((t) => (
           <li key={t.id}>
@@ -40,13 +46,24 @@ export function DetectSetupCard({ setup, progress, onRun, disabled }: {
             <span className="chip small">{t.kind === "clearance" ? `clearance ${Math.round(t.clearance_m * 1000)} mm` : KIND[t.kind]}</span>
           </li>))}
       </ul>
-      <label className="detect-tol">Hard clashes deeper than
-        <input type="number" min={0} step={1} value={toleranceMm} onChange={(e) => setToleranceMm(Number(e.target.value))} /> mm</label>
+      {!ruled && <label className="detect-tol">Hard clashes deeper than
+        <input type="number" min={0} step={1} value={toleranceMm} onChange={(e) => setToleranceMm(Number(e.target.value))} /> mm</label>}
       <button className="btn primary triage-go" disabled={disabled || !chosen.length} onClick={() => onRun(chosen)}>
         <Radar size={15} aria-hidden /> Check {checkedElements(setup, chosen).toLocaleString()} elements</button>
       <p className="hint">About ten seconds for a building. Then Muse names each clash, triage sorts them, and ORCA
         proposes verified fixes.</p>
     </section>
+  );
+}
+
+/** "Requirements: L3 · Strict  Edit", or the way to set some. */
+function ReqLine({ requirements, name, onRequirements }: { requirements: string | null; name?: string; onRequirements?: () => void }) {
+  if (!onRequirements && !requirements) return null;
+  return (
+    <p className="detect-req"><ClipboardCheck size={13} aria-hidden />
+      {requirements ? <b data-tip={name ? `Checked against "${name}"` : undefined}>{requirements}</b> : <span className="hint">ORCA's defaults · no requirements set</span>}
+      {onRequirements && <button className="btn small ghost" onClick={onRequirements}>{requirements ? "Edit" : "Set requirements"}</button>}
+    </p>
   );
 }
 
@@ -75,10 +92,12 @@ function ProgressRows({ progress }: { progress: DetectProgress }) {
 }
 
 /** Over a report ORCA found: what was checked, what changed since the last run, and Detect again. */
-export function DetectSummary({ detection, progress, onAgain, disabled, compact = false }: {
+export function DetectSummary({ detection, progress, onAgain, disabled, compact = false, requirementsId = null, onRequirements }: {
   detection: Detection; progress: DetectProgress | null; onAgain: () => void; disabled: boolean;
   compact?: boolean;  // the list is filtered: one line, so the list gets the room
+  requirementsId?: string | null; onRequirements?: () => void;  // the requirements in use now (their id)
 }) {
+  const ran = detection.requirements?.label ?? null;  // what this run was checked against
   const clashes = detection.coverage.reduce((n, c) => n + c.clashes, 0);
   const pairs = detection.coverage.reduce((n, c) => n + c.candidate_pairs, 0);
   const meant = detection.coverage.reduce((n, c) => n + Object.values(c.excluded).reduce((x, y) => x + y, 0), 0);
@@ -95,6 +114,9 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
       {progress ? <ProgressRows progress={progress} /> : !compact && <>
         <p className="detect-count"><b>{clashes.toLocaleString()}</b> clash{clashes === 1 ? "" : "es"} in
           {" "}{detection.elements.toLocaleString()} elements</p>
+        <ReqLine requirements={ran} name={detection.requirements?.name} onRequirements={onRequirements} />
+        {(detection.requirements?.id ?? null) !== requirementsId &&
+          <p className="hint small">The requirements changed since this run: Detect again to check under {requirementsId ? "them" : "ORCA's defaults"}.</p>}
         {!d.first && (
           <div className="detect-diff">
             <span className={`chip ${d.resolved.length ? "ok" : ""}`} data-tip={d.resolved.map((r) => r.test).join(", ") || "Nothing resolved since the last run"}>

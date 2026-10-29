@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, CircleCheck, Filter, Flag, ListChecks, Network, Repeat2, Sparkles, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleCheck, ClipboardCheck, ClipboardPlus, Filter, Flag, ListChecks, Network, Repeat2, Sparkles, Wand2 } from "lucide-react";
 import { useState } from "react";
 import type { Pattern, PatternVerdict, RootCause } from "./api";
 
@@ -13,7 +13,7 @@ const VERDICT: Record<PatternVerdict["verdict"], { label: string; cls: string }>
 
 /** What ORCA sees across the report: elements behind several clashes, and clashes that repeat the same way. */
 export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onFixRoot, onExplain, onSelect, onReview, onFixAll,
-  resolved, focus, onFocus }: {
+  resolved, focus, onFocus, onAddRule, hasRule = () => false }: {
   rootCauses: RootCause[] | null; patterns: Pattern[] | null; verdicts: Record<string, PatternVerdict> | null;
   explaining: boolean; busy: boolean;
   resolved: Set<string>;  // fixed or reviewed: a pattern shows only its open clashes, and stays in place when none are left
@@ -21,6 +21,8 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
   onFocus: (f: { label: string; ids: string[] } | null) => void;
   onFixRoot: (hub: string) => void; onExplain: () => void; onSelect: (ids: string[]) => void;
   onReview: (ids: string[], kind: "by_design" | "author", note: string) => void; onFixAll: (ids: string[]) => void;
+  /** A by-design pattern becomes a rule in the coordination requirements: settled without the model from then on. */
+  onAddRule?: (p: Pattern, v: PatternVerdict) => void; hasRule?: (p: Pattern) => boolean;
 }) {
   const [allRoots, setAllRoots] = useState(false);
   const [allPatterns, setAllPatterns] = useState(false);
@@ -98,6 +100,11 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
                   {p.cross_discipline ? " · across disciplines" : ""}</span>
                 {v && <span className="verdict"><span className={`chip small ${VERDICT[v.verdict].cls}`}>{VERDICT[v.verdict].label}</span> {v.cause}</span>}
                 {v && <span className="hint">{v.rule ? <>Rule: <i>{v.rule}</i></> : v.action}</span>}
+                {v?.verdict === "by_design" && onAddRule && (hasRule(p)
+                  ? <span className="chip small ok req-added"><ClipboardCheck size={11} aria-hidden /> in your requirements</span>
+                  : <button className="btn small ghost req-add" data-tour="add-requirement"
+                    data-tip="Make it a rule in your coordination requirements: these pairs are settled as by design without the model, here and on every project you reuse the file on. Muse Spark still checks the rule."
+                    onClick={() => onAddRule(p, v)}><ClipboardPlus size={12} aria-hidden /> Add to requirements</button>)}
               </div>
               <div className="insight-actions">
                 {filterButton(patLabel(p), p.clash_ids)}

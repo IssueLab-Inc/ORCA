@@ -202,6 +202,37 @@ answer key's three, all high and for MEP (all 633 with Site: 98 calls, 214 s). N
 Spark Open on Baseten (live deploy, Oct 27: median call 7.9 s but a longer tail, up to 33 s). Scored on the whole package
 the two models agree on 299 of 317 verdicts ([evals/README.md](evals/README.md#triage-of-navisworks-results)).
 
+### Coordination requirements (optional)
+
+**Requirements** in the header sets the standard ORCA checks, triages and fixes to
+([`docs/requirements.md`](docs/requirements.md), [`server/sightline/requirements.py`](server/sightline/requirements.py)).
+Without requirements, ORCA uses its defaults. A requirements file sets:
+- **A design level**, L1 Concept to L5 As-built. The names fit any industry; RIBA, LOD and product-phase equivalents
+  are hints only.
+- **A strictness**, from lenient to exacting, which covers both flagging and fixing. Strict flags more and fixes
+  cautiously.
+- **Checks** between groups of elements: hard, clearance or off.
+- **Who moves**: order, edits allowed, largest move, trims.
+- **Pairs declared by design.**
+- **Guidance for Muse Spark.**
+
+Level and strictness only ever turn into numbers (tolerance, clearance, smallest element, fix clearance, move limit),
+and the dialog shows the clash count they would give before you apply them.
+
+Muse Spark stays in the loop:
+- it drafts a file from the open models on request;
+- it still reads every clash no rule settles, told the requirements;
+- it audits each by-design rule on the clashes it set aside;
+- where nothing may be edited, it recommends a change for the designer.
+
+On a by-design pattern in Insights, **Add to requirements** settles those clashes at once. Verified fixes say which
+requirements they meet, and the PDF and BCF say which requirements they were checked against. The file downloads
+and uploads as `*.orca-requirements.json` for the next project.
+
+At L3 Balanced, ORCA finds exactly what it finds with no file (Northbank 464 = 464, the cell 107 = 107). On #1 under
+Strict, Muse proposed the duct offset up 400 mm through the girder opening (the designer's height), inside the
+400 mm limit.
+
 ### Several clashes at once, and root causes
 
 Tick clashes in the list and choose **Fix together**: ORCA runs the fix agent on every pair at once, then applies

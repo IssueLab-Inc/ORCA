@@ -13,7 +13,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import edits, verify
+from . import edits, requirements, verify
 from .meta_client import ChatModel
 from .scene import IfcScene
 
@@ -46,6 +46,7 @@ class Option:
     trim: dict | None = None            # trim only: {"end": "start" | "end", "by_m": metres}
     cleanup: bool = False               # a trim inside one model: tidies a joint for its author, not a coordination fix
     checked_against: int = 0            # elements the geometry check tested this fix against (proof strip)
+    meets: list[str] = field(default_factory=list)  # the coordination requirements it meets, in plain words
 
 
 @dataclass
@@ -66,9 +67,14 @@ class Result:
     options: list[Option]
     attempts: list[Attempt]   # every try, failures included: the UI streams these as agent steps
     advice: str = ""          # what a person should look at or decide, in the model's words (shown when nothing passed)
+    # Under coordination requirements that allow no edit here: Muse Spark's recommended change for the designer (a
+    # candidate, never tried or applied) and why ORCA could not make it.
+    recommendation: dict | None = None
+    requirements: str | None = None   # the requirements' label ("L3 Coordinated · Strict"), when there were some
+    clearance_m: float = 0.025        # the clearance every option had to keep
 
 
-def _describe(scene: IfcScene, clash: Clash) -> str:
+def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
     a, b = scene.element(clash.element_a), scene.element(clash.element_b)
     lines = [
         f"Element A (red): {a.ifc_class} '{a.name}', level {a.storey}, GlobalId {a.global_id}",
@@ -77,7 +83,7 @@ def _describe(scene: IfcScene, clash: Clash) -> str:
     if clash.distance_m is not None:
         lines.append(f"Reported signed distance: {clash.distance_m * 1000:.1f} mm (negative = overlap)")
     for label, this, other in (("A", clash.element_a, clash.element_b), ("B", clash.element_b, clash.element_a)):
-        lines += _run_text(scene, label, this, other)
+        lines += _run_text(scene, label, this, other, clearance_m)
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
         lines += _joint_text(scene, label, this, other, name)
     if clash.notes:
@@ -101,7 +107,7 @@ def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: 
     return lines
 
 
-def _run_text(scene: IfcScene, label: str, gid: str, other: str) -> list[str]:
+def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = 0.025) -> list[str]:
     """A straight segment's geometry, and where the other element sits along it: what a local offset needs."""
     try:
         run = edits.run_of(scene, gid)
@@ -125,13 +131,13 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str) -> list[str]:
                             if edits.default_corners() == "bends" else
                             f"a riser takes {run.depth_m:.2f} m of run, and at least 0.05 m must remain at each end."))
             try:
-                holes = edits.passages(scene, gid, other)
+                holes = edits.passages(scene, gid, other, clearance_m=clearance_m)
             except RuntimeError:
                 holes = []
             for h in holes:
                 lines.append(f"The other element has an opening on this line from z {h['bottom_m']:.3f} to "
                              f"{h['top_m']:.3f} m: offsetting {label}'s middle piece by {h['dz_min_m']:+.3f} to "
-                             f"{h['dz_max_m']:+.3f} m passes it through with 25 mm all round.")
+                             f"{h['dz_max_m']:+.3f} m passes it through with {clearance_m * 1000:.0f} mm all round.")
     return lines
 
 
@@ -146,7 +152,8 @@ def _feedback(attempts: list[Attempt]) -> str:
 
 def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = "construction",
             max_rounds: int = 3, want: int = 3, clearance_m: float = 0.025,
-            on_event: Callable[[dict], None] | None = None, lock=None, trials: bool = False) -> Result:
+            on_event: Callable[[dict], None] | None = None, lock=None, trials: bool = False,
+            policy: dict | None = None, guidance: str = "", recommend: str | None = None, doc=None) -> Result:
     """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
@@ -158,9 +165,17 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
 
     `lock` serialises every use of the scene, so several clashes can be resolved at once: their model calls
     overlap, their geometry trials (which edit the model and undo) take turns.
+
+    Under coordination requirements (`Workspace.fix_settings`): `policy` (GlobalId → requirements.Policy) refuses a
+    candidate they forbid before it is tried, as a failed attempt Muse is told about; `guidance` is added to the
+    system prompt; each verified option says what it `meets` of `doc`; with `recommend` (why nothing may be edited),
+    Muse Spark is still asked, once, and its best idea comes back as a recommendation, never tried or applied.
     """
     lock = lock or contextlib.nullcontext()
-    system = (PACKS / f"{pack}.md").read_text()
+    system = (PACKS / f"{pack}.md").read_text() + guidance
+    if recommend:
+        return _recommend(scene, clash, model, system + requirements.RECOMMEND.format(why=recommend), recommend,
+                          clearance_m, on_event, lock, trials, doc)
     base = scene if isinstance(scene, IfcScene) else IfcScene(scene)
     attempts: list[Attempt] = []
     options: list[Option] = []
@@ -175,7 +190,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         emit({"type": "thinking", "round": round_no})
         started = time.perf_counter()
         with lock:
-            text = _describe(base, clash) + _feedback(attempts)
+            text = _describe(base, clash, clearance_m) + _feedback(attempts)
         if trials and on_event and getattr(model, "streams_reasoning", False):  # someone is watching: show the thinking
             reply = model.complete_json_reasoning(system, text, clash.images, None,
                                                   lambda note, r=round_no: emit({"type": "reasoning", "round": r, "text": note}))
@@ -193,6 +208,11 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             other = clash.element_b if target == clash.element_a else clash.element_a
             trial = (lambda shape, i=len(attempts): emit({"type": "trial", "index": i, **shape})) if on_event and trials else None
             kind = cand.get("kind")
+            refused = _refused(base, cand, target, other, policy) if policy else None
+            if refused:
+                attempts.append(refused)
+                on_step(refused)
+                continue
             try_fix = _try_offset if kind == "offset" else _try_trim if kind == "trim" else None
             with lock:
                 attempt, option = (try_fix(base, cand, target, other, clearance_m, trial) if try_fix
@@ -217,7 +237,66 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 o.before = edits.meshes(base, o.moved)
         except RuntimeError:
             o.before = None
-    return Result(understanding, options, attempts, advice)
+        if policy and doc is not None:
+            mine = clash.element_a if clash.element_a in o.moved else clash.element_b
+            theirs = clash.element_b if mine == clash.element_a else clash.element_a
+            o.meets = requirements.meets(doc, policy[mine], policy[theirs], clearance_m, o.min_clearance_m,
+                                         o.delta_m, o.kind)
+    return Result(understanding, options, attempts, advice,
+                  requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
+
+
+def _candidate_delta(cand: dict) -> tuple[str, list[float]]:
+    kind = cand.get("kind") or "move"
+    if kind == "offset":
+        return kind, [0.0, 0.0, float(cand.get("dz_m", 0.0) or 0.0)]
+    if kind == "trim":
+        return kind, [0.0, 0.0, 0.0]
+    try:
+        return kind, [float(v) for v in cand.get("delta_m", [0, 0, 0])]
+    except (TypeError, ValueError):
+        return kind, [0.0, 0.0, 0.0]
+
+
+def _refused(scene: IfcScene, cand: dict, target: str, other: str, policy: dict) -> Attempt | None:
+    """A candidate the coordination requirements forbid, as a failed attempt (so Muse hears why), or None."""
+    kind, delta = _candidate_delta(cand)
+    same_model = scene.element(target).source == scene.element(other).source
+    why = requirements.blocked(policy[target], policy.get(other), kind, delta, same_model)
+    if not why:
+        return None
+    return Attempt(cand.get("title", kind), delta, False, why, kind,
+                   [float(v) for v in cand.get("split_m", [])] if kind == "offset" else None)
+
+
+def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: str, why: str, clearance_m: float,
+               on_event, lock, trials: bool, doc) -> Result:
+    """No edit is allowed: one round of Muse Spark, its best candidate kept as a recommendation for the designer."""
+    emit = on_event or (lambda e: None)
+    base = scene if isinstance(scene, IfcScene) else IfcScene(scene)
+    emit({"type": "thinking", "round": 1})
+    started = time.perf_counter()
+    with lock:
+        text = _describe(base, clash, clearance_m)
+    if trials and on_event and getattr(model, "streams_reasoning", False):
+        reply = model.complete_json_reasoning(system, text, clash.images, None,
+                                              lambda note: emit({"type": "reasoning", "round": 1, "text": note}))
+    else:
+        reply = model.complete_json(system, text, clash.images)
+    candidates = reply.get("candidates", [])
+    emit({"type": "ideas", "round": 1, "seconds": round(time.perf_counter() - started, 1),
+          "understanding": reply.get("understanding", ""), "count": len(candidates)})
+    rec = None
+    if candidates:
+        best = candidates[0]
+        kind, delta = _candidate_delta(best)
+        target = clash.element_a if best.get("move", "A") == "A" else clash.element_b
+        rec = {"title": best.get("title", ""), "kind": kind, "element": target, "delta_m": delta,
+               "split_m": best.get("split_m"), "rationale": best.get("rationale", ""),
+               "also_needs": best.get("also_needs", ""), "blocked_by": why,
+               "others": [c.get("title", "") for c in candidates[1:3]]}
+    return Result(reply.get("understanding", ""), [], [], reply.get("advice", ""), recommendation=rec,
+                  requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
 
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,

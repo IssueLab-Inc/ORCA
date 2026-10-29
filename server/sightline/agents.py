@@ -64,6 +64,7 @@ class Link:
     created: float
     expires: float
     ctx: Context = field(default_factory=Context)
+    requirements: str | None = None  # the page's coordination requirements (an id it registered): the agent works under them
     last_call: dict | None = None
     calls: int = 0
     proposals: dict[str, dict] = field(default_factory=dict)   # clash id -> the last proposal's result

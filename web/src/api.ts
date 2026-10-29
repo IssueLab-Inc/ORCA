@@ -9,6 +9,8 @@ export interface Option {
   /** A trim inside one model: tidies a joint for the model's author, not a coordination fix. */
   cleanup?: boolean;
   checked_against?: number;
+  /** The coordination requirements it meets, in plain words (server: requirements.meets). */
+  meets?: string[];
 }
 export interface Attempt {
   title: string; delta_m: number[]; passed: boolean; reason: string; kind: FixKind; split_m: number[] | null;
@@ -20,7 +22,16 @@ export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m:
 /** move: shift the run; offset: split and raise or lower the middle; trim: cut one end back to butt the other element. */
 export type FixKind = "move" | "offset" | "trim";
 export interface TrimCut { end: "start" | "end"; by_m: number }
-export interface Proposal { understanding: string; options: Option[]; attempts: Attempt[]; advice?: string }
+/** Under requirements that allow no edit: Muse Spark's best idea for the designer, never tried or applied. */
+export interface Recommendation {
+  title: string; kind: FixKind; element: string; delta_m: number[]; split_m: number[] | null; rationale: string;
+  also_needs: string; blocked_by: string; others: string[];
+}
+export interface Proposal {
+  understanding: string; options: Option[]; attempts: Attempt[]; advice?: string;
+  recommendation?: Recommendation | null; requirements?: string | null;
+  clearance_m?: number;  // the clearance every option had to keep (25 mm, or what the requirements ask)
+}
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
 export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
 export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
@@ -84,7 +95,7 @@ export interface Report { id: string; title: string; sources: string[]; clashes:
 export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[] }
 export interface DetectTest {
   id: string; name: string; a: DetectSelection; b: DetectSelection | null; kind: "hard" | "clearance" | "duplicate";
-  tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; enabled: boolean;
+  tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; enabled: boolean; min_size_m?: number;
 }
 export interface DetectCoverage {
   test: string; name: string; kind: string; elements_a: number; elements_b: number; candidate_pairs: number; clashes: number;
@@ -92,10 +103,13 @@ export interface DetectCoverage {
 }
 export interface DetectGone { id: string; test: string; a: string; b: string }
 export interface DetectDiff { new: string[]; resolved: DetectGone[]; no_longer_checked: DetectGone[]; first: boolean }
-export interface Detection { coverage: DetectCoverage[]; diff: DetectDiff; elements: number; seconds: number }
+/** What a result was checked against (server: Workspace.requirements_info). */
+export interface RequirementsInfo { id: string; name: string; version: number; label: string; level: number; strictness: Strictness }
+export interface Detection { coverage: DetectCoverage[]; diff: DetectDiff; elements: number; seconds: number; requirements?: RequirementsInfo | null }
 export interface DetectSetup {
   tests: DetectTest[]; teams: Record<string, string>; elements: number; rules: Record<string, string>;
   file_elements?: Record<string, number>;  // physical elements per model file
+  requirements?: RequirementsInfo | null;  // the tests are what these requirements compile to
 }
 export type DetectEvent =
   | { type: "phase"; text: string }
@@ -115,7 +129,11 @@ export interface TriageVerdict {
   understanding?: string; fix_hint?: string; confidence?: number; source: "rule" | "model"; seconds?: number; error?: string;
   /** What settled a "not a clash" verdict without the model (or overrode it): non_physical, touch, same_element,
    *  no_overlap (ORCA's measure) or reviewed (marked in this browser). */
-  basis?: "non_physical" | "touch" | "same_element" | "no_overlap" | "reviewed";
+  basis?: "non_physical" | "touch" | "same_element" | "no_overlap" | "reviewed" | "requirement" | "strictness";
+  /** A requirements rule that settled it (index in by_design); Muse's audit disputing that rule. */
+  rule?: number; audit?: "disputed"; audit_note?: string;
+  /** Strictness kept a low-confidence "by design" for a person: what the model said. */
+  model_verdict?: TriageKind;
   /** The triage model's own reading, when a settled fact overrode it. */
   model_reading?: string;
   /** What the triage model wrote while working it out (Muse Spark Open streams it). */
@@ -123,17 +141,60 @@ export interface TriageVerdict {
   /** Alike clashes are read once (server: triage.alike_groups): the group's size, and on the others the clash read. */
   alike?: number; alike_of?: string;
 }
-export interface TriageModel { model: string; open_weights: boolean; images?: boolean; note?: string }
+export interface TriageModel { model: string; open_weights: boolean; images?: boolean; note?: string; requirements?: RequirementsInfo | null }
+/** Muse Spark's check of a by-design rule on the clashes it set aside (server: triage.audit_rules). */
+export interface RuleAudit { answer: "consistent" | "looks_real" | "unsure"; note: string; rule: string; samples: string[]; settled: string[] }
 export type TriageEvent =
   | ({ type: "start"; total: number } & TriageModel)
   | ({ type: "clash"; id: string } & TriageVerdict)
   | { type: "reasoning"; id: string; text: string }
+  | { type: "audit"; rules: Record<string, RuleAudit> }
   | { type: "done"; summary: Record<string, number>; seconds: number; error?: string }
   | { type: "ping" };
 export interface TriageState extends Partial<TriageModel> {
   results: Record<string, TriageVerdict>; done: boolean; started?: boolean; total?: number; seconds?: number | null;
   error?: string | null;
+  audit?: Record<string, RuleAudit>;
+  /** The last run was under other requirements (another level, strictness or guidance): run again to apply these. */
+  stale?: boolean;
 }
+
+/** Coordination requirements (server: requirements.py; docs/requirements.md). */
+export type Strictness = "lenient" | "relaxed" | "balanced" | "strict" | "exacting";
+export type GroupRole = "structure" | "services" | "architecture" | "equipment" | "site" | "other";
+export type ReqSource = "orca" | "user" | "level" | "triage";
+export interface ReqGroup {
+  id: string; name: string; role: GroupRole; teams: string[]; classes: string[]; exclude_classes: string[];
+  systems: string[]; files: string[]; source: ReqSource;
+}
+export interface ReqCheck {
+  a: string; b: string | null; check: "hard" | "clearance" | "off"; clearance_mm: number | null; tolerance_mm: number | null;
+  reason: string; source: ReqSource;
+}
+export interface ReqMover { group: string; edits: "any" | "move" | "none"; max_move_mm: number | null; trims: boolean }
+export interface ReqByDesign { a_classes: string[]; b_classes: string[]; reason: string; source: ReqSource }
+export interface Requirements {
+  format: "orca-requirements/1"; name: string; version: number; level: number; strictness: Strictness;
+  groups: ReqGroup[]; checks: ReqCheck[]; duplicates: boolean; rules: Record<string, boolean>;
+  who_moves: ReqMover[]; by_design: ReqByDesign[]; guidance: { triage: string; fixes: string }; notes: string;
+}
+/** The numbers a level and strictness resolve to (server: requirements.resolve). */
+export interface ReqParams {
+  level: number; level_name: string; strictness: Strictness; strictness_name: string; tolerance_mm: number;
+  min_size_mm: number; service_clearance_mm: number; clearance_x: number; fix_clearance_mm: number;
+  max_move_mm: number | null; trims: "yes" | "cleanup" | "no"; edits: "any" | "move" | "none";
+  lean: "by_design" | "real_clash" | null; dispute_below: number | null;
+}
+export interface ReqLevel { level: number; name: string; meaning: string; hints: string[]; tolerance_mm: number; min_size_mm: number; service_clearance_mm: number; edits: string }
+export interface ReqStep { id: Strictness; name: string; meaning: string; fix_clearance_mm: number; max_move_mm: number | null; trims: string; lean: string | null }
+export interface ReqScale { levels: ReqLevel[]; strictness: ReqStep[]; format: string }
+export interface Inventory {
+  files: { file: string; team: string; elements: number; classes: Record<string, number> }[];
+  classes: Record<string, number>; systems: Record<string, number>; storeys: Record<string, number>;
+  step_groups: Record<string, number>; groups: ReqGroup[];
+}
+export interface Registered { id: string; doc: Requirements; params: ReqParams; label: string; model_key: string }
+export interface ReqPreview { clashes: number; baseline: number; seconds: number; tests: { name: string; kind: string; clashes: number }[]; params: ReqParams }
 
 /** The owner's settings (server: owner.py), sent with every call; the server ignores them for anyone but the owner. */
 export type Effort = "minimal" | "low" | "medium" | "high";
@@ -149,11 +210,32 @@ export interface SettingsState {
 }
 let ownerSettings: OwnerSettings | null = null;
 export function setOwnerSettings(s: OwnerSettings | null) { ownerSettings = s; }
-const settingsHeader = (): Record<string, string> => (ownerSettings ? { "X-Sightline-Settings": JSON.stringify(ownerSettings) } : {});
+/** The coordination requirements in use: their id goes with every call; the file is registered again when the server
+ *  no longer knows the id (a restart answers 409 "requirements_unknown"). */
+let requirementsId: string | null = null;
+let requirementsDoc: Requirements | null = null;
+export function setRequirements(id: string | null, doc: Requirements | null) { requirementsId = id; requirementsDoc = id ? doc : null; }
+export const requirementsInUse = () => requirementsId;
+const settingsHeader = (): Record<string, string> => ({
+  ...(ownerSettings ? { "X-Sightline-Settings": JSON.stringify(ownerSettings) } : {}),
+  ...(requirementsId ? { "X-Sightline-Requirements": requirementsId } : {}),
+});
 const jsonHeaders = () => ({ "Content-Type": "application/json", ...settingsHeader() });
 
+/** fetch, registering the requirements again and retrying once when the server has forgotten them. */
+async function send(url: string, init: RequestInit = {}): Promise<Response> {
+  const r = await fetch(url, init);
+  if (r.status !== 409 || !requirementsId || !requirementsDoc) return r;
+  const detail = (await r.clone().json().catch(() => null))?.detail;
+  if (detail !== "requirements_unknown") return r;
+  const again = await fetch("/api/requirements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requirementsDoc) });
+  if (!again.ok) return r;
+  requirementsId = ((await again.json()) as Registered).id;
+  return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "X-Sightline-Requirements": requirementsId } });
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`/api${path}`, { headers: jsonHeaders(), ...init });
+  const r = await send(`/api${path}`, { headers: jsonHeaders(), ...init });
   if (!r.ok) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`, r.status);
   return r.json() as Promise<T>;
 }
@@ -226,7 +308,8 @@ export type Team = "Structure" | "MEP" | "Architecture" | "Site";
 export interface ModelTeam { file: string; guess: Team; elements: number }
 /** A fix shown in the report: what it changes, and the view of the clash as it is and with the fix. */
 export interface Evidence {
-  status: "proposed" | "accepted"; title: string; kind: FixKind | "context"; edit: string; clearance: string; clearance_m: number | null;
+  /** recommended: the requirements allowed no edit; Muse Spark's recommendation for the designer. */
+  status: "proposed" | "accepted" | "recommended"; meets?: string[]; blocked_by?: string; title: string; kind: FixKind | "context"; edit: string; clearance: string; clearance_m: number | null;
   rationale: string; also_needs: string; advice?: string; moved: string[]; before_img?: string; after_img?: string;
 }
 /** A team's review of one clash, recorded in the app. */
@@ -238,7 +321,7 @@ export type DocEvent =
 
 /** POST and read newline-delimited JSON events until the stream ends. */
 async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void, signal?: AbortSignal, method = "POST") {
-  const r = await fetch(`/api${path}`, method === "GET" ? { headers: jsonHeaders(), signal }
+  const r = await send(`/api${path}`, method === "GET" ? { headers: jsonHeaders(), signal }
     : { method, headers: jsonHeaders(), body: JSON.stringify(body), signal });
   if (!r.ok || !r.body) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`, r.status);
   const reader = r.body.getReader();
@@ -365,7 +448,7 @@ export const api = {
   uploadModels: async (files: File[]) => {
     const form = new FormData();
     for (const f of files) form.append("files", f, f.name);
-    const r = await fetch("/api/models/upload", { method: "POST", body: form, headers: settingsHeader() });
+    const r = await send("/api/models/upload", { method: "POST", body: form, headers: settingsHeader() });
     if (!r.ok) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Upload failed (${r.status})`, r.status);
     return r.json() as Promise<OpenedScene>;
   },
@@ -381,7 +464,7 @@ export const api = {
   /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. */
   proposeStream: async (id: string, element_a: string, element_b: string, from: { report_id: string; clash_id: string } | undefined,
                         onEvent: (e: AgentEvent) => void): Promise<Proposal> => {
-    const r = await fetch(`/api/scenes/${id}/propose/stream`, {
+    const r = await send(`/api/scenes/${id}/propose/stream`, {
       method: "POST", headers: jsonHeaders(), body: JSON.stringify({ element_a, element_b, ...from }),
     });
     if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
@@ -453,11 +536,24 @@ export const api = {
     const form = new FormData();
     form.append("audio", wav, "voice.wav");
     if (reportId) form.append("report_id", reportId);
-    const r = await fetch("/api/transcribe", { method: "POST", body: form, headers: settingsHeader() });
+    const r = await send("/api/transcribe", { method: "POST", body: form, headers: settingsHeader() });
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Transcription failed (${r.status})`);
     return r.json() as Promise<{ transcript: string; duration_ms: number | null }>;
   },
   imageUrl: (reportId: string, clashId: string, index: number) => `/api/reports/${reportId}/clashes/${clashId}/images/${index}`,
   match: (reportId: string, sceneId: string) => call<Matches>(`/reports/${reportId}/match/${sceneId}`),
   measure: (reportId: string, clashId: string, sceneId: string) => call<Measure>(`/reports/${reportId}/clashes/${clashId}/measure/${sceneId}`),
+
+  requirementsScale: () => call<ReqScale>("/requirements/scale"),
+  /** Register a requirements file: its id (sent with every call once set), the file as ORCA reads it, its numbers. */
+  registerRequirements: (doc: Requirements) => call<Registered>("/requirements", { method: "POST", body: JSON.stringify(doc) }),
+  /** A starting point from the open models (what ORCA checks without requirements) and what they contain. */
+  requirementsDefault: (sceneId: string) => call<Registered & { inventory: Inventory }>(`/scenes/${sceneId}/requirements/default`),
+  /** Muse Spark drafts requirements for the open models (one model call: counts as a proposal). */
+  suggestRequirements: (sceneId: string, level: number, strictness: Strictness, name: string) =>
+    call<Registered & { summary: string; inventory: Inventory }>(`/scenes/${sceneId}/requirements/suggest`,
+      { method: "POST", body: JSON.stringify({ level, strictness, name }) }),
+  /** How many clashes a file would find in the open models, and how many ORCA's defaults find. */
+  previewRequirements: (sceneId: string, doc: Requirements) =>
+    call<ReqPreview>(`/scenes/${sceneId}/requirements/preview`, { method: "POST", body: JSON.stringify(doc) }),
 };
