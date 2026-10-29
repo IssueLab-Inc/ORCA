@@ -85,6 +85,13 @@ def _in_trial_route(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[
     return r.pieces, set(r.pieces), {other, *it.others}
 
 
+def _in_trial_resize(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    e = o["edit"]
+    r = edits.apply_resize(scene, o["moved"][0], e["split_m"], e["depth_m"], e.get("keep", "bottom"))
+    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
+    return r.pieces, set(r.pieces), {other, *it.others}
+
+
 def _in_trial_penetration(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
     service, host = o["edit"]["service"], o["edit"]["host"]
     pen = edits.penetration(scene, service, host, o["edit"].get("clearance_m", 0.025), o["edit"].get("fit", "annular"))
@@ -95,7 +102,7 @@ def _in_trial_penetration(scene, it: Item, o: dict) -> tuple[list[str], set[str]
 # How each kind of fix is applied inside a plan's trial: → (elements to check, the fix's own elements, the obstacles
 # its shortened end pieces are checked against; None when every element it changed is checked against everything).
 IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim, "route": _in_trial_route,
-            "penetration": _in_trial_penetration}
+            "resize": _in_trial_resize, "penetration": _in_trial_penetration}
 # The files a fix changes beyond its moved elements' (a penetration's provision for void goes in the service's file).
 EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]]}
 # Kinds whose element keeps the contacts it had (a trimmed member is framed into its neighbours, a service through a
@@ -505,13 +512,19 @@ def _keep_route(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]
     return r, r["pieces"]
 
 
+def _keep_resize(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    e = o["edit"]
+    r = ws.apply_resize(scene_id, o["moved"][0], e["split_m"], e["depth_m"], e.get("keep", "bottom"))
+    return r, r["pieces"]
+
+
 def _keep_penetration(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
     return ws.apply_penetration(scene_id, o["edit"]["service"], o["edit"]["host"]), []
 
 
 # How each kind of fix is kept in the scene: → (the Workspace's reply, with "files"; the pieces, the original first).
 KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route": _keep_route,
-        "penetration": _keep_penetration}
+        "resize": _keep_resize, "penetration": _keep_penetration}
 
 
 def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:

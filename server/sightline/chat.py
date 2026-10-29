@@ -87,11 +87,18 @@ TOOLS = [
          "steps": {"type": "array", "items": {"type": "object", "properties": {
              "from_m": {"type": "number"}, "to_m": {"type": "number"}, "up_m": {"type": "number"},
              "side_m": {"type": "number"}}, "required": ["from_m", "to_m"]}}}, ["element", "obstacle", "steps"]),
+    _fn("check_resize", "Check a flatter section for a stretch of the straight rectangular duct or cable tray `element` "
+        "past `obstacle` without keeping it: from split_m[0] to split_m[1] (metres along it) it becomes depth_m deep "
+        "and as wide as keeps its equivalent diameter (a duct, at most 4:1) or its cross-section (a tray), with the "
+        "`keep` face (bottom, top or centre) level and transitions either side.",
+        {"element": {"type": "string"}, "obstacle": {"type": "string"},
+         "split_m": {"type": "array", "items": {"type": "number"}}, "depth_m": {"type": "number"},
+         "keep": {"type": "string", "enum": ["bottom", "top", "centre"]}}, ["element", "obstacle", "split_m", "depth_m"]),
     _fn("check_penetration", "Check an opening for the straight service `element` through the wall or slab `host` "
         "without keeping it: sized from the service with the clearance all round, cut in a trial, the service checked "
         "against the host and everything else. Says who must review it (structure for slabs and load-bearing walls).",
         {"element": {"type": "string"}, "host": {"type": "string"}}, ["element", "host"]),
-    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes, trims at joints and openings through walls and slabs, checks each "
+    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes, flatter sections, trims at joints and openings, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
         "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
         {"clash_id": {"type": "string"}}, ["clash_id"]),
@@ -421,6 +428,11 @@ class Chat:
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "check_route":
             v = ws.check_route(self._scene(ctx), args["element"], args["obstacle"], list(args["steps"]))
+            v.pop("preview", None)
+            return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
+        if name == "check_resize":
+            v = ws.check_resize(self._scene(ctx), args["element"], args["obstacle"], [float(x) for x in args["split_m"]],
+                                float(args["depth_m"]), args.get("keep") or "bottom")
             v.pop("preview", None)
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "check_penetration":

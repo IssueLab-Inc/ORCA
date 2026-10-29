@@ -526,3 +526,78 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
         import importlib
         importlib.reload(ifcopenshell.api.owner.settings)
     return paths
+
+
+def build_resize_fixture(path: Path) -> Path:
+    """Runs that only a flatter section clears (edits.apply_resize), metres, one storey; straight segments with ports at
+    both ends.
+
+    - Supply duct (Tag RS-1, 500 wide x 300 deep, along X at y 0, centre z 2.6 (bottom 2.45, top 2.75), 0-6 m), joined
+      at 6 m to a 1 m end segment. Beam B1 across it (x 2.8-3.2, z 2.7-3.3): 50 mm into its top. The slab above (soffit
+      3.3), a ceiling 50 mm under the duct (top 2.40) and walls either side (y ±0.9) leave no offset or move: 220 mm deep,
+      bottom kept, clears with 30 mm, 735 wide for the same equivalent diameter.
+    - Cable tray (RS-2, 300 x 100, along X at y 5, centre z 2.6, 0-6 m) under beam B2 (bottom 2.63): 20 mm in.
+    - Pipe (RS-3, DN100) and a round duct (RS-4, Ø300), both along X under beam B2's line: sizes a resize keeps.
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA resize fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 01")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+    def element(ifc_class, name):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        return e
+
+    def block(ifc_class, name, x0, x1, y0, y1, z0, z1):
+        _box(model, body, element(ifc_class, name), (x1 - x0, y1 - y0, z1 - z0), (x0, y0, z0))
+
+    def segment(ifc_class, name, tag, start, end, profile):
+        e = element(ifc_class, name)
+        e.Tag = tag
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+        start, end = np.asarray(start, float), np.asarray(end, float)
+        d = (end - start) / np.linalg.norm(end - start)
+        x = np.cross(UP_, d)
+        x /= np.linalg.norm(x)
+        position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(map(float, start))),
+                                                   model.createIfcDirection(tuple(map(float, d))),
+                                                   model.createIfcDirection(tuple(map(float, x))))
+        solid = model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)),
+                                                 float(np.linalg.norm(end - start)))
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+        ports = []
+        for n, (p, flow) in enumerate(((start, "SINK"), (end, "SOURCE"))):
+            port = ifcopenshell.api.run("system.add_port", model, element=e)
+            port.Name, port.FlowDirection = f"Port {n}", flow
+            m = np.eye(4)
+            z = -d if flow == "SINK" else d
+            m[:3, :3] = np.column_stack([x, np.cross(z, x), z])
+            m[:3, 3] = p
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+            ports.append(port)
+        return e, ports
+
+    rect = lambda w, h: model.createIfcRectangleProfileDef("AREA", None, None, w, h)   # X across (level), Y up
+    _, (_, far) = segment("IfcDuctSegment", "Supply duct 500x300", "RS-1", (0, 0, 2.6), (6, 0, 2.6), rect(0.5, 0.3))
+    _, (near, _) = segment("IfcDuctSegment", "Supply duct 500x300", "RS-1E", (6, 0, 2.6), (7, 0, 2.6), rect(0.5, 0.3))
+    ifcopenshell.api.run("system.connect_port", model, port1=far, port2=near, direction="SOURCE")
+    block("IfcBeam", "Beam B1", 2.8, 3.2, -0.9, 0.9, 2.7, 3.3)
+    block("IfcSlab", "Level 02 slab", -1.0, 8.0, -1.0, 7.0, 3.3, 3.5)
+    block("IfcCovering", "Ceiling", 0.0, 6.0, -0.9, 0.9, 2.38, 2.40)
+    block("IfcWall", "Wall north", 0.0, 6.0, 0.9, 1.0, 0.0, 3.3)
+    block("IfcWall", "Wall south", 0.0, 6.0, -1.0, -0.9, 0.0, 3.3)
+    segment("IfcCableCarrierSegment", "Cable tray 300x100", "RS-2", (0, 5, 2.6), (6, 5, 2.6), rect(0.3, 0.1))
+    block("IfcBeam", "Beam B2", 2.8, 3.2, 3.5, 6.5, 2.63, 3.3)
+    segment("IfcPipeSegment", "Heating pipe DN100", "RS-3", (0, 4.2, 2.6), (6, 4.2, 2.6),
+            model.createIfcCircleProfileDef("AREA", None, None, 0.055))
+    segment("IfcDuctSegment", "Extract duct 300", "RS-4", (0, 5.8, 2.5), (6, 5.8, 2.5),
+            model.createIfcCircleProfileDef("AREA", None, None, 0.15))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path

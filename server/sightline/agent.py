@@ -98,6 +98,7 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025, memo: d
         if any(scene.entity(this).is_a(c) for c in edits.PENETRABLE):   # a wall or slab is not split or rerouted
             continue
         lines += _run_text(scene, label, this, other, clearance_m, more, memo)
+        lines += _resize_text(scene, label, this, other, clearance_m)
         lines += _nearby_text(scene, label, this, [n for n in clash.nearby.get(this, []) if n not in (other, *more)])
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
         lines += _joint_text(scene, label, this, other, name)
@@ -230,6 +231,41 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
         lines += together or [f"No side offset clears all of them in one stretch: give each obstacle its own step and "
                               f"return to the line between them."]
     return lines
+
+
+def _resize_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float) -> list[str]:
+    """When a rectangular duct or tray meets an obstacle above or below it: how deep it can be there, keeping the face
+    away from the obstacle level, and how wide that makes it for the same performance (a "resize")."""
+    try:
+        *_, width, depth, _, _ = edits._resizable(scene, scene.entity(gid))
+        run = edits.run_of(scene, gid)
+    except (edits.Unsupported, KeyError):
+        return []
+    box = scene.bounds().get(other)
+    if box is None:
+        return []
+    centre = run.start[2]
+    bottom, top = centre - depth / 2, centre + depth / 2
+    if box[0][2] >= centre:
+        keep, room, where = "bottom", box[0][2] - clearance_m - bottom, "under"
+    elif box[1][2] <= centre:
+        keep, room, where = "top", top - (box[1][2] + clearance_m), "over"
+    else:
+        return []
+    room = float(np.floor(round(room / edits.SIZE_STEP_M, 6)) * edits.SIZE_STEP_M)
+    if not 0 < room < depth - 1e-4:
+        return []
+    try:
+        size = edits.resize_size(scene, gid, room)
+    except edits.Unsupported as e:
+        return [f"Element {label} cannot be made flat enough to pass {where} the other element ({room * 1000:.0f} mm deep "
+                f"would fit): {e}."]
+    lt = edits.transition_length(width, depth, size["width_m"], size["depth_m"], keep)
+    return [f"A \"resize\" of {label} (move: \"{label}\"): keeping its {keep} level, {room * 1000:.0f} mm deep passes "
+            f"{where} the other element with {clearance_m * 1000:.0f} mm clear; it is then {size['width_m'] * 1000:.0f} mm "
+            f"wide ({size['performance']}). The resized stretch (split_m) must cover the other element; each transition "
+            f"takes {lt:.2f} m of run outside it, and 0.05 m must remain at each end. It changes how the service performs: "
+            f"its designer reviews it, so prefer a move, offset or route when one clears."]
 
 
 def _nearby_text(scene: IfcScene, label: str, gid: str, nearby: list[str]) -> list[str]:
@@ -445,8 +481,14 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                   requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
 
-def _candidate_delta(cand: dict) -> tuple[str, list[float]]:
+def _candidate_delta(cand: dict, scene: IfcScene | None = None, target: str | None = None) -> tuple[str, list[float]]:
     kind = cand.get("kind") or "move"
+    if kind == "resize":   # how far its moving face goes, when the scene can say
+        try:
+            size = edits.resize_size(scene, target, float(cand.get("depth_m")))
+            return kind, [0.0, 0.0, round(edits.face_move(size["before"][1], size["depth_m"], cand.get("keep") or "bottom"), 4)]
+        except (edits.Unsupported, KeyError, TypeError, ValueError, AttributeError):
+            return kind, [0.0, 0.0, 0.0]
     if kind == "offset":
         return kind, [0.0, 0.0, float(cand.get("dz_m", 0.0) or 0.0)]
     if kind in ("trim", "penetration"):
@@ -466,7 +508,7 @@ def _candidate_delta(cand: dict) -> tuple[str, list[float]]:
 
 def _refused(scene: IfcScene, cand: dict, target: str, other: str, policy: dict) -> Attempt | None:
     """A candidate the coordination requirements forbid, as a failed attempt (so Muse hears why), or None."""
-    kind, delta = _candidate_delta(cand)
+    kind, delta = _candidate_delta(cand, scene, target)
     if kind == "penetration":   # the service's team asks: its policy decides; the host's only whether it is cut
         target, other = penetration_sides(scene, target, other)
     same_model = scene.element(target).source == scene.element(other).source
@@ -781,6 +823,51 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
                            None, shape, checked_against=v.checked_against, edit=edit, review=reading.reviewer)
 
 
+def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
+                on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
+    """Make a stretch of a rectangular duct or tray flatter (edits.apply_resize), keeping what it carries; check the
+    new pieces against everything and the shortened ends against the obstacles, as an offset; undo. Its services
+    designer reviews it: the section changes how it performs."""
+    title = cand.get("title", "resize the section")
+    try:
+        split = [float(v) for v in cand.get("split_m") or []]
+        depth = float(cand.get("depth_m"))
+    except (TypeError, ValueError):
+        return Attempt(title, [0.0, 0.0, 0.0], False, "a resize needs split_m (two points) and depth_m", "resize"), None
+    keep = cand.get("keep") or "bottom"
+    try:
+        size = edits.resize_size(scene, target, depth)
+        if len(split) != 2:
+            raise edits.Unsupported("a resize needs two split points")
+    except (edits.Unsupported, KeyError) as e:
+        return Attempt(title, [0.0, 0.0, 0.0], False, f"cannot resize this element: {e}", "resize", split), None
+    (w0, h0), w1, h1 = size["before"], size["width_m"], size["depth_m"]
+    delta = [0.0, 0.0, round(edits.face_move(h0, h1, keep), 4)]   # how far the face that moves goes (+ up)
+    edit = {"split_m": sorted(split), "depth_m": h1, "width_m": w1, "keep": keep, "before": [w0, h0],
+            "performance": size["performance"], "summary": edits.resize_summary(sorted(split), w1, h1, keep),
+            "key": json.dumps([round(x, 2) for x in sorted(split)] + [round(h1, 3), keep])}
+    try:
+        with edits.trial(scene, target):
+            r = edits.apply_resize(scene, target, split, depth, keep)
+            shape = edits.meshes(scene, r.pieces) if on_trial else None
+            if on_trial:
+                on_trial({"kind": "resize", "moved": [target], "delta_m": delta, "pieces": shape, "summary": edit["summary"]})
+            ignore = set(r.pieces) | {c for g in r.pieces for c in scene.element(g).connected}
+            v = verify.check(scene, r.pieces[1:-1], clearance_m=clearance_m, ignore=ignore)  # transitions, middle
+            ends = verify.check(scene, [r.pieces[0], r.pieces[-1]], clearance_m=clearance_m, ignore=ignore)
+            hits = v.hits + [h for h in ends.hits if h.other == other or h.other in others]
+            preview = (shape or edits.meshes(scene, r.pieces)) if not hits else None
+    except edits.Unsupported as e:
+        return Attempt(title, delta, False, f"cannot resize this element: {e}", "resize", split, edit=edit), None
+    attempt = Attempt(title, delta, not hits, _reason(hits), "resize", split, _hit_ids(hits), edit=edit, where=_where(hits))
+    if hits:
+        return attempt, None
+    also = "; ".join(x for x in (cand.get("also_needs", ""), f"the services designer to confirm the new section "
+                                 f"({size['performance']})") if x)
+    return attempt, Option(title, [target], delta, cand.get("rationale", ""), also, v.min_clearance_m, {}, "resize",
+                           split, preview, checked_against=v.checked_against, edit=edit, review="services")
+
+
 def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                   on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
     return _try_move(scene, cand, target, clearance_m, on_trial)
@@ -789,10 +876,10 @@ def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearanc
 # Each kind of fix Muse may propose, and how to try it: (scene, candidate, target, other, clearance, on_trial,
 # others=) → (Attempt, Option or None). A kind not listed here is refused, never tried as a move.
 TRIES: dict[str, Callable] = {"move": _try_move_fix, "offset": _try_offset, "trim": _try_trim, "route": _try_route,
-                              "penetration": _try_penetration}
+                              "resize": _try_resize, "penetration": _try_penetration}
 # The candidate fields each kind is described by, carried into a recommendation (never tried) as its "edit".
 PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m"), "trim": ("by_m",),
-                                      "route": ("steps",), "penetration": ()}
+                                      "route": ("steps",), "resize": ("split_m", "depth_m", "keep"), "penetration": ()}
 
 
 def to_json(result: Result) -> str:
