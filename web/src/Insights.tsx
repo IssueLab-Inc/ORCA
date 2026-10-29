@@ -92,36 +92,38 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
           const open = p.clash_ids.filter((id) => !resolved.has(id));
           return (
             <div key={p.id} className={`insight pattern ${open.length ? "" : "done"}`} data-tour={v?.verdict === "by_design" ? "pattern-by-design" : undefined}>
-              <span className="pattern-n" aria-label={`${open.length} clashes open of ${p.clashes}`}
-                title={open.length < p.clashes ? `${open.length} of ${p.clashes} still open` : undefined}>{open.length ? open.length : p.clashes}×</span>
-              <div className="insight-text">
+              {/* A card: the count and what clashes with what; what it is and Muse's reading; then its actions */}
+              <div className="pattern-head">
+                <span className="pattern-n" aria-label={`${open.length} clashes open of ${p.clashes}`}
+                  title={open.length < p.clashes ? `${open.length} of ${p.clashes} still open` : undefined}>{open.length ? open.length : p.clashes}×</span>
                 <b title={`${p.classes[0]} with ${p.classes[1]}`}>{human(p.classes[0])} <span className="with">with</span> {human(p.classes[1])}</b>
               </div>
-              <div className="insight-actions">
-                {filterButton(patLabel(p), p.clash_ids)}
-                {!open.length && <span className="ibtn done-mark" aria-label="All resolved" data-tip="All resolved" data-tip-side="left"><CircleCheck size={16} aria-hidden /></span>}
-                {open.length > 0 && <>
-                <button className="ibtn" aria-label="Tick these clashes in the list" data-tip="Tick them in the list" data-tip-side="left"
-                  onClick={() => onSelect(open)}><ListChecks size={16} aria-hidden /></button>
-                {v?.verdict === "by_design" && <button className="ibtn" data-tour="mark-by-design" aria-label="Mark as by design" data-tip="Mark all as by design" data-tip-side="left"
-                  onClick={() => onReview(open, "by_design", v.rule || v.cause)}><CircleCheck size={16} aria-hidden /></button>}
-                {v?.verdict === "modelling_error" && <button className="ibtn" aria-label="Flag for the model author" data-tip="Flag all for the author" data-tip-side="left"
-                  onClick={() => onReview(open, "author", v.action)}><Flag size={16} aria-hidden /></button>}
-                {v?.verdict === "real_problem" && <button className="ibtn" disabled={busy} aria-label="Fix these together" data-tip="Fix these together (up to 8 pairs)" data-tip-side="left"
-                  onClick={() => onFixAll(open)}><Wand2 size={16} aria-hidden /></button>}
-                </>}
-              </div>
-              {/* What the pattern is and Muse's reading take the row's whole width, under the count and the buttons */}
               <div className="insight-more">
                 <span className="hint">{p.levels.length} level{p.levels.length === 1 ? "" : "s"} · {p.min_mm === p.max_mm ? `${p.min_mm} mm every time` : `${p.min_mm} to ${p.max_mm} mm`}
                   {p.cross_discipline ? " · across disciplines" : ""}</span>
                 {v && <><span className="verdict"><span className={`chip small ${VERDICT[v.verdict].cls}`}>{VERDICT[v.verdict].label}</span> {v.cause}</span>
-                <span className="hint">{v.rule ? <>Rule: <i>{v.rule}</i></> : v.action}</span>
-                {v.verdict === "by_design" && onAddRule && (hasRule(p)
+                <span className="hint">{v.rule ? <>Rule: <i>{v.rule}</i></> : v.action}</span></>}
+              </div>
+              <div className="pattern-foot">
+                {v?.verdict === "by_design" && onAddRule ? (hasRule(p)
                   ? <span className="chip small ok req-added"><ClipboardCheck size={11} aria-hidden /> in your requirements</span>
                   : <button className="btn small ghost req-add" data-tour="add-requirement"
                     data-tip="Make it a rule in your coordination requirements: these pairs are settled as by design without the model, here and on every project you reuse the file on. Muse Spark still checks the rule."
-                    onClick={() => onAddRule(p, v)}><ClipboardPlus size={12} aria-hidden /> Add to requirements</button>)}</>}
+                    onClick={() => onAddRule(p, v)}><ClipboardPlus size={12} aria-hidden /> Add to requirements</button>) : <span />}
+                <div className="insight-actions">
+                  {filterButton(patLabel(p), p.clash_ids)}
+                  {!open.length && <span className="ibtn done-mark" aria-label="All resolved" data-tip="All resolved" data-tip-side="left"><CircleCheck size={16} aria-hidden /></span>}
+                  {open.length > 0 && <>
+                  <button className="ibtn" aria-label="Tick these clashes in the list" data-tip="Tick them in the list" data-tip-side="left"
+                    onClick={() => onSelect(open)}><ListChecks size={16} aria-hidden /></button>
+                  {v?.verdict === "by_design" && <button className="ibtn" data-tour="mark-by-design" aria-label="Mark as by design" data-tip="Mark all as by design" data-tip-side="left"
+                    onClick={() => onReview(open, "by_design", v.rule || v.cause)}><CircleCheck size={16} aria-hidden /></button>}
+                  {v?.verdict === "modelling_error" && <button className="ibtn" aria-label="Flag for the model author" data-tip="Flag all for the author" data-tip-side="left"
+                    onClick={() => onReview(open, "author", v.action)}><Flag size={16} aria-hidden /></button>}
+                  {v?.verdict === "real_problem" && <button className="ibtn" disabled={busy} aria-label="Fix these together" data-tip="Fix these together (up to 8 pairs)" data-tip-side="left"
+                    onClick={() => onFixAll(open)}><Wand2 size={16} aria-hidden /></button>}
+                  </>}
+                </div>
               </div>
             </div>
           );

@@ -664,8 +664,9 @@ Phones and tablets (Oct 29, owner decision; design in `docs/mobile.md`, code `we
 - **Web tests:** App's new imports (`./layout`, `./Sheet`, `./AppMenu`, icons `List`, `Menu`) are in both stub lists;
   `tests/layout.test.mjs` covers the breakpoints, snapping and `follow()`.
 
-Insights patterns (Oct 29, owner feedback): the count, title and buttons share the first line; the levels/size line,
-Muse's verdict, the rule and Add to requirements run across the whole row underneath (`.insight-more`).
+Insights patterns (Oct 29, owner feedback): each pattern is a card: the count and the pair on one line
+(`.pattern-head`), the levels/size line, Muse's verdict and the rule across the card (`.insight-more`), and a foot
+with Add to requirements and the buttons (`.pattern-foot`), so the pair's name no longer wraps beside the buttons.
 
 Renamed to ORCA (Oct 29, owner decision; was Sightline). Everything people see or get in their files says ORCA: the
 app, the PDF and BCF, the MCP server name `orca`, export names `<name>.orca.ifc` / `.orca.step`, the STEP pset
