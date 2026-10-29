@@ -491,9 +491,9 @@ Insights, Triage, thumbnails (Oct 28, owner feedback):
 - **Patterns are read automatically** once per report and models (`explainPatterns(quiet)` in App.tsx, skipped while
   a proposal, plan or replay runs; a failure leaves the Explain button). Their mark / flag / fix buttons need that
   reading, which is why they seemed missing. Northbank: verdicts ~35 s after the list.
-- **A filter gives the list the room:** with a pattern or root cause filter on, Insights shows only that row (no
-  hints, toggles or other section), Triage goes compact unless opened for that filter (`forceCompact`), and the
-  Coordinate card shrinks to one line (`DetectSummary compact`). Northbank: the list starts ~1,400 px higher.
+- **A filter gives the list the room:** with a pattern or root cause filter on, Triage goes compact unless opened for
+  that filter (`forceCompact`). (Superseded Oct 29 by the Clashes / Insights tabs, below: Insights and the run's
+  summary now live in their own tab.)
 
 STEP models (Oct 28, owner decision; design in `docs/step.md`, code `server/sightline/step.py`):
 - **Conversion:** STEP → IFC on open (`cadquery-ocp` 8.0 in the same process as IfcOpenShell: checked, no conflict).
