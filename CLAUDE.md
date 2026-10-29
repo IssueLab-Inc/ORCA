@@ -294,10 +294,12 @@ the model's reading kept. Northbank on Muse Spark Open with the models open: 217
 non-physical, 12 same element), 106 asked.
 
 Guided tour (Oct 28): `web/src/Tour.tsx`, from the landing page (**Take the guided tour**) or the header (**Tour**).
-24 steps in 9 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
+30 steps in 10 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
 "hold on" (the girder has two more), a trim (Clash7 transom, c0051, accepted), root cause via chat ("Why are there so
 many clashes on Level 02? Fix the root cause." → girder plan for duct + tray + CW, accepted), patterns (Explain, mark by
-design), sign-off (review on #042, Report, build), hand-off (PDF, BCF, Export IFC), close (numbers). Each step spotlights
+design), your standard (Oct 29: Add to requirements on that pattern, open Requirements, L4, Strict with the expected
+count, the grid, Use them; targets `data-tour=add-requirement|requirements|req-levels|req-strict|req-grid|req-apply`;
+TourState `reqOpen`, `requirements`, `reqRules`; Escape closes the dialog, not the tour), sign-off (review on #042, Report, build), hand-off (PDF, BCF, Export IFC), close (numbers). Each step spotlights
 a real control (`data-tour` attributes) and moves on when the app reaches the state (`TourState`); "Show me" clicks it.
 Live Muse steps offer **Watch a recorded run** after 45 s (plan 75 s) or on error: real runs recorded on Oct 27 in
 `web/public/tour/` (c0053 18 s, c0051 trim 9 s, girder plan 35 s), replayed through the same pilot/plan code and
@@ -625,6 +627,21 @@ Coordination requirements (Oct 29, owner decision; design in `docs/requirements.
   - Add to requirements on "Beam with Column": 102 settled at once.
 - **Web tests:** `requirements.test.mjs`; App's new imports are in both stub lists (`setRequirements` is in the api
   stubs).
+
+Small models and a blank project (Oct 29, owner feedback on an uploaded ~100 mm load-cell STEP: a huge clash ring,
+framing far out, thumbnails with the part a speck):
+- **Viewer distances were building-sized floors** (0.5 m least margin and `2r + 0.5` in `zoneCamera`, 1.5 m in
+  `flyToBox`, 2 m in `view`, the marker's 0.3 scale floor, 2.5 m context, 4 m / 1 m section box, 1 m / 0.6 m fallback
+  zones, a 10 mm near plane). Now `Viewer.reach(metres, share)` keeps each building value but never more than a share
+  of the scene's diagonal (`sceneDiag`, cached per load), and `zoneCamera`'s least margin is also bounded by the pair
+  (a quarter of their union, twice the zone). The marker keeps a constant screen size (no floor), the near plane goes
+  down to 0.5 mm. `posed` uses `zoneCamera`, so A/B/C pictures and list thumbnails follow.
+- **Checked:** a generated 5-part load cell (110 mm, 2-12 mm overlaps; the appmeas.co.uk zip sits behind a Cloudflare
+  challenge here) frames the shaft and nut filling the view, thumbnails readable; Northbank #1 and #40 frame as before.
+- **Blank project:** the landing hero's **Use your own models** (`onBlank`, `data-tour=blank`) opens the workspace with
+  `ProjectStart.tsx` in the stage: a drop zone / Choose files for IFC or STEP (→ `openDemo(files)`: upload, open, check),
+  Import a report folder, Back to the demos. `landing` is `!stats && !report && !blank`; Tour hides until something is
+  open; on a phone the bottom sheet stays away (`starting`) until something opens.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

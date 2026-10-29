@@ -34,6 +34,9 @@ export interface TourState {
   compare: string; fixed: string[];
   planRunning: boolean; planFor: number; planReady: boolean; planError: string | null;
   patternsRead: boolean; reviewedCount: number; signoffs: number; docOpen: boolean; docReady: boolean;
+  /** Coordination requirements: the dialog is open; the ones in use ("L4 · Strict", null: ORCA's defaults); how many
+   * by-design rules they hold. */
+  reqOpen: boolean; requirements: string | null; reqRules: number;
   /** The tour's clashes in the open report: their ids and numbers (null until the check has found them). */
   duct: { id: string; number: number } | null; joint: { id: string; number: number } | null;
   /** The machine cell from STEP is open; its tour's clashes; something has been fixed (Export has a change to give). */
@@ -62,6 +65,12 @@ interface Step {
   reveal?: boolean;                    // open the target's group in the clash list and scroll to it
   fallback?: { what: "duct" | "joint" | "plan" | "ladder" | "pipe"; when: (s: TourState) => boolean };  // offer a recorded run
 }
+
+/** Click a control inside the requirements dialog (a level card, a strictness step). */
+const press = (selector: string, text: string) => () => {
+  const el = [...document.querySelectorAll<HTMLElement>(selector)].find((x) => x.textContent?.includes(text));
+  el?.click();
+};
 
 const row = (which: "duct" | "joint" | "ladder") => (s: TourState) => `[data-clash="${s[which]?.id ?? "none"}"] .clash-main`;
 const no = (c: TourState["duct"]) => (c ? <b>#{c.number}</b> : null);
@@ -229,7 +238,50 @@ export const BUILDING_STEPS: Step[] = [
     target: "[data-tour=pattern-by-design]", done: (s) => s.reviewedCount > 0,
     show: { label: "Mark it for me", run: () => (document.querySelector("[data-tour=mark-by-design]") as HTMLElement | null)?.click() },
   },
-  // 7. Sign-off
+  // 7. The team's standard
+  {
+    act: "Your standard", title: "Make it a rule",
+    body: () => <>Marking settles these clashes once. To settle them on every run, and on the next project, click
+      <b> Add to requirements</b>: the pair becomes a rule in the team's coordination requirements. Those clashes are set
+      aside without asking the model again, and Muse Spark later checks that the rule doesn't hide a real one.</>,
+    target: "[data-tour=add-requirement]", done: (s) => s.reqRules > 0, show: { label: "Add it for me" },
+  },
+  {
+    act: "Your standard", title: "The team's requirements",
+    body: (s) => <>{s.requirements ? <>The header now says <b>{s.requirements}</b>: ORCA is following a requirements file. </> : null}
+      Open <b>Requirements</b>. It is optional, and it sets the standard everything follows: where the design is, how
+      strict to be, what is checked against what, and who moves.</>,
+    target: "[data-tour=requirements]", done: (s) => s.reqOpen, show: { label: "Open it for me" },
+  },
+  {
+    act: "Your standard", title: "Where the design is",
+    body: () => <>Five design levels, named so any industry can use them (the RIBA, LOD and product-phase hints are rough
+      equivalents). Early levels only care about gross overlaps. <b>L4 Production</b> is ready to build, so the space
+      around services matters too: pick it.</>,
+    target: "[data-tour=req-levels]", show: { label: "Pick L4 for me", run: press(".req-level", "L4") },
+  },
+  {
+    act: "Your standard", title: "How strict",
+    body: () => <>One setting covers flagging and fixing. Move it to <b>Strict</b>: more is flagged, and fixes are cautious
+      (40 mm clear, nothing moved more than 400 mm, no trims across models). The chips show the numbers it sets, and
+      ORCA runs the check to show how many clashes they would find, against its defaults.</>,
+    target: "[data-tour=req-strict]", show: { label: "Make it strict", run: press(".req-ticks button", "Strict") },
+  },
+  {
+    act: "Your standard", title: "What's checked, and who moves",
+    body: () => <>Each group is checked against the others and itself: hard, a clearance, or off. Below it, who stays put
+      and who moves, how far, and whether trims are allowed. <b>Suggest with Muse Spark</b> drafts all of it from what the
+      models contain. <b>Download</b> keeps the file for the next project.</>,
+    target: "[data-tour=req-grid]",
+  },
+  {
+    act: "Your standard", title: "Use them",
+    body: () => <>Click <b>Use these requirements</b>. From now on Muse Spark is told them when it triages and proposes, a fix
+      that breaks them is turned down before it is tried, and the report says which requirements it was checked against.
+      <b> Check again</b> later reruns the clash check under them.</>,
+    target: "[data-tour=req-apply]", done: (s) => !s.reqOpen && !!s.requirements, show: { label: "Use them for me" },
+  },
+  // 8. Sign-off
   {
     act: "People decide", title: "Each team reviews",
     body: () => <>Back to the duct. Every team with an element in a clash reviews it: here MEP and Structure. Add a review:
@@ -257,7 +309,7 @@ export const BUILDING_STEPS: Step[] = [
       to the team that acts. <b>Export IFC</b> (top right) gives the edited models.</>,
     target: "[data-tour=download]",
   },
-  // 9. Close
+  // 10. Close
   {
     act: "ORCA", title: "Clashes fixed, proved, signed off", enter: (a) => { a.closeReport(); a.overview(); },
     body: (s) => <>
@@ -437,7 +489,8 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
   }, [done, index]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // Escape closes an open dialog (requirements, report) first, not the tour that is pointing into it.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".about-dialog")) onClose(); };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);

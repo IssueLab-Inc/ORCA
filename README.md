@@ -144,8 +144,10 @@ keeps working); **Let ORCA drive** hands it over again.
 
 ### Your own models, and STEP
 
-**Models › Upload models (IFC or STEP)** opens your own files: up to eight, 150 MB together on the demo, a few uploads
-per visitor per hour. A STEP machine (AP203/AP214/AP242) is converted to IFC when it opens (`server/sightline/step.py`,
+**Use your own models** on the landing page starts a blank project: drop or choose IFC or STEP files (or import a
+Navisworks report), and ORCA checks them as soon as they open. **Models › Upload models (IFC or STEP)** does the same from
+the header. Up to eight files, 150 MB together on the demo, a few uploads per visitor per hour. The viewer sizes its framing,
+clash marker and pictures to the parts, so a 100 mm load cell frames as well as a building. A STEP machine (AP203/AP214/AP242) is converted to IFC when it opens (`server/sightline/step.py`,
 design in [docs/step.md](docs/step.md)):
 - every part keeps its name, colour and transparency;
 - the model names each part's IFC class from its name and group;
@@ -227,7 +229,7 @@ Muse Spark stays in the loop:
 
 On a by-design pattern in Insights, **Add to requirements** settles those clashes at once. Verified fixes say which
 requirements they meet, and the PDF and BCF say which requirements they were checked against. The file downloads
-and uploads as `*.orca-requirements.json` for the next project.
+and uploads as `*.orca-requirements.json` for the next project. The guided tour's act "Your standard" walks through it.
 
 At L3 Balanced, ORCA finds exactly what it finds with no file (Northbank 464 = 464, the cell 107 = 107). On #1 under
 Strict, Muse proposed the duct offset up 400 mm through the girder opening (the designer's height), inside the
