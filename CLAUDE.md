@@ -247,7 +247,9 @@ origin only; the owner cookie reaches sockets via `_OwnerContext`; the socket fa
 Audio may run 1.5 s ahead of the clock (Meta garbles a 5 s burst, takes 3 s). Speech recognition is now tested with
 espeak-ng speech (`apt-get install espeak-ng` works in the cloud session) through the relay and in Chromium with a fake
 microphone; keywords turned "supply adequate" into "supply air duct". Status notes sit above the input so the mic
-doesn't move. Not yet checked: a human voice, and WebSockets through Modal's edge.
+doesn't move. Live on Modal since Oct 29: Modal's edge passes the socket through (espeak speech: first words at 1.5 s,
+final 0.5 s after the end; hands-free sentences at each pause; another origin gets 403; the browser flow works on the
+live URL). Not yet checked: a human voice on a real microphone.
 
 Export (Oct 27): edits accumulate in the scene's in-memory models (moves, offsets, trims, plans); export writes each
 edited discipline file once, with all its edits (a zip when several changed). Only kept fixes mark a file edited:
