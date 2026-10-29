@@ -578,6 +578,15 @@ Agents over MCP (Oct 29, owner decision; docs/mcp.md):
       "optional"`, because `required` aborts runs when a link expires);
     - read tools carry `readOnlyHint`, so Muse Code runs them without approval prompts;
     - Muse Code supports OAuth (`muse mcp login`), which fits the later OAuth work.
+  - **Token on its own (Oct 29, owner):** the dialog leads with Token (masked, show, copy) and Server rows (`CopyField`
+    in Agent.tsx); only the token changes between sessions. The client settings sit under "First time? Set up your
+    agent", open until this browser has made a link (`sightline.agent.setup`). Muse Code's tip: `"Bearer ${ORCA_TOKEN}"`
+    once, then only the env var changes.
+  - **Resume card:** `.about section` (a column, centred) had swallowed the card's row layout, so it is a `div` now.
+    - Layout: one row with an icon, the text, then Resume / Start fresh; it stacks below 560 px.
+    - Title: the project name from the files' shared prefix (`projectName`: "Northbank"), with chips for models,
+      clashes, fixed, and "Agent connected · time left".
+    - Start fresh also revokes the saved link.
 
 Coordination requirements (Oct 29, owner decision; design in `docs/requirements.md`, code
 `server/sightline/requirements.py`, `web/src/Requirements.tsx`, `web/src/reqFile.ts`):

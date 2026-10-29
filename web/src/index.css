@@ -674,9 +674,27 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .btn.agent-pill { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .agent-error { margin: 0; color: var(--fail); font-size: 13px; }
 .agent-expiry.soon { color: var(--warn); font-weight: 600; }
-.resume-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 14px 18px; background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow); }
-.resume-card h2 { margin: 2px 0; font-size: 16px; }
-.resume-card .demo-actions { margin: 0; }
+.resume-card { display: flex; flex-direction: row; align-items: center; gap: 14px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow); }
+.resume-icon { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.resume-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.resume-text .eyebrow { font-size: 11px; }
+.resume-text h2 { margin: 0; font-size: 18px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resume-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.resume-actions { flex: none; display: flex; gap: 8px; }
+@container (max-width: 560px) {
+  .resume-card { flex-wrap: wrap; }
+  .resume-actions { width: 100%; }
+  .resume-actions .btn { flex: 1; justify-content: center; }
+}
+.agent-fields { display: flex; flex-direction: column; gap: 6px; }
+.copy-field { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.copy-field .copy-label { flex: none; width: 52px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.copy-field code { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-setup { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.agent-setup > summary { cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.agent-setup[open] > summary { margin-bottom: 8px; }
+.agent-setup .seg { margin-bottom: 8px; }
+.agent-setup > .hint { margin-top: 8px; }
 
 /* Coordination requirements (Requirements.tsx) */
 .req-dialog { width: min(920px, 100%) !important; gap: 10px; }

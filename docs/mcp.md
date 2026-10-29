@@ -25,7 +25,12 @@ Code:
 ## Connecting
 
 **Remote, to the session you have open.** In ORCA, choose **Connect an agent**, then **Make a link for this session**.
-The dialog shows copy-ready settings, Muse Code's first:
+
+**After the first time, only the token changes.** The dialog leads with the token (masked; show and copy) and the
+server URL, so a new session means pasting one value into your agent's settings. Or set it up once with
+`"Bearer ${ORCA_TOKEN}"` (Muse Code interpolates environment variables) and change only `ORCA_TOKEN`.
+
+The full settings for each client are under **First time? Set up your agent**, Muse Code's first:
 
 - **Muse Code:** add ORCA to its settings file, at `~/.config/muse/settings.json`,
   `$XDG_CONFIG_HOME/muse/settings.json`, or `C:\Users\<you>\.config\muse\settings.json` on Windows.
