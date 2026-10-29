@@ -248,20 +248,26 @@ ORCA works out the width (`edits.resize_size`):
 - **a rectangular duct** keeps its equivalent diameter (Huebscher, `1.30 (ab)^0.625 / (a+b)^0.25`), the width to the
   next 5 mm, and is refused flatter than 4:1 ("830 x 200 mm would be 4.1:1 ... no shallower than about 205 mm");
 - **a cable tray** keeps its cross-section, at least 50 mm deep;
-- **refused:** pipes (their size is set by their flow), round ducts, parts from STEP (no profile to change), sloped
-  runs, tilted sections, and a stretch that leaves no room for its transitions.
+- **refused:** pipes (their size is set by their flow), round ducts, any profile but a plain `IfcRectangleProfileDef`
+  (exactly: a hollow, rounded / flat-oval or channel profile would come out as a solid rectangle), parts from STEP (no
+  profile to change), sloped runs, tilted sections, split points or depths that are not finite numbers (refused before
+  anything is edited), and a stretch that leaves no room for its transitions.
 
 **Geometry** (`edits.apply_resize`): five pieces through `_build_chain`: the original shortened, a transition fitting
 (`IfcDuctFitting` TRANSITION / `IfcCableCarrierFitting` REDUCER, a closed lofted `IfcTriangulatedFaceSet`, every face
 at most 30° from the run: `transition_length`), the resized middle (a copy with a profile of its own, never the shared
 one, shifted so the `keep` face stays level; its ports at its own centre), a transition back, and the rest. The
 centreline stays put across. `_build_chain` gained straights with their own profile and transition pieces (with where
-their ends' centres sit).
+their ends' centres sit). **The new size is written on what the reviewer reads** (`_label_resize`): the middle's name
+(a "600x300" in it becomes "795x240", else the size is added), its profile's name, its own copies of the original's
+properties that held the old size, and an `ORCA_Resize` property set (ResizedFrom, Size, KeepLevel, Performance); the
+transitions are "… transition to 795x240".
 
 **Checking:** as an offset: the transitions and middle against everything, the ends against the obstacles.
 **Review:** the services designer (`review: "services"`), with the performance line in `also_needs` ("equivalent
 diameter 100% of before, 3.3:1"). Ranked after every plain geometry fix (`TIERS`), and a round that verified only a
-resize gets one more round. Under the requirements a resize is sized by how far its moving face goes.
+resize gets one more round. Under the requirements a resize is sized by how far its moving face goes
+(`edits.face_move`: the whole change with the bottom or top kept, half with the centre kept).
 
 **What Muse is told** (`agent._resize_text`): when the obstacle is above or below the run, how deep the section can be
 there with the clearance, keeping the far face level, how wide that makes it and what it keeps, and how much run each

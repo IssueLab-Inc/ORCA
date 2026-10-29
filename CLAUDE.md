@@ -825,10 +825,12 @@ Resize (Oct 29, owner decision; `docs/edits.md` "Resize", code `edits.resize_siz
 `agent._try_resize`): the sixth kind of fix, a flatter section where an obstacle leaves too little depth.
 - **Shape:** `{"kind": "resize", "split_m": [a, b], "depth_m", "keep": "bottom" | "top" | "centre"}`; ORCA picks the
   width: a duct keeps its equivalent diameter (Huebscher, to 5 mm, at most 4:1), a tray its cross-section (at least
-  50 mm deep). Pipes, round ducts, STEP parts, sloped runs refused with the reason.
+  50 mm deep). Pipes, round ducts, any profile but a plain `IfcRectangleProfileDef` (hollow, rounded, channel), STEP
+  parts, sloped runs and non-finite values refused with the reason.
 - **Geometry:** original, transition (`IfcDuctFitting` TRANSITION / `IfcCableCarrierFitting` REDUCER, lofted mesh, faces
   at most 30°), resized middle (its own profile, keep face level), transition, rest; through `_build_chain`, which now
-  takes straights with their own profile and transition pieces.
+  takes straights with their own profile and transition pieces. The middle and transitions carry the new size (name,
+  profile name, copied properties, `ORCA_Resize` pset); a centre-kept resize is sized by half its change (`face_move`).
 - **Review** services, performance line in `also_needs`; tier 1. Muse is told the depth that fits over or under the
   obstacle and the width it makes (`_resize_text`). Everywhere: `TRIES`/`PARAMS`/`IN_TRIAL`/`KEEP`, `Workspace.check_resize`
   / `apply_resize`, chat and MCP `check_resize`.

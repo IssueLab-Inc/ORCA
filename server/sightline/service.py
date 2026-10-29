@@ -339,9 +339,10 @@ class Workspace:
         s = self.scene(scene_id)
         with self.lock:
             prof = None if hosts.hard_rule(s, host) else hosts.profile(s, host)
-        if prof and self.hosts_model is not None:
+        model = self.hosts_model if prof else None
+        if model is not None:
             try:
-                hosts.read(self.hosts_model, [prof])
+                hosts.read(model, [prof])
             except Exception:
                 pass   # the defaults: walls and slabs only
         with self.lock:

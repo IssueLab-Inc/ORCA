@@ -486,8 +486,14 @@ def _resizable(scene: IfcScene, element):
     if step_source(element):
         raise Unsupported("a part from STEP keeps its section (its file has no profile to change)")
     i, place, item, origin, d, px, py = _frames(scene, element)
-    if not item.SweptArea.is_a("IfcRectangleProfileDef"):
-        raise Unsupported("only a rectangular section is resized here (a round duct keeps its size)")
+    kind = item.SweptArea.is_a()
+    if kind != "IfcRectangleProfileDef":   # exactly: the resized middle is written as a plain rectangle
+        why = {"IfcCircleProfileDef": "a round duct keeps its size",
+               "IfcRectangleHollowProfileDef": "a hollow section would lose its wall",
+               "IfcRoundedRectangleProfileDef": "a rounded or flat-oval section is sized another way",
+               "IfcUShapeProfileDef": "a channel-shaped tray keeps its profile",
+               }.get(kind, f"its section is an {kind}")
+        raise Unsupported(f"only a plain rectangular section is resized here ({why})")
     if abs(float(d @ UP)) > 1e-3:
         raise Unsupported("only a level run is resized here")
     s = scene.unit_scales[i]
@@ -507,6 +513,8 @@ def resize_size(scene: IfcScene, global_id: str, depth_m: float) -> dict:
     Returns {"width_m", "depth_m", "before": [w, d], "performance"}; Unsupported when it cannot."""
     element = scene.entity(global_id)
     *_, width, depth, _, _ = _resizable(scene, element)
+    if not np.isfinite(float(depth_m)):
+        raise Unsupported("resize values must be finite")
     depth_m = round(float(depth_m), 4)
     if not 0 < depth_m < depth - 1e-4:
         raise Unsupported(f"a resize makes it shallower: {depth_m * 1000:.0f} mm is not less than its {depth * 1000:.0f} mm")
@@ -537,6 +545,26 @@ def width_for(width: float, depth: float, depth_m: float) -> float:
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if equivalent_diameter(mid, depth_m) < target else (lo, mid)
     return hi
+
+
+def face_move(h0: float, h1: float, keep: str) -> float:
+    """How far a resize's moving face goes (+ up) from depth `h0` to `h1`: the whole change when the bottom or top
+    stays level, half of it at each face when the centre does. What the requirements' largest move measures."""
+    return {"bottom": h1 - h0, "top": h0 - h1}.get(keep, (h1 - h0) / 2)
+
+
+def _size_mm(w: float, h: float) -> str:
+    return f"{w * 1000:.0f}x{h * 1000:.0f}"
+
+
+def _resized_name(name: str | None, before: tuple[float, float], after: str) -> str:
+    """`name` with its size written in (a "600x300" in it, either way round, becomes the new size), else the size
+    added: what the properties card, the exported IFC and the PDF show the reviewer."""
+    w, h = (round(v * 1000) for v in before)
+    for m in re.finditer(r"(?<!\d)(\d{2,5})\s*[x×X]\s*(\d{2,5})(?!\d)", name or ""):
+        if {int(m.group(1)), int(m.group(2))} == {w, h}:
+            return name[:m.start()] + after + name[m.end():]
+    return f"{name or 'Segment'} {after}"
 
 
 def transition_length(w0: float, h0: float, w1: float, h1: float, keep: str) -> float:
@@ -587,6 +615,8 @@ def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m:
         a, b = sorted(float(x) for x in split_m)
     except (TypeError, ValueError):
         raise Unsupported("a resize needs two split points") from None
+    if not np.isfinite([a, b]).all():   # checked before anything is edited: a NaN would fail half-way through
+        raise Unsupported("resize values must be finite")
     length = item.Depth * s
     if a - lt < MIN_PIECE_M - 1e-9 or b + lt > length - MIN_PIECE_M + 1e-9 or b - a < MIN_PIECE_M:
         raise Unsupported(f"the resized stretch {a:.2f}-{b:.2f} m leaves too little run: each transition takes "
@@ -600,7 +630,8 @@ def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m:
     prof = item.SweptArea
     across_x = abs(px @ side) > 0.999   # the profile's X runs across (width), else up (depth)
     xdim, ydim = (w1, h1) if across_x else (h1, w1)
-    resized = scene.models[i].createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+    old_size, new_size = _size_mm(w0, h0), _size_mm(w1, h1)
+    resized = scene.models[i].createIfcRectangleProfileDef(prof.ProfileType, new_size, prof.Position,
                                                            float(xdim / s), float(ydim / s))
     A, B, LT = a / s, b / s, lt / s
     lift = up * (off / s)
@@ -612,8 +643,33 @@ def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m:
               ("straight", origin + d * A + lift, d, B - A, resized),
               ("transition", origin + d * B, d, LT, v2, f2, (lift, still)),
               ("straight", origin + d * (B + LT), d, item.Depth - B - LT)]
+    name = element.Name
     gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces)
+    _label_resize(scene, gids, name, (w0, h0), old_size, new_size, keep, size["performance"])
     return Resize(global_id, [a, b], w1, h1, keep, size["before"], size["performance"], gids)
+
+
+def _label_resize(scene: IfcScene, gids: list[str], name: str | None, before: tuple[float, float], old_size: str,
+                  new_size: str, keep: str, performance: str) -> None:
+    """Say the new size on the resized middle (its name, the properties it copied from the original where they held
+    the old size, and an ORCA_Resize property set) and on the transitions, so the reviewer reads what changed."""
+    model = scene.models[scene.index_of(gids[0])]
+    middle = scene.entity(gids[2])
+    middle.Name = _resized_name(name, before, new_size)
+    for gid in (gids[1], gids[3]):
+        scene.entity(gid).Name = f"{name or 'Segment'} transition to {new_size}"
+    olds = {old_size, old_size.replace("x", " x "), old_size.replace("x", "×")}
+    for rel in list(getattr(middle, "IsDefinedBy", None) or []):
+        pset = rel.RelatingPropertyDefinition if rel.is_a("IfcRelDefinesByProperties") else None
+        if pset is None or not pset.is_a("IfcPropertySet") or len(rel.RelatedObjects) > 1:   # never the original's
+            continue
+        for prop in pset.HasProperties or []:
+            value = getattr(prop, "NominalValue", None)
+            if value is not None and isinstance(value.wrappedValue, str) and value.wrappedValue.strip() in olds:
+                prop.NominalValue = model.create_entity(value.is_a(), new_size)
+    pset = ifcopenshell.api.run("pset.add_pset", model, product=middle, name="ORCA_Resize")
+    ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={
+        "ResizedFrom": old_size, "Size": new_size, "KeepLevel": keep, "Performance": performance})
 
 
 def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple]) -> list[str]:

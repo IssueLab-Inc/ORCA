@@ -486,7 +486,7 @@ def _candidate_delta(cand: dict, scene: IfcScene | None = None, target: str | No
     if kind == "resize":   # how far its moving face goes, when the scene can say
         try:
             size = edits.resize_size(scene, target, float(cand.get("depth_m")))
-            return kind, [0.0, 0.0, round(size["depth_m"] - size["before"][1], 4)]
+            return kind, [0.0, 0.0, round(edits.face_move(size["before"][1], size["depth_m"], cand.get("keep") or "bottom"), 4)]
         except (edits.Unsupported, KeyError, TypeError, ValueError, AttributeError):
             return kind, [0.0, 0.0, 0.0]
     if kind == "offset":
@@ -842,8 +842,7 @@ def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_
     except (edits.Unsupported, KeyError) as e:
         return Attempt(title, [0.0, 0.0, 0.0], False, f"cannot resize this element: {e}", "resize", split), None
     (w0, h0), w1, h1 = size["before"], size["width_m"], size["depth_m"]
-    moving = {"bottom": h1 - h0, "top": h0 - h1}.get(keep, (h1 - h0) / 2)   # how far the face that moves goes (+ up)
-    delta = [0.0, 0.0, round(moving, 4)]
+    delta = [0.0, 0.0, round(edits.face_move(h0, h1, keep), 4)]   # how far the face that moves goes (+ up)
     edit = {"split_m": sorted(split), "depth_m": h1, "width_m": w1, "keep": keep, "before": [w0, h0],
             "performance": size["performance"], "summary": edits.resize_summary(sorted(split), w1, h1, keep),
             "key": json.dumps([round(x, 2) for x in sorted(split)] + [round(h1, 3), keep])}
