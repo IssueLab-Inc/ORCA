@@ -1,4 +1,4 @@
-import { Brain, ChevronDown, CircleCheck, Flag, Info, RotateCcw, ScanSearch } from "lucide-react";
+import { Brain, ChevronDown, CircleCheck, ClipboardCheck, Flag, Info, RotateCcw, ScanSearch } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { TriageKind, TriageModel, TriageVerdict } from "./api";
 
@@ -25,7 +25,7 @@ function tail(text: string) {
   return "…" + cut.slice(cut.indexOf(" ") + 1);
 }
 
-const BASIS_LABEL: Record<string, string> = { touch: "touch", non_physical: "not physical", same_element: "same element" };
+const BASIS_LABEL: Record<string, string> = { touch: "touch", non_physical: "not physical", same_element: "same element", requirement: "by requirement" };
 
 /** "50 touch · 49 not physical · 12 same element": what the rules settled, biggest first. */
 function ruleBreakdown(vs: TriageVerdict[]) {
@@ -42,10 +42,13 @@ function storedCompact(): boolean | null {
   try { const v = localStorage.getItem(COMPACT); return v == null ? null : v === "1"; } catch { return null; }
 }
 
-export interface TriageRun extends TriageModel { total: number; started: number; done: boolean; seconds?: number; error?: string }
+export interface TriageRun extends Omit<TriageModel, "requirements"> {
+  total: number; started: number; done: boolean; seconds?: number; error?: string;
+  requirements?: string | null;  // the requirements it was read under ("L3 · Strict"), when there were some
+}
 
 /** Bulk triage of the whole report, the first step: run it, watch it land, filter by verdict, set the noise aside. */
-export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active, forceCompact = false }: {
+export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active, forceCompact = false, requirements = null, stale = false, onRequirements }: {
   run: TriageRun | null; results: Record<string, TriageVerdict>; now: number; total: number;
   active?: TriageModel | null;  // the model a run would use now (server: /api/models), before one starts
   forceCompact?: boolean;       // the list is filtered to a pattern or root cause: give it the room (unless opened)
@@ -54,6 +57,9 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   onSetAside: (ids: string[]) => void; onFlag: (ids: string[]) => void;
   resolved?: (id: string) => boolean;  // fixed, set aside or flagged already
   open?: number;
+  requirements?: string | null;  // the coordination requirements in use ("L3 · Strict")
+  stale?: boolean;               // read under other requirements: run again to apply these
+  onRequirements?: () => void;
 }) {
   const [chosen, setChosen] = useState<boolean | null>(storedCompact);
   const [openedAnyway, setOpenedAnyway] = useState(false);
@@ -202,6 +208,14 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         </div>)}
 
       {run && (run.note || run.error) && <p className={run.error ? "bad small" : "hint small"}>{run.error || run.note}</p>}
+      {run && run.done && (requirements || run.requirements || stale) && (
+        <p className="triage-req">
+          <ClipboardCheck size={13} aria-hidden />
+          {stale ? <>Read under {run.requirements ? `requirements ${run.requirements}` : "ORCA's defaults"}; requirement rules apply now, the
+            {requirements ? ` ${requirements}` : " new"} reading on the next run.
+            <button className="btn small" onClick={() => onRun(true)}>Triage again</button></>
+            : <>Read under requirements {run.requirements ?? requirements}{onRequirements && <button className="btn small ghost" onClick={onRequirements}>Edit</button>}</>}
+        </p>)}
       {run && state !== "idle" && (
         <p className="triage-meta">
           {state === "done" && <>{seconds} s · {byRule} by rule · </>}

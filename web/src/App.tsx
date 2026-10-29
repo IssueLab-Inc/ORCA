@@ -1,4 +1,4 @@
-import { Bot, Boxes, Brain, Check, CircleCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
@@ -7,6 +7,9 @@ import { ReportDialog, ReviewBlock } from "./ReportDoc";
 import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
+import { RequirementsDialog } from "./Requirements";
+import { addByDesign, hasByDesign, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
+import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
 import { AgentDialog, timeLeft, type AgentLogEntry } from "./Agent";
@@ -112,6 +115,15 @@ export function App() {
   const [verdicts, setVerdicts] = useState<Record<string, PatternVerdict> | null>(null);
   const [explaining, setExplaining] = useState(false);
   const [reviewed, setReviewed] = useState<Record<string, Review>>({});
+  // Coordination requirements (Requirements.tsx; server: requirements.py): the file kept in this browser and whether it
+  // is in use, the id the server registered it under (sent with every call), and the dialog.
+  const [reqSaved, setReqSaved] = useState<SavedRequirements | null>(() => loadRequirements());
+  const [reqId, setReqId] = useState<string | null>(null);
+  const [reqOpen, setReqOpen] = useState(false);
+  // Muse Spark's audit of the by-design rules after a triage under requirements, and whether the triage shown was
+  // read under other requirements (a level, strictness or guidance since changed).
+  const [triageAudit, setTriageAudit] = useState<Record<string, RuleAudit>>({});
+  const [triageStale, setTriageStale] = useState(false);
   // Bulk triage of the open report (shared on the server: a run someone else started is followed, not repeated).
   const [triage, setTriage] = useState<Record<string, TriageVerdict>>({});
   const [triageRun, setTriageRun] = useState<TriageRun | null>(null);
@@ -323,12 +335,14 @@ export function App() {
   async function runTriage(rerun = false) {
     if (!report) return;
     const rid = report.id;
-    if (rerun) { setTriage({}); setTriageFilter(null); }
+    if (rerun) { setTriage({}); setTriageFilter(null); setTriageAudit({}); }
+    setTriageStale(false);
     setTriageLive({});
     setTriageRun((r) => r ?? { model: "", open_weights: false, total: report.clashes.length, started: Date.now(), done: false });
     try {
       await api.triageStream(rid, sceneId, (e) => {
-        if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false });
+        if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false, requirements: e.requirements?.label ?? null });
+        else if (e.type === "audit") setTriageAudit(e.rules);
         else if (e.type === "clash") {
           const { type: _t, id, ...v } = e;
           setTriage((t) => ({ ...t, [id]: v }));
@@ -340,21 +354,60 @@ export function App() {
     } catch (e) { setError((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
   }
 
-  // A newly opened report: pick up a triage that already exists for it (finished, or still running).
+  // The requirements in use: registered with the server (content-addressed), then their id goes with every call.
   useEffect(() => {
-    setTriage({}); setTriageRun(null); setTriageFilter(null);
+    saveRequirements(reqSaved);
+    if (!reqSaved?.enabled) { setRequirements(null, null); setReqId(null); return; }
+    let live = true;
+    api.registerRequirements(reqSaved.doc).then((r) => {
+      if (!live) return;
+      setRequirements(r.id, r.doc); setReqId(r.id);
+    }).catch((e) => { if (live) setError(`Requirements not in use: ${(e as Error).message}`); });
+    return () => { live = false; };
+  }, [reqSaved]);
+  const reqLabel = reqSaved?.enabled && reqId ? shortLabel(reqSaved.doc) : null;
+
+  /** Keep a requirements file (null: forget it); with `again`, check the models again under it. */
+  function applyRequirements(doc: Requirements | null, enabled: boolean, again: boolean) {
+    setReqSaved(doc ? { doc, enabled } : null);
+    setReqOpen(false);
+    if (again) pendingDetect.current = true;
+  }
+  const pendingDetect = useRef(false);
+  useEffect(() => {
+    if (!pendingDetect.current || !reqId) return;
+    pendingDetect.current = false;
+    void runDetect(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reqId]);
+
+  /** A pattern Muse read as by design becomes a by-design rule (a file is started from the models when there is none):
+   * its clashes are settled at once, without asking the model again. */
+  async function addRule(p: Pattern, v?: PatternVerdict) {
+    let doc = reqSaved?.doc ?? null;
+    if (!doc && sceneId) doc = (await api.requirementsDefault(sceneId).catch(() => null))?.doc ?? null;
+    if (!doc) return;
+    setReqSaved({ doc: addByDesign(doc, p, v), enabled: true });
+  }
+
+  // A newly opened report, or other requirements: pick up a triage that already exists for it (finished, or still
+  // running). Under requirements that only changed rules, the server carries the readings over at once; under
+  // another level, strictness or guidance it returns the last run marked stale until the triage is run again.
+  useEffect(() => {
+    setTriage({}); setTriageRun(null); setTriageFilter(null); setTriageAudit({}); setTriageStale(false);
     if (!report) return;
     let live = true;
     api.triage(report.id, sceneId).then((s) => {
       if (!live || !s.model) return;
-      if (s.done) {
+      setTriageAudit(s.audit ?? {}); setTriageStale(!!s.stale);
+      if (s.done || s.stale) {
         setTriage(s.results);
-        setTriageRun({ model: s.model, open_weights: !!s.open_weights, note: s.note, total: s.total ?? 0, started: Date.now(), done: true, seconds: s.seconds ?? undefined, error: s.error ?? undefined });
+        setTriageRun({ model: s.model, open_weights: !!s.open_weights, note: s.note, total: s.total ?? 0, started: Date.now(), done: true, seconds: s.seconds ?? undefined, error: s.error ?? undefined, requirements: s.requirements?.label ?? null });
       } else runTriage();
     }).catch(() => {});
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report]);
+  }, [report, reqId]);
 
   // Models opened after a triage: the server corrects what the open model settles (one element on both sides).
   const triageDone = !!triageRun?.done;
@@ -410,10 +463,22 @@ export function App() {
     return { before_img, after_img };
   }
 
+  /** Muse's recommendation where the requirements allow no edit: the report shows it on the clash's page. */
+  function noteRecommendation(r: Recommendation, pair: readonly [string | null, string | null]) {
+    const ids = clashIdsOf([pair])[0];
+    if (!ids.length) return;
+    const d = r.delta_m ?? [0, 0, 0];
+    const edit = r.kind === "offset" ? `offset the middle ${Math.round(d[2] * 1000)} mm` : r.kind === "trim" ? "trim at the joint"
+      : `move [${d.map((x) => Math.round(x * 1000)).join(", ")}] mm`;
+    const ev: Evidence = { status: "recommended", title: r.title, kind: r.kind, edit, clearance: "", clearance_m: null,
+      rationale: r.rationale, also_needs: r.also_needs, moved: [r.element], blocked_by: r.blocked_by };
+    setEvidence((all) => ({ ...all, ...Object.fromEntries(ids.filter((id) => !all[id] || all[id].status === "recommended").map((id) => [id, ev])) }));
+  }
+
   function evidenceOf(o: Option, status: Evidence["status"], pics: { before_img?: string; after_img?: string }): Evidence {
     return { status, title: o.title, kind: o.kind, edit: editText(o), moved: o.moved,
       clearance: o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m), clearance_m: o.min_clearance_m ?? null,
-      rationale: o.rationale, also_needs: o.also_needs, ...pics };
+      rationale: o.rationale, also_needs: o.also_needs, ...(o.meets?.length ? { meets: o.meets } : {}), ...pics };
   }
 
   function captureContext(p: ContextProposal): { before_img?: string; after_img?: string } {
@@ -664,7 +729,7 @@ export function App() {
     let live = true;
     api.detectTests(sceneId).then((s) => { if (live) setDetectSetup(s); }).catch(() => undefined);
     return () => { live = false; };
-  }, [sceneId]);
+  }, [sceneId, reqId]);
 
   function onDetectEvent(e: DetectEvent) {
     setDetecting((p) => {
@@ -691,7 +756,7 @@ export function App() {
       if (sceneEpoch.current !== epoch) return;
       const r = await loadReport(async () => done.report, "the clashes ORCA found");
       if (!r) return;
-      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds });
+      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds, requirements: done.requirements ?? null });
       const ids = new Set(r.clashes.map((c) => c.id));
       setReviewed(Object.fromEntries(Object.entries(keep).filter(([id]) => ids.has(id))));
       const still = selected && r.clashes.find((c) => c.id === selected);
@@ -852,6 +917,7 @@ export function App() {
       const show = () => {
         if (!live()) return;
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
+        if (result?.recommendation) noteRecommendation(result.recommendation, [a, b] as const);
         update({ phase: "done", checking: null }); setNow(Date.now());
       };
       if (pilot.current) pilot.current.finish(show); else show();
@@ -1240,7 +1306,7 @@ export function App() {
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved]);
+  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId]);
   /** What the agent does, carried out here: the chat's ui events, opened models, applied fixes, pictures. */
   async function onAgentEvent(e: LinkEvent) {
     if (!agentLink) return;
@@ -1619,6 +1685,10 @@ export function App() {
             <p className="hint">Upload the whole export folder to get each clash's images.</p>
           </>)}
         </Popover>
+        {!landing && sceneId && <button className={`btn ${reqLabel ? "req-pill" : "ghost"}`} data-tour="requirements" onClick={() => setReqOpen(true)}
+          aria-label="Coordination requirements" data-tip-side="bottom"
+          data-tip={reqLabel ? `Checking, triage and fixes follow "${reqSaved!.doc.name}" (${reqLabel})` : "Optional: set the design level, how strict to be and who moves. Off: ORCA's defaults"}>
+          <ClipboardCheck size={15} aria-hidden /><span className="lbl"> Requirements</span>{reqLabel && <span className="req-pill-label"> {reqLabel}</span>}</button>}
         <input ref={modelInput} type="file" hidden multiple accept=".ifc,.step,.stp" disabled={!!busy}
           onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) void openDemo(files); }} />
         <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
@@ -1657,20 +1727,23 @@ export function App() {
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
               insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
                 detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
-                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} compact={!!listFocus} />}
+                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} compact={!!listFocus}
+                requirementsId={reqSaved?.enabled ? reqId : null} onRequirements={() => setReqOpen(true)} />}
                 <TriageCard run={triageRun} active={triageModel} forceCompact={!!listFocus} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
                 total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
-                onFlag={(ids) => review(ids, "author", "Triage: modelling error")} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
+                onFlag={(ids) => review(ids, "author", "Triage: modelling error")}
+                requirements={reqLabel} stale={triageStale} onRequirements={() => setReqOpen(true)} /><Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
                 resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={setListFocus}
                 busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={() => void explainPatterns()}
                 onSelect={(ids) => setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])]))}
-                onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })} /></>} />
+                onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })}
+                onAddRule={sceneId ? (p, v) => void addRule(p, v) : undefined} hasRule={(p) => !!reqSaved?.enabled && hasByDesign(reqSaved.doc, p)} /></>} />
           : sceneId
             ? <div className="detect-slot"><DetectSetupCard setup={detectSetup} progress={detecting} disabled={!!busy}
-                onRun={(tests) => void runDetect(tests)} />
+                onRun={(tests) => void runDetect(tests)} requirements={reqLabel} onRequirements={() => setReqOpen(true)} />
                 <p className="hint small">Or double-click element A, then element B, in the model.</p></div>
             : <div className="empty-left">
               <Radar size={28} aria-hidden />
@@ -1812,7 +1885,9 @@ export function App() {
           </>}
           <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"} />
           {proposal && !proposing && <h2>Verified options</h2>}
-          {proposal && !proposing && !proposal.options.length && <NoFix proposal={proposal} onRetry={propose} onFlag={clash ? () => review([clash.id], "author", "No verified fix: needs the model's author") : undefined} />}
+          {proposal && !proposing && proposal.recommendation && <Recommended rec={proposal.recommendation} advice={proposal.advice} requirements={proposal.requirements ?? null}
+            onRequirements={() => setReqOpen(true)} />}
+          {proposal && !proposing && !proposal.options.length && !proposal.recommendation && <NoFix proposal={proposal} onRetry={propose} onFlag={clash ? () => review([clash.id], "author", "No verified fix: needs the model's author") : undefined} />}
           {clash && proposal && !proposing && proposal.options.length > 0 && proposal.options.every((o) => o.cleanup) && (
             <div className="cleanup-note">
               <b>Model cleanup, not a coordination clash</b>
@@ -1834,6 +1909,7 @@ export function App() {
                 <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
                 <span className="row"><span>Clearance</span><span className="mono">{o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m)}</span></span>
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
+                {o.meets?.length ? <span className="meets">{o.meets.map((m) => <span key={m}><Check size={11} aria-hidden /> {m}</span>)}</span> : null}
                 <span className="why">{o.rationale}</span>
                 <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} />
               </button>
@@ -1888,6 +1964,8 @@ export function App() {
       {agentOpen && <AgentDialog link={agentLink} log={agentLog} now={now} creating={agentBusy} error={agentError}
         canCreate={!!sceneId} onCreate={() => void connectAgent()} onRevoke={() => void disconnectAgent()} onClose={() => setAgentOpen(false)} />}
       {touring && <Tour key={tourWhich} which={tourWhich} state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}
+      {reqOpen && <RequirementsDialog sceneId={sceneId} initial={reqSaved?.doc ?? null} enabled={!!reqSaved?.enabled}
+        audit={triageAudit} canDetectAgain={!!sceneId} onApply={applyRequirements} onClose={() => setReqOpen(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
         triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} onReady={() => setDocReady(true)} />}
@@ -1958,6 +2036,26 @@ function ProofStrip({ o, rank, options, before }: { o: Option; rank: number; opt
   return <span className="proof-strip"><span className="ok">✓ Clash gone</span><span>{clear}{margin}</span>{before != null && <span>was {mm(before)} overlap</span>}<span>{o.checked_against ? `checked vs ${o.checked_against} elements` : "checked vs the model"}</span><span className="why">{why}</span></span>;
 }
 /** When nothing passed: what ORCA learned, so the clash reaches a person with a head start, not a dead end. */
+/** The requirements allow no edit here: Muse Spark's recommendation for the designer, never tried or applied. */
+function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void }) {
+  const d = rec.delta_m ?? [0, 0, 0];
+  const size = Math.round(Math.max(...d.map(Math.abs)) * 1000);
+  const change = rec.kind === "trim" ? "trim at the joint" : rec.kind === "offset" ? `offset the middle ${d[2] >= 0 ? "up" : "down"} ${Math.abs(Math.round(d[2] * 1000))} mm`
+    : size ? `move ${size} mm` : "";
+  return (
+    <div className="recommended">
+      <h3>Recommended for the designer</h3>
+      <p><b>{rec.title}</b>{change ? <> · <span className="mono">{change}</span></> : null}</p>
+      {rec.rationale && <p>{rec.rationale}</p>}
+      {rec.also_needs && <p><b>Also needs:</b> {rec.also_needs}</p>}
+      {advice && <p><b>What decides it:</b> {advice}</p>}
+      {rec.others.length > 0 && <p className="hint">Muse Spark also considered: {rec.others.join("; ")}</p>}
+      <p className="hint">Not edited: {rec.blocked_by}{requirements ? ` (requirements ${requirements})` : ""}. Nothing was tried
+        on the model. <button className="btn small ghost" onClick={onRequirements}>Requirements</button></p>
+    </div>
+  );
+}
+
 function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: () => void; onFlag?: () => void }) {
   const n = proposal.attempts.length;
   const counts = new Map<string, number>();

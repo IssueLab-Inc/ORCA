@@ -857,6 +857,20 @@ def _triage_donor(report, doc) -> triage.Job | None:
     return None
 
 
+def _ruled(doc, clash, verdict: dict | None) -> dict:
+    """A reading shown under requirements it was not read under: a by-design rule now in force settles it (keeping the
+    model's reading); a requirement verdict whose rule is gone is shown as not yet read."""
+    rule = requirements.settle(doc, clash)
+    if rule:
+        out = {**rule, "source": "rule"}
+        if verdict and verdict.get("source") == "model" and verdict.get("understanding"):
+            out["model_reading"] = f"{verdict.get('verdict', '').replace('_', ' ')}: {verdict['understanding']}"
+        return out
+    if verdict and verdict.get("basis") == "requirement":
+        return {"verdict": "unknown", "source": "rule", "error": "Its requirements rule is gone: triage again to read it."}
+    return verdict or {"verdict": "unknown", "source": "rule"}
+
+
 def _triage_latest(report) -> triage.Job | None:
     """The latest run of this report under any requirements: shown, marked stale, until one under these is started."""
     base = _triage_key(report)
@@ -898,7 +912,12 @@ def triage_state(report_id: str, scene_id: str | None = None):
         return job.state()
     latest = _triage_latest(report)
     if latest is not None:
-        return {**latest.state(), "stale": True}
+        state = latest.state()
+        if doc is not None:  # its readings, with the rules in force now (no model call): a rule added applies at once
+            state["results"] = {c.id: _ruled(doc, c, state["results"].get(c.id)) for c in report.clashes
+                                if c.id in state["results"] or requirements.settle(doc, c)}
+            state["summary"] = triage.summary(state["results"])
+        return {**state, "stale": True}
     return {"results": {}, "done": False, "started": False}
 
 

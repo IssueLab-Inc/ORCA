@@ -288,3 +288,29 @@ def test_an_agent_link_works_under_the_pages_requirements(client):
     assert link.requirements is None
     c.put(f"/api/links/{token}/context", json={"scene_id": sid}, headers={"X-Sightline-Requirements": rid})
     assert link.requirements == rid
+
+
+def test_a_rule_added_after_a_triage_applies_at_once_without_asking_again(tmp_path, monkeypatch):
+    (tmp_path / "reports" / "demo").mkdir(parents=True)
+    (tmp_path / "reports" / "demo" / "report.xml").write_text(STANDARD.replace("{beam}", "0FQ9jQy2DHrgb6aZcJtSSS"))
+    model = Reader()
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))
+    monkeypatch.setattr(app_module, "_triage_jobs", {})
+    monkeypatch.setattr(app_module, "triage_model", lambda: (model, {"model": "scripted", "open_weights": False}))
+    c = TestClient(app_module.app)
+    rid = c.post("/api/reports", json={"sample": "demo"}).json()["id"]
+    c.post(f"/api/reports/{rid}/triage/stream").text
+    asked = len(model.asked)
+    doc = _doc().to_dict()
+    reg = c.post("/api/requirements", json=doc).json()["id"]
+    state = c.get(f"/api/reports/{rid}/triage", headers={"X-Sightline-Requirements": reg}).json()
+    assert state["stale"] is True and len(model.asked) == asked
+    bases = sorted(v.get("basis", "") for v in state["results"].values())
+    assert bases == ["", "requirement"]
+    # Another rule set under the same prompt: a run under it starts at once from the readings, free.
+    rerun = [json.loads(l) for l in c.post(f"/api/reports/{rid}/triage/stream?rerun=true",
+                                         headers={"X-Sightline-Requirements": reg}).text.splitlines()]
+    reg2 = c.post("/api/requirements", json={**doc, "by_design": []}).json()["id"]
+    state2 = c.get(f"/api/reports/{rid}/triage", headers={"X-Sightline-Requirements": reg2}).json()
+    assert "stale" not in state2
+    assert rerun[-1]["type"] == "done"
