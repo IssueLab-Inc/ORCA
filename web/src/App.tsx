@@ -2138,7 +2138,7 @@ export function App() {
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
               {chosen === i && o.kind === "penetration" && o.edit?.reading_source === "muse" && sceneId && (
-                hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group)
+                hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group, o.edit.host_kind)
                   ? <span className="chip ok"><Check size={11} aria-hidden /> in the requirements</span>
                   : <button className="btn small" onClick={() => void addPenRule(o)}
                     data-tip="Make this reading a rule for the host's group in the coordination requirements"><ClipboardPlus size={13} aria-hidden /> Add to requirements</button>)}

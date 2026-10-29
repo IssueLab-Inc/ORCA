@@ -145,8 +145,9 @@ the service. Muse names the service as `move`; a wall or slab named instead is t
 (`penetration_sides`). The option's `moved` is the host (its geometry changes in the viewer), its `edit` names
 service and host, and the preview is the provision for void and the host with its hole (the page frames the first).
 
-**Who reviews it** (`penetration_review`): structure for a slab or a load-bearing wall (`Pset_WallCommon.LoadBearing`),
-else architecture; a `FireRating` adds fire-stopping to `also_needs`. Ranked below every plain geometry fix
+**Who reviews it** (`hosts.decide`, and `hosts.default` when nothing else answers; "Which hosts" below): structure
+for a slab or a load-bearing wall (`Pset_WallCommon.LoadBearing`), else architecture; a `FireRating` adds
+fire-stopping to `also_needs`. Ranked below every plain geometry fix
 (`TIERS`), and a round that verified only a penetration gets one more round to find one.
 
 **What Muse is told** (`agent._penetration_text`): that the service crosses the host's full depth, the opening a
@@ -191,8 +192,10 @@ limits; a machine panel's gland plate is made to be drilled. `server/sightline/h
 2. **The requirements** (`penetrations` in `orca-requirements/1`, optional): per group, allowed / review / never, the
    largest opening and the reviewer. They win over Muse; a file without the section keeps its id. The fixes prompt
    lists them. The dialog has "Openings for services" (Muse decides / Allowed / With review / Never, size, reviewer),
-   and an opening option read by Muse has **Add to requirements** (the reading becomes the rule for its host's group,
-   `edit.host_group`).
+   and an opening option read by Muse has **Add to requirements**. That rule is for the reading's kind of host only
+   (`kind`: `hosts.profile`'s key, `kind_name` in words; `edit.host_kind`), never the whole group: a cell's gland plate
+   read "allowed" must not open its base plates and guard panels, which read differently. A kind's rule beats its
+   group's; the dialog lists kind rules under their group, each removable.
 3. **Muse's reading of each kind of host** (`hosts.read`, `domain_packs/penetrations.md`, strict JSON, on the triage
    model): verdict (allowed, with_review, not_advised, never), reviewer, fit (annular: a clearance filled by a sleeve or
    fire-stopping; fitted: a gland or grommet), limits (largest hole for the host's depth, distance from its ends in
@@ -200,15 +203,21 @@ limits; a machine panel's gland plate is made to be drilled. `server/sightline/h
    name words, materials, thickness, standard `Pset_*Common` properties, discipline, STEP assembly), cached for the
    server's life, before a proposal's first round when a service crosses a host (`agent.penetration_pairs`). Facts are
    text only, and a project's own property sets never reach it (Northbank's demo property set holds its
-   answer key). A failed reading leaves the default: walls and slabs as in 4a, nothing else.
+   answer key). A failed reading leaves the default: walls and slabs as in 4a, nothing else. The model is resolved per
+   request (`Workspace.hosts_model`: the open-weights choice and the owner's settings apply as for triage), with a 60 s
+   timeout so a slow host does not hold the proposal; Muse's limits are kept only as numbers in range (`hosts.LIMITS`),
+   its conditions and reasoning are capped. Pairs are found before the opening is sized, so a gland plate too narrow
+   for an annular opening is still read (it may take a fitted one).
 
 **The hole against the limits** (`hosts.check_hole`): the host's depth is its smaller size in the hole's plane (a
 beam's depth for a pipe through its web), its ends those of its longer size; edges by rays from just outside the hole.
-A hole that breaks a limit is refused with the numbers; a passing one carries them (`edit.numbers`: "hole 170 mm in
+A hole that breaks a limit is refused with the numbers (when tried, and again when kept: the rules may have changed
+since the option was made); a passing one carries them (`edit.numbers`: "hole 170 mm in
 600 mm of host (28%)", "915 mm from its nearest end"), shown on the option card with the reading.
 
 **Fitted openings:** the service plus 1 mm round, to the mm (a 32 mm conduit: Ø34), and the service may touch the host
-(the gland seals it); in a plan's joint check too.
+(the gland seals it); in a plan's joint check too. The option's `meets` says "a fitted gland, sealed round the service
+(no clearance there)", never a clearance it does not have.
 
 **Ranking:** an opening in anything but a wall or slab ranks after one in a wall or slab (`agent.tier`).
 

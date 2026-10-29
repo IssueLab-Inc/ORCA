@@ -195,6 +195,7 @@ export interface ReqByDesign { a_classes: string[]; b_classes: string[]; reason:
 export interface ReqPenRule {
   group: string; rule: "allowed" | "review" | "never"; max_mm: number | null; reviewer: string | null; reason: string;
   source: "user" | "orca";
+  kind?: string | null; kind_name?: string;   // only for one kind of host in the group (from Muse's reading of it)
 }
 export interface Requirements {
   format: "orca-requirements/1"; name: string; version: number; level: number; strictness: Strictness;

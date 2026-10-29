@@ -221,7 +221,8 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
               columns, glazing, equipment and transfer beams never take one.</p>
             <ul className="req-pens">
               {draft.groups.map((g) => {
-                const r = draft.penetrations?.find((x) => x.group === g.id);
+                const r = draft.penetrations?.find((x) => x.group === g.id && !x.kind);
+                const kinds = (draft.penetrations ?? []).filter((x) => x.group === g.id && x.kind);
                 return (
                   <li key={g.id}>
                     <span className="req-mover-name">{g.name}{r?.source === "orca" && <Sparkles size={11} className="req-orca" aria-label="From Muse Spark's reading" />}</span>
@@ -238,6 +239,13 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                         <option value="">Reviewer…</option>{["structure", "architecture", "fire", "safety", "services"].map((x) =>
                           <option key={x} value={x}>{x}</option>)}</select>}
                     </span>
+                    {kinds.length > 0 && <ul className="req-kinds">{kinds.map((k) => (
+                      <li key={k.kind ?? ""}>
+                        <span>Only <b>{k.kind_name || "one kind"}</b>: {k.rule === "allowed" ? "allowed" : k.rule === "review" ? `with review${k.reviewer ? ` by ${k.reviewer}` : ""}` : "never"}
+                          {k.source === "orca" && <Sparkles size={11} className="req-orca" aria-label="From Muse Spark's reading" />}</span>
+                        <button className="ibtn" aria-label={`Remove the rule for ${k.kind_name}`}
+                          onClick={() => update(setPenetration(draft, g.id, null, k.kind ?? null))}><Trash2 size={14} aria-hidden /></button>
+                      </li>))}</ul>}
                   </li>);
               })}
             </ul>

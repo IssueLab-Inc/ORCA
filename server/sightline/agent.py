@@ -119,7 +119,7 @@ def penetration_pairs(scene: IfcScene, clash: Clash) -> list[tuple[str, str, str
     for label, gid, host_label, host in (("A", clash.element_a, "B", clash.element_b), ("B", clash.element_b, "A", clash.element_a)):
         try:
             if is_service(scene, gid) and not is_service(scene, host):
-                edits.penetration(scene, gid, host)
+                edits.penetration(scene, gid, host, fit="fitted")   # the smallest opening: a narrow plate is read too
                 out.append((label, gid, host_label, host))
         except (edits.Unsupported, KeyError, RuntimeError):
             continue
@@ -440,7 +440,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 mine = o.edit["service"]
             theirs = clash.element_b if mine == clash.element_a else clash.element_a
             o.meets = requirements.meets(doc, policy[mine], policy[theirs], clearance_m, o.min_clearance_m,
-                                         o.delta_m, o.kind)
+                                         o.delta_m, o.kind, fitted=(o.edit or {}).get("fit") == "fitted")
     return Result(understanding, options, attempts, advice,
                   requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
@@ -704,6 +704,12 @@ def penetration_sides(scene: IfcScene, target: str, other: str) -> tuple[str, st
     return target, other
 
 
+def _host_kind(scene: IfcScene, host: str) -> dict:
+    """The kind of host (hosts.profile's key, and its name): "Add to requirements" scopes its rule to it."""
+    prof = hosts.profile(scene, host)
+    return {"host_kind": prof["key"], "host_kind_name": prof["facts"]["name"]}
+
+
 def _group_of(scene: IfcScene, gid: str) -> str | None:
     doc = requirements.current() or requirements.default_doc(scene)
     g = requirements.Matcher(scene, doc).group_of(gid)
@@ -746,7 +752,7 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
             "plain_host": any(scene.entity(host).is_a(c) for c in edits.PENETRABLE),
             # The host's group under the requirements in use, or those the page would start from the models: "Add to
             # requirements" turns the reading into a rule for it.
-            "host_group": _group_of(scene, host)}
+            "host_group": _group_of(scene, host), **_host_kind(scene, host)}
     ignore = set(scene.element(service).connected)
     before = {x.other: x.distance_m for x in verify.check(scene, [service], clearance_m=clearance_m, ignore=ignore).hits}
     files = {scene.index_of(service), scene.index_of(host)}

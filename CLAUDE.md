@@ -811,11 +811,13 @@ Which hosts take an opening (Oct 29, owner decision; `docs/edits.md` "Which host
   answer-key pset) never reach it. `Workspace.hosts_model` (none when a test injects the proposal model).
 - **The hole** (`hosts.check_hole`) against the limits; numbers on the option card (`hostRows` in fixKinds.ts).
   Fitted openings: service + 1 mm, may touch. Openings in anything but a wall or slab rank after (`agent.tier`).
-- **Page:** Requirements dialog "Openings for services"; an opening read by Muse has **Add to requirements**
-  (`edit.host_group`). App imports `ClipboardPlus`, `addPenetration`, `hasPenetration`, `hostRows` (stubs updated).
+- **Page:** Requirements dialog "Openings for services"; an opening read by Muse has **Add to requirements**, a rule
+  for that kind of host in its group only (`kind` = `hosts.profile` key, `edit.host_kind`), never the whole group. App imports `ClipboardPlus`, `addPenetration`, `hasPenetration`, `hostRows` (stubs updated).
 - **Cell C8** (demo-models): the 400 V feed's 32 mm conduit through EP-301's 3 mm gland plate. Rev A 161 parts, Rev B
   185, 17 planted pairs. `step_classes.md` now names conduits (CONDUITSEGMENT); `samples/step-cache` regenerated.
 - **Checked:** `tests/test_hosts.py` (12); `evals/penetration_hosts.py` 25/25 on Muse Spark (18 kinds in one call,
   34-41 s); `evals/step_cell.py` C7 and C8 (Ø34 mm fitted gland hole, kept, exported plate cut); answer key 3/3 first try
   at Rev04 heights; 449 server tests, 59 web tests; C8 in the browser accepted in place.
+- **Review fixes (Oct 29):** host model resolved per request (60 s timeout), Muse's limits sanitised, narrow gland
+  plates still read, keeping an opening re-checks the hole, fitted options claim no clearance.
 

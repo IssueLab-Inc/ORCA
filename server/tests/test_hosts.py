@@ -1,5 +1,6 @@
 """Which hosts can take an opening (hosts.py): hard rules, Muse's reading of each kind of host, the requirements'
 rules, and the actual hole checked against the reading's limits."""
+import numpy as np
 import pytest
 
 from sightline import agent, edits, hosts, requirements as req, verify
@@ -212,3 +213,107 @@ def test_a_kept_gland_hole_is_fitted_and_the_clash_clears(tmp_path):
     r = ws.apply_penetration(sid, conduit, plate)
     assert r["cut"] and r["fit"] == "fitted" and r["width_m"] == 0.034
     assert not [h for h in verify.check(scene, [conduit], clearance_m=0.0).hits if h.other == plate and h.distance_m < -0.001]
+
+
+def test_a_rule_added_from_one_reading_covers_only_that_kind_of_host(scene):
+    plate, beam = gid(scene, "Gland plate GP1"), gid(scene, "Beam B1")
+    hosts.read(Reader(Gland=("allowed", "none", "fitted"), Beam=("never", "structure")),
+               [hosts.profile(scene, plate), hosts.profile(scene, beam)])
+    d = req.default_doc(scene).to_dict()
+    structure = next(g["id"] for g in d["groups"] if g["role"] == "structure")
+    rule = {"group": structure, "rule": "allowed", "source": "orca", "kind": hosts.profile(scene, plate)["key"],
+            "kind_name": "gland plate gp"}
+    doc = req.parse({**d, "penetrations": [rule]})
+    assert doc.penetrations[0].kind == rule["kind"] and req.parse(doc.to_dict()) == doc
+    assert hosts.decide(scene, plate, doc).source == "requirements"
+    assert hosts.decide(scene, beam, doc).verdict == "never"     # Muse's never for beams stands
+    group_wide = req.parse({**d, "penetrations": [{**rule, "kind": None}, rule]})
+    assert hosts.decide(scene, beam, group_wide).verdict == "allowed"   # a person's group-wide rule still wins
+    assert "Structure (gland plate gp) may take them" in req.prompt_text(doc, "fixes")
+
+
+def test_the_host_model_is_resolved_for_each_request(tmp_path, monkeypatch):
+    from sightline import meta_client
+    from sightline.service import Workspace
+    made = []
+    monkeypatch.setattr(meta_client, "triage_model", lambda timeout_s=120: (made.append(timeout_s) or object(), {}))
+    ws = Workspace(tmp_path)
+    a, b = ws.hosts_model, ws.hosts_model
+    assert a is not b and len(made) == 2      # never cached: the open-weights choice is per request
+
+    def broken(timeout_s=120):
+        raise RuntimeError("no key")
+    monkeypatch.setattr(meta_client, "triage_model", broken)
+    assert ws.hosts_model is None
+    monkeypatch.setattr(meta_client, "triage_model", lambda timeout_s=120: (object(), {}))
+    assert ws.hosts_model is not None         # a failure does not stick
+
+
+def test_a_narrow_gland_plate_is_still_read_and_takes_its_fitted_hole(scene):
+    import ifcopenshell.api
+    plate = scene.entity(gid(scene, "Gland plate GP1"))
+    model = scene.models[scene.index_of(plate.GlobalId)]
+    prof = plate.Representation.Representations[0].Items[0].SweptArea
+    prof.YDim, prof.Position.Location.Coordinates = 0.16, (0.3, 0.08)          # y 0.12-0.28: 160 mm wide
+    m = np.eye(4)
+    m[:3, 3] = (12.0, 0.12, 1.997)
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=plate, matrix=m, is_si=True)
+    scene._bounds = None
+    conduit = gid(scene, "PN-9")
+    with pytest.raises(edits.Unsupported, match="break out"):
+        edits.penetration(scene, conduit, plate.GlobalId)                       # no room for an annular opening...
+    assert agent.penetration_pairs(scene, Clash(conduit, plate.GlobalId))      # ...but it is read
+    reader = Reader(Gland=("allowed", "none", "fitted"))
+
+    class Muse:
+        def complete_json(self, system, text, images=None):
+            return {"candidates": [{"title": "Gland hole", "kind": "penetration", "move": "A"}]}
+    result = resolve(scene, Clash(conduit, plate.GlobalId), Muse(), max_rounds=1, hosts_model=reader)
+    assert len(reader.calls) == 1 and result.options and result.options[0].edit["fit"] == "fitted"
+
+
+def test_keeping_an_opening_checks_the_hole_against_the_rules_as_they_are(tmp_path):
+    from sightline.service import Workspace
+    paths = build_penetration_fixture(tmp_path / "samples")
+    ws = Workspace(paths[0].parent)
+    sid = ws.open([p.name for p in paths])
+    scene = ws.scene(sid)
+    pipe, wall = gid(scene, "PN-1"), gid(scene, "Wall W1 partition")
+    d = req.default_doc(scene).to_dict()
+    group = req.Matcher(scene, req.parse(d)).group_of(wall).id
+    small = req.parse({**d, "penetrations": [{"group": group, "rule": "review", "max_mm": 100}]})
+    token = req.enter(req.register(small))
+    try:
+        with pytest.raises(edits.Unsupported, match="the requirements allow at most 100 mm"):
+            ws.apply_penetration(sid, pipe, wall)
+    finally:
+        req.leave(token)
+
+
+def test_a_fitted_gland_claims_no_clearance(scene):
+    plate, conduit = gid(scene, "Gland plate GP1"), gid(scene, "PN-9")
+    hosts.read(Reader(Gland=("allowed", "none", "fitted")), [hosts.profile(scene, plate)])
+    doc = req.default_doc(scene)
+    m = req.Matcher(scene, doc)
+
+    class Muse:
+        def complete_json(self, system, text, images=None):
+            return {"candidates": [{"title": "Gland hole", "kind": "penetration", "move": "A"}]}
+    result = resolve(scene, Clash(conduit, plate), Muse(), max_rounds=1, doc=doc,
+                     policy={conduit: req.policy(doc, m, conduit), plate: req.policy(doc, m, plate)},
+                     clearance_m=req.fix_clearance(doc, m, conduit, plate))
+    assert result.options[0].meets[0] == "a fitted gland, sealed round the service (no clearance there)"
+
+
+def test_muse_limits_are_numbers_in_range(scene):
+    class Loose:
+        def complete_json(self, system, text, images=None, schema=None):
+            kind = text.split("kind ", 1)[1].split(":", 1)[0]
+            return {"readings": [{"kind": kind, "verdict": "with_review", "reviewer": "structure", "fit": "annular",
+                                  "limits": {"max_depth_ratio": "0.4", "keep_from_ends_depths": 40,
+                                             "keep_from_edges_m": 50, "zone": "middle"},
+                                  "conditions": ["a sleeve", 7, ""], "reasoning": "r"}]}
+    beam = gid(scene, "Beam B1")
+    [r] = hosts.read(Loose(), [hosts.profile(scene, beam)]).values()
+    assert r.limits == {"max_depth_ratio": 0.4} and r.conditions == ["a sleeve"]
+    agent._try_penetration(scene, {}, gid(scene, "PN-4"), beam, 0.025)          # no TypeError

@@ -23,6 +23,7 @@ from .scene import IfcScene, is_provision, step_source
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
 MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
+HOSTS_TIMEOUT_S = 60   # a host reading that takes longer (a cold open-weights host) leaves the defaults
 MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
 # Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
 MODELS = Path(tempfile.gettempdir()) / "sightline-models"
@@ -69,13 +70,15 @@ class Workspace:
 
     @property
     def hosts_model(self) -> ChatModel | None:
-        if self._hosts_model is None:
-            from .meta_client import triage_model
-            try:
-                self._hosts_model = triage_model()[0]
-            except Exception:   # no key here: walls and slabs only, as without a reading
-                self._hosts_model = False
-        return self._hosts_model or None
+        """The model that reads hosts: given, or the triage model as this request resolves it (the owner's choice,
+        else everyone's), like triage and titles. Never cached: the open-weights setting may change."""
+        if self._hosts_model is not None:
+            return self._hosts_model or None
+        from .meta_client import triage_model
+        try:
+            return triage_model(timeout_s=HOSTS_TIMEOUT_S)[0]
+        except Exception:   # no key here: walls and slabs only, as without a reading
+            return None
 
     def list_samples(self) -> list[str]:
         return sorted(p.name for p in self.samples.iterdir() if p.suffix.lower() in MODEL_SUFFIXES)
@@ -345,6 +348,9 @@ class Workspace:
                 raise edits.Unsupported(f"{s.element(host).name} may not take an opening: "
                                         f"{reading.reasoning or hosts.reading_text(reading)}")
             pen = edits.penetration(s, service, host, settings.get("clearance_m", 0.025), reading.fit)
+            problems, _ = hosts.check_hole(s, pen, reading)
+            if problems:   # the limits as they are now (the requirements may have changed since it was proposed)
+                raise edits.Unsupported("; ".join(problems))
             edits.apply_penetration(s, pen, cut)
             s.mark_edited(service)
             if cut:
