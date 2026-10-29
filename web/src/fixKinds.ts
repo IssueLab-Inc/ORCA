@@ -42,11 +42,12 @@ export const editText = (t: EditLike) => t.edit?.summary
 export const clearanceText = (o: Pick<Option, "kind" | "min_clearance_m">) => o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m);
 
 /** The new pieces to frame when showing a fix: the risers, bends and middle of a split run (not its shortened ends),
- * all of an opening. Empty: frame where the moved element meets the other side instead. */
+ * an opening's provision for void (not the whole wall it goes through). Empty: frame where the moved element meets
+ * the other side instead. */
 export function framePieces<M>(o: { kind: string; preview: M[] | null }): M[] {
   if (!o.preview) return [];
   if (o.kind === "offset" || o.kind === "route" || o.kind === "resize") return o.preview.slice(1, -1);
-  if (o.kind === "penetration") return o.preview;
+  if (o.kind === "penetration") return o.preview.slice(0, 1);
   return [];
 }
 

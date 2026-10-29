@@ -576,7 +576,10 @@ def fix_apply(scene_id: str, body: FixApply):
         raise HTTPException(422, f"Cannot apply this fix: {e}")
     except (ValueError, KeyError, TypeError, IndexError) as e:
         raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
-    return {**r, "pieces": r["pieces"][0]}
+    out = {**r, "pieces": r["pieces"][0]}
+    if r.get("not_cut"):   # a penetration requested, not cut: the clash stays open until the host's team cuts it
+        out.update(cut=False, blocked_by=r["not_cut"][0]["blocked_by"])
+    return out
 
 
 @app.get("/api/scenes/{scene_id}/export")

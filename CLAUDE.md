@@ -771,3 +771,30 @@ Accept in place (Oct 29, owner decision; `docs/edits.md` "Keeping a fix"): a kep
 - **Checked:** Northbank golden path and the cell's route accepted with no file download (headless Chromium); 4 server
   tests (`test_accept_in_place.py`), 3 web tests (`viewer-patch.test.mjs`, real three.js batches). Web test harness:
   `viewer-load.test.mjs` compiles the real `./patch`.
+
+Penetrations (Oct 29, owner decision; design in `docs/edits.md` "Penetration", code `edits.penetration` /
+`apply_penetration`, `agent._try_penetration`): the fifth kind of fix, an opening asked for where a straight service
+crosses a wall or slab.
+- **Hosts:** `IfcWall` / `IfcSlab` with extruded bodies only. Beams, columns, footings, piles, members, doors, windows
+  and curtain walls are refused (the girder is never cut); so is a hole the host would not surround by 50 mm.
+- **Opening:** the section + clearance + 5 mm all round, rounded up to 10 mm, round or rectangular, square to the
+  service, through the host's depth (rays from both faces) and 10 mm proud. Cell C7: Ø130 mm, 220 mm deep.
+- **Always a provision for void** in the service's model (`IfcBuildingElementProxy` PROVISIONFORVOID; IFC2X3 by
+  ObjectType; `Pset_ProvisionForVoid`; see-through orange). It is never physical (`scene.not_physical`: no box, not
+  in `products()`). **The opening** (`IfcOpeningElement` voiding the host) is cut in trials always, and when kept only
+  with no requirements or when the host's group may be edited (`requirements.can_cut`); otherwise `cut: false`,
+  `blocked_by`, the clash stays open and the page records "Opening requested" (evidence "recommended"; PDF "Opening
+  requested"; plans and MCP report `not_cut`).
+- **Check:** the service must clear the host by the clearance; elsewhere only contacts new or worse count. Option
+  clearance = the opening's gap. Review: structure for slabs and load-bearing walls, else architecture; a fire rating
+  adds fire-stopping. Tier 2 (after plain fixes and resize). Under "move only" requirements it is allowed (it asks).
+- **Muse is told** the opening a penetration would ask for, who cuts and reviews it, and that a service running out of
+  both faces must keep crossing; walls and slabs are no longer described as runs to split.
+- **Everywhere:** `TRIES`/`IN_TRIAL`/`EXTRA_FILES`/`KEEP`, `plans.KEEPS_CONTACTS`, chat and MCP `check_penetration`,
+  `Workspace.check_penetration` / `apply_penetration`; STEP export cuts the host (`BRepAlgoAPI_Cut`) and adds the
+  provision for void to the service's group. The viewer draws the host see-through in the preview and frames the
+  provision for void.
+- **Checked:** `tests/test_penetration.py` (15, incl. IFC2X3 and the endpoint/plan/patch); answer key still 3/3 first
+  try at Rev04 heights; `evals/step_cell.py` C7: Muse offers the opening (36 s), kept and cut, the STEP's wall 2,655
+  cm³ smaller with the provision for void in Compressed air; in the browser accepted in place, no file download.
+

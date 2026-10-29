@@ -29,6 +29,9 @@ export interface Attempt {
 export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m: number[]; pieces: Piece[] | null; summary?: string }
 /** move: shift the run; offset: split and raise or lower the middle; trim: cut one end back to butt the other element;
  * route: a detour of several steps; resize: a flatter section past the obstacle; penetration: an opening through it. */
+/** A kept fix: the files it changed, a split run's pieces, and how to patch the page's model (Patch). A penetration whose
+ * host the requirements lock comes back `cut: false`, with who cuts it. */
+export type Kept = { files: number[]; pieces?: string[]; cut?: boolean; blocked_by?: string } & Patch;
 export type FixKind = "move" | "offset" | "trim" | "route" | "resize" | "penetration";
 export interface TrimCut { end: "start" | "end"; by_m: number }
 /** Under requirements that allow no edit: Muse Spark's best idea for the designer, never tried or applied. */
@@ -451,7 +454,7 @@ export const api = {
     return plan;
   },
   applyPlan: (sceneId: string, options: Option[]) =>
-    call<{ files: number[]; pieces: string[][] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
+    call<{ files: number[]; pieces: string[][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
                  clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
@@ -505,13 +508,15 @@ export const api = {
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
   /** Keep a fix in the server's model; returns the indexes of the files that changed. */
   accept: (id: string, o: Option) => (o.kind === "trim" && o.trim
-    ? call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
+    ? call<Kept>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
     : o.kind === "offset"
-    ? call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
+    ? call<Kept>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
     : o.kind === "move"
-    ? call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
+    ? call<Kept>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
     // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there).
-    : call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
+    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there). A penetration
+    // whose host the requirements lock comes back `cut: false`: only its provision for void was written.
+    : call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). */

@@ -31,7 +31,7 @@ from .service import Workspace
 INSTRUCTIONS = """ORCA is an AI design coordinator for 3D models (buildings from IFC, machines from STEP). It finds
 clashes between models, proposes fixes that edit real model elements, and checks every fix with geometry before
 anyone sees it. Start with get_session to see what is open. Then report_summary or list_clashes, get_clash and
-get_clash_images to understand a clash, and check_move / check_offset / check_route to test your own idea, or propose_fixes to run
+get_clash_images to understand a clash, and check_move / check_offset / check_route / check_penetration to test your own idea, or propose_fixes to run
 ORCA's fix agent. Nothing changes the model until apply_fix or apply_plan. Distances are metres, Z up; a negative
 distance is an overlap. When a person has ORCA open with this link, show_clash and set_view move their view and
 capture_view shows you what they see."""
@@ -346,6 +346,14 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         from one offset to the next; each change is one axis at a time. 90° bends join them."""
         return run(ctx, "check_route", {"element": element, "obstacle": obstacle, "steps": steps})
 
+    @tool(read_only=True)
+    def check_penetration(element: str, host: str, ctx: Context) -> dict:
+        """Check an opening for the straight service `element` through the wall or slab `host` without keeping it:
+        sized from the service with the clearance all round, cut in a trial, and the service checked against the
+        host and everything else. Kept with apply_fix after propose_fixes offers it: a provision for void always,
+        the opening itself only where the requirements let the host's team's model be edited."""
+        return run(ctx, "check_penetration", {"element": element, "host": host})
+
     @tool()
     def propose_fixes(clash_id: str, ctx: Context, wait_s: float = 40) -> dict:
         """Run ORCA's fix agent on a clash: it proposes moves, local offsets and trims, checks each against the whole
@@ -406,6 +414,11 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         before = W().scene(link.ctx.scene_id).revision
         out = plans.apply(W(), link.ctx.scene_id, [o])
         out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
+        if out["not_cut"]:   # a penetration requested, not cut: the clash stays open until the host's team cuts it
+            _applied(link, out, [], [], [], {})
+            done(link, "apply_fix", f"requested '{o['title']}'")
+            return {"applied": o["title"], "kind": o["kind"], "clash": c.label, "files_changed": len(out["files"]),
+                    "requested_only": out["not_cut"][0]["blocked_by"]}
         pairs = [[proposal["element_a"], proposal["element_b"]]]
         _applied(link, out, pairs, [o["title"]], [c.id], {c.id: o["title"]})
         done(link, "apply_fix", f"applied '{o['title']}'")
@@ -426,12 +439,18 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         before = W().scene(link.ctx.scene_id).revision
         out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
         out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
-        pairs = [[it["element_a"], o] for it in items for o in [it["element_b"], *(it.get("others") or [])]]
-        titles = [it["option"]["title"] for it in items for _ in [it["element_b"], *(it.get("others") or [])]]
-        _applied(link, out, pairs, titles, [cid for it in items for cid in it["clash_ids"]],
-                 {cid: it["option"]["title"] for it in items for cid in it["clash_ids"]})
+        requested = {n["index"] for n in out["not_cut"]}   # penetrations only requested: their clashes stay open
+        cut = [it for k, it in enumerate(items) if k not in requested]
+        pairs = [[it["element_a"], o] for it in cut for o in [it["element_b"], *(it.get("others") or [])]]
+        titles = [it["option"]["title"] for it in cut for _ in [it["element_b"], *(it.get("others") or [])]]
+        _applied(link, out, pairs, titles, [cid for it in cut for cid in it["clash_ids"]],
+                 {cid: it["option"]["title"] for it in cut for cid in it["clash_ids"]})
         done(link, "apply_plan", f"applied {len(items)} fix(es)")
-        return {"applied": [it["option"]["title"] for it in items], "files_changed": len(out["files"])}
+        result = {"applied": [it["option"]["title"] for it in items], "files_changed": len(out["files"])}
+        if requested:
+            result["requested_only"] = [{"fix": items[n["index"]]["option"]["title"], "why": n["blocked_by"]}
+                                        for n in out["not_cut"]]
+        return result
 
     def _applied(link: agents.Link, out: dict, pairs: list, titles: list, clash_ids: list,
                  fixed: dict[str, str]) -> None:

@@ -766,6 +766,230 @@ def apply_trim(scene: IfcScene, global_id: str, end: str, by_m: float) -> Trim:
     return Trim(global_id, end, by_m)
 
 
+# ------------------------------------------------------------------------------------------------- penetrations
+
+# What can take a hole for a service, for now: walls and slabs with an extruded body. A beam, column or footing is
+# the structural engineer's to open (slice 4b reads other hosts with Muse; these stay refused until then).
+PENETRABLE = ("IfcWall", "IfcSlab")
+NOT_PENETRABLE = {
+    "IfcBeam": "a beam's openings are the structural engineer's to place: route round it or through an opening it has",
+    "IfcColumn": "a column is never cut for a service",
+    "IfcFooting": "a footing is never cut for a service",
+    "IfcPile": "a pile is never cut for a service",
+    "IfcMember": "a structural member's openings are the structural engineer's to place",
+    "IfcDoor": "a door is never cut for a service", "IfcWindow": "a window is never cut for a service",
+    "IfcCurtainWall": "a curtain wall is never cut for a service",
+}
+OPENING_MARGIN_M = 0.005  # beyond the clearance, all round: tessellated circles and site tolerance
+OPENING_ROUND_M = 0.01    # opening sizes are rounded up to this
+OPENING_PROUD_M = 0.01    # the void runs this far past each face of the host
+OPENING_EDGE_M = 0.05     # the host must surround the opening by this much: a hole at its edge is a notch
+MAX_THROUGH_M = 1.0       # deeper than any wall or slab: the run lies along the host, not across it
+PFV_COLOUR, PFV_ALPHA = (0.96, 0.55, 0.12), 0.35
+
+
+@dataclass
+class Penetration:
+    service: str           # the run that passes through
+    host: str              # the wall or slab it passes through
+    shape: str             # "rect" or "round"
+    width_m: float         # along the service profile's X (the diameter when round)
+    height_m: float        # along its Y (the diameter when round)
+    depth_m: float         # along the service: through the host, and 10 mm proud of each face
+    start: list[float]     # world metres: where the void starts, on the service's axis
+    axis: list[float]      # the service's direction (the void's)
+    xdir: list[float]      # the service profile's X
+    clearance_m: float = 0.025
+    gap_m: float = 0.0             # the least gap between the service and the opening's edge, by construction
+    provision: str | None = None   # the provision for void's GlobalId, once applied
+    opening: str | None = None     # the host's new opening, when it was cut
+
+
+def not_penetrable(host) -> str | None:
+    """Why `host` cannot take an opening here, or None."""
+    for cls, why in NOT_PENETRABLE.items():
+        if host.is_a(cls):
+            return why
+    if not any(host.is_a(c) for c in PENETRABLE):
+        return f"only walls and slabs take an opening for a service here ({host.is_a()} is not one)"
+    rep = host.Representation
+    bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
+    if not bodies or not all(i.is_a("IfcExtrudedAreaSolid") for b in bodies for i in b.Items):
+        return "only a wall or slab with an extruded body can be cut here"
+    return None
+
+
+def size_text(pen: Penetration) -> str:
+    if pen.shape == "round":
+        return f"Ø{pen.width_m * 1000:.0f} mm"
+    return f"{pen.width_m * 1000:.0f} x {pen.height_m * 1000:.0f} mm"
+
+
+def _host_tris(scene: IfcScene, host_gid: str) -> np.ndarray:
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    shape = ifcopenshell.geom.create_shape(settings, scene.entity(host_gid))
+    verts = np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
+    return verts[np.asarray(shape.geometry.faces).reshape(-1, 3)]
+
+
+def _outline(shape: str, w: float, h: float, px, py, step_m: float = 0.03) -> list[np.ndarray]:
+    """Offsets (world) round an opening's outline every `step_m`, and its centre."""
+    if shape == "round":
+        n = max(12, int(np.ceil(np.pi * w / step_m)))
+        return [np.zeros(3)] + [px * np.cos(a) * w / 2 + py * np.sin(a) * w / 2
+                                for a in np.linspace(0, 2 * np.pi, n, endpoint=False)]
+    xs = np.linspace(-w / 2, w / 2, max(2, int(np.ceil(w / step_m)) + 1))
+    ys = np.linspace(-h / 2, h / 2, max(2, int(np.ceil(h / step_m)) + 1))
+    return ([np.zeros(3)] + [px * x + py * y for x in xs for y in (-h / 2, h / 2)]
+            + [px * x + py * y for y in ys[1:-1] for x in (-w / 2, w / 2)])
+
+
+def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: float = 0.025) -> Penetration:
+    """The opening a straight service needs through a wall or slab: its section plus the clearance and 5 mm all round,
+    rounded up to 10 mm, rectangular or round like the service, square to the service and through the host's whole
+    depth (found by rays from both sides round the opening's outline) and 10 mm proud of each face. Reads the model
+    only; `apply_penetration` writes it."""
+    host = scene.entity(host_gid)
+    why = not_penetrable(host)
+    if why:
+        raise Unsupported(why)
+    service = scene.entity(service_gid)
+    i, _, item, origin, d, px, py = _frames(scene, service)
+    s = scene.unit_scales[i]
+    sx, sy = _profile_size(item.SweptArea)
+    round_ = item.SweptArea.is_a("IfcCircleProfileDef")
+    margin = clearance_m + OPENING_MARGIN_M
+
+    def up(x: float) -> float:
+        return round(float(np.ceil(round(x / OPENING_ROUND_M, 6)) * OPENING_ROUND_M), 4)
+    w, h = up(sx * s + 2 * margin), up(sy * s + 2 * margin)
+    shape = "round" if round_ else "rect"
+    start, length = origin * s, item.Depth * s
+    box = scene.bounds().get(host_gid)
+    if box is None:
+        raise Unsupported("the host has no geometry")
+    corners = np.array([[x, y, z] for x in box[:, 0] for y in box[:, 1] for z in box[:, 2]])
+    along = (corners - start) @ d
+    lo, hi = float(along.min()), float(along.max())
+    if hi < 0 or lo > length:
+        raise Unsupported("the service does not reach it")
+    tris = _host_tris(scene, host_gid)
+    ring = np.array(_outline(shape, w, h, px, py))
+    front, back = start + d * (lo - 0.5), start + d * (hi + 0.5)
+    t_in = _first_hit(front + ring, d, tris)
+    t_out = _first_hit(back + ring, -d, tris)
+    if not np.isfinite(t_in).any() or not np.isfinite(t_out).any():
+        raise Unsupported("the service does not pass through it")
+    entry = lo - 0.5 + float(t_in[np.isfinite(t_in)].min())
+    exit_ = hi + 0.5 - float(t_out[np.isfinite(t_out)].min())
+    through = exit_ - entry
+    if through > MAX_THROUGH_M:
+        raise Unsupported(f"the service runs {through:.2f} m inside it: along it, not through it")
+    # The host must surround the opening: rays just outside it, every way, must still meet the host.
+    middle = start + d * (entry + exit_) / 2
+    for name, v, half in (("above", py, h), ("below", -py, h), ("to one side", px, w), ("to the other side", -px, w)):
+        probe = middle + v * (half / 2 + OPENING_EDGE_M) - d * (through / 2 + 0.5)
+        if not np.isfinite(_first_hit(probe[None], d, tris)).any():
+            raise Unsupported(f"the opening would break out of its edge {name}: it needs {OPENING_EDGE_M * 1000:.0f} mm of "
+                              "host all round (route the service instead, or ask its designer)")
+    a = entry - OPENING_PROUD_M
+    gap = min((w - sx * s) / 2, (h - sy * s) / 2)
+    return Penetration(service_gid, host_gid, shape, w, h, round(through + 2 * OPENING_PROUD_M, 4),
+                       np.round(start + d * a, 5).tolist(), np.asarray(d).tolist(), np.asarray(px).tolist(), clearance_m,
+                       round(float(gap), 4))
+
+
+def _void_rep(model, s: float, pen: Penetration, context):
+    """The void as one extrusion along +Z of its own placement, in the file's units."""
+    if pen.shape == "round":
+        profile = model.createIfcCircleProfileDef("AREA", None, model.createIfcAxis2Placement2D(_point(model, (0, 0)), None),
+                                                  float(pen.width_m / 2 / s))
+    else:
+        profile = model.createIfcRectangleProfileDef("AREA", None, model.createIfcAxis2Placement2D(_point(model, (0, 0)), None),
+                                                     float(pen.width_m / s), float(pen.height_m / s))
+    solid = model.createIfcExtrudedAreaSolid(profile, model.createIfcAxis2Placement3D(_point(model, (0, 0, 0)), None, None),
+                                             model.createIfcDirection((0.0, 0.0, 1.0)), float(pen.depth_m / s))
+    return model.createIfcShapeRepresentation(context, "Body", "SweptSolid", [solid]), solid
+
+
+def _void_place(model, product, s: float, pen: Penetration) -> None:
+    z, x = np.asarray(pen.axis, float), np.asarray(pen.xdir, float)
+    m = np.eye(4)
+    m[:3, :3] = np.column_stack([x, np.cross(z, x), z])
+    m[:3, 3] = np.asarray(pen.start, float) / s
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=product, matrix=m, is_si=False)
+
+
+def _body_context(element):
+    rep = element.Representation
+    return next(r.ContextOfItems for r in rep.Representations if r.RepresentationIdentifier == "Body")
+
+
+def _see_through(model, solid) -> None:
+    rgb = model.createIfcColourRgb(None, *PFV_COLOUR)
+    rendering = model.createIfcSurfaceStyleRendering(rgb, 1 - PFV_ALPHA, None, None, None, None, None, None, "NOTDEFINED")
+    style = model.createIfcSurfaceStyle("ORCA provision for void", "BOTH", [rendering])
+    if model.schema == "IFC2X3":   # IFC2X3 wraps styles in an assignment
+        model.createIfcStyledItem(solid, [model.createIfcPresentationStyleAssignment([style])], None)
+    else:
+        model.createIfcStyledItem(solid, [style], None)
+
+
+def apply_penetration(scene: IfcScene, pen: Penetration, cut: bool) -> Penetration:
+    """Request the opening: always a provision for void in the service's model (an IfcBuildingElementProxy,
+    PROVISIONFORVOID, with Pset_ProvisionForVoid, see-through orange, in the service's storey), and, when `cut`, the
+    opening itself in the host (an IfcOpeningElement voiding it). Edits the models in place; wrap in `trial_files`
+    (both files) to try it and undo."""
+    service, host = scene.entity(pen.service), scene.entity(pen.host)
+    i = scene.index_of(pen.service)
+    ms, ss = scene.models[i], scene.unit_scales[i]
+    four = ms.schema != "IFC2X3"
+    pfv = ifcopenshell.api.run("root.create_entity", ms, ifc_class="IfcBuildingElementProxy",
+                               name=f"Provision for void: {service.Name or service.is_a()[3:]}")
+    if four:
+        pfv.PredefinedType = "PROVISIONFORVOID"
+    else:
+        pfv.ObjectType = "ProvisionForVoid"
+    pfv.Description = f"{size_text(pen)} for {service.Name or service.is_a()[3:]} through {host.Name or host.is_a()[3:]}"
+    container = ifcopenshell.util.element.get_container(service)
+    if container is not None:
+        ifcopenshell.api.run("spatial.assign_container", ms, relating_structure=container, products=[pfv])
+    rep, solid = _void_rep(ms, ss, pen, _body_context(service))
+    _see_through(ms, solid)
+    ifcopenshell.api.run("geometry.assign_representation", ms, product=pfv, representation=rep)
+    _void_place(ms, pfv, ss, pen)
+    systems = ifcopenshell.util.system.get_element_systems(service)
+    props = {"Shape": "Round" if pen.shape == "round" else "Rectangle", "Depth": pen.depth_m / ss,
+             "System": (systems[0].Name if systems and systems[0].Name else service.is_a()[3:])}
+    if pen.shape == "round":
+        props["Diameter"] = pen.width_m / ss
+    else:
+        props.update(Width=pen.width_m / ss, Height=pen.height_m / ss)
+    pset = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name="Pset_ProvisionForVoid")
+    ifcopenshell.api.run("pset.edit_pset", ms, pset=pset, properties=props)
+    source = step_source(service)   # from STEP: the provision is written back as a part of the service's group
+    if source:
+        sp = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name=STEP_PSET)
+        ifcopenshell.api.run("pset.edit_pset", ms, pset=sp,
+                             properties={k: v for k, v in source.items() if k in ("Group", "Label", "Source")})
+    pen.provision, pen.opening = pfv.GlobalId, None
+    if cut:
+        j = scene.index_of(pen.host)
+        mh, sh = scene.models[j], scene.unit_scales[j]
+        opening = ifcopenshell.api.run("root.create_entity", mh, ifc_class="IfcOpeningElement",
+                                       name=f"Opening for {service.Name or service.is_a()[3:]}")
+        if mh.schema != "IFC2X3":
+            opening.PredefinedType = "OPENING"
+        rep, _ = _void_rep(mh, sh, pen, _body_context(host))
+        ifcopenshell.api.run("geometry.assign_representation", mh, product=opening, representation=rep)
+        _void_place(mh, opening, sh, pen)
+        ifcopenshell.api.run("feature.add_feature", mh, feature=opening, element=host)
+        pen.opening = opening.GlobalId
+        scene.refresh_bounds([pen.host])
+    return pen
+
+
 @contextmanager
 def trial(scene: IfcScene, global_id: str):
     """Make edits to the file holding `global_id`, then undo them all, cached boxes included."""

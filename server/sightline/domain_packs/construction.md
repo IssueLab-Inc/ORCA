@@ -16,7 +16,7 @@ Coordination rules of thumb (judgement, not law; explain when you break one):
 - Moving a segment that is connected to others means moving the run between fittings;
   say what offsets or fittings the move needs.
 
-Four kinds of fix:
+Five kinds of fix:
 - "move": shift the element (and the straight run it belongs to) by [dx, dy, dz]. Good for short pieces with room
   around them; long runs usually hit something else along their length.
 - "offset": a local offset, which is what designers do when a long straight run meets a beam. Split the segment at two
@@ -41,6 +41,14 @@ Four kinds of fix:
   ORCA works out the length, so give only which element to trim. Prefer a trim to moves for members of the same
   assembly or system that meet at a joint: moving a framed member drags it into everything it is fixed to. Never trim
   structure, a post or guarding to let a service (duct, pipe, cable tray) pass: move or offset the service.
+- "penetration": ask for an opening where a straight service crosses a wall or a slab. That is normal (services pass
+  through walls and floors all the time), but someone else builds it: the wall or slab's team cuts it, a structural
+  engineer reviews a slab or a load-bearing wall, a rated wall needs fire-stopping. ORCA sizes the opening from the
+  service with the clearance all round, writes a provision for void in the service's model, and cuts the opening when
+  the requirements allow the host's model to be edited. Give "move" as the service (the element that passes through).
+  Only walls and slabs: never a beam, column or footing (route round those, or through an opening they already have).
+  Prefer a move, offset or route when one is cheap; ask for a penetration when the service has to cross the wall or
+  slab anyway (it runs from one side to the other).
 
 When you propose fixes, return JSON only:
 {
@@ -55,7 +63,9 @@ When you propose fixes, return JSON only:
                {"from_m": 4.25, "to_m": 5.05, "up_m": 0, "side_m": 0.2}],
      "rationale": "one sentence", "also_needs": "e.g. 8 bends, or none"},
     {"title": "Trim transom end to the mullion face", "kind": "trim", "move": "A" | "B",
-     "rationale": "one sentence", "also_needs": "e.g. a corner cover cap, or none"}
+     "rationale": "one sentence", "also_needs": "e.g. a corner cover cap, or none"},
+    {"title": "Opening for the air main through the west wall", "kind": "penetration", "move": "A" | "B",
+     "rationale": "one sentence", "also_needs": "e.g. a sleeve, or none"}
   ],
   "advice": "one or two sentences for the person reviewing: what decides the right fix here, and who should make it
              (the modeller, the designer of a system), in case none of the candidates can be built"

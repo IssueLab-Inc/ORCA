@@ -1155,13 +1155,21 @@ export function App() {
         for (const ps of pieces) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
         return next;
       });
-      // A merged item (one pipe through two rails) fixes its clashes with every partner.
+      // A merged item (one pipe through two rails) fixes its clashes with every partner. A penetration its host's team
+      // must cut was only asked for: its clashes stay open.
       const pairsOf = (i: PlanItem) => [i.element_b, ...(i.others ?? [])].map((o) => [i.element_a, o] as const);
-      markFixed(items.flatMap(pairsOf), items.flatMap((i) => pairsOf(i).map(() => i.option!.title)));
+      const requested = new Map((kept.not_cut ?? []).map((n) => [n.index, n.blocked_by] as const));
+      const done = items.filter((_, k) => !requested.has(k));
+      markFixed(done.flatMap(pairsOf), done.flatMap((i) => pairsOf(i).map(() => i.option!.title)));
       const groups = items.map((i) => clashIdsOf(pairsOf(i)).flat());
       setEvidence((ev) => {
         const next = { ...ev };
-        items.forEach((it, k) => { for (const id of new Set([...groups[k], ...it.clash_ids])) next[id] = evidenceOf(it.option!, "accepted", pics); });
+        items.forEach((it, k) => {
+          const why = requested.get(k);
+          for (const id of new Set([...groups[k], ...it.clash_ids])) {
+            next[id] = why == null ? evidenceOf(it.option!, "accepted", pics) : { ...evidenceOf(it.option!, "recommended", pics), blocked_by: why };
+          }
+        });
         return next;
       });
       setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
@@ -1550,7 +1558,10 @@ export function App() {
       const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
-      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, evidenceOf(o, "accepted", pics)])) }));
+      // A penetration the host's team must cut: asked for (its provision for void is in the model), not yet fixed.
+      const requested = kept.cut === false;
+      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, requested
+        ? { ...evidenceOf(o, "recommended", pics), blocked_by: kept.blocked_by ?? "" } : evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
       await applyToViewer(sceneId, kept, pieces?.length ? [pieces] : [], live);
       if (!live()) return;
@@ -1558,7 +1569,7 @@ export function App() {
         const [first, ...added] = pieces;
         setEdits((e) => ({ ...e, [first]: [...(e[first] ?? []), ...added] }));
       }
-      markFixed([[a, b]], [o.title]);
+      if (!requested) markFixed([[a, b]], [o.title]);
       resetWork(); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
   }
@@ -2037,6 +2048,13 @@ export function App() {
           {clash && report
             ? (<><ClashPanel reportId={report.id} clash={shownClash ?? clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash: shownClash ?? clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]}
               origin={report.origin} capturing={capturing === clash.id} />
+              {evidence[clash.id]?.status === "recommended" && evidence[clash.id].kind === "penetration" &&
+                <div className="recommended">
+                  <h3>Opening requested</h3>
+                  <p><b>{evidence[clash.id].title}</b> · <span className="mono">{evidence[clash.id].edit}</span></p>
+                  <p className="hint">The provision for void is in the model; the opening is not cut yet: {evidence[clash.id].blocked_by}.
+                    This clash stays open until it is.</p>
+                </div>}
               {(evidence[clash.id] || triage[clash.id]?.verdict === "real_clash" || (signoffs[clash.id]?.length ?? 0) > 0) &&
                 <ReviewBlock clash={clash} teams={modelTeams} signoffs={signoffs[clash.id] ?? []}
                   onAdd={(so) => addSignoff(clash.id, so)} onRemove={(i) => removeSignoff(clash.id, i)} />}

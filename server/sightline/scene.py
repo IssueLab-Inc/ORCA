@@ -43,6 +43,19 @@ FIXED_CLASSES = ("IfcBeam", "IfcColumn", "IfcSlab", "IfcWall", "IfcFooting", "If
 # Not physical: openings are voids already cut from their host, virtual elements have no material.
 NOT_PHYSICAL = ("IfcFeatureElement", "IfcVirtualElement")
 
+
+def is_provision(e) -> bool:
+    """A provision for void: the space a service asks to be opened through a wall or slab, drawn in the service's own
+    model (IFC4 PredefinedType PROVISIONFORVOID; IFC2X3 has only the ObjectType)."""
+    return bool(e.is_a("IfcBuildingElementProxy") and (
+        getattr(e, "PredefinedType", None) == "PROVISIONFORVOID"
+        or (getattr(e, "ObjectType", None) or "").replace(" ", "").lower() == "provisionforvoid"))
+
+
+def not_physical(e) -> bool:
+    """Not a thing that can clash: an opening, a virtual element, a provision for void."""
+    return any(e.is_a(c) for c in NOT_PHYSICAL) or is_provision(e)
+
 FITTINGS = ("IfcFlowFitting", "IfcDuctFitting", "IfcPipeFitting", "IfcCableCarrierFitting")
 
 
@@ -124,7 +137,7 @@ class IfcScene:
     def products(self):
         """Every physical element with a body, across all files; the set the geometry check runs over."""
         return [p for m in self.models for p in m.by_type("IfcElement")
-                if p.Representation is not None and not any(p.is_a(c) for c in NOT_PHYSICAL)]
+                if p.Representation is not None and not not_physical(p)]
 
     def bounds(self) -> dict[str, np.ndarray]:
         """GlobalId → [[min x, y, z], [max x, y, z]] in metres at current positions.
@@ -159,6 +172,8 @@ class IfcScene:
         settings = ifcopenshell.geom.settings()
         settings.set("use-world-coords", True)
         for gid in global_ids:
+            if not_physical(self.entity(gid)):   # never a box for what cannot clash: detection reads boxes as physical
+                continue
             verts = np.asarray(ifcopenshell.geom.create_shape(settings, self.entity(gid)).geometry.verts,
                                dtype=float).reshape(-1, 3)
             self._bounds[gid] = np.array([verts.min(axis=0), verts.max(axis=0)])
