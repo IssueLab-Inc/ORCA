@@ -32,7 +32,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import numpy as np
 
-from .scene import STEP_PSET, IfcScene, step_source
+from .scene import STEP_PSET, IfcScene, is_provision, step_source
 
 UP = np.array([0.0, 0.0, 1.0])
 MIN_PIECE_M = 0.05  # shortest straight piece left either side of a riser
@@ -402,8 +402,13 @@ def apply_route(scene: IfcScene, global_id: str, steps: list[dict], corners: str
     for at, du, dv in _transitions(steps):
         if abs(du) > 1e-4 and abs(dv) > 1e-4:
             if not round_:   # a rectangular section would twist through a bend in a tilted plane
+                if all(abs(at - st["from_m"]) > 1e-3 for st in steps):   # it is coming back to its line
+                    raise Unsupported(f"at {at:.2f} m the route comes back to its line up and sideways at once: come "
+                                      "back one axis at a time too (end with a step that keeps the up offset without "
+                                      "the sideways one, sharing the boundary, so it steps back sideways, then down)")
                 raise Unsupported(f"at {at:.2f} m the route changes up and sideways at once: change one axis at a time "
-                                  "(go up in one step, then sideways in the next, sharing the boundary)")
+                                  "(go up in one step, then sideways in the next, sharing the boundary; come back the "
+                                  "same way: a step back sideways only, then down)")
             jump = float(np.hypot(du, dv))   # a round pipe takes a rolling offset: one bend plane, on the diagonal
             moves.append((at, (up * du + side * dv) / jump, jump, (sx, sx)))
         elif abs(du) > 1e-4:
@@ -481,8 +486,14 @@ def _resizable(scene: IfcScene, element):
     if step_source(element):
         raise Unsupported("a part from STEP keeps its section (its file has no profile to change)")
     i, place, item, origin, d, px, py = _frames(scene, element)
-    if not item.SweptArea.is_a("IfcRectangleProfileDef"):
-        raise Unsupported("only a rectangular section is resized here (a round duct keeps its size)")
+    kind = item.SweptArea.is_a()
+    if kind != "IfcRectangleProfileDef":   # exactly: the resized middle is written as a plain rectangle
+        why = {"IfcCircleProfileDef": "a round duct keeps its size",
+               "IfcRectangleHollowProfileDef": "a hollow section would lose its wall",
+               "IfcRoundedRectangleProfileDef": "a rounded or flat-oval section is sized another way",
+               "IfcUShapeProfileDef": "a channel-shaped tray keeps its profile",
+               }.get(kind, f"its section is an {kind}")
+        raise Unsupported(f"only a plain rectangular section is resized here ({why})")
     if abs(float(d @ UP)) > 1e-3:
         raise Unsupported("only a level run is resized here")
     s = scene.unit_scales[i]
@@ -502,6 +513,8 @@ def resize_size(scene: IfcScene, global_id: str, depth_m: float) -> dict:
     Returns {"width_m", "depth_m", "before": [w, d], "performance"}; Unsupported when it cannot."""
     element = scene.entity(global_id)
     *_, width, depth, _, _ = _resizable(scene, element)
+    if not np.isfinite(float(depth_m)):
+        raise Unsupported("resize values must be finite")
     depth_m = round(float(depth_m), 4)
     if not 0 < depth_m < depth - 1e-4:
         raise Unsupported(f"a resize makes it shallower: {depth_m * 1000:.0f} mm is not less than its {depth * 1000:.0f} mm")
@@ -532,6 +545,26 @@ def width_for(width: float, depth: float, depth_m: float) -> float:
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if equivalent_diameter(mid, depth_m) < target else (lo, mid)
     return hi
+
+
+def face_move(h0: float, h1: float, keep: str) -> float:
+    """How far a resize's moving face goes (+ up) from depth `h0` to `h1`: the whole change when the bottom or top
+    stays level, half of it at each face when the centre does. What the requirements' largest move measures."""
+    return {"bottom": h1 - h0, "top": h0 - h1}.get(keep, (h1 - h0) / 2)
+
+
+def _size_mm(w: float, h: float) -> str:
+    return f"{w * 1000:.0f}x{h * 1000:.0f}"
+
+
+def _resized_name(name: str | None, before: tuple[float, float], after: str) -> str:
+    """`name` with its size written in (a "600x300" in it, either way round, becomes the new size), else the size
+    added: what the properties card, the exported IFC and the PDF show the reviewer."""
+    w, h = (round(v * 1000) for v in before)
+    for m in re.finditer(r"(?<!\d)(\d{2,5})\s*[x×X]\s*(\d{2,5})(?!\d)", name or ""):
+        if {int(m.group(1)), int(m.group(2))} == {w, h}:
+            return name[:m.start()] + after + name[m.end():]
+    return f"{name or 'Segment'} {after}"
 
 
 def transition_length(w0: float, h0: float, w1: float, h1: float, keep: str) -> float:
@@ -582,6 +615,8 @@ def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m:
         a, b = sorted(float(x) for x in split_m)
     except (TypeError, ValueError):
         raise Unsupported("a resize needs two split points") from None
+    if not np.isfinite([a, b]).all():   # checked before anything is edited: a NaN would fail half-way through
+        raise Unsupported("resize values must be finite")
     length = item.Depth * s
     if a - lt < MIN_PIECE_M - 1e-9 or b + lt > length - MIN_PIECE_M + 1e-9 or b - a < MIN_PIECE_M:
         raise Unsupported(f"the resized stretch {a:.2f}-{b:.2f} m leaves too little run: each transition takes "
@@ -595,7 +630,8 @@ def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m:
     prof = item.SweptArea
     across_x = abs(px @ side) > 0.999   # the profile's X runs across (width), else up (depth)
     xdim, ydim = (w1, h1) if across_x else (h1, w1)
-    resized = scene.models[i].createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+    old_size, new_size = _size_mm(w0, h0), _size_mm(w1, h1)
+    resized = scene.models[i].createIfcRectangleProfileDef(prof.ProfileType, new_size, prof.Position,
                                                            float(xdim / s), float(ydim / s))
     A, B, LT = a / s, b / s, lt / s
     lift = up * (off / s)
@@ -607,8 +643,33 @@ def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m:
               ("straight", origin + d * A + lift, d, B - A, resized),
               ("transition", origin + d * B, d, LT, v2, f2, (lift, still)),
               ("straight", origin + d * (B + LT), d, item.Depth - B - LT)]
+    name = element.Name
     gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces)
+    _label_resize(scene, gids, name, (w0, h0), old_size, new_size, keep, size["performance"])
     return Resize(global_id, [a, b], w1, h1, keep, size["before"], size["performance"], gids)
+
+
+def _label_resize(scene: IfcScene, gids: list[str], name: str | None, before: tuple[float, float], old_size: str,
+                  new_size: str, keep: str, performance: str) -> None:
+    """Say the new size on the resized middle (its name, the properties it copied from the original where they held
+    the old size, and an ORCA_Resize property set) and on the transitions, so the reviewer reads what changed."""
+    model = scene.models[scene.index_of(gids[0])]
+    middle = scene.entity(gids[2])
+    middle.Name = _resized_name(name, before, new_size)
+    for gid in (gids[1], gids[3]):
+        scene.entity(gid).Name = f"{name or 'Segment'} transition to {new_size}"
+    olds = {old_size, old_size.replace("x", " x "), old_size.replace("x", "×")}
+    for rel in list(getattr(middle, "IsDefinedBy", None) or []):
+        pset = rel.RelatingPropertyDefinition if rel.is_a("IfcRelDefinesByProperties") else None
+        if pset is None or not pset.is_a("IfcPropertySet") or len(rel.RelatedObjects) > 1:   # never the original's
+            continue
+        for prop in pset.HasProperties or []:
+            value = getattr(prop, "NominalValue", None)
+            if value is not None and isinstance(value.wrappedValue, str) and value.wrappedValue.strip() in olds:
+                prop.NominalValue = model.create_entity(value.is_a(), new_size)
+    pset = ifcopenshell.api.run("pset.add_pset", model, product=middle, name="ORCA_Resize")
+    ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={
+        "ResizedFrom": old_size, "Size": new_size, "KeepLevel": keep, "Performance": performance})
 
 
 def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple]) -> list[str]:
@@ -963,6 +1024,8 @@ OPENING_PROUD_M = 0.01    # the void runs this far past each face of the host
 OPENING_EDGE_M = 0.05     # the host must surround the opening by this much: a hole at its edge is a notch
 MAX_THROUGH_M = 1.0       # deeper than any wall or slab: the run lies along the host, not across it
 PFV_COLOUR, PFV_ALPHA = (0.96, 0.55, 0.12), 0.35
+STOPS_INSIDE_M = 0.005    # a service ending this close to a face still passes through
+PROVISION_PSET = "ORCA_Provision"   # on a provision for void ORCA wrote: the service and host it is for
 
 
 @dataclass
@@ -1059,6 +1122,9 @@ def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: f
         raise Unsupported("the service does not pass through it")
     entry = lo - 0.5 + float(t_in[np.isfinite(t_in)].min())
     exit_ = hi + 0.5 - float(t_out[np.isfinite(t_out)].min())
+    if entry < -STOPS_INSIDE_M or exit_ > length + STOPS_INSIDE_M:
+        raise Unsupported("the service stops inside it: an opening is for a service that passes through (shorten or "
+                          "move it instead)")
     through = exit_ - entry
     if through > MAX_THROUGH_M:
         raise Unsupported(f"the service runs {through:.2f} m inside it: along it, not through it")
@@ -1112,12 +1178,34 @@ def _see_through(model, solid) -> None:
         model.createIfcStyledItem(solid, [style], None)
 
 
+def provision_for(scene: IfcScene, service_gid: str, host_gid: str):
+    """The provision for void already written for this service through this host, or None."""
+    model = scene.models[scene.index_of(service_gid)]
+    for e in model.by_type("IfcBuildingElementProxy"):
+        if is_provision(e):
+            mine = ifcopenshell.util.element.get_psets(e).get(PROVISION_PSET, {})
+            if mine.get("Service") == service_gid and mine.get("Host") == host_gid:
+                return e
+    return None
+
+
 def apply_penetration(scene: IfcScene, pen: Penetration, cut: bool) -> Penetration:
     """Request the opening: always a provision for void in the service's model (an IfcBuildingElementProxy,
     PROVISIONFORVOID, with Pset_ProvisionForVoid, see-through orange, in the service's storey), and, when `cut`, the
     opening itself in the host (an IfcOpeningElement voiding it). Edits the models in place; wrap in `trial_files`
     (both files) to try it and undo."""
     service, host = scene.entity(pen.service), scene.entity(pen.host)
+    existing = provision_for(scene, pen.service, pen.host)
+    if existing is not None:   # asked for before (its team had not cut it): one request, not two
+        pen.provision, pen.opening = existing.GlobalId, None
+    else:
+        _write_provision(scene, pen, service, host)
+    if cut:
+        _cut_opening(scene, pen, service, host)
+    return pen
+
+
+def _write_provision(scene: IfcScene, pen: Penetration, service, host) -> None:
     i = scene.index_of(pen.service)
     ms, ss = scene.models[i], scene.unit_scales[i]
     four = ms.schema != "IFC2X3"
@@ -1144,26 +1232,30 @@ def apply_penetration(scene: IfcScene, pen: Penetration, cut: bool) -> Penetrati
         props.update(Width=pen.width_m / ss, Height=pen.height_m / ss)
     pset = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name="Pset_ProvisionForVoid")
     ifcopenshell.api.run("pset.edit_pset", ms, pset=pset, properties=props)
+    mine = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name=PROVISION_PSET)
+    ifcopenshell.api.run("pset.edit_pset", ms, pset=mine, properties={"Service": pen.service, "Host": pen.host})
     source = step_source(service)   # from STEP: the provision is written back as a part of the service's group
     if source:
         sp = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name=STEP_PSET)
         ifcopenshell.api.run("pset.edit_pset", ms, pset=sp,
                              properties={k: v for k, v in source.items() if k in ("Group", "Label", "Source")})
     pen.provision, pen.opening = pfv.GlobalId, None
-    if cut:
-        j = scene.index_of(pen.host)
-        mh, sh = scene.models[j], scene.unit_scales[j]
-        opening = ifcopenshell.api.run("root.create_entity", mh, ifc_class="IfcOpeningElement",
-                                       name=f"Opening for {service.Name or service.is_a()[3:]}")
-        if mh.schema != "IFC2X3":
-            opening.PredefinedType = "OPENING"
-        rep, _ = _void_rep(mh, sh, pen, _body_context(host))
-        ifcopenshell.api.run("geometry.assign_representation", mh, product=opening, representation=rep)
-        _void_place(mh, opening, sh, pen)
-        ifcopenshell.api.run("feature.add_feature", mh, feature=opening, element=host)
-        pen.opening = opening.GlobalId
-        scene.refresh_bounds([pen.host])
-    return pen
+
+
+def _cut_opening(scene: IfcScene, pen: Penetration, service, host) -> None:
+    """The opening itself, in the host's model, voiding the host."""
+    j = scene.index_of(pen.host)
+    mh, sh = scene.models[j], scene.unit_scales[j]
+    opening = ifcopenshell.api.run("root.create_entity", mh, ifc_class="IfcOpeningElement",
+                                   name=f"Opening for {service.Name or service.is_a()[3:]}")
+    if mh.schema != "IFC2X3":
+        opening.PredefinedType = "OPENING"
+    rep, _ = _void_rep(mh, sh, pen, _body_context(host))
+    ifcopenshell.api.run("geometry.assign_representation", mh, product=opening, representation=rep)
+    _void_place(mh, opening, sh, pen)
+    ifcopenshell.api.run("feature.add_feature", mh, feature=opening, element=host)
+    pen.opening = opening.GlobalId
+    scene.refresh_bounds([pen.host])
 
 
 @contextmanager
@@ -1208,6 +1300,9 @@ def meshes(scene: IfcScene, global_ids: list[str], render: bool = False) -> list
     settings.set("use-world-coords", True)
     if render:
         settings.set("weld-vertices", False)
+        # No per-class default colours: an unstyled element must stay as the page drew it (web-ifc: white), not turn
+        # IfcOpenShell's grey or brown, or see-through for a window, when a fix is kept.
+        settings.set("apply-default-materials", False)
     out = []
     for gid in global_ids:
         shape = ifcopenshell.geom.create_shape(settings, scene.entity(gid))
@@ -1277,6 +1372,19 @@ def _first_hit(origins: np.ndarray, d: np.ndarray, tris: np.ndarray) -> np.ndarr
     return t.min(axis=1) if t.shape[1] else np.full(len(origins), np.inf)
 
 
+FREE_BANDS_MAX_TRIS = 200_000   # past this many triangles in the stretch, the room beside an obstacle is not told
+MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet")
+
+
+def _kernel(p) -> str:
+    """The geometry kernel to triangulate `p` with: CGAL for a body of meshes only (OpenCASCADE sews a mesh into
+    shells first: seconds for a dense one), else OpenCASCADE, so curved and cut shapes are as before."""
+    reps = [r for r in (p.Representation.Representations if p.Representation else []) if r.RepresentationIdentifier == "Body"]
+    items = [i for r in reps for i in r.Items]
+    meshes = bool(items) and all(any(i.is_a(c) for c in MESH_ITEMS) for i in items) and not getattr(p, "HasOpenings", None)
+    return "hybrid-cgal-simple-opencascade" if meshes else "opencascade"
+
+
 def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = "side", clearance_m: float = 0.025,
                reach_m: float = 1.0, step_m: float = 0.01) -> list[dict]:
     """Offsets of a straight segment, on its own "up" or "side" axis (`run_frame`), at which its profile (with
@@ -1315,7 +1423,7 @@ def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = 
             continue
         solids.append(boxes[g])
         try:
-            shape = ifcopenshell.geom.create_shape(settings, p)
+            shape = ifcopenshell.geom.create_shape(settings, p, geometry_library=_kernel(p))
         except RuntimeError:
             continue
         verts = np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
@@ -1323,27 +1431,64 @@ def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = 
     if not tris:
         return []
     tris = np.concatenate(tris)
+    # Only triangles that reach the stretch along the run, and the band the rays sweep across it, can be hit. A dense
+    # mesh nearby (a meshed motor, a detailed fitting) is cut down to the part that matters, or, past a budget, the
+    # room is not told at all: this runs while the scene is locked.
+    rel = tris - start
+    tt, ta, tc = rel @ d, rel @ a, rel @ c
+    eps = 1e-6   # a triangle touching a ray's edge still counts, as it does in the ray test
+    keep = ((tt.max(1) >= lo - eps) & (tt.min(1) <= hi + eps) & (tc.max(1) >= -half_c - eps) & (tc.min(1) <= half_c + eps)
+            & (ta.max(1) >= -reach_m - half_a - eps) & (ta.min(1) <= reach_m + half_a + eps))
+    tris, ta, tc = tris[keep], ta[keep], tc[keep]
+    if len(tris) > FREE_BANDS_MAX_TRIS:
+        return []
+    # Each ray runs along the run at one point of the cross-section (a, c): it can only meet triangles whose own
+    # cross-section span covers that point. Bin the triangles on a grid there, so a ray tests only its own cell.
+    a0, c0, cell = -reach_m - half_a - 2 * eps, -half_c - 2 * eps, 0.03
+    na = int(np.ceil((2 * (reach_m + half_a) + 4 * eps) / cell)) + 1
+    nc = int(np.ceil((2 * half_c + 4 * eps) / cell)) + 1
+    ia0 = np.clip(np.floor((ta.min(1) - eps - a0) / cell).astype(int), 0, na - 1)
+    ia1 = np.clip(np.floor((ta.max(1) + eps - a0) / cell).astype(int), 0, na - 1)
+    ic0 = np.clip(np.floor((tc.min(1) - eps - c0) / cell).astype(int), 0, nc - 1)
+    ic1 = np.clip(np.floor((tc.max(1) + eps - c0) / cell).astype(int), 0, nc - 1)
+    wc = ic1 - ic0 + 1
+    count = (ia1 - ia0 + 1) * wc
+    owner = np.repeat(np.arange(len(tris)), count)
+    k = np.arange(count.sum()) - np.repeat(np.cumsum(count) - count, count)
+    cells = (np.repeat(ia0, count) + k // np.repeat(wc, count)) * nc + np.repeat(ic0, count) + k % np.repeat(wc, count)
+    order = np.argsort(cells, kind="stable")
+    cells, owner = cells[order], owner[order]
+    solids = np.array(solids) if solids else np.zeros((0, 2, 3))
     offsets = np.arange(-reach_m, reach_m + 1e-9, step_m)
     # The profile's outline every 30 mm, and its centre: anything that crosses the stretch crosses the outline (a 100 mm
-    # post between the corners of a 400 mm duct would slip past corner rays alone).
+    # post between the corners of a 400 mm duct would slip past corner rays alone). The centre goes first: one hit is
+    # enough to rule an offset out.
     along_a = np.linspace(-half_a, half_a, max(2, int(np.ceil(2 * half_a / 0.03)) + 1))
     along_c = np.linspace(-half_c, half_c, max(2, int(np.ceil(2 * half_c / 0.03)) + 1))
-    samples = ([(sa, sc) for sa in along_a for sc in (-half_c, half_c)] + [(sa, sc) for sc in along_c[1:-1]
-               for sa in (-half_a, half_a)] + [(0.0, 0.0)])
+    samples = np.array([(0.0, 0.0)] + [(sa, sc) for sa in along_a for sc in (-half_c, half_c)]
+                       + [(sa, sc) for sc in along_c[1:-1] for sa in (-half_a, half_a)])
     base = start + d * lo
-    origins = np.array([base + a * (v + sa) + c * sc for v in offsets for sa, sc in samples])
-    blocked = np.zeros(len(origins), dtype=bool)
-    for k in range(0, len(origins), 256):
-        blocked[k:k + 256] = _hits(origins[k:k + 256], d, tris, hi - lo)
-    # A ray wholly inside a solid (along a wall) crosses none of its faces: its middle inside an element's box counts.
-    middles = origins + d * (hi - lo) / 2
-    for bmin, bmax in solids:
-        blocked |= ((middles > bmin) & (middles < bmax)).all(axis=1)
-    free = ~blocked.reshape(len(offsets), len(samples)).any(axis=1)
+    free = np.ones(len(offsets), dtype=bool)
+    for k, v in enumerate(offsets):
+        ray_a, ray_c = v + samples[:, 0], samples[:, 1]
+        origins = base + np.outer(ray_a, a) + np.outer(ray_c, c)
+        # A ray wholly inside a solid (along a wall) crosses none of its faces: its middle inside an element's box counts.
+        middles = origins + d * (hi - lo) / 2
+        if len(solids) and ((middles[:, None, :] > solids[None, :, 0]) & (middles[:, None, :] < solids[None, :, 1])).all(2).any():
+            free[k] = False
+            continue
+        ray_cells = (np.clip(np.floor((ray_a - a0) / cell).astype(int), 0, na - 1) * nc
+                     + np.clip(np.floor((ray_c - c0) / cell).astype(int), 0, nc - 1))
+        first = np.searchsorted(cells, ray_cells, side="left")
+        last = np.searchsorted(cells, ray_cells, side="right")
+        for r in range(len(samples)):
+            if last[r] > first[r] and _hits(origins[r:r + 1], d, tris[owner[first[r]:last[r]]], hi - lo).any():
+                free[k] = False
+                break
     # And the route must get there: from the line, square to it, at both ends of the stretch, nothing in the way.
     for sign in (1.0, -1.0):
         starts = np.array([start + d * t + c * sc for t in (lo, hi) for sc in (-half_c, 0.0, half_c)])
-        room = _first_hit(starts, a * sign, tris).min() - half_a
+        room = (_first_hit(starts, a * sign, tris).min() if len(tris) else np.inf) - half_a
         for bmin, bmax in solids:   # a solid the line itself starts in leaves no room that way
             if ((starts > bmin) & (starts < bmax)).all(axis=1).any():
                 room = 0.0

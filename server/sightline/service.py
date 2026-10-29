@@ -26,6 +26,7 @@ MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
 # Open model sets also held within a size budget: the IFC bytes they were opened from, a stand-in for memory (a scene
 # holds several times its file: docs/uploads.md). 0 = by count only.
 SCENE_BUDGET_MB = int(os.environ.get("SIGHTLINE_SCENE_BUDGET_MB", "0"))
+HOSTS_TIMEOUT_S = 60   # a host reading that takes longer (a cold open-weights host) leaves the defaults
 MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
 # Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
 MODELS = Path(tempfile.gettempdir()) / "sightline-models"
@@ -75,13 +76,15 @@ class Workspace:
 
     @property
     def hosts_model(self) -> ChatModel | None:
-        if self._hosts_model is None:
-            from .meta_client import triage_model
-            try:
-                self._hosts_model = triage_model()[0]
-            except Exception:   # no key here: walls and slabs only, as without a reading
-                self._hosts_model = False
-        return self._hosts_model or None
+        """The model that reads hosts: given, or the triage model as this request resolves it (the owner's choice,
+        else everyone's), like triage and titles. Never cached: the open-weights setting may change."""
+        if self._hosts_model is not None:
+            return self._hosts_model or None
+        from .meta_client import triage_model
+        try:
+            return triage_model(timeout_s=HOSTS_TIMEOUT_S)[0]
+        except Exception:   # no key here: walls and slabs only, as without a reading
+            return None
 
     def list_samples(self) -> list[str]:
         return sorted(p.name for p in self.samples.iterdir() if p.suffix.lower() in MODEL_SUFFIXES)
@@ -214,7 +217,7 @@ class Workspace:
                       else f"From a Navisworks clash report: {c.test}, {c.name}.")
             seen = " Images are views of this clash." if pics else ""
             notes = "\n".join(filter(None, [notes, source + seen]))
-            nearby = self._nearby(scene_id, self.report(report_id), element_a, element_b) if scene_id in self.scenes else []
+            nearby = self._nearby(scene_id, self.report(report_id), element_a, element_b) if scene_id in self.scenes else {}
             return agent.Clash(element_a, element_b, distance_m, pics, notes, nearby=nearby)
         return agent.Clash(element_a, element_b, distance_m, pics, notes)
 
@@ -222,15 +225,15 @@ class Workspace:
     NOT_PHYSICAL_CLASSES = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
     NEARBY_MAX = 3
 
-    def _nearby(self, scene_id: str, report, element_a: str, element_b: str) -> list[str]:
-        """The other hard clashes of A or B (whichever can move) in the report, with physical partners, nearest first
-        (at most 3, within 3 m of this one): one route may clear them together. Told to Muse, never required."""
+    def _nearby(self, scene_id: str, report, element_a: str, element_b: str) -> dict[str, list[str]]:
+        """Per side that can move, its other hard clashes in the report with physical partners, nearest first (at most
+        3, within 3 m of where A and B meet): one route may clear them together. Told to Muse, never required."""
         def gap(x, y):
             return float(np.linalg.norm(np.maximum(0, np.maximum(x[0] - y[1], y[0] - x[1]))))
         scene = self.scenes[scene_id]
         # Only partners of a side that can move: a girder's other services are its own clashes, not this fix's.
         movable = {g for g in (element_a, element_b) if g in scene.bounds() and not scene.element(g).fixed}
-        out: dict[str, float] = {}
+        found: dict[str, set[str]] = {}
         for c in report.clashes:
             ga, gb = c.a.global_id, c.b.global_id
             if not ga or not gb or (c.distance_m is not None and c.distance_m > -0.001) or {ga, gb} == {element_a, element_b}:
@@ -238,15 +241,21 @@ class Workspace:
             for mine, partner, cls in ((ga, gb, c.b.ifc_class), (gb, ga, c.a.ifc_class)):
                 if (mine in movable and partner not in (element_a, element_b)
                         and cls not in self.NOT_PHYSICAL_CLASSES):
-                    out[partner] = c.distance_m or 0.0
-        if not out:
-            return []
+                    found.setdefault(mine, set()).add(partner)
         boxes = scene.bounds()
-        if element_a not in boxes or element_b not in boxes:
-            return []
-        here = np.array([np.minimum(boxes[element_a][0], boxes[element_b][0]), np.maximum(boxes[element_a][1], boxes[element_b][1])])
-        near = sorted((gap(boxes[p], here), p) for p in out if p in boxes)
-        return [p for d, p in near if d <= self.NEARBY_M][:self.NEARBY_MAX]
+        if not found or element_a not in boxes or element_b not in boxes:
+            return {}
+        # Where A and B meet: their boxes' overlap, or the gap between them on an axis where they do not overlap.
+        lo = np.maximum(boxes[element_a][0], boxes[element_b][0])
+        hi = np.minimum(boxes[element_a][1], boxes[element_b][1])
+        zone = np.array([np.minimum(lo, hi), np.maximum(lo, hi)])
+        out = {}
+        for mine, partners in found.items():
+            near = sorted((gap(boxes[p], zone), p) for p in partners if p in boxes)
+            kept = [p for dist, p in near if dist <= self.NEARBY_M][:self.NEARBY_MAX]
+            if kept:
+                out[mine] = kept
+        return out
 
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
         s = self.scene(scene_id)
@@ -254,7 +263,7 @@ class Workspace:
             placements = s.translate(moved, tuple(delta_m))
             for g in moved:  # kept: export writes these files
                 s.mark_edited(g)
-            s.revision += 1
+            s.bump(s.index_of(g) for g in moved)
         return {"placements": placements, "files": sorted({s.index_of(g) for g in moved}), "changed": list(moved)}
 
     PATCH_MAX_VERTS = 500_000   # past this, the page reloads the files instead
@@ -265,7 +274,9 @@ class Workspace:
         render), taken after every edit of it. A page whose model is not at `revision_before` (it missed an edit), or
         that gets no meshes (an element that would not triangulate, or too much to send), reloads the files."""
         s = self.scene(scene_id)
-        out = {"scene_id": scene_id, "revision_before": revision_before, "revision": s.revision, "meshes": None}
+        out = {"scene_id": scene_id, "revision_before": revision_before, "revision": s.revision, "meshes": None,
+               # which files each revision changed: a page behind `revision_before` reloads what it missed
+               "history": [[rev, files] for rev, files in s.history]}
         with self.lock:
             try:
                 meshes = edits.meshes(s, list(dict.fromkeys(changed)), render=True)
@@ -291,7 +302,7 @@ class Workspace:
         with self.lock:
             off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
             s.mark_edited(element)
-            s.revision += 1
+            s.bump([s.index_of(element)])
         return {**asdict(off), "files": [s.index_of(element)], "changed": list(off.pieces)}
 
     def check_route(self, scene_id: str, element: str, other: str, steps: list[dict], clearance_m: float = 0.025) -> dict:
@@ -309,7 +320,7 @@ class Workspace:
         with self.lock:
             r = edits.apply_route(s, element, steps)
             s.mark_edited(element)
-            s.revision += 1
+            s.bump([s.index_of(element)])
         return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
 
     def check_resize(self, scene_id: str, element: str, other: str, split_m: list[float], depth_m: float,
@@ -329,7 +340,7 @@ class Workspace:
         with self.lock:
             r = edits.apply_resize(s, element, split_m, depth_m, keep)
             s.mark_edited(element)
-            s.revision += 1
+            s.bump([s.index_of(element)])
         return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
 
     def check_penetration(self, scene_id: str, service: str, host: str, clearance_m: float = 0.025) -> dict:
@@ -338,9 +349,10 @@ class Workspace:
         s = self.scene(scene_id)
         with self.lock:
             prof = None if hosts.hard_rule(s, host) else hosts.profile(s, host)
-        if prof and self.hosts_model is not None:
+        model = self.hosts_model if prof else None
+        if model is not None:
             try:
-                hosts.read(self.hosts_model, [prof])
+                hosts.read(model, [prof])
             except Exception:
                 pass   # the defaults: walls and slabs only
         with self.lock:
@@ -367,12 +379,15 @@ class Workspace:
                 raise edits.Unsupported(f"{s.element(host).name} may not take an opening: "
                                         f"{reading.reasoning or hosts.reading_text(reading)}")
             pen = edits.penetration(s, service, host, settings.get("clearance_m", 0.025), reading.fit)
+            problems, _ = hosts.check_hole(s, pen, reading)
+            if problems:   # the limits as they are now (the requirements may have changed since it was proposed)
+                raise edits.Unsupported("; ".join(problems))
             edits.apply_penetration(s, pen, cut)
             s.mark_edited(service)
             if cut:
                 s.mark_edited(host)
-            s.revision += 1
-        files = sorted({s.index_of(service), *([s.index_of(host)] if cut else [])})
+            files = sorted({s.index_of(service), *([s.index_of(host)] if cut else [])})
+            s.bump(files)
         out = {**asdict(pen), "cut": cut, "files": files, "changed": [pen.provision, *([host] if cut else [])]}
         if not cut:
             out["blocked_by"] = f"{host_policy.group_name} may not be edited: its team cuts the opening"
@@ -384,7 +399,7 @@ class Workspace:
         with self.lock:
             t = edits.apply_trim(s, element, end, by_m)
             s.mark_edited(element)
-            s.revision += 1
+            s.bump([s.index_of(element)])
         return {**asdict(t), "pieces": [element], "files": [s.index_of(element)], "changed": [element]}
 
     def file(self, scene_id: str, index: int, out_dir: Path) -> Path:

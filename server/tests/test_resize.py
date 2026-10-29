@@ -125,3 +125,61 @@ def test_the_endpoint_and_a_plan_keep_a_resize(tmp_path, monkeypatch):
     out = r.json()
     assert out["pieces"][0] == duct and len(out["pieces"]) == 5 and {m["global_id"] for m in out["meshes"]} == set(out["pieces"])
     assert not [h for h in verify.check(scene, out["pieces"][1:-1], ignore=set(out["pieces"])).hits if h.other == beam]
+
+
+@pytest.mark.parametrize("profile, why", [("IfcRectangleHollowProfileDef", "a hollow section would lose its wall"),
+                                          ("IfcRoundedRectangleProfileDef", "a rounded or flat-oval section")])
+def test_only_a_plain_rectangle_is_resized(scene, profile, why):
+    duct = by_tag(scene, "RS-1")
+    item = scene.entity(duct).Representation.Representations[0].Items[0]
+    old = item.SweptArea
+    extra = {"WallThickness": 0.001} if "Hollow" in profile else {"RoundingRadius": 0.15}
+    item.SweptArea = scene.model.create_entity(profile, ProfileType="AREA", Position=old.Position,
+                                               XDim=old.XDim, YDim=old.YDim, **extra)
+    with pytest.raises(edits.Unsupported, match=why):
+        edits.apply_resize(scene, duct, [2.5, 3.5], 0.22, "bottom")
+
+
+def test_a_split_that_is_not_a_number_is_refused_before_anything_changes(tmp_path, monkeypatch):
+    from sightline import app as app_module
+    from sightline.service import Workspace
+    path = build_resize_fixture(tmp_path / "samples" / "resize.ifc")
+    ws = Workspace(path.parent)
+    sid = ws.open([path.name])
+    scene = ws.scene(sid)
+    duct = by_tag(scene, "RS-1")
+    connected = lambda: [system.get_connected_port(p) is not None for p in system.get_ports(scene.entity(duct))]
+    before = connected()
+    with pytest.raises(edits.Unsupported, match="finite"):
+        edits.apply_resize(scene, duct, [float("nan"), 3.5], 0.22)
+    monkeypatch.setattr(app_module, "ws", ws)
+    r = TestClient(app_module.app).post(f"/api/scenes/{sid}/fix/apply", content=(
+        '{"option": {"kind": "resize", "moved": ["%s"], "delta_m": [0, 0, 0], '
+        '"edit": {"split_m": [NaN, 3.5], "depth_m": 0.22}}}' % duct).encode(), headers={"content-type": "application/json"})
+    assert r.status_code in (400, 409, 422) and connected() == before and scene.revision == 0
+
+
+def test_a_centre_kept_resize_moves_each_face_half_the_change(scene):
+    duct, beam = by_tag(scene, "RS-1"), by_name(scene, "Beam B1")
+    cand = {"kind": "resize", "split_m": [2.5, 3.5], "depth_m": 0.22, "keep": "centre"}
+    assert agent._candidate_delta(cand, scene, duct) == ("resize", [0.0, 0.0, -0.04])
+    attempt, _ = agent._try_resize(scene, cand, duct, beam, 0.025)
+    assert attempt.delta_m == [0.0, 0.0, -0.04]
+    assert agent._candidate_delta({**cand, "keep": "bottom"}, scene, duct)[1] == [0.0, 0.0, -0.08]
+
+
+def test_the_resized_pieces_say_their_new_size(scene):
+    import ifcopenshell.util.element as ue
+    duct = by_tag(scene, "RS-1")
+    name = scene.entity(duct).Name
+    r = edits.apply_resize(scene, duct, [2.5, 3.5], 0.22, "bottom")
+    middle = scene.entity(r.pieces[2])
+    assert "735x220" in middle.Name and "500x300" not in middle.Name
+    assert middle.Representation.Representations[0].Items[0].SweptArea.ProfileName == "735x220"
+    resize = ue.get_psets(middle)["ORCA_Resize"]
+    assert (resize["ResizedFrom"], resize["Size"], resize["KeepLevel"]) == ("500x300", "735x220", "bottom")
+    assert [scene.entity(g).Name for g in (r.pieces[1], r.pieces[3])] == [f"{name} transition to 735x220"] * 2
+    assert scene.entity(duct).Name == name and "ORCA_Resize" not in ue.get_psets(scene.entity(duct))
+    assert edits._resized_name("Supply air main L02 600x300", (0.6, 0.3), "795x240") == "Supply air main L02 795x240"
+    assert edits._resized_name("Main 300 x 600 duct", (0.6, 0.3), "795x240") == "Main 795x240 duct"
+    assert edits._resized_name("Main", (0.6, 0.3), "795x240") == "Main 795x240"

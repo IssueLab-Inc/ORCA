@@ -433,6 +433,7 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
     - pipe P3 (DN100, PN-5) along Y at x 4.15, z 1.0, y 6-8: through column C1 (refused);
     - pipe P4 (DN100, PN-6) along X at y 2, z 3.33, x 0-4: through W1 at its top (the opening would break out).
     - pipe P5 (DN50, PN-7) along X at y 1, z 1.0, x 5-7: through load-bearing W2.
+    - pipe P8 (DN50, PN-11) along X at y -2.6, z 0.8, x 1-7: through both W1 and W2.
     Beyond the slab: transfer beam B2 (x 10.0-10.3, y 0-4, z 2.8-3.4) with column C2 standing on it (y 1.85-2.15,
     z 3.4-6.4), and pipe P6 (DN100, PN-8) along X at y 3, z 3.1, x 9.5-11 through it; a 3 mm gland plate GP1 (x 12-12.6,
     y 0-0.4, z 1.997-2.0) with a 32 mm conduit (PN-9) down through it at (12.3, 0.2), z 1.9-2.6; a glazing unit (x 14-14.02,
@@ -517,6 +518,7 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
             segment("IfcPipeSegment", "Pipe through transfer beam DN100", "PN-8", (9.5, 3, 3.1), (11, 3, 3.1), pipe(0.055))
             segment("IfcCableCarrierSegment", "Feed conduit 32", "PN-9", (12.3, 0.2, 2.6), (12.3, 0.2, 1.9), pipe(0.016))
             segment("IfcPipeSegment", "Pipe through glazing DN50", "PN-10", (13.5, 0, 1.0), (14.5, 0, 1.0), pipe(0.03))
+            segment("IfcPipeSegment", "Hot water DN50", "PN-11", (1, -2.6, 0.8), (7, -2.6, 0.8), pipe(0.03))
         path = folder / f"pen-{name}.ifc"
         model.write(str(path))
         paths.append(path)

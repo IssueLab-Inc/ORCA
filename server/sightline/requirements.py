@@ -146,6 +146,10 @@ class PenRule:
     reviewer: str | None = None     # who reviews one: structure, architecture, fire, safety, services
     reason: str = ""
     source: str = "user"            # user | orca (added from Muse's reading)
+    # Only for one kind of host (hosts.profile's key) when set: a rule made from Muse's reading of one kind (a gland
+    # plate) is that kind's, never the whole group's (its base plates and guard panels read differently).
+    kind: str | None = None
+    kind_name: str = ""             # that kind in words, for the dialog
 
 
 @dataclass
@@ -171,6 +175,9 @@ class Doc:
         d = {"format": FORMAT, **asdict(self)}
         if not self.penetrations:   # a file without the section keeps its id (content-addressed: docs/requirements.md)
             d.pop("penetrations")
+        for r in d.get("penetrations", []):
+            if r["kind"] is None:   # a group-wide rule says nothing about kinds
+                del r["kind"], r["kind_name"]
         return d
 
 
@@ -285,12 +292,14 @@ def parse(data: Any, classes: set[str] | None = None, teams: set[str] | None = N
         if not isinstance(r, dict):
             continue
         gid = slug(r.get("group") or "")
-        if gid not in ids or any(x.group == gid for x in pens):
+        kind = re.sub(r"[^0-9a-f]", "", str(r.get("kind") or ""))[:32] or None
+        if gid not in ids or any(x.group == gid and x.kind == kind for x in pens):
             continue
         pens.append(PenRule(gid, r.get("rule") if r.get("rule") in PEN_RULES else "review",
                             _num(r.get("max_mm"), 10, 5000) or None,
                             r.get("reviewer") if r.get("reviewer") in PEN_REVIEWERS else None, _text(r.get("reason"), 240),
-                            r.get("source") if r.get("source") in ("orca", "user") else "user"))
+                            r.get("source") if r.get("source") in ("orca", "user") else "user",
+                            kind, _text(r.get("kind_name"), 80) if kind else ""))
     guidance = data.get("guidance") if isinstance(data.get("guidance"), dict) else {}
     return Doc(name=_text(data.get("name") or "Coordination requirements", 80),
                version=int(_num(data.get("version", 1), 1, 10_000) or 1), level=level, strictness=strictness,
@@ -695,11 +704,17 @@ class PenAnswer:
     group_name: str
 
 
-def penetration_rule(doc: Doc, matcher: Matcher, gid: str) -> PenAnswer | None:
-    """The requirements' penetration rule for the group `gid` is in, or None."""
+def penetration_rule(doc: Doc, matcher: Matcher, gid: str, kind: str | None = None) -> PenAnswer | None:
+    """The requirements' penetration rule for `gid`: one for its kind of host (`kind`, hosts.profile's key) in its
+    group, else its group's own, else None."""
     g = matcher.group_of(gid)
-    r = next((x for x in doc.penetrations if g and x.group == g.id), None)
-    return PenAnswer(r.rule, r.max_mm, r.reviewer, g.name) if r else None
+    if g is None:
+        return None
+    mine = [x for x in doc.penetrations if x.group == g.id]
+    r = next((x for x in mine if kind and x.kind == kind), None) or next((x for x in mine if x.kind is None), None)
+    if r is None:
+        return None
+    return PenAnswer(r.rule, r.max_mm, r.reviewer, f"{g.name} ({r.kind_name})" if r.kind else g.name)
 
 
 def can_cut(pol: Policy | None) -> bool:
@@ -709,11 +724,14 @@ def can_cut(pol: Policy | None) -> bool:
 
 
 def meets(doc: Doc, pol: Policy, other: Policy, clearance_m: float, min_clearance_m: float | None,
-          delta_m: list[float], kind: str) -> list[str]:
-    """Which requirements a verified option meets, in plain words, from the geometry check and the policy."""
+          delta_m: list[float], kind: str, fitted: bool = False) -> list[str]:
+    """Which requirements a verified option meets, in plain words, from the geometry check and the policy. A fitted
+    gland is sealed round its service: no clearance is claimed for it."""
     out = []
     need = clearance_m * 1000
-    if min_clearance_m is None:
+    if fitted:
+        out.append("a fitted gland, sealed round the service (no clearance there)")
+    elif min_clearance_m is None:
         out.append(f"clear of everything by more than {need:.0f} mm ({STRICTNESS[doc.strictness]['name']})")
     else:
         out.append(f"nearest {min_clearance_m * 1000:.0f} mm ≥ {need:.0f} mm required ({STRICTNESS[doc.strictness]['name']})")
@@ -818,7 +836,8 @@ def prompt_text(doc: Doc, role: str, rules: bool = True) -> str:
             lines.append("- Limits: " + "; ".join(limits) + ".")
         if doc.penetrations:
             lines.append("- Openings for services: " + "; ".join(
-                f"{names.get(r.group, r.group)} " + {"allowed": "may take them", "review": "may take them, reviewed",
+                f"{names.get(r.group, r.group)}" + (f" ({r.kind_name})" if r.kind else "") + " "
+                + {"allowed": "may take them", "review": "may take them, reviewed",
                                                      "never": "never takes one"}[r.rule]
                 + (f" up to {r.max_mm:.0f} mm" if r.max_mm and r.rule != "never" else "")
                 + (f" by {r.reviewer}" if r.reviewer and r.rule != "never" else "") for r in doc.penetrations) + ".")

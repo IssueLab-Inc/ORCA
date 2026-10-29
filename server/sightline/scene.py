@@ -99,6 +99,7 @@ class IfcScene:
         self._edited: set[int] = set()
         self._bounds: dict[str, np.ndarray] | None = None
         self.revision = 0
+        self.history: list[tuple[int, list[int]]] = []   # (revision, files it changed), for pages that missed an edit
 
     def snapshot(self) -> IfcScene:
         """Clone current in-memory IFC state, including edits not yet exported."""
@@ -109,6 +110,7 @@ class IfcScene:
         clone._edited = set(self._edited)
         clone._bounds = None if self._bounds is None else {g: b.copy() for g, b in self._bounds.items()}
         clone.revision = self.revision
+        clone.history = list(self.history)
         return clone
 
     # Single-file conveniences (tests, spikes).
@@ -218,6 +220,12 @@ class IfcScene:
             verts = np.asarray(ifcopenshell.geom.create_shape(settings, self.entity(gid)).geometry.verts,
                                dtype=float).reshape(-1, 3)
             self._bounds[gid] = np.array([verts.min(axis=0), verts.max(axis=0)])
+
+    def bump(self, files) -> int:
+        """A kept edit: the next revision, and which files it changed (a page that missed it reloads those)."""
+        self.revision += 1
+        self.history.append((self.revision, sorted(set(files))))
+        return self.revision
 
     def mark_edited(self, global_id: str) -> None:
         """Record that the file holding this element changed, so export writes it."""

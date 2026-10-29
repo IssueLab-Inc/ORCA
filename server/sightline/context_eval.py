@@ -509,7 +509,7 @@ def commit_candidate(scene: IfcScene, objective: dict, operations: list[dict], d
     if not result['passed']:
         raise ValueError(f'candidate failed verification: {result["checks"]}')
     private._edited.update(result['files'])
-    private.revision = scene.revision + 1
+    private.bump(result['files'])
     # All fallible model work completed before the single state publication.
     scene.__dict__ = private.__dict__.copy()
     return result

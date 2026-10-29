@@ -94,17 +94,21 @@ other obstacles).
 when the obstacle has no opening, the up offsets) at which the run's profile, with the clearance all round, passes that
 stretch clear of everything, not only the obstacle. Rays run along the stretch round the profile's outline (every
 30 mm) and at its centre; a ray inside a solid counts as blocked (its middle in an element's box); a band counts only if
-the run can reach it square from its line at both ends of the stretch. On the cell's C6: beside column C3, side offsets
+the run can reach it square from its line at both ends of the stretch. Only triangles that reach the stretch are kept, binned by where they sit
+across the run so each ray tests its own cell (a mesh is triangulated with CGAL); past 200,000 triangles the room is
+not told. It is worked out once per proposal, not every round. A dense 28,800-triangle mesh beside a run: 52 s
+before, 0.6 s now, with the same bands on every fixture and cell case. On the cell's C6: beside column C3, side offsets
 +0.20 to +0.29 m (between the column and the fence); past both columns at once, none (ES-2 is between them). For a single
-proposal on a report clash, the moving element's other clashes within 3 m are named too (`Workspace._nearby`): a route
-may clear them together, but only the asked clash is required (never the fixed side's: a girder's other services are
-their own clashes).
+proposal on a report clash, the moving element's other clashes within 3 m of where the pair meet are named too
+(`Workspace._nearby`, per side: each element hears of its own): a route may clear them together, but only the asked
+clash is required (never the fixed side's: a girder's other services are their own clashes).
 
 **Demo case:** the cell's C6 (demo-models repo): PL-302 runs along the plant's south wall through columns C3 and C4.
 Offsets over or under fail (the columns run full height), a whole-run move or one long detour hits the ES-2 emergency
 stop between them; a detour of 200 mm round each column clears with 33 mm to spare.
 
-**Not yet:** 45° pieces, falling drainage, diagonal ("rolling") changes, and routes in the wider-fix planner.
+**Not yet:** 45° pieces, falling drainage, and routes in the wider-fix planner. (Diagonal "rolling" changes are
+done, for round pipes only.)
 
 ## Penetration (Oct 29)
 
@@ -114,7 +118,8 @@ penetration asks for one instead of moving the service.
 **When** (`edits.penetration`, `not_penetrable`): a straight service (an extruded segment, any direction, so a riser
 through a slab too) crosses a host whose body is extrusions. Which hosts may take one is `hosts.decide`'s call (next
 section; on Oct 29 at first walls and slabs only). Refused by geometry: a crossing that runs more than 1 m inside the
-host (along it, not through it), one the service doesn't reach or pass through, and an opening the host would not
+host (along it, not through it), one the service doesn't reach or pass through, a service that stops inside the host (it runs into the wall:
+move or shorten it), and an opening the host would not
 surround by 50 mm (a hole at its edge is a notch).
 
 **The opening:** the service's section plus the clearance and 5 mm all round (tessellated circles, site tolerance),
@@ -131,16 +136,20 @@ of each face. The cell's air main (DN50, 60 mm) through the 200 mm west wall: Ø
   the host's box refreshed.
 - A provision for void is never physical (`scene.not_physical`): no box, never in `products()`, so detection, checks,
   root causes and requirements never see it.
+- **One request:** the provision carries `ORCA_Provision` (Service, Host). Asking again reuses it (`provision_for`);
+  while the host still may not be cut, a new proposal is told the opening was already requested and refuses it.
 
 **Trying it** (`agent._try_penetration`): both files in one `trial_files`, always cut, then the service is checked:
-it must clear the host by the clearance, and only contacts new or worse than before count elsewhere (the service
+it must clear the host by the clearance (and every other element a plan's merged item is for: one opening does not
+clear a second wall), and only contacts new or worse than before count elsewhere (the service
 stays where it is: a valve already beside it is not this fix's). The option's clearance is the opening's gap round
 the service. Muse names the service as `move`; a wall or slab named instead is taken as the host
 (`penetration_sides`). The option's `moved` is the host (its geometry changes in the viewer), its `edit` names
 service and host, and the preview is the provision for void and the host with its hole (the page frames the first).
 
-**Who reviews it** (`penetration_review`): structure for a slab or a load-bearing wall (`Pset_WallCommon.LoadBearing`),
-else architecture; a `FireRating` adds fire-stopping to `also_needs`. Ranked below every plain geometry fix
+**Who reviews it** (`hosts.decide`, and `hosts.default` when nothing else answers; "Which hosts" below): structure
+for a slab or a load-bearing wall (`Pset_WallCommon.LoadBearing`), else architecture; a `FireRating` adds
+fire-stopping to `also_needs`. Ranked below every plain geometry fix
 (`TIERS`), and a round that verified only a penetration gets one more round to find one.
 
 **What Muse is told** (`agent._penetration_text`): that the service crosses the host's full depth, the opening a
@@ -185,8 +194,10 @@ limits; a machine panel's gland plate is made to be drilled. `server/sightline/h
 2. **The requirements** (`penetrations` in `orca-requirements/1`, optional): per group, allowed / review / never, the
    largest opening and the reviewer. They win over Muse; a file without the section keeps its id. The fixes prompt
    lists them. The dialog has "Openings for services" (Muse decides / Allowed / With review / Never, size, reviewer),
-   and an opening option read by Muse has **Add to requirements** (the reading becomes the rule for its host's group,
-   `edit.host_group`).
+   and an opening option read by Muse has **Add to requirements**. That rule is for the reading's kind of host only
+   (`kind`: `hosts.profile`'s key, `kind_name` in words; `edit.host_kind`), never the whole group: a cell's gland plate
+   read "allowed" must not open its base plates and guard panels, which read differently. A kind's rule beats its
+   group's; the dialog lists kind rules under their group, each removable.
 3. **Muse's reading of each kind of host** (`hosts.read`, `domain_packs/penetrations.md`, strict JSON, on the triage
    model): verdict (allowed, with_review, not_advised, never), reviewer, fit (annular: a clearance filled by a sleeve or
    fire-stopping; fitted: a gland or grommet), limits (largest hole for the host's depth, distance from its ends in
@@ -194,15 +205,21 @@ limits; a machine panel's gland plate is made to be drilled. `server/sightline/h
    name words, materials, thickness, standard `Pset_*Common` properties, discipline, STEP assembly), cached for the
    server's life, before a proposal's first round when a service crosses a host (`agent.penetration_pairs`). Facts are
    text only, and a project's own property sets never reach it (Northbank's demo property set holds its
-   answer key). A failed reading leaves the default: walls and slabs as in 4a, nothing else.
+   answer key). A failed reading leaves the default: walls and slabs as in 4a, nothing else. The model is resolved per
+   request (`Workspace.hosts_model`: the open-weights choice and the owner's settings apply as for triage), with a 60 s
+   timeout so a slow host does not hold the proposal; Muse's limits are kept only as numbers in range (`hosts.LIMITS`),
+   its conditions and reasoning are capped. Pairs are found before the opening is sized, so a gland plate too narrow
+   for an annular opening is still read (it may take a fitted one).
 
 **The hole against the limits** (`hosts.check_hole`): the host's depth is its smaller size in the hole's plane (a
 beam's depth for a pipe through its web), its ends those of its longer size; edges by rays from just outside the hole.
-A hole that breaks a limit is refused with the numbers; a passing one carries them (`edit.numbers`: "hole 170 mm in
+A hole that breaks a limit is refused with the numbers (when tried, and again when kept: the rules may have changed
+since the option was made); a passing one carries them (`edit.numbers`: "hole 170 mm in
 600 mm of host (28%)", "915 mm from its nearest end"), shown on the option card with the reading.
 
 **Fitted openings:** the service plus 1 mm round, to the mm (a 32 mm conduit: Ø34), and the service may touch the host
-(the gland seals it); in a plan's joint check too.
+(the gland seals it); in a plan's joint check too. The option's `meets` says "a fitted gland, sealed round the service
+(no clearance there)", never a clearance it does not have.
 
 **Ranking:** an opening in anything but a wall or slab ranks after one in a wall or slab (`agent.tier`).
 
@@ -231,20 +248,26 @@ ORCA works out the width (`edits.resize_size`):
 - **a rectangular duct** keeps its equivalent diameter (Huebscher, `1.30 (ab)^0.625 / (a+b)^0.25`), the width to the
   next 5 mm, and is refused flatter than 4:1 ("830 x 200 mm would be 4.1:1 ... no shallower than about 205 mm");
 - **a cable tray** keeps its cross-section, at least 50 mm deep;
-- **refused:** pipes (their size is set by their flow), round ducts, parts from STEP (no profile to change), sloped
-  runs, tilted sections, and a stretch that leaves no room for its transitions.
+- **refused:** pipes (their size is set by their flow), round ducts, any profile but a plain `IfcRectangleProfileDef`
+  (exactly: a hollow, rounded / flat-oval or channel profile would come out as a solid rectangle), parts from STEP (no
+  profile to change), sloped runs, tilted sections, split points or depths that are not finite numbers (refused before
+  anything is edited), and a stretch that leaves no room for its transitions.
 
 **Geometry** (`edits.apply_resize`): five pieces through `_build_chain`: the original shortened, a transition fitting
 (`IfcDuctFitting` TRANSITION / `IfcCableCarrierFitting` REDUCER, a closed lofted `IfcTriangulatedFaceSet`, every face
 at most 30° from the run: `transition_length`), the resized middle (a copy with a profile of its own, never the shared
 one, shifted so the `keep` face stays level; its ports at its own centre), a transition back, and the rest. The
 centreline stays put across. `_build_chain` gained straights with their own profile and transition pieces (with where
-their ends' centres sit).
+their ends' centres sit). **The new size is written on what the reviewer reads** (`_label_resize`): the middle's name
+(a "600x300" in it becomes "795x240", else the size is added), its profile's name, its own copies of the original's
+properties that held the old size, and an `ORCA_Resize` property set (ResizedFrom, Size, KeepLevel, Performance); the
+transitions are "… transition to 795x240".
 
 **Checking:** as an offset: the transitions and middle against everything, the ends against the obstacles.
 **Review:** the services designer (`review: "services"`), with the performance line in `also_needs` ("equivalent
 diameter 100% of before, 3.3:1"). Ranked after every plain geometry fix (`TIERS`), and a round that verified only a
-resize gets one more round. Under the requirements a resize is sized by how far its moving face goes.
+resize gets one more round. Under the requirements a resize is sized by how far its moving face goes
+(`edits.face_move`: the whole change with the bottom or top kept, half with the centre kept).
 
 **What Muse is told** (`agent._resize_text`): when the obstacle is above or below the run, how deep the section can be
 there with the clearance, keeping the far face level, how wide that makes it and what it keeps, and how much run each
@@ -269,8 +292,14 @@ and re-parse it in the browser. Now every way of keeping a fix answers with what
   taken after every edit of the request (`edits.meshes(render=True)`: unwelded, with normals, the style's colour and
   opacity, and the element's file). No meshes when one will not triangulate or there are more than 500,000 vertices.
 - **Page:** `applyToViewer` (App.tsx) patches when the reply has meshes for this scene and the page's model is at
-  `revision_before` (from opening: `revision` in the open, upload and scene-info replies); otherwise it reloads the
-  changed files as before. Either way it then knows the new revision.
+  `revision_before` (from opening: `revision` in the open, upload and scene-info replies, resume included); otherwise
+  it reloads this fix's files and every file changed by an edit it missed (`history`: which files each revision
+  changed, `IfcScene.bump`; all edited files when the page doesn't know its revision). Either way it then knows the new
+  revision.
+- **One request, one revision range:** `_with_patch` and the MCP `apply_fix` / `apply_plan` read `revision_before`,
+  keep the fix and take the patch under the workspace lock, so another tab's edit never lands in between.
+- **Colours:** the patch's meshes carry only the model's own styles (no IfcOpenShell class defaults), so an unstyled
+  element keeps the colour the page drew it in.
 - **Viewer:** `viewer/patch.ts` (`patchModel`, pure over the loaded model): an element keeps its instance and gets the
   new geometry (add, point the instance at it, then delete the old one: deleting first would delete the instance); a
   new piece gets its own instance, coloured from its mesh or the element it came from, in the see-through batch when

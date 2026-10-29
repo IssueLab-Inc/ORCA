@@ -28,7 +28,8 @@ class Clash:
     images: list[Path] = field(default_factory=list)  # A, B, C when available
     notes: str = ""           # e.g. ceiling void depth, project type
     others: list[str] = field(default_factory=list)  # more elements A runs into (a plan's merged item): one fix for all
-    nearby: list[str] = field(default_factory=list)  # other clashes of A or B close by in the report: told, not required
+    # Other clashes of A or B close by in the report, per side (GlobalId → its partners): told, not required.
+    nearby: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -82,7 +83,9 @@ class Result:
     clearance_m: float = 0.025        # the clearance every option had to keep
 
 
-def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
+def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025, memo: dict | None = None) -> str:
+    """What Muse reads about the clash. `memo` keeps what the geometry said between rounds of one proposal (the room
+    past an obstacle costs a ray scan; nothing changes between rounds: every trial is undone)."""
     a, b = scene.element(clash.element_a), scene.element(clash.element_b)
     lines = [
         f"Element A (red): {a.ifc_class} '{a.name}', level {a.storey}, GlobalId {a.global_id}",
@@ -94,9 +97,9 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
                                      ("B", clash.element_b, clash.element_a, [])):
         if any(scene.entity(this).is_a(c) for c in edits.PENETRABLE):   # a wall or slab is not split or rerouted
             continue
-        lines += _run_text(scene, label, this, other, clearance_m, more)
+        lines += _run_text(scene, label, this, other, clearance_m, more, memo)
         lines += _resize_text(scene, label, this, other, clearance_m)
-        lines += _nearby_text(scene, label, this, [n for n in clash.nearby if n not in (other, *more)])
+        lines += _nearby_text(scene, label, this, [n for n in clash.nearby.get(this, []) if n not in (other, *more)])
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
         lines += _joint_text(scene, label, this, other, name)
         lines += _penetration_text(scene, label, this, other, name, clearance_m)
@@ -117,7 +120,7 @@ def penetration_pairs(scene: IfcScene, clash: Clash) -> list[tuple[str, str, str
     for label, gid, host_label, host in (("A", clash.element_a, "B", clash.element_b), ("B", clash.element_b, "A", clash.element_a)):
         try:
             if is_service(scene, gid) and not is_service(scene, host):
-                edits.penetration(scene, gid, host)
+                edits.penetration(scene, gid, host, fit="fitted")   # the smallest opening: a narrow plate is read too
                 out.append((label, gid, host_label, host))
         except (edits.Unsupported, KeyError, RuntimeError):
             continue
@@ -148,6 +151,10 @@ def _penetration_text(scene: IfcScene, label: str, gid: str, host: str, host_lab
     if problems:
         lines.append(f"Here the opening breaks its limits: {'; '.join(problems)}. Do not propose a penetration of "
                      f"{host_label} at this point.")
+    asked = edits.provision_for(scene, gid, host)
+    if asked is not None:
+        lines.append(f"An opening has already been requested here (provision for void '{asked.Name}'): it waits for "
+                     f"{host_label}'s team to cut it. Do not ask for it again.")
     run = edits.run_of(scene, gid)
     along = float(np.asarray(pen.start) @ np.asarray(run.direction) - np.asarray(run.start) @ np.asarray(run.direction))
     if along > 0 and along + pen.depth_m < run.length_m:   # it runs out of both faces: it serves something beyond
@@ -174,7 +181,7 @@ def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: 
 
 
 def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = 0.025,
-              others: list[str] = ()) -> list[str]:
+              others: list[str] = (), memo: dict | None = None) -> list[str]:
     """A straight segment's geometry, and where the other element (and any `others` it also runs into) sits along it:
     what a local offset needs."""
     try:
@@ -206,7 +213,7 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
                 lines.append(f"The other element has an opening on this line from z {h['bottom_m']:.3f} to "
                              f"{h['top_m']:.3f} m: offsetting {label}'s middle piece by {h['dz_min_m']:+.3f} to "
                              f"{h['dz_max_m']:+.3f} m passes it through with {clearance_m * 1000:.0f} mm all round.")
-            lines += _room_text(scene, label, gid, [other], "the other element", clearance_m, above=not holes)
+            lines += _room_text(scene, label, gid, [other], "the other element", clearance_m, above=not holes, memo=memo)
     for o in others:
         if o not in b:
             continue
@@ -217,9 +224,10 @@ def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: fl
             e = scene.element(o)
             lines.append(f"Element {label} also runs into {e.ifc_class} '{e.name}' at {lo:.2f}-{hi:.2f} m along it, "
                          f"from z {b[o][0][2]:.3f} to {b[o][1][2]:.3f} m: one fix must clear it too.")
-            lines += _room_text(scene, label, gid, [o], f"'{e.name}'", clearance_m)
+            lines += _room_text(scene, label, gid, [o], f"'{e.name}'", clearance_m, memo=memo)
     if others:
-        together = _room_text(scene, label, gid, [other, *others], "all of them at once", clearance_m, above=False)
+        together = _room_text(scene, label, gid, [other, *others], "all of them at once", clearance_m, above=False,
+                              memo=memo)
         lines += together or [f"No side offset clears all of them in one stretch: give each obstacle its own step and "
                               f"return to the line between them."]
     return lines
@@ -289,9 +297,12 @@ def _compass(v) -> str:
 
 
 def _room_text(scene: IfcScene, label: str, gid: str, obstacles: list[str], what: str, clearance_m: float,
-               above: bool = True) -> list[str]:
+               above: bool = True, memo: dict | None = None) -> list[str]:
     """The room a route has past `obstacles`: side offsets (and up offsets when `above`) at which the run's profile
-    clears everything along their stretch (`edits.free_bands`)."""
+    clears everything along their stretch (`edits.free_bands`), once per proposal when given a `memo`."""
+    key = ("room", gid, tuple(obstacles), what, clearance_m, above)
+    if memo is not None and key in memo:
+        return memo[key]
     try:
         run = edits.run_of(scene, gid)
         _, side = edits.run_frame(run.direction)
@@ -309,6 +320,8 @@ def _room_text(scene: IfcScene, label: str, gid: str, obstacles: list[str], what
                        else "up offsets (+ up, - down)")
             lines.append(f"Room past {what} for element {label}: {meaning} of {ranges} m keep {clearance_m * 1000:.0f} mm "
                          f"clear of everything along that stretch (a route step can use them).")
+    if memo is not None:
+        memo[key] = lines
     return lines
 
 
@@ -385,6 +398,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     understanding = ""
     advice = ""
     emit = on_event or (lambda e: None)
+    memo: dict = {}   # what the geometry tells Muse, kept between rounds (every trial is undone)
 
     def on_step(attempt: Attempt) -> None:
         emit({"type": "attempt", "index": len(attempts) - 1, **asdict(attempt)})
@@ -402,7 +416,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 except Exception as e:   # a reading that fails leaves the defaults: walls and slabs only
                     emit({"type": "note", "text": f"Could not read the host: {e}"})
         with lock:
-            text = _describe(base, clash, clearance_m) + _feedback(attempts)
+            text = _describe(base, clash, clearance_m, memo) + _feedback(attempts)
         if trials and on_event and getattr(model, "streams_reasoning", False):  # someone is watching: show the thinking
             reply = model.complete_json_reasoning(system, text, clash.images, None,
                                                   lambda note, r=round_no: emit({"type": "reasoning", "round": r, "text": note}))
@@ -462,7 +476,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 mine = o.edit["service"]
             theirs = clash.element_b if mine == clash.element_a else clash.element_a
             o.meets = requirements.meets(doc, policy[mine], policy[theirs], clearance_m, o.min_clearance_m,
-                                         o.delta_m, o.kind)
+                                         o.delta_m, o.kind, fitted=(o.edit or {}).get("fit") == "fitted")
     return Result(understanding, options, attempts, advice,
                   requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
@@ -472,7 +486,7 @@ def _candidate_delta(cand: dict, scene: IfcScene | None = None, target: str | No
     if kind == "resize":   # how far its moving face goes, when the scene can say
         try:
             size = edits.resize_size(scene, target, float(cand.get("depth_m")))
-            return kind, [0.0, 0.0, round(size["depth_m"] - size["before"][1], 4)]
+            return kind, [0.0, 0.0, round(edits.face_move(size["before"][1], size["depth_m"], cand.get("keep") or "bottom"), 4)]
         except (edits.Unsupported, KeyError, TypeError, ValueError, AttributeError):
             return kind, [0.0, 0.0, 0.0]
     if kind == "offset":
@@ -678,11 +692,15 @@ def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m
     title = cand.get("title", "reroute")
     raw = cand.get("steps")
     try:
-        if isinstance(raw, list) and len(raw) == 1 and not float(raw[0].get("side_m") or 0) and float(raw[0].get("up_m") or 0):
+        # Only a level run that is not drainage: an offset takes neither a slope nor the drainage rule a route keeps.
+        level = abs(float(np.asarray(edits.run_of(scene, target).direction)[2])) < 1e-3 and not edits.is_gravity(
+            scene.entity(target))
+        if (level and isinstance(raw, list) and len(raw) == 1 and not float(raw[0].get("side_m") or 0)
+                and float(raw[0].get("up_m") or 0)):
             one = raw[0]
             return _try_offset(scene, {**cand, "kind": "offset", "split_m": [one["from_m"], one["to_m"]],
                                        "dz_m": one["up_m"]}, target, other, clearance_m, on_trial, others=others)
-    except (AttributeError, KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError, edits.Unsupported):
         pass
     try:
         run = edits.run_of(scene, target)
@@ -714,12 +732,24 @@ def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m
                            v.min_clearance_m, {}, "route", None, preview, checked_against=v.checked_against, edit=edit)
 
 
+def may_cut(scene: IfcScene, host: str) -> bool:
+    """Whether the opening would be cut in `host` under the requirements in use (none: yes)."""
+    doc = requirements.current()
+    return doc is None or requirements.can_cut(requirements.policy(doc, requirements.Matcher(scene, doc), host))
+
+
 def penetration_sides(scene: IfcScene, target: str, other: str) -> tuple[str, str]:
     """(service, host) of a penetration: Muse names the service as the element that "moves" (its team asks); when it
     names the host instead (the one that is not a service), the two are swapped."""
     if not is_service(scene, target) and is_service(scene, other):
         return other, target
     return target, other
+
+
+def _host_kind(scene: IfcScene, host: str) -> dict:
+    """The kind of host (hosts.profile's key, and its name): "Add to requirements" scopes its rule to it."""
+    prof = hosts.profile(scene, host)
+    return {"host_kind": prof["key"], "host_kind_name": prof["facts"]["name"]}
 
 
 def _group_of(scene: IfcScene, gid: str) -> str | None:
@@ -749,6 +779,10 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
         problems, numbers = hosts.check_hole(scene, pen, reading)
         if problems:
             raise edits.Unsupported("; ".join(problems))
+        asked = edits.provision_for(scene, service, host)
+        if asked is not None and not may_cut(scene, host):
+            raise edits.Unsupported(f"an opening was already requested here ('{asked.Name}'); it waits for the host's "
+                                    "team to cut it")
     except (edits.Unsupported, KeyError) as e:
         return Attempt(title, zero, False, f"cannot request an opening here: {e}", "penetration"), None
     h = scene.element(host)
@@ -760,7 +794,7 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
             "plain_host": any(scene.entity(host).is_a(c) for c in edits.PENETRABLE),
             # The host's group under the requirements in use, or those the page would start from the models: "Add to
             # requirements" turns the reading into a rule for it.
-            "host_group": _group_of(scene, host)}
+            "host_group": _group_of(scene, host), **_host_kind(scene, host)}
     ignore = set(scene.element(service).connected)
     before = {x.other: x.distance_m for x in verify.check(scene, [service], clearance_m=clearance_m, ignore=ignore).hits}
     files = {scene.index_of(service), scene.index_of(host)}
@@ -771,10 +805,13 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
             on_trial({"kind": "penetration", "moved": [host], "delta_m": zero, "pieces": shape, "summary": summary})
         v = verify.check(scene, [service], clearance_m=clearance_m, ignore=ignore)
     # The service stays where it is: what it touched before (a valve beside it) is not this fix's. The host must clear
-    # by the clearance, or, through a fitted gland, touch at most.
+    # by the clearance, or, through a fitted gland, touch at most; every other element this fix is for must clear too
+    # (a plan's merged item: one opening does not clear a second wall).
     def counts(x) -> bool:
         if x.other == host:
             return pen.fit != "fitted" or x.distance_m < -0.001
+        if x.other in others:
+            return True
         return x.other not in before or x.distance_m < before[x.other] - 0.002
     hits = [x for x in v.hits if counts(x)]
     attempt = Attempt(title, zero, not hits, _reason(hits), "penetration", None, _hit_ids(hits), edit=edit, where=_where(hits))
@@ -805,8 +842,7 @@ def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_
     except (edits.Unsupported, KeyError) as e:
         return Attempt(title, [0.0, 0.0, 0.0], False, f"cannot resize this element: {e}", "resize", split), None
     (w0, h0), w1, h1 = size["before"], size["width_m"], size["depth_m"]
-    moving = {"bottom": h1 - h0, "top": h0 - h1}.get(keep, (h1 - h0) / 2)   # how far the face that moves goes (+ up)
-    delta = [0.0, 0.0, round(moving, 4)]
+    delta = [0.0, 0.0, round(edits.face_move(h0, h1, keep), 4)]   # how far the face that moves goes (+ up)
     edit = {"split_m": sorted(split), "depth_m": h1, "width_m": w1, "keep": keep, "before": [w0, h0],
             "performance": size["performance"], "summary": edits.resize_summary(sorted(split), w1, h1, keep),
             "key": json.dumps([round(x, 2) for x in sorted(split)] + [round(h1, 3), keep])}

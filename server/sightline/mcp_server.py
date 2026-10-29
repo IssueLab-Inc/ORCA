@@ -421,9 +421,10 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         if not 1 <= option <= len(options):
             raise LookupError(f"no verified option {option} for {c.label}: run propose_fixes first")
         o = options[option - 1]
-        before = W().scene(link.ctx.scene_id).revision
-        out = plans.apply(W(), link.ctx.scene_id, [o])
-        out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
+        with W().lock:   # one request's edits between `before` and the patch
+            before = W().scene(link.ctx.scene_id).revision
+            out = plans.apply(W(), link.ctx.scene_id, [o])
+            out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
         if out["not_cut"]:   # a penetration requested, not cut: the clash stays open until the host's team cuts it
             _applied(link, out, [], [], [], {})
             done(link, "apply_fix", f"requested '{o['title']}'")
@@ -446,9 +447,10 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
                                                                   or check.get("items", {}).get(it["key"], {}).get("passed"))]
         if not items:
             raise LookupError("this plan has no verified fix to apply")
-        before = W().scene(link.ctx.scene_id).revision
-        out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
-        out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
+        with W().lock:   # one request's edits between `before` and the patch
+            before = W().scene(link.ctx.scene_id).revision
+            out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
+            out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
         requested = {n["index"] for n in out["not_cut"]}   # penetrations only requested: their clashes stay open
         cut = [it for k, it in enumerate(items) if k not in requested]
         pairs = [[it["element_a"], o] for it in cut for o in [it["element_b"], *(it.get("others") or [])]]
@@ -469,7 +471,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         link.applied.update(fixed)
         link.publish({"type": "ui", "action": "applied", "files": out["files"], "pieces": out["pieces"],
                       "pairs": pairs, "titles": titles, "clash_ids": clash_ids,
-                      **{k: out.get(k) for k in ("scene_id", "revision_before", "revision", "meshes")}})
+                      **{k: out.get(k) for k in ("scene_id", "revision_before", "revision", "meshes", "history")}})
 
     # ------------------------------------------------------------------ triage, report, export
 

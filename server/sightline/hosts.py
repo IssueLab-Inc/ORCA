@@ -191,6 +191,25 @@ def _facts_text(kind: str, facts: dict) -> str:
     return f"- kind {kind}: " + "; ".join(bits)
 
 
+LIMITS = {"max_depth_ratio": (0.0, 1.0), "keep_from_ends_depths": (0.0, 5.0), "keep_from_edges_m": (0.0, 1.0)}
+
+
+def _limits(raw) -> dict:
+    """Muse's limits as numbers in range, the rest dropped: a reply in JSON mode is not held to the schema, and a
+    ratio of 40 (meant as %) or an edge distance of 50 (meant as mm) would turn a check off or refuse every hole."""
+    out = {}
+    for name, (lo, hi) in LIMITS.items():
+        try:
+            v = float((raw or {}).get(name))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if np.isfinite(v) and lo < v <= hi:
+            out[name] = v
+    if isinstance(raw, dict) and raw.get("zone") in ("any", "middle_third"):
+        out["zone"] = raw["zone"]
+    return out
+
+
 def read(model, profiles: list[dict]) -> dict[str, Reading]:
     """Muse's reading of each kind of host not read before (one call for all of them); cached by kind."""
     with _cache_lock:
@@ -203,10 +222,10 @@ def read(model, profiles: list[dict]) -> dict[str, Reading]:
             k = r.get("kind", "")
             if k not in todo or r.get("verdict") not in VERDICTS:
                 continue
-            limits = {x: v for x, v in (r.get("limits") or {}).items() if v is not None}
             got[k] = Reading(r["verdict"], r.get("reviewer") if r.get("reviewer") in REVIEWERS else None,
-                             "fitted" if r.get("fit") == "fitted" else "annular", limits,
-                             [c for c in r.get("conditions") or [] if c], r.get("reasoning", ""), "muse",
+                             "fitted" if r.get("fit") == "fitted" else "annular", _limits(r.get("limits")),
+                             [c[:200] for c in r.get("conditions") or [] if isinstance(c, str) and c][:6],
+                             str(r.get("reasoning") or "")[:600], "muse",
                              todo[k]["facts"]["name"])
         with _cache_lock:
             _cache.update(got)
@@ -244,7 +263,8 @@ def decide(scene: IfcScene, host_gid: str, doc=None, matcher=None) -> Reading:
     rule = None
     if doc is not None and getattr(doc, "penetrations", None):
         from . import requirements
-        rule = requirements.penetration_rule(doc, matcher or requirements.Matcher(scene, doc), host_gid)
+        rule = requirements.penetration_rule(doc, matcher or requirements.Matcher(scene, doc), host_gid,
+                                             profile(scene, host_gid)["key"])
     if rule is None:
         return base
     verdict = {"allowed": "allowed", "review": "with_review", "never": "never"}[rule.rule]
