@@ -57,7 +57,7 @@ export const nextSnap = (s: Snap): Snap => (s === "peek" ? "half" : s === "half"
 /** What the sheet does when something happens in the app, so people never hunt for the right tab: the list when a
  * report opens, the clash's panel when one is picked, out of the way (peek) while ORCA drives the model, and back up
  * when there is a result to read. `null` leaves that part as it is. */
-export type Happening = "report" | "models" | "select" | "work" | "result" | "chat";
+export type Happening = "report" | "models" | "select" | "work" | "result";
 export function follow(what: Happening, snap: Snap): { list: boolean | null; snap: Snap | null } {
   switch (what) {
     case "report": return { list: true, snap: snap === "peek" ? "half" : null };
@@ -65,6 +65,5 @@ export function follow(what: Happening, snap: Snap): { list: boolean | null; sna
     case "select": return { list: false, snap: snap === "peek" ? "half" : null };
     case "work": return { list: false, snap: "peek" };
     case "result": return { list: false, snap: snap === "peek" ? "half" : null };
-    case "chat": return { list: false, snap: null };
   }
 }

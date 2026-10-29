@@ -1018,3 +1018,4 @@ a.pop-item { color: inherit; }
   .review-form select, .review-form input, .team-table select, .req-cell select, .req-movers select, .detect-tol input { min-height: 40px; }
 }
 @media (pointer: coarse) { .insight.pattern > .insight-actions { margin: -10px -4px -10px 0; } }
+@media (max-width: 760px) { .lightbox { background: rgba(10, 14, 20, .95); } }
