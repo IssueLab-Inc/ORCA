@@ -23,7 +23,8 @@ checks below.
 Decided (owner, Oct 29): the fix after only (ORCA's own before and after views are already there); a clean
 presentation render, not a site photo; a switch in the owner menu at the top right, For me and For everyone, like the
 open-weights one; two Wonder judges per picture, not one (a false accept misleads, a false reject only costs a retry);
-the open tray bend is fixed in the model, not the prompt (below).
+the open tray bend is fixed in the model, not the prompt (below); the PDF gets a built view for every accepted fix
+automatically (below).
 
 ## What Muse Image can't do (Oct 29, Navisworks pictures of #042)
 
@@ -191,9 +192,20 @@ lines), the legend and what was taken away.
 - **Clash panel** (an option, or an accepted fix): **Show it built** → the picture, a wipe slider against ORCA's view
   and a "Lines from the model" overlay, so anyone can see it matches; what was cut away and the check's verdicts in
   a tooltip. `web/src/BuiltView.tsx`.
-- **PDF:** on the fix page, beside "The model as it is" and "With the fix", a third picture "As it could look built
-  (illustration)" when one was made; the report's evidence gains `built_img`. The BCF snapshot stays the true
-  capture.
+- **PDF, automatically for accepted fixes** (owner decision, Oct 29): on the fix page, beside "The model as it is"
+  and "With the fix", a third picture "As it could look built (illustration)"; the report's evidence gains
+  `built_img`. Only while the switch is on for that visitor; off, the PDF is as today.
+  - **At accept** (a single fix, a plan's fixes, a replayed tour fix), the page starts Show it built for each fix in
+    the background, from the same moment it captures the before and after views. The page keeps each accepted fix's
+    pieces with its evidence, so the cutaway can be framed again later.
+  - **At report time**, an accepted fix still without one (accepted before the switch went on, or capped at the
+    time) gets one then, in parallel, at most 10 per report; the report stream says "Drawing n built views" and waits
+    for those and for any still drawing from an accept.
+  - A fix whose pictures all fail the check keeps its true views only, with the line "No built view: Muse Image
+    couldn't keep to the model here".
+  - Proposed options that were not accepted get one only if someone pressed Show it built on them.
+  - Each costs what a click does and counts against the visitor's caps (none for the owner). The BCF snapshot stays
+    the true capture.
 - Plan panel, per fix. Chat: `show_it_built`. MCP later. The phone's Fix sheet.
 
 ## Plan
@@ -206,10 +218,11 @@ Branch `feature/show-it-built`, one PR.
    judge rule with a scripted model; never offered without geometry or for a trim; the BCF snapshot stays the true
    capture; caps; cache.
 3. UI in the clash panel and the plan panel; the phone's Fix sheet.
-4. The PDF's third picture.
+4. The PDF's third picture: built at accept in the background, missing ones at report time (at most 10, in
+   parallel), the true views alone when a fix's pictures fail.
 5. Chat tool; a tour step only as a recorded run.
 6. Runtime check in the browser on Northbank and the cell, then on Modal. README picture only from a real run.
 
 ## Open questions
 
-1. PDF built views: opt-in per report, or automatic for accepted fixes?
+None left from S0.
