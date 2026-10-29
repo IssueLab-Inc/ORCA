@@ -143,6 +143,7 @@ export class Viewer {
     this.clearFocusCache();
     for (const m of this.models) { this.scene.remove(...batches(m)); disposeBatches(m); }
     this.models = staged.map((m) => this.adopt(m));
+    this.sceneSize = 0;
     this.names = names;
     this.hiddenModels.clear();
     this.applyMode();
@@ -163,8 +164,26 @@ export class Viewer {
     const m = this.adopt(loaded);
     if (old) { this.scene.remove(...batches(old)); disposeBatches(old); }
     this.models[index] = m;
+    this.sceneSize = 0;
     this.clearFocusCache();
     this.applyMode();
+  }
+
+  /** The diagonal of everything loaded, metres (cached until the models change). */
+  private sceneSize = 0;
+  private sceneDiag(): number {
+    if (!this.sceneSize) {
+      const box = new THREE.Box3();
+      for (const m of this.models) for (const b of batches(m)) { b.computeBoundingBox(); if (b.boundingBox) box.union(b.boundingBox); }
+      this.sceneSize = box.isEmpty() ? 100 : Math.max(box.getSize(new THREE.Vector3()).length(), 1e-3);
+    }
+    return this.sceneSize;
+  }
+
+  /** A length tuned on buildings (`metres`), never more than `share` of the whole scene: a 100 mm machine part
+   * gets millimetres where a building gets half a metre, and buildings keep exactly what they had. */
+  private reach(metres: number, share: number): number {
+    return Math.min(metres, this.sceneDiag() * share);
   }
 
   setModelVisible(index: number, visible: boolean) {
@@ -364,7 +383,7 @@ export class Viewer {
   }
 
   /** Elements whose box comes within `margin` metres of the focus elements' boxes. */
-  private nearFocus(ids: string[], margin = 2.5): Set<string> {
+  private nearFocus(ids: string[], margin = this.reach(2.5, 0.25)): Set<string> {
     const box = this.boxOf(ids);
     const out = new Set<string>();
     if (box.isEmpty()) return out;
@@ -468,8 +487,8 @@ export class Viewer {
     const boxes = ids.map((g) => this.boxOf([g])).filter((b) => !b.isEmpty());
     let zone: THREE.Box3 | null = null;
     if (boxes.length === 2) zone = meetingZone(boxes[0], boxes[1]);
-    else if (boxes.length === 1 && point) zone = new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3(1, 1, 1)).intersect(boxes[0]);
-    if ((!zone || zone.isEmpty()) && point) zone = new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3(0.6, 0.6, 0.6));
+    else if (boxes.length === 1 && point) zone = new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3().setScalar(this.reach(1, 0.2))).intersect(boxes[0]);
+    if ((!zone || zone.isEmpty()) && point) zone = new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3().setScalar(this.reach(0.6, 0.15)));
     if (!zone || zone.isEmpty()) return false;
     this.setMarker(point ?? zone.getCenter(new THREE.Vector3()), label);
     this.flyToZone(zone, boxes.reduce((u, b) => u.union(b), zone.clone()));
@@ -502,13 +521,15 @@ export class Viewer {
   private zoneCamera(zone: THREE.Box3, union: THREE.Box3): [THREE.Vector3, THREE.Vector3] {
     const zoneDiag = zone.getSize(new THREE.Vector3()).length();
     const unionDiag = union.getSize(new THREE.Vector3()).length();
-    const margin = Math.min(Math.max(0.35 * zoneDiag, 0.1 * unionDiag, 0.5), Math.max((unionDiag - zoneDiag) / (2 * Math.sqrt(3)), 0.5));
+    // Half a metre at least around a building clash; for small parts, a share of the parts themselves.
+    const least = Math.min(0.5, Math.max(0.25 * unionDiag, 2 * zoneDiag), this.reach(0.5, 0.15));
+    const margin = Math.min(Math.max(0.35 * zoneDiag, 0.1 * unionDiag, least), Math.max((unionDiag - zoneDiag) / (2 * Math.sqrt(3)), least));
     const framed = zone.clone().expandByScalar(margin);
     const centre = framed.getCenter(new THREE.Vector3());
     const r = framed.getSize(new THREE.Vector3()).length() / 2;
     const vFov = THREE.MathUtils.degToRad(this.camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
-    const dist = Math.max((r / Math.sin(Math.min(vFov, hFov) / 2)) * 1.1, 2 * r + 0.5);
+    const dist = Math.max((r / Math.sin(Math.min(vFov, hFov) / 2)) * 1.1, 2 * r + least);
     return [centre.clone().add(this.viewDirection().multiplyScalar(dist)), centre];
   }
 
@@ -603,7 +624,7 @@ export class Viewer {
   /** Standard views around the current target (or the section box, if one is on). */
   view(preset: Preset) {
     const target = this.controls.target.clone();
-    const dist = Math.max(this.camera.position.distanceTo(target), 2);
+    const dist = Math.max(this.camera.position.distanceTo(target), this.reach(2, 0.8));
     const dirs: Record<Preset, THREE.Vector3> = {
       top: new THREE.Vector3(0, 1, 0.0001), front: new THREE.Vector3(0, 0, 1), right: new THREE.Vector3(1, 0, 0),
       iso: new THREE.Vector3(1, 0.8, 1),
@@ -613,7 +634,7 @@ export class Viewer {
 
   private flyToBox(box: THREE.Box3, tight: number, dir?: THREE.Vector3, animate = true) {
     const centre = box.getCenter(new THREE.Vector3());
-    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 1.5);
+    const size = Math.max(box.getSize(new THREE.Vector3()).length(), this.reach(1.5, 0.5));
     const d = (dir ?? this.viewDirection()).normalize();
     this.flyTo(centre.clone().add(d.multiplyScalar(size * tight)), centre, animate);
   }
@@ -632,7 +653,7 @@ export class Viewer {
   // ---------------------------------------------------------------- section box and marker
 
   /** Cut the model to a box around the focus (or `box`), `margin` metres beyond it; null turns it off. */
-  setSection(on: boolean, margin = 1.5, box?: THREE.Box3) {
+  setSection(on: boolean, margin = this.reach(1.5, 0.1), box?: THREE.Box3) {
     if (this.sectionHelper) { this.scene.remove(this.sectionHelper); this.sectionHelper = null; }
     this.clipping.length = 0;
     this.sectionBox = null;
@@ -658,8 +679,9 @@ export class Viewer {
   private boxAroundFocus(): THREE.Box3 {
     const box = this.boxOf(this.focusIds());
     if (this.marker.visible) {
-      const around = new THREE.Box3().setFromCenterAndSize(this.marker.position, new THREE.Vector3(4, 4, 4));
-      return box.isEmpty() ? around : box.intersect(around).union(new THREE.Box3().setFromCenterAndSize(this.marker.position, new THREE.Vector3(1, 1, 1)));
+      const around = new THREE.Box3().setFromCenterAndSize(this.marker.position, new THREE.Vector3().setScalar(this.reach(4, 0.3)));
+      return box.isEmpty() ? around : box.intersect(around).union(new THREE.Box3().setFromCenterAndSize(this.marker.position,
+        new THREE.Vector3().setScalar(this.reach(1, 0.1))));
     }
     return box;
   }
@@ -715,7 +737,7 @@ export class Viewer {
     if (!p1) return null;
     const mat = new THREE.MeshBasicMaterial({ color: "#2f5d8a", depthTest: false });
     for (const p of [p1, p2].filter((x): x is THREE.Vector3 => !!x)) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 8), mat);
+      const s = new THREE.Mesh(new THREE.SphereGeometry(this.reach(0.03, 0.01), 12, 8), mat);
       s.position.copy(p);
       s.renderOrder = 11;
       this.measureLayer.add(s);
@@ -747,7 +769,8 @@ export class Viewer {
     this.place(this.markerLabel, this.marker.visible ? this.marker.position : null);
     this.place(this.measureLabel, this.measureLayer.userData.mid ?? null);
     if (this.marker.visible) {
-      const s = Math.max(this.camera.position.distanceTo(this.marker.position) / 8, 0.3);
+      // A constant size on screen, at any scale: a floor in metres made it swallow a 100 mm part.
+      const s = Math.max(this.camera.position.distanceTo(this.marker.position) / 8, 1e-4);
       this.marker.scale.setScalar(s);
       this.marker.children[1].lookAt(this.camera.position);
     }
@@ -757,7 +780,7 @@ export class Viewer {
   /** Near/far planes follow the distance to the target, so close-ups don't clip and far views don't z-fight. */
   private adjustClipRange() {
     const d = this.camera.position.distanceTo(this.controls.target);
-    const near = Math.min(Math.max(d / 200, 0.01), 1);
+    const near = Math.min(Math.max(d / 200, 0.0005), 1);  // small parts are seen from centimetres away
     if (Math.abs(near - this.camera.near) / near > 0.2) {
       this.camera.near = near;
       this.camera.far = Math.max(near * 100000, 2000);

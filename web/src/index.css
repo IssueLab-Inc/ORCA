@@ -865,7 +865,8 @@ a.pop-item { color: inherit; }
 .app.phone { display: block; position: relative; --half: 55dvh; --peek: var(--peek-h, 132px); }
 .app.phone .bar { position: absolute; top: 0; left: 0; right: 0; z-index: 20; }
 .app.phone .stage { position: absolute; left: 0; right: 0; top: var(--head-h); bottom: var(--stage-b); }
-.app.phone.landing .stage { bottom: 0; }
+.app.phone.landing .stage, .app.phone.starting .stage { bottom: 0; }
+.app.phone.starting .pane { display: none; }
 .app.phone.snap-peek { --sheet-h: var(--peek); --stage-b: var(--peek); }
 .app.phone.snap-half { --sheet-h: var(--half); --stage-b: var(--half); }
 .app.phone.snap-full { --sheet-h: calc(100dvh - var(--head-h) - 8px); --stage-b: var(--half); }
@@ -1026,3 +1027,18 @@ a.pop-item { color: inherit; }
   .review-form select, .review-form input, .team-table select, .req-cell select, .req-movers select, .detect-tol input { min-height: 40px; }
 }
 @media (max-width: 760px) { .lightbox { background: rgba(10, 14, 20, .95); } }
+
+/* A blank project (ProjectStart.tsx): the visitor's own models */
+.project-start { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 40px max(24px, calc(50% - 320px)); background: var(--bg); }
+.project-start h1 { margin: 0; font-size: 26px; }
+.project-start .lede { margin: 0; color: #33414f; line-height: 1.55; }
+.project-back { align-self: flex-start; margin-left: -8px; }
+.project-drop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 36px 20px; text-align: center; border: 2px dashed #b9c4d1; border-radius: 14px; background: var(--surface); color: var(--accent-ink); cursor: pointer; transition: border-color .12s, background .12s; }
+.project-drop:hover, .project-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.project-drop.busy { opacity: .6; cursor: progress; }
+.project-drop b { font-size: 16px; color: var(--ink); }
+.project-drop .btn { margin-top: 6px; }
+.project-alt { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.project-alt > svg { flex: none; color: var(--muted); }
+.project-alt > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+@media (max-width: 560px) { .project-alt { flex-wrap: wrap; } .project-start { padding: 24px 16px; } }
