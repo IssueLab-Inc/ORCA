@@ -124,7 +124,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
             <h3>Design level</h3>
             <p className="hint">How far the models have got. Early levels only care about gross overlaps; later ones about every
               millimetre and the space around services. The names fit any industry; the hints are rough equivalents.</p>
-            <div className="req-levels" role="radiogroup" aria-label="Design level">
+            <div className="req-levels" role="radiogroup" aria-label="Design level" data-tour="req-levels">
               {(scale?.levels ?? []).map((l) => (
                 <button key={l.level} role="radio" aria-checked={draft.level === l.level}
                   className={`req-level${draft.level === l.level ? " on" : ""}`} onClick={() => update({ ...draft, level: l.level })}>
@@ -134,6 +134,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                 </button>))}
             </div>
 
+            <div className="req-strict-block" data-tour="req-strict">
             <h3>Strictness</h3>
             <p className="hint">One setting for flagging and fixing. Strict flags more and fixes cautiously (more clearance, smaller
               moves, no trims); lenient flags only clear problems and allows bolder fixes.</p>
@@ -168,12 +169,13 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                   <span className="hint">ORCA's defaults find {preview.baseline.toLocaleString()} · checked in {preview.seconds} s</span></>
                 : previewError ? <span className="hint">{previewError}</span> : null}
             </p>
+            </div>
 
             <h3>Checks</h3>
             <p className="hint">What each group is checked against. Hard: any overlap past the tolerance. Clearance: a gap that must
               stay (insulation, hangers, access). Off: context only.{level && level.service_clearance_mm > 0
                 ? ` At L${level.level} a hard check between services and structure keeps ${level.service_clearance_mm} mm (scaled by strictness).` : ""}</p>
-            <div className="req-grid-wrap">
+            <div className="req-grid-wrap" data-tour="req-grid">
               <table className="req-grid">
                 <thead><tr><th />{groups.map((g) => <th key={g.id} scope="col">{g.name}</th>)}</tr></thead>
                 <tbody>{groups.map((ga, i) => (
@@ -247,7 +249,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
 
         {error && <p className="bad">{error}</p>}
         <div className="actions">
-          <button className="btn primary big" disabled={!draft} onClick={() => onApply(draft, enabled, false)}>
+          <button className="btn primary big" data-tour="req-apply" disabled={!draft} onClick={() => onApply(draft, enabled, false)}>
             {enabled ? "Use these requirements" : "Keep the file, use ORCA's defaults"}</button>
           {canDetectAgain && enabled && <button className="btn big" disabled={!draft} onClick={() => onApply(draft, enabled, true)}>Use them and check again</button>}
           {initial && <button className="btn ghost" onClick={() => onApply(null, false, false)}>Forget the file</button>}

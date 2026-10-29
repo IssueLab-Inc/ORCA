@@ -227,7 +227,7 @@ Muse Spark stays in the loop:
 
 On a by-design pattern in Insights, **Add to requirements** settles those clashes at once. Verified fixes say which
 requirements they meet, and the PDF and BCF say which requirements they were checked against. The file downloads
-and uploads as `*.orca-requirements.json` for the next project.
+and uploads as `*.orca-requirements.json` for the next project. The guided tour's act "Your standard" walks through it.
 
 At L3 Balanced, ORCA finds exactly what it finds with no file (Northbank 464 = 464, the cell 107 = 107). On #1 under
 Strict, Muse proposed the duct offset up 400 mm through the girder opening (the designer's height), inside the

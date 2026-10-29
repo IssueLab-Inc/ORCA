@@ -1595,6 +1595,7 @@ export function App() {
     planRunning: planning, planFor: planRun ? (now - planRun.started) / 1000 : 0, planReady: !!plan, planError,
     patternsRead: !!verdicts, reviewedCount: Object.keys(reviewed).length, signoffs: tourDuct ? signoffs[tourDuct.id]?.length ?? 0 : 0,
     docOpen, docReady,
+    reqOpen, requirements: reqLabel, reqRules: reqSaved?.enabled ? reqSaved.doc.by_design.length : 0,
     duct: tourDuct ? { id: tourDuct.id, number: tourDuct.number } : null,
     cellOpen, ladder: tourLadder ? { id: tourLadder.id, number: tourLadder.number } : null,
     pipes: tourPipes.map((c) => ({ id: c.id, number: c.number })),

@@ -294,10 +294,12 @@ the model's reading kept. Northbank on Muse Spark Open with the models open: 217
 non-physical, 12 same element), 106 asked.
 
 Guided tour (Oct 28): `web/src/Tour.tsx`, from the landing page (**Take the guided tour**) or the header (**Tour**).
-24 steps in 9 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
+30 steps in 10 acts: the problem, triage (Muse Spark Open), one live fix (#042 duct: propose, pilot, before/after),
 "hold on" (the girder has two more), a trim (Clash7 transom, c0051, accepted), root cause via chat ("Why are there so
 many clashes on Level 02? Fix the root cause." → girder plan for duct + tray + CW, accepted), patterns (Explain, mark by
-design), sign-off (review on #042, Report, build), hand-off (PDF, BCF, Export IFC), close (numbers). Each step spotlights
+design), your standard (Oct 29: Add to requirements on that pattern, open Requirements, L4, Strict with the expected
+count, the grid, Use them; targets `data-tour=add-requirement|requirements|req-levels|req-strict|req-grid|req-apply`;
+TourState `reqOpen`, `requirements`, `reqRules`; Escape closes the dialog, not the tour), sign-off (review on #042, Report, build), hand-off (PDF, BCF, Export IFC), close (numbers). Each step spotlights
 a real control (`data-tour` attributes) and moves on when the app reaches the state (`TourState`); "Show me" clicks it.
 Live Muse steps offer **Watch a recorded run** after 45 s (plan 75 s) or on error: real runs recorded on Oct 27 in
 `web/public/tour/` (c0053 18 s, c0051 trim 9 s, girder plan 35 s), replayed through the same pilot/plan code and
