@@ -10,6 +10,10 @@ export interface Progress {
   modelSeconds: number[];   // per finished round
   ideas: number;            // candidates in the current round
   checking: { index: number; title: string; kind: string } | null;
+  /** The model working now ("Muse Spark", or "Muse Wonder" on a second try). */
+  model?: string;
+  /** Ideas already in the table from an earlier try: a second try's own numbering starts after them. */
+  offset?: number;
 }
 
 export { editText, KIND_LABEL } from "./fixKinds";
@@ -23,11 +27,14 @@ function firstReason(reason: string): [string, number] {
 export function statusLine(p: Progress | null, now: number, attempts: Attempt[]): string {
   if (!p) return "";
   const total = Math.round((now - p.started) / 1000);
+  const who = p.model || "Muse Spark";
   if (p.phase === "thinking") {
-    return `Round ${p.round}: Muse Spark is reading the clash and the model data… ${Math.round((now - p.thinkingSince) / 1000)} s`;
+    return p.offset
+      ? `${who}, round ${p.round}: reading the first try and the model around it… ${Math.round((now - p.thinkingSince) / 1000)} s`
+      : `Round ${p.round}: ${who} is reading the clash and the model data… ${Math.round((now - p.thinkingSince) / 1000)} s`;
   }
   if (p.phase === "checking" && p.checking) {
-    return `Round ${p.round}: checking idea ${p.checking.index + 1} (${p.checking.title}) against the whole model · ${total} s`;
+    return `Round ${p.round}: checking ${p.offset ? `${who}'s ` : ""}idea ${(p.offset ?? 0) + p.checking.index + 1} (${p.checking.title}) against the whole model · ${total} s`;
   }
   const ok = attempts.filter((a) => a.passed).length;
   if (!attempts.length) return `Done in ${total} s: nothing was tried on the model`;  // a recommendation only (requirements)
@@ -39,6 +46,9 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
     return <p className="hint">ORCA's steps appear here: each idea from Muse Spark, and what the geometry check found.</p>;
   }
   const running = progress && progress.phase !== "done";
+  // Name the model on each idea only when two tried (a second try): one model needs no label.
+  const models = new Set(attempts.map((t) => t.model || "Muse Spark"));
+  const offset = progress?.offset ?? 0;
   return (
     <div className="activity">
       <div className="activity-head">
@@ -56,15 +66,15 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
               <tr key={i} className={t.passed ? "ok" : "fail"}>
                 <td className="mono" data-label="#">{i + 1}</td>
                 <td data-label="Kind"><span className={`badge ${t.kind}`}>{kindLabel(t.kind)}</span></td>
-                <td data-label="Idea">{t.title}</td>
+                <td data-label="Idea">{t.title}{models.size > 1 && <span className={`chip model ${t.model === "Muse Wonder" ? "wonder" : ""}`}>{t.model || "Muse Spark"}</span>}</td>
                 <td className="mono" data-label="Edit">{editText(t)}</td>
                 <td data-label="Check">{t.passed ? <span className="ok">✓ verified</span>
                   : <span className="bad" title={t.reason}>✗ {first}{more ? ` +${more} more` : ""}</span>}</td>
               </tr>
             );
           })}
-          {progress?.phase === "checking" && progress.checking && progress.checking.index >= attempts.length &&
-            <tr className="pending"><td className="mono">{progress.checking.index + 1}</td><td><span className={`badge ${progress.checking.kind}`}>{kindLabel(progress.checking.kind)}</span></td>
+          {progress?.phase === "checking" && progress.checking && offset + progress.checking.index >= attempts.length &&
+            <tr className="pending"><td className="mono">{offset + progress.checking.index + 1}</td><td><span className={`badge ${progress.checking.kind}`}>{kindLabel(progress.checking.kind)}</span></td>
               <td>{progress.checking.title}</td><td /><td className="hint">checking…</td></tr>}
         </tbody>
       </table>
