@@ -73,7 +73,7 @@ Two images per call: the **look** (true colours, solid, everything within 3 m, t
 | Look only | 1 of 6: invented a support, a back panel, a hollow duct bend, a plinth |
 | Look + lines | 5 of 6 |
 | Look + lines + what the objects are ("a ceiling void", names) | 3 of 6: added a ceiling with lights, a cable tray with cables, fence panels |
-| **Look + lines, second prompt** (no "cut" wording, background kept, "no extra pipes, rods, hangers…") | **9 of 12** on the images endpoint, **6 of 6** through Responses with reasoning high |
+| **Look + lines, second prompt** (no "cut" wording, background kept, "no extra pipes, rods, hangers…") | **7 of 12** on the images endpoint, **5 of 6** through Responses with reasoning high, by eye on zoomed crops (the judges' first count, 9 and 6, missed a round column, a dropped block and an opened bend) |
 
 14.5–33 s a picture (median 23 s), the same on both endpoints. Telling Muse Image what things are invites it to add
 what such places usually have, so the prompt names nothing; it reads the materials well from the look alone
@@ -87,28 +87,44 @@ the look) and shrank another. To try in the build: draw physical see-through par
 1. **Pixels (instant):** edges of the picture against edges of ORCA's own render, at 256 px after a blur (so concrete
    and galvanising texture drops out): F-score ≥ 0.55, and no tile of an 8 × 8 grid more than 45% covered by edges
    that are near neither the render's nor the model's lines (an added object). Faithful restyles: F 0.65–0.95, worst
-   tile ≤ 0.34. This alone rejects 6 of 14 known-bad pictures (other scenes, redesigns) and no good one.
-2. **Muse Spark (reasoning high), three calls in parallel:** image 1 the look, image 2 the picture; list the objects in
-   image 1, then go over image 2 region by region and record anything added, removed, moved, reshaped or resized, with
-   a size; verdict faithful, minor differences or unfaithful. **Any unfaithful fails the picture.** One call varies on
-   borderline pictures (the ladder's missing mesh guards: unfaithful in 0 of 1, 1 of 3 and 2 of 3 runs at high effort, 3
-   of 3 at low), hence three.
-   Median 42 s a call, 94 s at worst; low effort is faster (6–37 s) but missed the invented support 2 times in 3.
+   tile ≤ 0.34. This alone rejects 6 of the known-bad pictures (other scenes, redesigns) and no good one.
+2. **A judge:** image 1 the look, image 2 the picture; list the objects in image 1, then go over image 2 region by
+   region and record anything added, removed, moved, reshaped or resized, with a size; verdict faithful, minor
+   differences or unfaithful, and unfaithful fails the picture (`s0.JUDGE_SYSTEM`).
 
-| Rule | Known-bad rejected | Faithful restyles passed |
-|---|---|---|
-| Pixels | 6/14 | 17/17 |
-| Pixels + one judge call | 13/14 | 15/17 |
-| Pixels + majority of three | 13/14 | 17/17 |
-| **Pixels + any of three** | **14/14** | **15/17** |
+**Which judge** (`spikes/built/judges.py`): Muse Spark (reasoning high) and Muse Wonder (low, medium), three runs each
+on the same 31 pictures. The labels: 14 known bad (six "improve this design", three with facts, four look-only, the
+ladder without its mesh guards), and five restyles that passed Spark and the thumbnail look but not a zoomed crop
+(two air-pipe pictures drew a flat rectangular column round, a third dropped a block under the slab; two duct-view
+pictures drew the tray's closed bend fitting as an open channel). 19 bad, 12 faithful.
 
-Known-bad: six "improve this design" pictures, three with facts, four look-only and the ladder picture without its
-mesh guards (eye-confirmed). The bar was every known-bad rejected and at least 80% of good ones passed: met (88%). A
-false reject costs a retry, a false accept misleads, so the strict rule.
+| Pixel gate plus | Bad rejected | Faithful passed | Time | Cost a check |
+|---|---|---|---|---|
+| Spark high, 1 call | 13/19 | 10/12 | median 42 s, 94 s max | contributor tier |
+| Spark high, any of 3 | 14/19 | 10/12 | ~60–90 s (parallel) | contributor tier |
+| Wonder low, 1 call | 16/19 | 9/12 | median 23 s, 47 s max | $0.044 |
+| **Wonder medium, 1 call** | **18/19** | **8/12** | median 32 s, 81 s max | $0.059 |
+| Wonder medium, majority of 3 | 17/19 | 9/12 | | $0.18 |
+| Wonder medium, any of 3 | 18/19 | 6/12 | | $0.18 |
 
-**Not run:** radius 2 and 5 m (3 m throughout); a penetration (needs the edits work); Muse Wonder as the judge. The
-capture took up to 77 s in headless Chromium on software GL, mostly fetching classes one by one; in the app the classes
-come with the scene and the GPU draws the passes.
+- **Spark misses shape changes.** It passed all five pictures found on zoom, every run.
+- **Wonder catches them, and is steady where Spark wasn't:** the ladder's missing mesh guards in 6 of 6 runs (Spark 1
+  of 3). It misses the duct view's opened bend in one of the two pictures (debatable: a real tray bend is open).
+- **Wonder misreads one model view, every time:** the cold-water views have two openings side by side in the girder
+  web (the outline pass shows both); Wonder read one wide slot in all 18 of its runs on them, and rejected all three
+  faithful pictures. That case would never get a picture.
+- **The outline drawing as image 3 fixes that misread and loses others** (11 hard pictures, two runs, medium,
+  $0.071 a call): the cold-water pictures 6 of 6 faithful, but the round column in one air-pipe picture and the opened
+  bend in one duct picture passed both runs.
+
+A false reject costs a retry or, at worst, no picture (the true view still shows); a false accept puts a wrong
+picture beside the model. So the judge is **Muse Wonder, medium, one call per picture, without the outline**. Spent on
+this: $11.25 for 211 Wonder calls.
+
+**Not run:** radius 2 and 5 m (3 m throughout); a penetration (needs the edits work); Wonder at high effort. The
+faithful labels are by eye on zoomed crops for every disputed picture, at thumbnail size for the rest. The capture
+took up to 77 s in headless Chromium on software GL, mostly fetching classes one by one; in the app the classes come
+with the scene and the GPU draws the passes.
 
 ## Design after S0
 
@@ -122,13 +138,17 @@ lines), the legend and what was taken away.
 ### Generate and check (server)
 
 - `server/sightline/built.py`: two pictures at once through Responses (`image_generation`, `reasoning_strength`
-  high), so one usually passes without a second round; each through the pixel gate, then three Muse Spark judges in
-  parallel. The first that passes is shown; with none, one more pair with the judges' differences in the prompt
-  ("don't drop the mesh guard panels on the right"), then "Muse Image couldn't keep to the model here" and the true
-  view only.
-- About 1–1.5 minutes to a checked picture (23 s to draw, 42–94 s to judge); the panel streams the stages.
-- Cost: $0.02–0.04 in pictures and 6–12 Muse Spark calls a click. Cached by a hash of the look, lines and prompt
-  version, so the PDF, replays and the tour reuse a picture.
+  high), so one usually passes without a second round; each through the pixel gate, then one Muse Wonder judge
+  (medium) each, in parallel. The first that passes is shown; with none, one more pair with the judge's differences in
+  the prompt ("don't drop the mesh guard panels on the right"), then "Muse Image couldn't keep to the model here" and
+  the true view only.
+- About a minute to a checked picture (23 s to draw, median 32 s to judge, 81 s at worst); the panel streams the
+  stages.
+- Cost: $0.14 a click ($0.02 in pictures, $0.12 in judging), $0.28 with the second pair. Wonder has no contributor
+  tier, so built views share the escalation's daily spend limit (`docs/escalation.md`), and the owner's caps apply.
+  Without Wonder (off, or over the limit): Muse Spark, any of three calls, with the label saying the check was the
+  lighter one. Cached by a hash of the look, lines and prompt version, so the PDF, replays and the tour reuse a
+  picture.
 - Not offered for trims and cleanups: a 30 mm cut-back is invisible at the scale of the view (the transom).
 
 ### API and UI
@@ -162,5 +182,6 @@ Branch `feature/show-it-built`, one PR.
 ## Open questions
 
 1. PDF built views: opt-in per report, or automatic for accepted fixes?
-2. Is 1–1.5 minutes per picture acceptable, or should the judge run on Muse Wonder (untested) or at low effort with
-   five calls?
+2. Is $0.14–0.28 a click acceptable for the public demo, or should built views be owner-only or capped low?
+3. The cold-water misread: try the ids pass (one colour per element) as image 3 instead of the outline, or accept
+   that some views never get a picture.

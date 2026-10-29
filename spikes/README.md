@@ -57,7 +57,8 @@ run through `verify.check` (25 mm clearance) on Structure + MEP + Architecture.
 ## Show it built, S0 (Oct 29)
 
 `spikes/built/`: real fixes (`fixes.py`, Muse Spark proposes and the API accepts), ORCA's viewer renders each one four
-ways (`capture.cjs` driving `web/spikes/built.ts`), Muse Image restyles them and the check scores them (`s0.py`).
+ways (`capture.cjs` driving `web/spikes/built.ts`), Muse Image restyles them and the check scores them (`s0.py`); `judges.py` compares Muse Spark and Muse Wonder as
+the judge.
 Results and decisions in `docs/show-it-built.md`.
 
     cd server && uv run uvicorn sightline.app:app --port 8000      # with Northbank and the cell STEP in samples/
@@ -65,3 +66,5 @@ Results and decisions in `docs/show-it-built.md`.
     cd server && uv run python ../spikes/built/fixes.py OUT
     cd spikes/built && NODE_PATH=$(npm root -g) node capture.cjs OUT 3
     cd server && uv run python ../spikes/built/s0.py OUT keep_r keep:2
+    cd server && uv run python ../spikes/built/judges.py OUT run low,medium   # Muse Wonder as the judge (billed)
+    cd server && uv run python ../spikes/built/judges.py OUT lines medium     # ... with the outline drawing
