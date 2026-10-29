@@ -98,9 +98,24 @@ class Link:
 
     def subscribe(self) -> queue.Queue:
         q: queue.Queue = queue.Queue(maxsize=EVENTS_PER_SUBSCRIBER)
+        q.stream_id = uuid.uuid4().hex[:10]  # type: ignore[attr-defined]  # the page names it when it closes
         with self._lock:
             self._subscribers.append(q)
         return q
+
+    def leave(self, stream_id: str) -> bool:
+        """A page closed (it says so as it unloads): stop counting it at once. Behind a proxy a dropped stream is only
+        noticed on a later write, so the agent would be told a browser is there for a while."""
+        with self._lock:
+            gone = [q for q in self._subscribers if getattr(q, "stream_id", None) == stream_id]
+            for q in gone:
+                self._subscribers.remove(q)
+        for q in gone:
+            try:
+                q.put_nowait({"type": "bye"})
+            except queue.Full:
+                pass
+        return bool(gone)
 
     def unsubscribe(self, q: queue.Queue) -> None:
         with self._lock:

@@ -277,7 +277,7 @@ export interface SavedSession {
 export interface LinkContext { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] }
 /** What the agent does, for the page to follow: its calls, requests for pictures, and the chat's ui events. */
 export type LinkEvent =
-  | { type: "hello"; calls: number; last_call: AgentLink["last_call"]; expires_at: number; max_expires_at: number; server_time: number }
+  | { type: "hello"; stream: string; calls: number; last_call: AgentLink["last_call"]; expires_at: number; max_expires_at: number; server_time: number }
   | { type: "heartbeat" } | { type: "revoked" }
   | { type: "agent_call"; tool: string; args: Record<string, unknown>; expires_at: number }
   | { type: "agent_result"; tool: string; summary: string }
@@ -294,6 +294,8 @@ export const api = {
   sceneInfo: (sceneId: string) => call<SceneInfo>(`/scenes/${sceneId}`),
   linkContext: (token: string, ctx: LinkContext) =>
     call<unknown>(`/links/${encodeURIComponent(token)}/context`, { method: "PUT", body: JSON.stringify(ctx) }),
+  /** The page is closing: a beacon, which the browser still sends while it unloads. */
+  leaveLink: (token: string, stream: string) => navigator.sendBeacon?.(`/api/links/${encodeURIComponent(token)}/leave/${stream}`),
   revokeLink: (token: string) => call<{ revoked: boolean }>(`/links/${encodeURIComponent(token)}`, { method: "DELETE" }),
   /** Follow the link until the server ends the stream (a few minutes) or `signal` aborts; the caller reconnects. */
   linkEvents: (token: string, onEvent: (e: LinkEvent) => void, signal?: AbortSignal) =>
