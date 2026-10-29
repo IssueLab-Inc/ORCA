@@ -1,11 +1,11 @@
 """STEP models: read a STEP assembly, check it as IFC, and write the fixes back into the STEP.
 
-Machine builders work in STEP. Sightline checks and edits IFC, so a STEP file is converted when it opens:
+Machine builders work in STEP. ORCA checks and edits IFC, so a STEP file is converted when it opens:
 - every part (a leaf of the assembly tree) becomes one IFC element with a triangulated body, its STEP name and colour
   (alpha included), and a placement at its box's lower corner, so a move is one placement edit;
 - the STEP groups (sub-assemblies) become IfcGroups, for organisation only. They are not IfcElementAssembly: detection
   treats an assembly's parts as meant to meet, and a machine's top groups ("Guarding") hold parts that must not clash;
-- each element carries the pset `Sightline_STEP` (Group, Label, Source), which ties it back to the STEP label;
+- each element carries the pset `ORCA_STEP` (Group, Label, Source), which ties it back to the STEP label;
 - STEP carries no IFC classes, so `classify` (one Muse call per 200 parts, from names and group paths) picks one per
   part; without it every part is an IfcBuildingElementProxy named for its group.
 
@@ -30,10 +30,12 @@ import ifcopenshell.api
 import ifcopenshell.guid
 import numpy as np
 
+from .scene import STEP_PSET
+
 SUFFIXES = {".step", ".stp"}
 MAX_PARTS = int(os.environ.get("SIGHTLINE_STEP_MAX_PARTS", "20000"))
 MAX_TRIANGLES = int(os.environ.get("SIGHTLINE_STEP_MAX_TRIANGLES", "5000000"))
-PSET = "Sightline_STEP"
+PSET = STEP_PSET
 NAMESPACE = uuid.UUID("3b8f2d0e-6c1a-4f5e-9a7d-2f1c5b8e4a90")
 
 # The classes a STEP part may become (`classify`), each with its IFC4 predefined types where it has them.
@@ -94,7 +96,7 @@ def _read(path: Path):
     if reader.ReadFile(str(path)) != IFSelect_RetDone:
         raise StepError(f"{path.name} could not be read as STEP.")
     if not reader.Transfer(doc):
-        raise StepError(f"{path.name} has no shapes Sightline can read.")
+        raise StepError(f"{path.name} has no shapes ORCA can read.")
     unit = (Interface_Static.CVal_s("xstep.cascade.unit") or "MM").upper()
     scale = {"MM": 0.001, "CM": 0.01, "M": 1.0, "IN": 0.0254, "INCH": 0.0254, "FT": 0.3048}.get(unit, 0.001)
     return doc, XCAFDoc_DocumentTool.ShapeTool_s(doc.Main()), XCAFDoc_DocumentTool.ColorTool_s(doc.Main()), scale
@@ -523,7 +525,7 @@ def _placed(shape, loc):
 
 def export(step_path: Path, manifest: dict, out: Path, moves: dict[str, list[float]] | None = None,
            replace: dict[str, dict] | None = None, add: list[dict] | None = None) -> Path:
-    """Write the STEP again with Sightline's edits, keeping every name and colour. `manifest` is the converter's
+    """Write the STEP again with ORCA's edits, keeping every name and colour. `manifest` is the converter's
     `parts`; all geometry is in metres, world axes.
     - `moves` {gid: delta}: the part's component location becomes parent⁻¹ · T · parent · old, so nested assemblies
       keep their own placements;

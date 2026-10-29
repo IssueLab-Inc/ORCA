@@ -1,4 +1,4 @@
-# Sightline working guide
+# ORCA working guide
 
 Read `CLAUDE.md` for the product, geometry, environment, and secret-handling rules.
 

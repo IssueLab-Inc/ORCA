@@ -14,13 +14,13 @@ function excluded(c: DetectCoverage) {
   return parts.length ? parts.join(", ") : "0";
 }
 
-/** Before any report is open: what Sightline will check in the open models, and the button to run it. */
+/** Before any report is open: what ORCA will check in the open models, and the button to run it. */
 export function DetectSetupCard({ setup, progress, onRun, disabled }: {
   setup: DetectSetup | null; progress: DetectProgress | null; onRun: (tests: DetectTest[]) => void; disabled: boolean;
 }) {
   const [picked, setPicked] = useState<Record<string, boolean>>({});  // the user's ticks over each test's default
   const [toleranceMm, setToleranceMm] = useState(1);
-  if (progress) return <section className="triage detect running"><DetectHead sub="Sightline is checking the models…" />
+  if (progress) return <section className="triage detect running"><DetectHead sub="ORCA is checking the models…" />
     <ProgressRows progress={progress} /></section>;
   if (!setup) return <section className="triage detect"><DetectHead sub="Reading the models…" /></section>;
   const enabled = (t: DetectTest) => picked[t.id] ?? t.enabled;
@@ -30,7 +30,7 @@ export function DetectSetupCard({ setup, progress, onRun, disabled }: {
   return (
     <section className="triage detect idle" data-tour="detect">
       <DetectHead sub="Every pair of models, and each model against itself" />
-      <p className="triage-lead">Sightline checks every pair of models and each model against itself, and reports
+      <p className="triage-lead">ORCA checks every pair of models and each model against itself, and reports
         overlaps deeper than the tolerance. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and
         touches are counted, not reported.</p>
       <ul className="detect-tests">
@@ -44,7 +44,7 @@ export function DetectSetupCard({ setup, progress, onRun, disabled }: {
         <input type="number" min={0} step={1} value={toleranceMm} onChange={(e) => setToleranceMm(Number(e.target.value))} /> mm</label>
       <button className="btn primary triage-go" disabled={disabled || !chosen.length} onClick={() => onRun(chosen)}>
         <Radar size={15} aria-hidden /> Check {checkedElements(setup, chosen).toLocaleString()} elements</button>
-      <p className="hint">About ten seconds for a building. Then Muse names each clash, triage sorts them, and Sightline
+      <p className="hint">About ten seconds for a building. Then Muse names each clash, triage sorts them, and ORCA
         proposes verified fixes.</p>
     </section>
   );
@@ -74,7 +74,7 @@ function ProgressRows({ progress }: { progress: DetectProgress }) {
   </>);
 }
 
-/** Over a report Sightline found: what was checked, what changed since the last run, and Detect again. */
+/** Over a report ORCA found: what was checked, what changed since the last run, and Detect again. */
 export function DetectSummary({ detection, progress, onAgain, disabled, compact = false }: {
   detection: Detection; progress: DetectProgress | null; onAgain: () => void; disabled: boolean;
   compact?: boolean;  // the list is filtered: one line, so the list gets the room
@@ -89,7 +89,7 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
     <section className={`triage detect summary ${progress ? "running" : ""} ${compact && !progress ? "compact" : ""}`} data-tour="detected">
       <DetectHead sub={progress ? "Checking again…" : compact
         ? `${clashes.toLocaleString()} clashes in ${detection.elements.toLocaleString()} elements · ${detection.seconds.toFixed(1)} s`
-        : `Found by Sightline · ${detection.seconds.toFixed(1)} s`}
+        : `Found by ORCA · ${detection.seconds.toFixed(1)} s`}
         action={!progress && <button className="ibtn" aria-label="Detect again" data-tip="Detect again: see what your fixes resolved"
           data-tip-side="left" disabled={disabled} onClick={onAgain}><RotateCcw size={14} aria-hidden /></button>} />
       {progress ? <ProgressRows progress={progress} /> : !compact && <>

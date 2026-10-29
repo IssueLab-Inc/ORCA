@@ -46,7 +46,7 @@ image = (
                    ignore=lambda p: p.suffix.lower() not in {".ifc", ".step", ".stp", ".json", ".xml", ".png", ".jpg", ".jpeg"})
 )
 
-app = modal.App("clashwise-sightline")
+app = modal.App("orca")
 
 
 @app.function(

@@ -1,4 +1,4 @@
-"""Sightline as an MCP server: the same operations the web app uses, for agents such as ClashWise Wise.
+"""ORCA as an MCP server: the same operations the web app uses, for agents.
 
 Run over stdio:  uv run python -m sightline.mcp_server
 """
@@ -11,13 +11,13 @@ from mcp.server.mcpserver import MCPServer
 
 from .service import Workspace
 
-mcp = MCPServer("clashwise-sightline", title="ClashWise Sightline")
+mcp = MCPServer("orca", title="ORCA")
 ws = Workspace()
 
 
 @mcp.tool()
 def list_models() -> list[str]:
-    """List the IFC models Sightline can open."""
+    """List the IFC models ORCA can open."""
     return ws.list_samples()
 
 

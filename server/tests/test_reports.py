@@ -42,7 +42,7 @@ STANDARD = """<?xml version="1.0" encoding="UTF-8"?>
 </exchange>
 """
 
-# The ClashWise three-view export: grouped tags "<node> / <category> / <property>", leaf element first.
+# The three-view export of the demo package (its smart-tag keys are data): grouped tags "<node> / <category> / <property>", leaf element first.
 GROUPED = """<exchange units="m"><batchtest name="Sampled"><clashtests>
  <clashtest name="IfcDistributionPort (MEP) vs IfcWall (Architecture)" test_type="hard" tolerance="0">
   <clashresults><clashresult name="Clash7" guid="g-7" status="active" distance="-0.05" href="c7/A-transparent.png">

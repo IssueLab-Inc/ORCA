@@ -1,4 +1,4 @@
-"""The geometry check. It is the authority for every clearance number Sightline shows.
+"""The geometry check. It is the authority for every clearance number ORCA shows.
 
 The browser triangulates with web-ifc and this side with IfcOpenShell, so the two can differ by a
 millimetre or so; the UI always displays these numbers, never its own.

@@ -327,7 +327,7 @@ def _page(r: Row, n: int) -> str:
     # Coordinated captures colour edit groups, so their colours do not identify the report's A/B pair.
     label_a, label_b = ("A", "B") if ev.get("kind") == "context" else ("A (red)", "B (green)")
     crop = _zone_crop(c.images[0][1]) if c.images else None
-    found_by = "Sightline" if c.source == "sightline" else "Navisworks"  # who detected it, and whose depth this is
+    found_by = "ORCA" if c.source == "sightline" else "Navisworks"  # who detected it, and whose depth this is
     pics = "".join(
         f"<figure><img src='{_e(u)}'/><figcaption>{_e(cap)}</figcaption></figure>" for u, cap in [
             (crop, f"{found_by} view, zoomed to where they meet (red A, green B)"),
@@ -373,7 +373,7 @@ CSS = """
 @page { size: A4; margin: 18mm 16mm 18mm 16mm; font-family: "DejaVu Sans", sans-serif;
   @top-left { content: string(doc-title); font-size: 8pt; color: #5d6a7a; }
   @top-right { content: string(draft); font-size: 8pt; color: #b8352a; font-weight: bold; }
-  @bottom-left { content: "ClashWise Sightline · AI-assisted design coordination report"; font-size: 8pt; color: #5d6a7a; }
+  @bottom-left { content: "ORCA · AI-assisted design coordination report"; font-size: 8pt; color: #5d6a7a; }
   @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #5d6a7a; } }
 @page cover { @top-left { content: none; } @top-right { content: none; } }
 body { font-family: "IBM Plex Sans", "DejaVu Sans", sans-serif; font-size: 9.5pt; color: #16202b; line-height: 1.45; }
@@ -467,7 +467,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
              f"<div class='stamp'>DRAFT · AI-assisted · {reviewed} of {len(pages)} reviewed</div>")
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{_e(title)}</title><style>{CSS}</style></head><body>
 <section class='cover'>
-  <div class='eyebrow'>ClashWise Sightline · design coordination</div>
+  <div class='eyebrow'>ORCA · design coordination</div>
   <h1>{_e(title)}</h1>
   <div style='font-size:12pt;color:#5d6a7a'>{_e(subtitle)}</div>
   <span class='draft-mark'>{'' if final else 'DRAFT · requires review'}</span>
@@ -480,7 +480,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
     <div class='count'><b>{len(noise)}</b>noise</div>
   </div>
   <p style='color:#5d6a7a;font-size:8.5pt'>Text marked AI-drafted was written by Muse Spark (Meta) from the clash data,
-  the clash pictures and Sightline's geometry checks, and must be reviewed by the teams named before anyone acts on it.
+  the clash pictures and ORCA's geometry checks, and must be reviewed by the teams named before anyone acts on it.
   Fixes marked verified were checked against the whole federated model: the clash is gone, at least 25 mm clear, and
   nothing new is hit. They are not structural, cost or site approvals.</p>
 </section>
@@ -499,8 +499,8 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
   <h2 style='margin-top:14pt'>Noise</h2>
   {grouped(noise, 'By design, not physical, or only touching, grouped by clash test. No action; most can be hidden with a clash rule.') if noise else '<p>None.</p>'}
   <h2 style='margin-top:14pt'>How this report was made</h2>
-  <p>Verdicts come from Sightline's triage: sure cases by rule (spaces, ports and openings are not physical; results
-  within 1 mm only touch), the rest by an open-weights model (Muse Spark Open). Fixes come from Sightline's agent: Muse
+  <p>Verdicts come from ORCA's triage: sure cases by rule (spaces, ports and openings are not physical; results
+  within 1 mm only touch), the rest by an open-weights model (Muse Spark Open). Fixes come from ORCA's agent: Muse
   Spark proposes edits to real IFC elements and a geometry engine (IfcOpenShell) checks each against the whole model.
   Who acts: the team whose element a fix changes, else the discipline triage named, else the coordination rule
   (structure stays, then architecture, then site; services move). Every team with an element in a clash reviews it.</p>
@@ -540,7 +540,7 @@ def _xyz(tag: str, v) -> str:
     return f"<{tag}><X>{v[0]:.4f}</X><Y>{v[1]:.4f}</Y><Z>{v[2]:.4f}</Z></{tag}>"
 
 
-def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "Sightline") -> bytes:
+def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA") -> bytes:
     """BCF 2.1: one topic per clash that needs action, assigned to its acting team, with the AI explanation and the
     recorded reviews as comments, the pair selected and coloured in a viewpoint, and a snapshot."""
     from PIL import Image
@@ -610,7 +610,7 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
     summary = summarise(model, rows)
     stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     models = sorted({r.model_a for r in rows} | {r.model_b for r in rows})
-    base_ctx = {"Clashes from": "Sightline's check of the models" if report.origin == "sightline" else f"Navisworks report {report.title}", "Models": ", ".join(f"{m} ({model_teams.get(m, '?')})" for m in models),
+    base_ctx = {"Clashes from": "ORCA's check of the models" if report.origin == "sightline" else f"Navisworks report {report.title}", "Models": ", ".join(f"{m} ({model_teams.get(m, '?')})" for m in models),
                 "Generated": stamp, "Scope": {"combined": "All clashes", "team": "Per team", "model": "Per model"}[scope]}
 
     if scope == "team":

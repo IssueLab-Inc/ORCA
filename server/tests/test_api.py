@@ -46,7 +46,7 @@ def test_federated_set_exports_only_the_edited_file(tmp_path, monkeypatch):
     assert c.get(f"/api/scenes/{sid}/export").status_code == 409  # a check moves and moves back: still nothing changed
     c.post(f"/api/scenes/{sid}/apply", json={"moved": [duct], "delta_m": [0, 0, -0.8]})
     r = c.get(f"/api/scenes/{sid}/export")
-    assert r.status_code == 200 and "services.sightline.ifc" in r.headers["content-disposition"]
+    assert r.status_code == 200 and "services.orca.ifc" in r.headers["content-disposition"]
 
 
 def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypatch):
@@ -84,12 +84,12 @@ def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypat
     r = c.get(f"/api/scenes/{sid}/export")
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
     files = zipfile.ZipFile(io.BytesIO(r.content))
-    assert sorted(files.namelist()) == ["services.sightline.ifc", "structure.sightline.ifc"]
-    out = ifcopenshell.file.from_string(files.read("services.sightline.ifc").decode())
+    assert sorted(files.namelist()) == ["services.orca.ifc", "structure.orca.ifc"]
+    out = ifcopenshell.file.from_string(files.read("services.orca.ifc").decode())
     assert all(out.by_guid(g) for g in pieces)                                   # the offset's five pieces
     z = lambda m, g: ifcopenshell.util.placement.get_local_placement(m.by_guid(g).ObjectPlacement)[2, 3]
     assert z(out, slab) == pytest.approx(z(services, slab))                       # the live model, moved
     assert z(out, slab) == pytest.approx(3.5)                                     # 3.4 + 0.1
-    moved = ifcopenshell.file.from_string(files.read("structure.sightline.ifc").decode())
+    moved = ifcopenshell.file.from_string(files.read("structure.orca.ifc").decode())
     x = ifcopenshell.util.placement.get_local_placement(moved.by_guid(other_beam).ObjectPlacement)[0, 3]
     assert x == pytest.approx(0.5)                                                # the kept move, not the tried one

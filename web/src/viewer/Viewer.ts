@@ -512,7 +512,7 @@ export class Viewer {
     return [centre.clone().add(this.viewDirection().multiplyScalar(dist)), centre];
   }
 
-  /** The three pictures of a clash Sightline found, taken the way the Navisworks export takes them (CLAUDE.md, "Images
+  /** The three pictures of a clash ORCA found, taken the way the Navisworks export takes them (CLAUDE.md, "Images
    * sent to the model"): A the pair alone and see-through, framed on where they meet; B the pair solid in its grey
    * context within 2.5 m; C the pair alone from a quarter turn round. Red A and green B, so the colour reading that
    * crops Navisworks pictures works on these too. The view is put back as it was. Null when either element has no

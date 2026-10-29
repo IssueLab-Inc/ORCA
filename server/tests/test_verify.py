@@ -70,7 +70,7 @@ def test_federated_files_clash_across_disciplines(tmp_path):
     v = verify.check(s, [gid])
     assert v.passed and v.min_clearance_m == pytest.approx(0.12, abs=0.005)
     written = s.write_edited(tmp_path)
-    assert [p.name for p in written] == ["services.sightline.ifc"]  # the structure file is untouched
+    assert [p.name for p in written] == ["services.orca.ifc"]  # the structure file is untouched
 
 
 def test_neighbourhood_check_skips_far_elements(tmp_path):

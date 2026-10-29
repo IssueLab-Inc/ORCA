@@ -66,7 +66,7 @@ export function App() {
   const [matches, setMatches] = useState<Matches | null>(null);
   const [clash, setClash] = useState<ReportClash | null>(null);
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
-  // Sightline's own detection (server: detect.py): what it would run on the open models, a run in progress, the last
+  // ORCA's own detection (server: detect.py): what it would run on the open models, a run in progress, the last
   // result, and the A/B/C views taken in the browser of the clashes it found (by clash id).
   const [detectSetup, setDetectSetup] = useState<DetectSetup | null>(null);
   const [detecting, setDetecting] = useState<DetectProgress | null>(null);
@@ -190,7 +190,7 @@ export function App() {
       // Default to the building disciplines and the site (the report's site clashes need it), not the grids or a later revision.
       const set = list.filter((f) => /(structure|mep|architecture|site)\.ifc$/i.test(f));
       setPicked(set.length ? set : list.slice(0, 1));
-    }).catch((e) => setError(`Can't reach the Sightline server: ${e.message}`));
+    }).catch((e) => setError(`Can't reach the ORCA server: ${e.message}`));
     api.reportSamples().then(setReportSamples).catch(() => undefined);
     return () => {
       ++sceneEpoch.current; ++workspaceEpoch.current; ++previewRequest.current;
@@ -414,7 +414,7 @@ export function App() {
   }
 
   // Triage as shown: a model verdict of "real" or "model error" gives way to what is already settled in this browser
-  // (marked not a clash, or Sightline's own geometry: one element, not physical, a touch, no overlap here), and the
+  // (marked not a clash, or ORCA's own geometry: one element, not physical, a touch, no overlap here), and the
   // model's reading is kept beside it.
   const shownTriage = useMemo(() => {
     if (!report) return triage;
@@ -455,7 +455,7 @@ export function App() {
     if (!viewer.current?.focusClash(ids, point, `#${c.number}`)) setError("This clash has no geometry or point to show in the open model.");
   }
 
-  // A selected report clash: its pair in the viewer, and Sightline's own measure of it.
+  // A selected report clash: its pair in the viewer, and ORCA's own measure of it.
   useEffect(() => {
     setMeasure(null);
     if (!clash || !report || !sceneId || !matches) return;
@@ -576,7 +576,7 @@ export function App() {
     } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
   }
 
-  /** The start page's buttons: open the demo models and let Sightline check them (the golden path also picks the duct
+  /** The start page's buttons: open the demo models and let ORCA check them (the golden path also picks the duct
    * through the girder and proposes a fix). A Navisworks report is optional: Coordinate › Import. */
   async function startGolden() { golden.current = true; await openDemo(); }
   async function openDemo(source?: string[] | File[]) {
@@ -641,7 +641,7 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report?.id]);
 
-  // ------------------------------------------------------------------ Sightline detection (docs/detection.md)
+  // ------------------------------------------------------------------ ORCA detection (docs/detection.md)
 
   useEffect(() => {
     setDetectSetup(null);
@@ -674,7 +674,7 @@ export function App() {
     try {
       const done = await api.detect(sid, tests, onDetectEvent);
       if (sceneEpoch.current !== epoch) return;
-      const r = await loadReport(async () => done.report, "the clashes Sightline found");
+      const r = await loadReport(async () => done.report, "the clashes ORCA found");
       if (!r) return;
       setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds });
       const ids = new Set(r.clashes.map((c) => c.id));
@@ -697,7 +697,7 @@ export function App() {
     finally { setDetecting(null); }
   }
 
-  /** A clash Sightline found has no pictures: take its A/B/C views in the viewer and keep them on the server, where the
+  /** A clash ORCA found has no pictures: take its A/B/C views in the viewer and keep them on the server, where the
    * fix agent, triage and the PDF use them as they use Navisworks views. Once per clash. */
   function captureViews(reportId: string, clashId: string, ga: string, gb: string): Promise<void> {
     const pending = captures.current.get(clashId);
@@ -771,7 +771,7 @@ export function App() {
     if (!url) return;
     const link = document.createElement("a");
     link.href = url;
-    link.download = `sightline-${clash ? `clash-${clash.number}` : "view"}.png`;
+    link.download = `orca-${clash ? `clash-${clash.number}` : "view"}.png`;
     link.click();
   }
 
@@ -860,7 +860,7 @@ export function App() {
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
-    // A clash Sightline found: give the agent its views, as a Navisworks report would (waiting a few seconds at most).
+    // A clash ORCA found: give the agent its views, as a Navisworks report would (waiting a few seconds at most).
     if (clash && report?.origin === "sightline" && !clash.images.length && !views[clash.id])
       await Promise.race([captureViews(report.id, clash.id, a, b), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
@@ -1268,7 +1268,7 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [report, views, titles]);
   const shownClash = clash ? shown(clash) : clash;
-  // Until a report or the models are open, the page is the landing: no panels, just what Sightline is and the demo.
+  // Until a report or the models are open, the page is the landing: no panels, just what ORCA is and the demo.
   const landing = !stats && !report;
   const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
@@ -1432,9 +1432,9 @@ export function App() {
         {!landing && <button className="btn ghost" onClick={() => setAbout(true)} aria-label="How it works" title="How it works"><Info size={15} aria-hidden /><span className="lbl"> How it works</span></button>}
         {!landing && !touring && <button className="btn ghost" onClick={() => startTour(cellOpen ? "cell" : "northbank")} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
         </div>
-        <span className="brand"><span className="logo" aria-hidden>◎</span><b>Sightline</b></span>
+        <span className="brand"><span className="logo" aria-hidden>◎</span><b>ORCA</b></span>
         <div className="bar-side end">
-        {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch Sightline fix a clash</button>}
+        {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
           owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
@@ -1476,7 +1476,7 @@ export function App() {
             : <div className="empty-left">
               <Radar size={28} aria-hidden />
               <h2>Nothing to coordinate yet</h2>
-              <p className="hint">Open the models: Sightline checks them for clashes.</p>
+              <p className="hint">Open the models: ORCA checks them for clashes.</p>
             </div>}
       </aside>
 
@@ -1529,7 +1529,7 @@ export function App() {
             <span>{pilotStatus.text}</span>
             {pilotStatus.driving
               ? <button className="btn small" onClick={() => pilot.current?.takeOver()}>Take the view</button>
-              : <button className="btn small" onClick={() => pilot.current?.resume()}>Let Sightline drive</button>}
+              : <button className="btn small" onClick={() => pilot.current?.resume()}>Let ORCA drive</button>}
           </div>
         )}
         {compareBar}
@@ -1754,7 +1754,7 @@ function ProofStrip({ o, rank, options, before }: { o: Option; rank: number; opt
   const why = rank === 0 ? (comfy && smallest ? "ranked first: comfortable clearance, smallest change" : comfy ? "ranked first: comfortable clearance" : smallest ? "ranked first: smallest change that clears" : "ranked first: best clearance of the verified fixes") : `option ${rank + 1} of ${options.length}`;
   return <span className="proof-strip"><span className="ok">✓ Clash gone</span><span>{clear}{margin}</span>{before != null && <span>was {mm(before)} overlap</span>}<span>{o.checked_against ? `checked vs ${o.checked_against} elements` : "checked vs the model"}</span><span className="why">{why}</span></span>;
 }
-/** When nothing passed: what Sightline learned, so the clash reaches a person with a head start, not a dead end. */
+/** When nothing passed: what ORCA learned, so the clash reaches a person with a head start, not a dead end. */
 function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: () => void; onFlag?: () => void }) {
   const n = proposal.attempts.length;
   const counts = new Map<string, number>();
@@ -1772,7 +1772,7 @@ function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: ()
     <div className="nofix">
       <h3>No edit passed the geometry check</h3>
       <p>
-        Sightline tried {n} idea{n === 1 ? "" : "s"} and left the model unchanged.
+        ORCA tried {n} idea{n === 1 ? "" : "s"} and left the model unchanged.
         {top.length > 0 && <> What stood in the way: {top.map(([cls, k], i) => (
           <span key={cls}>{i ? ", and " : ""}<b>{cls.replace(/^Ifc/, "")}</b> elements in {k === n ? "every attempt" : `${k} of ${n}`}</span>))}.</>}
       </p>

@@ -22,6 +22,20 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import ifcopenshell.util.unit
 
+# The pset a part converted from STEP carries (step.py): its group, label and source file. Older conversions, and their
+# caches, called it Sightline_STEP.
+STEP_PSET = "ORCA_STEP"
+STEP_PSETS = (STEP_PSET, "Sightline_STEP")
+
+
+def step_source(entity) -> dict:
+    """Where a part converted from STEP came from (Group, Label, Source), or {} for any other element."""
+    for name in STEP_PSETS:
+        found = ifcopenshell.util.element.get_pset(entity, name)
+        if found:
+            return found
+    return {}
+
 # Things a coordinator normally keeps where they are. The agent may still propose moving them,
 # but the domain pack tells it why it usually shouldn't; this flag only drives defaults in the UI.
 FIXED_CLASSES = ("IfcBeam", "IfcColumn", "IfcSlab", "IfcWall", "IfcFooting", "IfcMember", "IfcPlate")
@@ -202,9 +216,9 @@ class IfcScene:
         return sorted(seen)
 
     def step_group(self, global_id: str) -> str | None:
-        """The STEP assembly group a converted part came from (pset Sightline_STEP), else None."""
+        """The STEP assembly group a converted part came from (pset ORCA_STEP), else None."""
         entity = self.entity(global_id)
-        group = ifcopenshell.util.element.get_pset(entity, "Sightline_STEP", "Group") if entity is not None else None
+        group = step_source(entity).get("Group") if entity is not None else None
         return group if isinstance(group, str) and group else None
 
     def placement(self, global_id: str) -> np.ndarray:
@@ -237,7 +251,7 @@ class IfcScene:
         self.model.write(str(path))
         return path
 
-    def write_edited(self, out_dir: Path, suffix: str = ".sightline") -> list[Path]:
+    def write_edited(self, out_dir: Path, suffix: str = ".orca") -> list[Path]:
         """Write every file that has edits, as <name><suffix>.ifc. Untouched files are not rewritten."""
         out = []
         for i in sorted(self._edited):

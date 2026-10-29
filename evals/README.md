@@ -1,6 +1,6 @@
 # Evaluation log
 
-`results.csv` is the running record of how Sightline's proposals score: one row per model call, appended, never
+`results.csv` is the running record of how ORCA's proposals score: one row per model call, appended, never
 rewritten, so runs on new datasets and new prompts stay comparable with the first ones.
 
 | Column | Meaning |
@@ -46,8 +46,8 @@ Local offsets (`answer_key.py`, one round each; #061 has no Navisworks images). 
 
 ## Triage of Navisworks results
 
-`navisworks_triage.py` sends every clash in a Navisworks three-view sample package (ClashWiseDemoModels,
-`northbank/StructuredOutputs/`) to the model with its A/B/C images and metadata, and asks for a verdict
+`navisworks_triage.py` sends every clash in a Navisworks three-view sample package (the demo-models
+repo's `northbank/StructuredOutputs/`) to the model with its A/B/C images and metadata, and asks for a verdict
 (`real_clash` / `by_design` / `non_physical` / `modelling_error`), severity, owner and action under a strict JSON schema.
 There is no human review yet, so it scores against a reference built from metadata only: a space or port on either
 side is `non_physical`, a result within 1 mm is a touch (not a real clash), and the answer key must come back as
@@ -100,11 +100,11 @@ width across) and a trim inside one model is marked `cleanup`.
 |---|---|---|---|---|
 | 2026-10-28 | 3 | 3/3 | 0/3 | 3/3 (one trim each, on the beam, transom, beam) |
 
-## Sightline detection
+## ORCA detection
 
-`detection_navisworks.py` runs Sightline's own detection (`server/sightline/detect.py`, docs/detection.md) on Northbank
+`detection_navisworks.py` runs ORCA's own detection (`server/sightline/detect.py`, docs/detection.md) on Northbank
 and compares it with the Navisworks package. `detection_cell.py` checks it on the palletising cell from
-ClashWiseDemoModels, against the cell's generated answer key.
+the demo-models repo, against the cell's generated answer key.
 
     cd server
     uv run python ../evals/detection_navisworks.py --out ../evals/runs/<date>-northbank-detection
@@ -115,7 +115,7 @@ Results on Oct 28 (`runs/2026-10-28-northbank-detection/`, `runs/2026-10-28-cell
 | | Result |
 |---|---|
 | Northbank, default tests | 633 clashes in 1,961 elements, 7-12 s |
-| Sampled Navisworks results Sightline also reports | 117 of 117 real overlaps. The other 200 are 129 not physical, 46 touches, 24 one element, 1 joined by ports |
+| Sampled Navisworks results ORCA also reports | 117 of 117 real overlaps. The other 200 are 129 not physical, 46 touches, 24 one element, 1 joined by ports |
 | Answer key | 3/3, including #061, which Navisworks stored no result for |
 | Cell Rev A / Rev B | 13/13 planted pairs and 0 unexpected / 0 planted and 0 unexpected |
 

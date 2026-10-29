@@ -1,4 +1,4 @@
-"""The operations Sightline offers, shared by the web API and the MCP server so they never drift."""
+"""The operations ORCA offers, shared by the web API and the MCP server so they never drift."""
 from __future__ import annotations
 
 import json
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import agent, detect, edits, reports, step, verify
 from .meta_client import ChatModel, MetaChatModel
-from .scene import IfcScene
+from .scene import IfcScene, step_source
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
@@ -158,7 +158,7 @@ class Workspace:
             pics = pics or [p for _, p in c.images]
             if distance_m is None:
                 distance_m = c.distance_m
-            source = (f"Found by Sightline's own detection: {c.test}, {c.name}." if self.report(report_id).origin == "sightline"
+            source = (f"Found by ORCA's own detection: {c.test}, {c.name}." if self.report(report_id).origin == "sightline"
                       else f"From a Navisworks clash report: {c.test}, {c.name}.")
             seen = " Images are views of this clash." if pics else ""
             notes = "\n".join(filter(None, [notes, source + seen]))
@@ -224,7 +224,7 @@ class Workspace:
                 parts = json.loads(Path(src["manifest"]).read_text())["parts"]
                 moves, replace, add = step_changes(s, i, parts)
                 stem = Path(src["step"]).stem
-                out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.sightline.step", moves, replace, add))
+                out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.orca.step", moves, replace, add))
             return out
 
     # Clash reports (Navisworks XML).
@@ -273,7 +273,7 @@ class Workspace:
                          "images": [label for label, _ in c.images]} for c in r.clashes],
         }
 
-    # Sightline detection (detect.py; design in docs/detection.md).
+    # ORCA detection (detect.py; design in docs/detection.md).
 
     def detect_tests(self, scene_id: str) -> dict:
         """The tests a run would use by default for the open models, and the ones offered but off."""
@@ -287,7 +287,7 @@ class Workspace:
                 "rules": detect.RULE_LABEL}
 
     def detect(self, scene_id: str, tests: list[dict] | None = None, on_event=None) -> dict:
-        """Run Sightline's own clash detection and open the result as a clash report."""
+        """Run ORCA's own clash detection and open the result as a clash report."""
         scene = self.scene(scene_id)
         chosen = None if tests is None else [detect.Test.from_dict(t) for t in tests]
         with self.lock:
@@ -320,7 +320,7 @@ class Workspace:
         triage and the PDF see it as they see Navisworks views. Only detected reports take captures."""
         report = self.report(report_id)
         if report.origin != "sightline":
-            raise PermissionError("Only clashes found by Sightline take captured views.")
+            raise PermissionError("Only clashes found by ORCA take captured views.")
         if label not in ("A", "B", "C"):
             raise ValueError("label must be A, B or C")
         clash = report.clash(clash_id)
@@ -374,7 +374,7 @@ class Workspace:
         return out
 
     def measure(self, report_id: str, clash_id: str, scene_id: str) -> dict:
-        """Sightline's own measure of a report clash: the signed distance between the two matched elements.
+        """ORCA's own measure of a report clash: the signed distance between the two matched elements.
         None when they do not overlap here, or when they are joined through ports (the check skips those)."""
         with self.lock:
             m = self.match(report_id, scene_id)[clash_id]
@@ -416,7 +416,7 @@ def _spec(scene: IfcScene, element) -> dict:
 def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, list]:
     """What changed in a model converted from STEP, for `step.export`: moved parts (placement against the manifest's
     origin), parts whose extrusion changed (an offset's first piece, a trimmed member) and new parts (the rest of an
-    offset), each new part tied to the STEP part it came from through its `Sightline_STEP` label."""
+    offset), each new part tied to the STEP part it came from through its `ORCA_STEP` label."""
     model = scene.models[index]
     moves, replace, add = {}, {}, []
     for gid, info in parts.items():
@@ -439,7 +439,7 @@ def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, 
     for element in model.by_type("IfcElement"):
         if element.GlobalId in known or element.Representation is None or element.is_a("IfcFeatureElement"):
             continue
-        source = ifcopenshell.util.element.get_pset(element, "Sightline_STEP") or {}
+        source = step_source(element)
         if source.get("Label"):
             add.append({"name": element.Name or element.is_a()[3:], "label": source["Label"],
                         "spec": _spec(scene, element)})

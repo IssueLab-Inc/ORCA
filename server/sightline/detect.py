@@ -1,4 +1,4 @@
-"""Sightline detection: find the clashes in the open models, as a clash report the rest of Sightline already reads.
+"""ORCA detection: find the clashes in the open models, as a clash report the rest of ORCA already reads.
 
 Design: docs/detection.md. In short:
 - a test asks one question (hard, clearance or duplicate) of two selections, or of one selection against itself;

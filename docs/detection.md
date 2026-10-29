@@ -1,6 +1,6 @@
-# Sightline detection: design
+# ORCA detection: design
 
-Sightline finds clashes itself, in the models that are open, and hands them to everything else: the list, triage,
+ORCA finds clashes itself, in the models that are open, and hands them to everything else: the list, triage,
 insights, root causes, plans, chat, the PDF and BCF, and export. This is the main way in (Oct 28): the demo opens the
 models and runs it, and the header's **Coordinate** menu leads with **Check the open models**. Importing a Navisworks
 report is the second way, for teams that already run it. Detection matters most for models no one runs Navisworks on,
@@ -8,9 +8,8 @@ such as a machine cell from mechanical CAD.
 
 In the product the job is **design coordination** (the card is "Coordinate the models", a run's report is "Coordination ·
 4 models", the PDF is a "Design coordination report"); a single item is still a **clash**, and one it finds is **found
-by Sightline**. It is new work, written
-for Sightline. ClashWise's native-detection notes informed the design, but no ClashWise code is used, and this is not
-ClashWise native detection.
+by ORCA**. It is new work, written
+for ORCA during the event.
 
 ## What we measured first (Oct 28)
 
@@ -120,7 +119,7 @@ The query's own figure is not used alone because it is unreliable both ways:
 - a pipe half a millimetre into a beam's underside reads 200 mm (the beam's width);
 - a top rail 40 mm into a post reads 20 mm.
 
-So Sightline's depth can differ from Navisworks' (#042: Sightline −300 mm, Navisworks −150 mm). The clash panel's "Now"
+So ORCA's depth can differ from Navisworks' (#042: ORCA −300 mm, Navisworks −150 mm). The clash panel's "Now"
 uses the same measure, so it agrees with the run.
 
 The clash point is the middle of the two witness points, else the middle of the boxes' overlap.
@@ -132,13 +131,13 @@ separating-axis check runs on every pair whose boxes overlap deeper than the tol
 ## 4. What a run returns
 
 A run is a clash report like an imported one, so every existing feature works on it unchanged. It differs in four ways:
-- **Origin.** It is marked `sightline` rather than `navisworks`, so the wording changes: "Found by Sightline: −300 mm".
+- **Origin.** It is marked `sightline` rather than `navisworks`, so the wording changes: "Found by ORCA: −300 mm".
 - **Stable ids.** A clash's id is `s` plus a hash of its test and the two GlobalIds, sorted. Running again gives the same
   ids, so fixes, reviews and sign-offs stay attached. There are no "Clash 1, 2, …" names. Each clash has a
   number, #N, unique across the whole report and kept across runs (a new clash takes the next number; a resolved one's
   number is never reused). It has a plain name from its two elements at once, and a title Muse writes from its facts
   shortly after ("Cold-water main clips the transfer girder at grid 3, level 02"; `server/sightline/titles.py`).
-- **Run diff.** Sightline keeps the last run per set of open models. On the next run each clash is `new` or `active`,
+- **Run diff.** ORCA keeps the last run per set of open models. On the next run each clash is `new` or `active`,
   and a clash that has gone is listed as **resolved** only if both elements were still checked against each other in
   a complete test. If one left the selection (deleted, or the test changed) it is **no longer checked**, which is not
   the same as resolved.
@@ -162,7 +161,7 @@ best (see CLAUDE.md, "Images sent to the model"):
 | B | The pair solid, with grey context within 2.5 m, same camera |
 | C | The pair only, about 90° round from A |
 
-Sightline takes the pictures when a clash is opened and before a fix is proposed, and uploads them to the run. The fix
+ORCA takes the pictures when a clash is opened and before a fix is proposed, and uploads them to the run. The fix
 agent, triage of that clash and the PDF then use them like Navisworks pictures.
 
 ## 6. How we know it works
@@ -176,9 +175,9 @@ agent, triage of that clash and the PDF then use them like Navisworks pictures.
 - **Northbank against Navisworks** (`evals/detection_navisworks.py`):
   - run Navisworks' own 73 tests (class pairs and tolerances read from the package);
   - compare the counts per test;
-  - check how many of the 317 sampled clashes Sightline finds, with every miss explained;
+  - check how many of the 317 sampled clashes ORCA finds, with every miss explained;
   - check the answer key, including #061.
-- **The palletising cell** (ClashWiseDemoModels `palletising-cell/`):
+- **The palletising cell** (the demo-models repo's `palletising-cell/`):
   - Rev A: all 13 planted pairs found, and everything else is one of the cell's by-design contacts.
   - Rev B: none of the planted pairs.
   - Compare with Navisworks once that run exists.
@@ -190,7 +189,7 @@ agent, triage of that clash and the PDF then use them like Navisworks pictures.
 | | Result |
 |---|---|
 | Northbank, default tests (`evals/runs/2026-10-28-northbank-detection/`) | 633 clashes in 1,961 elements in 7-12 s; 0 between models except the 3 girder clashes; 449 inside Structure, 169 inside Site, 12 inside Architecture |
-| Sampled Navisworks results Sightline reports | **117 of 117** that are physical, on two elements, deeper than 1 mm and not meant to meet; of the other 200: 129 not physical, 46 touches, 24 one element, 1 joined by ports |
+| Sampled Navisworks results ORCA reports | **117 of 117** that are physical, on two elements, deeper than 1 mm and not meant to meet; of the other 200: 129 not physical, 46 touches, 24 one element, 1 joined by ports |
 | Answer key | #042 −300 mm, #057 −100 mm, #061 −77 mm, all in "MEP vs Structure"; Navisworks stored no result for #061 |
 | Palletising cell (`evals/runs/2026-10-28-cell-detection/`) | Rev A: 13/13 planted pairs, 94 by design, 0 unexpected; Rev B: 0 planted, 92 by design, 0 unexpected; 0.6 s each |
 

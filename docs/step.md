@@ -1,6 +1,6 @@
 # STEP models
 
-Machine builders work in STEP (AP203/AP214/AP242). Sightline checks and edits IFC, so a STEP file is converted when it
+Machine builders work in STEP (AP203/AP214/AP242). ORCA checks and edits IFC, so a STEP file is converted when it
 opens, checked like any model, and written back as STEP with the fixes. Code: `server/sightline/step.py`.
 
 ## Conversion
@@ -19,7 +19,7 @@ opens, checked like any model, and written back as STEP with the fixes. Code: `s
   - one element per part, placed at the part's box minimum (so a move is one placement edit); exact parts get the
     extrusion, the rest an `IfcTriangulatedFaceSet`;
   - its STEP name, and a style with its colour and transparency;
-  - pset `Sightline_STEP` (Group, Label, Source);
+  - pset `ORCA_STEP` (Group, Label, Source);
   - GlobalIds come from the file's hash and the label path, so the same STEP converts to the same ids;
   - STEP groups become `IfcGroup`s, not assemblies: detection treats an assembly's parts as meant to meet, and a
     machine's top groups (Guarding) hold parts that must not clash.
@@ -32,7 +32,7 @@ opens, checked like any model, and written back as STEP with the fixes. Code: `s
 ## Fixes and export
 
 - **Moves, offsets and trims:** exact parts take all three; meshed parts move only.
-- **Bends on STEP parts:** an offset's bend fittings carry the segment's `Sightline_STEP` pset, so they export into
+- **Bends on STEP parts:** an offset's bend fittings carry the segment's `ORCA_STEP` pset, so they export into
   its group.
 - **Runs without ports:** a STEP part has no ports, so `IfcScene.connected_run` takes the parts of the same STEP group
   that touch it, transitively (`step_run`). A cable ladder moves as one; a fence post moves alone.
@@ -41,11 +41,11 @@ opens, checked like any model, and written back as STEP with the fixes. Code: `s
     now minus its origin. `step.export` sets the component's location to parent⁻¹ · T · parent · old.
   - **replace:** an exact part whose extrusion changed (an offset's first piece, a trimmed rail). Its prototype shape
     is rebuilt (`BRepPrimAPI_MakeCylinder` / `MakeBox`, in the component's own frame).
-  - **add:** a new element carrying a part's `Sightline_STEP` label (offset middles, risers, bends) becomes a new part
+  - **add:** a new element carrying a part's `ORCA_STEP` label (offset middles, risers, bends) becomes a new part
     in that part's group, with its name and colour: an exact prism, or a sewn solid from its triangles.
   - Shapes are placed with `BRepBuilderAPI_Transform`, never `.Moved()`: a located shape loses its name and colour on
     write.
-  - It writes `<name>.sightline.step` with names and colours, next to the edited IFC (a zip).
+  - It writes `<name>.orca.step` with names and colours, next to the edited IFC (a zip).
 - **Fix together on one part:** clashes that share a movable element (a pipe through two rails) become one job
   (`plans.merge_shared`): one agent, told about every obstacle. A shared fixed element (a girder hit by three
   services) is not merged.

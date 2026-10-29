@@ -363,7 +363,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .row-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .row-thumb.none { background: var(--bg); cursor: default; }
 
-/* What Sightline is (About.tsx): the start page in the empty viewer, and the "How it works" dialog */
+/* What ORCA is (About.tsx): the start page in the empty viewer, and the "How it works" dialog */
 .about-page { position: absolute; inset: 0; overflow: auto; background: radial-gradient(1200px 500px at 85% -10%, #dce8f4 0%, transparent 60%), var(--bg); }
 .about { --about-bg: var(--bg); position: relative; max-width: 860px; margin: 0 auto; padding: 36px 32px 28px; display: flex; flex-direction: column; gap: 26px; line-height: 1.55; }
 .about p { margin: 0; }
@@ -373,6 +373,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .eyebrow { margin: 0; font: 600 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
 .about h1 { margin: 0; font-size: 28px; line-height: 1.2; letter-spacing: -.01em; text-wrap: balance; }
 .lede { font-size: 15.5px; color: #33414f; }
+.orca-loop { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: -2px 0 0 !important; font: 600 12px var(--mono); letter-spacing: .04em; color: var(--muted); }
+.orca-loop span + span::before { content: "→"; margin-right: 14px; color: var(--line-strong, #b8c2cc); }
+.orca-loop b { color: var(--accent); }
 .about-cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
 .about-cta .btn.big { padding: 11px 18px; font-size: 14.5px; }
 .about-loads { line-height: 1.5; max-width: 52ch; }
@@ -447,7 +450,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .proof-strip .why { font-weight: 500; }
 .impact-bar { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); font-size: 12.5px; }
 
-/* A glow round the viewer while Sightline drives it (pilot.ts): fades in and out, and pulses while on */
+/* A glow round the viewer while ORCA drives it (pilot.ts): fades in and out, and pulses while on */
 .pilot-glow { position: absolute; inset: 0; pointer-events: none; z-index: 3; opacity: 0; transition: opacity .7s ease; }
 .pilot-glow::after { content: ""; position: absolute; inset: 0;
   box-shadow: inset 0 0 0 1.5px rgba(74, 163, 223, .5), inset 0 0 18px 3px rgba(74, 163, 223, .25), inset 0 0 60px 8px rgba(18, 181, 203, .08); }
@@ -627,7 +630,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .context-condition { display: flex; align-items: flex-start; gap: 8px; line-height: 1.45; }
 .context-condition input { flex: none; margin-top: 3px; }
 
-/* Sightline detection (Detect.tsx) */
+/* ORCA detection (Detect.tsx) */
 .detect-slot { display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; }
 .detect-slot > .hint { margin: 0 14px; }
 .detect-tests { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }

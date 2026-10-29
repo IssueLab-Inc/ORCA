@@ -42,7 +42,7 @@ export function statusLine(p: Progress | null, now: number, attempts: Attempt[])
 
 export function Activity({ attempts, progress, now }: { attempts: Attempt[]; progress: Progress | null; now: number }) {
   if (!progress && !attempts.length) {
-    return <p className="hint">Sightline's steps appear here: each idea from Muse Spark, and what the geometry check found.</p>;
+    return <p className="hint">ORCA's steps appear here: each idea from Muse Spark, and what the geometry check found.</p>;
   }
   const running = progress && progress.phase !== "done";
   return (

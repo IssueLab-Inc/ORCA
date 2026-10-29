@@ -115,7 +115,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
     } catch (e) {
       if (!mounted.current || !current()) return;
       const denied = (e as Error).name === "NotAllowedError";
-      setVoice({ state: "idle", since: 0, level: 0, note: denied ? "Microphone access was blocked. Allow it in the browser to talk to Sightline."
+      setVoice({ state: "idle", since: 0, level: 0, note: denied ? "Microphone access was blocked. Allow it in the browser to talk to ORCA."
         : "No microphone found." });
       return;
     }
@@ -197,7 +197,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
       <div className="chat-log" aria-live="polite">
         {!turns.length && (
           <div className="chat-empty">
-            <p className="hint">Ask Sightline about the models and their clashes. It can read clashes, look at their
+            <p className="hint">Ask ORCA about the models and their clashes. It can read clashes, look at their
               images, measure, try fixes and show you what it means. Type, or press the mic and say it.</p>
             {SUGGESTIONS.map((s) => <button key={s} className="suggest" disabled={!ready} onClick={() => send(s)}>{s}</button>)}
           </div>
@@ -228,7 +228,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
               data-tip="Stop and send" data-tip-side="top" style={{ "--level": voice.level } as React.CSSProperties}>
               <Square size={13} aria-hidden /> {Math.floor((Date.now() - voice.since) / 1000)} s</button>
           : <button type="button" className="btn mic" onClick={() => void startListening()} disabled={!ready || busy || voice.state === "transcribing"}
-              aria-label="Speak to Sightline" data-tip="Speak to Sightline (Muse Voice Transcribe)" data-tip-side="top">
+              aria-label="Speak to ORCA" data-tip="Speak to ORCA (Muse Voice Transcribe)" data-tip-side="top">
               {voice.state === "transcribing" ? <i className="spinner" aria-hidden /> : <Mic size={15} aria-hidden />}</button>)}
       </form>
       {voice.state === "listening" && <p className="voice-note live"><i className="rec" aria-hidden /> Listening… say what you want, then press stop.</p>}
