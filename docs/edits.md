@@ -13,6 +13,7 @@ before anyone sees it. This page is the design of the kinds of fix and how a new
 | `offset` | Splits a straight segment either side of an obstacle and takes the middle up or down (or sideways), with bends | Oct 27 |
 | `trim` | Cuts a slender member's end back to butt another's face | Oct 27 |
 | `route` | Holds stretches of a straight segment at offsets (up and/or sideways) in up to 3 steps, with bends | Oct 29 |
+| `resize` | Makes a stretch of a rectangular duct or tray flatter (one face level, wider to carry the same), with transitions | Oct 29 |
 | `penetration` | Asks for an opening where a straight service crosses a wall or slab: a provision for void always, the opening cut when the host's team allows edits | Oct 29 |
 
 ## One registry (Oct 29)
@@ -40,7 +41,8 @@ An option of a newer kind carries `edit` (its parameters, a `summary` and a `key
 ## Ranking
 
 Plain geometry fixes (move, offset, trim, route) rank before a resize (it changes how a service performs), and a
-resize before a penetration (another team builds it): `agent.TIERS`. Then comfortable clearance, the smallest change,
+resize before a penetration (another team builds it): `agent.TIERS`; an opening in a wall or slab before one in
+anything else. Then comfortable clearance, the smallest change,
 the most clearance. A round that verified only a resize or a penetration does not end the search: Muse gets one more
 round to find a plain fix.
 
@@ -217,6 +219,44 @@ review or not advised).
 
 **Demo case:** the cell's C8 (demo-models repo): the plant's 400 V feed drops in a 32 mm conduit into EP-301 through its
 top gland plate (3 mm) with no hole. The fix is a gland hole.
+
+## Resize (Oct 29)
+
+Where an obstacle leaves too little depth above or below a duct or tray and nothing else clears (a ceiling under it, a
+slab over the beam, walls either side), the designer's answer is a flatter section for that stretch, wider so it
+carries the same.
+
+**The shape Muse proposes:** `{"kind": "resize", "move": "A", "split_m": [2.5, 3.5], "depth_m": 0.22, "keep": "bottom"}`.
+ORCA works out the width (`edits.resize_size`):
+- **a rectangular duct** keeps its equivalent diameter (Huebscher, `1.30 (ab)^0.625 / (a+b)^0.25`), the width to the
+  next 5 mm, and is refused flatter than 4:1 ("830 x 200 mm would be 4.1:1 ... no shallower than about 205 mm");
+- **a cable tray** keeps its cross-section, at least 50 mm deep;
+- **refused:** pipes (their size is set by their flow), round ducts, parts from STEP (no profile to change), sloped
+  runs, tilted sections, and a stretch that leaves no room for its transitions.
+
+**Geometry** (`edits.apply_resize`): five pieces through `_build_chain`: the original shortened, a transition fitting
+(`IfcDuctFitting` TRANSITION / `IfcCableCarrierFitting` REDUCER, a closed lofted `IfcTriangulatedFaceSet`, every face
+at most 30° from the run: `transition_length`), the resized middle (a copy with a profile of its own, never the shared
+one, shifted so the `keep` face stays level; its ports at its own centre), a transition back, and the rest. The
+centreline stays put across. `_build_chain` gained straights with their own profile and transition pieces (with where
+their ends' centres sit).
+
+**Checking:** as an offset: the transitions and middle against everything, the ends against the obstacles.
+**Review:** the services designer (`review: "services"`), with the performance line in `also_needs` ("equivalent
+diameter 100% of before, 3.3:1"). Ranked after every plain geometry fix (`TIERS`), and a round that verified only a
+resize gets one more round. Under the requirements a resize is sized by how far its moving face goes.
+
+**What Muse is told** (`agent._resize_text`): when the obstacle is above or below the run, how deep the section can be
+there with the clearance, keeping the far face level, how wide that makes it and what it keeps, and how much run each
+transition takes. Prompt: `construction.md` "resize". Chat and MCP: `check_resize`.
+
+**Checked:** `tests/test_resize.py` (11) on `fixtures.build_resize_fixture` (a 500 x 300 duct 50 mm into a beam with
+a slab above, a ceiling below and walls either side: 735 x 220 mm bottom kept, 30 mm clear). In the browser, uploaded
+through Use your own models, Muse tried a drop and a raise (both fail) and proposed "Flatten duct to 225 mm deep under
+the beam" (710 x 225 mm, verified, 25 mm); accepted in place. No planted demo case.
+
+**Not yet:** round ducts (flat oval), resizing at fittings, and keeping a pressure drop rather than an equivalent
+diameter.
 
 ## Keeping a fix: the model updates in place (Oct 29)
 

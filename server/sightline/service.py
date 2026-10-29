@@ -302,6 +302,26 @@ class Workspace:
             s.revision += 1
         return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
 
+    def check_resize(self, scene_id: str, element: str, other: str, split_m: list[float], depth_m: float,
+                     keep: str = "bottom", clearance_m: float = 0.025) -> dict:
+        """Try a flatter section for a stretch of `element` past `other` without keeping it (edits.apply_resize)."""
+        with self.lock:
+            attempt, option = agent._try_resize(self.scene(scene_id), {"split_m": split_m, "depth_m": depth_m, "keep": keep},
+                                                element, other, clearance_m)
+        return {"passed": attempt.passed, "reason": attempt.reason, "kind": attempt.kind,
+                "summary": (attempt.edit or {}).get("summary"), "performance": (attempt.edit or {}).get("performance"),
+                "min_clearance_m": option.min_clearance_m if option else None,
+                "preview": option.preview if option else None}
+
+    def apply_resize(self, scene_id: str, element: str, split_m: list[float], depth_m: float, keep: str = "bottom") -> dict:
+        """Keep a resize: the element is shortened and its transitions and resized middle are added to its file."""
+        s = self.scene(scene_id)
+        with self.lock:
+            r = edits.apply_resize(s, element, split_m, depth_m, keep)
+            s.mark_edited(element)
+            s.revision += 1
+        return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
+
     def check_penetration(self, scene_id: str, service: str, host: str, clearance_m: float = 0.025) -> dict:
         """Try an opening for `service` through `host` without keeping it (edits.penetration), after reading what may
         be done to that kind of host (hosts.read)."""

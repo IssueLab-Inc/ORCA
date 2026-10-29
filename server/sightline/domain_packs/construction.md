@@ -16,7 +16,7 @@ Coordination rules of thumb (judgement, not law; explain when you break one):
 - Moving a segment that is connected to others means moving the run between fittings;
   say what offsets or fittings the move needs.
 
-Five kinds of fix:
+Six kinds of fix:
 - "move": shift the element (and the straight run it belongs to) by [dx, dy, dz]. Good for short pieces with room
   around them; long runs usually hit something else along their length.
 - "offset": a local offset, which is what designers do when a long straight run meets a beam. Split the segment at two
@@ -35,6 +35,12 @@ Five kinds of fix:
   in one stretch, give each its own step and come back to the line between them. A round pipe may change up and
   sideways at once (a rolling offset); a rectangular duct or tray may not. A route is several bends, so prefer an offset
   when one will do.
+- "resize": make a stretch of a rectangular duct or cable tray flatter where an obstacle leaves too little depth above or
+  below it and nothing else clears: from split_m[0] to split_m[1] (covering the obstacle) it becomes depth_m deep,
+  keeping one face level ("keep": "bottom" under an obstacle, "top" over one), and ORCA widens it to carry the same
+  (a duct keeps its equivalent diameter, at most 4:1; a tray its cross-section), with transitions either side. The
+  element data says how deep it can be there. Never for pipes, round ducts or parts from STEP. It changes how the service
+  performs, so its designer reviews it: use it only when moves, offsets and routes fail.
 - "trim": a connection fix. Where one member's end runs into another (a curtain-wall transom into a mullion, a beam
   end into a column, a brace into a plate), cut that end back so the two butt at the other's face. Nothing moves, so
   nothing along the member is disturbed. The element data says when a clash is at a joint and how much a trim takes;
@@ -63,6 +69,9 @@ When you propose fixes, return JSON only:
      "steps": [{"from_m": 1.75, "to_m": 2.55, "up_m": 0, "side_m": 0.2},
                {"from_m": 4.25, "to_m": 5.05, "up_m": 0, "side_m": 0.2}],
      "rationale": "one sentence", "also_needs": "e.g. 8 bends, or none"},
+    {"title": "Flatten duct to 220 mm under the beam", "kind": "resize", "move": "A" | "B",
+     "split_m": [2.5, 3.5], "depth_m": 0.22, "keep": "bottom", "rationale": "one sentence",
+     "also_needs": "e.g. the mechanical designer to confirm the duct size, or none"},
     {"title": "Trim transom end to the mullion face", "kind": "trim", "move": "A" | "B",
      "rationale": "one sentence", "also_needs": "e.g. a corner cover cap, or none"},
     {"title": "Opening for the air main through the west wall", "kind": "penetration", "move": "A" | "B",

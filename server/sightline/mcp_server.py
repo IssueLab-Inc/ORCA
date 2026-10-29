@@ -31,7 +31,7 @@ from .service import Workspace
 INSTRUCTIONS = """ORCA is an AI design coordinator for 3D models (buildings from IFC, machines from STEP). It finds
 clashes between models, proposes fixes that edit real model elements, and checks every fix with geometry before
 anyone sees it. Start with get_session to see what is open. Then report_summary or list_clashes, get_clash and
-get_clash_images to understand a clash, and check_move / check_offset / check_route / check_penetration to test your own idea, or propose_fixes to run
+get_clash_images to understand a clash, and check_move / check_offset / check_route / check_resize / check_penetration to test your own idea, or propose_fixes to run
 ORCA's fix agent. Nothing changes the model until apply_fix or apply_plan. Distances are metres, Z up; a negative
 distance is an overlap. When a person has ORCA open with this link, show_clash and set_view move their view and
 capture_view shows you what they see."""
@@ -345,6 +345,16 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         axes (up; side = to the left of its direction seen from above). Steps that share a boundary change straight
         from one offset to the next; each change is one axis at a time. 90° bends join them."""
         return run(ctx, "check_route", {"element": element, "obstacle": obstacle, "steps": steps})
+
+    @tool(read_only=True)
+    def check_resize(element: str, obstacle: str, split_m: list[float], depth_m: float, ctx: Context,
+                     keep: str = "bottom") -> dict:
+        """Check a flatter section for a stretch of the straight rectangular duct or cable tray `element` past
+        `obstacle` without keeping it: from split_m[0] to split_m[1] (metres along it) it becomes depth_m deep and as
+        wide as keeps its equivalent diameter (a duct, at most 4:1) or cross-section (a tray), the `keep` face (bottom,
+        top or centre) level, with transitions either side. Its services designer reviews it."""
+        return run(ctx, "check_resize", {"element": element, "obstacle": obstacle, "split_m": split_m, "depth_m": depth_m,
+                                         "keep": keep})
 
     @tool(read_only=True)
     def check_penetration(element: str, host: str, ctx: Context) -> dict:

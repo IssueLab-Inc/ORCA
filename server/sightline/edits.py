@@ -443,12 +443,183 @@ def apply_route(scene: IfcScene, global_id: str, steps: list[dict], corners: str
     return Route(global_id, steps, gids, "bends" if use_bends else "square")
 
 
+# ------------------------------------------------------------------------------------------------- resize
+
+RESIZABLE = ("IfcDuctSegment", "IfcCableCarrierSegment")
+TRANSITION_TYPE = {"IfcDuctSegment": "TRANSITION", "IfcCableCarrierSegment": "REDUCER", "IfcPipeSegment": "TRANSITION",
+                   "IfcCableSegment": "NOTDEFINED"}
+TRANSITION_ANGLE = np.radians(30)   # each face of a transition turns at most this much from the run
+MAX_ASPECT = 4.0                    # a rectangular duct no flatter than 4:1 (losses and noise climb past it)
+MIN_TRAY_DEPTH_M = 0.05             # a cable tray keeps sides at least this high
+SIZE_STEP_M = 0.005                 # new sizes to 5 mm
+
+
+@dataclass
+class Resize:
+    element: str          # the segment that was split; it keeps the first piece
+    split_m: list[float]  # the resized stretch, metres along the run from its start
+    width_m: float        # the new section, across and up
+    depth_m: float
+    keep: str             # the face that stays level: "bottom", "top" or "centre"
+    before: list[float]   # [width, depth] before
+    performance: str      # what the new section keeps: "equivalent diameter 100%, 3.3:1"
+    pieces: list[str]     # GlobalIds in run order: the original, transition, resized middle, transition, end
+
+
+def equivalent_diameter(width: float, depth: float) -> float:
+    """A rectangular duct's equivalent diameter (Huebscher): the round duct with the same friction loss at the same
+    airflow."""
+    return 1.30 * (width * depth) ** 0.625 / (width + depth) ** 0.25
+
+
+def _resizable(scene: IfcScene, element):
+    """(file index, placement, item, origin, run direction, profile X, profile Y, width m, depth m, up, side) of a
+    level, straight, rectangular duct or tray; else Unsupported with why."""
+    if not any(element.is_a(c) for c in RESIZABLE):
+        what = "a pipe's size is set by its flow" if element.is_a("IfcPipeSegment") else f"{element.is_a()} is not a duct or tray"
+        raise Unsupported(f"only rectangular ducts and cable trays are resized here ({what})")
+    if step_source(element):
+        raise Unsupported("a part from STEP keeps its section (its file has no profile to change)")
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    if not item.SweptArea.is_a("IfcRectangleProfileDef"):
+        raise Unsupported("only a rectangular section is resized here (a round duct keeps its size)")
+    if abs(float(d @ UP)) > 1e-3:
+        raise Unsupported("only a level run is resized here")
+    s = scene.unit_scales[i]
+    sx, sy = _profile_size(item.SweptArea)
+    if abs(py @ UP) > 0.999:
+        width, depth, up, side = sx * s, sy * s, py * np.sign(py @ UP), px
+    elif abs(px @ UP) > 0.999:
+        width, depth, up, side = sy * s, sx * s, px * np.sign(px @ UP), py
+    else:
+        raise Unsupported("the section is tilted: only an upright one is resized")
+    return i, place, item, origin, d, px, py, width, depth, up, side
+
+
+def resize_size(scene: IfcScene, global_id: str, depth_m: float) -> dict:
+    """The section a duct or tray takes at a new, smaller depth, keeping what it carries: a duct keeps its equivalent
+    diameter (the width solved to the next 5 mm), at most 4:1; a tray keeps its cross-section, at least 50 mm deep.
+    Returns {"width_m", "depth_m", "before": [w, d], "performance"}; Unsupported when it cannot."""
+    element = scene.entity(global_id)
+    *_, width, depth, _, _ = _resizable(scene, element)
+    depth_m = round(float(depth_m), 4)
+    if not 0 < depth_m < depth - 1e-4:
+        raise Unsupported(f"a resize makes it shallower: {depth_m * 1000:.0f} mm is not less than its {depth * 1000:.0f} mm")
+    step = lambda x: round(float(np.ceil(round(x / SIZE_STEP_M, 6)) * SIZE_STEP_M), 4)
+    if element.is_a("IfcCableCarrierSegment"):
+        if depth_m < MIN_TRAY_DEPTH_M - 1e-6:
+            raise Unsupported(f"a tray keeps sides at least {MIN_TRAY_DEPTH_M * 1000:.0f} mm high")
+        w = step(width * depth / depth_m)
+        return {"width_m": w, "depth_m": depth_m, "before": [round(width, 4), round(depth, 4)],
+                "performance": f"cross-section {w * depth_m / (width * depth):.0%} of before"}
+    target = equivalent_diameter(width, depth)
+    w = step(width_for(width, depth, depth_m))
+    aspect = w / depth_m
+    if aspect > MAX_ASPECT + 1e-6:
+        least = depth_m
+        while least < depth and width_for(width, depth, least) / least > MAX_ASPECT:
+            least += SIZE_STEP_M
+        raise Unsupported(f"{w * 1000:.0f} x {depth_m * 1000:.0f} mm would be {aspect:.1f}:1, flatter than "
+                          f"{MAX_ASPECT:.0f}:1 (no shallower than about {least * 1000:.0f} mm)")
+    return {"width_m": w, "depth_m": depth_m, "before": [round(width, 4), round(depth, 4)],
+            "performance": f"equivalent diameter {equivalent_diameter(w, depth_m) / target:.0%} of before, {aspect:.1f}:1"}
+
+
+def width_for(width: float, depth: float, depth_m: float) -> float:
+    """The width that keeps a duct's equivalent diameter at a new depth (unrounded)."""
+    target, lo, hi = equivalent_diameter(width, depth), width, width * 20
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if equivalent_diameter(mid, depth_m) < target else (lo, mid)
+    return hi
+
+
+def transition_length(w0: float, h0: float, w1: float, h1: float, keep: str) -> float:
+    """How long a transition from w0 x h0 to w1 x h1 (keeping the `keep` face level) is, so no face turns more than
+    30° from the run (at least 50 mm)."""
+    off = {"bottom": (h1 - h0) / 2, "top": (h0 - h1) / 2}.get(keep, 0.0)
+    moves = [abs(off + h1 / 2 - h0 / 2), abs(off - h1 / 2 + h0 / 2), abs(w1 - w0) / 2]
+    return max(max(moves) / np.tan(TRANSITION_ANGLE), MIN_PIECE_M)
+
+
+def resize_summary(split_m: list[float], width_m: float, depth_m: float, keep: str) -> str:
+    return (f"resize {split_m[0]:.2f}-{split_m[1]:.2f} m to {width_m * 1000:.0f} x {depth_m * 1000:.0f} mm"
+            + (f" ({keep} kept level)" if keep in ("bottom", "top") else ""))
+
+
+def _loft(p0, d, length, side, up, a: tuple, b: tuple) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
+    """A closed lofted transition between two rectangles square to `d`: `a` = (width, depth, centre offset up) at
+    `p0`, `b` at p0 + d·length. Faces point outward."""
+    corners = ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    verts = np.array([p0 + d * t + side * (sx * w / 2) + up * (off + sy * h / 2)
+                      for t, (w, h, off) in ((0.0, a), (length, b)) for sx, sy in corners])
+    faces = [(k, (k + 1) % 4, 4 + (k + 1) % 4) for k in range(4)] + [(k, 4 + (k + 1) % 4, 4 + k) for k in range(4)]
+    faces += [(0, 1, 2), (0, 2, 3), (4, 5, 6), (4, 6, 7)]
+    centre = verts.mean(axis=0)
+    out = []
+    for f in faces:   # convex: a face points outward when its normal leaves the centre
+        n = np.cross(verts[f[1]] - verts[f[0]], verts[f[2]] - verts[f[0]])
+        out.append(f if n @ (verts[list(f)].mean(axis=0) - centre) > 0 else (f[0], f[2], f[1]))
+    return verts, out
+
+
+def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m: float, keep: str = "bottom") -> Resize:
+    """Resize a stretch of a level rectangular duct or tray: from `split_m[0]` to `split_m[1]` (metres along it) it
+    takes the section `resize_size` gives at `depth_m`, with the `keep` face level ("bottom", "top" or "centre") and
+    the same centreline across, joined to the rest by transition fittings whose faces turn at most 30°. The element
+    keeps the first piece; the resized middle has a profile of its own (never the shared one). Edits the model in
+    place; wrap in `trial` to try it and undo."""
+    element = scene.entity(global_id)
+    i, place, item, origin, d, px, py, w0, h0, up, side = _resizable(scene, element)
+    s = scene.unit_scales[i]
+    size = resize_size(scene, global_id, depth_m)
+    w1, h1 = size["width_m"], size["depth_m"]
+    if keep not in ("bottom", "top", "centre"):
+        raise Unsupported("say which face stays level: bottom, top or centre")
+    off = {"bottom": (h1 - h0) / 2, "top": (h0 - h1) / 2, "centre": 0.0}[keep]
+    lt = transition_length(w0, h0, w1, h1, keep)
+    try:
+        a, b = sorted(float(x) for x in split_m)
+    except (TypeError, ValueError):
+        raise Unsupported("a resize needs two split points") from None
+    length = item.Depth * s
+    if a - lt < MIN_PIECE_M - 1e-9 or b + lt > length - MIN_PIECE_M + 1e-9 or b - a < MIN_PIECE_M:
+        raise Unsupported(f"the resized stretch {a:.2f}-{b:.2f} m leaves too little run: each transition takes "
+                          f"{lt:.2f} m and {MIN_PIECE_M * 1000:.0f} mm must remain at each end (run {length:.2f} m)")
+    profile_x = px.copy()
+    position = getattr(item.SweptArea, "Position", None)
+    if position is not None and position.RefDirection is not None:
+        local_x = np.asarray(position.RefDirection.DirectionRatios, dtype=float)
+        local_x /= np.linalg.norm(local_x)
+        profile_x = px * local_x[0] + py * local_x[1]
+    prof = item.SweptArea
+    across_x = abs(px @ side) > 0.999   # the profile's X runs across (width), else up (depth)
+    xdim, ydim = (w1, h1) if across_x else (h1, w1)
+    resized = scene.models[i].createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+                                                           float(xdim / s), float(ydim / s))
+    A, B, LT = a / s, b / s, lt / s
+    lift = up * (off / s)
+    v1, f1 = _loft(origin + d * (A - LT), d, LT, side, up, (w0 / s, h0 / s, 0.0), (w1 / s, h1 / s, off / s))
+    v2, f2 = _loft(origin + d * B, d, LT, side, up, (w1 / s, h1 / s, off / s), (w0 / s, h0 / s, 0.0))
+    still = np.zeros(3)
+    pieces = [("straight", origin, d, A - LT),
+              ("transition", origin + d * (A - LT), d, LT, v1, f1, (still, lift)),
+              ("straight", origin + d * A + lift, d, B - A, resized),
+              ("transition", origin + d * B, d, LT, v2, f2, (lift, still)),
+              ("straight", origin + d * (B + LT), d, item.Depth - B - LT)]
+    gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces)
+    return Resize(global_id, [a, b], w1, h1, keep, size["before"], size["performance"], gids)
+
+
 def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple]) -> list[str]:
     """Turn `element` into the chain of `pieces` (world, file units): the first piece is the element itself, shortened
     (it must be the straight from its origin along `d`); straights are copies of it with the same profile, bends are
     new fittings. Ports are added and chained in order, the last piece takes over the element's far connection, and
-    the authored external port frames and flows are kept. Pieces: ("straight", start, axis, length) and ("bend", start,
-    from, to, radius, width, depth) (width across the bend's plane, depth in it). Returns the GlobalIds in order."""
+    the authored external port frames and flows are kept. Pieces: ("straight", start, axis, length[, profile]) (a
+    profile of its own: a resized stretch), ("bend", start, from, to, radius, width, depth) (width across the bend's
+    plane, depth in it) and ("transition", start, axis, length, verts, faces) (a lofted change of section, world
+    triangles in file units[, (start shift, end shift)]: where its ends' centres sit off the run's line). Returns the
+    GlobalIds in order."""
     i = scene.index_of(element.GlobalId)
     model, s = scene.models[i], scene.unit_scales[i]
     L = item.Depth
@@ -503,10 +674,10 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
 
     item.Depth = pieces[0][3]
     chain, ends = [element], [(pieces[0][1], pieces[0][1] + pieces[0][2] * pieces[0][3])]
-    straights = bends = 0
+    straights = bends = transitions = 0
     for piece in pieces[1:]:
         if piece[0] == "straight":
-            _, start, axis, length = piece
+            _, start, axis, length, *own = piece
             straights += 1
             part = ifcopenshell.api.run("root.copy_class", model, product=element)
             if element.Tag:
@@ -515,10 +686,23 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
             ref = section_ref(axis)
             position = model.createIfcAxis2Placement3D(
                 _point(model, local_start), _dir(model, inv[:3, :3] @ axis), _dir(model, inv[:3, :3] @ ref))
-            solid = model.createIfcExtrudedAreaSolid(item.SweptArea, position, model.createIfcDirection((0.0, 0.0, 1.0)),
-                                                     float(length))
+            solid = model.createIfcExtrudedAreaSolid(own[0] if own else item.SweptArea, position,
+                                                     model.createIfcDirection((0.0, 0.0, 1.0)), float(length))
             rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "SweptSolid", [solid])
             ends.append((start, start + axis * length))
+        elif piece[0] == "transition":
+            _, start, axis, length, verts, faces, *shift = piece
+            shift = shift[0] if shift else (np.zeros(3), np.zeros(3))
+            transitions += 1
+            part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} transition",
+                                f"{element.Tag}-TR{transitions}" if element.Tag else None,
+                                TRANSITION_TYPE[element.is_a()])
+            local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
+            solid = model.createIfcTriangulatedFaceSet(
+                model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]), None, True,
+                [[int(x) + 1 for x in f] for f in faces], None)
+            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "Tessellation", [solid])
+            ends.append((start + shift[0], start + axis * length + shift[1]))
         else:
             _, start, t0, t1, R, w, t = piece
             bends += 1
@@ -585,11 +769,11 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
     return gids
 
 
-def _new_fitting(model, segment, place, name: str, tag: str | None):
-    """A bend fitting for `segment`: its fitting class, type BEND, in the same storey and systems, with two ports and
-    its own placement (the segment's frame, so bend vertices share the segment's local coordinates)."""
+def _new_fitting(model, segment, place, name: str, tag: str | None, predefined: str = "BEND"):
+    """A fitting for `segment` (a bend, or a transition): its fitting class, in the same storey and systems, with two
+    ports and its own placement (the segment's frame, so the fitting's vertices share the segment's local coordinates)."""
     fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=FITTING_CLASS[segment.is_a()],
-                                   predefined_type="BEND", name=name)
+                                   predefined_type=predefined, name=name)
     if tag:
         fitting.Tag = tag
     container = ifcopenshell.util.element.get_container(segment)

@@ -819,3 +819,18 @@ Which hosts take an opening (Oct 29, owner decision; `docs/edits.md` "Which host
   34-41 s); `evals/step_cell.py` C7 and C8 (Ø34 mm fitted gland hole, kept, exported plate cut); answer key 3/3 first try
   at Rev04 heights; 449 server tests, 59 web tests; C8 in the browser accepted in place.
 
+Resize (Oct 29, owner decision; `docs/edits.md` "Resize", code `edits.resize_size` / `apply_resize`,
+`agent._try_resize`): the sixth kind of fix, a flatter section where an obstacle leaves too little depth.
+- **Shape:** `{"kind": "resize", "split_m": [a, b], "depth_m", "keep": "bottom" | "top" | "centre"}`; ORCA picks the
+  width: a duct keeps its equivalent diameter (Huebscher, to 5 mm, at most 4:1), a tray its cross-section (at least
+  50 mm deep). Pipes, round ducts, STEP parts, sloped runs refused with the reason.
+- **Geometry:** original, transition (`IfcDuctFitting` TRANSITION / `IfcCableCarrierFitting` REDUCER, lofted mesh, faces
+  at most 30°), resized middle (its own profile, keep face level), transition, rest; through `_build_chain`, which now
+  takes straights with their own profile and transition pieces.
+- **Review** services, performance line in `also_needs`; tier 1. Muse is told the depth that fits over or under the
+  obstacle and the width it makes (`_resize_text`). Everywhere: `TRIES`/`PARAMS`/`IN_TRIAL`/`KEEP`, `Workspace.check_resize`
+  / `apply_resize`, chat and MCP `check_resize`.
+- **Checked:** `tests/test_resize.py` (11, `fixtures.build_resize_fixture`); answer key 3/3 first try at Rev04 heights;
+  460 server tests; in the browser on the uploaded fixture Muse's only verified fix was "Flatten duct to 225 mm deep
+  under the beam" (710 x 225 mm), accepted in place. No planted demo case.
+
