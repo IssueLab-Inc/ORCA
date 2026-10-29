@@ -15,28 +15,46 @@ export function IconButton({ icon: Icon, label, shortcut, active, disabled, onCl
   );
 }
 
-/** A small menu that opens beside its trigger and closes on outside click or Escape. */
+/** A small menu that opens beside its trigger and closes on outside click or Escape. On a phone it opens as a sheet
+ * from the bottom of the screen, with its title and a close button (index.css, "Responsive"). */
 export function Popover({ icon, label, shortcut, children, tip = "right", text }: {
   icon: LucideIcon; label: string; shortcut?: string; children: (close: () => void) => React.ReactNode; tip?: "right" | "bottom";
   text?: string;  // show a text label beside the icon (for the few actions people look for by name)
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const off = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const off = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", off);
+    document.addEventListener("pointerdown", off);
     document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("keydown", esc); };
+    return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", esc); };
   }, [open]);
+  // Kept inside the window: a menu that would run off the right edge opens to the left of its trigger's edge instead.
+  useLayoutEffect(() => {
+    const m = menu.current;
+    if (!open || !m || getComputedStyle(m).position === "fixed") return;
+    m.style.translate = "";
+    const over = m.getBoundingClientRect().right - (window.innerWidth - 8);
+    if (over > 0) m.style.translate = `${-Math.round(over)}px 0`;
+  }, [open]);
+  const close = () => setOpen(false);
   return (
-    <div className={`pop pop-${tip}`} ref={ref}>
+    <div className={`pop pop-${tip} ${open ? "open" : ""}`} ref={ref}>
       {text
         ? <button type="button" className={`btn ghost ${open ? "on" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}>
             {(() => { const I = icon; return <I size={16} strokeWidth={1.8} aria-hidden />; })()} {text}</button>
         : <IconButton icon={icon} label={label} shortcut={shortcut} active={open} onClick={() => setOpen(!open)} tip={tip} />}
-      {open && <div className="pop-menu" role="menu">{children(() => setOpen(false))}</div>}
+      {open && <>
+        <div className="pop-scrim" aria-hidden onClick={close} />
+        <div className="pop-menu" role="menu" aria-label={label} ref={menu}>
+          <div className="pop-sheet-head"><b>{text ?? label}</b>
+            <button type="button" className="ibtn" aria-label="Close" onClick={close}><span aria-hidden>✕</span></button></div>
+          {children(close)}
+        </div>
+      </>}
     </div>
   );
 }
@@ -65,9 +83,35 @@ export function Tooltips() {
     };
     const hide = () => { current = null; setTip(null); };
     const over = (e: PointerEvent) => { if (e.pointerType !== "touch") show(e.target); };
+    // Touch has no hover. A tap on a purely informational element (data-tip-tap: an info icon, a chip) shows its tip
+    // for a few seconds; pressing and holding any control with a tip (an icon button) shows what it does, as phones do,
+    // without doing it.
+    let touched = false, timer = 0, hold = 0, held: HTMLElement | null = null;
+    const showFor = (el: HTMLElement) => {
+      current = el; setTip({ el, text: el.dataset.tip!, side: (el.dataset.tipSide as Side) || "top" });
+      window.clearTimeout(timer); timer = window.setTimeout(hide, 3500);
+    };
+    const press = (e: PointerEvent) => {
+      touched = e.pointerType === "touch"; held = null; window.clearTimeout(hold);
+      const el = touched ? (e.target as HTMLElement | null)?.closest?.("[data-tip]") as HTMLElement | null : null;
+      if (el?.dataset.tip && !el.closest(".stage canvas")) hold = window.setTimeout(() => { held = el; showFor(el); navigator.vibrate?.(8); }, 500);
+    };
+    const release = () => window.clearTimeout(hold);
+    const swallow = (e: Event) => { if (held) { e.preventDefault(); e.stopPropagation(); if (e.type === "click") held = null; } };
+    const tap = (e: MouseEvent) => {
+      if (!touched) return;
+      const el = (e.target as HTMLElement | null)?.closest?.("[data-tip-tap]") as HTMLElement | null;
+      if (el?.dataset.tip) showFor(el);
+    };
     const focus = (e: FocusEvent) => { if ((e.target as HTMLElement).matches?.(":focus-visible")) show(e.target); };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") hide(); };
     document.addEventListener("pointerover", over);
+    document.addEventListener("pointerdown", press, true);
+    document.addEventListener("pointerup", release, true);
+    document.addEventListener("pointercancel", release, true);
+    document.addEventListener("click", swallow, true);
+    document.addEventListener("contextmenu", swallow, true);
+    document.addEventListener("click", tap);
     document.addEventListener("focusin", focus);
     document.addEventListener("focusout", hide);
     document.addEventListener("pointerdown", hide, true);
@@ -76,6 +120,13 @@ export function Tooltips() {
     window.addEventListener("blur", hide);
     return () => {
       document.removeEventListener("pointerover", over);
+      document.removeEventListener("pointerdown", press, true);
+      document.removeEventListener("pointerup", release, true);
+      document.removeEventListener("pointercancel", release, true);
+      document.removeEventListener("click", swallow, true);
+      document.removeEventListener("contextmenu", swallow, true);
+      document.removeEventListener("click", tap);
+      window.clearTimeout(timer); window.clearTimeout(hold);
       document.removeEventListener("focusin", focus);
       document.removeEventListener("focusout", hide);
       document.removeEventListener("pointerdown", hide, true);
@@ -88,7 +139,7 @@ export function Tooltips() {
   // Leaving the element (or it being removed) hides the tip.
   useEffect(() => {
     if (!tip) return;
-    const leave = (e: PointerEvent) => { if (!tip.el.contains(e.relatedTarget as Node | null)) setTip(null); };
+    const leave = (e: PointerEvent) => { if (e.pointerType !== "touch" && !tip.el.contains(e.relatedTarget as Node | null)) setTip(null); };
     tip.el.addEventListener("pointerleave", leave);
     const gone = window.setInterval(() => { if (!tip.el.isConnected) setTip(null); }, 300);
     return () => { tip.el.removeEventListener("pointerleave", leave); window.clearInterval(gone); };
