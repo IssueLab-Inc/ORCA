@@ -662,7 +662,7 @@ Next, in order.
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
    at fittings.
 3. ✅ Viewer: context/x-ray modes, section box, measure (above). ✅ A/B/C capture in the browser (detected clashes).
-   Still to do: plan view.
+   Still to do: plan, section and elevation views beside the 3D view, up to four (design in `docs/views.md`, Oct 29).
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ ORCA
