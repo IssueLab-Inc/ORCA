@@ -1,4 +1,4 @@
-import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LocateFixed, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
@@ -25,6 +25,9 @@ import { Popover, Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
 import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
+import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
+import { SheetBar } from "./Sheet";
+import { MenuSheet } from "./AppMenu";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
@@ -36,6 +39,16 @@ export function App() {
   // Side panel widths: dragged by their inner edge, remembered in this browser, double-click to reset.
   const [widths, setWidths] = useState(() => ({ left: stored("sightline.left-w", 310), right: stored("sightline.right-w", 380) }));
   const [resizing, setResizing] = useState<"left" | "right" | null>(null);
+  // Phones and tablets (layout.ts, docs/mobile.md): the clash list in a bottom sheet's tab (phone) or a drawer (tablet),
+  // how far the phone's sheet is pulled up, and the header's menu. The sheet follows what happens (see `followed`).
+  const layout = useLayout();
+  const compact = layout === "phone" || layout === "tablet";
+  const coarse = useCoarse();
+  const [listOpen, setListOpen] = useState(false);
+  const [snap, setSnap] = useState<Snap>("half");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const longPress = useRef<{ x: number; y: number; timer: number; fired: boolean } | null>(null);
   // While the agent works it drives the viewer (pilot.ts); touching the view takes it back.
   const [pilotStatus, setPilotStatus] = useState<PilotStatus | null>(null);
   const sides = useRef<string[]>([]);
@@ -816,12 +829,12 @@ export function App() {
    * orbit, never a pick. */
   function onClick(ev: React.MouseEvent) {
     const d = down.current;
-    if (d && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 5) return;
+    if (d && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > (coarse ? 10 : 5)) return;
+    if (longPress.current?.fired) { longPress.current = null; return; }  // the long press already picked
     const hit = viewer.current?.pickAt(ev.nativeEvent);
     if (ev.detail === 2) {
       if (!hit || hit.globalId === a) return;
-      if (!a || (a && b)) { setA(hit.globalId); setB(null); } else setB(hit.globalId);
-      setClash(null); resetWork();
+      pickSide(hit.globalId);
       return;
     }
     if (tool.measure) {
@@ -834,6 +847,49 @@ export function App() {
     if (sceneId) api.element(sceneId, hit.globalId)
       .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === hit.globalId ? { ...s, info } : s)); })
       .catch(() => undefined);
+  }
+
+  /** Pick element A, then B (a double click, a long press, or Set as A / B on its card). */
+  function pickSide(gid: string, side: "a" | "b" = !a || (a && b) ? "a" : "b") {
+    if (side === "a") { setA(gid); setB(null); } else setB(gid);
+    setClash(null); resetWork();
+    if (compact) {  // say what comes next, and show the pair once it is whole
+      setSelected(null);
+      flash(side === "a" ? "A set. Now pick element B: tap it, then Set as B." : "B set. Propose fixes, below.");
+      if (side === "b") { setListOpen(false); if (tab === "chat") setTab("clash"); if (snap === "peek") setSnap("half"); }
+    }
+  }
+
+  function flash(text: string) {
+    setToast(text);
+    window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setToast(null), 2800);
+  }
+  const flashTimer = useRef(0);
+
+  /** A long press (half a second, finger still) on a touch screen picks A then B, as a double click does. */
+  function pressStart(e: React.PointerEvent) {
+    down.current = { x: e.clientX, y: e.clientY };
+    if (e.pointerType !== "touch" || tool.measure) return;
+    window.clearTimeout(longPress.current?.timer);
+    const at = { clientX: e.clientX, clientY: e.clientY } as MouseEvent;
+    const press = { x: e.clientX, y: e.clientY, fired: false, timer: 0 };
+    press.timer = window.setTimeout(() => {
+      const hit = viewer.current?.pickAt(at);
+      if (!hit || hit.globalId === a) return;
+      press.fired = true;
+      navigator.vibrate?.(10);
+      pickSide(hit.globalId);
+    }, 500);
+    longPress.current = press;
+  }
+  function pressMove(e: React.PointerEvent) {
+    const p = longPress.current;
+    if (p && !p.fired && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) { window.clearTimeout(p.timer); longPress.current = null; }
+  }
+  function pressEnd() {
+    const p = longPress.current;
+    if (p && !p.fired) { window.clearTimeout(p.timer); longPress.current = null; }
   }
 
   function toggle(k: "edges" | "section" | "measure") {
@@ -1537,6 +1593,37 @@ export function App() {
   const landing = !stats && !report;
   const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
+  // Phones and tablets: the sheet (or drawer) follows what happens, so the panel people need is the one showing. The
+  // list when a report or the models open, the clash once one is picked, out of the way while ORCA drives the model,
+  // back up with the result. Moving the sheet by hand always wins until the next thing happens.
+  const followed = useRef<{ report: string | null; models: boolean; clash: string | null; working: boolean }>({ report: null, models: false, clash: null, working: false });
+  const fixing = proposing || planning || contextWorking;
+  useEffect(() => {
+    const f = followed.current, seen: Happening[] = [];
+    if (report && report.id !== f.report) seen.push("report");
+    else if (stats && !f.models && !report) seen.push("models");
+    if (clash && clash.id !== f.clash) seen.push("select");
+    if (fixing && !f.working) seen.push("work");
+    if (!fixing && f.working) seen.push("result");
+    followed.current = { report: report?.id ?? null, models: !!stats, clash: clash?.id ?? null, working: fixing };
+    if (!compact) return;
+    let list: boolean | null = null, next = snap;
+    for (const what of seen) {
+      const r = follow(what, next);
+      if (r.list != null) list = r.list;
+      if (r.snap) next = r.snap;
+    }
+    if (list != null) setListOpen(list);
+    if (next !== snap) setSnap(next);
+    // With a result, the options come into view in the pane (only the pane scrolls, never the page).
+    if (seen.includes("result")) requestAnimationFrame(() => {
+      const pane = document.querySelector<HTMLElement>(".pane.right"), el = pane?.querySelector<HTMLElement>(".card, .nofix, .recommended");
+      if (!pane || !el) return;
+      const top = el.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+      if (top < 0 || top > pane.clientHeight - 80) pane.scrollTo({ top: pane.scrollTop + top - 12, behavior: "smooth" });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compact, report?.id, stats, clash?.id, fixing]);
   // Read the patterns as soon as they are found, once per report and models, unless a proposal or plan is running then
   // (it is tried again when that ends). A failure leaves the Explain button for a manual try.
   useEffect(() => {
@@ -1608,6 +1695,16 @@ export function App() {
     fixPipe: () => { if (tourPipes.length) { setTab("plan"); void runPlan({ clash_ids: tourPipes.map((c) => c.id) }); } },
     compare: setCompare,
     overview: () => { setViewPlan(false); viewer.current?.preview([]); viewer.current?.fitAll(); },
+    reveal: (sel, el) => {
+      if (!compact) return;
+      if (!el) { if (/data-tour=["']?(report|export|requirements)\b/.test(sel) && layout === "phone") setMenuOpen(true); return; }
+      if (el.closest(".pane.left")) { setListOpen(true); if (snap === "peek") setSnap("half"); }
+      else if (el.closest(".pane.right")) {
+        setListOpen(false);
+        if (el.closest(".chat-slot")) setTab("chat");
+        if (layout === "phone" && snap === "peek") setSnap("half");
+      }
+    },
     closeReport: () => setDocOpen(false),
     replay: (what) => { if (what === "plan") void replayPlan(); else if (what === "pipe") void replayPlan("pipe"); else void replayPropose(what); },
     ask: (send) => { setTab("chat"); setChatAsk((q) => ({ text: TOUR_QUESTION, send, n: (q?.n ?? 0) + 1 })); },
@@ -1619,7 +1716,7 @@ export function App() {
   };
 
   const compareBar = (option || (plan && viewPlan && planOptions.length > 0) || (activeContext && contextProposal)) && (
-    <div className="compare" onClick={(e) => e.stopPropagation()}>
+    <div className="compare" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
       <div className="seg" role="group" aria-label="Compare before and after">
         {(["before", "after", "both"] as const).map((m) => (
           <button key={m} className={compare === m ? "on" : ""} onClick={() => setCompare(m)} aria-pressed={compare === m}>
@@ -1649,56 +1746,118 @@ export function App() {
     </div>
   );
 
+  // The right pane's tabs, also the phone sheet's Fix / Plan / Chat.
+  const showClashTab = () => { setListOpen(false); setTab("clash"); setViewPlan(false); setViewContext(false); };
+  const showPlanTab = () => {
+    setListOpen(false); clearManual();
+    setTab("plan"); setViewContext(planKind === "context" && !!context); setViewPlan(planKind === "batch" && !!(plan || planRun));
+  };
+  const showChatTab = () => { setListOpen(false); setTab("chat"); };
+  const raise = () => { if (snap === "peek") setSnap("half"); };
+  // The next clash still open after the selected one (the report's order), for "Next clash" once one is done.
+  const nextClash = (() => {
+    if (!report || !clash || !matches) return null;
+    const list = shownReport?.clashes ?? report.clashes, at = list.findIndex((c) => c.id === clash.id);
+    const open = (c: ReportClash) => c.id !== clash.id && !fixes[c.id] && !reviewed[c.id] && !!matches[c.id]?.a && !!matches[c.id]?.b;
+    return list.slice(at + 1).find(open) ?? list.slice(0, Math.max(0, at)).find(open) ?? null;
+  })();
+  // The phone sheet's peek line: what is happening now, and the one next step, so the sheet is useful folded down.
+  const peekLine: { text: React.ReactNode; live?: boolean; action?: { label: string; run: () => void; disabled?: boolean; tour?: string } } =
+    busy ? { text: busy, live: true }
+      : detecting ? { text: detecting.phase, live: true }
+      : proposing ? { text: statusLine(progress, now, proposal?.attempts ?? []), live: true }
+      : planning ? { text: "ORCA is building a plan…", live: true }
+      : contextWorking ? { text: "Exploring a wider fix…", live: true }
+      : viewPlan && plan ? { text: planOptions.length ? `Plan: ${planOptions.length} fix${planOptions.length === 1 ? "" : "es"} ready to review` : "Plan: nothing to accept yet",
+        action: { label: "Review", run: () => { showPlanTab(); raise(); } } }
+      : option && clash ? { text: <><b>{chosen! + 1}</b> · {option.title}</>,
+        action: { label: option.cleanup ? "Accept cleanup" : "Accept", run: () => void accept(option), disabled: !!busy, tour: "accept" } }
+      : proposal && progress?.phase === "done" && !proposal.options.length ? { text: "No verified fix: see why",
+        action: { label: "See why", run: () => { showClashTab(); raise(); } } }
+      : clash && shownClash && (fixes[clash.id] || reviewed[clash.id]) ? {
+        text: <><CircleCheck size={15} aria-hidden className="ok" /> <b>#{shownClash.number}</b> {fixes[clash.id] ? "fixed" : "reviewed"}{nextClash ? "" : ": nothing left open"}</>,
+        action: nextClash ? { label: "Next clash", run: () => { setTab("clash"); selectClash(nextClash); } } : undefined }
+      : clash && shownClash ? { text: <><b>#{shownClash.number}</b> {shownClash.title ?? shownClash.name}</>,
+        action: hideFix ? { label: "Not a clash", run: () => { showClashTab(); raise(); } }
+          : { label: "Propose fixes", run: () => { showClashTab(); void propose(); }, disabled: !a || !b || !sceneId || !!busy, tour: "propose" } }
+      : a && b ? { text: "A and B picked", action: { label: "Propose fixes", run: () => { showClashTab(); void propose(); }, disabled: !sceneId || !!busy } }
+      : a ? { text: "A set: now tap element B, then Set as B" }
+      : report ? { text: `${report.clashes.length} clash${report.clashes.length === 1 ? "" : "es"} · pick one to fix it`,
+        action: listOpen ? undefined : { label: "Clashes", run: () => { setListOpen(true); raise(); } } }
+      : sceneId ? { text: "Models open", action: { label: "Check for clashes", run: () => void runDetect(null), disabled: !!busy } }
+      : { text: "Open models from the menu" };
+  // iOS cannot pick a folder: the export-folder upload is left out there (XML files still upload).
+  const noFolders = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  // The header's two menus, as popovers on a desktop and as sections of the menu on phones and tablets.
+  const modelsMenu = (close: () => void) => (<>
+    <p className="pop-title">Models to open together</p>
+    {samples.map((f) => (
+      <label key={f} className="pop-item check">
+        <input type="checkbox" value={f} checked={picked.includes(f)}
+          onChange={(e) => setPicked(e.target.checked ? [...picked, f] : picked.filter((x) => x !== f))} /> {f}
+      </label>
+    ))}
+    {!samples.length && <p className="hint">No models in samples/</p>}
+    <button id="open" className="btn primary small" disabled={!picked.length || !!busy} onClick={() => { close(); open(); }}>
+      <FolderOpen size={14} aria-hidden /> Open {picked.length} model{picked.length === 1 ? "" : "s"}</button>
+    <p className="pop-title">Or your own</p>
+    <button className="pop-item" disabled={!!busy} onClick={() => { close(); modelInput.current?.click(); }}>
+      <Upload size={14} aria-hidden /> Upload models (IFC or STEP)…</button>
+    <p className="hint">Up to 150 MB together. A STEP machine is converted to IFC to check; Export gives your STEP back
+      with the fixes.</p>
+  </>);
+  const coordinateMenu = (close: () => void) => (<>
+    <p className="pop-title">Coordinate the open models</p>
+    <button className="pop-item" disabled={!sceneId || !!busy || !!detecting} onClick={() => { close(); void runDetect(null); }}>
+      <Radar size={14} aria-hidden /> Check the open models</button>
+    {!sceneId && <p className="hint">Open the models first.</p>}
+    <p className="pop-title">Or import a Navisworks clash report (XML)</p>
+    {reportSamples.map((s) => (
+      <button key={s} className="pop-item" disabled={!!busy} onClick={() => { close(); loadReport(() => api.openReport(s), s); }}>
+        <FileSpreadsheet size={14} aria-hidden /> {s}</button>
+    ))}
+    {!noFolders && <button className="pop-item" disabled={!!busy} onClick={() => { close(); folderInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload an export folder…</button>}
+    <button className="pop-item" disabled={!!busy} onClick={() => { close(); filesInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload XML files…</button>
+    {!noFolders && <p className="hint">Upload the whole export folder to get each clash's images.</p>}
+  </>);
+
   return (
-    <div className={`app ${resizing ? "resizing" : ""} ${landing ? "landing" : ""}`}
+    <div className={`app ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
       style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}>
+      {compact ? (
+      <header className="bar">
+        <span className="brand"><span className="logo" aria-hidden>◎</span><b>ORCA</b></span>
+        <span className="spacer" />
+        {layout === "tablet" && !landing && (report || sceneId) && <button className={`btn ghost ${listOpen ? "on" : ""}`} data-tour="drawer"
+          aria-expanded={listOpen} onClick={() => setListOpen(!listOpen)}>
+          <List size={16} aria-hidden /> Clashes{report ? <span className="badge-n">{report.clashes.length}</span> : null}</button>}
+        {landing && layout === "tablet" && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
+        {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
+        {agentLink && <button className="btn agent-pill" onClick={() => setAgentOpen(true)} aria-label={`Agent connected · ${timeLeft(agentLink, now)} left`}><Bot size={16} aria-hidden /></button>}
+        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
+        {layout === "tablet" && report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }}>
+          <FileText size={15} aria-hidden /> Report</button>}
+        {layout === "tablet" && sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)}>
+          <Download size={15} aria-hidden /> Export</a>}
+        <button className="btn ghost menu-btn" data-tour="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
+          <Menu size={18} aria-hidden /><span>Menu</span></button>
+      </header>
+      ) : (
       <header className="bar">
         <div className="bar-side">
         <Popover icon={Boxes} label="Models" text="Models" tip="bottom">
-          {(close) => (<>
-            <p className="pop-title">Models to open together</p>
-            {samples.map((f) => (
-              <label key={f} className="pop-item check">
-                <input type="checkbox" value={f} checked={picked.includes(f)}
-                  onChange={(e) => setPicked(e.target.checked ? [...picked, f] : picked.filter((x) => x !== f))} /> {f}
-              </label>
-            ))}
-            {!samples.length && <p className="hint">No models in samples/</p>}
-            <button id="open" className="btn primary small" disabled={!picked.length || !!busy} onClick={() => { close(); open(); }}>
-              <FolderOpen size={14} aria-hidden /> Open {picked.length} model{picked.length === 1 ? "" : "s"}</button>
-            <p className="pop-title">Or your own</p>
-            <button className="pop-item" disabled={!!busy} onClick={() => { close(); modelInput.current?.click(); }}>
-              <Upload size={14} aria-hidden /> Upload models (IFC or STEP)…</button>
-            <p className="hint">Up to 150 MB together. A STEP machine is converted to IFC to check; Export gives your STEP back
-              with the fixes.</p>
-          </>)}
+          {modelsMenu}
         </Popover>
         {stats && <span className="stat mono" title={`${modelNames.join(", ")}: ${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>
           {stats.elements.toLocaleString()} elements</span>}
         <Popover icon={Radar} label="Coordinate" text="Coordinate" tip="bottom">
-          {(close) => (<>
-            <p className="pop-title">Coordinate the open models</p>
-            <button className="pop-item" disabled={!sceneId || !!busy || !!detecting} onClick={() => { close(); void runDetect(null); }}>
-              <Radar size={14} aria-hidden /> Check the open models</button>
-            {!sceneId && <p className="hint">Open the models first.</p>}
-            <p className="pop-title">Or import a Navisworks clash report (XML)</p>
-            {reportSamples.map((s) => (
-              <button key={s} className="pop-item" disabled={!!busy} onClick={() => { close(); loadReport(() => api.openReport(s), s); }}>
-                <FileSpreadsheet size={14} aria-hidden /> {s}</button>
-            ))}
-            <button className="pop-item" disabled={!!busy} onClick={() => { close(); folderInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload an export folder…</button>
-            <button className="pop-item" disabled={!!busy} onClick={() => { close(); filesInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload XML files…</button>
-            <p className="hint">Upload the whole export folder to get each clash's images.</p>
-          </>)}
+          {coordinateMenu}
         </Popover>
         {!landing && sceneId && <button className={`btn ${reqLabel ? "req-pill" : "ghost"}`} data-tour="requirements" onClick={() => setReqOpen(true)}
           aria-label="Coordination requirements" data-tip-side="bottom"
           data-tip={reqLabel ? `Checking, triage and fixes follow "${reqSaved!.doc.name}" (${reqLabel})` : "Optional: set the design level, how strict to be and who moves. Off: ORCA's defaults"}>
           <ClipboardCheck size={15} aria-hidden />{reqLabel ? <span className="req-pill-label"> {reqLabel}</span> : <span className="lbl"> Requirements</span>}</button>}
-        <input ref={modelInput} type="file" hidden multiple accept=".ifc,.step,.stp" disabled={!!busy}
-          onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) void openDemo(files); }} />
-        <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
-        <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         {!landing && <button className="btn ghost" onClick={() => setAbout(true)} aria-label="How it works" title="How it works"><Info size={15} aria-hidden /><span className="lbl"> How it works</span></button>}
         {!landing && !touring && <button className="btn ghost" onClick={() => startTour(cellOpen ? "cell" : "northbank")} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
         </div>
@@ -1722,12 +1881,17 @@ export function App() {
           <Download size={15} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
         </div>
       </header>
+      )}
+      <input ref={modelInput} type="file" hidden multiple accept=".ifc,.step,.stp" disabled={!!busy}
+        onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) void openDemo(files); }} />
+      <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
+      <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
 
       <aside className="pane left">
         {report
           ? <ReportList report={shownReport ?? report} naming={naming} matches={matches}
               thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb}
-              focus={listFocus} onClearFocus={() => setListFocus(null)} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={selectClash} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
+              focus={listFocus} onClearFocus={() => setListFocus(null)} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={(c) => { if (compact && tab === "chat") setTab("clash"); selectClash(c); }} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
@@ -1750,7 +1914,8 @@ export function App() {
           : sceneId
             ? <div className="detect-slot"><DetectSetupCard setup={detectSetup} progress={detecting} disabled={!!busy}
                 onRun={(tests) => void runDetect(tests)} requirements={reqLabel} onRequirements={() => setReqOpen(true)} />
-                <p className="hint small">Or double-click element A, then element B, in the model.</p></div>
+                <p className="hint small">{coarse ? "Or tap element A in the model, then element B, and set each from its card."
+                  : "Or double-click element A, then element B, in the model."}</p></div>
             : <div className="empty-left">
               <Radar size={28} aria-hidden />
               <h2>Nothing to coordinate yet</h2>
@@ -1759,8 +1924,9 @@ export function App() {
       </aside>
 
       <main className={`stage ${tool.measure ? "measuring" : ""}`} ref={host} onClick={onClick}
-        onPointerDown={(e) => { down.current = { x: e.clientX, y: e.clientY }; }}>
-        {stats && <ViewerToolbar state={tool} models={modelNames} hasFocus={!!(a || b)}
+        onPointerDown={pressStart} onPointerMove={pressMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
+        onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
+        {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b)}
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {!stats && !busy && (
@@ -1776,14 +1942,14 @@ export function App() {
               agent: !!resumable.saved.link, agentLeft: resumable.saved.link ? timeLeft(resumable.saved.link, now) : null, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,
             details: <>
               Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
-              checks them, in about 25 seconds. Other models: <b>Models</b>, in the header.
+              checks them, in about 25 seconds. Other models: {compact ? <><b>Menu</b>, then <b>Models</b></> : <><b>Models</b>, in the header</>}.
             </>,
           }} />
         )}
         {tool.measure && <div className="overlay hint-bar" onClick={(e) => e.stopPropagation()}>
-          {measured != null ? `Measured ${Math.round(measured * 1000)} mm. Click again to start a new measurement.` : measurePts.length ? "Click the second point." : "Click the first point to measure from."}</div>}
+          {measured != null ? `Measured ${Math.round(measured * 1000)} mm. ${coarse ? "Tap" : "Click"} again to start a new measurement.` : measurePts.length ? `${coarse ? "Tap" : "Click"} the second point.` : `${coarse ? "Tap" : "Click"} the first point to measure from.`}</div>}
         {selected && !tool.measure && (
-          <div className="props" onClick={(e) => e.stopPropagation()}>
+          <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             <div className="row"><b>{String(selected.info?.ifc_class ?? "Element").replace(/^Ifc/, "")}</b>
               <button className="ibtn" onClick={() => setSelected(null)} aria-label="Close" data-tip="Close" data-tip-side="left"><X size={15} aria-hidden /></button></div>
             <div>{String(selected.info?.name ?? "")}</div>
@@ -1795,8 +1961,8 @@ export function App() {
               {Array.isArray(selected.info?.connected) ? <><dt>Connected</dt><dd>{(selected.info.connected as unknown[]).length} elements</dd></> : null}
             </dl>
             <div className="row">
-              <button className="btn small" onClick={() => { setA(selected.globalId); setB(null); setClash(null); resetWork(); }}><i className="sw red" />Set as A</button>
-              <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => { setB(selected.globalId); setClash(null); resetWork(); }}><i className="sw green" />Set as B</button>
+              <button className="btn small" onClick={() => pickSide(selected.globalId, "a")}><i className="sw red" />Set as A</button>
+              <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => pickSide(selected.globalId, "b")}><i className="sw green" />Set as B</button>
             </div>
           </div>
         )}
@@ -1804,7 +1970,7 @@ export function App() {
         {proposing && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
         <div className={`pilot-glow ${pilotStatus?.driving ? "on" : ""}`} aria-hidden />
         {pilotStatus && (
-          <div className={`pilot ${pilotStatus.state}`} role="status">
+          <div className={`pilot ${pilotStatus.state}`} role="status" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             {pilotStatus.driving ? <Navigation size={14} aria-hidden /> : <Hand size={14} aria-hidden />}
             <span>{pilotStatus.text}</span>
             {pilotStatus.driving
@@ -1814,20 +1980,18 @@ export function App() {
         )}
         {compareBar}
         {error && <div className="overlay error" role="alert" onClick={() => setError(null)}>{error}<X size={14} aria-hidden /></div>}
+        {toast && <div className="toast" role="status">{toast}</div>}
       </main>
 
       <aside className={`pane right ${tab === "chat" ? "chatting" : ""}`}>
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={() => { setTab("clash"); setViewPlan(false); setViewContext(false); }}>
+          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={showClashTab}>
             <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
-          <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={() => {
-            clearManual();
-            setTab("plan"); setViewContext(planKind === "context" && !!context); setViewPlan(planKind === "batch" && !!(plan || planRun));
-          }}>
+          <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={showPlanTab}>
             <Network size={14} aria-hidden /> Plan{planning || contextWorking ? <i className="spinner" aria-hidden />
               : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
               : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
-          <button role="tab" data-tour="tab-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
+          <button role="tab" data-tour="tab-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={showChatTab}>
             <MessageSquare size={14} aria-hidden /> Chat</button>
         </div>
         <div className="chat-slot" hidden={tab !== "chat"}>
@@ -1864,7 +2028,8 @@ export function App() {
                 <dt><i className="sw red" />A</dt><dd className="mono">{a ?? "—"}</dd>
                 <dt><i className="sw green" />B</dt><dd className="mono">{b ?? "—"}</dd>
               </dl>
-            ) : <p className="hint">Pick a clash from the list, or double-click two elements in the model.</p>}
+            ) : <p className="hint">{coarse ? "Pick a clash from the list, or tap an element in the model and set it as A, then B."
+              : "Pick a clash from the list, or double-click two elements in the model."}</p>}
           {hideFix && clash && (
             <div className="noclash-card" role="status">
               <b><CircleCheck size={15} aria-hidden /> {notAClash!.title}</b>
@@ -1923,6 +2088,10 @@ export function App() {
             </div>
           ))}
 
+          {compact && (proposing || (proposal?.attempts.length ?? 0) > 0) && <details className="activity-fold">
+            <summary>Agent activity · {proposal?.attempts.length ?? 0} checked</summary>
+            <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
+          </details>}
           {!hideFix && <details className="try">
             <summary><Move size={14} aria-hidden /> Try a move yourself</summary>
             <label className="field">Move A vertically (m)
@@ -1961,9 +2130,55 @@ export function App() {
             setWidths((ws) => ({ ...ws, [side]: w })); remember(side, w);
           }} />
       ))}
-      <footer className="dock">
+      {!compact && <footer className="dock">
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
-      </footer>
+      </footer>}
+      {layout === "tablet" && listOpen && !landing && <div className="drawer-scrim" aria-hidden onClick={() => setListOpen(false)} />}
+      {layout === "phone" && !landing && (
+        <SheetBar snap={snap} onSnap={setSnap}>
+          <div className={`sheet-peek ${peekLine.live ? "live" : ""}`} role="status">
+            <button type="button" className="sheet-peek-text" onClick={raise}>
+              {peekLine.live && <i className="spinner" aria-hidden />}<span>{peekLine.text}</span></button>
+            {peekLine.action && <button type="button" className="btn primary" data-tour={peekLine.action.tour}
+              disabled={peekLine.action.disabled} onClick={peekLine.action.run}>{peekLine.action.label}</button>}
+          </div>
+          <div className="sheet-tabs" role="tablist" aria-label="Panels">
+            <button role="tab" aria-selected={listOpen} className={listOpen ? "on" : ""} data-tour="sheet-list"
+              onClick={() => { setListOpen(true); raise(); }}>
+              <List size={17} aria-hidden /><span>Clashes</span>{report ? <span className="badge-n">{report.clashes.length}</span> : null}</button>
+            <button role="tab" aria-selected={!listOpen && tab === "clash"} className={!listOpen && tab === "clash" ? "on" : ""} data-tour="sheet-fix"
+              onClick={() => { showClashTab(); raise(); }}>
+              <LocateFixed size={17} aria-hidden /><span>Fix</span>{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
+            <button role="tab" aria-selected={!listOpen && tab === "plan"} className={!listOpen && tab === "plan" ? "on" : ""} data-tour="tab-plan"
+              onClick={() => { showPlanTab(); raise(); }}>
+              <Network size={17} aria-hidden /><span>Plan</span>{planning || contextWorking ? <i className="spinner" aria-hidden />
+                : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
+                : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
+            <button role="tab" aria-selected={!listOpen && tab === "chat"} className={!listOpen && tab === "chat" ? "on" : ""} data-tour="tab-chat"
+              onClick={() => { showChatTab(); raise(); }}>
+              <MessageSquare size={17} aria-hidden /><span>Chat</span></button>
+          </div>
+        </SheetBar>
+      )}
+      {menuOpen && compact && <MenuSheet title="ORCA" onClose={() => setMenuOpen(false)}>
+        <section className="menu-section"><h3><Boxes size={15} aria-hidden /> Models</h3>{modelsMenu(() => setMenuOpen(false))}</section>
+        <section className="menu-section"><h3><Radar size={15} aria-hidden /> Coordinate</h3>{coordinateMenu(() => setMenuOpen(false))}</section>
+        {!landing && <section className="menu-section"><h3>This session</h3>
+          {sceneId && <button className="pop-item" data-tour="requirements" onClick={() => { setMenuOpen(false); setReqOpen(true); }}>
+            <ClipboardCheck size={16} aria-hidden /> Requirements{reqLabel ? <span className="chip accent">{reqLabel}</span> : <span className="why">optional</span>}</button>}
+          {report && <button className="pop-item" data-tour="report" onClick={() => { setMenuOpen(false); setDocOpen(true); setDocReady(false); }}>
+            <FileText size={16} aria-hidden /> Report: PDF and BCF</button>}
+          {sceneId && <a className="pop-item" data-tour="export" href={api.exportUrl(sceneId)} onClick={() => setMenuOpen(false)}>
+            <Download size={16} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
+          <button className="pop-item" onClick={() => { setMenuOpen(false); setAgentOpen(true); }}>
+            {agentLink ? <><Bot size={16} aria-hidden /> Agent connected · {timeLeft(agentLink, now)} left</> : <><Plug size={16} aria-hidden /> Connect an agent</>}</button>
+        </section>}
+        <section className="menu-section"><h3>Help</h3>
+          {!landing && <button className="pop-item" onClick={() => { setMenuOpen(false); setAbout(true); }}><Info size={16} aria-hidden /> How it works</button>}
+          {!touring && <button className="pop-item" onClick={() => { setMenuOpen(false); startTour(cellOpen ? "cell" : "northbank"); }}>
+            <Compass size={16} aria-hidden /> Take the guided tour</button>}
+        </section>
+      </MenuSheet>}
 
       <Tooltips />
       {about && <About triageOpen={!!triageModel?.open_weights} onClose={() => setAbout(false)} />}
