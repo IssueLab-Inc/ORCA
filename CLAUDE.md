@@ -860,4 +860,7 @@ Bigger uploads (Oct 29, owner decision: target 500 MB; design and measurements i
   web-ifc drawing on the main thread (next: a Web Worker). `evals/big_models.py`, `big_models_browser.cjs`.
 - **Checked:** `tests/test_uploads.py` (7), `web/tests/uploads.test.mjs` (3); 467 server tests, 62 web tests; golden
   path unchanged. App imports `./uploads` (both harnesses compile it).
+- **After the reviews of PRs 26-32 (Oct 29):** 491 server tests, 63 web tests; answer key 3/3 first try at Rev04 heights
+  (Muse's girder opening refused as a transfer element); `evals/step_cell.py` passes (C1, C2, C6, C7, C8, Rev B 0);
+  golden path accepted in place, no file download.
 
