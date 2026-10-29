@@ -641,7 +641,7 @@ framing far out, thumbnails with the part a speck):
 - **Blank project:** the landing hero's **Use your own models** (`onBlank`, `data-tour=blank`) opens the workspace with
   `ProjectStart.tsx` in the stage: a drop zone / Choose files for IFC or STEP (→ `openDemo(files)`: upload, open, check),
   Import a report folder, Back to the demos. `landing` is `!stats && !report && !blank`; Tour hides until something is
-  open.
+  open; on a phone the bottom sheet stays away (`starting`) until something opens.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
