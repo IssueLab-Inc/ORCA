@@ -94,3 +94,43 @@ def test_a_wider_fix_is_not_offered_on_models_too_big_to_copy(tmp_path, monkeypa
     with pytest.raises(context_planner.ContextError) as e:
         context_planner.validate_objective(ws, sid, {"element_a": duct, "element_b": beam})
     assert e.value.status == 413 and "offered up to 1 MB. Propose fixes works at any size." in str(e.value)
+
+
+def test_a_small_archive_that_unpacks_huge_is_stopped_in_bounded_steps(client, monkeypatch, tmp_path):
+    import io
+    import zlib
+    bomb = gzip.compress(b"\0" * (64 << 20))                  # 64 MiB of zeros in about 64 kB
+    with pytest.raises(app_module._TooBig):
+        app_module._unpack(io.BytesIO(bomb), tmp_path / "out.ifc", True, 1 << 20)
+    assert (tmp_path / "out.ifc").stat().st_size <= 1 << 20   # never more than the room, never one huge inflate
+    monkeypatch.setattr(app_module, "MODEL_UPLOAD_MAX_MB", 1)
+    r = client.post("/api/models/upload", files=[("files", ("Bomb.ifc.gz", bomb))])
+    assert r.status_code == 413
+    whole = gzip.compress(b"ISO-10303-21;\n" * 1000)
+    with pytest.raises(zlib.error):                            # an archive cut short is not written as if whole
+        app_module._unpack(io.BytesIO(whole[:-12]), tmp_path / "cut.ifc", True, 1 << 20)
+    assert client.post("/api/models/upload", files=[("files", ("Cut.ifc.gz", whole[:-12]))]).status_code == 400
+
+
+def test_an_upload_without_its_length_is_refused_before_it_is_read(client):
+    def body():
+        yield b"--x\r\n"
+    r = client.post("/api/models/upload/stream", content=body(), headers={"content-type": "multipart/form-data; boundary=x"})
+    assert r.status_code == 411 and "Content-Length" in r.json()["detail"]
+
+
+def test_room_is_made_before_a_new_scene_opens(tmp_path, monkeypatch):
+    from sightline import service
+    folder = tmp_path / "samples"
+    a, b = build_clash_fixture(folder / "A.ifc"), build_route_fixture(folder / "B.ifc")
+    ws = Workspace(folder, budget_mb=0)
+    ws.budget = a.stat().st_size + b.stat().st_size - 1
+    first = ws.open(["A.ifc"])
+    held = []
+    real = service.IfcScene
+    monkeypatch.setattr(service, "IfcScene", lambda paths: (held.append(list(ws.scenes)), real(paths))[1])
+    second = ws.open(["B.ifc"])
+    assert held == [[]] and list(ws.scenes) == [second] and first not in ws.sizes   # A went before B was read
+    ws.max_scenes, ws.budget = 2, 0
+    third = ws.open(["A.ifc"])
+    assert held[-1] == [second] and list(ws.scenes) == [second, third]

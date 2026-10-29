@@ -843,14 +843,17 @@ Bigger uploads (Oct 29, owner decision: target 500 MB; design and measurements i
 - **Way in:** the page checks the server's cap first (`GET /api/models`: `model_upload_max_mb`; `web/src/uploads.ts`),
   gzips each file over 1 MB (`CompressionStream`, IFC packs about 5x), sends it with XHR (upload progress) to
   `POST /api/models/upload/stream` (NDJSON: received, STEP events, opening, `boxes` done/total, a `tick` every 5 s, done
-  or error). The server refuses on Content-Length before reading, unpacks `.gz` parts as they arrive, caps the unpacked
-  size (`app._receive_models`). An uploaded IFC is drawn from the visitor's own file, not downloaded back.
+  or error). The server refuses before reading (411 without Content-Length, 413 over the cap), unpacks `.gz` parts in
+  a thread, 1 MiB per gunzip step, capping the unpacked size as it goes and refusing a truncated archive
+  (`app._receive_models` / `_unpack`); a 409 `requirements_unknown` re-registers and resends once (`reRegister`). An
+  uploaded IFC is drawn from the visitor's own file, not downloaded back.
 - **Boxes** (`IfcScene.bounds`): meshes through CGAL (`hybrid-cgal-simple-opencascade`, 1 ms vs 20-30 ms), every
   element through it from 50 MB (`SIGHTLINE_BIG_MODEL_MB`), in batches of 2,000 (one iterator held a 150 MB model's
   shapes: 4.8 GB → 1.4 GB), threads from `sched_getaffinity`, progress callback. Northbank's boxes, order and 464
   detected clashes are identical (checked).
 - **Detection's sweep** had no lower bound (quadratic): 500 MB 482 → 18 s; Northbank identical.
-- **Holding:** `SIGHTLINE_SCENE_BUDGET_MB` (IFC bytes, Modal 300) besides the count; wider fixes refused above
+- **Holding:** `SIGHTLINE_SCENE_BUDGET_MB` (IFC bytes, Modal 300) besides the count, room made before a new scene is
+  read (`Workspace._evict`); mesh-only bodies go through CGAL by one rule (`scene.meshes_only`); wider fixes refused above
   `SIGHTLINE_WIDER_FIX_MAX_MB` (100: they copy the models); exports older than an hour deleted.
 - **Measured** (local, 4 CPUs): 150 MB through the page 123 s, 250 MB 194 s, 500 MB 484 s (2.8 GB server peak, 1.4 GB
   JS heap). Cap stays **150 MB** on the demo by the plan's rule (about two minutes); 500 MB is blocked by box time and

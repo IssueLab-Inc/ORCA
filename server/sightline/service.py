@@ -119,6 +119,8 @@ class Workspace:
                 else:
                     ifc_paths.append(path)
             on_event({"type": "opening", "files": len(ifc_paths)})
+            # Room first: a new scene peaks while it opens, so the held ones over the budget go before, not after.
+            self._evict(sum(p.stat().st_size for p in ifc_paths))
             scene = IfcScene(ifc_paths)
             # Pay the one-off triangulation now, not on the first check; a big model reports how far it has got.
             scene.bounds(lambda done, total: on_event({"type": "boxes", "done": done, "total": total}))
@@ -133,9 +135,18 @@ class Workspace:
         self.sizes[scene_id] = sum(p.stat().st_size for p in ifc_paths)
         if root is not None:
             self._roots[scene_id] = root
-        while len(self.scenes) > 1 and ((self.max_scenes and len(self.scenes) > self.max_scenes)
-                                        or (self.budget and sum(self.sizes.values()) > self.budget)):
-            old = self._oldest(self.scenes, scene_id)
+        self._evict(0, scene_id)
+        return scene_id
+
+    def _evict(self, incoming: int, newest: str | None = None) -> None:
+        """Drop the oldest scenes (those no live agent link holds last) until the count and byte budget leave room:
+        for a scene of `incoming` bytes about to open, or with `newest` (never dropped) just added."""
+        def over() -> bool:
+            count = len(self.scenes) + (newest is None)
+            return bool((self.max_scenes and count > self.max_scenes)
+                        or (self.budget and sum(self.sizes.values()) + incoming > self.budget))
+        while len(self.scenes) > (newest is not None) and over():
+            old = self._oldest(self.scenes, newest)
             del self.scenes[old]
             self.sizes.pop(old, None)
             self.sources.pop(old, None)
@@ -143,7 +154,6 @@ class Workspace:
             self.detections.pop(old, None)
             if old in self._roots:
                 shutil.rmtree(self._roots.pop(old), ignore_errors=True)
-        return scene_id
 
     @property
     def step_cache(self) -> Path:

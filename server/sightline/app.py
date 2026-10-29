@@ -359,16 +359,53 @@ def open_scene(body: Open):
         raise HTTPException(400, str(e))
 
 
+class _TooBig(Exception):
+    pass
+
+
+UNPACK_STEP = 1 << 20   # bytes out of the gunzip per step: a small archive of zeros never inflates in one call
+
+
+def _unpack(src, dest: Path, gz: bool, room: int) -> int:
+    """Copy `src` (an uploaded part's file) to `dest`, gunzipping it when `gz`, writing at most `room` bytes
+    (else _TooBig, as soon as it is past). A truncated archive is a zlib.error. Blocking: run it off the event loop."""
+    written = 0
+    unzip = zlib.decompressobj(16 + zlib.MAX_WBITS) if gz else None
+    with dest.open("wb") as out:
+        def put(data: bytes) -> None:
+            nonlocal written
+            written += len(data)
+            if written > room:
+                raise _TooBig
+            out.write(data)
+        while chunk := src.read(1 << 20):
+            if unzip is None:
+                put(chunk)
+                continue
+            while True:   # bounded steps until this chunk is used up and nothing is pending
+                data = unzip.decompress(chunk, UNPACK_STEP)
+                put(data)
+                chunk = unzip.unconsumed_tail
+                if unzip.eof or (not chunk and len(data) < UNPACK_STEP):
+                    break
+        if unzip is not None:
+            put(unzip.flush())
+            if not unzip.eof:
+                raise zlib.error("the archive ends before its end")
+    return written
+
+
 async def _receive_models(request: Request) -> tuple[Path, list[Path], list[str]]:
     """Check, receive and unpack an upload of model files: IFC or STEP, each as is or gzipped by the page (`.gz`, the
-    name without it). Refused before the body is read when its length alone is over the cap; the cap
-    (SIGHTLINE_MODEL_UPLOAD_MAX_MB, all files together) counts the unpacked size. Returns the folder (deleted with
+    name without it). Refused before the body is read when it has no length (411: a chunked body would be spooled
+    whole before any check) or its length alone is over the cap; the cap (SIGHTLINE_MODEL_UPLOAD_MAX_MB, all files
+    together) counts the unpacked size, checked in bounded steps off the event loop. Returns the folder (deleted with
     the scene, or here on failure), the paths and the names."""
     cap = MODEL_UPLOAD_MAX_MB << 20
     try:
-        length = int(request.headers.get("content-length") or 0)
-    except ValueError:
-        length = 0
+        length = int(request.headers["content-length"])
+    except (KeyError, ValueError):
+        raise HTTPException(411, "Send the upload with its length (Content-Length).") from None
     if length > cap + (1 << 20):   # compressed or not, the body is never bigger than what it unpacks to (plus a form)
         raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.")
     form = await request.form(max_files=MODEL_UPLOAD_MAX_FILES + 1)
@@ -391,18 +428,13 @@ async def _receive_models(request: Request) -> tuple[Path, list[Path], list[str]
     try:
         for f, name, sent in zip(files, names, packed):
             dest = root / name
-            unzip = zlib.decompressobj(16 + zlib.MAX_WBITS) if sent != name else None
-            with dest.open("wb") as out:
-                while chunk := await f.read(1 << 20):
-                    data = unzip.decompress(chunk) if unzip else chunk
-                    total += len(data)
-                    if total > cap:
-                        raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.")
-                    out.write(data)
-                if unzip:
-                    out.write(unzip.flush())
+            await f.seek(0)
+            total += await run_in_threadpool(_unpack, f.file, dest, sent != name, cap - total)
             paths.append(dest)
         return root, paths, names
+    except _TooBig:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.") from None
     except zlib.error:
         shutil.rmtree(root, ignore_errors=True)
         raise HTTPException(400, "A compressed model file could not be unpacked.")

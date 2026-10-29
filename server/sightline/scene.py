@@ -56,9 +56,11 @@ BIG_MODEL_BYTES = int(os.environ.get("SIGHTLINE_BIG_MODEL_MB", "50")) << 20
 MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet")
 
 
-def _meshes_only(p) -> bool:
-    """Whether every body item of `p` is a triangle or polygon mesh (nothing curved to facet, no booleans)."""
-    reps = [r for r in p.Representation.Representations if r.RepresentationIdentifier == "Body"]
+def meshes_only(p) -> bool:
+    """Whether every body item of `p` is a triangle or polygon mesh (nothing curved to facet, no booleans): CGAL
+    triangulates those in a fraction of OpenCASCADE's time (it sews a mesh into shells first)."""
+    reps = [r for r in (p.Representation.Representations if p.Representation else [])
+            if r.RepresentationIdentifier == "Body"]
     items = [i for r in reps for i in r.Items]
     return bool(items) and all(any(i.is_a(c) for c in MESH_ITEMS) for i in items) and not getattr(p, "HasOpenings", None)
 
@@ -175,7 +177,7 @@ class IfcScene:
             for i, m in enumerate(self.models):
                 for p in m.by_type("IfcElement"):
                     if p.Representation is not None and not not_physical(p):
-                        groups.setdefault((i, _meshes_only(p)), []).append(p)
+                        groups.setdefault((i, meshes_only(p)), []).append(p)
                         order.append(p.GlobalId)
             total, done = sum(len(g) for g in groups.values()), 0
             try:

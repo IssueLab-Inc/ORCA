@@ -32,7 +32,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import numpy as np
 
-from .scene import STEP_PSET, IfcScene, is_provision, step_source
+from .scene import MESH_KERNEL, STEP_PSET, IfcScene, is_provision, meshes_only, step_source
 
 UP = np.array([0.0, 0.0, 1.0])
 MIN_PIECE_M = 0.05  # shortest straight piece left either side of a riser
@@ -1373,16 +1373,10 @@ def _first_hit(origins: np.ndarray, d: np.ndarray, tris: np.ndarray) -> np.ndarr
 
 
 FREE_BANDS_MAX_TRIS = 200_000   # past this many triangles in the stretch, the room beside an obstacle is not told
-MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet")
-
-
 def _kernel(p) -> str:
-    """The geometry kernel to triangulate `p` with: CGAL for a body of meshes only (OpenCASCADE sews a mesh into
-    shells first: seconds for a dense one), else OpenCASCADE, so curved and cut shapes are as before."""
-    reps = [r for r in (p.Representation.Representations if p.Representation else []) if r.RepresentationIdentifier == "Body"]
-    items = [i for r in reps for i in r.Items]
-    meshes = bool(items) and all(any(i.is_a(c) for c in MESH_ITEMS) for i in items) and not getattr(p, "HasOpenings", None)
-    return "hybrid-cgal-simple-opencascade" if meshes else "opencascade"
+    """The geometry kernel to triangulate `p` with: CGAL for a body of meshes only (scene.meshes_only), else
+    OpenCASCADE, so curved and cut shapes are as before."""
+    return MESH_KERNEL if meshes_only(p) else "opencascade"
 
 
 def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = "side", clearance_m: float = 0.025,

@@ -263,16 +263,22 @@ const settingsHeader = (): Record<string, string> => ({
 });
 const jsonHeaders = () => ({ "Content-Type": "application/json", ...settingsHeader() });
 
+/** Register the requirements in use again (the server forgot their id: a restart); true when it took them. */
+async function reRegister(): Promise<boolean> {
+  if (!requirementsId || !requirementsDoc) return false;
+  const again = await fetch("/api/requirements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requirementsDoc) });
+  if (!again.ok) return false;
+  requirementsId = ((await again.json()) as Registered).id;
+  return true;
+}
+
 /** fetch, registering the requirements again and retrying once when the server has forgotten them. */
 async function send(url: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(url, init);
   if (r.status !== 409 || !requirementsId || !requirementsDoc) return r;
   const detail = (await r.clone().json().catch(() => null))?.detail;
-  if (detail !== "requirements_unknown") return r;
-  const again = await fetch("/api/requirements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requirementsDoc) });
-  if (!again.ok) return r;
-  requirementsId = ((await again.json()) as Registered).id;
-  return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "X-Sightline-Requirements": requirementsId } });
+  if (detail !== "requirements_unknown" || !(await reRegister())) return r;
+  return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "X-Sightline-Requirements": requirementsId! } });
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -504,7 +510,8 @@ export const api = {
       const packed = await pack(f);
       form.append("files", packed, packed === f ? f.name : `${f.name}.gz`);
     }
-    return new Promise<OpenedScene>((resolve, reject) => {
+    // Sent again once, as `send` does, when the server has forgotten the requirements' id (a restart).
+    const post = (retry: boolean) => new Promise<OpenedScene>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/models/upload/stream");
       for (const [k, v] of Object.entries(settingsHeader())) xhr.setRequestHeader(k, v);
@@ -531,6 +538,10 @@ export const api = {
         if (xhr.status !== 200) {
           let detail = `Upload failed (${xhr.status})`;
           try { detail = JSON.parse(xhr.responseText).detail ?? detail; } catch { /* not JSON */ }
+          if (retry && xhr.status === 409 && detail === "requirements_unknown") {
+            reRegister().then((ok) => (ok ? post(false) : Promise.reject(new ApiError(detail, 409)))).then(resolve, reject);
+            return;
+          }
           reject(new ApiError(detail, xhr.status));
           return;
         }
@@ -542,6 +553,7 @@ export const api = {
       xhr.onerror = () => reject(new Error("The upload stopped: the connection dropped."));
       xhr.send(form);
     });
+    return post(true);
   },
   file: async (id: string, index: number) => {
     const r = await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" });

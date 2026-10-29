@@ -11,9 +11,15 @@ what a big model costs and how the upload copes. Code: `app._receive_models`, `a
    `model_upload_max_mb`, `model_upload_max_files`), and every place that states it reads it from there.
 2. **Packed in the browser**: each file over 1 MB is gzipped with `CompressionStream` and sent as `<name>.gz`
    (Northbank's MEP and Architecture files pack 5.7x and 5.5x, the eval's synthetic models 4.6x).
-3. **Sent with `XMLHttpRequest`**, so the page shows upload progress ("Uploading 45% (230 of 510 MB)").
-4. **The server refuses early** when the body's length alone is over the cap (before reading it), unpacks `.gz`
-   parts to disk as they arrive, and counts the cap on the unpacked size (`SIGHTLINE_MODEL_UPLOAD_MAX_MB`).
+3. **Sent with `XMLHttpRequest`**, so the page shows upload progress ("Uploading 45% (230 of 510 MB)"). A 409
+   `requirements_unknown` (the server restarted and forgot the requirements' id) registers the file again and sends
+   the same form once more, as every other call does (`reRegister` in `api.ts`).
+4. **The server refuses early**, before reading the body: 411 without a Content-Length (a chunked body would be
+   spooled whole to disk before any check; browsers always send one), 413 when the length alone is over the cap. It
+   unpacks `.gz` parts to disk off the event loop (`app._unpack`, in a thread), at most 1 MiB out of the gunzip per
+   step, and counts the cap (`SIGHTLINE_MODEL_UPLOAD_MAX_MB`) on the unpacked size as it goes: a 522 kB archive of 512
+   MiB of zeros is refused in about a second with a few MB of memory. An archive cut short is refused, never written
+   as if whole.
 5. **Opening is streamed** (`POST /api/models/upload/stream`, NDJSON): `received`, the STEP conversion's events,
    `opening`, `boxes` (elements measured, every 500), a `tick` every 5 s so no proxy times out an idle connection, then
    `done` or `error`. Refusals before the files are in stay plain HTTP errors. `POST /api/models/upload` is kept
@@ -36,7 +42,9 @@ Every element's box is measured once when a model opens (`IfcScene.bounds`). Two
 ## Holding them
 
 - **A byte budget** (`SIGHTLINE_SCENE_BUDGET_MB`) as well as the count (`SIGHTLINE_MAX_SCENES`): the IFC bytes of the
-  open scenes, oldest dropped first (never the one just opened, never one an agent link holds unless all are).
+  open scenes, oldest dropped first (never the one just opened, never one an agent link holds unless all are). Room
+  is made before a new scene is read, by its size (`Workspace._evict`): an opening model peaks on top of what is
+  held, so the old ones go first, not after.
 - **Wider fixes** copy the open models two or three times, so they are offered up to `SIGHTLINE_WIDER_FIX_MAX_MB`
   (100 by default); Propose fixes works at any size.
 - Written models and exports older than an hour are deleted.
