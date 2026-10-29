@@ -279,7 +279,7 @@ function ResumeCard({ r, disabled }: { r: Resume; disabled: boolean }) {
       <span className="resume-icon" aria-hidden><RotateCcw size={18} /></span>
       <div className="resume-text">
         <p className="eyebrow">Pick up where you left off</p>
-        <h2 data-tip={r.files.join(", ")} data-tip-side="bottom">{projectName(r.files)}</h2>
+        <h2 data-tip-tap data-tip={r.files.join(", ")} data-tip-side="bottom">{projectName(r.files)}</h2>
         <div className="resume-meta">
           <span className="chip">{r.files.length} model{r.files.length === 1 ? "" : "s"}</span>
           {r.clashes != null && <span className="chip">{r.clashes} clashes</span>}

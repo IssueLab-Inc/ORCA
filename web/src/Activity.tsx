@@ -61,11 +61,11 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
             const [first, more] = firstReason(t.reason);
             return (
               <tr key={i} className={t.passed ? "ok" : "fail"}>
-                <td className="mono">{i + 1}</td>
-                <td><span className={`badge ${t.kind}`}>{KIND_LABEL[t.kind] ?? t.kind}</span></td>
-                <td>{t.title}</td>
-                <td className="mono">{editText(t)}</td>
-                <td>{t.passed ? <span className="ok">✓ verified</span>
+                <td className="mono" data-label="#">{i + 1}</td>
+                <td data-label="Kind"><span className={`badge ${t.kind}`}>{KIND_LABEL[t.kind] ?? t.kind}</span></td>
+                <td data-label="Idea">{t.title}</td>
+                <td className="mono" data-label="Edit">{editText(t)}</td>
+                <td data-label="Check">{t.passed ? <span className="ok">✓ verified</span>
                   : <span className="bad" title={t.reason}>✗ {first}{more ? ` +${more} more` : ""}</span>}</td>
               </tr>
             );

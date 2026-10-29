@@ -126,14 +126,14 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>}
       {compact && state === "running" && <>
         <div className="triage-count small"><b>{ids.length}</b> of {n} sorted <span className="hint">· {seconds} s</span>
-          <span className="triage-info" data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></div>
+          <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></div>
         {bar}
       </>}
       {compact && state === "done" && <>
         <div className="triage-count small">
           <b className={counts.real_clash ? "bad" : "ok"}>{counts.real_clash}</b>
           {counts.real_clash === 1 ? " needs a fix" : " need a fix"} <span className="hint">of {n}</span>
-          <span className="triage-info" data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span>
+          <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span>
         </div>
         {bar}
       </>}
