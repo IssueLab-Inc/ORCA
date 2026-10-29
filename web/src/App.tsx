@@ -1694,6 +1694,16 @@ export function App() {
     fixPipe: () => { if (tourPipes.length) { setTab("plan"); void runPlan({ clash_ids: tourPipes.map((c) => c.id) }); } },
     compare: setCompare,
     overview: () => { setViewPlan(false); viewer.current?.preview([]); viewer.current?.fitAll(); },
+    reveal: (sel, el) => {
+      if (!compact) return;
+      if (!el) { if (/data-tour=["']?(report|export|requirements)\b/.test(sel) && layout === "phone") setMenuOpen(true); return; }
+      if (el.closest(".pane.left")) { setListOpen(true); if (snap === "peek") setSnap("half"); }
+      else if (el.closest(".pane.right")) {
+        setListOpen(false);
+        if (el.closest(".chat-slot")) setTab("chat");
+        if (layout === "phone" && snap === "peek") setSnap("half");
+      }
+    },
     closeReport: () => setDocOpen(false),
     replay: (what) => { if (what === "plan") void replayPlan(); else if (what === "pipe") void replayPlan("pipe"); else void replayPropose(what); },
     ask: (send) => { setTab("chat"); setChatAsk((q) => ({ text: TOUR_QUESTION, send, n: (q?.n ?? 0) + 1 })); },
@@ -1931,7 +1941,7 @@ export function App() {
               agent: !!resumable.saved.link, agentLeft: resumable.saved.link ? timeLeft(resumable.saved.link, now) : null, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,
             details: <>
               Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
-              checks them, in about 25 seconds. Other models: <b>Models</b>, in the header.
+              checks them, in about 25 seconds. Other models: {compact ? <><b>Menu</b>, then <b>Models</b></> : <><b>Models</b>, in the header</>}.
             </>,
           }} />
         )}

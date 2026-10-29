@@ -46,6 +46,9 @@ export interface TourActions {
   replay: (what: "duct" | "joint" | "plan" | "ladder" | "pipe") => void; ask: (send: boolean) => void; signoff: () => void;
   openCell: () => void; fixPipe: () => void;
   overview: () => void; closeReport: () => void;
+  // Phones and tablets: open what hides a step's control (the sheet's tab, the drawer, the header menu); `el` is the
+  // control when it is in the page but hidden, null when it is not in the page at all (a menu item).
+  reveal?: (selector: string, el: Element | null) => void;
 }
 
 interface Step {
@@ -271,6 +274,16 @@ export const BUILDING_STEPS: Step[] = [
 
 const PAD = 6;
 const CARD_W = 340;
+/** The card's width: its own, or the window's less a margin on a phone. */
+const cardW = () => Math.min(CARD_W, window.innerWidth - 24);
+
+/** On screen and not hidden by CSS (display, visibility), at least partly inside the window. */
+function visible(el: Element) {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const check = (el as Element & { checkVisibility?: (o: object) => boolean }).checkVisibility;
+  return check ? check.call(el, { checkVisibilityCSS: true, visibilityProperty: true }) : true;
+}
 
 /** The machine cell's tour: a robot palletising cell opened from its STEP file, checked, fixed and handed back as STEP. */
 export const CELL_STEPS: Step[] = [
@@ -394,9 +407,13 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
     // under it (another clash selected into the same panel moves everything).
     let shown: Element | null = null;
     let settle = Date.now() + 1500;
+    let revealed = false;
     const find = () => {
       const sel = typeof step.target === "function" ? step.target(stateRef.current) : step.target;
-      const el = sel ? document.querySelector(sel) : null;
+      // The control that shows: a phone has some controls twice (the sheet's tabs and the pane's own), one hidden.
+      const all = sel ? [...document.querySelectorAll(sel)] : [];
+      const el = all.find(visible) ?? null;
+      if (sel && !el && !revealed && actions.reveal) { revealed = true; actions.reveal(sel, all[0] ?? null); }
       if (el && el !== shown) {
         const group = step.reveal ? el.closest("details") : null;
         if (group && !group.open) group.open = true;
@@ -425,7 +442,18 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
 
-  useLayoutEffect(() => { if (card.current) setCardH(card.current.offsetHeight); });
+  useLayoutEffect(() => {
+    if (!card.current) return;
+    // On a touch screen the steps say tap, not click (the copy is written once, for a mouse).
+    if (window.matchMedia?.("(pointer: coarse)").matches) {
+      const walk = document.createTreeWalker(card.current, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const t = n.nodeValue ?? "", touch = t.replace(/\b([Cc])licked\b/g, (_, c) => (c === "C" ? "Tapped" : "tapped")).replace(/\bClick/g, "Tap").replace(/\bclicking\b/g, "tapping").replace(/\bclick/g, "tap");
+        if (touch !== t) n.nodeValue = touch;
+      }
+    }
+    setCardH(card.current.offsetHeight);
+  });
 
   const pos = place(rect, cardH);
   const offer = step.fallback && !done && step.fallback.when(state);
@@ -439,7 +467,7 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
       {rect
         ? <div className="tour-hole" style={{ left: rect.left - PAD, top: rect.top - PAD, width: rect.width + 2 * PAD, height: rect.height + 2 * PAD }} />
         : <div className="tour-dim" />}
-      <div ref={card} className="tour-card" style={{ left: pos.left, top: pos.top, width: CARD_W }}>
+      <div ref={card} className="tour-card" style={{ left: pos.left, top: pos.top, width: cardW() }}>
         <div className="row">
           <span className="tour-act">{step.act} · {index + 1} of {STEPS.length}</span>
           <button className="ibtn" aria-label="End the tour" onClick={onClose}><X size={14} aria-hidden /></button>
@@ -489,7 +517,16 @@ const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce
 
 /** Beside the target if there is room (right, then left), else below or above it, kept on screen. */
 function place(r: DOMRect | null, h: number) {
-  const vw = window.innerWidth, vh = window.innerHeight, gap = 14;
+  const vw = window.innerWidth, vh = window.innerHeight, gap = 14, CARD_W = cardW();
+  // A phone: the card spans the width, at the top or the bottom, whichever leaves the control in view.
+  if (vw <= 760) {
+    const low = Math.max(12, vh - h - 12), high = 12 + 52;
+    if (!r) return { left: 12, top: low };
+    const below = low >= r.bottom + gap, above = r.top - gap - h >= 12;
+    if (below && (!above || r.top + r.height / 2 <= vh / 2)) return { left: 12, top: low };
+    if (above) return { left: 12, top: Math.min(high, r.top - gap - h) };
+    return { left: 12, top: vh - r.bottom > r.top ? low : 12 };  // no room clear of it: the side with more room
+  }
   if (!r) return { left: (vw - CARD_W) / 2, top: Math.max(16, (vh - h) / 2) };
   const clampTop = (t: number) => Math.min(Math.max(12, t), vh - h - 12);
   const clampLeft = (l: number) => Math.min(Math.max(12, l), vw - CARD_W - 12);
