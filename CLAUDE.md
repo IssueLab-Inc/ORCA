@@ -668,7 +668,11 @@ Next, in order.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ ORCA
    detection (no Navisworks needed). ✅ #N numbers and Muse titles. ✅ Demo, tour and landing on detection. ✅ STEP
    models and the palletising cell (from STEP) as the second demo.
-6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
+6. Planned after the Advanced IFC edits (reroute, resize, penetration; `feature/fix-kinds` first), drafts only:
+   escalating no-fix clashes to Muse Wonder (`docs/escalation.md`) and Show it built, Muse Image restyling ORCA's view
+   of a verified fix, checked against the model (`docs/show-it-built.md`). Muse Image cannot design a fix (Oct 29:
+   it redraws the geometry and invents numbers); it only restyles one.
+7. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
 offsets and trims on meshed STEP parts.
