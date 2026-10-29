@@ -7,7 +7,8 @@ Reads the passes capture.cjs wrote (look, ids, normals, fix, legend.json) and th
 
 Variants: look (the view alone), lines (the view and its outline drawing), facts (both, plus what the objects are),
 design (a known-bad prompt: "improve the design"), keep (lines with the second prompt: no cut wording, the background
-kept), keep_r (keep through the Responses API, reasoning high). `keep:2` makes two pictures of each case.
+kept), keep_r (keep through the Responses API, reasoning high), closed and closed_r (keep plus the cross-section
+line, `SHAPES`). `keep:2` makes two pictures of each case; `case=duct` limits the run to one case.
 """
 import base64
 import io
@@ -28,7 +29,8 @@ from sightline.meta_client import MetaChatModel, load_env  # noqa: E402
 
 load_env()
 OUT = Path(sys.argv[1])
-VARIANTS = sys.argv[2:] or ["look", "lines", "facts"]
+CASES = [a[5:] for a in sys.argv[2:] if a.startswith("case=")]
+VARIANTS = [a for a in sys.argv[2:] if not a.startswith("case=")] or ["look", "lines", "facts"]
 SIDE = 1024
 TOL = 4  # pixels: an outline within this distance counts as kept
 TILE_MAX = 0.45  # the worst tile's share of new edges (an added object); goods reached 0.42 (glazing), bad 0.45-0.91
@@ -48,6 +50,8 @@ KEEP = ("Restyle this 3D model view as a clean architectural presentation render
         "surfaces look: realistic materials for what each object is, soft even studio light, gentle ambient occlusion. "
         "Keep the background the same plain light blue-grey. No people, no text, no labels. The second image is the "
         "outline drawing of the same view: every line in it must stay exactly where it is in your picture.")
+SHAPES = (" Keep each object's cross-section as it is drawn: closed shapes stay closed and open channels stay open, "
+          "bends and fittings included.")
 DESIGN = ("Improve this design: reroute whatever needs it so the services run neatly and nothing clashes, and render "
           "it as a realistic photo of the finished building.")
 
@@ -258,6 +262,8 @@ def main():
     rows = []
     jobs = []
     for case in manifest["cases"]:
+        if CASES and case["name"] not in CASES:
+            continue
         for pdir in sorted((OUT / "passes").glob(f"{case['name']}-R*")):
             leg = json.loads((pdir / "legend.json").read_text())
             p = {"ids": id_map(png(pdir / "ids.png")), "fix": png(pdir / "fix.png")[..., 0] > 128,
@@ -285,6 +291,8 @@ def main():
             prompt = DESIGN
         if kind in ("keep", "keep_r"):
             prompt, images = KEEP, [look, lines_png]
+        if kind in ("closed", "closed_r"):
+            prompt, images = KEEP + SHAPES, [look, lines_png]
         out = pdir / f"muse-{v}.png"
         try:
             if out.exists():

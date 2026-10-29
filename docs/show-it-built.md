@@ -22,7 +22,8 @@ checks below.
 
 Decided (owner, Oct 29): the fix after only (ORCA's own before and after views are already there); a clean
 presentation render, not a site photo; a switch in the owner menu at the top right, For me and For everyone, like the
-open-weights one.
+open-weights one; two Wonder judges per picture, not one (a false accept misleads, a false reject only costs a retry);
+the open tray bend is fixed in the model, not the prompt (below).
 
 ## What Muse Image can't do (Oct 29, Navisworks pictures of #042)
 
@@ -136,8 +137,17 @@ cold-water picture, a tray picture). Median 35 s, 70 s at worst, $0.073 a call.
 
 A false reject costs a retry or, at worst, no picture (the true view still shows); a false accept puts a wrong
 picture beside the model. So the judge is **Muse Wonder, medium, with the ids picture as image 3, two calls in
-parallel, either unfaithful fails**. One call is the cheaper setting (16.0/19, 11.0/12). Spent on Wonder: $17.44 for
+parallel, either unfaithful fails** (owner decision). One call would be the cheaper setting (16.0/19, 11.0/12). Spent on Wonder: $17.44 for
 295 calls.
+
+**The open tray bend is the model's mismatch, not the picture's.** Northbank's cable tray is an `IfcUShapeProfileDef`
+(300 × 100 mm, 4 mm walls), an open channel, but `edits._bend_mesh` builds every bend as a closed rectangle (or
+circle), so ORCA's offset puts closed boxes between open channels. Muse Image draws the tray open all the way, as a
+real one is. A prompt line ("keep each object's cross-section as it is drawn: closed shapes stay closed and open
+channels stay open, bends and fittings included", `s0.SHAPES`, variant `closed`) didn't change that: 0 of 2 duct-view
+pictures kept the bend closed, and Muse Spark again called both faithful. So the prompt stays as it was, and the
+bends are to follow the segment's profile (an ask of the edits work, `docs/escalation.md`); then the picture and the
+model agree.
 
 **Not run:** radius 2 and 5 m (3 m throughout); a penetration (needs the edits work); Wonder at high effort. The
 faithful labels are by eye on zoomed crops for every disputed picture, at thumbnail size for the rest. The capture
@@ -203,5 +213,3 @@ Branch `feature/show-it-built`, one PR.
 ## Open questions
 
 1. PDF built views: opt-in per report, or automatic for accepted fixes?
-2. Two judge calls ($0.31 a click) or one ($0.17)?
-3. The opened tray bend: accept it (a real tray bend is open), or say "solid fittings stay closed" in the prompt.

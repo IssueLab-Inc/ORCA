@@ -138,6 +138,11 @@ Branch `feature/wonder-escalation`, one PR.
 - A compound candidate (several edits, one trial), or a note that it is out of scope.
 - Preview meshes for a penetration (the girder drawn with its new opening): Show it built needs them too
   (`docs/show-it-built.md`).
+- Bends that follow the segment's profile. `edits._bend_mesh` sweeps a closed rectangle (or circle) for every bend, so
+  an offset cable tray (`IfcUShapeProfileDef`, Northbank's 300 × 100 mm, 4 mm walls) gets closed box bends between
+  open channels; the same would hold for C, I and L profiles. Sweep the profile's own outline. Show it built's pictures
+  draw the tray open all the way and a prompt line didn't change that (`docs/show-it-built.md`), so this is what makes
+  picture and model agree.
 - Test cases that need each new kind, for E0.
 
 ## Open questions
