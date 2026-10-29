@@ -32,7 +32,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import numpy as np
 
-from .scene import STEP_PSET, IfcScene, step_source
+from .scene import STEP_PSET, IfcScene, is_provision, step_source
 
 UP = np.array([0.0, 0.0, 1.0])
 MIN_PIECE_M = 0.05  # shortest straight piece left either side of a riser
@@ -791,6 +791,8 @@ OPENING_PROUD_M = 0.01    # the void runs this far past each face of the host
 OPENING_EDGE_M = 0.05     # the host must surround the opening by this much: a hole at its edge is a notch
 MAX_THROUGH_M = 1.0       # deeper than any wall or slab: the run lies along the host, not across it
 PFV_COLOUR, PFV_ALPHA = (0.96, 0.55, 0.12), 0.35
+STOPS_INSIDE_M = 0.005    # a service ending this close to a face still passes through
+PROVISION_PSET = "ORCA_Provision"   # on a provision for void ORCA wrote: the service and host it is for
 
 
 @dataclass
@@ -888,6 +890,9 @@ def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: f
         raise Unsupported("the service does not pass through it")
     entry = lo - 0.5 + float(t_in[np.isfinite(t_in)].min())
     exit_ = hi + 0.5 - float(t_out[np.isfinite(t_out)].min())
+    if entry < -STOPS_INSIDE_M or exit_ > length + STOPS_INSIDE_M:
+        raise Unsupported("the service stops inside it: an opening is for a service that passes through (shorten or "
+                          "move it instead)")
     through = exit_ - entry
     if through > MAX_THROUGH_M:
         raise Unsupported(f"the service runs {through:.2f} m inside it: along it, not through it")
@@ -941,12 +946,34 @@ def _see_through(model, solid) -> None:
         model.createIfcStyledItem(solid, [style], None)
 
 
+def provision_for(scene: IfcScene, service_gid: str, host_gid: str):
+    """The provision for void already written for this service through this host, or None."""
+    model = scene.models[scene.index_of(service_gid)]
+    for e in model.by_type("IfcBuildingElementProxy"):
+        if is_provision(e):
+            mine = ifcopenshell.util.element.get_psets(e).get(PROVISION_PSET, {})
+            if mine.get("Service") == service_gid and mine.get("Host") == host_gid:
+                return e
+    return None
+
+
 def apply_penetration(scene: IfcScene, pen: Penetration, cut: bool) -> Penetration:
     """Request the opening: always a provision for void in the service's model (an IfcBuildingElementProxy,
     PROVISIONFORVOID, with Pset_ProvisionForVoid, see-through orange, in the service's storey), and, when `cut`, the
     opening itself in the host (an IfcOpeningElement voiding it). Edits the models in place; wrap in `trial_files`
     (both files) to try it and undo."""
     service, host = scene.entity(pen.service), scene.entity(pen.host)
+    existing = provision_for(scene, pen.service, pen.host)
+    if existing is not None:   # asked for before (its team had not cut it): one request, not two
+        pen.provision, pen.opening = existing.GlobalId, None
+    else:
+        _write_provision(scene, pen, service, host)
+    if cut:
+        _cut_opening(scene, pen, service, host)
+    return pen
+
+
+def _write_provision(scene: IfcScene, pen: Penetration, service, host) -> None:
     i = scene.index_of(pen.service)
     ms, ss = scene.models[i], scene.unit_scales[i]
     four = ms.schema != "IFC2X3"
@@ -973,26 +1000,30 @@ def apply_penetration(scene: IfcScene, pen: Penetration, cut: bool) -> Penetrati
         props.update(Width=pen.width_m / ss, Height=pen.height_m / ss)
     pset = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name="Pset_ProvisionForVoid")
     ifcopenshell.api.run("pset.edit_pset", ms, pset=pset, properties=props)
+    mine = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name=PROVISION_PSET)
+    ifcopenshell.api.run("pset.edit_pset", ms, pset=mine, properties={"Service": pen.service, "Host": pen.host})
     source = step_source(service)   # from STEP: the provision is written back as a part of the service's group
     if source:
         sp = ifcopenshell.api.run("pset.add_pset", ms, product=pfv, name=STEP_PSET)
         ifcopenshell.api.run("pset.edit_pset", ms, pset=sp,
                              properties={k: v for k, v in source.items() if k in ("Group", "Label", "Source")})
     pen.provision, pen.opening = pfv.GlobalId, None
-    if cut:
-        j = scene.index_of(pen.host)
-        mh, sh = scene.models[j], scene.unit_scales[j]
-        opening = ifcopenshell.api.run("root.create_entity", mh, ifc_class="IfcOpeningElement",
-                                       name=f"Opening for {service.Name or service.is_a()[3:]}")
-        if mh.schema != "IFC2X3":
-            opening.PredefinedType = "OPENING"
-        rep, _ = _void_rep(mh, sh, pen, _body_context(host))
-        ifcopenshell.api.run("geometry.assign_representation", mh, product=opening, representation=rep)
-        _void_place(mh, opening, sh, pen)
-        ifcopenshell.api.run("feature.add_feature", mh, feature=opening, element=host)
-        pen.opening = opening.GlobalId
-        scene.refresh_bounds([pen.host])
-    return pen
+
+
+def _cut_opening(scene: IfcScene, pen: Penetration, service, host) -> None:
+    """The opening itself, in the host's model, voiding the host."""
+    j = scene.index_of(pen.host)
+    mh, sh = scene.models[j], scene.unit_scales[j]
+    opening = ifcopenshell.api.run("root.create_entity", mh, ifc_class="IfcOpeningElement",
+                                   name=f"Opening for {service.Name or service.is_a()[3:]}")
+    if mh.schema != "IFC2X3":
+        opening.PredefinedType = "OPENING"
+    rep, _ = _void_rep(mh, sh, pen, _body_context(host))
+    ifcopenshell.api.run("geometry.assign_representation", mh, product=opening, representation=rep)
+    _void_place(mh, opening, sh, pen)
+    ifcopenshell.api.run("feature.add_feature", mh, feature=opening, element=host)
+    pen.opening = opening.GlobalId
+    scene.refresh_bounds([pen.host])
 
 
 @contextmanager

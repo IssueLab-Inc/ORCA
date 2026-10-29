@@ -120,6 +120,10 @@ def _penetration_text(scene: IfcScene, label: str, gid: str, host: str, host_lab
              f"({pen.depth_m - 2 * edits.OPENING_PROUD_M:.2f} m). A \"penetration\" (move: \"{label}\") asks for a "
              f"{edits.size_text(pen)} opening ({clearance_m * 1000:.0f} mm clear all round): {host_label}'s team cuts it, "
              f"{who}" + (f", and it needs {needs}" if needs else "") + "."]
+    asked = edits.provision_for(scene, gid, host)
+    if asked is not None:
+        lines.append(f"An opening has already been requested here (provision for void '{asked.Name}'): it waits for "
+                     f"{host_label}'s team to cut it. Do not ask for it again.")
     run = edits.run_of(scene, gid)
     along = float(np.asarray(pen.start) @ np.asarray(run.direction) - np.asarray(run.start) @ np.asarray(run.direction))
     if along > 0 and along + pen.depth_m < run.length_m:   # it runs out of both faces: it serves something beyond
@@ -641,6 +645,12 @@ def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m
                            v.min_clearance_m, {}, "route", None, preview, checked_against=v.checked_against, edit=edit)
 
 
+def may_cut(scene: IfcScene, host: str) -> bool:
+    """Whether the opening would be cut in `host` under the requirements in use (none: yes)."""
+    doc = requirements.current()
+    return doc is None or requirements.can_cut(requirements.policy(doc, requirements.Matcher(scene, doc), host))
+
+
 def penetration_sides(scene: IfcScene, target: str, other: str) -> tuple[str, str]:
     """(service, host) of a penetration: Muse names the service as the element that "moves" (its team asks), but a
     wall or slab named instead is taken as the host."""
@@ -671,6 +681,10 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
     try:
         service, host = penetration_sides(scene, target, other)
         pen = edits.penetration(scene, service, host, clearance_m)
+        asked = edits.provision_for(scene, service, host)
+        if asked is not None and not may_cut(scene, host):
+            raise edits.Unsupported(f"an opening was already requested here ('{asked.Name}'); it waits for the host's "
+                                    "team to cut it")
     except (edits.Unsupported, KeyError) as e:
         return Attempt(title, zero, False, f"cannot request an opening here: {e}", "penetration"), None
     h = scene.element(host)
@@ -686,8 +700,10 @@ def _try_penetration(scene: IfcScene, cand: dict, target: str, other: str, clear
         if on_trial:
             on_trial({"kind": "penetration", "moved": [host], "delta_m": zero, "pieces": shape, "summary": summary})
         v = verify.check(scene, [service], clearance_m=clearance_m, ignore=ignore)
-    # The service stays where it is: what it touched before (a valve beside it) is not this fix's; the host must clear.
-    hits = [x for x in v.hits if x.other == host or x.other not in before or x.distance_m < before[x.other] - 0.002]
+    # The service stays where it is: what it touched before (a valve beside it) is not this fix's; the host must clear,
+    # and so must every other element this fix is for (a plan's merged item: one opening does not clear a second wall).
+    hits = [x for x in v.hits if x.other == host or x.other in others or x.other not in before
+            or x.distance_m < before[x.other] - 0.002]
     attempt = Attempt(title, zero, not hits, _reason(hits), "penetration", None, _hit_ids(hits), edit=edit, where=_where(hits))
     if hits:
         return attempt, None

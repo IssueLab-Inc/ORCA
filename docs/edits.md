@@ -117,7 +117,8 @@ penetration asks for one instead of moving the service.
 through a slab too) crosses an `IfcWall` or `IfcSlab` whose body is extrusions. Beams, columns, footings, piles,
 members, doors, windows and curtain walls are refused with the reason (slice 4b reads other hosts with Muse; the
 Northbank girder is never cut). So is a crossing that runs more than 1 m inside the host (along it, not through it),
-one the service doesn't reach or pass through, and an opening the host would not surround by 50 mm (a hole at its
+one the service doesn't reach or pass through, a service that stops inside the host (it runs into the wall:
+move or shorten it), and an opening the host would not surround by 50 mm (a hole at its
 edge is a notch).
 
 **The opening:** the service's section plus the clearance and 5 mm all round (tessellated circles, site tolerance),
@@ -134,9 +135,12 @@ of each face. The cell's air main (DN50, 60 mm) through the 200 mm west wall: Ø
   the host's box refreshed.
 - A provision for void is never physical (`scene.not_physical`): no box, never in `products()`, so detection, checks,
   root causes and requirements never see it.
+- **One request:** the provision carries `ORCA_Provision` (Service, Host). Asking again reuses it (`provision_for`);
+  while the host still may not be cut, a new proposal is told the opening was already requested and refuses it.
 
 **Trying it** (`agent._try_penetration`): both files in one `trial_files`, always cut, then the service is checked:
-it must clear the host by the clearance, and only contacts new or worse than before count elsewhere (the service
+it must clear the host by the clearance (and every other element a plan's merged item is for: one opening does not
+clear a second wall), and only contacts new or worse than before count elsewhere (the service
 stays where it is: a valve already beside it is not this fix's). The option's clearance is the opening's gap round
 the service. Muse names the service as `move`; a wall or slab named instead is taken as the host
 (`penetration_sides`). The option's `moved` is the host (its geometry changes in the viewer), its `edit` names

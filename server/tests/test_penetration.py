@@ -201,3 +201,40 @@ def test_ifc2x3_takes_a_provision_for_void_by_its_object_type(tmp_path):
         pfv = scene.entity(pen.provision)
         assert pfv.ObjectType == "ProvisionForVoid" and is_provision(pfv) and pfv.OwnerHistory is not None
         assert not hits_on(scene, pipe, wall)
+
+
+def test_one_opening_does_not_clear_a_second_wall(tmp_path):
+    ws, sid, scene = workspace(tmp_path)
+    pipe, w1, w2 = gid(scene, "PN-11"), gid(scene, "Wall W1 partition"), gid(scene, "Wall W2 core")
+    attempt, option = agent._try_penetration(scene, {}, pipe, w1, 0.025, others=[w2])
+    assert not attempt.passed and "IfcWall" in attempt.reason and w2 in attempt.hit_ids
+    _, alone = agent._try_penetration(scene, {}, pipe, w1, 0.025)        # alone it verifies...
+    item = plans.Item(f"{pipe}|{w1}", pipe, w1, "pair", [], option=plans.asdict(alone), others=[w2])
+    check = plans.verify_together(ws, sid, [item])                       # ...but not for an item that is also for W2
+    assert not check["passed"] and "IfcWall" in check["items"][item.key]["reason"]
+
+
+def test_a_service_that_stops_inside_the_host_is_refused(scene):
+    pipe = scene.entity(gid(scene, "PN-1"))
+    pipe.Representation.Representations[0].Items[0].Depth = 2.05     # ends 50 mm into the 200 mm wall
+    with pytest.raises(edits.Unsupported, match="stops inside it"):
+        edits.penetration(scene, pipe.GlobalId, gid(scene, "Wall W1 partition"))
+
+
+def test_an_opening_asked_for_twice_is_one_request(tmp_path):
+    ws, sid, scene = workspace(tmp_path)
+    duct, wall = gid(scene, "PN-2"), gid(scene, "Wall W1 partition")
+    token = req.enter(req.register(doc_locking(scene, "structure")))
+    try:
+        first = ws.apply_penetration(sid, duct, wall)
+        attempt, _ = agent._try_penetration(scene, {}, duct, wall, 0.025)
+        assert not attempt.passed and "already requested" in attempt.reason
+        assert "An opening has already been requested here" in agent._describe(scene, agent.Clash(duct, wall))
+        second = ws.apply_penetration(sid, duct, wall)
+    finally:
+        req.leave(token)
+    assert second["provision"] == first["provision"] and not second["cut"]
+    assert len([e for e in scene.models[1].by_type("IfcBuildingElementProxy") if is_provision(e)]) == 1
+    # Once the wall's team may be edited, the same request is cut, still with one provision.
+    third = ws.apply_penetration(sid, duct, wall)
+    assert third["cut"] and third["provision"] == first["provision"]

@@ -150,7 +150,10 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                     partner = it.element_b if mine == it.element_a else it.element_a
                     touch = it.option["kind"] == "trim"
                     was = before[it.key]
-                    hits = [h for h in hits if ((h.distance_m < -0.002 or not touch) if h.other == partner
+                    # Every element the item is for must clear (a merged item's others too); the rest only must not
+                    # get worse.
+                    meant = {partner, *it.others}
+                    hits = [h for h in hits if ((h.distance_m < -0.002 or not touch) if h.other in meant
                                                 else h.other not in was or h.distance_m < was[h.other] - 0.002)]
                 for h in hits:
                     if h.other in owner and owner[h.other] != it.key:

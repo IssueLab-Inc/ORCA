@@ -433,6 +433,7 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
     - pipe P3 (DN100, PN-5) along Y at x 4.15, z 1.0, y 6-8: through column C1 (refused);
     - pipe P4 (DN100, PN-6) along X at y 2, z 3.33, x 0-4: through W1 at its top (the opening would break out).
     - pipe P5 (DN50, PN-7) along X at y 1, z 1.0, x 5-7: through load-bearing W2.
+    - pipe P6 (DN50, PN-11) along X at y -2.6, z 0.8, x 1-7: through both W1 and W2.
     """
     folder.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -506,6 +507,7 @@ def build_penetration_fixture(folder: Path, version: str = "IFC4") -> list[Path]
             segment("IfcPipeSegment", "Pipe through column DN100", "PN-5", (4.15, 6, 1.0), (4.15, 8, 1.0), pipe(0.055))
             segment("IfcPipeSegment", "Pipe at wall head DN100", "PN-6", (0, 2, 3.33), (4, 2, 3.33), pipe(0.055))
             segment("IfcPipeSegment", "Cold water DN50", "PN-7", (5, 1, 1.0), (7, 1, 1.0), pipe(0.03))
+            segment("IfcPipeSegment", "Hot water DN50", "PN-11", (1, -2.6, 0.8), (7, -2.6, 0.8), pipe(0.03))
         path = folder / f"pen-{name}.ifc"
         model.write(str(path))
         paths.append(path)
