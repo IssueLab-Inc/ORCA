@@ -370,6 +370,12 @@ async def upload_models(request: Request, files: list[UploadFile] = File(...)):
         raise HTTPException(400, f"Could not open the models: {type(e).__name__}: {e}")
 
 
+@app.get("/api/scenes/{scene_id}")
+def scene_info(scene_id: str):
+    """A scene the page had open (to resume after a reload or a closed tab): 404 once the server no longer holds it."""
+    return ws.scene_info(_scene(scene_id))
+
+
 @app.get("/api/scenes/{scene_id}/files/{index}")
 def scene_file(scene_id: str, index: int):
     paths = ws.scene(_scene(scene_id)).paths
@@ -1039,6 +1045,7 @@ async def transcribe_voice(request: Request, audio: UploadFile = File(...), repo
 # page follows what it does. The MCP server itself is mounted at /mcp below (mcp_server.py).
 
 links = agents.Links()
+ws.keep = links.kept  # what live links point at is evicted last
 link_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_LINKS_PER_HOUR", "0")),
                           int(os.environ.get("SIGHTLINE_LINKS_PER_DAY", "0")), noun="agent links")
 agent_call_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_AGENT_CALLS_PER_HOUR", "0")), 0, noun="agent calls")
@@ -1052,8 +1059,9 @@ class LinkContext(BaseModel):
     fixed: list[str] = []
 
 
-def _link(token: str) -> agents.Link:
-    link = links.get(token)
+def _link(token: str, touch: bool = True) -> agents.Link:
+    """A live link: using it (a context update, an agent call) renews it; only reading its state does not."""
+    link = links.get(token, touch=touch)
     if link is None:
         raise HTTPException(404, "This agent link has expired or was revoked.")
     return link
@@ -1075,7 +1083,7 @@ def create_link(body: LinkContext, request: Request):
 
 @app.get("/api/links/{token}")
 def link_state(token: str):
-    return _link(token).public()
+    return _link(token, touch=False).public()
 
 
 @app.put("/api/links/{token}/context")

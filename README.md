@@ -254,7 +254,8 @@ The agent sees what you have open (models, clashes, their pictures). It can:
 - build the report;
 - export.
 
-Your page follows it: the camera goes to the clash it shows, and its fixes appear as it applies them. The link is a
+Your page follows it: the camera goes to the clash it shows, and its fixes appear as it applies them. Close the tab and the agent keeps working; open ORCA again and **Resume** brings back the same models, clashes,
+fixes (the agent's too) and link. The link is a
 secret that expires 12 hours after its last use; **Revoke** ends it. Fixes it asks for count against the demo's
 allowance. The tools, links and security are in [docs/mcp.md](docs/mcp.md).
 

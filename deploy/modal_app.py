@@ -61,7 +61,7 @@ app = modal.App("orca")
     scaledown_window=20 * 60,
     timeout=10 * 60,  # a proposal with retries can take a few minutes
 )
-@modal.concurrent(max_inputs=32)
+@modal.concurrent(max_inputs=64)  # linked pages hold an events stream each
 @modal.asgi_app()
 def web():
     import sys

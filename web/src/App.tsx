@@ -4,12 +4,12 @@ import { Activity, editText, statusLine, type Progress } from "./Activity";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, LinkEvent, OwnerSettings, TriageModel } from "./api";
+import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
-import { AgentDialog, type AgentLogEntry } from "./Agent";
+import { AgentDialog, timeLeft, type AgentLogEntry } from "./Agent";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
 import { ContextPlan, contextStep, type ContextRun } from "./ContextPlan";
@@ -126,14 +126,15 @@ export function App() {
   const [touring, setTouring] = useState(false);
   const [tourWhich, setTourWhich] = useState<"northbank" | "cell">("northbank");
   const startTour = (which: "northbank" | "cell") => { setTourWhich(which); setTouring(true); };
-  // An agent connected over MCP (Agent.tsx; server: agents.py, mcp_server.py). The link is kept for this tab only.
-  const [agentLink, setAgentLinkState] = useState<AgentLink | null>(() => {
-    try { const s = sessionStorage.getItem("sightline.agent"); return s ? JSON.parse(s) as AgentLink : null; } catch { return null; }
-  });
-  const setAgentLink = (l: AgentLink | null) => {
-    setAgentLinkState(l);
-    try { if (l) sessionStorage.setItem("sightline.agent", JSON.stringify(l)); else sessionStorage.removeItem("sightline.agent"); } catch { /* private window */ }
-  };
+  // An agent connected over MCP (Agent.tsx; server: agents.py, mcp_server.py). It is part of the saved session below.
+  const [agentLink, setAgentLinkState] = useState<AgentLink | null>(null);
+  /** Keep a link, measuring how far this browser's clock is from the server's when the server just sent its time. */
+  const setAgentLink = (l: AgentLink | null) => setAgentLinkState(l && (l.server_time
+    ? { ...l, clock_offset: l.server_time - Date.now() / 1000, server_time: 0 } : l));
+  // This browser's last session (models, clashes, fixes, agent link), kept so a reload or a closed tab can resume it
+  // while the server still holds it. One per browser: opening other models replaces it.
+  const [sceneFiles, setSceneFiles] = useState<string[]>([]);
+  const [resumable, setResumable] = useState<{ saved: SavedSession; info: SceneInfo; clashes: number | null } | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
@@ -559,7 +560,8 @@ export function App() {
 
   /** Open models: the picked samples, other sample names, or files the visitor chose (uploaded). A STEP model is
    * converted to IFC on the server; Export gives it back as STEP too. */
-  async function open(source: string[] | File[] = picked) {
+  /** Open models: samples, uploads, or (`existing`) a scene the server still holds, to resume a session. */
+  async function open(source: string[] | File[] = picked, existing?: OpenedScene) {
     if (!source.length) return;
     const upload = source[0] instanceof File;
     const names = (source as (string | File)[]).map((x) => (typeof x === "string" ? x : x.name));
@@ -570,11 +572,11 @@ export function App() {
     pilot.current?.cancel();
     setChatAsk(undefined);
     setContext(null); setContextChosen(null); setContextNames({}); setAcknowledged([]); setViewContext(false); setViewPlan(false);
-    setBusy(upload ? `Uploading ${names.length} model${names.length > 1 ? "s" : ""}${hasStep ? " and converting the STEP" : ""}…`
+    setBusy(existing ? "Reopening your session…" : upload ? `Uploading ${names.length} model${names.length > 1 ? "s" : ""}${hasStep ? " and converting the STEP" : ""}…`
       : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`);
     setError(null); resetWork(false, true);
     try {
-      const { id, files, step } = upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]);
+      const { id, files, step } = existing ?? (upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]));
       if (sceneEpoch.current !== epoch) return;
       const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
       if (sceneEpoch.current !== epoch) return;
@@ -584,7 +586,7 @@ export function App() {
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
-      setStepFiles(Object.values(step ?? {}));
+      setStepFiles(Object.values(step ?? {})); setSceneFiles(files); setResumable(null);
       return id;
     } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
   }
@@ -1242,10 +1244,15 @@ export function App() {
   /** What the agent does, carried out here: the chat's ui events, opened models, applied fixes, pictures. */
   async function onAgentEvent(e: LinkEvent) {
     if (!agentLink) return;
-    if (e.type === "hello" || e.type === "heartbeat") return;
+    if (e.type === "hello") {
+      setAgentLinkState((l) => l && { ...l, expires_at: e.expires_at, max_expires_at: e.max_expires_at,
+        clock_offset: e.server_time - Date.now() / 1000, calls: e.calls, last_call: e.last_call ?? l.last_call });
+      return;
+    }
+    if (e.type === "heartbeat") return;
     if (e.type === "revoked") { setAgentLink(null); return; }
     if (e.type === "agent_call") {
-      setAgentLinkState((l) => l && { ...l, last_call: { tool: e.tool, at: Date.now() / 1000 } });
+      setAgentLinkState((l) => l && { ...l, last_call: { tool: e.tool, at: Date.now() / 1000 }, expires_at: e.expires_at ?? l.expires_at });
       setAgentLog((log) => [...log.slice(-40), { at: Date.now() / 1000, tool: e.tool, text: "…" }]);
       return;
     }
@@ -1313,12 +1320,72 @@ export function App() {
     return () => stop.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentLink?.token]);
-  // A clock for "last call 4 s ago" while the dialog or the pill shows it.
+  // A clock for "last call 4 s ago" and the time left, and the link's state from the server once a minute (its expiry
+  // renews as it is used; a link that expired or was revoked elsewhere is dropped).
   useEffect(() => {
     if (!agentLink) return;
-    const t = setInterval(() => setNow(Date.now()), 2000);
-    return () => clearInterval(t);
-  }, [agentLink]);
+    const token = agentLink.token;
+    const tick = setInterval(() => setNow(Date.now()), 2000);
+    const poll = setInterval(() => {
+      api.linkState(token).then((s) => setAgentLinkState((l) => l && l.token === token ? {
+        ...l, expires_at: s.expires_at, max_expires_at: s.max_expires_at, calls: s.calls,
+        clock_offset: s.server_time - Date.now() / 1000 } : l))
+        .catch((e) => { if (e instanceof ApiError && e.status === 404) setAgentLink(null); });
+    }, 60000);
+    return () => { clearInterval(tick); clearInterval(poll); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentLink?.token]);
+
+  // ------------------------------------------------------------------ the saved session (resume after a reload)
+  const SESSION_KEY = "sightline.session";
+  useEffect(() => {  // on arrival: is there a session the server still holds?
+    let saved: SavedSession | null = null;
+    try { saved = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null"); } catch { saved = null; }
+    if (!saved?.scene_id) return;
+    const s = saved;
+    void (async () => {
+      try {
+        const info = await api.sceneInfo(s.scene_id);
+        const r = s.report_id ? await api.report(s.report_id).catch(() => null) : null;
+        // The link, if it still lives, and the fixes its agent applied while no page was open.
+        const state = s.link ? await api.linkState(s.link.token).catch(() => null) : null;
+        setResumable({ saved: { ...s, link: state ? s.link : null, fixes: { ...s.fixes, ...(state?.applied ?? {}) } },
+                       info, clashes: r ? r.clashes.length : null });
+      } catch { try { localStorage.removeItem(SESSION_KEY); } catch { /* private window */ } }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {  // keep it current while working
+    if (!sceneId) return;
+    const s: SavedSession = { scene_id: sceneId, report_id: report?.id ?? null, files: sceneFiles, fixes,
+                              link: agentLink, saved_at: Date.now() / 1000 };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* private window: no resume */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneId, report?.id, sceneFiles, fixes, agentLink?.token]);
+  /** Reopen the saved session: the same models (with the fixes applied on the server), its clashes, its fixes, and
+   * the agent link, which the page follows again. */
+  async function resumeSession() {
+    const r = resumable;
+    if (!r || busy) return;
+    const { saved, info } = r;
+    const id = await open(info.files, { id: info.id, files: info.files, step: info.step });
+    if (!id) return;
+    if (saved.report_id) {
+      const rep = await loadReport(() => api.report(saved.report_id!), "your clashes");
+      if (rep) {
+        setFixes(saved.fixes ?? {});
+        if (info.detection && info.detection.report_id === rep.id) {
+          const { report_id: _r, ...d } = info.detection;
+          setDetection(d);
+        }
+      }
+    }
+    if (saved.link) setAgentLinkState(saved.link);
+  }
+  function startFresh() {
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* private window */ }
+    setResumable(null);
+  }
 
   async function accept(o: Option) {
     if (!sceneId || busy) return;
@@ -1554,7 +1621,7 @@ export function App() {
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {!landing && <button className={`btn ${agentLink ? "agent-pill" : "ghost"}`} onClick={() => setAgentOpen(true)}
           aria-label={agentLink ? "Agent connected" : "Connect an agent"} data-tip-side="bottom"
-          data-tip={agentLink ? "An agent works on this session over MCP" : "Let an AI agent (Muse Code, Claude) work on this session over MCP"}>
+          data-tip={agentLink ? `An agent works on this session over MCP · the link has ${timeLeft(agentLink, now)} left` : "Let an AI agent (Muse Code, Claude) work on this session over MCP"}>
           {agentLink ? <><Bot size={15} aria-hidden /><span className="lbl"> {agentLink.last_call ? `Agent · ${agentLink.last_call.tool}` : "Agent · waiting"}</span></>
             : <><Plug size={15} aria-hidden /><span className="lbl"> Connect an agent</span></>}</button>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
@@ -1615,6 +1682,8 @@ export function App() {
             onGolden: startGolden,
             onTour: () => startTour("northbank"),
             onCellTour: cellSample ? () => startTour("cell") : undefined,
+            resume: resumable ? { files: resumable.info.files, clashes: resumable.clashes, fixed: Object.keys(resumable.saved.fixes ?? {}).length,
+              agent: !!resumable.saved.link, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,
             details: <>
               Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
               checks them, in about 25 seconds. Other models: <b>Models</b>, in the header.

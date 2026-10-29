@@ -67,6 +67,7 @@ class Link:
     last_call: dict | None = None
     calls: int = 0
     proposals: dict[str, dict] = field(default_factory=dict)   # clash id -> the last proposal's result
+    applied: dict[str, str] = field(default_factory=dict)      # clash id -> the fix the agent applied (its title)
     plans: dict[str, Any] = field(default_factory=dict)        # plan id -> plans.Plan
     jobs: dict[str, Job] = field(default_factory=dict)
     _subscribers: list[queue.Queue] = field(default_factory=list, repr=False)
@@ -163,9 +164,11 @@ class Link:
         return job.state()
 
     def public(self) -> dict:
-        return {"id": self.id, "expires_at": self.expires, "calls": self.calls, "last_call": self.last_call,
+        return {"id": self.id, "expires_at": self.expires, "max_expires_at": self.created + MAX_AGE,
+                "server_time": time.time(), "calls": self.calls, "last_call": self.last_call,
                 "browser": self.browser, "context": {"scene_id": self.ctx.scene_id, "report_id": self.ctx.report_id,
-                                                     "clash_id": self.ctx.clash_id, "fixed": len(self.ctx.fixed)}}
+                                                     "clash_id": self.ctx.clash_id, "fixed": len(self.ctx.fixed)},
+                "applied": self.applied}
 
 
 class Links:
@@ -207,6 +210,13 @@ class Links:
         if link is not None:
             link.publish({"type": "revoked"})
         return link is not None
+
+    def kept(self) -> set[str]:
+        """The scenes and reports live links point at: the server evicts them last."""
+        now = time.time()
+        with self._lock:
+            live = [l for l in self._links.values() if now <= l.expires]
+        return {x for l in live for x in (l.ctx.scene_id, l.ctx.report_id) if x}
 
     def _sweep(self, now: float) -> None:
         for key in [k for k, l in self._links.items() if now > l.expires]:

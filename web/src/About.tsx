@@ -1,4 +1,4 @@
-import { ArrowDown, Box, Check, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
+import { ArrowDown, Box, Check, RotateCcw, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, X, Compass } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 /**
@@ -8,7 +8,8 @@ import { useEffect, type ReactNode } from "react";
 export function About({ start, onClose, triageOpen = false }: {
   // onGolden: one click opens the demo models, checks them, picks the duct-through-girder clash and proposes a fix.
   start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void;
-    onCell?: () => void; onCellTour?: () => void };  // the second demo: the palletising cell from STEP
+    onCell?: () => void; onCellTour?: () => void;  // the second demo: the palletising cell from STEP
+    resume?: Resume };  // this browser's last session, still on the server
   onClose?: () => void;
   triageOpen?: boolean;  // titles and triage run on the open-weights model now (server: /api/models)
 }) {
@@ -22,6 +23,8 @@ export function About({ start, onClose, triageOpen = false }: {
   const body = (
     <article className="about">
       {onClose && <button className="ibtn about-close" onClick={onClose} aria-label="Close"><X size={18} aria-hidden /></button>}
+
+      {start?.resume && <ResumeCard r={start.resume} disabled={start.disabled} />}
 
       <header className="about-hero">
         <div>
@@ -251,6 +254,31 @@ function Step({ n, icon, title, children }: { n: number; icon: ReactNode; title:
 
 /** Side view of the demo's clash: the girder in section (an I with a gap in its web where the opening is), the duct
  * running through the solid web, then raised through the opening with square risers, as ORCA's offset does. */
+/** A session this browser had open, which the server still holds: reopen it (models, clashes, fixes, agent link). */
+export interface Resume {
+  files: string[]; clashes: number | null; fixed: number; agent: boolean; savedAt: number;
+  onResume: () => void; onFresh: () => void;
+}
+
+function ResumeCard({ r, disabled }: { r: Resume; disabled: boolean }) {
+  const mins = Math.max(1, Math.round((Date.now() / 1000 - r.savedAt) / 60));
+  const when = mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} h ago` : "yesterday";
+  return (
+    <section className="resume-card" aria-label="Your last session">
+      <div>
+        <p className="eyebrow">Pick up where you left off · {when}</p>
+        <h2>{r.files.map((f) => f.replace(/\.(ifc|step|stp)$/i, "")).join(", ")}</h2>
+        <p className="hint">{[r.clashes != null ? `${r.clashes} clashes` : null, r.fixed ? `${r.fixed} fixed` : null,
+          r.agent ? "agent connected" : null].filter(Boolean).join(" · ")}</p>
+      </div>
+      <div className="demo-actions">
+        <button className="btn primary big" disabled={disabled} onClick={r.onResume}><RotateCcw size={16} aria-hidden /> Resume</button>
+        <button className="btn big" onClick={r.onFresh}>Start fresh</button>
+      </div>
+    </section>
+  );
+}
+
 /** One demo on the start page: what you see when it opens, what it is, what it shows, and how to start it. */
 function DemoCard({ img, alt, eyebrow, title, blurb, shows, chips, note, children }: {
   img: string; alt: string; eyebrow: string; title: string; blurb: ReactNode; shows: ReactNode[]; chips: string[];

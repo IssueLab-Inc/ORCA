@@ -7,7 +7,7 @@ Error.prepareStackTrace = (error, frames) => `${error.name}: ${error.message}\n$
   `    at ${frame.getFunctionName() ?? "anonymous"} (${frame.getFileName()?.startsWith("data:") ? "transpiled production module" : frame.getFileName()}:${frame.getLineNumber()})`).join("\n")}`;
 
 const url = (js) => `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
-const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AgentDialog", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary"];
+const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary"];
 const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
   export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
   export const clashLabel=(c)=>"#"+c.number;

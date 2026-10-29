@@ -37,10 +37,14 @@ SAMPLE_EXCLUDE = tuple(c.strip() for c in os.environ.get(
 
 class Workspace:
     def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None, max_scenes: int = MAX_SCENES,
-                 max_reports: int = MAX_REPORTS):
+                 max_reports: int = MAX_REPORTS, keep=None):
         self.samples = samples
         self.max_scenes = max_scenes
         self.max_reports = max_reports
+        # Ids (scenes or reports) to evict last: what live agent links point at (app.py). Called at eviction time.
+        self.keep = keep or (lambda: set())
+        self.names: dict[str, list[str]] = {}       # scene id → the file names it was opened from
+        self.detections: dict[str, dict] = {}       # scene id → its last detection run (coverage, diff), to redraw it
         self.scenes: dict[str, IfcScene] = {}
         self.reports: dict[str, reports.Report] = {}
         self._matches: dict[tuple[str, str], dict] = {}
@@ -102,12 +106,15 @@ class Workspace:
         scene_id = uuid.uuid4().hex[:12]
         self.scenes[scene_id] = scene
         self.sources[scene_id] = sources
+        self.names[scene_id] = [p.name for p in paths]
         if root is not None:
             self._roots[scene_id] = root
         while self.max_scenes and len(self.scenes) > self.max_scenes:
-            old = next(iter(self.scenes))  # oldest first (dicts keep insertion order)
+            old = self._oldest(self.scenes, scene_id)
             del self.scenes[old]
             self.sources.pop(old, None)
+            self.names.pop(old, None)
+            self.detections.pop(old, None)
             if old in self._roots:
                 shutil.rmtree(self._roots.pop(old), ignore_errors=True)
         return scene_id
@@ -254,10 +261,16 @@ class Workspace:
             raise
         return self._keep(report)
 
+    def _oldest(self, held: dict, newest: str) -> str:
+        """The one to drop: the oldest that no live agent link points at, else the oldest (never the one just added)."""
+        kept = self.keep()
+        ids = [k for k in held if k != newest]
+        return next((k for k in ids if k not in kept), ids[0])
+
     def _keep(self, report: reports.Report) -> reports.Report:
         self.reports[report.id] = report
         while self.max_reports and len(self.reports) > self.max_reports:
-            old = self.reports.pop(next(iter(self.reports)))
+            old = self.reports.pop(self._oldest(self.reports, report.id))
             if old.temporary:
                 shutil.rmtree(old.root, ignore_errors=True)
         return report
@@ -296,8 +309,17 @@ class Workspace:
         self._carry(self.reports.get(self._run_reports.get(scene_id, "")), run.report)
         self._run_reports[scene_id] = run.report.id
         report = self._keep(run.report)
-        return {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
-                "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset}
+        out = {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
+               "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset}
+        self.detections[scene_id] = {k: out[k] for k in ("coverage", "diff", "elements", "seconds")} | {"report_id": report.id}
+        return out
+
+    def scene_info(self, scene_id: str) -> dict:
+        """What a page needs to reopen a scene it had open (a reload, a closed tab): its files as they were opened,
+        which came from STEP, and the last detection run."""
+        self.scene(scene_id)
+        return {"id": scene_id, "files": self.names.get(scene_id, []), "step": self.step_files(scene_id),
+                "detection": self.detections.get(scene_id)}
 
     @staticmethod
     def _carry(old: reports.Report | None, new: reports.Report) -> None:

@@ -262,15 +262,24 @@ async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean
 
 /** An agent link (server: agents.py): an MCP client holding the token works on this session; the page follows it. */
 export interface AgentLink {
-  token: string; mcp_url: string; id: string; expires_at: number; calls: number; browser: boolean;
-  last_call: { tool: string; at: number } | null;
+  token: string; mcp_url: string; id: string; calls: number; browser: boolean; last_call: { tool: string; at: number } | null;
+  expires_at: number; max_expires_at: number;  // seconds: 12 h after its last use, never past the 24 h cap
+  server_time: number;  // the server's clock when this was sent, to count time left on any visitor's clock
+  clock_offset?: number;  // set by the page: server clock minus this browser's, in seconds
+}
+/** What a page needs to reopen a scene it had open (server: Workspace.scene_info). */
+export interface SceneInfo extends OpenedScene { detection: (Detection & { report_id: string }) | null }
+/** This browser's last session, kept so a reload or a closed tab can resume it while the server still holds it. */
+export interface SavedSession {
+  scene_id: string; report_id: string | null; files: string[]; fixes: Record<string, string>;
+  link: AgentLink | null; clock_offset?: number; saved_at: number;
 }
 export interface LinkContext { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] }
 /** What the agent does, for the page to follow: its calls, requests for pictures, and the chat's ui events. */
 export type LinkEvent =
-  | { type: "hello"; calls: number; last_call: AgentLink["last_call"] }
+  | { type: "hello"; calls: number; last_call: AgentLink["last_call"]; expires_at: number; max_expires_at: number; server_time: number }
   | { type: "heartbeat" } | { type: "revoked" }
-  | { type: "agent_call"; tool: string; args: Record<string, unknown> }
+  | { type: "agent_call"; tool: string; args: Record<string, unknown>; expires_at: number }
   | { type: "agent_result"; tool: string; summary: string }
   | { type: "capture_request"; id: string; what: "view" | "clash"; report_id?: string; clash_id?: string; a?: string; b?: string }
   | { type: "ui"; action: "open_models"; names: string[] }
@@ -280,7 +289,9 @@ export type LinkEvent =
 
 export const api = {
   createLink: (ctx: LinkContext) => call<AgentLink>("/links", { method: "POST", body: JSON.stringify(ctx) }),
-  linkState: (token: string) => call<Omit<AgentLink, "token" | "mcp_url">>(`/links/${encodeURIComponent(token)}`),
+  /** A link's state; `applied`: the fixes its agent applied (clash id → title), for a page that resumes later. */
+  linkState: (token: string) => call<Omit<AgentLink, "token" | "mcp_url"> & { applied: Record<string, string> }>(`/links/${encodeURIComponent(token)}`),
+  sceneInfo: (sceneId: string) => call<SceneInfo>(`/scenes/${sceneId}`),
   linkContext: (token: string, ctx: LinkContext) =>
     call<unknown>(`/links/${encodeURIComponent(token)}/context`, { method: "PUT", body: JSON.stringify(ctx) }),
   revokeLink: (token: string) => call<{ revoked: boolean }>(`/links/${encodeURIComponent(token)}`, { method: "DELETE" }),
