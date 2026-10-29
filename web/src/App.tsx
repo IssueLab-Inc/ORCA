@@ -1194,7 +1194,11 @@ export function App() {
       sceneRevision.current = kept.revision ?? null;
       return;
     }
-    for (const i of kept.files) {
+    // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
+    // them when it doesn't know), so it never jumps to a revision whose edits it hasn't drawn.
+    const drawn = sceneRevision.current;
+    const missed = (kept.history ?? []).filter(([rev]) => drawn == null || rev > drawn).flatMap(([, files]) => files);
+    for (const i of [...new Set([...kept.files, ...missed])].sort((x, y) => x - y)) {
       const bytes = await api.file(sid, i);
       if (!live()) return;
       await viewer.current!.replace(i, bytes, live);
@@ -1530,7 +1534,7 @@ export function App() {
     const r = resumable;
     if (!r || busy) return;
     const { saved, info } = r;
-    const id = await open(info.files, { id: info.id, files: info.files, step: info.step });
+    const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision });
     if (!id) return;
     if (saved.report_id) {
       const rep = await loadReport(() => api.report(saved.report_id!), "your clashes");

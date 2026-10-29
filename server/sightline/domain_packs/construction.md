@@ -29,7 +29,9 @@ Five kinds of fix:
   (+ to the left of the run's direction seen from above; the element data names its compass direction). Between steps
   the run returns to its line; steps that share a boundary change straight from one offset to the next. Each change is
   one axis at a time: to go up and then sideways, go up in one step and add the sideways move in the next, sharing the
-  boundary. Bends take about one profile depth of run either side of each change, so keep at least that (plus 0.05 m)
+  boundary. Coming back is one axis at a time too: end with a step that keeps the up offset without the sideways one,
+  sharing the boundary, so the route steps back sideways and then down (up and over a plinth: [{1.5-2.4 m, up 0.35},
+  {2.4-3.8 m, up 0.35, side 0.55}, {3.8-4.6 m, up 0.35}]). Bends take about one profile depth of run either side of each change, so keep at least that (plus 0.05 m)
   between a change and the obstacle, another change or the segment's ends. The element data lists the room past each
   obstacle ("side offsets ... keep ... clear"): use it. When there is room past each obstacle but not past all of them
   in one stretch, give each its own step and come back to the line between them. A round pipe may change up and
