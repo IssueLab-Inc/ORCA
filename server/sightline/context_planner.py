@@ -407,5 +407,7 @@ def accept(ws, scene_id, proposal_id, acknowledged_conditions):
         except Exception as exc:
             raise ContextError(409, f'Fresh proposal checks failed: {exc}') from exc
         scene.__dict__ = private.__dict__.copy()
+        changed = list(dict.fromkeys([*(g for ps in result['pieces'] for g in ps),
+                                      *(g for e in result['edits'] for g in e.get('moved', []))]))
         return dict(files=result['files'], pieces=result['pieces'], edits=result['edits'],
-                    resolved_pairs=resolved, checks=result['checks'])
+                    resolved_pairs=resolved, checks=result['checks'], changed=changed)

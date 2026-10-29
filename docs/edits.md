@@ -102,3 +102,27 @@ Offsets over or under fail (the columns run full height), a whole-run move or on
 stop between them; a detour of 200 mm round each column clears with 33 mm to spare.
 
 **Not yet:** 45° pieces, falling drainage, diagonal ("rolling") changes, and routes in the wider-fix planner.
+
+## Keeping a fix: the model updates in place (Oct 29)
+
+Accepting a fix used to download the whole file it changed (and the server wrote the whole IFC out for that download)
+and re-parse it in the browser. Now every way of keeping a fix answers with what changed:
+
+- **Server:** each apply reports `changed` (the moved run, a split run's pieces, a trimmed member, a plan's or wider
+  fix's edits), and the endpoints, the MCP `apply_fix` / `apply_plan` and the agent link's `applied` event add
+  `Workspace.patch`: `scene_id`, `revision_before`, `revision`, and `meshes`, the changed and new elements' triangles
+  taken after every edit of the request (`edits.meshes(render=True)`: unwelded, with normals, the style's colour and
+  opacity, and the element's file). No meshes when one will not triangulate or there are more than 500,000 vertices.
+- **Page:** `applyToViewer` (App.tsx) patches when the reply has meshes for this scene and the page's model is at
+  `revision_before` (from opening: `revision` in the open, upload and scene-info replies); otherwise it reloads the
+  changed files as before. Either way it then knows the new revision.
+- **Viewer:** `viewer/patch.ts` (`patchModel`, pure over the loaded model): an element keeps its instance and gets the
+  new geometry (add, point the instance at it, then delete the old one: deleting first would delete the instance); a
+  new piece gets its own instance, coloured from its mesh or the element it came from, in the see-through batch when
+  its opacity says so (made when the model had none). Batches are built with spare room (`ROOM`); `makeRoom` packs
+  out freed space, then grows by twice what is needed. The viewer then drops its focus cache (it shares the buffers),
+  resets the scene size and redraws.
+- **Measured:** the server answers an offset on Northbank in 0.23 s with 9 meshes (936 vertices); in the browser no
+  file is fetched after an accept. On Northbank's 2.3 MB MEP file the headless browser is barely faster (4.0 s
+  against 4.4 s after the reply, software rendering dominates); the gain is the parse of the whole file, which grows
+  with its size.

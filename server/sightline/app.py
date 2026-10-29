@@ -348,7 +348,7 @@ def open_scene(body: Open):
     try:
         needs = any(Path(n).suffix.lower() in step.SUFFIXES for n in body.samples)
         sid = ws.open(body.samples, classify_with=_classifier() if needs else None)
-        return {"id": sid, "files": body.samples, "step": ws.step_files(sid)}
+        return {"id": sid, "files": body.samples, "step": ws.step_files(sid), "revision": ws.scene(sid).revision}
     except FileNotFoundError as e:
         raise HTTPException(404, f"No model called {e.args[0]}.")
     except step.StepError as e:
@@ -387,7 +387,7 @@ async def upload_models(request: Request, files: list[UploadFile] = File(...)):
         needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
         classifier = _classifier() if needs else None
         sid = await run_in_threadpool(lambda: ws.open_paths(paths, root, classify_with=classifier))
-        return {"id": sid, "files": names, "step": ws.step_files(sid)}
+        return {"id": sid, "files": names, "step": ws.step_files(sid), "revision": ws.scene(sid).revision}
     except HTTPException:
         shutil.rmtree(root, ignore_errors=True)
         raise
@@ -466,9 +466,17 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
     return _ndjson(stream())
 
 
+def _with_patch(scene_id: str, kept) -> dict:
+    """Keep a fix (`kept()` returns the Workspace's reply, with "changed") and add what the page needs to update its
+    model in place (`Workspace.patch`)."""
+    before = ws.scene(scene_id).revision
+    r = kept()
+    return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
+
+
 @app.post("/api/scenes/{scene_id}/apply")
 def apply(scene_id: str, body: Move):
-    return ws.apply(_scene(scene_id), body.moved, body.delta_m)
+    return _with_patch(_scene(scene_id), lambda: ws.apply(scene_id, body.moved, body.delta_m))
 
 
 class ContextObjective(BaseModel):
@@ -515,7 +523,8 @@ def context_stream(scene_id: str, body: ContextObjective, request: Request):
 def context_apply(scene_id: str, body: ContextApply):
     _scene(scene_id)
     try:
-        return context_planner.accept(ws, scene_id, body.proposal_id, body.acknowledged_conditions)
+        return _with_patch(scene_id, lambda: context_planner.accept(ws, scene_id, body.proposal_id,
+                                                                     body.acknowledged_conditions))
     except context_planner.ContextError as exc:
         raise HTTPException(exc.status, str(exc))
 
@@ -536,7 +545,7 @@ class TrimBody(BaseModel):
 @app.post("/api/scenes/{scene_id}/trim/apply")
 def apply_trim(scene_id: str, body: TrimBody):
     try:
-        return ws.apply_trim(_scene(scene_id), body.element, body.end, body.by_m)
+        return _with_patch(_scene(scene_id), lambda: ws.apply_trim(scene_id, body.element, body.end, body.by_m))
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot trim this element: {e}")
 
@@ -544,7 +553,7 @@ def apply_trim(scene_id: str, body: TrimBody):
 @app.post("/api/scenes/{scene_id}/offset/apply")
 def apply_offset(scene_id: str, body: Offset):
     try:
-        return ws.apply_offset(_scene(scene_id), body.element, body.split_m, body.dz_m)
+        return _with_patch(_scene(scene_id), lambda: ws.apply_offset(scene_id, body.element, body.split_m, body.dz_m))
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot offset this element: {e}")
 
@@ -562,12 +571,12 @@ def fix_apply(scene_id: str, body: FixApply):
     if not isinstance(o.get("moved"), list) or not o["moved"]:
         raise HTTPException(400, "The fix names no element.")
     try:
-        r = plans.apply(ws, _scene(scene_id), [o])
+        r = _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, [o]))
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot apply this fix: {e}")
     except (ValueError, KeyError, TypeError, IndexError) as e:
         raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
-    return {"files": r["files"], "pieces": r["pieces"][0]}
+    return {**r, "pieces": r["pieces"][0]}
 
 
 @app.get("/api/scenes/{scene_id}/export")
@@ -1084,7 +1093,7 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
 @app.post("/api/scenes/{scene_id}/plan/apply")
 def plan_apply(scene_id: str, body: PlanApply):
     try:
-        return plans.apply(ws, _scene(scene_id), body.options)
+        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, body.options))
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot apply the plan: {e}")
     except ValueError as e:

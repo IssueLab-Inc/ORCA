@@ -759,3 +759,15 @@ kind of fix, for what one offset can't pass.
   - `evals/step_cell.py`: C6 Fix together → one job, a verified route in 31 s; classes 159/159; 16/16 planted.
 - **Checked:** answer key still 3/3 first try at Rev04 heights; 418 server tests, 53 web tests; landing and README cell numbers and
   `web/public/demos/cell.webp` updated.
+
+Accept in place (Oct 29, owner decision; `docs/edits.md` "Keeping a fix"): a kept fix no longer reloads its file.
+- **Server:** apply replies and the link's `applied` event carry `Workspace.patch` (`scene_id`, `revision_before`,
+  `revision`, `meshes` from `edits.meshes(render=True)`: unwelded, normals, style colour and opacity, file); every apply
+  reports `changed`. Open, upload and scene-info replies carry `revision`.
+- **Page:** `applyToViewer` (App.tsx) patches through `Viewer.patch` → `viewer/patch.ts` when the page is at
+  `revision_before` (`sceneRevision` ref), else reloads the changed files as before. Batches keep spare room
+  (`patch.ROOM`); `makeRoom` packs, then grows ×2; new pieces take their mesh's colour, else their origin's; a
+  see-through piece makes the model's glass batch when it has none.
+- **Checked:** Northbank golden path and the cell's route accepted with no file download (headless Chromium); 4 server
+  tests (`test_accept_in_place.py`), 3 web tests (`viewer-patch.test.mjs`, real three.js batches). Web test harness:
+  `viewer-load.test.mjs` compiles the real `./patch`.

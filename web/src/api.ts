@@ -1,3 +1,4 @@
+import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
 export interface Verdict { passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number }
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
@@ -63,10 +64,13 @@ export type ContextEvent =
   | { type: "context_progress"; phase: "inspecting" | "thinking" | "checking" | "blocked"; message: string }
   | ContextResult
   | { type: "error"; detail: string };
-export interface ContextApplied {
+export interface ContextApplied extends Patch {
   files: number[]; pieces: string[][]; edits: ContextEdit[];
   resolved_pairs: { element_a: string; element_b: string }[]; checks: ContextChecks;
 }
+/** What a kept fix sends back so the page can update its model in place instead of reloading the files it changed
+ * (server: Workspace.patch). A page whose model is not at `revision_before`, or that gets no meshes, reloads. */
+export interface Patch { scene_id?: string; revision_before?: number; revision?: number; meshes?: ElementMesh[] | null }
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent =
   | { type: "thinking"; round: number }
@@ -208,7 +212,7 @@ export interface ReqPreview { clashes: number; baseline: number; seconds: number
 export type Effort = "minimal" | "low" | "medium" | "high";
 /** The owner's own settings (this browser): absent fields follow the settings for everyone. */
 /** An opened set of models: the scene id, the file names, and which came from STEP (index → STEP name). */
-export interface OpenedScene { id: string; files: string[]; step?: Record<string, string> }
+export interface OpenedScene { id: string; files: string[]; step?: Record<string, string>; revision?: number }
 export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean }
 /** The settings for everyone (server: settings.py); null fields take the environment's default. */
 export interface EveryoneSettings { open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null }
@@ -376,7 +380,7 @@ export type LinkEvent =
   | { type: "agent_result"; tool: string; summary: string }
   | { type: "capture_request"; id: string; what: "view" | "clash"; report_id?: string; clash_id?: string; a?: string; b?: string }
   | { type: "ui"; action: "open_models"; names: string[] }
-  | { type: "ui"; action: "applied"; files: number[]; pieces: string[][]; pairs: [string, string][]; titles: string[]; clash_ids: string[] }
+  | ({ type: "ui"; action: "applied"; files: number[]; pieces: string[][]; pairs: [string, string][]; titles: string[]; clash_ids: string[] } & Patch)
   | { type: "ui"; action: "follow_triage" }
   | ChatEvent;
 
@@ -447,7 +451,7 @@ export const api = {
     return plan;
   },
   applyPlan: (sceneId: string, options: Option[]) =>
-    call<{ files: number[]; pieces: string[][] }>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
+    call<{ files: number[]; pieces: string[][] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
                  clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
@@ -501,13 +505,13 @@ export const api = {
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
   /** Keep a fix in the server's model; returns the indexes of the files that changed. */
   accept: (id: string, o: Option) => (o.kind === "trim" && o.trim
-    ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
+    ? call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
     : o.kind === "offset"
-    ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
+    ? call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
     : o.kind === "move"
-    ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
+    ? call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
     // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there).
-    : call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
+    : call<{ files: number[]; pieces?: string[] } & Patch>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). */
