@@ -458,6 +458,15 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .nofix p { margin: 0; }
 .nofix-blockers { margin: 2px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .nofix-actions { justify-content: flex-start; flex-wrap: wrap; }
+/* A second try on Muse Wonder (docs/escalation.md): the offer in the no-fix card, the quieter link under options, and
+   which model found each option or idea. */
+.escalate-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--radius);
+  background: var(--panel, #fff); border: 1px solid var(--accent-soft); }
+.escalate-card .hint { flex: 1 1 220px; }
+.link.better-fix { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 2px 0 6px; font-size: 12.5px; }
+.chip.model { background: var(--bg); color: var(--muted); }
+.chip.model.wonder { background: #efe8fb; color: #5b3c99; }
+.steps .chip.model { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; }
 .proof-strip { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--ok-soft); font-size: 12px; font-weight: 600; }
 .proof-strip .why { font-weight: 500; }
 .impact-bar { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); font-size: 12.5px; }

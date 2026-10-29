@@ -13,6 +13,7 @@ function mm(m: number | null | undefined) {
 
 export const KIND_LABEL: Record<FixKind, string> = {
   move: "Move", offset: "Offset", trim: "Trim", route: "Reroute", resize: "Resize", penetration: "Opening",
+  combined: "Combined",
 };
 export const kindLabel = (kind: string) => KIND_LABEL[kind as FixKind] ?? kind;
 
@@ -48,6 +49,7 @@ export function framePieces<M>(o: { kind: string; preview: M[] | null }): M[] {
   if (!o.preview) return [];
   if (o.kind === "offset" || o.kind === "route" || o.kind === "resize") return o.preview.slice(1, -1);
   if (o.kind === "penetration") return o.preview.slice(0, 1);
+  if (o.kind === "combined") return o.preview;   // every element it changes, where it now is
   return [];
 }
 

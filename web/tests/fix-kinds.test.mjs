@@ -43,3 +43,12 @@ test("an opening's card shows its host's reading and the hole against its limits
     ["Hole", "hole 170 mm in 600 mm of host (28%); 915 mm from its nearest end"]]);
   assert.deepEqual(kinds.hostRows({ kind: "offset", edit: o.edit }), []);
 });
+
+test("a combined fix (a second try's several elements at once) says each step and frames them all", () => {
+  const o = { kind: "combined", split_m: null, delta_m: [0, 0, -0.5], moved: ["pipe", "duct"], preview: ["pipe", "duct"],
+    edit: { summary: "LTHW pipe: move [0, 0, -500] mm; Supply duct: move [0, 0, -400] mm" } };
+  assert.equal(kinds.kindLabel("combined"), "Combined");
+  assert.equal(kinds.editText(o), "LTHW pipe: move [0, 0, -500] mm; Supply duct: move [0, 0, -400] mm");
+  assert.equal(kinds.changeText(o), o.edit.summary);
+  assert.deepEqual(kinds.framePieces(o), ["pipe", "duct"]);
+});

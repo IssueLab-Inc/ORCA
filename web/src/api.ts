@@ -16,6 +16,8 @@ export interface Option {
   edit?: FixEdit | null;
   /** Who must review it before it is built ("structure", "services"), when geometry alone cannot say it works. */
   review?: string | null;
+  /** Who proposed it, as people read it ("Muse Spark", "Muse Wonder"). */
+  model?: string;
 }
 export interface FixEdit { summary?: string; key?: string; [param: string]: unknown }
 export interface Attempt {
@@ -24,6 +26,7 @@ export interface Attempt {
   hit_ids?: string[];  // what it hit, worst first
   edit?: FixEdit | null;
   where?: number[][];  // where the worst hits are, world metres
+  model?: string;      // whose idea it was ("Muse Spark", "Muse Wonder")
 }
 /** A candidate in place while the agent checks it: a move's elements and delta, or an offset's new pieces. */
 export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m: number[]; pieces: Piece[] | null; summary?: string }
@@ -31,8 +34,9 @@ export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m:
  * route: a detour of several steps; resize: a flatter section past the obstacle; penetration: an opening through it. */
 /** A kept fix: the files it changed, a split run's pieces, and how to patch the page's model (Patch). A penetration whose
  * host the requirements lock comes back `cut: false`, with who cuts it. */
-export type Kept = { files: number[]; pieces?: string[]; cut?: boolean; blocked_by?: string } & Patch;
-export type FixKind = "move" | "offset" | "trim" | "route" | "resize" | "penetration";
+/** A kept fix: `pieces`, its split run (the original first); `groups`, every run it split (a combined fix's several). */
+export type Kept = { files: number[]; pieces?: string[]; groups?: string[][]; cut?: boolean; blocked_by?: string } & Patch;
+export type FixKind = "move" | "offset" | "trim" | "route" | "resize" | "penetration" | "combined";
 export interface TrimCut { end: "start" | "end"; by_m: number }
 /** Under requirements that allow no edit: Muse Spark's best idea for the designer, never tried or applied. */
 export interface Recommendation {
@@ -43,7 +47,14 @@ export interface Proposal {
   understanding: string; options: Option[]; attempts: Attempt[]; advice?: string;
   recommendation?: Recommendation | null; requirements?: string | null;
   clearance_m?: number;  // the clearance every option had to keep (25 mm, or what the requirements ask)
+  model?: string;        // the model that ran these rounds ("Muse Spark", "Muse Wonder")
+  usage?: Usage | null;  // its tokens, and what they cost for a model billed per token
+  /** A second try on a larger model (docs/escalation.md): the first try's options and ideas are carried in. */
+  escalated?: boolean;
 }
+export interface Usage { model: string; calls: number; input_tokens: number; output_tokens: number; reasoning_tokens: number; usd: number }
+/** Whether a clash Muse Spark could not fix may go to a larger model for a second try (server: escalation_info). */
+export interface EscalationInfo { model: string; label: string; mode: "off" | "button" | "auto"; available: boolean }
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
 export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
 export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
@@ -78,7 +89,7 @@ export interface Patch {
   history?: [number, number[]][];   // (revision, files it changed): a page that missed an edit reloads those
 }
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
-export type AgentEvent =
+export type AgentEvent = (
   | { type: "thinking"; round: number }
   | { type: "reasoning"; round: number; text: string }  // a summary of what Muse Spark is working out, as it thinks
   | { type: "ideas"; round: number; seconds: number; understanding: string; count: number }
@@ -86,7 +97,10 @@ export type AgentEvent =
   | ({ type: "trial" } & Trial)
   | ({ type: "attempt"; index: number } & Attempt)
   | ({ type: "result" } & Proposal)
-  | { type: "error"; detail: string };
+  // A second try starts, on this model; with the first try as it stands (null: none to read).
+  | { type: "escalating"; model: string; first: boolean; first_try?: { understanding: string; advice?: string; attempts: Attempt[] } | null }
+  | { type: "note"; text: string }
+  | { type: "error"; detail: string }) & { model?: string };   // a second try names its model on every event
 
 /** One side of a clash as the Navisworks report describes it. */
 export interface ReportElement {
@@ -242,11 +256,20 @@ async function pack(file: File): Promise<Blob> {
   if (typeof CompressionStream === "undefined" || file.size < 1 << 20) return file;
   return new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
 }
-export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean }
+export type EscalationMode = "off" | "button" | "auto";
+export interface OwnerSettings {
+  effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean;
+  escalation?: EscalationMode; escalation_effort?: Effort;
+}
 /** The settings for everyone (server: settings.py); null fields take the environment's default. */
-export interface EveryoneSettings { open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null }
+export interface EveryoneSettings {
+  open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null;
+  escalation: EscalationMode | null; escalation_effort: Effort | null;
+}
 export interface SettingsState {
-  everyone: EveryoneSettings; defaults: { open_weights: boolean; effort: Effort | null; triage_effort: Effort | null };
+  everyone: EveryoneSettings;
+  defaults: { open_weights: boolean; effort: Effort | null; triage_effort: Effort | null; escalation: EscalationMode;
+    escalation_effort: Effort | null };
   host: boolean;  // an open-weights host key is configured
 }
 let ownerSettings: OwnerSettings | null = null;
@@ -296,6 +319,7 @@ export interface PlanItem {
   key: string; element_a: string; element_b: string; label: string; clash_ids: string[]; in_report: boolean;
   distance_m: number | null; understanding: string; option: Option | null; alternatives: Option[]; tried: number; error: string;
   others?: string[];  // more elements the same movable element runs into: one fix clears them all
+  recommended?: boolean;  // the requirements allow no edit here: a recommendation, no second try
 }
 export interface PlanCheck {
   passed: boolean; items: Record<string, { passed: boolean; reason: string; min_clearance_m: number | null }>;
@@ -452,7 +476,7 @@ export const api = {
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
   settings: () => call<SettingsState>("/settings"),
   /** Which model this browser's titles and triage would use now (the owner's choice, else the setting for everyone). */
-  models: () => call<{ triage: TriageModel; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
+  models: () => call<{ triage: TriageModel; escalation?: EscalationInfo; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
   saveSettings: (changes: Partial<EveryoneSettings>) => call<SettingsState>("/settings", { method: "PUT", body: JSON.stringify(changes) }),
   teams: (reportId: string, sceneId: string | null) =>
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
@@ -564,11 +588,12 @@ export const api = {
     call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
   propose: (id: string, element_a: string, element_b: string, from?: { report_id: string; clash_id: string }) =>
     call<Proposal>(`/scenes/${id}/propose`, { method: "POST", body: JSON.stringify({ element_a, element_b, ...from }) }),
-  /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. */
+  /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. `escalate`: a second, longer try
+   * on the larger model, reading the last try at this pair (docs/escalation.md). */
   proposeStream: async (id: string, element_a: string, element_b: string, from: { report_id: string; clash_id: string } | undefined,
-                        onEvent: (e: AgentEvent) => void): Promise<Proposal> => {
+                        onEvent: (e: AgentEvent) => void, escalate = false): Promise<Proposal> => {
     const r = await send(`/api/scenes/${id}/propose/stream`, {
-      method: "POST", headers: jsonHeaders(), body: JSON.stringify({ element_a, element_b, ...from }),
+      method: "POST", headers: jsonHeaders(), body: JSON.stringify({ element_a, element_b, ...from, ...(escalate ? { escalate } : {}) }),
     });
     if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
     const reader = r.body.getReader();

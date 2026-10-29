@@ -667,7 +667,7 @@ def fix_clearance(doc: Doc, matcher: Matcher, a: str, b: str) -> float:
 
 
 # Kinds whose change has a size the "largest move" limit applies to: how far any part of the element goes.
-SIZED = ("move", "offset", "route", "resize")
+SIZED = ("move", "offset", "route", "resize", "combined")
 
 
 def change_size(kind: str, delta_m: list[float]) -> float:

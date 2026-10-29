@@ -8,7 +8,7 @@ export interface PilotStatus {
   text: string;
 }
 
-type Step = { trial: Trial; title: string; attempt: Attempt | null; arrived: () => void };
+type Step = { trial: Trial; n: number; title: string; attempt: Attempt | null; arrived: () => void };
 
 const TRYING = "#f5a623";
 const PASSED = "#12b5cb";  // teal: not either side's red or green
@@ -31,34 +31,47 @@ export class Pilot {
   private done: (() => void) | null = null;
   private generation = 0;
   private waits = new Set<() => void>();
+  private who = "Muse Spark";   // the model proposing now (a second try's, after `model`)
+  private offset = 0;           // ideas before this try's (a second try numbers its own after the first's)
 
   constructor(private viewer: () => Viewer | null, private frame: (t: Trial) => void,
               private onStatus: (s: PilotStatus | null) => void) {}
 
-  /** A proposal started: take the view. */
-  start() {
+  /** A proposal started: take the view. `model`: who proposes (a second try's model). */
+  start(model = "Muse Spark") {
     this.cancel();
     this.active = this.driving = true;
-    this.status("thinking", "Muse Spark is reading the clash…");
+    this.who = model; this.offset = 0;
+    this.status("thinking", `${model} is reading the clash…`);
     this.viewer()?.orbit(true);
+  }
+
+  /** A second try started in the same run: its model, and how many ideas came before (its own follow on). */
+  model(name: string, offset: number) {
+    this.who = name; this.offset = offset;
+    if (this.active && this.driving && !this.playing) {
+      this.status("thinking", `${name} is reading the first try and the model around it…`);
+      this.viewer()?.orbit(true);
+    }
   }
 
   event(e: AgentEvent) {
     if (!this.active) return;
     if (e.type === "thinking" && e.round > 1 && this.driving && !this.playing) {
-      this.status("thinking", `Round ${e.round}: Muse Spark is thinking again, with what failed…`);
+      this.status("thinking", `Round ${e.round}: ${this.who} is thinking again, with what failed…`);
       this.viewer()?.orbit(true);
     }
     if (e.type === "reasoning" && this.driving && !this.playing) this.status("thinking", `Thinking: ${e.text}`);
-    if (e.type === "checking") this.titles.set(e.index, e.title);
+    if (e.type === "checking") this.titles.set(this.offset + e.index, e.title);
     if (e.type === "trial" && this.driving) {
-      const step: Step = { trial: e, title: this.titles.get(e.index) ?? "", attempt: null, arrived: () => undefined };
-      this.steps.set(e.index, step);
+      const n = this.offset + e.index;
+      const step: Step = { trial: e, n, title: this.titles.get(n) ?? "", attempt: null, arrived: () => undefined };
+      this.steps.set(n, step);
       this.queue.push(step);
       void this.play();
     }
     if (e.type === "attempt") {
-      const step = this.steps.get(e.index);
+      const step = this.steps.get(this.offset + e.index);
       if (step) { step.attempt = e; step.arrived(); }
     }
   }
@@ -116,7 +129,7 @@ export class Pilot {
       v.setHits([]);
       v.showOption({ kind: t.kind, moved: t.moved, deltaM: t.delta_m, pieces: t.pieces, before: null }, "after", TRYING);
       this.frame(t);
-      this.status("trying", `Trying idea ${t.index + 1}: ${step.title || describe(t)}`);
+      this.status("trying", `Trying idea ${step.n + 1}: ${step.title || describe(t)}`);
       const arrived = step.attempt ? Promise.resolve() : new Promise<void>((r) => { step.arrived = r; });
       await Promise.all([arrived, this.wait(busy ? 500 : 1100)]);
       if (!current()) return;
@@ -135,7 +148,7 @@ export class Pilot {
     if (!current()) return;
     this.playing = false;
     if (n && this.driving && !this.done) {
-      this.status("thinking", "Muse Spark is weighing what it found…");
+      this.status("thinking", `${this.who} is weighing what it found…`);
       this.viewer()?.orbit(true);
     }
     if (this.done) this.land();

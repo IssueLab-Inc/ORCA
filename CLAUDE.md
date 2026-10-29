@@ -668,7 +668,14 @@ Next, in order.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ ORCA
    detection (no Navisworks needed). ✅ #N numbers and Muse titles. ✅ Demo, tour and landing on detection. ✅ STEP
    models and the palletising cell (from STEP) as the second demo.
-6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
+6. ✅ Escalating to Muse Wonder (`docs/escalation.md`, below). Next after it, a draft: Show it built, Muse Image restyling ORCA's view
+   of a verified fix, checked against the model (`docs/show-it-built.md`). Muse Image cannot design a fix (Oct 29:
+   it redraws the geometry and invents numbers); it only restyles one. S0 passed on ORCA's own views (Oct 29,
+   `spikes/built/`): a cutaway chosen by the page, look + outline drawing (5 of 6 faithful through Responses), and a
+   pixel gate plus two Muse Wonder judges (medium) given the ids pass in flat colours to read the model view by: 17/19
+   bad rejected, 10/12 faithful passed; Muse Spark passed five shape changes Wonder caught (`spikes/built/judges.py`).
+   An owner-menu switch (For me / For everyone) decides who gets it.
+7. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
 offsets and trims on meshed STEP parts.
@@ -863,4 +870,30 @@ Bigger uploads (Oct 29, owner decision: target 500 MB; design and measurements i
 - **After the reviews of PRs 26-32 (Oct 29):** 491 server tests, 63 web tests; answer key 3/3 first try at Rev04 heights
   (Muse's girder opening refused as a transfer element); `evals/step_cell.py` passes (C1, C2, C6, C7, C8, Rev B 0);
   golden path accepted in place, no file download.
+
+Escalating to Muse Wonder (Oct 29, owner decision; `docs/escalation.md`, code `server/sightline/escalation.py`,
+`spend.py`, `agent._try_combined`): a second, longer try on a larger model, for a clash Muse Spark could not fix or to
+look for a better fix.
+- **Model and money:** `meta_client.escalation_model()` (`META_ESCALATION_MODEL`, default `muse-wonder-1.0`, $4 / $20
+  per M tokens, no contributor tier). `MetaChatModel.usage` counts tokens (both endpoints, every final event);
+  `PRICES` by id prefix. One day's budget for every Wonder call, `SIGHTLINE_WONDER_MAX_USD_DAY` ($25), with running work
+  holding its estimate (`spend.held`). Caps `SIGHTLINE_ESCALATE_PER_HOUR` / `_PER_DAY` plus one proposal, both or
+  neither (`ProposeLimit.take_all`). Setting `escalation` off / button / auto (+ `escalation_effort`), owner menu.
+- **The brief:** the first try (ideas, why each failed, what it hit by name, fixes found), openings and room past
+  the elements it ran into most, every element within 5 m, the kinds from the registry. The last try per scene and
+  pair is kept (`Workspace.last_try`, plan items too) and read only while its scene revision and requirements id
+  still match: a kept edit or a rule change makes its verified options stale.
+- **Combined fixes:** a seventh kind, 1-3 steps (move / offset / route) on different elements, one on A or B, never
+  structure (`agent.stays`, by inheritance) and nothing but services besides A and B; tried in one trial, checked
+  together, kept all or nothing (`edits.kept_files`), each split run's pieces as its own group (`groups` on
+  `/fix/apply`); ranks after one element's fix.
+- **Page:** NoFix **Ask Muse Wonder**, **Look for a better fix with Muse Wonder** under verified options, the same on a
+  failed Fix-together item; model chips; the pilot names the model; a failed second try puts the first's options
+  back. Chat and MCP: `propose_fixes(escalate=true)`.
+- **E0** (`evals/escalation.py`): on the 6 of 21 real clashes Spark left unfixed, Spark again 0/6, Spark + brief 3/6,
+  Wonder + brief 5/6 ($2.01 in all, ~2 min each). Four of Wonder's are C4 posts lifted off their slab, because a moved
+  element's existing embedment counts as a clash (the C5 HMI's floor contact): fix the move check, not the prompt.
+  B1 moves a pad footing (structure; no review chip yet). Answer key 3/3 first try at Rev04 heights.
+- **Checked:** 520 server tests, 64 web tests; in the browser Northbank #1 got Spark's offset and, on Look for a better
+  fix, Wonder's "Shorter offset up 400 mm through girder opening", both verified and chipped.
 

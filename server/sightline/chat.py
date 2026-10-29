@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import context_planner, edits, plans
+from . import context_planner, edits, plans, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 
@@ -100,8 +100,11 @@ TOOLS = [
         {"element": {"type": "string"}, "host": {"type": "string"}}, ["element", "host"]),
     _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes, flatter sections, trims at joints and openings, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
-        "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
-        {"clash_id": {"type": "string"}}, ["clash_id"]),
+        "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes. "
+        "With escalate true it is a second, longer try on Muse Wonder that reads the first try's failures and may "
+        "change several elements together (about a minute, and costs more): only after a first try found nothing, or "
+        "only a resize or an opening, or when the user asks for a better fix.",
+        {"clash_id": {"type": "string"}, "escalate": {"type": "boolean"}}, ["clash_id"]),
     _fn("find_root_causes", "Elements that are in several real clashes at once (the likely root causes), with clashes "
         "the geometry finds that the Navisworks report missed. Use it for 'why are there so many clashes here' or "
         "'what is the real problem'."),
@@ -149,6 +152,7 @@ class Chat:
         self.sessions: OrderedDict[str, Session] = OrderedDict()
         self.propose_allowed = propose_allowed or (lambda: None)
         self.propose_allowed_many: Callable[[int], str | None] = lambda n: None
+        self.escalate_allowed: Callable[[], str | None] = lambda: None
 
     @property
     def model(self) -> ToolModel:
@@ -170,12 +174,14 @@ class Chat:
              cancel: threading.Event | None = None,
              propose_allowed: Callable[[], str | None] | None = None,
              propose_allowed_many: Callable[[int], str | None] | None = None,
+             escalate_allowed: Callable[[], str | None] | None = None,
              before_publish: Callable[[], None] | None = None) -> str:
         cancel = cancel or threading.Event()
         # Defaults preserve constructor/direct-tool callers; each turn captures its
         # callbacks before a model wait can interleave with another visitor's turn.
         allowed = self.propose_allowed if propose_allowed is None else propose_allowed
         allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
+        escalate_ok = self.escalate_allowed if escalate_allowed is None else escalate_allowed
         target = session
         with target._history_lock:
             target._next_turn += 1
@@ -218,7 +224,8 @@ class Chat:
                     break
                 try:
                     result, summary, pics = self._run(name, args, ctx, emit, cancel=cancel,
-                                                     propose_allowed=allowed, propose_allowed_many=allowed_many)
+                                                     propose_allowed=allowed, propose_allowed_many=allowed_many,
+                                                     escalate_allowed=escalate_ok)
                 except Exception as e:  # a bad id, a shape that cannot be edited: tell the model, keep going
                     result, summary, pics = {"error": f"{type(e).__name__}: {e}"}, f"failed: {e}", []
                 if cancel.is_set():
@@ -298,10 +305,11 @@ class Chat:
                 "in_model": bool(m.get("a") and m.get("b")), "fixed": c.id in ctx.fixed}
 
     def _run(self, name: str, args: dict, ctx: Context, emit, *, cancel=None,
-             propose_allowed=None, propose_allowed_many=None) -> tuple[dict, str, list[Path]]:
+             propose_allowed=None, propose_allowed_many=None, escalate_allowed=None) -> tuple[dict, str, list[Path]]:
         ws = self.ws
         allowed = self.propose_allowed if propose_allowed is None else propose_allowed
         allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
+        escalate_ok = self.escalate_allowed if escalate_allowed is None else escalate_allowed
         if name == 'explore_wider_fix':
             report, sid = self._report(ctx), self._scene(ctx)
             c = report.clash(args['clash_id'])
@@ -440,25 +448,42 @@ class Chat:
             v.pop("preview", None)
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "propose_fixes":
-            refused = allowed()
-            if refused:
-                return {"error": refused}, "refused: allowance used", []
+            second = bool(args.get("escalate"))
             r, sid = self._report(ctx), self._scene(ctx)
             c = r.clash(args["clash_id"])
             m = self._matches(ctx).get(c.id, {})
             if not (m.get("a") and m.get("b")):
                 return {"error": "both elements must be in the open model"}, "not in the model", []
+            recommend = second and ws.fix_settings(sid, m["a"], m["b"]).get("recommend")
+            if recommend:   # nothing may be edited: no second try to make, and nothing charged for one
+                return ({"error": f"Nothing may be edited here ({recommend}); a first try gives the recommendation."},
+                        "no second try: recommendation only", [])
+            refused = escalate_ok() if second else allowed()
+            if refused:
+                return {"error": refused}, "refused: " + ("no second try" if second else "allowance used"), []
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
-            result = ws.propose(sid, m["a"], m["b"], report_id=r.id, clash_id=c.id,
-                                on_event=lambda e: emit({"type": "agent", "event": e}))
+            on_event = lambda e: emit({"type": "agent", "event": e})   # noqa: E731
+            if second:
+                result = ws.escalate(sid, m["a"], m["b"], report_id=r.id, clash_id=c.id, on_event=on_event)
+            else:
+                result = ws.propose(sid, m["a"], m["b"], report_id=r.id, clash_id=c.id, on_event=on_event,
+                                    escalate_check=escalate_ok)
             emit({"type": "proposal", "clash_id": c.id, "element_a": m["a"], "element_b": m["b"], **result})
             summary = [{"title": o["title"], "kind": o["kind"], "delta_m": o["delta_m"], "split_m": o["split_m"],
                         "edit": (o.get("edit") or {}).get("summary"), "review": o.get("review"),
+                        "found_by": o.get("model") or None,
                         "clearance_mm": None if o["min_clearance_m"] is None else round(o["min_clearance_m"] * 1000)}
                        for o in result["options"]]
             failed = [{"title": a["title"], "reason": a["reason"]} for a in result["attempts"] if not a["passed"]]
+            note = "The verified options are now in the user's options panel to preview and accept."
+            if result.get("escalated"):
+                note += " This was a second try on Muse Wonder: the first try's fixes are included."
+            elif (not summary or all(o["kind"] in ("resize", "penetration") for o in summary)) and \
+                    not result.get("recommendation") and settings.escalation() != "off":
+                note += (" A second, longer try on Muse Wonder is possible (propose_fixes with escalate true) if the "
+                         "user wants one.")
             return ({"understanding": result["understanding"], "verified_options": summary, "failed": failed[:8],
-                     "note": "The verified options are now in the user's options panel to preview and accept."},
+                     "advice": result.get("advice") or None, "note": note},
                     f"{len(summary)} verified of {len(result['attempts'])} tried", [])
         if name == "find_root_causes":
             r, sid = self._report(ctx), self._scene(ctx)

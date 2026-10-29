@@ -136,6 +136,16 @@ control centre, light curtain and robot restricted space). The first run scored 
 not advised (the prompt now lists floor and ground slabs as reviewed by structure), and the opaque glass spandrel
 panel's label was wrong (its material is glass: never is right).
 
+## A second try on Muse Wonder (E0)
+
+`escalation.py --cell <palletising-cell> --northbank <northbank/IFC> --out runs/<date>-escalation` sweeps one Muse
+Spark proposal over every planted cell clash and Northbank's answer key and B1 (`--reuse` reads a saved
+`sweep.json`), then gives each clash left unfixed three arms of two rounds: Spark again, Spark with the escalation
+brief, Muse Wonder with it; clashes fixed only with a resize or an opening get Wonder's "better fix". Rows go in
+`results.csv` (run `escalation-*`); the arms' advice and failures in `results.json`, a table in `summary.md`. Oct 29:
+6 of 21 unfixed; Spark again 0/6, Spark + brief 3/6, Wonder + brief 5/6, Wonder $2.01 in all (`docs/escalation.md`
+reads the C4 fixes with care: four lift a post off its slab).
+
 ## ORCA detection
 
 `detection_navisworks.py` runs ORCA's own detection (`server/sightline/detect.py`, docs/detection.md) on Northbank

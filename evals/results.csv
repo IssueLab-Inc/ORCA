@@ -39,3 +39,43 @@ date,dataset,clash,model,images,run,latency_s,candidates,passing,top1_pass,top1_
 2026-10-29,northbank-rev03,#042,muse-spark-1.3-contributor,ABC,1,30.0,3,2,yes,"0,0,0.4",50,"0,0,0.4 (offset)","effort low; kinds move+offset; first: Offset duct up 400mm through girder opening (offset [1.1, 2.3] +0.40)"
 2026-10-29,northbank-rev03,#057,muse-spark-1.3-contributor,ABC,1,24.9,3,1,yes,"0,0,0.25",50,"0,0,0.25 (offset)","effort low; kinds move+offset; first: Offset tray up 250 mm through girder opening (offset [10.8, 11.8] +0.25)"
 2026-10-29,northbank-rev03,#061,muse-spark-1.3-contributor,none,1,27.2,4,1,yes,"0,0,0.28",53,"0,0,0.28 (offset)","effort low; kinds move+offset+penetration; first: Offset water main up through girder opening (offset [9.3, 10.0] +0.28)"
+2026-10-29,cell-revA-step,cell C1 air/seg2 x cv/rail/north,muse-spark-1.3-contributor,none,escalation-sweep,59.8,3,1,yes,"0.0,0.0,-0.15",38,,offset: Local offset of pipe A down 150 mm under rail
+2026-10-29,cell-revA-step,cell C1 air/seg2 x cv/rail/south,muse-spark-1.3-contributor,none,escalation-sweep,87.7,3,1,yes,"0.0,0.0,-0.15",38,,offset: Offset pipe down 150 mm under the side rail
+2026-10-29,cell-revA-step,cell C2 ct/h2 x fence/post/W5,muse-spark-1.3-contributor,none,escalation-sweep,16.6,3,2,yes,"0.0,0.0,0.15",50,,offset: Offset tray up over post top
+2026-10-29,cell-revA-step,cell C3 fence/rail/S5-SE x fence/post/SE,muse-spark-1.3-contributor,none,escalation-sweep,9.3,1,1,yes,"-0.04,-0.0,-0.0",8,,trim: Trim top rail end to post face
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N3,muse-spark-1.3-contributor,none,escalation-sweep,127.0,7,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N3,muse-spark-1.3-contributor,none,escalation-spark_again,110.7,6,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N3,muse-spark-1.3-contributor,none,escalation-spark_brief,225.3,5,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N3,muse-wonder-1.0,none,escalation-wonder_brief,113.1,9,3,yes,"-0.1,0.3,0.18",90,,move: Move post N3 north-west 300 mm and lift 180 mm clear of slab
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N4,muse-spark-1.3-contributor,none,escalation-sweep,108.0,8,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N4,muse-spark-1.3-contributor,none,escalation-spark_again,49.5,5,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N4,muse-spark-1.3-contributor,none,escalation-spark_brief,181.3,6,3,yes,"0.0,0.4,0.15",80,,move: Move post N4 north 400 mm onto 150 mm plinth
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/post/N4,muse-wonder-1.0,none,escalation-wonder_brief,111.5,5,3,yes,"0.0,0.4,0.12",50,,move: Move post N4 north 400 mm and lift 120 mm clear of its slab embedment
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N3,muse-spark-1.3-contributor,none,escalation-sweep,131.3,8,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N3,muse-spark-1.3-contributor,none,escalation-spark_again,54.4,4,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N3,muse-spark-1.3-contributor,none,escalation-spark_brief,102.7,2,1,yes,"0.0,1.25,0.0",40,,move: Shift N3 base north 1250 mm beyond slab edge
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N3,muse-wonder-1.0,none,escalation-wonder_brief,143.0,10,3,yes,"0.0,0.5,0.2",130,,"move: Relocate N3 base plate 500 mm north, lifted 200 mm clear of slab"
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N4,muse-spark-1.3-contributor,none,escalation-sweep,229.5,7,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N4,muse-spark-1.3-contributor,none,escalation-spark_again,70.3,4,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N4,muse-spark-1.3-contributor,none,escalation-spark_brief,127.5,6,2,yes,"0.0,0.35,0.12",50,,move: Move N4 base 350 mm north onto plinth clear of restricted volume
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/plate/N4,muse-wonder-1.0,none,escalation-wonder_brief,116.5,8,3,yes,"0.0,0.5,0.15",80,,move: Move N4 base plate 500 mm north and raise it 150 mm
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/panel/N4-N5,muse-spark-1.3-contributor,none,escalation-sweep,122.4,10,3,yes,"0.0,0.35,0.0",150,,"move: Move guard N4-N5 north 350 mm, keep level"
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/curtain/N/a,muse-spark-1.3-contributor,none,escalation-sweep,20.4,2,1,yes,"-0.084,0.288,0.0",76,,move: Move light curtain emitter radially out of restricted space
+2026-10-29,cell-revA-step,cell C4 r1/reach x fence/curtain/N/b,muse-spark-1.3-contributor,none,escalation-sweep,24.3,2,2,yes,"0.0,0.35,0.0",114,,move: Move receiver 350 mm in +Y to clear zone
+2026-10-29,cell-revA-step,cell C5 hmi x ep301/space,muse-spark-1.3-contributor,none,escalation-sweep,80.9,9,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C5 hmi x ep301/space,muse-spark-1.3-contributor,none,escalation-spark_again,60.0,6,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C5 hmi x ep301/space,muse-spark-1.3-contributor,none,escalation-spark_brief,100.6,6,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C5 hmi x ep301/space,muse-wonder-1.0,none,escalation-wonder_brief,124.3,10,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C6 air/pl302/seg3 x bldg/column/C3,muse-spark-1.3-contributor,none,escalation-sweep,56.1,3,2,yes,"0.0,0.22,0.0",53,,route: Reroute pipe north past column
+2026-10-29,cell-revA-step,cell C6 air/pl302/seg3 x bldg/column/C4,muse-spark-1.3-contributor,none,escalation-sweep,24.2,2,1,yes,"0.0,0.22,0.0",53,,route: Detour pipe north past column C4
+2026-10-29,cell-revA-step,cell C7 air/main x bldg/wall/west,muse-spark-1.3-contributor,none,escalation-sweep,53.4,4,1,yes,"0.0,0.0,0.0",35,,penetration: Cored Ø130 mm opening for air main through west wall
+2026-10-29,cell-revA-step,cell C7 air/main x bldg/wall/west,muse-wonder-1.0,none,escalation-wonder_better,95.9,2,0,no,,,,no fix: 
+2026-10-29,cell-revA-step,cell C8 elec/c302 x gland/ep301-top,muse-spark-1.3-contributor,none,escalation-sweep,63.8,4,1,yes,"0.0,0.0,0.0",1,,penetration: Glanded opening for C-302 conduit through EP-301 top gland plate
+2026-10-29,cell-revA-step,cell C8 elec/c302 x gland/ep301-top,muse-wonder-1.0,none,escalation-wonder_better,100.5,2,0,no,,,,no fix: 
+2026-10-29,northbank-rev03,northbank #042 duct,muse-spark-1.3-contributor,none,escalation-sweep,44.1,3,2,yes,"0.0,0.0,0.4",50,,offset: Offset duct up 400 mm through girder opening
+2026-10-29,northbank-rev03,northbank #057 tray,muse-spark-1.3-contributor,none,escalation-sweep,46.8,2,1,yes,"0.0,0.0,0.25",50,,offset: Offset tray up 250 mm through girder opening
+2026-10-29,northbank-rev03,northbank #061 cold water,muse-spark-1.3-contributor,none,escalation-sweep,27.6,2,1,yes,"0.0,0.0,0.28",53,,offset: Offset main up 280 mm through girder opening
+2026-10-29,northbank-rev03,northbank B1 pad footing x lift pit wall,muse-spark-1.3-contributor,none,escalation-sweep,96.0,10,0,no,,,,no fix: 
+2026-10-29,northbank-rev03,northbank B1 pad footing x lift pit wall,muse-spark-1.3-contributor,none,escalation-spark_again,79.8,9,0,no,,,,no fix: 
+2026-10-29,northbank-rev03,northbank B1 pad footing x lift pit wall,muse-spark-1.3-contributor,none,escalation-spark_brief,34.1,1,0,no,,,,no fix: 
+2026-10-29,northbank-rev03,northbank B1 pad footing x lift pit wall,muse-wonder-1.0,none,escalation-wonder_brief,44.9,3,3,yes,"-1.3,0.0,0.0",175,,move: Shift pad footing 1.30 m west clear of pit and ground beam

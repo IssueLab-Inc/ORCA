@@ -5,7 +5,7 @@ import { changeText, clearanceText, editText, framePieces, hostRows, recEditText
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -174,9 +174,15 @@ export function App() {
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
   // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
+  // Whether a clash Muse Spark could not fix may go to Muse Wonder for a second try (docs/escalation.md).
+  const [escalation, setEscalation] = useState<EscalationInfo | null>(null);
   useEffect(() => {
-    api.models().then((m) => { setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); }).catch(() => undefined);
+    api.models().then((m) => {
+      setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); setEscalation(m.escalation ?? null);
+    }).catch(() => undefined);
   }, [ownerSettings]);
+  const canEscalate = !!escalation?.available && escalation.mode !== "off";
+  const wonder = escalation?.label ?? "Muse Wonder";
   // How much a visitor may upload, from the server (checked here before anything is sent).
   const [uploadMax, setUploadMax] = useState<number | null>(null);
   const [replaying, setReplaying] = useState(false);
@@ -972,8 +978,9 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  /** Start showing the agent's progress; returns the handler for its events and a function to call when done. */
-  function trackAgent() {
+  /** Start showing the agent's progress; returns the handler for its events and a function to call when done. With
+   * `first` (a second try), the first try's ideas stay in the activity table and the second's are numbered after them. */
+  function trackAgent(first: Proposal | null = null) {
     directContext.current?.retire();
     clearManual();
     const run = ++agentRun.current;
@@ -981,15 +988,31 @@ export function App() {
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
     setError(null); setChosen(null); setViewPlan(false); setViewContext(false); setReplaying(false);
     const t = Date.now();
-    let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
+    let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null,
+      ...(first ? { model: wonder, offset: first.attempts.length } : {}) };
     setProgress(p); setNow(t);
-    setProposal({ understanding: "", options: [], attempts: [] });
+    setProposal(first ? { understanding: first.understanding, options: [], attempts: first.attempts, advice: first.advice }
+      : { understanding: "", options: [], attempts: [] });
     setThoughts([]);
-    pilot.current?.start();
+    pilot.current?.start(first ? wonder : undefined);
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
+    let attempts = first?.attempts.length ?? 0;
     const onEvent = (e: AgentEvent) => {
       if (!live()) return;
       pilot.current?.event(e);
+      // A second try starting in the same stream (automatic): its ideas are numbered after the first's.
+      if (e.type === "escalating") {
+        const seed = !first && !attempts && e.first_try?.attempts.length ? e.first_try : null;
+        if (seed) {   // a try the page didn't watch (a plan's item): its ideas lead the table
+          attempts = seed.attempts.length;
+          setProposal((q) => q && { ...q, understanding: seed.understanding, advice: seed.advice, attempts: seed.attempts });
+        }
+        update({ model: e.model, offset: attempts, round: 1, modelSeconds: [] }); setThoughts([]);
+        pilot.current?.model(e.model, attempts);
+      }
+      else if (e.model && e.model !== p.model && p.offset == null) update({ model: e.model });
+      if (e.type === "attempt") attempts += 1;
+      if (e.type === "note") setThoughts((t) => [...t, { round: p.round, text: e.text }]);   // e.g. why no second try
       if (e.type === "reasoning") setThoughts((t) => [...t, { round: e.round, text: e.text }]);
       if (e.type === "thinking") update({ round: e.round, phase: "thinking", thinkingSince: Date.now(), checking: null });
       if (e.type === "ideas") {
@@ -1007,6 +1030,8 @@ export function App() {
       const show = () => {
         if (!live()) return;
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
+        // A second try that failed or was refused: the first try's fixes stand.
+        else if (first) { setProposal(first); setChosen(first.options.length ? 0 : null); }
         if (result?.recommendation) noteRecommendation(result.recommendation, [a, b] as const);
         update({ phase: "done", checking: null }); setNow(Date.now());
       };
@@ -1024,18 +1049,33 @@ export function App() {
     return { onEvent, finish, live, retire };
   }
 
-  async function propose() {
-    if (!sceneId || !a || !b || busy) return;
+  /** Propose fixes for the pair (Muse Spark, up to three rounds). */
+  function propose() { return runProposal(false); }
+  /** A second, longer try on Muse Wonder, reading this try (docs/escalation.md): after no fix, or for a better one. */
+  function escalate() { return runProposal(true); }
+
+  /** A failed Fix-together item: its clash, then a second try on it (reading the plan's try at that pair). */
+  function escalateItem(it: PlanItem) {
+    const c = report?.clashes.find((x) => it.clash_ids.includes(x.id)) ?? null;
+    if (c) selectClash(c); else { resetWork(); setA(it.element_a); setB(it.element_b); }
+    setViewPlan(false); showClashTab();
+    void runProposal(true, { a: it.element_a, b: it.element_b, clash: c });
+  }
+
+  /** `pick`: a pair other than the one shown (a plan's item; the page's selection catches up as this runs). */
+  async function runProposal(second: boolean, pick?: { a: string; b: string; clash: ReportClash | null }) {
+    const ea = pick ? pick.a : a, eb = pick ? pick.b : b, on = pick ? pick.clash : clash;
+    if (!sceneId || !ea || !eb || busy) return;
     replaceChatWork();
-    const tracker = trackAgent(); directAgent.current = tracker;
+    const tracker = trackAgent(second && !pick ? proposal : null); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
-    const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
+    const from = on && report ? { report_id: report.id, clash_id: on.id } : undefined;
     // A clash ORCA found: give the agent its views, as a Navisworks report would (waiting a few seconds at most).
-    if (clash && report?.origin === "sightline" && !clash.images.length && !views[clash.id])
-      await Promise.race([captureViews(report.id, clash.id, a, b), new Promise((r) => setTimeout(r, 4000))]);
+    if (on && report?.origin === "sightline" && !on.images.length && !views[on.id])
+      await Promise.race([captureViews(report.id, on.id, ea, eb), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
-    try { result = await api.proposeStream(sceneId, a, b, from, onEvent); }
+    try { result = await api.proposeStream(sceneId, ea, eb, from, onEvent, second); }
     catch (e) { if (agentRun.current === run) setError((e as Error).message); }
     finally { finish(result); }
   }
@@ -1350,6 +1390,7 @@ export function App() {
     chatOwner.current.invalidate();
     chatAgent.current?.retire(); chatPlan.current?.retire(); chatContext.current?.retire();
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
+    chatEscalating.current = false;
   }
   function onChatEvent(e: ChatEvent) {
     if (e.type === "thinking") directContext.current?.retire();
@@ -1375,24 +1416,39 @@ export function App() {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
     }
     if (e.type === "agent") {
-      if (e.event.type === "thinking" && e.event.round === 1) chatAgent.current = trackAgent();
+      // A second try from chat: the first try's ideas stay; its own round 1 is not a new proposal.
+      // Seeded from the server's own first try (the page's may be another clash's, or older than this turn).
+      if (e.event.type === "escalating" && !chatAgent.current) {
+        const f = e.event.first_try;
+        chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: [] }
+          : { understanding: "", attempts: [], options: [] });
+        chatEscalating.current = true;
+      } else if (e.event.type === "escalating") chatEscalating.current = true;
+      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent();
       chatAgent.current?.onEvent(e.event);
     }
     if (e.type === "proposal") {
       setA(e.element_a); setB(e.element_b);
       (chatAgent.current ?? trackAgent()).finish(e);
-      chatAgent.current = null;
+      chatAgent.current = null; chatEscalating.current = false;
     }
     if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind); planThisTurn.current = true; }
     if (e.type === "error") chatContext.current?.fail(e.detail);
     if (e.type === "tool_result" && e.name === "explore_wider_fix" && chatContext.current?.live()) {
       setContext((r) => r && r.phase !== "done" ? { ...r, phase: "done", error: e.summary } : r);
     }
+    // A proposal tool that ended without its proposal (a second try that failed): put back what stood before.
+    if (e.type === "tool_result" && e.name === "propose_fixes" && chatAgent.current) {
+      chatAgent.current.finish(null); chatAgent.current = null;
+    }
+    if (e.type === "tool_result" && e.name === "propose_fixes") chatEscalating.current = false;
+    if (e.type === "done" || e.type === "error") chatEscalating.current = false;
     if (e.type === "done") { planThisTurn.current = false; chatContext.current = null; }
     if (e.type === "plan_event") chatPlan.current?.onEvent(e.event);
     if (e.type === "plan") { (chatPlan.current ?? trackPlan(e.kind)).finish(e); chatPlan.current = null; }
   }
   const chatPlan = useRef<ReturnType<typeof trackPlan> | null>(null);
+  const chatEscalating = useRef(false);
   const planThisTurn = useRef(false);
 
   // ------------------------------------------------------------------ an agent over MCP
@@ -1587,7 +1643,8 @@ export function App() {
       : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
     try {
       const kept = await api.accept(sceneId, o);
-      const pieces = kept.pieces;
+      // Each split run's pieces, the original first (a combined fix can split several runs).
+      const groups = kept.groups ?? (kept.pieces?.length ? [kept.pieces] : []);
       if (!live()) return;
       staleContext();
       // A penetration the host's team must cut: asked for (its provision for void is in the model), not yet fixed.
@@ -1595,12 +1652,13 @@ export function App() {
       setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, requested
         ? { ...evidenceOf(o, "recommended", pics), blocked_by: kept.blocked_by ?? "" } : evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
-      await applyToViewer(sceneId, kept, pieces?.length ? [pieces] : [], live);
+      await applyToViewer(sceneId, kept, groups, live);
       if (!live()) return;
-      if (pieces?.length) {
-        const [first, ...added] = pieces;
-        setEdits((e) => ({ ...e, [first]: [...(e[first] ?? []), ...added] }));
-      }
+      setEdits((e) => {
+        const next = { ...e };
+        for (const ps of groups) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
+        return next;
+      });
       if (!requested) markFixed([[a, b]], [o.title]);
       resetWork(); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
@@ -1826,7 +1884,9 @@ export function App() {
       : option && clash ? { text: <><b>{chosen! + 1}</b> · {option.title}</>,
         action: { label: option.cleanup ? "Accept cleanup" : "Accept", run: () => void accept(option), disabled: !!busy, tour: "accept" } }
       : proposal && progress?.phase === "done" && !proposal.options.length ? { text: "No verified fix: see why",
-        action: { label: "See why", run: () => { showClashTab(); raise(); } } }
+        action: canEscalate && !proposal.escalated && !proposal.recommendation
+          ? { label: `Ask ${wonder.replace(/^Muse /, "")}`, run: () => { showClashTab(); void escalate(); }, disabled: !!busy }
+          : { label: "See why", run: () => { showClashTab(); raise(); } } }
       : clash && shownClash && (fixes[clash.id] || reviewed[clash.id]) ? {
         text: <><CircleCheck size={15} aria-hidden className="ok" /> <b>#{shownClash.number}</b> {fixes[clash.id] ? "fixed" : "reviewed"}{nextClash ? "" : ": nothing left open"}</>,
         action: nextClash ? { label: "Next clash", run: () => { setTab("clash"); selectClash(nextClash); } } : undefined }
@@ -1925,7 +1985,8 @@ export function App() {
             : <><Plug size={15} aria-hidden /><span className="lbl"> Connect an agent</span></>}</button>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
           owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
-          {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}</span>}
+          {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}
+          {ownerSettings.escalation ? ` · second try ${ownerSettings.escalation}` : ""}</span>}
         <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
         {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
@@ -2073,6 +2134,7 @@ export function App() {
             onAccept={acceptContext} onRegenerate={() => { if (context.objective) void exploreContext(context.objective); }}
             onDiscard={() => { directContext.current?.retire(); ++contextRequest.current; clearManual(); setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
+            onEscalate={canEscalate ? escalateItem : undefined} wonder={wonder}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
             onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />}
         </>}
@@ -2120,20 +2182,23 @@ export function App() {
           {(proposal?.understanding || proposing) && <>
             <h2>Understanding</h2>
             {(proposal?.understanding || !thoughts.length) &&
-              <p className="understanding">{proposal?.understanding || "Muse Spark is reading the clash…"}</p>}
+              <p className="understanding">{proposal?.understanding || `${progress?.model ?? "Muse Spark"} is reading the clash…`}</p>}
           </>}
-          <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"} />
+          <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"}
+            model={progress?.model ?? proposal?.model ?? "Muse Spark"} />
           {proposal && !proposing && <h2>Verified options</h2>}
           {proposal && !proposing && proposal.recommendation && <Recommended rec={proposal.recommendation} advice={proposal.advice} requirements={proposal.requirements ?? null}
             onRequirements={() => setReqOpen(true)} />}
-          {proposal && !proposing && !proposal.options.length && !proposal.recommendation && <NoFix proposal={proposal} onRetry={propose} onFlag={clash ? () => review([clash.id], "author", "No verified fix: needs the model's author") : undefined} />}
+          {proposal && !proposing && !proposal.options.length && !proposal.recommendation && <NoFix proposal={proposal} onRetry={propose}
+            onEscalate={canEscalate && !proposal.escalated ? () => void escalate() : undefined} wonder={wonder}
+            onFlag={clash ? () => review([clash.id], "author", "No verified fix: needs the model's author") : undefined} />}
           {clash && proposal && !proposing && proposal.options.length > 0 && proposal.options.every((o) => o.cleanup) && (
             <div className="cleanup-note">
               <b>Model cleanup, not a coordination clash</b>
               <p>Both elements are in the same model, and they overlap where one frames into the other. That is often how
                 they are built (a beam cast into its footing, a transom into its mullion). Tidy the joint if the model goes
                 to fabrication or quantities; otherwise mark it as not a clash.</p>
-              {proposal.advice && <p className="why">Muse Spark: {proposal.advice}</p>}
+              {proposal.advice && <p className="why">{proposal.model || "Muse Spark"}: {proposal.advice}</p>}
               {reviewed[clash.id]
                 ? <span className="chip ok"><CircleCheck size={12} aria-hidden /> marked {reviewed[clash.id].kind === "by_design" ? "by design" : "for the author"}</span>
                 : <button className="btn small" onClick={() => review([clash.id], "by_design", "A joint inside one model: built as modelled")}>
@@ -2145,6 +2210,8 @@ export function App() {
                 <span className="row"><b>{i + 1} · {o.title}</b><span className="chips">
                   {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
                   {o.review && <span className="chip warn" data-tip={reviewText(o.review)}>{o.review} review</span>}
+                  {proposal!.escalated && <span className={`chip model ${o.model === wonder ? "wonder" : ""}`}
+                    data-tip={o.model === wonder ? `Found on the second try, by ${wonder}` : "Found on the first try"}>{o.model || "Muse Spark"}</span>}
                   <span className="chip ok"><Check size={11} aria-hidden /> verified</span></span></span>
                 <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
                 <span className="row"><span>Clearance</span><span className="mono">{clearanceText(o)}</span></span>
@@ -2164,6 +2231,14 @@ export function App() {
             </div>
           ))}
 
+          {proposal && !proposing && proposal.options.length > 0 && canEscalate && !proposal.escalated && !hideFix && (
+            <button className="link better-fix" data-tour="better-fix" disabled={!!busy} onClick={() => void escalate()}
+              data-tip={`A larger model takes a second, longer look with everything this try learned. These options stay. About a minute.`}>
+              <Sparkles size={13} aria-hidden /> Look for a better fix with {wonder}</button>)}
+          {proposal?.escalated && !proposing && proposal.usage && ownerSettings && (
+            <p className="hint mono">{wonder}: {proposal.usage.calls} call{proposal.usage.calls === 1 ? "" : "s"},
+              {" "}{Math.round(proposal.usage.input_tokens / 1000)}k in, {Math.round(proposal.usage.output_tokens / 1000)}k out
+              {" "}({Math.round(proposal.usage.reasoning_tokens / 1000)}k reasoning) · ${proposal.usage.usd.toFixed(2)}</p>)}
           {compact && (proposing || (proposal?.attempts.length ?? 0) > 0) && <details className="activity-fold">
             <summary>Agent activity · {proposal?.attempts.length ?? 0} checked</summary>
             <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
@@ -2349,8 +2424,11 @@ function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recom
 }
 
 /** When nothing passed: what ORCA learned, so the clash reaches a person with a head start, not a dead end. */
-function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: () => void; onFlag?: () => void }) {
+function NoFix({ proposal, onRetry, onFlag, onEscalate, wonder }: {
+  proposal: Proposal; onRetry?: () => void; onFlag?: () => void; onEscalate?: () => void; wonder: string;
+}) {
   const n = proposal.attempts.length;
+  const second = proposal.escalated ? proposal.attempts.filter((t) => t.model === wonder).length : 0;
   const counts = new Map<string, number>();
   for (const t of proposal.attempts) {
     for (const cls of new Set([...t.reason.matchAll(/(?:collision|clearance) with (Ifc\w+)/g)].map((m) => m[1]))) {
@@ -2367,20 +2445,27 @@ function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: ()
       <h3>No edit passed the geometry check</h3>
       <p>
         ORCA tried {n} idea{n === 1 ? "" : "s"} and left the model unchanged.
+        {second > 0 && <> {wonder} took a second, longer look and tried {second} of them.</>}
         {top.length > 0 && <> What stood in the way: {top.map(([cls, k], i) => (
           <span key={cls}>{i ? ", and " : ""}<b>{cls.replace(/^Ifc/, "")}</b> elements in {k === n ? "every attempt" : `${k} of ${n}`}</span>))}.</>}
       </p>
       {proposal.advice && <p><b>What decides it:</b> {proposal.advice}</p>}
       {blockers.length > 0 && <ul className="nofix-blockers">{blockers.map((t, i) => <li key={i}><b>{t.title}</b> — {t.reason}</li>)}</ul>}
       <p><b>What this teaches:</b> {next}</p>
+      {onEscalate && <div className="escalate-card">
+        <button className="btn primary" data-tour="escalate" onClick={onEscalate}><Sparkles size={15} aria-hidden /> Ask {wonder}</button>
+        <span className="hint">A larger model takes a second, longer look, with everything this try learned. It may move a
+          neighbouring service too. About a minute.</span>
+      </div>}
       <div className="row nofix-actions">{onRetry && <button className="btn small" onClick={onRetry}>Propose again</button>}{onFlag && <button className="btn small" onClick={onFlag}>Flag for the model's author</button>}<span className="hint">Full detail in the activity table below.</span></div>
     </div>
   );
 }
 
 
-/** Muse Spark's reasoning, summarised by the model as it thinks: live while it works, then folded away. */
-function Thinking({ notes, live, thinking }: { notes: { round: number; text: string }[]; live: boolean; thinking: boolean }) {
+/** The model's reasoning (Muse Spark, or Muse Wonder on a second try), summarised as it thinks: live while it works,
+ * then folded away. */
+function Thinking({ notes, live, thinking, model }: { notes: { round: number; text: string }[]; live: boolean; thinking: boolean; model: string }) {
   const end = useRef<HTMLLIElement | null>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }); }, [notes.length]);
   if (!notes.length && !live) return null;
@@ -2397,12 +2482,12 @@ function Thinking({ notes, live, thinking }: { notes: { round: number; text: str
   );
   if (live) return (
     <div className="thinking live" aria-live="polite">
-      <h3><Brain size={14} aria-hidden /> {thinking ? "Muse Spark is thinking" : "Muse Spark's thinking so far"}</h3>{list}
+      <h3><Brain size={14} aria-hidden /> {thinking ? `${model} is thinking` : `${model}'s thinking so far`}</h3>{list}
     </div>
   );
   return (
     <details className="thinking">
-      <summary><Brain size={14} aria-hidden /> How Muse Spark reasoned <span className="hint">· {notes.length} note{notes.length === 1 ? "" : "s"}</span></summary>
+      <summary><Brain size={14} aria-hidden /> How {model} reasoned <span className="hint">· {notes.length} note{notes.length === 1 ? "" : "s"}</span></summary>
       {list}
     </details>
   );

@@ -1,3 +1,4 @@
+import pytest
 import json
 
 from fastapi.testclient import TestClient
@@ -51,6 +52,8 @@ def test_batch_dedupes_pairs_and_checks_the_plan_as_a_whole(tmp_path):
     assert plan.check["passed"] and plan.check["items"][item.key]["min_clearance_m"] > 0.04
     assert [e["status"] for e in events if e["type"] == "item"][-1] == "done"
     assert len(list(ws.scene(sid).model.by_type("IfcDuctSegment"))) == 2      # trials were all undone
+    assert ws.last_try(sid, main, beam)["attempts"]   # what a second try on this item reads (docs/escalation.md)
+    assert not item.recommended
 
 
 def test_verify_together_finds_fixes_that_collide(tmp_path):
@@ -62,6 +65,18 @@ def test_verify_together_finds_fixes_that_collide(tmp_path):
     items = [plans.Item("k1", main, beam, "", [], option=up), plans.Item("k2", end, main, "", [], option=clash)]
     check = plans.verify_together(ws, sid, items)
     assert not check["passed"] and check["conflicts"]
+
+
+def test_a_combined_fix_in_a_plan_is_checked_as_a_single_proposal_checks_it(tmp_path):
+    ws, sid, rid, main, beam = _setup(tmp_path)
+    combined = {"kind": "combined", "moved": [main], "delta_m": [0, 0, 0.4], "title": "t",
+                "edit": {"pair": [main, beam], "steps": [
+                    {"kind": "offset", "target": main, "split_m": [2.0, 4.0], "delta_m": [0, 0, 0.4]}]}}
+    check = plans.verify_together(ws, sid, [plans.Item("k1", main, beam, "", [], option=combined)])
+    assert check["passed"] and check["items"]["k1"]["min_clearance_m"] == pytest.approx(0.05, abs=1e-3)
+    low = {**combined, "edit": {**combined["edit"], "steps": [{**combined["edit"]["steps"][0], "delta_m": [0, 0, 0.3]}]}}
+    check = plans.verify_together(ws, sid, [plans.Item("k1", main, beam, "", [], option=low)])
+    assert not check["passed"] and "IfcBeam" in check["items"]["k1"]["reason"]
 
 
 def test_root_causes_and_plan_endpoints(tmp_path, monkeypatch):

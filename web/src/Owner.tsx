@@ -1,10 +1,12 @@
 import { KeyRound, Lock, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, setOwnerSettings, type Effort, type EveryoneSettings, type OwnerSettings, type SettingsState } from "./api";
+import { api, setOwnerSettings, type Effort, type EscalationMode, type EveryoneSettings, type OwnerSettings, type SettingsState } from "./api";
 import { Popover } from "./ui";
 
 const KEY = "sightline.owner";
 const EFFORTS: Effort[] = ["minimal", "low", "medium", "high"];
+/** Second tries on Muse Wonder (docs/escalation.md): off, offered as a button, or automatic after no fix. */
+const ESCALATION: [EscalationMode, string][] = [["off", "Off"], ["button", "Offered (a button)"], ["auto", "Automatic after no fix"]];
 
 function stored(): OwnerSettings {
   try { return JSON.parse(localStorage.getItem(KEY) ?? "{}") as OwnerSettings; } catch { return {}; }
@@ -86,6 +88,18 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
                 <option value="off">Off: Muse Spark</option>
               </select>
             </label>
+            <label>Second try on Muse Wonder
+              <select value={settings.escalation ?? ""} onChange={(e) => change({ ...settings, escalation: (e.target.value || undefined) as EscalationMode | undefined })}>
+                <option value="">Same as everyone</option>
+                {ESCALATION.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </label>
+            <label>Muse Wonder reasoning
+              <select value={settings.escalation_effort ?? ""} onChange={(e) => change({ ...settings, escalation_effort: (e.target.value || undefined) as Effort | undefined })}>
+                <option value="">Same as everyone</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
             <label className="check"><input type="checkbox" checked={settings.no_caps !== false}
               onChange={(e) => change({ ...settings, no_caps: e.target.checked })} /> Skip the demo caps</label>
             <p className="hint">Only your requests use these, and they win over the settings for everyone. A triage run you
@@ -113,6 +127,20 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
             </label>
             {!everyone.host && <p className="hint">No open-weights host is configured (TRIAGE_API_KEY), so titles and triage
               use Muse Spark.</p>}
+            <label>Second try on Muse Wonder
+              <select value={everyone.everyone.escalation ?? ""} onChange={(e) => void saveEveryone({ escalation: (e.target.value || null) as EscalationMode | null })}>
+                <option value="">Default ({ESCALATION.find(([v]) => v === everyone.defaults.escalation)?.[1].toLowerCase() ?? "offered"})</option>
+                {ESCALATION.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </label>
+            <label>Muse Wonder reasoning
+              <select value={everyone.everyone.escalation_effort ?? ""} onChange={(e) => void saveEveryone({ escalation_effort: (e.target.value || null) as Effort | null })}>
+                <option value="">Default ({everyone.defaults.escalation_effort ?? "medium"})</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <p className="hint">Muse Wonder bills every token (about $0.3 to $1 a second try), within the day's budget and
+              each visitor's caps.</p>
             <p className="hint">Every visitor's requests use these, kept on the server across restarts. Runs already going
               keep their model.</p>
             {saved && <p className="ok small" role="status">{saved}</p>}

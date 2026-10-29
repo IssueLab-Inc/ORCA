@@ -31,6 +31,9 @@ _triage_effort: contextvars.ContextVar[str | None] = contextvars.ContextVar("tri
 _owner: contextvars.ContextVar[bool] = contextvars.ContextVar("owner", default=False)
 _no_caps: contextvars.ContextVar[bool] = contextvars.ContextVar("no_caps", default=False)
 _open_weights: contextvars.ContextVar[bool | None] = contextvars.ContextVar("open_weights", default=None)
+_escalation: contextvars.ContextVar[str | None] = contextvars.ContextVar("escalation", default=None)
+_escalation_effort: contextvars.ContextVar[str | None] = contextvars.ContextVar("escalation_effort", default=None)
+ESCALATION = ("off", "button", "auto")
 
 
 def _token() -> str:
@@ -75,9 +78,11 @@ def settings(header: str | None) -> dict:
     if not isinstance(raw, dict):
         return {}
     out: dict[str, Any] = {}
-    for k in ("effort", "triage_effort"):
+    for k in ("effort", "triage_effort", "escalation_effort"):
         if raw.get(k) in EFFORTS:
             out[k] = raw[k]
+    if raw.get("escalation") in ESCALATION:   # absent: follow the setting for everyone
+        out["escalation"] = raw["escalation"]
     out["no_caps"] = raw.get("no_caps", True) is not False
     if isinstance(raw.get("open_weights"), bool):  # absent: follow the setting for everyone (settings.py)
         out["open_weights"] = raw["open_weights"]
@@ -88,11 +93,13 @@ def enter(is_owner: bool, header: str | None) -> list:
     """Set this request's context: whether it is the owner's, and the owner's settings. Returns tokens for `leave`."""
     s = settings(header) if is_owner else {}
     return [_owner.set(is_owner), _effort.set(s.get("effort")), _triage_effort.set(s.get("triage_effort")),
-            _no_caps.set(is_owner and s.get("no_caps", True)), _open_weights.set(s.get("open_weights"))]
+            _no_caps.set(is_owner and s.get("no_caps", True)), _open_weights.set(s.get("open_weights")),
+            _escalation.set(s.get("escalation")), _escalation_effort.set(s.get("escalation_effort"))]
 
 
 def leave(tokens: list) -> None:
-    for var, tok in zip((_owner, _effort, _triage_effort, _no_caps, _open_weights), tokens):
+    for var, tok in zip((_owner, _effort, _triage_effort, _no_caps, _open_weights, _escalation, _escalation_effort),
+                        tokens):
         var.reset(tok)
 
 
@@ -109,9 +116,15 @@ def open_weights() -> bool | None:
     return _open_weights.get()
 
 
+def escalation() -> str | None:
+    """The owner's own choice of escalation for this request ("off", "button", "auto"), else None (settings)."""
+    return _escalation.get()
+
+
 def effort(role: str = "default") -> str | None:
-    """The owner's reasoning effort for this request (`role` "triage" for the triage model), else None."""
-    return _triage_effort.get() if role == "triage" else _effort.get()
+    """The owner's reasoning effort for this request (`role` "triage" for the triage model, "escalation" for Muse
+    Wonder), else None."""
+    return {"triage": _triage_effort, "escalation": _escalation_effort}.get(role, _effort).get()
 
 
 def spawn(fn: Callable[[], None]) -> threading.Thread:
