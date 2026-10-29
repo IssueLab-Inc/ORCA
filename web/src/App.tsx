@@ -1688,7 +1688,7 @@ export function App() {
         {!landing && sceneId && <button className={`btn ${reqLabel ? "req-pill" : "ghost"}`} data-tour="requirements" onClick={() => setReqOpen(true)}
           aria-label="Coordination requirements" data-tip-side="bottom"
           data-tip={reqLabel ? `Checking, triage and fixes follow "${reqSaved!.doc.name}" (${reqLabel})` : "Optional: set the design level, how strict to be and who moves. Off: ORCA's defaults"}>
-          <ClipboardCheck size={15} aria-hidden /><span className="lbl"> Requirements</span>{reqLabel && <span className="req-pill-label"> {reqLabel}</span>}</button>}
+          <ClipboardCheck size={15} aria-hidden />{reqLabel ? <span className="req-pill-label"> {reqLabel}</span> : <span className="lbl"> Requirements</span>}</button>}
         <input ref={modelInput} type="file" hidden multiple accept=".ifc,.step,.stp" disabled={!!busy}
           onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) void openDemo(files); }} />
         <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
@@ -1911,7 +1911,7 @@ export function App() {
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 {o.meets?.length ? <span className="meets">{o.meets.map((m) => <span key={m}><Check size={11} aria-hidden /> {m}</span>)}</span> : null}
                 <span className="why">{o.rationale}</span>
-                <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} />
+                <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} need={proposal!.clearance_m} />
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
             </div>
@@ -2025,17 +2025,15 @@ function remember(side: "left" | "right", w: number) {
 /** "Northbank-Structure.ifc" → "Structure" */
 function shortName(file: string) { return file.replace(/\.(ifc|step|stp)$/i, "").replace(/^Northbank-/, ""); }
 
-function ProofStrip({ o, rank, options, before }: { o: Option; rank: number; options: Option[]; before: number | null }) {
-  const need = 0.025;
+function ProofStrip({ o, rank, options, before, need = 0.025 }: { o: Option; rank: number; options: Option[]; before: number | null; need?: number }) {
   const clear = o.kind === "trim" ? "butt joint, no overlap" : o.min_clearance_m == null ? "nothing within 500 mm" : `${mm(o.min_clearance_m)} clear`;
-  const margin = o.kind !== "trim" && o.min_clearance_m != null ? ` (${Math.round((o.min_clearance_m - need) * 1000)} mm over the 25 mm needed)` : "";
+  const margin = o.kind !== "trim" && o.min_clearance_m != null ? ` (${Math.round((o.min_clearance_m - need) * 1000)} mm over the ${Math.round(need * 1000)} mm needed)` : "";
   const change = options.map((x) => x.delta_m.reduce((s, v) => s + Math.abs(v), 0));
   const smallest = change[rank] === Math.min(...change);
   const comfy = o.min_clearance_m == null || o.min_clearance_m >= 2 * need;
   const why = rank === 0 ? (comfy && smallest ? "ranked first: comfortable clearance, smallest change" : comfy ? "ranked first: comfortable clearance" : smallest ? "ranked first: smallest change that clears" : "ranked first: best clearance of the verified fixes") : `option ${rank + 1} of ${options.length}`;
   return <span className="proof-strip"><span className="ok">✓ Clash gone</span><span>{clear}{margin}</span>{before != null && <span>was {mm(before)} overlap</span>}<span>{o.checked_against ? `checked vs ${o.checked_against} elements` : "checked vs the model"}</span><span className="why">{why}</span></span>;
 }
-/** When nothing passed: what ORCA learned, so the clash reaches a person with a head start, not a dead end. */
 /** The requirements allow no edit here: Muse Spark's recommendation for the designer, never tried or applied. */
 function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void }) {
   const d = rec.delta_m ?? [0, 0, 0];
@@ -2056,6 +2054,7 @@ function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recom
   );
 }
 
+/** When nothing passed: what ORCA learned, so the clash reaches a person with a head start, not a dead end. */
 function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: () => void; onFlag?: () => void }) {
   const n = proposal.attempts.length;
   const counts = new Map<string, number>();

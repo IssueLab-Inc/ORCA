@@ -85,6 +85,8 @@ Findings (Oct 27, details in spikes/README.md):
 
 ## Starting a session
 
+- **Specs and plans go in `docs/` (like `docs/detection.md`, `docs/requirements.md`), never `docs/superpowers/`, and
+  no superpowers skills** (owner decision, Oct 29). The existing files there are history.
 - Follow `AGENTS.md`: large work uses a branch per slice named for its kind (`feature/…`, `fix/…`, `docs/…`, never a
   tool prefix like `codex/` or `claude/`) and a PR; do not implement on `main` or merge without authorization. Run
   the relevant server tests, web build (`npm run build`, `npm test`) and product runtime checks before delivery.
@@ -576,6 +578,44 @@ Agents over MCP (Oct 29, owner decision; docs/mcp.md):
       "optional"`, because `required` aborts runs when a link expires);
     - read tools carry `readOnlyHint`, so Muse Code runs them without approval prompts;
     - Muse Code supports OAuth (`muse mcp login`), which fits the later OAuth work.
+
+Coordination requirements (Oct 29, owner decision; design in `docs/requirements.md`, code
+`server/sightline/requirements.py`, `web/src/Requirements.tsx`, `web/src/reqFile.ts`):
+- **What it is:** an optional `orca-requirements/1` JSON file: a design level (L1 Concept to L5 As-built, industry-neutral,
+  RIBA/LOD/product phase only as hints), a strictness (lenient to exacting; covers both flagging and fixing; strict
+  fixes cautiously), groups (by team, class, system or file, never GlobalId), a check matrix (hard, clearance, off),
+  who moves (edits any/move/none, largest move, trims), by-design class pairs, and guidance for Muse. No file means
+  today's behaviour exactly.
+- **What it compiles into:** detection tests (`req:a|b`, plus the new `Test.min_size_m`); triage rules (`basis:
+  requirement`), the strictness overlay (a low-confidence by-design becomes real under Strict) and prompt lines; and
+  `Workspace.fix_settings` (clearance, `Policy`, prompt lines, recommend mode) for proposals, plans and root causes.
+  `context_eval` keeps a never-edited group fixed.
+- **Muse stays in the loop:** it drafts a file (`POST .../requirements/suggest`, one proposal), reads what no rule
+  settles, audits each by-design rule after triage (`triage.audit_rules`; a disputed rule marks its clashes), and
+  recommends instead of editing where nothing may be edited (`agent._recommend`). Options carry `meets`.
+- **Triage prompt says only what differs from the defaults.** L3 Balanced adds nothing. Measured: "every hard clash
+  matters" in the L3 line turned Muse Spark's 12 model errors into 80 on Northbank.
+- **Plumbing:**
+  - Pages register a file (`POST /api/requirements`, content-addressed) and send `X-Sightline-Requirements` with
+    every call; a forgotten id is a 409 `requirements_unknown`, and `api.ts` registers again and retries.
+  - Triage jobs are keyed by `model_key` + `rules_key`. A rule change continues from the last run's readings for
+    free; another prompt shows the last run as `stale`, with today's rules applied.
+  - Agent links carry the page's id.
+  - `GET /requirements/scale`, `GET .../requirements/default`, `POST .../requirements/preview` (detection without a
+    report, cached; caps `SIGHTLINE_REQUIREMENTS_PER_HOUR`, `SIGHTLINE_PREVIEW_PER_HOUR`).
+- **UI:** header **Requirements** (the pill shows "L4 · Strict"). The dialog has level cards, a strictness slider with
+  what it sets and the expected count, the grid, who moves, rules with Muse's audit, guidance, Suggest with Muse Spark,
+  Download / Upload / Start from the models, and "Use them and check again". Insights has **Add to requirements** on
+  by-design patterns. Detect and Triage cards say what they ran under, and a recommendation shows in the clash panel
+  and the PDF.
+- **Measured (Northbank, Muse Spark):**
+  - L3 Balanced 464 = 464 (cell 107 = 107, same pairs); L4 Strict with Muse's draft 830.
+  - Muse's L4 Strict draft took 36 to 85 s: structure never edited, MEP 50 mm to structure, six by-design pairs.
+  - #1 under Strict: offset +400 mm through the web opening, 50 mm ≥ 40 mm required, within the 400 mm limit.
+  - L5: the same change recommended, nothing edited.
+  - Add to requirements on "Beam with Column": 102 settled at once.
+- **Web tests:** `requirements.test.mjs`; App's new imports are in both stub lists (`setRequirements` is in the api
+  stubs).
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

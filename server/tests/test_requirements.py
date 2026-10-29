@@ -220,10 +220,12 @@ def test_strict_does_not_trust_a_low_confidence_by_design(scene):
     assert req.overlay(doc_with(scene, strictness="strict"), {**v, "confidence": 0.9})["verdict"] == "by_design"
 
 
-def test_prompt_lines_say_the_level_lean_movers_and_guidance(scene):
-    doc = doc_with(scene, strictness="strict", guidance={"triage": "Ignore hangers.", "fixes": "Keep ducts level."})
+def test_prompt_lines_say_only_what_differs_from_the_defaults(scene):
+    """L3 balanced restates ORCA's defaults: triage hears nothing, so its verdicts don't move."""
+    assert req.prompt_text(req.default_doc(scene), "triage") == ""
+    doc = doc_with(scene, level=4, strictness="strict", guidance={"triage": "Ignore hangers.", "fixes": "Keep ducts level."})
     t = req.prompt_text(doc, "triage")
-    assert "L3 Coordinated" in t and "call it real_clash" in t and "Ignore hangers." in t
+    assert "L4 Production" in t and "call it real_clash" in t and "Ignore hangers." in t and "25 mm clearance" in t
     f = req.prompt_text(doc, "fixes")
     assert "at least 40 mm" in f and "400 mm" in f and "Keep ducts level." in f and "Structure stays put" in f
 

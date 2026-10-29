@@ -30,6 +30,7 @@ export interface Recommendation {
 export interface Proposal {
   understanding: string; options: Option[]; attempts: Attempt[]; advice?: string;
   recommendation?: Recommendation | null; requirements?: string | null;
+  clearance_m?: number;  // the clearance every option had to keep (25 mm, or what the requirements ask)
 }
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
 export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }

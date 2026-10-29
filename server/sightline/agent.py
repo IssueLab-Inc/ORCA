@@ -71,6 +71,7 @@ class Result:
     # candidate, never tried or applied) and why ORCA could not make it.
     recommendation: dict | None = None
     requirements: str | None = None   # the requirements' label ("L3 Coordinated · Strict"), when there were some
+    clearance_m: float = 0.025        # the clearance every option had to keep
 
 
 def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025) -> str:
@@ -242,7 +243,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
             o.meets = requirements.meets(doc, policy[mine], policy[theirs], clearance_m, o.min_clearance_m,
                                          o.delta_m, o.kind)
     return Result(understanding, options, attempts, advice,
-                  requirements=requirements.label(doc) if doc is not None else None)
+                  requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
 
 def _candidate_delta(cand: dict) -> tuple[str, list[float]]:
@@ -295,7 +296,7 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
                "also_needs": best.get("also_needs", ""), "blocked_by": why,
                "others": [c.get("title", "") for c in candidates[1:3]]}
     return Result(reply.get("understanding", ""), [], [], reply.get("advice", ""), recommendation=rec,
-                  requirements=requirements.label(doc) if doc is not None else None)
+                  requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
 
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,

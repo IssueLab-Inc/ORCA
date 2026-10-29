@@ -728,9 +728,9 @@ def requirements_default(scene_id: str):
     """A starting point from the open models (L3 Coordinated, balanced: what ORCA checks without requirements), and
     what the models contain."""
     scene = ws.scene(_scene(scene_id))
-    with ws.lock:
-        doc = requirements.default_doc(scene)
-        inv = requirements.inventory(scene)
+    # Read-only (classes, teams, systems), so it does not wait for a preview or a fix trial holding the lock.
+    doc = requirements.default_doc(scene)
+    inv = requirements.inventory(scene)
     return {**_requirements_out(doc), "inventory": inv}
 
 
@@ -742,8 +742,7 @@ def requirements_suggest(scene_id: str, body: RequirementsDraft, request: Reques
     refused = _take(propose_limit, request)
     if refused:
         raise HTTPException(429, refused)
-    with ws.lock:
-        inv = requirements.inventory(scene)
+    inv = requirements.inventory(scene)
     try:
         doc, summary = requirements.suggest(ws.model, inv, body.level, body.strictness, body.name)
     except Exception as e:

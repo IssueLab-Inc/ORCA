@@ -51,10 +51,10 @@ LEVELS: dict[int, dict] = {
     2: {"name": "Developed", "meaning": "Main systems and primary structure in place; branches and small items still move.",
         "hints": ["RIBA 3", "LOD 200", "EVT"], "tolerance_mm": 10, "min_size_mm": 100,
         "service_clearance_mm": 0, "edits": "any"},
-    3: {"name": "Coordinated", "meaning": "Everything modelled to size; every hard clash matters.",
+    3: {"name": "Coordinated", "meaning": "Everything modelled to its real size and place: clashes are judged as built.",
         "hints": ["RIBA 4", "LOD 300", "DVT"], "tolerance_mm": 1, "min_size_mm": 0,
         "service_clearance_mm": 0, "edits": "any"},
-    4: {"name": "Production", "meaning": "Ready to fabricate and install: clearances for insulation, hangers and access.",
+    4: {"name": "Production", "meaning": "Ready to fabricate and install: the space around services (insulation, hangers, access) matters too.",
         "hints": ["RIBA 5", "LOD 400", "PVT"], "tolerance_mm": 1, "min_size_mm": 0,
         "service_clearance_mm": 25, "edits": "any"},
     5: {"name": "As-built", "meaning": "A record of what was built: check and report; ORCA recommends, it does not edit.",
@@ -704,37 +704,39 @@ def overlay(doc: Doc, verdict: dict) -> dict:
 # ------------------------------------------------------------------------------------------------- prompts
 
 def prompt_text(doc: Doc, role: str, rules: bool = True) -> str:
-    """Lines added to Muse Spark's system prompt: "triage" or "fixes"."""
+    """Lines added to Muse Spark's system prompt: "triage" or "fixes". Only what differs from ORCA's defaults is said
+    (L3 balanced with no rules or guidance says nothing to triage): a requirement that only restates the defaults
+    must not move the model's verdicts (measured: "every hard clash matters" turned 12 model errors into 80)."""
     p = resolve(doc)
     lv = LEVELS[doc.level]
-    lines = ["", "Project coordination requirements (set by the project team; follow them, and say when one decides):",
-             f"- Design level L{doc.level} {lv['name']}: {lv['meaning']}",
-             f"- Strictness {p.strictness_name}: {STRICTNESS[doc.strictness]['meaning']}"]
+    lines: list[str] = []
+    if doc.level != 3:
+        lines.append(f"- Design level L{doc.level} {lv['name']}: {lv['meaning']}")
+    if p.lean:
+        lines.append(f"- Strictness {p.strictness_name}: {LEAN_TEXT[p.lean]}")
+    cells = [t.name for t in compile_tests(doc) if t.kind == "clearance"]
     names = {g.id: g.name for g in doc.groups}
-    cells = []
-    for t in compile_tests(doc):
-        if t.kind == "clearance":
-            cells.append(f"{t.name}")
     if role == "triage":
-        lines.append(f"- Hard clashes count from {p.tolerance_mm:g} mm of overlap"
-                     + (f"; elements smaller than {p.min_size_mm:.0f} mm are not checked" if p.min_size_mm else "") + ".")
+        if p.tolerance_mm != 1 or p.min_size_mm:
+            lines.append(f"- Hard clashes count from {p.tolerance_mm:g} mm of overlap"
+                         + (f"; elements smaller than {p.min_size_mm:.0f} mm are not checked" if p.min_size_mm else "") + ".")
         if cells:
-            lines.append("- Clearance checks: " + "; ".join(cells) + ".")
-        if p.lean:
-            lines.append(f"- {LEAN_TEXT[p.lean]}")
+            lines.append("- Clearance checks (a gap that must stay): " + "; ".join(cells) + ".")
         if rules and doc.by_design:
             lines.append("- Declared by design: " + "; ".join(_pair_text(r) + (f" ({r.reason})" if r.reason else "")
                                                              for r in doc.by_design) + ".")
     else:
-        lines.append(f"- A fix must clear everything by at least {p.fix_clearance_mm:.0f} mm"
-                     + (f" and move nothing more than {p.max_move_mm:.0f} mm" if p.max_move_mm else "")
-                     + f"; {TRIM_TEXT[p.trims]}.")
+        if doc.strictness != "balanced":
+            lines.append(f"- A fix must clear everything by at least {p.fix_clearance_mm:.0f} mm"
+                         + (f" and move nothing more than {p.max_move_mm:.0f} mm" if p.max_move_mm else "")
+                         + f"; {TRIM_TEXT[p.trims]}.")
         if cells:
-            lines.append("- Clearance checks: " + "; ".join(cells) + ".")
-    if doc.who_moves:
-        order = [names.get(m.group, m.group) for m in doc.who_moves]
-        lines.append(f"- Who moves: {order[0]} stays put the most" + (f", then {', '.join(order[1:-1])}" if len(order) > 2 else "")
-                     + (f"; {order[-1]} moves first." if len(order) > 1 else "."))
+            lines.append("- Clearance checks (a gap that must stay): " + "; ".join(cells) + ".")
+        if doc.who_moves:
+            order = [names.get(m.group, m.group) for m in doc.who_moves]
+            if len(order) > 1:
+                lines.append(f"- Who moves: {order[0]} stays put the most"
+                             + (f", then {', '.join(order[1:-1])}" if len(order) > 2 else "") + f"; {order[-1]} moves first.")
         limits = []
         for m in doc.who_moves:
             n = names.get(m.group, m.group)
@@ -746,16 +748,17 @@ def prompt_text(doc: Doc, role: str, rules: bool = True) -> str:
                 limits.append(f"{n} moves at most {m.max_move_mm:.0f} mm")
             if not m.trims:
                 limits.append(f"no trims on {n}")
-        if p.edits == "none":
-            limits.append("at this level nothing may be edited: recommend changes for the designer")
-        elif p.edits == "move":
+        if p.edits == "move":
             limits.append("at this level fixes are whole moves only")
-        if limits and role == "fixes":
+        if limits:
             lines.append("- Limits: " + "; ".join(limits) + ".")
     text = doc.guidance.get(role, "").strip()
     if text:
         lines.append(f"- The team's guidance: {text}")
-    return "\n".join(lines)
+    if not lines:
+        return ""
+    return "\n".join(["", "Project coordination requirements (the team's settings; apply them where they bear on a clash):",
+                      *lines])
 
 
 RECOMMEND = ("\n\nThe project requirements do not allow ORCA to edit the model for this clash ({why}). Nothing you "

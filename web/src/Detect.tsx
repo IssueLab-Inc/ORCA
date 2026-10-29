@@ -57,11 +57,11 @@ export function DetectSetupCard({ setup, progress, onRun, disabled, requirements
 }
 
 /** "Requirements: L3 · Strict  Edit", or the way to set some. */
-function ReqLine({ requirements, onRequirements }: { requirements: string | null; onRequirements?: () => void }) {
+function ReqLine({ requirements, name, onRequirements }: { requirements: string | null; name?: string; onRequirements?: () => void }) {
   if (!onRequirements && !requirements) return null;
   return (
     <p className="detect-req"><ClipboardCheck size={13} aria-hidden />
-      {requirements ? <>Requirements: <b>{requirements}</b></> : <span className="hint">ORCA's defaults · no requirements set</span>}
+      {requirements ? <b data-tip={name ? `Checked against "${name}"` : undefined}>{requirements}</b> : <span className="hint">ORCA's defaults · no requirements set</span>}
       {onRequirements && <button className="btn small ghost" onClick={onRequirements}>{requirements ? "Edit" : "Set requirements"}</button>}
     </p>
   );
@@ -114,7 +114,7 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
       {progress ? <ProgressRows progress={progress} /> : !compact && <>
         <p className="detect-count"><b>{clashes.toLocaleString()}</b> clash{clashes === 1 ? "" : "es"} in
           {" "}{detection.elements.toLocaleString()} elements</p>
-        <ReqLine requirements={ran ? `${detection.requirements!.name} · ${ran}` : null} onRequirements={onRequirements} />
+        <ReqLine requirements={ran} name={detection.requirements?.name} onRequirements={onRequirements} />
         {(detection.requirements?.id ?? null) !== requirementsId &&
           <p className="hint small">The requirements changed since this run: Detect again to check under {requirementsId ? "them" : "ORCA's defaults"}.</p>}
         {!d.first && (

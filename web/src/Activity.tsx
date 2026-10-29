@@ -37,6 +37,7 @@ export function statusLine(p: Progress | null, now: number, attempts: Attempt[])
     return `Round ${p.round}: checking idea ${p.checking.index + 1} (${p.checking.title}) against the whole model · ${total} s`;
   }
   const ok = attempts.filter((a) => a.passed).length;
+  if (!attempts.length) return `Done in ${total} s: nothing was tried on the model`;  // a recommendation only (requirements)
   return `Done in ${total} s: ${ok} of ${attempts.length} ideas passed the geometry check`;
 }
 

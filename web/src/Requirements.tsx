@@ -180,10 +180,13 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                   <tr key={ga.id}><th scope="row">
                     <input className="req-group-name" value={ga.name} aria-label={`Name of group ${ga.name}`}
                       onChange={(e) => update({ ...draft, groups: draft.groups.map((g) => g.id === ga.id ? { ...g, name: e.target.value } : g) })} />
-                    <span className="req-selects" data-tip={[...ga.teams.map((t) => `team ${t}`), ...ga.classes.map((c) => c.replace(/^Ifc/, ""))].join(", ")}>
-                      {ga.teams.length ? ga.teams.join(", ") : `${ga.classes.length} classes`}</span></th>
+                    {(ga.classes.length > 0 || ga.teams.join(", ") !== ga.name) &&
+                      <span className="req-selects" data-tip={[...ga.teams.map((t) => `team ${t}`), ...ga.classes.map((c) => c.replace(/^Ifc/, ""))].join(", ")}>
+                        {ga.classes.length ? `${ga.classes.length} kinds of element` : `team ${ga.teams.join(", ")}`}</span>}</th>
                     {groups.map((gb, j) => j < i ? <td key={gb.id} className="req-none" /> : (
                       <td key={gb.id}><Cell value={cell(ga.id, j === i ? null : gb.id)} label={`${ga.name} vs ${j === i ? "itself" : gb.name}`}
+                        levelMm={j !== i && new Set([ga.role, gb.role]).has("services") && new Set([ga.role, gb.role]).has("structure")
+                          ? params?.service_clearance_mm ?? 0 : 0}
                         onChange={(patch) => update(setCell(draft, ga.id, j === i ? null : gb.id, patch))} /></td>))}
                   </tr>))}
                 </tbody>
@@ -256,7 +259,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
   );
 }
 
-function Cell({ value, label, onChange }: { value: ReqCheck | undefined; label: string; onChange: (p: Partial<ReqCheck>) => void }) {
+function Cell({ value, label, levelMm, onChange }: { value: ReqCheck | undefined; label: string; levelMm: number; onChange: (p: Partial<ReqCheck>) => void }) {
   const v = value ?? { check: "hard", clearance_mm: null, reason: "", source: "level" } as Partial<ReqCheck>;
   const tip = [v.reason, v.source === "orca" ? "ORCA suggests" : v.source === "user" ? "Yours" : ""].filter(Boolean).join(" · ");
   return (
@@ -265,6 +268,7 @@ function Cell({ value, label, onChange }: { value: ReqCheck | undefined; label: 
         <option value="hard">Hard</option><option value="clearance">Clearance</option><option value="off">Off</option></select>
       {v.check === "clearance" && <label className="req-mm"><input type="number" min={0} max={500} step={5} value={v.clearance_mm ?? 25}
         aria-label={`${label} clearance`} onChange={(e) => onChange({ clearance_mm: Number(e.target.value) })} /> mm</label>}
+      {v.check === "hard" && levelMm > 0 && <span className="req-mm" data-tip="The design level keeps this gap between services and structure">keeps {levelMm} mm</span>}
       {v.source === "orca" && <Sparkles size={11} className="req-orca" aria-label="ORCA suggests" />}
     </span>
   );
