@@ -16,7 +16,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, reports, step, verify
+from . import agent, detect, edits, reports, requirements, step, verify
 from .meta_client import ChatModel, MetaChatModel
 from .scene import IfcScene, step_source
 
@@ -154,7 +154,28 @@ class Workspace:
         the model find openings and free space; spikes/README.md, spike 4)."""
         clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id)
         return asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
-                                    trials=on_event is not None))
+                                    trials=on_event is not None, **self.fix_settings(scene_id, element_a, element_b)))
+
+    def fix_settings(self, scene_id: str, element_a: str, element_b: str) -> dict:
+        """What the coordination requirements set for a fix of this pair (none: today's defaults): the clearance it
+        must keep, who may be edited and how, the lines Muse Spark is told, and recommend-only when neither side
+        may be edited."""
+        doc = requirements.current()
+        if doc is None:
+            return {}
+        scene = self.scene(scene_id)
+        with self.lock:
+            m = requirements.Matcher(scene, doc)
+            pa, pb = requirements.policy(doc, m, element_a), requirements.policy(doc, m, element_b)
+            clearance = requirements.fix_clearance(doc, m, element_a, element_b)
+        why = None
+        if pa.edits == "none" and pb.edits == "none":
+            lv = requirements.LEVELS[doc.level]
+            why = (f"L{doc.level} {lv['name']}: report only" if requirements.resolve(doc).edits == "none" else
+                   f"neither {pa.group_name} nor {pb.group_name} may be edited")
+        return {"clearance_m": clearance, "policy": {element_a: pa, element_b: pb},
+                "guidance": requirements.prompt_text(doc, "fixes"), "recommend": why,
+                "doc": doc}
 
     def clash_for(self, element_a: str, element_b: str, distance_m: float | None = None,
                   images: list[str] | None = None, notes: str = "", report_id: str | None = None,
@@ -289,29 +310,51 @@ class Workspace:
     # ORCA detection (detect.py; design in docs/detection.md).
 
     def detect_tests(self, scene_id: str) -> dict:
-        """The tests a run would use by default for the open models, and the ones offered but off."""
+        """The tests a run would use by default for the open models, and the ones offered but off. Under coordination
+        requirements (requirements.current()), the tests they compile to."""
         scene = self.scene(scene_id)
+        doc = requirements.current()
         with self.lock:
             ix = detect._Index(scene)
-            tests = detect.default_tests(scene, ix) + detect.presets(scene, ix)
+            tests = (requirements.compile_tests(doc, scene) if doc else
+                     detect.default_tests(scene, ix) + detect.presets(scene, ix))
             teams = {name: team for name, team in zip(ix.names, ix.teams)}
             per_file = Counter(ix.names[i] for i in ix.file.values())
         return {"tests": [asdict(t) for t in tests], "teams": teams, "elements": len(ix.entity), "file_elements": dict(per_file),
-                "rules": detect.RULE_LABEL}
+                "rules": detect.RULE_LABEL, "requirements": self.requirements_info(doc)}
+
+    @staticmethod
+    def requirements_info(doc=None) -> dict | None:
+        """What a result was checked against: the file's name, version, level and strictness, and its id."""
+        doc = doc if doc is not None else requirements.current()
+        if doc is None:
+            return None
+        return {"id": requirements.doc_id(doc), "name": doc.name, "version": doc.version, "label": requirements.label(doc),
+                "level": doc.level, "strictness": doc.strictness}
 
     def detect(self, scene_id: str, tests: list[dict] | None = None, on_event=None) -> dict:
         """Run ORCA's own clash detection and open the result as a clash report."""
         scene = self.scene(scene_id)
-        chosen = None if tests is None else [detect.Test.from_dict(t) for t in tests]
+        doc = requirements.current()
+        if tests is not None:
+            chosen = [detect.Test.from_dict(t) for t in tests]
+        else:
+            chosen = requirements.compile_tests(doc, scene) if doc else None
+        # A rerun compares with the last run only when both ran under the same requirements (the same tests).
+        rid = requirements.doc_id(doc) if doc else None
+        previous = self._runs.get(scene_id)
+        if previous is not None and previous.get("requirements") != rid:
+            previous = None
         with self.lock:
-            run = detect.run(scene, chosen, on_event=on_event, previous=self._runs.get(scene_id))
-        self._runs[scene_id] = run.state
+            run = detect.run(scene, chosen, on_event=on_event, previous=previous)
+        self._runs[scene_id] = {**run.state, "requirements": rid}
         self._carry(self.reports.get(self._run_reports.get(scene_id, "")), run.report)
         self._run_reports[scene_id] = run.report.id
         report = self._keep(run.report)
         out = {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
-               "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset}
-        self.detections[scene_id] = {k: out[k] for k in ("coverage", "diff", "elements", "seconds")} | {"report_id": report.id}
+               "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset,
+               "requirements": self.requirements_info(doc)}
+        self.detections[scene_id] = {k: out[k] for k in ("coverage", "diff", "elements", "seconds", "requirements")} | {"report_id": report.id}
         return out
 
     def scene_info(self, scene_id: str) -> dict:

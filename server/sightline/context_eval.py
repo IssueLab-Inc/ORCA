@@ -11,7 +11,7 @@ import numpy as np
 import ifcopenshell.util.system as system
 import ifcopenshell.util.element
 
-from . import edits, verify
+from . import edits, requirements, verify
 from .scene import IfcScene, FIXED_CLASSES
 
 TOL = .002
@@ -19,9 +19,15 @@ CLEARANCE = .025
 
 
 def element_constraints(scene: IfcScene, gid: str) -> list[str]:
-    """Explicit per-element model constraints; absent properties impose no restriction."""
+    """Explicit per-element model constraints; absent properties impose no restriction. Coordination requirements
+    that allow no edit of the element's group (or none at their level) keep it fixed too."""
     properties = ifcopenshell.util.element.get_pset(scene.entity(gid),'Pset_SightlineConstraints') or {}
-    return ['KeepFixed'] if properties.get('KeepFixed') is True else []
+    if properties.get('KeepFixed') is True:
+        return ['KeepFixed']
+    doc = requirements.current()
+    if doc is not None and requirements.policy(doc, requirements.Matcher(scene, doc), gid).edits == 'none':
+        return ['KeepFixed']
+    return []
 
 
 def check_offset_profile(scene: IfcScene, gid: str) -> None:

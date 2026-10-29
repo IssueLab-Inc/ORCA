@@ -70,6 +70,7 @@ class Test:
     clearance_m: float = 0.0
     rules: dict[str, bool] = field(default_factory=lambda: {r: True for r in RULES})
     enabled: bool = True
+    min_size_m: float = 0.0      # elements whose largest box side is under this are left out (early design levels)
 
     @staticmethod
     def from_dict(d: dict) -> "Test":
@@ -81,7 +82,7 @@ class Test:
         return Test(id=str(d["id"]), name=str(d.get("name") or d["id"]), a=sel(d.get("a") or {}), b=sel(d.get("b")),
                     kind=kind, tolerance_m=max(0.0, float(d.get("tolerance_m", TOLERANCE_M))),
                     clearance_m=max(0.0, float(d.get("clearance_m", 0.0))), rules=rules,
-                    enabled=bool(d.get("enabled", True)))
+                    enabled=bool(d.get("enabled", True)), min_size_m=max(0.0, float(d.get("min_size_m", 0.0))))
 
 
 @dataclass
@@ -499,6 +500,13 @@ def measure_pair(scene: IfcScene, a: str, b: str) -> float | None:
     return None if hit is None else round(hit.distance_m, 6)
 
 
+def _sized(ix: _Index, ids: list[str], min_size_m: float) -> list[str]:
+    """Only elements at least `min_size_m` across in their largest direction (all when it is 0)."""
+    if min_size_m <= 0:
+        return ids
+    return [g for g in ids if float(np.max(ix.boxes[g][1] - ix.boxes[g][0])) >= min_size_m]
+
+
 def clash_id(test_id: str, a: str, b: str) -> str:
     x, y = sorted((a, b))
     return "s" + hashlib.sha1(f"{test_id}|{x}|{y}".encode()).hexdigest()[:9]
@@ -520,8 +528,8 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
     # Broad phase for every test first, so the triangle tree is built once over just what can clash.
     plans = []
     for t in tests:
-        a = ix.select(t.a)
-        b = None if t.b is None else ix.select(t.b)
+        a = _sized(ix, ix.select(t.a), t.min_size_m)
+        b = None if t.b is None else _sized(ix, ix.select(t.b), t.min_size_m)
         margin = t.clearance_m if t.kind == "clearance" else t.tolerance_m
         plans.append((t, a, b, _candidates(ix, a, b, margin)))
     needed = {g for _, _, _, pairs in plans for p in pairs for g in p}

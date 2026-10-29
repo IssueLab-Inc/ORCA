@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import agent, edits, owner, verify
+from . import agent, edits, owner, requirements, verify
 from .service import Workspace
 
 PACKS = Path(__file__).parent / "domain_packs"
@@ -77,18 +77,21 @@ def _trial(scene, indexes: set[int]):
         scene._bounds = before
 
 
-def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m: float = 0.025) -> dict:
+def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m: float | None = None) -> dict:
     """Apply every item's chosen fix in one trial, check each against the whole model (the other fixes included),
-    and undo. Returns {"passed", "items": {key: {"passed", "reason", "min_clearance_m"}}, "conflicts": [...]}."""
+    and undo. Returns {"passed", "items": {key: {"passed", "reason", "min_clearance_m"}}, "conflicts": [...]}.
+    Each item keeps the clearance its coordination requirements ask for (25 mm without any), unless `clearance_m`."""
     scene = ws.scene(scene_id)
     live = [it for it in items if it.option]
     out: dict = {"passed": True, "items": {}, "conflicts": []}
     if not live:
         return {**out, "passed": False}
+    need = {it.key: clearance_m if clearance_m is not None else
+            ws.fix_settings(scene_id, it.element_a, it.element_b).get("clearance_m", 0.025) for it in live}
     with ws.lock:
         files = {scene.index_of(g) for it in live for g in it.option["moved"]}
         # A trimmed member already touches what it is framed into: only contacts new or worse than these count.
-        before = {it.key: {h.other: h.distance_m for h in verify.check(scene, it.option["moved"], clearance_m=clearance_m).hits}
+        before = {it.key: {h.other: h.distance_m for h in verify.check(scene, it.option["moved"], clearance_m=need[it.key]).hits}
                   for it in live if it.option["kind"] == "trim"}
         with _trial(scene, files):
             changed: dict[str, tuple[list[str], set[str], str | None]] = {}  # key → (check these, own elements, obstacle)
@@ -106,6 +109,7 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                     changed[it.key] = (list(o["moved"]), set(o["moved"]), None)
             owner = {g: key for key, (_, own, _) in changed.items() for g in own}
             for it in live:
+                clearance_m = need[it.key]
                 check_ids, own, obstacle = changed[it.key]
                 ignore = own | {c for g in own for c in scene.element(g).connected if c not in owner}
                 if obstacle:  # an offset: new pieces against everything, the shortened ends only against the obstacle
@@ -244,13 +248,18 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
             def progress(e: dict) -> None:
                 if e["type"] == "attempt":
                     emit({"type": "item", "key": it.key, "status": "checking", "attempt": e["title"], "passed": e["passed"]})
-            result = agent.resolve(ws.scene(scene_id), clash, ws.model, on_event=progress, lock=ws.lock, max_rounds=2)
+            result = agent.resolve(ws.scene(scene_id), clash, ws.model, on_event=progress, lock=ws.lock, max_rounds=2,
+                                   **ws.fix_settings(scene_id, it.element_a, it.element_b))
             it.understanding = result.understanding
             it.tried = len(result.attempts)
             options = [asdict(o) for o in result.options]
             it.option = options[0] if options else None
             it.alternatives = options[1:]
-            if not options:
+            if result.recommendation:
+                r = result.recommendation
+                it.error = (f"Not edited: {r['blocked_by']}. Muse Spark recommends for the designer: {r['title']}"
+                            + (f" ({r['rationale']})" if r.get("rationale") else ""))
+            elif not options:
                 it.error = failure_summary(ws.scene(scene_id), result)
         except Exception as e:  # one clash failing must not sink the plan
             it.error = f"{type(e).__name__}: {e}"
@@ -361,6 +370,8 @@ def root_causes(ws: Workspace, scene_id: str, report_id: str, fixed: list[str] |
 def _describe_cluster(ws: Workspace, scene_id: str, cluster: dict) -> str:
     scene = ws.scene(scene_id)
     hub = cluster["hub"]
+    settings = ws.fix_settings(scene_id, hub["global_id"], cluster["partners"][0]["global_id"]) if cluster["partners"] else {}
+    clearance_m = settings.get("clearance_m", 0.025)
     lines = [f"Element in several clashes (the hub): {hub['ifc_class']} '{hub['name']}', level {hub['storey']}, "
              f"file {hub['source']}, GlobalId {hub['global_id']}"]
     with ws.lock:
@@ -376,9 +387,9 @@ def _describe_cluster(ws: Workspace, scene_id: str, cluster: dict) -> str:
             lines.append(f"- {p['ifc_class']} '{p['name']}' ({p['source']}, level {p['storey']}), "
                          f"{(p['distance_m'] or 0) * 1000:+.0f} mm, {src}, GlobalId {p['global_id']}")
             try:
-                for h in edits.passages(scene, p["global_id"], hub["global_id"]):
+                for h in edits.passages(scene, p["global_id"], hub["global_id"], clearance_m=clearance_m):
                     lines.append(f"    the hub has an opening on its line: offset it {h['dz_min_m']:+.3f} to "
-                                 f"{h['dz_max_m']:+.3f} m to pass through with 25 mm clearance")
+                                 f"{h['dz_max_m']:+.3f} m to pass through with {clearance_m * 1000:.0f} mm clearance")
             except (edits.Unsupported, KeyError, RuntimeError):
                 pass
     return "\n".join(lines)
@@ -395,7 +406,9 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
         raise KeyError("That element is not in several open clashes.")
     emit({"type": "thinking", "what": "root cause"})
     text = _describe_cluster(ws, scene_id, cluster)
-    reply = ws.model.complete_json((PACKS / "root_cause.md").read_text(), text)
+    doc = requirements.current()
+    reply = ws.model.complete_json((PACKS / "root_cause.md").read_text()
+                                   + (requirements.prompt_text(doc, "fixes") if doc else ""), text)
     strategy = reply.get("strategy") if reply.get("strategy") in ("move_hub", "fix_partners", "as_designed") else "fix_partners"
     emit({"type": "root_cause", "root_cause": reply.get("root_cause", ""), "strategy": strategy,
           "reason": reply.get("reason", "")})
@@ -511,7 +524,9 @@ def triage_patterns(ws: Workspace, pats: list[dict]) -> dict[str, dict]:
                      f"clashes, {p['pairs']} element pairs, levels {', '.join(p['levels'])}, overlap {p['min_mm']} to "
                      f"{p['max_mm']} mm{' (the same every time)' if p['constant'] else ''}. Examples: "
                      + "; ".join(p["examples"][:3]))
-    reply = ws.model.complete_json((PACKS / "patterns.md").read_text(), "\n".join(lines))
+    doc = requirements.current()
+    reply = ws.model.complete_json((PACKS / "patterns.md").read_text()
+                                   + (requirements.prompt_text(doc, "triage") if doc else ""), "\n".join(lines))
     out = {}
     for row in reply.get("patterns", []):
         try:

@@ -335,13 +335,19 @@ def _page(r: Row, n: int) -> str:
             (_data_url_ok(ev.get("after_img")), "With the fix" + (" (applied)" if ev.get("status") == "accepted" else " (proposed)")),
         ] if u)
     fix = ""
-    if ev:
+    if ev and ev.get("status") == "recommended":  # the requirements allow no edit here: Muse's recommendation stands
+        fix = (f"<div class='fix'><h4>Recommended for the designer: {_e(ev.get('title'))} <span class='tag'>not edited</span></h4><dl>"
+               f"<dt>Why not edited</dt><dd>{_e(ev.get('blocked_by') or 'the coordination requirements allow no edit')}</dd>"
+               f"<dt>Change</dt><dd>{_e(ev.get('edit'))}</dd>"
+               f"<dt>Also needs</dt><dd>{_e(ev.get('also_needs') or 'nothing noted')}</dd></dl></div>")
+    elif ev:
         status = "Applied to the model" if ev.get("status") == "accepted" else "Proposed, not applied"
         fix = (f"<div class='fix'><h4>Fix: {_e(ev.get('title'))} <span class='tag verified'>verified by geometry</span>"
                f" <span class='tag'>{status}</span></h4><dl>"
                f"<dt>Edit</dt><dd>{_e(ev.get('edit'))}</dd>"
                f"<dt>Clearance</dt><dd>{_e(ev.get('clearance'))}</dd>"
-               f"<dt>Also needs</dt><dd>{_e(ev.get('also_needs') or 'nothing noted')}</dd></dl></div>")
+               + (f"<dt>Meets</dt><dd>{_e('; '.join(ev['meets']))}</dd>" if isinstance(ev.get("meets"), list) and ev["meets"] else "")
+               + f"<dt>Also needs</dt><dd>{_e(ev.get('also_needs') or 'nothing noted')}</dd></dl></div>")
     explanation = ai.get("explanation") or r.reading.get("understanding") or "No explanation available."
     action = ai.get("recommended_action") or r.reading.get("fix_hint") or ev.get("advice") or ""
     points = "".join(f"<li><b>{_e(p.get('team'))}:</b> {_e(p.get('point'))}</li>" for p in ai.get("review_points", []))
@@ -414,7 +420,39 @@ table { border-collapse: collapse; width: 100%; } .facts th { text-align: left; 
 """
 
 
-def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, context: dict) -> str:
+def requirements_html(doc) -> str:
+    """The coordination requirements a report was checked against: level, strictness, the numbers they set, the
+    checks, who moves, the by-design rules and the guidance Muse Spark was given."""
+    from . import requirements
+    p = requirements.resolve(doc)
+    names = {g.id: g.name for g in doc.groups}
+    groups = "".join(f"<tr><td>{_e(g.name)}</td><td>{_e(g.role)}</td><td>{_e(', '.join(g.teams + [c.removeprefix('Ifc') for c in g.classes]) or '—')}</td></tr>"
+                     for g in doc.groups)
+    checks = "".join(f"<tr><td>{_e(names.get(c.a, c.a))}</td><td>{_e(names.get(c.b, c.b) if c.b else '(within)')}</td>"
+                     f"<td>{_e(c.check + (f' {c.clearance_mm:.0f} mm' if c.check == 'clearance' and c.clearance_mm else ''))}</td>"
+                     f"<td>{_e(c.reason)}</td></tr>" for c in doc.checks)
+    movers = "".join(f"<tr><td>{i + 1}</td><td>{_e(names.get(m.group, m.group))}</td><td>{_e(m.edits)}</td>"
+                     f"<td>{_e(f'{m.max_move_mm:.0f} mm' if m.max_move_mm else '—')}</td><td>{'yes' if m.trims else 'no'}</td></tr>"
+                     for i, m in enumerate(doc.who_moves))
+    rules = "".join(f"<li>{_e(requirements._pair_text(r))}{' (' + _e(r.reason) + ')' if r.reason else ''}</li>" for r in doc.by_design)
+    guidance = "".join(f"<p><b>{k.title()}:</b> {_e(v)}</p>" for k, v in doc.guidance.items() if v)
+    return f"""
+<section class='section-break'>
+  <h2>Coordination requirements</h2>
+  <p><b>{_e(doc.name)}</b> · version {doc.version} · {_e(requirements.label(doc))} · id <code>{requirements.doc_id(doc)}</code></p>
+  <p>{_e(requirements.LEVELS[doc.level]['meaning'])} {_e(requirements.STRICTNESS[doc.strictness]['meaning'])}
+  Hard clashes count from {p.tolerance_mm:g} mm{f'; elements under {p.min_size_mm:.0f} mm are not checked' if p.min_size_mm else ''}.
+  Fixes clear by at least {p.fix_clearance_mm:.0f} mm{f' and move at most {p.max_move_mm:.0f} mm' if p.max_move_mm else ''};
+  {_e(requirements.TRIM_TEXT[p.trims])}.</p>
+  <h3>Groups</h3><table class='list'><thead><tr><th>Group</th><th>Role</th><th>Selects</th></tr></thead><tbody>{groups}</tbody></table>
+  <h3>Checks</h3><table class='list'><thead><tr><th>Group</th><th>With</th><th>Check</th><th>Why</th></tr></thead><tbody>{checks}</tbody></table>
+  <h3>Who moves</h3><table class='list'><thead><tr><th>Order</th><th>Group</th><th>Edits</th><th>Largest move</th><th>Trims</th></tr></thead><tbody>{movers}</tbody></table>
+  <h3>Declared by design</h3>{f'<ul>{rules}</ul>' if rules else '<p>None.</p>'}
+  {f'<h3>Guidance for Muse Spark</h3>{guidance}' if guidance else ''}
+</section>"""
+
+
+def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, context: dict, requirements_doc=None) -> str:
     pages = [r for r in rows if r.section == "page"]
     author = [r for r in rows if r.section == "author"]
     noise = [r for r in rows if r.section == "noise"]
@@ -463,6 +501,8 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
                 f"<th>Typical reason</th></tr></thead><tbody>{body}</tbody></table>")
 
     meta = "".join(f"<tr><th>{_e(k)}</th><td>{_e(v)}</td></tr>" for k, v in context.items())
+    from . import requirements
+    clear_mm = f"{requirements.resolve(requirements_doc).fix_clearance_mm:.0f}" if requirements_doc is not None else "25"
     stamp = (f"<div class='stamp ok'>REVIEWED · {reviewed} of {len(pages)}</div>" if final else
              f"<div class='stamp'>DRAFT · AI-assisted · {reviewed} of {len(pages)} reviewed</div>")
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{_e(title)}</title><style>{CSS}</style></head><body>
@@ -481,7 +521,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
   </div>
   <p style='color:#5d6a7a;font-size:8.5pt'>Text marked AI-drafted was written by Muse Spark (Meta) from the clash data,
   the clash pictures and ORCA's geometry checks, and must be reviewed by the teams named before anyone acts on it.
-  Fixes marked verified were checked against the whole federated model: the clash is gone, at least 25 mm clear, and
+  Fixes marked verified were checked against the whole federated model: the clash is gone, at least {clear_mm} mm clear, and
   nothing new is hit. They are not structural, cost or site approvals.</p>
 </section>
 <section class='section-break'>
@@ -505,6 +545,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
   Who acts: the team whose element a fix changes, else the discipline triage named, else the coordination rule
   (structure stays, then architecture, then site; services move). Every team with an element in a clash reviews it.</p>
 </section>
+{requirements_html(requirements_doc) if requirements_doc is not None else ''}
 </body></html>"""
 
 
@@ -540,7 +581,7 @@ def _xyz(tag: str, v) -> str:
     return f"<{tag}><X>{v[0]:.4f}</X><Y>{v[1]:.4f}</Y><Z>{v[2]:.4f}</Z></{tag}>"
 
 
-def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA") -> bytes:
+def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", checked_against: str = "") -> bytes:
     """BCF 2.1: one topic per clash that needs action, assigned to its acting team, with the AI explanation and the
     recorded reviews as comments, the pair selected and coloured in a viewpoint, and a snapshot."""
     from PIL import Image
@@ -558,6 +599,8 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA") 
                                           ai.get("recommended_action"),
                                           f"Fix: {r.evidence.get('title')} ({r.evidence.get('status')}, verified by geometry)." if r.evidence else ""]))
             comments = [(author + " (AI-drafted, to be reviewed)", desc)]
+            if checked_against:
+                comments.append((author, f"Checked against coordination requirements {checked_against}."))
             comments += [(f"{v.get('name')} ({v.get('team')})", f"{v.get('decision')}: {v.get('note') or ''}".strip(": "))
                          for v in r.reviews]
             priority = {"high": "Critical", "medium": "Major", "low": "Minor"}.get(r.reading.get("severity"), "Normal")
@@ -612,6 +655,12 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
     models = sorted({r.model_a for r in rows} | {r.model_b for r in rows})
     base_ctx = {"Clashes from": "ORCA's check of the models" if report.origin == "sightline" else f"Navisworks report {report.title}", "Models": ", ".join(f"{m} ({model_teams.get(m, '?')})" for m in models),
                 "Generated": stamp, "Scope": {"combined": "All clashes", "team": "Per team", "model": "Per model"}[scope]}
+    from . import requirements
+    req_doc = requirements.current()
+    checked = (f"{req_doc.name} v{req_doc.version}, {requirements.label(req_doc)} ({requirements.doc_id(req_doc)})"
+               if req_doc is not None else "")
+    if checked:
+        base_ctx["Requirements"] = checked
 
     if scope == "team":
         groups = {t: [r for r in rows if t in r.reviewers] for t in sorted({t for r in rows for t in r.reviewers})}
@@ -627,12 +676,12 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
     for i, (key, items) in enumerate(groups.items()):
         title = "Design coordination report" + (f": {key}" if key else "")
         sub = f"{report.title} · {len(items)} results" + (f" involving {label.lower()} {key}" if key else "")
-        html_text = render_html(title, sub, items, summary, {**base_ctx, **({label: key} if key else {})})
+        html_text = render_html(title, sub, items, summary, {**base_ctx, **({label: key} if key else {})}, req_doc)
         files.append((f"sightline-report{('-' + _slug(key)) if key else ''}.pdf", to_pdf(html_text)))
         emit({"type": "progress", "step": "rendering", "done": i + 1, "total": len(groups)})
     if include_bcf:
         emit({"type": "progress", "step": "bcf"})
-        files.append(("sightline-issues.bcfzip", bcf_zip(rows, matches, scene)))
+        files.append(("sightline-issues.bcfzip", bcf_zip(rows, matches, scene, checked_against=checked)))
     if len(files) == 1:
         return files[0][1], files[0][0], "application/pdf"
     out = io.BytesIO()
