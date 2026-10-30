@@ -268,6 +268,12 @@ def _merged_label(ws: Workspace, scene_id: str, g: str, partners: list[str]) -> 
     return f"{e.ifc_class} '{e.name}' x {len(partners)} elements: {', '.join(repr(n) for n in names)}"
 
 
+def clashes_covered(items: list[Item]) -> int:
+    """How many clashes these items stand for: their distinct report clashes, plus one for each item with none (a
+    hub's partner the geometry found, not in the report). A merged item is one fix for several clashes."""
+    return len({c for it in items for c in it.clash_ids}) + sum(1 for it in items if not it.clash_ids)
+
+
 def _direction(a) -> str:
     """"up 150 mm", "down 300 mm", "sideways 120 mm", "offset down 250 mm", "trimming it": what an idea did."""
     d = [float(x) for x in (a.delta_m or [0, 0, 0])]
@@ -376,7 +382,7 @@ def build_batch(ws: Workspace, scene_id: str, report_id: str, clash_ids: list[st
                    "This clash is being fixed together with others; prefer fixes that stay close to the element.",
                    emit)
     check = _settle(ws, scene_id, items, emit)
-    n = len(items)
+    n = clashes_covered(items)
     plan = Plan("batch", f"Fix {n} clash{'es' if n != 1 else ''} together", items=items, check=check,
                 seconds=round(time.perf_counter() - started, 1))
     if skipped:

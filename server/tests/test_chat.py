@@ -95,6 +95,8 @@ def test_chat_finds_root_causes_and_builds_a_plan(tmp_path):
     plan = next(e for e in events if e["type"] == "plan")
     assert plan["kind"] == "batch" and plan["check"]["passed"]
     assert any(e["type"] == "plan_event" for e in events)
+    result = next(e for e in events if e["type"] == "tool_result" and e["name"] == "plan_fixes_together")
+    assert result["summary"] == "1 of 1 clash fixed, verified together"
 
 
 @pytest.mark.parametrize('cancel_older', [True, False])
