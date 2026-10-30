@@ -83,13 +83,14 @@ did not change. Crossing 1100 px moves slots between the dock and the grid; noth
 **The right-hand tab.** `tab` is still `App`'s. `setTab` also asks the dock to show that panel (`DockHandle.show`:
 reopen a closed panel at home, open its collapsed bar, bring its window forward). A click on a dock tab is the user
 choosing it: Clash, Plan and Chat run their classic tab handlers (`showClashTab`, `showPlanTab`, `showChatTab`), so the
-viewer follows as before. In the dock every panel draws its content whatever `tab` says; Clash and Chat can both be on
+viewer follows as before. Whatever else brings one of the three to the front (a restored layout, closing its
+neighbour, a drag, Put it back) updates `tab` too (`onShown`, from dockview's active panel). In the dock every panel draws its content whatever `tab` says; Clash and Chat can both be on
 screen. The dock tabs show what the classic tabs did (the option count, the plan's spinner) and carry the tour's
 `data-tour` names.
 
 **Panels behind another tab stay in the page,** hidden (dockview's `renderer: "always"`), so the tour finds what it
-points at and its `reveal` shows the panel it is in. When the tour starts, panels in their own windows come back and
-collapsed bars open (`DockHandle.gather`): the tour reads the main page.
+points at and its `reveal` shows the panel it is in. When the tour starts, closed panels open again, panels in their
+own windows come back and collapsed bars open (`DockHandle.gather`): the tour reads the main page.
 
 **Scroll.** Moving an element resets its scrollers. Each slot remembers where its scrollers were (a capture-phase
 scroll listener, ignoring a squeezed scroller) and puts them back after a move or when its bar opens again.
@@ -97,8 +98,9 @@ scroll listener, ignoring a squeezed scroller) and puts them back after a move o
 **Pop-out windows.** dockview opens `/popout.html` (`web/public/popout.html`, served by Vite and by the server's static
 mount) and copies the page's styles into it. React's listeners sit on the slot, so clicks work there. What was bound to
 the main window now isn't: `App`'s keys listen on every pop-out window too, each window gets its own `Tooltips` layer
-(`doc` prop), and `Popover` listens on its own document. Dialogs (the image, the report, requirements) still open in
-the main window.
+(`doc` prop), `Popover` listens on its own document, the clash list finds its rows in its own document, and hands-free
+voice stops when the chat's own window is put away. Dialogs (the image, the report, requirements) still open in the
+main window.
 
 ## Found on the way
 
@@ -106,7 +108,12 @@ the main window.
   WebGL canvas under it by its whole content height, so the stage background showed through. Docked slots and the
   panes in them draw no background of their own (dockview's group paints the panel). Seen and fixed Oct 30.
 - **StrictMode** runs an effect's cleanup and the effect again at once; the dock's subscriptions are let go only when
-  `DockHost` really unmounts.
+  `DockHost` really unmounts, and then only the handle it published (`onGone`), with its pop-out windows.
+- **From the review (Oct 30):** a floating or pop-out window split into several groups is saved as a grid, not a group
+  (`windowViews`), so a reload kept it and a pop-out's panels all go home; `fromJSON` brings the model's lock back as
+  plain `true`, so it is set again; a new `components` object on each render made dockview lay out again several times a
+  second while an agent worked; a tab's padding was outside the part that sees clicks; the scroll memory let go of
+  scrollers React removed only on a move.
 
 ## Not done (later)
 

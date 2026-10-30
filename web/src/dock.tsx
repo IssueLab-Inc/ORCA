@@ -29,7 +29,12 @@ function makeSlot(id: PanelId): HTMLDivElement {
   slot.dataset.panel = id;
   const seen = new Map<Element, number>();
   // A collapsed bar squeezes its scrollers to nothing, which scrolls them to the top: that is not where they were.
-  slot.addEventListener("scroll", (e) => { const t = e.target as Element; if (typeof t.scrollTop === "number" && t.clientHeight > 0) seen.set(t, t.scrollTop); }, true);
+  slot.addEventListener("scroll", (e) => {
+    const t = e.target as Element;
+    if (typeof t.scrollTop !== "number" || t.clientHeight <= 0) return;
+    for (const el of seen.keys()) if (!slot.contains(el)) seen.delete(el);  // a scroller React removed is let go
+    seen.set(t, t.scrollTop);
+  }, true);
   scrolls.set(slot, seen);
   return slot;
 }
@@ -89,6 +94,7 @@ const ICONS: Record<PanelId, LucideIcon> = { model: Box, clashes: List, clash: L
 const TOUR_TAG: Partial<Record<PanelId, string>> = { plan: "tab-plan", chat: "tab-chat" };
 const THEME: DockviewTheme = { name: "orca", className: "dockview-theme-orca", colorScheme: "light" };
 const SAVE_MS = 400;
+const RIGHT: PanelId[] = ["clash", "plan", "chat"];
 
 /** Each panel is its slot. */
 function PanelView({ api }: IDockviewPanelProps) {
@@ -102,6 +108,9 @@ function PanelView({ api }: IDockviewPanelProps) {
   }, [api, slot]);
   return <SlotHost slot={slot} docked />;
 }
+
+// One object for the page's life: a new one on each render makes dockview re-apply its options and lay out again.
+const COMPONENTS = { panel: PanelView };
 
 /** A panel's tab: its icon, title and what App says about it (a count, a spinner). A click is the user choosing it.
  *  In a side bar a click opens the bar and never closes it (dockview toggles it on the active tab): the bar's own
@@ -263,17 +272,23 @@ function menu({ panel, api }: GetTabContextMenuItemsParams) {
 
 const storage = () => { try { return window.localStorage; } catch { return null; } };
 
-export function DockHost({ slots, sizes, tabs, onReady, onTab, onWindows }: {
+export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, onWindows }: {
   slots: Slots; sizes: { left: number; right: number }; tabs: Tabs;
-  onReady: (dock: DockHandle | null) => void;
+  onReady: (dock: DockHandle) => void;
+  /** This dock is gone: App lets go of its handle, unless a newer dock has given it another. */
+  onGone: (dock: DockHandle) => void;
+  /** One of Clash, Plan and Chat is now the panel in front, however it got there (a tab, a closed neighbour, a
+   *  restored layout, Put it back): App's `tab` follows. */
+  onShown: (id: "clash" | "plan" | "chat") => void;
   /** The user picked a panel's tab. */
   onTab: (id: PanelId) => void;
   /** The pop-out windows open now: App listens for its keys there, and draws tooltips there. */
   onWindows: (windows: Window[]) => void;
 }) {
-  const live = useRef({ onReady, onWindows, sizes });
-  live.current = { onReady, onWindows, sizes };
+  const live = useRef({ onReady, onGone, onShown, onWindows, sizes });
+  live.current = { onReady, onGone, onShown, onWindows, sizes };
   const cleanup = useRef<(() => void) | null>(null);
+  const published = useRef<DockHandle | null>(null);
   // Let go of the dock only when this really unmounts: StrictMode runs an effect's cleanup and the effect again at
   // once, and the dock (with its subscriptions) lives on through that.
   const mounted = useRef(false);
@@ -281,7 +296,14 @@ export function DockHost({ slots, sizes, tabs, onReady, onTab, onWindows }: {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      window.setTimeout(() => { if (!mounted.current) { cleanup.current?.(); cleanup.current = null; live.current.onReady(null); } }, 0);
+      // dockview closes its pop-out windows without saying so: App lets go of them here.
+      window.setTimeout(() => {
+        if (mounted.current) return;
+        cleanup.current?.(); cleanup.current = null;
+        if (published.current) live.current.onGone(published.current);
+        published.current = null;
+        live.current.onWindows([]);
+      }, 0);
     };
   }, []);
 
@@ -299,14 +321,22 @@ export function DockHost({ slots, sizes, tabs, onReady, onTab, onWindows }: {
     const saved = readLayout(storage());
     let loaded = false;
     if (saved) {
-      try { api.fromJSON(saved as unknown as SerializedDockview); loaded = !!api.getPanel("model"); } catch { loaded = false; }
+      try {
+        api.fromJSON(saved as unknown as SerializedDockview);
+        const model = api.getPanel("model");
+        loaded = !!model;
+        // fromJSON brings the lock back as `true` (no drops in the middle only): nothing docks into the model at all.
+        if (model) { model.group.locked = "no-drop-target"; model.group.header.hidden = true; }
+      } catch { loaded = false; }
       if (!loaded) clearAll(api);
     }
     if (!loaded) build(api, live.current.sizes);
     rewire();
     const windows = () => live.current.onWindows(api.getPopouts().map((p) => p.window).filter((w): w is Window => !!w));
+    const front = (id?: string) => { if (id && (RIGHT as string[]).includes(id)) live.current.onShown(id as "clash" | "plan" | "chat"); };
     const subs = [api.onDidLayoutChange(save), api.onDidLayoutFromJSON(rewire), api.onDidAddPopoutGroup(windows),
-      api.onDidRemovePopoutGroup(windows)];
+      api.onDidRemovePopoutGroup(windows), api.onDidActivePanelChange((e) => front(e.panel?.id))];
+    front(api.getGroup(EDGE_GROUP.right)?.activePanel?.id);   // a restored layout may have Plan or Chat in front
     cleanup.current = () => { window.clearTimeout(timer); unwire(); for (const s of subs) s.dispose(); };
 
     const handle: DockHandle = {
@@ -330,6 +360,8 @@ export function DockHost({ slots, sizes, tabs, onReady, onTab, onWindows }: {
         rewire();
       },
       gather() {
+        // Closed ones too (Properties, which floats in on a selection, stays as it is).
+        for (const p of PANELS) if (p.home !== "centre" && p.home !== "float" && !api.getPanel(p.id)) addHome(api, p.id);
         for (const p of api.panels) if (p.group.api.location.type === "popout") moveHome(api, p);
         for (const edge of ["left", "right", "bottom"] as Edge[]) {
           const g = api.getEdgeGroup(edge);
@@ -338,12 +370,13 @@ export function DockHost({ slots, sizes, tabs, onReady, onTab, onWindows }: {
       },
       isOpen: (id) => !!api.getPanel(id),
     };
+    published.current = handle;
     live.current.onReady(handle);
   }
 
   return (
     <DockContext.Provider value={{ slots, tabs, onTab }}>
-      <DockviewReact className="dock-host" theme={THEME} components={{ panel: PanelView }} defaultTabComponent={Tab}
+      <DockviewReact className="dock-host" theme={THEME} components={COMPONENTS} defaultTabComponent={Tab}
         rightHeaderActionsComponent={Actions} onReady={ready} getTabContextMenuItems={menu}
         floatingGroupBounds="boundedWithinViewport" floatingGroupDragHandle="tabbar" />
     </DockContext.Provider>

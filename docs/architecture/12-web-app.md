@@ -450,7 +450,11 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
 - **Saving:** `toJSON` into `sightline.dock.v1` a moment after a layout change or a collapse (`writeLayout`, which
   puts pop-out panels back in their bars first); on load `readLayout` and `fromJSON`, else the default.
 - **`DockHandle`** for `App`: `show(id, { dock })` (`showSteps`: reopen at home, open the bar, focus the window or bring
-  it home), `reset()`, `gather()` (the tour: every panel back in this window, every bar open), `isOpen(id)`.
+  it home), `reset()`, `gather()` (the tour: closed panels reopened, every panel back in this window, every bar open),
+  `isOpen(id)`. `DockHost` reports `onReady(handle)`, `onGone(handle)` on a real unmount (App lets go only if it is still
+  the handle it holds), `onShown(id)` when Clash, Plan or Chat comes to the front however it got there (`tab` follows),
+  `onTab(id)` for a tab click, and `onWindows` (the pop-out windows; none on unmount). The side widths are one constant,
+  `dockLayout.PANE`, shared with the classic resizers.
 - Side panels use dockview's `renderer: "always"`, so a panel behind another tab stays in the page, hidden: the tour
   finds its targets and `reveal` shows their panel.
 - Pop-out windows load `web/public/popout.html`; `App` adds its keys to each window and mounts a `Tooltips` there

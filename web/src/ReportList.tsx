@@ -77,10 +77,12 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
     return [...out.entries()];
   }, [report, matches, query, onlyLinked, hideFixed, fixes, reviewed, triage, triageFilter, focus]);
 
+  const root = useRef<HTMLDivElement>(null);
   // Bring the selected clash into view, also when something else (the chat) selected it.
   useEffect(() => {
     if (!selected) return;
-    const t = setTimeout(() => { document.querySelector(`[data-clash="${selected}"]`)?.scrollIntoView({ block: "nearest" }); }, 50);
+    // In the list's own document: in a pop-out window (docs/panels.md) the main document has no rows.
+    const t = setTimeout(() => { root.current?.querySelector(`[data-clash="${selected}"]`)?.scrollIntoView({ block: "nearest" }); }, 50);
     return () => clearTimeout(t);
   }, [selected]);
 
@@ -96,7 +98,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
       {label}{n != null && <span className={view === v ? "badge-n" : "count"}>{n}</span>}</button>
   );
   return (
-    <div className="report">
+    <div className="report" ref={root}>
       <div className="left-tabs" role="tablist" aria-label="The report">
         {tab("clashes", "Clashes", report.clashes.length)}
         {tab("insights", "Insights", insightsCount, "tab-insights")}

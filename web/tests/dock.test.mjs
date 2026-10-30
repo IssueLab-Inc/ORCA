@@ -50,6 +50,27 @@ test("a layout that can't be ORCA's gives way to the default", () => {
   assert.ok(!dock.validLayout(other), "drawn by another component");
 });
 
+test("a floating or pop-out window split into several groups still counts its panels", () => {
+  // dockview writes a window holding more than one group as { grid, position }, with no data.
+  const split = (views) => ({ grid: { root: { type: "branch", data: views.map((v, i) => ({ type: "leaf", data: { views: v, id: `w${i}` } })) } }, position: {} });
+  const floating = layout({ right: ["plan"] });
+  floating.panels.clash = { id: "clash", contentComponent: "panel" }; floating.panels.chat = { id: "chat", contentComponent: "panel" };
+  floating.floatingGroups = [split([["clash"], ["chat"]])];
+  assert.deepEqual(dock.placedViews(floating).sort(), ["activity", "chat", "clash", "clashes", "model", "plan"]);
+  assert.ok(dock.validLayout(floating), "a reload keeps it rather than falling back to the default");
+  const popped = layout({ right: ["plan"] });
+  popped.panels.clash = { id: "clash", contentComponent: "panel" }; popped.panels.chat = { id: "chat", contentComponent: "panel" };
+  popped.popoutGroups = [split([["clash"], ["chat"]])];
+  const saved = dock.withoutPopouts(popped);
+  assert.deepEqual(saved.edgeGroups.right.group.views, ["plan", "clash", "chat"], "both groups' panels go home");
+  assert.ok(dock.validLayout(saved));
+});
+
+test("the classic panes and the dock's side bars share one set of widths", () => {
+  assert.deepEqual([...dock.EDGE_SIZE.left], [...dock.PANE.left]);
+  assert.deepEqual([...dock.EDGE_SIZE.right], [...dock.PANE.right]);
+});
+
 test("a saved layout puts what was in its own window back in its side bar", () => {
   const saved = dock.withoutPopouts(layout({ right: ["clash", "plan"], popout: ["chat"] }));
   assert.deepEqual(saved.popoutGroups, []);

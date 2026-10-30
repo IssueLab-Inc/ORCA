@@ -20,10 +20,12 @@ export const isPanel = (id: string): id is PanelId => (PANEL_IDS as string[]).in
 export const homeOf = (id: PanelId) => PANELS.find((p) => p.id === id)!.home;
 export const titleOf = (id: PanelId) => PANELS.find((p) => p.id === id)!.title;
 
-/** The three side bars' group ids, and their sizes in pixels: least, most and the default. The left and right ones
- * start at the widths the classic layout's panes were dragged to (`sightline.left-w`, `sightline.right-w`). */
+/** The side panes' widths in pixels (least, most, default): the classic layout's dragged panes and the dock's left and
+ * right side bars, which start at the widths the panes were dragged to (`sightline.left-w`, `sightline.right-w`). */
+export const PANE = { left: [240, 640, 310], right: [300, 720, 380] } as const;
+/** The three side bars' group ids and sizes (least, most, default). */
 export const EDGE_GROUP: Record<Edge, string> = { left: "edge-left", right: "edge-right", bottom: "edge-bottom" };
-export const EDGE_SIZE: Record<Edge, [number, number, number]> = { left: [240, 640, 310], right: [300, 720, 380], bottom: [80, 480, 120] };
+export const EDGE_SIZE: Record<Edge, readonly [number, number, number]> = { ...PANE, bottom: [80, 480, 120] };
 
 /** Where the layout is kept in this browser, and the switch back to the classic layout. */
 export const LAYOUT_KEY = "sightline.dock.v1";
@@ -33,11 +35,14 @@ export const CLASSIC_KEY = "sightline.dock.classic";
 export interface SavedLayout {
   grid?: { root?: unknown };
   panels?: Record<string, { id?: string; contentComponent?: string }>;
-  floatingGroups?: { data?: { views?: string[] } }[];
-  popoutGroups?: { data?: { views?: string[] } }[];
+  floatingGroups?: WindowEntry[];
+  popoutGroups?: WindowEntry[];
   edgeGroups?: Partial<Record<Edge, EdgeEntry>>;
   [key: string]: unknown;
 }
+/** A floating or pop-out window: one group (`data`), or several split in a grid of their own (`grid`). */
+type WindowEntry = { data?: { views?: string[] }; grid?: { root?: unknown }; [key: string]: unknown };
+const windowViews = (g: WindowEntry) => g.data?.views ?? gridViews(g.grid?.root);
 type EdgeEntry = { size?: number; visible?: boolean; collapsed?: boolean; group?: { id?: string; views?: string[]; activeView?: string; [key: string]: unknown }; [key: string]: unknown };
 
 /** The panels in the grid's leaves (the centre: the model, and whatever was docked beside it). */
@@ -50,8 +55,8 @@ export function gridViews(node: unknown): string[] {
 
 /** Every panel placed anywhere in a layout: the grid, floating groups, pop-out windows and the side bars. */
 export function placedViews(layout: SavedLayout): string[] {
-  return [...gridViews(layout.grid?.root), ...(layout.floatingGroups ?? []).flatMap((g) => g.data?.views ?? []),
-    ...(layout.popoutGroups ?? []).flatMap((g) => g.data?.views ?? []),
+  return [...gridViews(layout.grid?.root), ...(layout.floatingGroups ?? []).flatMap(windowViews),
+    ...(layout.popoutGroups ?? []).flatMap(windowViews),
     ...Object.values(layout.edgeGroups ?? {}).flatMap((e) => e?.group?.views ?? [])];
 }
 
@@ -76,7 +81,7 @@ export function withoutPopouts(layout: SavedLayout): SavedLayout {
   if (!layout.popoutGroups?.length) return layout;
   const edgeGroups: Partial<Record<Edge, EdgeEntry>> = structuredClone(layout.edgeGroups ?? {});
   const panels = { ...layout.panels };
-  for (const id of layout.popoutGroups.flatMap((g) => g.data?.views ?? [])) {
+  for (const id of layout.popoutGroups.flatMap(windowViews)) {
     if (!isPanel(id)) continue;
     const home = homeOf(id);
     if (home === "float") { delete panels[id]; continue; }

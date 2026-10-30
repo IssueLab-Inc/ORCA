@@ -1144,6 +1144,23 @@ code `web/src/dock.tsx`, `web/src/dockLayout.ts`, `web/src/App.tsx`, `web/src/ui
   reload with a popped-out, a floating and a collapsed panel; Reset; Classic; the tour gathering panels; #1 proposed
   with the Clash panel floating, put back mid-run and accepted (1 fixed); tablet and phone unchanged.
 
+Review of the panels (Oct 30; PR review on `feature/dockable-panels`; code `web/src/dock.tsx`, `dockLayout.ts`,
+`App.tsx`, `index.css`, `ReportList.tsx`, `Chat.tsx`, `ui.tsx`):
+- **Saved layouts:** a floating or pop-out window split into several groups is written as a grid; reading only a group's
+  views threw the whole layout away on reload (`windowViews`). After `fromJSON` the model is locked against drops
+  again (dockview restores `no-drop-target` as `true`).
+- **The dock:** one `components` object (a new one each render re-laid the dock out several times a second while an
+  agent worked); the handle and pop-out windows let go on a real unmount, and only the handle this dock published;
+  `tab` follows whatever brings Clash, Plan or Chat to the front; the tour reopens closed panels; tab padding inside the
+  part that sees clicks (an edge click collapsed the bar); the scroll memory prunes removed scrollers; the badges and
+  side widths computed once (`clashBadge`, `planBadge`, `PANE`).
+- **Pop-outs:** the clash list scrolls its row in its own document; hands-free voice follows the chat's window.
+- **After merging main:** a menu in a dock panel was cut off at the panel's edge; `Popover` keeps it inside the
+  window narrowed by whatever clips it (`roomFor`).
+- **Checked:** 111 web tests (a split floating and pop-out window, shared widths); in Chromium on Northbank: an edge
+  click on the right bar's active tab leaves it at 380 px; after a reload the model's group saves `no-drop-target`;
+  Chat closed, the tour opens it again; the Visibility menu fits the Model panel at 1440×800.
+
 Properties of any element (Oct 30; `feature/element-properties`, on top of the panels; code `server/sightline/properties.py`,
 `service.py`, `app.py`, `web/src/Properties.tsx`, `App.tsx`, `dock.tsx`, `dockLayout.ts`):
 - **What:** a click selects any element, also through a see-through view (a click that meets nothing in focus takes the
@@ -1154,7 +1171,8 @@ Properties of any element (Oct 30; `feature/element-properties`, on top of the p
   without its scripting note.
 - **Also on the panels branch:** the docked page could scroll (dockview parks hidden panels' layers below the dock;
   measured scrollHeight 1750 in a 900 px window, shifted 203 px): the app and dock area now clip.
-- **Checked:** `server/tests/test_properties.py` (5), `web/tests/properties.test.mjs` (4); 113 web tests; build clean.
+- **Checked:** `server/tests/test_properties.py` (5), `web/tests/properties.test.mjs` (4); 113 web tests, 115 after the
+  panels review merged in; build clean.
   In Playwright on Northbank: #1 in focus (X-ray), a click on the faded furniture behind selects it; the girder reads
   Steel S355, 400 × 12000 × 1000 mm, Model data without its scripting note; the filter; Esc empties the panel; the
   classic card's All properties; the page never scrolls.
