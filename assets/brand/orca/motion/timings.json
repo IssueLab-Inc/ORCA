@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "durationsMs": {
+    "orbit": 1600,
+    "breathe": 2000,
+    "resolve": 2400,
+    "phase-cycle": 4800,
+    "settle": 760,
+    "reveal": 1600
+  },
+  "repeats": {
+    "orbit": "infinite",
+    "breathe": "infinite",
+    "resolve": "infinite",
+    "phase-cycle": "infinite, demonstration only",
+    "settle": 1,
+    "reveal": 1
+  },
+  "reducedMotion": "Static final brand mark, no repeating motion",
+  "colours": {
+    "ink": "#11161B",
+    "navy": "#052640",
+    "white": "#FFFFFF",
+    "paper": "#F5F7F8",
+    "line": "#DDE3E7",
+    "muted": "#52636E"
+  }
+}

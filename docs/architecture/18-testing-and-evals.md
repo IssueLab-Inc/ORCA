@@ -1,7 +1,7 @@
 # 18 · Testing, evals and verification
 
 > **Covers:** `server/tests/`, `server/sightline/fixtures.py`, `web/tests/`, `evals/`, `spikes/`, `web/spikes/`,
-> `web/scripts/capture-demos.cjs`, `evals/big_models_browser.cjs` · **Checked against code:** 2026-10-30 (`104fda9`) ·
+> `web/scripts/capture-demos.cjs`, `evals/big_models_browser.cjs`, `assets/brand/orca/` checks · **Checked against code:** 2026-10-30 (`feature/brand-assets`, based on `0390a12`) ·
 > **Deeper detail:** [evals/README.md](../../evals/README.md) (the eval log), [spikes/README.md](../../spikes/README.md)
 
 ORCA's promise is that no fix reaches a person unverified, so the project checks itself at five levels: fast server
@@ -387,6 +387,18 @@ flowchart TD
 
 Always: the product check in the browser for anything a person sees, and the work on its own branch (`feature/…`,
 `fix/…`, `docs/…`) with a PR; never on `main`, never merged without authorisation.
+
+## Brand and motion asset checks
+
+The standalone brand/motion library has its own checks in [`assets/brand/orca/`](../../assets/brand/orca/README.md):
+`source/build-print.py --validate-only --skip-package` checks existing static exports;
+`motion/source/package-motion.py --package-only` checks animated exports; `npm run check:types` checks the React
+wrappers; `npm run check:browser` runs `motion/source/check-browser.cjs` against a temporary loopback server and a
+fresh headless Chromium browser. It checks changing motion, centring, pause, size/speed/theme controls, reduced
+motion, final reveal states, accessible labels, safe dynamic text, controlled phases and mobile layout. These checks
+write manifests/reports alongside the assets; temporary frames, browser screenshots, dependencies and ZIPs are ignored.
+They do not replace the application checks when a later redesign integrates the library. Brand harness inventory
+checked 2026-10-30 against `0390a12` plus this slice. Details: [brand asset design](../brand-assets.md).
 
 ## When to update this doc
 

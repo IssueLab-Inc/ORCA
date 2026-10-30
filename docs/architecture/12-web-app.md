@@ -1,9 +1,9 @@
 # 12 · Web app: structure and state
 
 > **Covers:** `web/src/` (all but `viewer/`, which is [13](13-3d-viewer.md)), `web/index.html`, `web/vite.config.ts`,
-> `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/` · **Checked against code:** 2026-10-30
-> (`feature/dockable-panels`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/views.md](../views.md),
-> [docs/panels.md](../panels.md)
+> `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/`, `assets/brand/orca/` · **Checked against code:**
+> 2026-10-30 (`feature/dockable-panels`, with `main` at `69fe0a3` merged) · **Deeper design:** [docs/mobile.md](../mobile.md),
+> [docs/views.md](../views.md), [docs/panels.md](../panels.md), [docs/brand-assets.md](../brand-assets.md)
 
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
 almost all of the page's state and every call that changes it; the other components draw what `App` hands them and
@@ -55,7 +55,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `pilot.ts` | Lets the fix agent drive the viewer while it works | `Pilot`, `PilotStatus` | `App` |
 | `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
 | `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
-| `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (on a phone its sheet renders into the body, above the bottom sheet; it listens on its own document, so it works in a pop-out window), and the tooltip layer (`Tooltips`, one per document: the page and each pop-out window) | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
+| `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (kept inside its window: it moves left or up, and scrolls inside when taller, so it never makes the page scroll; Esc closes only the menu; it listens on its own document, so it works in a pop-out window; on a phone its sheet renders into the body, above the bottom sheet), and the tooltip layer (`Tooltips`, one per document: the page and each pop-out window) | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
 | `uploads.ts` | The size check before an upload and the words for each upload stage | `uploadRefusal`, `uploadStatus`, `localFile` | `App` |
 | `voice.ts` | Live voice over a socket, and the record-then-upload fallback | `LiveVoice`, `VoiceRecorder`, `LiveVoiceError`, `MAX_SECONDS`, `VoiceMode` | `Chat.tsx` |
 | `viewer/Viewer.ts`, `viewer/ifcLoader.ts`, `viewer/patch.ts`, `viewer/views.ts`, `viewer/cube.ts`, `viewer/drawing.ts`, `viewer/annotate.ts` | The viewer: 3D, the view cube and the drawing views | see [13](13-3d-viewer.md) | `App`, `pilot.ts`, `ViewPanes.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
@@ -562,6 +562,12 @@ No `sessionStorage` or IndexedDB is used.
 
 ## Build, assets and tests
 
+- **Approved redesign assets:** [`assets/brand/orca/`](../../assets/brand/orca/README.md) holds direction-05 vector
+  masters, static exports, icons, motion and React/native integration examples. It is outside `web/public` and
+  `web/src`; the current app does not load it. Static and motion builders share `source/master.json`. The redesign
+  should copy/import only what it needs and drive phase/completion feedback from real events. Design and commands:
+  [docs/brand-assets.md](../brand-assets.md). Brand inventory checked 2026-10-30 against `0390a12` plus this slice.
+
 - **`package.json` scripts:** `dev` (Vite dev server), `build` (`tsc --noEmit && vite build` into `web/dist/`),
   `test` (`node --test tests/*.test.mjs`), `preview`, `copy-wasm`, and `postinstall` (runs `copy-wasm`).
   Dependencies are pinned: `react` / `react-dom` 19.3.1, `three` 0.186.1, `web-ifc` 0.0.77, `lucide-react` 1.48.0,
@@ -607,3 +613,4 @@ No `sessionStorage` or IndexedDB is used.
   the dock follow each other (also [docs/panels.md](../panels.md)).
 - A new tour, act, `TourState` field, `TourActions` action or recording in `web/public/tour/`.
 - A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `web/public/`.
+- The identity or motion library in `assets/brand/orca/`, or its adoption by the app.

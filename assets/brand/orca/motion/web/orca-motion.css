@@ -1,0 +1,34 @@
+
+.om-spin,.om-phase,.om-settle,.om-letter{transform-box:view-box;transform-origin:128px 128px}
+.om-svg{overflow:visible}
+.om-letter{transform-origin:538.5px 128px}
+@keyframes om-orbit{to{transform:rotate(360deg)}}
+@keyframes om-breathe-a{0%,100%{transform:translate(0,0);opacity:1}50%{transform:translate(-6px,-6px);opacity:.5}}
+@keyframes om-breathe-b{0%,100%{transform:translate(0,0);opacity:1}50%{transform:translate(6px,6px);opacity:.5}}
+@keyframes om-resolve-a{0%,8%,100%{transform:translate(-14px,14px);opacity:.55}32%,78%{transform:translate(0,0);opacity:1}}
+@keyframes om-resolve-b{0%,8%,100%{transform:translate(14px,-14px);opacity:.55}32%,78%{transform:translate(0,0);opacity:1}}
+@keyframes om-phase{0%,20%{transform:rotate(0)}25%,45%{transform:rotate(90deg)}50%,70%{transform:rotate(180deg)}75%,95%{transform:rotate(270deg)}100%{transform:rotate(360deg)}}
+@keyframes om-settle{0%{transform:scale(.88);opacity:.2}60%{transform:scale(1.055);opacity:1}100%{transform:scale(1);opacity:1}}
+@keyframes om-letter-in{0%{transform:translateY(18px);opacity:0}100%{transform:translateY(0);opacity:1}}
+@media(prefers-reduced-motion:no-preference){
+.om-orbit .om-spin{animation:om-orbit 1.6s linear infinite}
+.om-breathe .om-half-a{animation:om-breathe-a 2s ease-in-out infinite}
+.om-breathe .om-half-b{animation:om-breathe-b 2s ease-in-out infinite}
+.om-resolve .om-half-a{animation:om-resolve-a 2.4s cubic-bezier(.4,0,.2,1) infinite}
+.om-resolve .om-half-b{animation:om-resolve-b 2.4s cubic-bezier(.4,0,.2,1) infinite}
+.om-phase-cycle .om-phase{animation:om-phase 4.8s cubic-bezier(.4,0,.2,1) infinite}
+.om-settle .om-settle{animation:om-settle .76s cubic-bezier(.2,.8,.2,1) both}
+.om-reveal .om-letter{animation:om-letter-in .7s cubic-bezier(.2,.8,.2,1) both}
+.om-reveal .om-letter-1{animation-delay:.16s}.om-reveal .om-letter-2{animation-delay:.32s}.om-reveal .om-letter-3{animation-delay:.48s}
+}
+
+:host{display:inline-flex;vertical-align:middle;color:inherit;max-width:100%}
+.wrap{display:inline-flex;align-items:center;gap:.65em;color:inherit}
+.art{display:inline-flex;width:var(--orca-motion-size,32px);height:var(--orca-motion-size,32px);flex:none}
+.art svg{width:100%;height:100%;display:block}
+.label{font:inherit}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.wrap[data-paused] *{animation-play-state:paused!important}
+.wrap[data-reduced] *{animation:none!important;transition:none!important}
+.controlled .om-spin{transform:rotate(var(--phase-angle,0deg));transition:transform 240ms cubic-bezier(.4,0,.2,1)}
+.wide{display:block;width:var(--orca-reveal-width,320px);max-width:100%}.wide .art{display:block;width:100%;height:auto}.wide svg{height:auto}
+@media(prefers-reduced-motion:reduce){.controlled .om-spin{transition:none}}

@@ -1,0 +1,35 @@
+ORCA motion pack / review / 30 October 2026
+
+Reviewed the gallery at desktop and phone widths, the native component example,
+and a deterministic animation overview frame. The brand geometry comes from
+the same direction-05 master used by the static asset kit.
+
+The local Chromium check in validation-browser.json exercises actual motion,
+pause, size, speed, dark background, manual and operating-system reduced motion,
+one-shot final states, production phase control, safe dynamic labels, standalone
+animated SVG preferences and responsive layout. No browser script errors occurred.
+
+The rotating O was checked for centre drift. The phase component was left on
+Check and confirmed not to advance itself. Reduced-motion checks confirmed that
+the complete wordmark stays visible without the letter-entry animation.
+
+All GIF/APNG animations decode, contain changing frames, and have their loop
+metadata checked. Transparent APNGs retain alpha. The Settle and Reveal APNGs
+play once; their GIF counterparts loop deliberately for comparison.
+
+GIF/APNG do not automatically honour operating-system motion preferences.
+Use the SVG/native components for application UI and static brand artwork as
+the fallback when using raster animation. No animation represents a measured
+percentage or a server-confirmed result by itself.
+
+Native components are runtime-tested in Chromium. The thin React TypeScript
+wrappers are supplied for integration; this standalone delivery does not run
+the consuming application's TypeScript or production build.
+
+To repeat the browser checks, install Playwright and point ORCA_BROWSER at a
+local Chromium/Edge executable when the Windows default is unavailable:
+  node source/check-browser.cjs --deps /path/to/node_modules
+The check uses a temporary localhost server and a fresh headless browser.
+
+This records the original standalone delivery. Repository-edition validation,
+including the React wrapper type check, is documented in the parent README.

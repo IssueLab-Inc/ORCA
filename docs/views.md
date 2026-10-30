@@ -367,11 +367,18 @@ with it):
 
 ## Cost
 
-A drawing view with a cut costs about three passes over the visible triangles (fill, stencil, normals) plus a few
-full-view quads. To keep Quad light on a laptop, drawing views redraw only when needed: their own camera moved, their
-settings changed, the pane was resized, or the scene changed (a version counter bumped by `applyMode`, `setHits`,
-`setMarker`, previews and loads). The 3D view renders every frame as today. Measure on Northbank before merging: frame
-time while orbiting in Quad, and while the pilot plays a proposal.
+A drawing view with a cut costs four passes (fill, counting the cut faces both ways, normals) over what lies between
+its cut and its far plane, plus a few full-view quads. To keep Quad light on a laptop, drawing views redraw only when
+what they show changed: their settings, the pane's size, or the scene (a version counter bumped by `applyMode`,
+`setHits`, `setMarker`, previews and loads). A pan or zoom moves the last picture while it goes on and draws once it
+rests, and a pane composites only when its picture moved or changed. The 3D view renders every frame as today.
+
+Built, after the live smoke test (Oct 30): panning a drawing redrew it on every pointer move and stuttered; Quad on a
+large screen ran the graphics card out of memory (each drawing's 4× multisampled targets, about 90 MB a pane) and the
+browser dropped the WebGL context, blanking the viewer. Now: no multisampling in drawings, the camera starts at the
+cut, pans and zooms move the last picture, unchanged panes are not composited again, and a lost context is announced
+and recovered (every pane drawn again; a reload offered if it does not come back). Frame times on a real GPU are still
+to measure.
 
 ## Tests and checks
 

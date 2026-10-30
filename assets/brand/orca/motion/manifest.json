@@ -1,0 +1,435 @@
+{
+  "name": "ORCA motion pack",
+  "version": "1.0",
+  "date": "2026-10-30",
+  "files": [
+    {
+      "file": "START-HERE.txt",
+      "bytes": 6239,
+      "sha256": "6eea5354df679174232f64f3ab8fa24f6a605f74ce8356e5a84bb2255ee228b8"
+    },
+    {
+      "file": "timings.json",
+      "bytes": 579,
+      "sha256": "ac7439110b5886649ba628d8a5f29a2a534b03aec2a0afcd269b8ee79f7cf593"
+    },
+    {
+      "file": "validation-browser.json",
+      "bytes": 1077,
+      "sha256": "c4cef61910c718c82ee1effc50119571d651c931aaf41f48f1397687d693c865"
+    },
+    {
+      "file": "apng/breathe-ink.png",
+      "bytes": 340093,
+      "sha256": "e678ec44c189ff7dd28b8070b7bf46ea32e5a665ba5964be062a1172005962ed",
+      "width": 256,
+      "height": 256,
+      "frames": 50,
+      "loop": 0,
+      "duration_ms": 2000.0
+    },
+    {
+      "file": "apng/breathe-white.png",
+      "bytes": 257965,
+      "sha256": "54bc406514c5721ab5b2eec3e4702daae5b27dc4f6d86182c67a0b6cc9b9c684",
+      "width": 256,
+      "height": 256,
+      "frames": 50,
+      "loop": 0,
+      "duration_ms": 2000.0
+    },
+    {
+      "file": "apng/orbit-ink.png",
+      "bytes": 294804,
+      "sha256": "01f5565a15239d79fef5aaffb0d23e4f289415b254ff39cbfcd15510311709b0",
+      "width": 256,
+      "height": 256,
+      "frames": 40,
+      "loop": 0,
+      "duration_ms": 1600.0
+    },
+    {
+      "file": "apng/orbit-white.png",
+      "bytes": 225432,
+      "sha256": "ce130b936473f0e8b8031b48e81997fcafb4d60ca9b5be61240108986e4150f1",
+      "width": 256,
+      "height": 256,
+      "frames": 40,
+      "loop": 0,
+      "duration_ms": 1600.0
+    },
+    {
+      "file": "apng/phase-cycle-ink.png",
+      "bytes": 174560,
+      "sha256": "2960bd952fe64afa4435ebcf5565ad86a8f0822f0d54e479d2436fdc52efe8fc",
+      "width": 256,
+      "height": 256,
+      "frames": 24,
+      "loop": 0,
+      "duration_ms": 4800.0
+    },
+    {
+      "file": "apng/phase-cycle-white.png",
+      "bytes": 133664,
+      "sha256": "ef176eca5f8b6a8d252251bb60391a47315cccb019930d5a5dc7dd1b9be7f79a",
+      "width": 256,
+      "height": 256,
+      "frames": 24,
+      "loop": 0,
+      "duration_ms": 4800.0
+    },
+    {
+      "file": "apng/resolve-ink.png",
+      "bytes": 205443,
+      "sha256": "0b233ce0307a5b81eab02947b9ac4111b3e2fac3b1dd232cdc19a9655a1a9c79",
+      "width": 256,
+      "height": 256,
+      "frames": 30,
+      "loop": 0,
+      "duration_ms": 2400.0
+    },
+    {
+      "file": "apng/resolve-white.png",
+      "bytes": 155777,
+      "sha256": "734d418a114e8962ec919c8cdd9f186dd842019a2d7ecbc96992a027a8402429",
+      "width": 256,
+      "height": 256,
+      "frames": 30,
+      "loop": 0,
+      "duration_ms": 2400.0
+    },
+    {
+      "file": "apng/reveal-ink.png",
+      "bytes": 389894,
+      "sha256": "d4a47bd6147bbaca11997522e7fe78be49bdde53448b4eef82b1f50873a6d2a7",
+      "width": 960,
+      "height": 306,
+      "frames": 31,
+      "loop": 1,
+      "duration_ms": 3200.0
+    },
+    {
+      "file": "apng/reveal-white.png",
+      "bytes": 292278,
+      "sha256": "d6c54305a91de0ec75cef3b4a6c99a5a5248a2a5259395acb92160ece8ed11c0",
+      "width": 960,
+      "height": 306,
+      "frames": 31,
+      "loop": 1,
+      "duration_ms": 3200.0
+    },
+    {
+      "file": "apng/settle-ink.png",
+      "bytes": 131550,
+      "sha256": "6402d14ce3d0abc509a3f57dd03262e3baa5f8b0569be0b1324582532a68218c",
+      "width": 256,
+      "height": 256,
+      "frames": 20,
+      "loop": 1,
+      "duration_ms": 1280.0
+    },
+    {
+      "file": "apng/settle-white.png",
+      "bytes": 100575,
+      "sha256": "0e5ada0d9a28d05098a16ac77134af5d9465b73fca69c3d3738394c391a29822",
+      "width": 256,
+      "height": 256,
+      "frames": 20,
+      "loop": 1,
+      "duration_ms": 1280.0
+    },
+    {
+      "file": "gif/breathe-dark.gif",
+      "bytes": 180927,
+      "sha256": "46ba3a3ce39d7d1a119a9198e09f26b25e73968e0f2982f0835ee9a514a29baa",
+      "width": 256,
+      "height": 256,
+      "frames": 50,
+      "loop": 0,
+      "duration_ms": 2000
+    },
+    {
+      "file": "gif/breathe-light.gif",
+      "bytes": 184581,
+      "sha256": "dfac1cbbec076459140ae92b5ef9dd254c2055813e272e51f92d47ce6f45b8ff",
+      "width": 256,
+      "height": 256,
+      "frames": 50,
+      "loop": 0,
+      "duration_ms": 2000
+    },
+    {
+      "file": "gif/orbit-dark.gif",
+      "bytes": 146887,
+      "sha256": "465546d97332ecbcd821f9342cfdeccc7a49bed524748d1332ac8dd11231c9f4",
+      "width": 256,
+      "height": 256,
+      "frames": 40,
+      "loop": 0,
+      "duration_ms": 1600
+    },
+    {
+      "file": "gif/orbit-light.gif",
+      "bytes": 150247,
+      "sha256": "5e7a1b415c994174a4eb5c694d7476dee0bc7637f4d193a825ae11fee4d31532",
+      "width": 256,
+      "height": 256,
+      "frames": 40,
+      "loop": 0,
+      "duration_ms": 1600
+    },
+    {
+      "file": "gif/phase-cycle-dark.gif",
+      "bytes": 87439,
+      "sha256": "e497c6a12c8f14f8d360baae9eedd22ab3185fc0eeb1ba727022f4a3372a1130",
+      "width": 256,
+      "height": 256,
+      "frames": 24,
+      "loop": 0,
+      "duration_ms": 4800
+    },
+    {
+      "file": "gif/phase-cycle-light.gif",
+      "bytes": 89455,
+      "sha256": "97a87c0533b3357a3c8cee30e50b5bd855c9cbb42e9c1f8ece0ff5f45cf8d278",
+      "width": 256,
+      "height": 256,
+      "frames": 24,
+      "loop": 0,
+      "duration_ms": 4800
+    },
+    {
+      "file": "gif/resolve-dark.gif",
+      "bytes": 109886,
+      "sha256": "5b5d32162ee8a3471497cd55c9e03a3be58ce0952477ed87ac89c39a52b4ab6f",
+      "width": 256,
+      "height": 256,
+      "frames": 30,
+      "loop": 0,
+      "duration_ms": 2400
+    },
+    {
+      "file": "gif/resolve-light.gif",
+      "bytes": 111242,
+      "sha256": "7bcb3d7e3a302be3b7f686d12d6b9e4a346af43e70c11ddddd26bf5ececb591c",
+      "width": 256,
+      "height": 256,
+      "frames": 30,
+      "loop": 0,
+      "duration_ms": 2400
+    },
+    {
+      "file": "gif/reveal-dark.gif",
+      "bytes": 257542,
+      "sha256": "5f634759192c98c635ab8cd8e8536203f246176360a2c6d8451986c4d31485c1",
+      "width": 720,
+      "height": 230,
+      "frames": 30,
+      "loop": 0,
+      "duration_ms": 3200
+    },
+    {
+      "file": "gif/reveal-light.gif",
+      "bytes": 310332,
+      "sha256": "61a49a321145b9cb76cccd1386909b8d5b395b4852a4abce77cfecdddac86d26",
+      "width": 720,
+      "height": 230,
+      "frames": 31,
+      "loop": 0,
+      "duration_ms": 3200
+    },
+    {
+      "file": "gif/settle-dark.gif",
+      "bytes": 70607,
+      "sha256": "0c16eecd8ba0e303216cb2938d3f402d0211bf4718405fa8b3be21a0c740af35",
+      "width": 256,
+      "height": 256,
+      "frames": 20,
+      "loop": 0,
+      "duration_ms": 1280
+    },
+    {
+      "file": "gif/settle-light.gif",
+      "bytes": 72116,
+      "sha256": "69a9863e74585fb16336e0f1dcc85376ac1ae5cc5820271c19913eb5d620671a",
+      "width": 256,
+      "height": 256,
+      "frames": 20,
+      "loop": 0,
+      "duration_ms": 1280
+    },
+    {
+      "file": "preview/index.html",
+      "bytes": 29595,
+      "sha256": "a470177109b155a11ba599e87feb65f1a37836d7e23c0b4a7ad742778cac8049"
+    },
+    {
+      "file": "preview/motion-overview.gif",
+      "bytes": 2447896,
+      "sha256": "b5344192077609fcb6c165dd2b04ef266583741008eacb17e586676e96e8294e",
+      "width": 1200,
+      "height": 720,
+      "frames": 120,
+      "loop": 0,
+      "duration_ms": 4800
+    },
+    {
+      "file": "preview/motion-poster.png",
+      "bytes": 48935,
+      "sha256": "20dabaa9ec1f6cb1e540d9a6311886b63f3ce8992c40917350f8b2cb45ec8eef",
+      "width": 1200,
+      "height": 720,
+      "frames": 1
+    },
+    {
+      "file": "react/OrcaMotion.tsx",
+      "bytes": 1472,
+      "sha256": "7db449a86fbb427b9a19063bcf83184c2f533638c43243ed75cf8590201f9b54"
+    },
+    {
+      "file": "react/tsconfig.json",
+      "bytes": 353,
+      "sha256": "34d0bd3409ce7d706d848e59a98c15497c039686ebb3f465272690ea128f559a"
+    },
+    {
+      "file": "source/build-components.cjs",
+      "bytes": 9210,
+      "sha256": "986881c2f82450a06f4b9e4a2b2de52297d54f22f7a3ddbc1d3db4864d4f8c4d"
+    },
+    {
+      "file": "source/build-motion.cjs",
+      "bytes": 19227,
+      "sha256": "258a552c88488e56287b0c42ae1eea2a3c0c41f16187b5d07d5039458cc4edea"
+    },
+    {
+      "file": "source/check-browser.cjs",
+      "bytes": 8109,
+      "sha256": "753795f7f39b8c40fdcc3d6ca9105fc33a873f94f41277f2e7c327de7caba1d2"
+    },
+    {
+      "file": "source/package-motion.py",
+      "bytes": 8334,
+      "sha256": "d82a50af03db9193f83b4b5b041c9a6dfd9c86b4afb133b76a429fce3ab2ccd2"
+    },
+    {
+      "file": "source/qa-notes.txt",
+      "bytes": 1971,
+      "sha256": "37f32fda6323136928bc59564d5e030190d4415381108a5338e868875f4a64be"
+    },
+    {
+      "file": "svg/breathe-ink.svg",
+      "bytes": 2811,
+      "sha256": "0747da2b0777a19669980a79ff76823a7494b774ea43a87169e833ce4ac2e8e5"
+    },
+    {
+      "file": "svg/breathe-navy.svg",
+      "bytes": 2811,
+      "sha256": "47933897bc343e03556ba7f39e86f5e4678bef4477123afd891a5f00ae1f785d"
+    },
+    {
+      "file": "svg/breathe-white.svg",
+      "bytes": 2811,
+      "sha256": "4f6b7bf61ebe8a246169a40b7121c106543db0c442bf09f4967bd644c9a64c3e"
+    },
+    {
+      "file": "svg/orbit-ink.svg",
+      "bytes": 2810,
+      "sha256": "ccb4a09da3e08ce4b337670d34c7caf2df3c3ae645481255432dbf35ceb5adb9"
+    },
+    {
+      "file": "svg/orbit-navy.svg",
+      "bytes": 2810,
+      "sha256": "fce08ef339a9e3768ce8bd67d3dd485546cc8ec39624167ba1d111b6b7dc9854"
+    },
+    {
+      "file": "svg/orbit-white.svg",
+      "bytes": 2810,
+      "sha256": "a519c578f0a8f22629ba2d84b6ea4e713b5a7b7a943f67348ef9bcb10073ea6e"
+    },
+    {
+      "file": "svg/phase-cycle-ink.svg",
+      "bytes": 2865,
+      "sha256": "5f9d9da68826028d1b527ea4a5138ae5438755fd654adcea4c52394517fccee4"
+    },
+    {
+      "file": "svg/phase-cycle-navy.svg",
+      "bytes": 2865,
+      "sha256": "e86a320915483df7d6aec5565c48da40a77e7ab728660e058e75889662d736d6"
+    },
+    {
+      "file": "svg/phase-cycle-white.svg",
+      "bytes": 2865,
+      "sha256": "0770793946b32e6da44a5c139bd56ae72d21af5c9bf3823b64ff87a640b6db38"
+    },
+    {
+      "file": "svg/resolve-ink.svg",
+      "bytes": 2811,
+      "sha256": "cb4f017eae390bd20b9b300952d99ee3f446f02096f1fc61a52d0b50c07a898e"
+    },
+    {
+      "file": "svg/resolve-navy.svg",
+      "bytes": 2811,
+      "sha256": "a8c2f9afa6c76d37aa0cb3591ca66aae28583240fc0347db31e91986f3620c29"
+    },
+    {
+      "file": "svg/resolve-white.svg",
+      "bytes": 2811,
+      "sha256": "20b54bb9710a607b6b3114cad74f9736be1cd598f70e51896606c0f6b82aaee6"
+    },
+    {
+      "file": "svg/reveal-ink.svg",
+      "bytes": 3747,
+      "sha256": "62b8ea8486e3096eaf5c340ef8efa61a0d5717f7077e10fc8bc10a9dbeae094f"
+    },
+    {
+      "file": "svg/reveal-navy.svg",
+      "bytes": 3747,
+      "sha256": "55af0a0aa44eef5e5f0a8d3bc44706c93d0ee6fa18ff9c6f9e0ea9545d9ab101"
+    },
+    {
+      "file": "svg/reveal-white.svg",
+      "bytes": 3747,
+      "sha256": "d760ce6840cd0e62dc8dfa7e74f894239638d0f1612fb2ee368719293e29c38d"
+    },
+    {
+      "file": "svg/settle-ink.svg",
+      "bytes": 2837,
+      "sha256": "da393426d2eeb9ed48d48a4e7a22915a16eeadcbbedf955dee5e8de21f49acfa"
+    },
+    {
+      "file": "svg/settle-navy.svg",
+      "bytes": 2837,
+      "sha256": "26363c03d3ec18a0bc4ef14b587c53cc65a318783f896094432dac4eea342de6"
+    },
+    {
+      "file": "svg/settle-white.svg",
+      "bytes": 2837,
+      "sha256": "610aa35f852dbe0682fb9e9bc4ddf1c16b7c0678d67dff6ad769c75173b92f6f"
+    },
+    {
+      "file": "web/example.html",
+      "bytes": 1681,
+      "sha256": "0da298277eea111b810c89fee3ca8f32610910971848e2cbc0c7aa5288195275"
+    },
+    {
+      "file": "web/orca-motion-svg.css",
+      "bytes": 1899,
+      "sha256": "c687965b3e851b5efe1e31c58ba8c90390e31f2accf2b2372b8c4401aa0cd02f"
+    },
+    {
+      "file": "web/orca-motion.css",
+      "bytes": 2825,
+      "sha256": "84d2d32022dad5d6b9d1c4f436cd9cc3c8ad04c3f26a37b5e862d23922b723e7"
+    },
+    {
+      "file": "web/orca-motion.d.ts",
+      "bytes": 599,
+      "sha256": "2020825f421c057e4ecce8b23dc795d3ed585481c1ee22670851d8ba005af189"
+    },
+    {
+      "file": "web/orca-motion.js",
+      "bytes": 22010,
+      "sha256": "73f8aab85986fe5da936f5814c0f17abb02856008c4c17f17e1179e936d60e5d"
+    }
+  ]
+}

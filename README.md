@@ -349,6 +349,10 @@ cd web && npm test                 # web unit tests (node --test)
 
 ## How it is built
 
+The approved [ORCA identity and motion kit](assets/brand/orca/README.md) is kept in `assets/brand/orca/` for the upcoming
+application redesign: editable masters, static exports, loading animations and integration examples. Its design and
+adoption notes are in [docs/brand-assets.md](docs/brand-assets.md).
+
 [docs/architecture/](docs/architecture/README.md) maps the whole application: product and journeys, architecture,
 end-to-end flows, the server and web code, geometry, fixes, AI models and prompts, the API and MCP, files in and out,
 configuration, security and caps, deployment, tests and evals, demo data and decisions, with diagrams. Feature designs
