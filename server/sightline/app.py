@@ -31,11 +31,11 @@ from starlette.routing import Route
 
 from . import (agents, built, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
                requirements, settings, spend, step, titles, triage, voice_live)
-from .meta_client import escalation_info, load_env, transcribe, triage_model, triage_model_info
-from .limits import ProposeLimit, client_id
+from .meta_client import escalation_info, transcribe, triage_model, triage_model_info
+from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace
 
-load_env()  # the repo's .env, before anything reads a setting (caps, owner token); real environment variables win
+# The repo's .env was read on the package's first import (sightline/__init__.py), before any module read a setting.
 app = FastAPI(title="ORCA")
 
 
@@ -168,31 +168,31 @@ escalate_limit = ProposeLimit.escalate_from_env()
 chat_limit = ProposeLimit.chat_from_env()
 # Show it built (docs/show-it-built.md): pictures checked by Muse Wonder, a few cents each (SIGHTLINE_BUILT_PER_HOUR per
 # visitor, _PER_DAY for everyone); a request costs up to two rounds of two pictures and two judges each.
-built_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_BUILT_PER_HOUR", "0")),
-                           int(os.environ.get("SIGHTLINE_BUILT_PER_DAY", "0")), noun="built views")
+built_limit = ProposeLimit(env_int("SIGHTLINE_BUILT_PER_HOUR", 0),
+                           env_int("SIGHTLINE_BUILT_PER_DAY", 0), noun="built views")
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
 # Clash titles: one titling run per report (a few model calls for a whole report): SIGHTLINE_TITLES_PER_HOUR per visitor.
-title_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_TITLES_PER_HOUR", "0")),
-                           int(os.environ.get("SIGHTLINE_TITLES_PER_DAY", "0")), noun="titling runs")
+title_limit = ProposeLimit(env_int("SIGHTLINE_TITLES_PER_HOUR", 0),
+                           env_int("SIGHTLINE_TITLES_PER_DAY", 0), noun="titling runs")
 # Detection runs cost no model call but take the server's CPU for seconds: SIGHTLINE_DETECT_PER_HOUR per visitor.
-detect_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_DETECT_PER_HOUR", "0")),
-                            int(os.environ.get("SIGHTLINE_DETECT_PER_DAY", "0")), noun="detection runs")
-voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
-                           int(os.environ.get("SIGHTLINE_VOICE_PER_DAY", "0")), noun="voice messages")
+detect_limit = ProposeLimit(env_int("SIGHTLINE_DETECT_PER_HOUR", 0),
+                            env_int("SIGHTLINE_DETECT_PER_DAY", 0), noun="detection runs")
+voice_limit = ProposeLimit(env_int("SIGHTLINE_VOICE_PER_HOUR", 0),
+                           env_int("SIGHTLINE_VOICE_PER_DAY", 0), noun="voice messages")
 # Model uploads (IFC or STEP): each takes disk, memory and, for STEP, a conversion and one model call to name its parts.
-model_upload_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_HOUR", "0")),
-                                  int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_DAY", "0")), noun="model uploads")
+model_upload_limit = ProposeLimit(env_int("SIGHTLINE_MODEL_UPLOADS_PER_HOUR", 0),
+                                  env_int("SIGHTLINE_MODEL_UPLOADS_PER_DAY", 0), noun="model uploads")
 
 # Coordination requirements (requirements.py): registering a file is cheap, a preview runs a detection.
-requirements_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_REQUIREMENTS_PER_HOUR", "120")),
-                                  int(os.environ.get("SIGHTLINE_REQUIREMENTS_PER_DAY", "0")), noun="requirements files")
-preview_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_PREVIEW_PER_HOUR", "60")),
-                             int(os.environ.get("SIGHTLINE_PREVIEW_PER_DAY", "0")), noun="requirement previews")
+requirements_limit = ProposeLimit(env_int("SIGHTLINE_REQUIREMENTS_PER_HOUR", 120),
+                                  env_int("SIGHTLINE_REQUIREMENTS_PER_DAY", 0), noun="requirements files")
+preview_limit = ProposeLimit(env_int("SIGHTLINE_PREVIEW_PER_HOUR", 60),
+                             env_int("SIGHTLINE_PREVIEW_PER_DAY", 0), noun="requirement previews")
 
 MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
 # Live voice (voice_live.py): hold to talk runs as long as a recording may; hands-free keeps the mic open longer.
 VOICE_HOLD_MAX_S = 60
-VOICE_HANDS_FREE_MAX_S = float(os.environ.get("SIGHTLINE_VOICE_LIVE_MAX_S", "120"))
+VOICE_HANDS_FREE_MAX_S = env_float("SIGHTLINE_VOICE_LIVE_MAX_S", 120)
 # Words Muse Voice Transcribe should lean toward: what people say to ORCA about a building model.
 VOICE_WORDS = ["ORCA", "Orca", "Northbank", "clash", "clashes", "duct", "ductwork", "supply air", "cable tray", "pipe",
                "transfer girder", "girder", "beam", "column", "slab", "mullion", "transom", "curtain wall", "web opening",
@@ -290,10 +290,10 @@ class DetectRequest(BaseModel):
 
 # Uploaded clash reports: XML plus the images it links to, kept in a temp folder while the report is open.
 UPLOADS = Path(tempfile.gettempdir()) / "sightline-reports"
-UPLOAD_MAX_MB = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_MB", "200"))
-UPLOAD_MAX_FILES = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_FILES", "5000"))
+UPLOAD_MAX_MB = env_int("SIGHTLINE_UPLOAD_MAX_MB", 200)
+UPLOAD_MAX_FILES = env_int("SIGHTLINE_UPLOAD_MAX_FILES", 5000)
 UPLOAD_TYPES = {".xml", ".png", ".jpg", ".jpeg"}
-MODEL_UPLOAD_MAX_MB = int(os.environ.get("SIGHTLINE_MODEL_UPLOAD_MAX_MB", str(UPLOAD_MAX_MB)))
+MODEL_UPLOAD_MAX_MB = env_int("SIGHTLINE_MODEL_UPLOAD_MAX_MB", UPLOAD_MAX_MB)
 MODEL_UPLOAD_MAX_FILES = 8
 
 
@@ -1262,7 +1262,7 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False) -> 
             model, info = triage_model()
             if doc is not None:
                 info = {**info, "requirements": ws.requirements_info(doc)}
-            job = triage.Job(report, model, info, int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8")),
+            job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", 8),
                              requirements=doc, seed=donor.results if donor is not None else None)
             job.learn(facts)
             _triage_jobs[key] = job.start()
@@ -1569,9 +1569,9 @@ async def voice_live_socket(socket: WebSocket):
 
 links = agents.Links()
 ws.keep = links.kept  # what live links point at is evicted last
-link_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_LINKS_PER_HOUR", "0")),
-                          int(os.environ.get("SIGHTLINE_LINKS_PER_DAY", "0")), noun="agent links")
-agent_call_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_AGENT_CALLS_PER_HOUR", "0")), 0, noun="agent calls")
+link_limit = ProposeLimit(env_int("SIGHTLINE_LINKS_PER_HOUR", 0),
+                          env_int("SIGHTLINE_LINKS_PER_DAY", 0), noun="agent links")
+agent_call_limit = ProposeLimit(env_int("SIGHTLINE_AGENT_CALLS_PER_HOUR", 0), 0, noun="agent calls")
 MAX_CAPTURE_BYTES = 6_000_000
 
 
