@@ -37,6 +37,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `Insights.tsx` | Root causes and patterns, with their fix, filter, tick, mark and Add to requirements buttons | `Insights` | `App` (into `ReportList`'s `insights` slot) |
 | `Owner.tsx` | The owner's gear: unlock, "For me" and "For everyone" settings | `OwnerSettingsMenu` | `App` |
 | `PlanPanel.tsx` | A Fix-together or root-cause plan: its items, their status, the joint check, Accept | `PlanPanel`, `PlanRun` | `App` |
+| `Properties.tsx` | The selected element's properties under its card: type, material, size, attributes, each property set and quantity set, a filter, click to copy | `PropertySets`, `sections`, `filtered`, `shown` | `App` |
 | `ProjectStart.tsx` | The blank project's drop zone (IFC/STEP models, or a Navisworks report or folder) | `ProjectStart` | `App` |
 | `ReportDoc.tsx` | The coordination report dialog (scope, teams, build PDF and BCF) and the per-clash review block | `ReportDialog`, `ReviewBlock`, `reviewersOf`, `TEAMS` | `App` |
 | `ReportList.tsx` | The left pane over a report: Clashes / Insights tabs, impact bar, search and filters, the list with lazy thumbnails | `ReportList`, `clashLabel`, `mm`, `linkState`, `Review` | `App`, `ClashPanel.tsx`, `ContextPlan.tsx`, `PlanPanel.tsx`, `ReportDoc.tsx` |
@@ -165,6 +166,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 | Tour | `touring`, `tourWhich`, `replaying`, `about` | | `tourState`, `tourActions` |
 | Layout and sheet | `widths`, `resizing`, `listOpen`, `snap`, `menuOpen` | `followed` | `layout`, `compact`, `coarse`, `peekLine` |
 | Panels (docs/panels.md) | `tab` (set through `setTab`, which also shows the panel in the dock), `classic`, `popouts` (pop-out windows open now) | `dock` (`DockHandle`), `dockedNow`; `slots` (`usePanelSlots`) | `docked`, `dockTabs`, `showPanel`, `layoutMenu` |
+| Selected element | `selected` (GlobalId and `api.element`'s card data), `elementProps` (`api.properties`, read on each selection) | | `elementCard` (the card: identity, links, Set as A / B, actions), `elementSets` (`PropertySets`): over the model in the classic layout (with All properties), in the Properties panel in the dock |
 | Thumbnails queue | `thumbs` | `thumbQueue`, `thumbPaused`, `thumbTimer`, `thumbSource` | |
 | Status | `busy`, `error`, `now` | `sceneEpoch`, `workspaceEpoch` | `working`, `fixing` |
 

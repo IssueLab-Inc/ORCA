@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, connections, datums, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
+from . import agent, connections, datums, detect, edits, escalation, hosts, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -215,6 +215,13 @@ class Workspace:
                  for kind, gids in links.items()}
         return {**asdict(s.element(global_id)), "links": named, "systems": g["systems"].get(global_id, []),
                 "part_of": part_of}
+
+    def properties(self, scene_id: str, global_id: str) -> dict:
+        """Everything the model says about one element (properties.py): attributes, type, materials, property sets,
+        quantities in SI and size. KeyError for an element the scene doesn't have."""
+        s = self.scene(scene_id)
+        with self.lock:
+            return properties.properties(s, global_id)
 
     def _contacts(self, scene_id: str) -> list:
         return (self._runs.get(scene_id) or {}).get("contacts", [])

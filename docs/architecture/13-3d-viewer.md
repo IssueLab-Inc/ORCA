@@ -358,7 +358,10 @@ flowchart LR
 - a glass hit is remembered and returned only if nothing solid lies behind it, so a robot's safety zone does not
   swallow clicks on what stands inside it.
 
-With `{ ghosts: true }` (the connection hover) ghosted context is picked too.
+With `{ ghosts: true }` (the connection hover) ghosted context is picked too. A single click that selects an element
+(`App.onClick`) falls back to `{ ghosts: true }` when the normal pick meets nothing, so any element can be selected
+through a see-through view and its properties read ([docs/panels.md](../panels.md)); double-click A / B picking keeps
+the normal pick.
 
 `pick(event)` returns just the GlobalId. `setMeasure(p1, p2)` draws the picked points and the line and returns the
 distance in metres; its label reads "N mm (Δx · Δy · Δz)" in IFC axes.

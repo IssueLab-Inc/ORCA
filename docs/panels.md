@@ -28,6 +28,7 @@ It is new work, written for ORCA during the event. No code from other products.
 | Plan | `PlanPanel` or `ContextPlan` | right side bar (tab) |
 | Chat | `ChatPanel` | right side bar (tab) |
 | Activity | The agent's activity table | bottom side bar |
+| Properties | The selected element's card and everything its model says about it (below) | floating at the model's top right, opened by the first selection |
 
 - **Side bars** (dockview's edge groups) hold their tabs along the top while open, as the classic panes did. The
   button at the end of the tabs collapses a bar to a strip of its tabs down its outer edge (the bottom one to a strip
@@ -45,6 +46,24 @@ It is new work, written for ORCA during the event. No code from other products.
   after a collapse). A layout that can't be ORCA's (another version, a panel it doesn't have, the model anywhere but the
   middle) gives way to the default. Pop-out windows come back docked after a reload: a browser opens a window only on
   a click.
+
+## Properties
+
+A click on any element selects it (blue in every view). In a see-through view with a clash in focus, a click that
+meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`), so context is never out of reach.
+
+- **On a desktop** the selection opens the Properties panel, floating where the old card was; drag it, dock it in a
+  side bar or beside the model, or open it in its own window, and later selections fill it wherever it is. Its ✕
+  closes it; Esc clears the selection (the panel then says to click an element).
+- **Classic layout, tablets and phones** keep the card over the model, with an **All properties** section.
+- **What it shows:** the card as before (class, name, GlobalId, tag, level, file, links, Set as A / B, Zoom, Hide,
+  Isolate, Section box, Hide / Isolate the class), then the element's type, materials, size (mm, from the scene's
+  box), attributes, every property set (with what its type gives it) and every quantity set in SI with its unit. A
+  filter narrows the rows; a click on a value copies it.
+- **From the server:** `GET /api/scenes/{sid}/elements/{gid}/properties` (`properties.py`), read from the scene as it is
+  now, so a kept fix's new pieces have theirs. The demo models carry their own notes in a property set named for the
+  tool that generated them: it shows as **Model data**, without the scripting note on the clash host (it says the
+  answer key was planted).
 
 ## How it works
 
@@ -98,6 +117,7 @@ the main window.
 
 ## Tests and checks
 
+- `server/tests/test_properties.py` (5) and `web/tests/properties.test.mjs` (4): what the panel reads and shows.
 - `web/tests/dock.test.mjs` (7): every panel has a home, which saved layouts load, what was popped out goes back to
   its bar, storage and versions, what showing a panel takes, and the free-core-only rule.
 - Browser (Playwright, Northbank, 1440×900): the default layout; float, collapse, reopen, tab clicks; pop out Chat

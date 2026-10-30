@@ -89,6 +89,13 @@ export type BuiltEvent =
 export interface EscalationInfo { model: string; label: string; mode: "off" | "button" | "auto"; available: boolean }
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
 export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
+/** What the model says about one element (properties.py): quantities in SI with their unit, size in metres (IFC axes). */
+export interface ElementProperties {
+  global_id: string; ifc_class: string; attributes: Record<string, unknown>;
+  type: { ifc_class: string; name: string | null } | null; materials: string[];
+  psets: Record<string, Record<string, unknown>>; quantities: Record<string, Record<string, { value: unknown; unit: string }>>;
+  size_m: number[] | null; source: string;
+}
 export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
 export interface ContextChecks {
   geometry: { passed: boolean; target_resolved: boolean; hits: ContextHit[]; existing_conflicts: ContextHit[]; min_clearance_m: number | null };
@@ -672,6 +679,8 @@ export const api = {
   },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
+  /** Everything the model says about one element, for the Properties panel (properties.py). */
+  properties: (id: string, globalId: string) => call<ElementProperties>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties`),
   /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
    *  check): the connection highlight's graph (docs/connections.md). */
   connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),

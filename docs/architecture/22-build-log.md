@@ -1102,3 +1102,18 @@ code `web/src/dock.tsx`, `web/src/dockLayout.ts`, `web/src/App.tsx`, `web/src/ui
   clicks; Chat popped out (styles, typing, a tooltip, M reaching the page), its window closed and popped out again;
   reload with a popped-out, a floating and a collapsed panel; Reset; Classic; the tour gathering panels; #1 proposed
   with the Clash panel floating, put back mid-run and accepted (1 fixed); tablet and phone unchanged.
+
+Properties of any element (Oct 30; `feature/element-properties`, on top of the panels; code `server/sightline/properties.py`,
+`service.py`, `app.py`, `web/src/Properties.tsx`, `App.tsx`, `dock.tsx`, `dockLayout.ts`):
+- **What:** a click selects any element, also through a see-through view (a click that meets nothing in focus takes the
+  faded element behind); on a desktop the Properties panel floats in where the old card was and can be docked or popped
+  out; it shows the card, then type, materials, size, attributes, every property set and quantity set (SI), with a
+  filter and click to copy. Classic layout, tablets and phones: the card with All properties.
+- **Server:** `GET /api/scenes/{sid}/elements/{gid}/properties`; the demo models' own set shows as "Model data",
+  without its scripting note.
+- **Also on the panels branch:** the docked page could scroll (dockview parks hidden panels' layers below the dock;
+  measured scrollHeight 1750 in a 900 px window, shifted 203 px): the app and dock area now clip.
+- **Checked:** `server/tests/test_properties.py` (5), `web/tests/properties.test.mjs` (4); 113 web tests; build clean.
+  In Playwright on Northbank: #1 in focus (X-ray), a click on the faded furniture behind selects it; the girder reads
+  Steel S355, 400 × 12000 × 1000 mm, Model data without its scripting note; the filter; Esc empties the panel; the
+  classic card's All properties; the page never scrolls.
