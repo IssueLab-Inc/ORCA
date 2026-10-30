@@ -55,9 +55,13 @@ with a clash still picked. So the clash and the camera become independent.
 - **What a picked clash is now:** its pair in red and green with outlines, the marker and its number, in every open
   view, wherever each view looks. It no longer decides the style or the visibility, and it moves the camera only
   when picked (with Fly to clash on) or on F.
-- **Fly to clash** (Views popover, on by default, kept per browser in `sightline.views.fly`): picking a clash flies the
-  3D view to it and sets the drawing views' defaults, as today. Off: picking only highlights it in every view and the
-  camera stays (Navisworks' auto-zoom off); **F** flies when wanted.
+- **Clicking a clash takes every open view to it** (owner, Oct 30: the default move). Every click, from the list,
+  chat, the tour or an agent link, including a click on the clash already picked (as today): the 3D view flies to
+  where the pair meets, and each drawing view goes to it as well (Views and layouts, "Every view goes to the clash").
+  Between clicks the views are free: navigating away keeps the clash drawn, and the next click brings every view back.
+- **Fly to clash** (Views popover, on by default, kept per browser in `sightline.views.fly`) is the way to turn that off
+  for those who want it: picking then only highlights the clash in every view and nothing moves (Navisworks' auto-zoom
+  off); **F** takes the views there when wanted.
 - **The camera moves only when asked:** picking a clash (Fly on), F, H, a preset or the view cube, a saved view,
   picking an option or a plan (framed on the fix, as today), and the pilot while it drives (any camera move takes over,
   as today). Background work never moves it: re-measures, titles, thumbnails, triage, a kept fix patched in
@@ -163,16 +167,17 @@ every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate
 - **Layouts.** Single (3D, as today), Two (Plan · 3D), Quad (Plan · 3D / Section · Elevation). Each pane can show any
   view. Double-click a pane's title to maximise it; again to go back. Key **Q** cycles Single → Two → Quad.
 - **Per device.** Desktop up to Quad; tablet Single or Two; phone Single only (its bottom sheet needs the room).
-- **Defaults follow the clash.** Picking a clash (list, chat, tour, agent link) with Fly to clash on sets, once per
-  clash:
+- **Every view goes to the clash.** Each click on a clash (Fly to clash on, the default) frames it in every unpinned
+  view and sets:
   - plan: the storey the clash point stands in (highest level at or below it) and a cut height through the point,
     kept between 0.3 m and the storey height less 50 mm;
   - section: through the clash point, vertical, along the longer horizontal axis of the side that moves (the
     service). Raising the #042 duct through the girder then reads in profile: the girder cut, the web opening, the
     offset's risers and bends;
-  - elevation: the side the section looks towards.
-  A view the user changed keeps its settings until the next clash; a pinned view (pin in its header) keeps them
-  across clashes.
+  - elevation: the side the section looks towards;
+  - and each drawing view pans and zooms to frame where the pair meets, with the same margins as the 3D view.
+  What the user changes in a view (pan, zoom, cut, section line) holds until the next click on a clash, which brings
+  it back. A pinned view (pin in its header) is never moved by a click; F still takes it to the clash.
 - **Drawing views and modes (the toggle).** "Full model" (default): drawing views show every element in visible
   models, whatever the 3D mode. "Follow 3D": they hide what Near it / Only it hide. Either way the pair is red and
   green, hidden models stay hidden and an edit preview replaces what it changes.
@@ -351,7 +356,7 @@ time while orbiting in Quad, and while the pilot plays a proposal.
 - **Web, navigation:** the Esc chain, what-wins for visibility, view cube directions, camera history, saved views
   round-tripped.
 - **Browser, navigation:** pick #1, orbit away and look at Level 03: the pair still drawn there in 3D (and later in
-  every view); Esc until the clash is left, camera unmoved; Fly to clash off: picking moves nothing; filters and a
+  every view); Esc until the clash is left, camera unmoved; every unpinned view back at #1 after clicking it again; Fly to clash off: picking moves nothing; filters and a
   temporary hide leave #1's A/B/C pictures pixel-identical; X-ray with no clash shows the girder through the façade.
 - **Browser (Playwright):** Northbank #1 in Quad: plan cut through the duct and girder with the amber interference,
   section showing the web opening, grids and levels;
