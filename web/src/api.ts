@@ -1,6 +1,19 @@
+import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
-export interface Verdict { passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number; reason?: string }
+export interface Verdict {
+  passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number;
+  /** Why a move fails without a hit: it would pull a joint apart (connections.plan_move) or leave what stood on
+   *  something standing on nothing (verify.keep_supports). */
+  reason?: string | null;
+  /** A move's new placements: what was asked to move and what it takes along. */
+  placements?: Record<string, number[]>;
+  /** The segments a move stretches so its joints hold, as they would be. */
+  preview?: Piece[] | null;
+  /** What a move carried and stretched (`summary`), or, when it was refused before it was tried, the joints it would
+   *  pull apart (`refused_at`). */
+  joints?: { refused_at?: string[]; summary?: string };
+}
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
   title: string; moved: string[]; delta_m: number[]; rationale: string; also_needs: string;
@@ -18,6 +31,9 @@ export interface Option {
   review?: string | null;
   /** Who proposed it, as people read it ("Muse Spark", "Muse Wonder"). */
   model?: string;
+  /** The clash it was verified for (A, B) and what else it had to clear: keeping it tries it again against these. */
+  pair?: string[] | null;
+  others?: string[];
 }
 export interface FixEdit { summary?: string; key?: string; [param: string]: unknown }
 export interface Attempt {
@@ -136,7 +152,10 @@ export type TitleEvent =
   | { type: "batch_error"; detail: string }
   | { type: "ping" }
   | { type: "done"; titled: number; seconds: number; error?: string };
-export interface Report { id: string; title: string; sources: string[]; clashes: ReportClash[]; origin?: "navisworks" | "sightline" }
+export interface Report {
+  id: string; title: string; sources: string[]; clashes: ReportClash[]; origin?: "navisworks" | "sightline";
+  requirements_id?: string | null;  // a detected run: the requirements it ran under (null: the defaults)
+}
 
 /** ORCA detection (server: detect.py; design in docs/detection.md). */
 export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[] }
@@ -650,17 +669,16 @@ export const api = {
   },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
-  /** Keep a fix in the server's model; returns the indexes of the files that changed. */
-  accept: (id: string, o: Option) => (o.kind === "trim" && o.trim
-    ? call<Kept>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
-    : o.kind === "offset"
-    ? call<Kept>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
-    : o.kind === "move"
-    ? call<Kept>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
-    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there).
-    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there). A penetration
-    // whose host the requirements lock comes back `cut: false`: only its provision for void was written.
-    : call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
+  /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
+   *  check): the connection highlight's graph (docs/connections.md). */
+  connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),
+  /** Keep a fix in the server's model; returns the indexes of the files that changed. One endpoint keeps every kind
+   *  from the option itself (its meshes are not needed there): the server tries it again against the clash it names
+   *  (`pair`: the option's own, else the clash on screen) and answers 409 with why when it no longer passes. A
+   *  penetration whose host the requirements lock comes back `cut: false`: only its provision for void was written. */
+  accept: (id: string, o: Option, pair: string[] | null) =>
+    call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST",
+      body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null } }) }),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). */

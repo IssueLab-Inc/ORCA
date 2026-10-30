@@ -56,11 +56,12 @@ def test_pdfs_per_team_and_bcf(tmp_path):
     data, name, media = document.generate(
         report, verdicts, model, scope="team", model_teams={}, matches=None, scene=None, evidence=evidence,
         reviews=reviews, marks={}, include_bcf=True, emit=events.append)
-    assert media == "application/zip" and name.endswith(".zip")
+    assert media == "application/zip" and name == "orca-report.zip"
     z = zipfile.ZipFile(io.BytesIO(data))
     pdfs = [n for n in z.namelist() if n.endswith(".pdf")]
+    assert pdfs and all(n.startswith("orca-report-") for n in pdfs)
     assert pdfs and all(z.read(n).startswith(b"%PDF") for n in pdfs)
-    bcf = zipfile.ZipFile(io.BytesIO(z.read("sightline-issues.bcfzip")))
+    bcf = zipfile.ZipFile(io.BytesIO(z.read("orca-issues.bcfzip")))
     topics = [n for n in bcf.namelist() if n.endswith("markup.bcf")]
     pages = sum(1 for c in report.clashes if verdicts[c.id]["verdict"] == "real_clash" or c.id == first.id)
     assert len(topics) == pages and "bcf.version" in bcf.namelist()
@@ -76,7 +77,20 @@ def test_combined_without_bcf_is_one_pdf_and_stays_draft(tmp_path):
     assert "DRAFT" in html_text
     data, name, media = document.generate(report, verdicts, Writer(), scope="combined", model_teams={}, matches=None,
                                           scene=None, evidence={}, reviews={}, marks={}, include_bcf=False)
-    assert media == "application/pdf" and data.startswith(b"%PDF")
+    assert media == "application/pdf" and data.startswith(b"%PDF") and name == "orca-report.pdf"
+
+
+def test_the_report_names_the_triage_model_that_ran(tmp_path, monkeypatch):
+    report = _report(tmp_path)
+    rows = document.build_rows(report, {}, {}, None, None, {}, {}, {})
+    open_run = {"model": "meta-models/muse-spark-open", "open_weights": True}
+    spark_run = {"model": "muse-spark-1.3-contributor", "open_weights": False}
+    assert "the rest by an open-weights model (Muse Spark Open)." in document.render_html("t", "s", rows, {}, {}, None, open_run)
+    html_text = document.render_html("t", "s", rows, {}, {}, None, spark_run)
+    assert "the rest by Muse Spark (Meta)." in html_text and "Muse Spark Open" not in html_text
+    # Without a run (a restart), the model triage would run on now: here the open-weights model is switched off.
+    monkeypatch.setattr(document, "triage_model_info", lambda: spark_run)
+    assert "the rest by Muse Spark (Meta)." in document.render_html("t", "s", rows, {}, {})
 
 
 @pytest.mark.parametrize("kind", ["context", "move", None])

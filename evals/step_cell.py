@@ -6,14 +6,19 @@ built with). This opens the STEP files the way the app does (`Workspace.open`: c
 the titles' model, triangulate), then checks:
 - every part converted, names unique, and the classes the model picked against the parts list's own classes;
 - detection on Rev A finds every planted pair and nothing that is neither planted nor by design; Rev B none planted;
-- C2 (the CT-301 cable ladder through fence post W5): moving the ladder run 150 mm up, as Rev B does, clears it;
+- C2 (the CT-301 cable ladder through fence post W5): moving the ladder run 150 mm up, as Rev B does, clears it; the
+  move keeps its joints (connections.py): the bends and run 1 go along and the riser from EP-301 gets 150 mm taller,
+  its foot still on the panel's gland plate;
 - C1 (the air pipe through both conveyor rails): Fix together makes one job and finds a verified fix;
 - C3 (a fence rail 40 mm into post SE): trimmed back to the post's face;
 - C6 (the PL-302 branch through plant columns C3 and C4): the designer's route (200 mm out round each column) passes
   the check; Fix together on both clashes makes one job, and Muse's fix is a verified route;
 - C7 (the plant's compressed-air main through the west wall): only an opening clears; a single proposal offers a
   penetration, and kept (no requirements) the opening is cut;
-- export writes the STEP again: the ladder 150 mm higher, the pipe's offset pieces added, the rail shorter, the west
+- C6 also: moving PL-302's segment 3 north 250 mm keeps its joints (bends 2 and 3 along, segments 2 and 4 shorter)
+  but runs into the ES-2 emergency stop, which is why only a route clears;
+- export writes the STEP again: the ladder 150 mm higher, the riser taller, the pipe's offset pieces added, the rail
+  shorter, the west
   wall cut and the provision for void added to the compressed-air group, see-through;
 - C8 (the 400 V feed conduit through EP-301's top gland plate): Muse reads the gland plate (allowed, a fitted gland),
   a single proposal offers the gland hole, kept and cut; the exported plate has the hole.
@@ -38,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO = Path(os.environ.get("DEMO_MODELS", ROOT.parent / "demo-models"))
 sys.path.insert(0, str(ROOT / "server"))
 
-from sightline import detect, edits, plans, step, verify  # noqa: E402
+from sightline import connections, detect, edits, plans, step, verify  # noqa: E402
 from sightline.meta_client import triage_model  # noqa: E402
 from sightline.service import Workspace  # noqa: E402
 
@@ -105,13 +110,24 @@ def main():
 
         if rev == "A":
             gid_of = {k: g for g, k in keys.items()}
-            ladder = scene.connected_run(gid_of["ct/h2"])
+            seed = connections.run(scene, gid_of["ct/h2"])
+            lift = connections.plan_move(scene, seed, (0.0, 0.0, 0.15))
+            ladder = list(lift.moved)                      # what moves whole; the riser stretches
             post = gid_of["fence/post/W5"]
             names = sorted(scene.entity(g).Name for g in ladder)
-            before = verify.check(scene, ladder)
-            ws.apply(sid, ladder, (0.0, 0.0, 0.15))
-            after = verify.check(scene, ladder)
+            risers = [scene.entity(st.global_id).Name for st in lift.stretched]
+            joined = set(lift.changed())
+            before = verify.check(scene, ladder, ignore=joined)
+            ws.apply(sid, seed, (0.0, 0.0, 0.15))
+            after = verify.check(scene, ladder, ignore=joined)
             hits_post = any(h.other == post and h.kind == "collision" for h in after.hits)
+            # C6 by a move: it can keep its joints, but runs into the emergency stop between the columns
+            seg3 = next(g for g in scene.bounds() if scene.entity(g).Name == "PL-302 compressed air DN25 segment 3")
+            north = connections.plan_move(scene, connections.run(scene, seg3), (0.0, 0.25, 0.0))
+            north_hits = connections.trial_move(scene, north, 0.025).hits if north.ok else []
+            north_text = (f"carries {len(north.carried)} parts, {len(north.stretched)} segments shorter; hits "
+                          f"{', '.join(sorted({scene.entity(h.other).Name for h in north_hits})) or 'nothing'}"
+                          if north.ok else north.refused)
 
             # C1: the air pipe through both conveyor rails. Fix together makes it one job (one movable pipe, two
             # rails); the exact pipe (a cylinder in the STEP, an extrusion here) can be split and dropped under them.
@@ -238,6 +254,8 @@ def main():
             new = {p.name: p for p in step.parts(step_out)[0]}
             moved = {n for n in src if abs(zmin(new[n]) - zmin(src[n])) > 1e-3}
             dz = sorted({round(zmin(new[n]) - zmin(src[n]), 1) for n in moved if n in names})
+            taller = [round(zmax(new[n]) - zmax(src[n]), 1) for n in risers]   # foot stays: zmin unchanged
+            feet = [round(zmin(new[n]) - zmin(src[n]), 1) for n in risers]
             air_before = sum(1 for n in src if src[n].group == "Compressed air")
             air_after = sum(1 for p in step.parts(step_out)[0] if p.group == "Compressed air")
             rail_name = scene.entity(rail).Name
@@ -261,11 +279,13 @@ def main():
             ok &= c8_step
             c8_lines = [f"## C8 gland hole: {'pass' if c8_ok else 'FAIL'}", "", *c8_lines, ""]
             fix_ok = set(names) <= moved and dz == [150.0] and not hits_post and shorter == 40.0 \
+                and taller == [150.0] and feet == [0.0] and north.ok and bool(north_hits) \
                 and (air_after > air_before if kinds[:1] == ["offset"] or c6_kind == "route" else True)
             ok &= fix_ok
             lines += [f"## C2 fix and export: {'pass' if fix_ok else 'FAIL'}", "",
-                      f"- The run that moves with `CT-301` h2 (same STEP group, touching): {len(names)} parts, "
-                      f"{', '.join(names)}.",
+                      f"- The ladder moved with its joints: {len(names)} parts move ({', '.join(names)}); "
+                      f"{', '.join(risers) or 'nothing'} {taller} mm taller, its foot {feet} mm (on the panel).",
+                      f"- C6 by a move (segment 3 north 250 mm): {north_text}.",
                       f"- Check before: {_summary(before)}; after +150 mm: {_summary(after)}"
                       f"{'; still hits post W5' if hits_post else '; clear of post W5'}.",
                       f"- Exported {', '.join(p.name for p in out)}; re-read: the {len(names)} ladder parts {dz} mm "
@@ -278,6 +298,14 @@ def main():
     print("\n".join(lines))
     shutil.rmtree(work, ignore_errors=True)
     sys.exit(0 if ok else 1)
+
+
+def zmax(part) -> float:
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    box = Bnd_Box()
+    BRepBndLib.Add_s(part.shape, box)
+    return box.CornerMax().Z()
 
 
 def volume(part) -> float:

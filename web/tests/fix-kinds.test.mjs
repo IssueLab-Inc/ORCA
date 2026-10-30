@@ -7,7 +7,8 @@ const kinds = await import(await compiled("../src/fixKinds.ts"));
 test("each kind is described in one place, the newer kinds by the server's own summary", () => {
   assert.equal(kinds.editText({ kind: "offset", split_m: [2.6, 4.4], delta_m: [0, 0, 0.4] }), "offset 2.60–4.40 m by +400 mm");
   assert.equal(kinds.editText({ kind: "trim", split_m: null, delta_m: [0, 0, 0], trim: { end: "start", by_m: 0.04 } }), "trim one end 40 mm");
-  assert.equal(kinds.editText({ kind: "move", split_m: null, delta_m: [0, 0, -0.15] }), "move 0 mm · 0 mm · -150 mm");
+  assert.equal(kinds.editText({ kind: "move", split_m: null, delta_m: [0, 0, -0.15] }), "move down 150 mm");
+  assert.equal(kinds.editText({ kind: "move", split_m: null, delta_m: [-0.1, 0.25, 0.0002] }), "move west 100 mm, north 250 mm");
   assert.equal(kinds.editText({ kind: "route", split_m: null, delta_m: [0, 0.3, 0.4], edit: { summary: "route up 400 mm, then side 300 mm" } }),
     "route up 400 mm, then side 300 mm");
   assert.equal(kinds.kindLabel("penetration"), "Opening");
@@ -25,7 +26,10 @@ test("framing shows a split run's new pieces, an opening whole, and a move or tr
 
 test("clearance, change and recommendation lines for every kind", () => {
   assert.equal(kinds.clearanceText({ kind: "trim", min_clearance_m: 0 }), "butt joint");
-  assert.equal(kinds.clearanceText({ kind: "route", min_clearance_m: 0.05 }), "+50 mm");
+  assert.equal(kinds.clearanceText({ kind: "route", min_clearance_m: 0.05 }), "50 mm");
+  assert.equal(kinds.clearanceText({ kind: "move", min_clearance_m: null }), "nothing within 500 mm");
+  assert.equal(kinds.needsText("move the run together, and re-fix anchors; none"), "move the run together, and re-fix anchors");
+  assert.equal(kinds.needsText("None."), "");
   const offset = { kind: "offset", split_m: [2.6, 4.4], delta_m: [0, 0, 0.4], preview: new Array(9), moved: ["d"] };
   assert.equal(kinds.changeText(offset), "1.80 m of it raised 400 mm; 4 bends and 2 short risers");
   assert.equal(kinds.changeText({ kind: "resize", delta_m: [0, 0, -0.05], moved: ["d"], edit: { summary: "800×250 mm for 1.80 m" } }),

@@ -193,6 +193,23 @@ def test_a_run_is_a_report_the_rest_of_sightline_reads(paths, tmp_path):
     assert ws.report_image(again["report"]["id"], duct.id, 0).read_bytes() == png
 
 
+def test_a_run_names_the_requirements_it_ran_under(paths, tmp_path):
+    """The page keeps sign-offs per detection run by the models and this id (every run's title is the same)."""
+    from sightline import requirements as req
+
+    for p in paths:
+        (tmp_path / p.name).write_bytes(p.read_bytes())
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open([p.name for p in paths])
+    plain = ws.detect(sid)["report"]
+    assert plain["requirements_id"] is None and sorted(plain["sources"]) == sorted(p.name for p in paths)
+    rid = req.register(req.default_doc(ws.scene(sid)))
+    with req.using(rid):
+        under = ws.detect(sid)["report"]
+    assert under["requirements_id"] == rid and under["title"] == plain["title"]
+    assert ws.report_summary(under["id"])["requirements_id"] == rid
+
+
 def test_detect_api_streams_progress_then_opens_the_report(paths, tmp_path, monkeypatch):
     import json
     from fastapi.testclient import TestClient

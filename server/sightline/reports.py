@@ -78,6 +78,7 @@ class Report:
     clashes: list[ReportClash]
     temporary: bool = False   # uploaded: the folder is deleted when the report is closed
     origin: str = "navisworks"  # "sightline" when ORCA detected the clashes itself (detect.py)
+    requirements_id: str | None = None  # a detected run: the requirements it ran under (None: the defaults)
 
     def clash(self, clash_id: str) -> ReportClash:
         """By id, or by number as people say it ("#39" or "39")."""

@@ -1,8 +1,9 @@
 """ORCA detection on the PC-03 palletising cell, a machine model (the demo-models repo's `palletising-cell/`).
 
-The cell is generated with an answer key: Rev A has five planted problems (13 part pairs, `verify_cell.PLANTED`) and
-Rev B fixes all of them; every other overlap is a contact the cell is built with (`verify_cell.BY_DESIGN`: anchor bolts
-in their plates and the floor, the conveyor's drums in its rails, the robot working over the conveyor and pallets).
+The cell is generated with an answer key: Rev A (161 parts) has eight planted problems (17 part pairs,
+`verify_cell.PLANTED`) and Rev B (185 parts) fixes all of them; every other overlap is a contact the cell is built with
+(`verify_cell.BY_DESIGN`: anchor bolts in their plates and the floor, the conveyor's drums in its rails, the robot
+working over the conveyor and pallets, the gland plate on its panel and the feed conduit's end inside it).
 ORCA's default tests on the one-file model (the model against itself, and duplicates) must find every planted pair
 in Rev A, none in Rev B, and nothing that is neither planted nor by design.
 

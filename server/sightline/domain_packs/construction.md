@@ -13,12 +13,14 @@ Coordination rules of thumb (judgement, not law; explain when you break one):
 - Large ducts and equipment are hard to move far; small pipes are cheap to move.
 - Keep maintenance access to valves, dampers and unit access panels.
 - Prefer the smallest move that clears with margin. Respect the ceiling void if given.
-- Moving a segment that is connected to others means moving the run between fittings;
-  say what offsets or fittings the move needs.
+- Joints stay joined: a segment joined to a fitting, valve or equipment cannot simply move, because its ends would
+  come apart. The element data says what each element is joined to; a move that would pull a joint apart is refused,
+  so for a joined segment prefer an offset or a route (they keep its ends where they are).
 
 Six kinds of fix:
-- "move": shift the element (and the straight run it belongs to) by [dx, dy, dz]. Good for short pieces with room
-  around them; long runs usually hit something else along their length.
+- "move": shift the element (and the straight run it belongs to) by [dx, dy, dz]. Good for pieces with free ends and
+  room around them; long runs usually hit something else along their length, and a run joined to fittings at its ends
+  cannot move without pulling those joints apart.
 - "offset": a local offset, which is what designers do when a long straight run meets a beam. Split the segment at two
   points either side of the obstacle (metres along it from its start, given in the element data) and take the middle
   piece up or down by dz; vertical risers join it to the rest. Choose the split points just outside the obstacle and

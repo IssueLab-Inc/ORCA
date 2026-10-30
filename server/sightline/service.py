@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -16,19 +17,21 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
+from . import agent, connections, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
+from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
-MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
+MAX_SCENES = env_int("SIGHTLINE_MAX_SCENES", 0)  # 0 = no limit
 # Open model sets also held within a size budget: the IFC bytes they were opened from, a stand-in for memory (a scene
 # holds several times its file: docs/uploads.md). 0 = by count only.
-SCENE_BUDGET_MB = int(os.environ.get("SIGHTLINE_SCENE_BUDGET_MB", "0"))
+SCENE_BUDGET_MB = env_int("SIGHTLINE_SCENE_BUDGET_MB", 0)
 HOSTS_TIMEOUT_S = 60   # a host reading that takes longer (a cold open-weights host) leaves the defaults
 LAST_KEPT = 200        # the last try per clash pair kept for a second try to read (docs/escalation.md)
-MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
+PATTERNS_KEPT = 64     # Muse's readings of report patterns kept (plans.read_patterns)
+MAX_REPORTS = env_int("SIGHTLINE_MAX_REPORTS", 0)  # open clash reports kept, same rule
 # Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
 MODELS = Path(tempfile.gettempdir()) / "sightline-models"
 MODEL_SUFFIXES = {".ifc"} | step.SUFFIXES
@@ -75,6 +78,12 @@ class Workspace:
         # read: what was tried and why it failed. Pairs are sorted; the oldest go past LAST_KEPT.
         self._last: dict[tuple[str, str, str], tuple[tuple, dict]] = {}   # → (what it was tried on, the try)
         self._last_lock = threading.Lock()
+        # (report id, scene id, pattern ids, triage prompt) → Muse's reading of those patterns (plans.read_patterns),
+        # made once and shared by the route, the chat and MCP; the oldest go past PATTERNS_KEPT. One lock per reading
+        # being made, so a second caller waits for it instead of paying for it again.
+        self._patterns: dict[tuple, dict] = {}
+        self._pattern_locks: dict[tuple, threading.Lock] = {}
+        self._patterns_lock = threading.Lock()
 
     @property
     def model(self) -> ChatModel:
@@ -187,15 +196,47 @@ class Workspace:
             return {g: [s.element(g).ifc_class, s.element(g).name or s.element(g).ifc_class] for g in s.bounds()}
 
     def describe(self, scene_id: str, global_id: str) -> dict:
-        return asdict(self.scene(scene_id).element(global_id))
+        """An element, with what it is linked to by kind (connections.links_of: joints, assembly, hosted, what it rests
+        on and supports, contacts), its systems and the assembly it is part of."""
+        s = self.scene(scene_id)
+        with self.lock:
+            g = self.connections(scene_id)
+            links = connections.links_of(s, global_id, self._contacts(scene_id))
+        part_of = next(({"global_id": w, "name": a["name"], "parts": len(a["parts"])}
+                        for w, a in g["assemblies"].items() if global_id in a["parts"]), None)
+        named = {kind: [{"global_id": o, "name": s.element(o).name, "ifc_class": s.element(o).ifc_class} for o in gids]
+                 for kind, gids in links.items()}
+        return {**asdict(s.element(global_id)), "links": named, "systems": g["systems"].get(global_id, []),
+                "part_of": part_of}
+
+    def _contacts(self, scene_id: str) -> list:
+        return (self._runs.get(scene_id) or {}).get("contacts", [])
+
+    def connections(self, scene_id: str) -> dict:
+        """What is linked to what in the open models (connections.graph), with the last check's contacts."""
+        s = self.scene(scene_id)
+        with self.lock:
+            return connections.graph(s, self._contacts(scene_id))
 
     def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025,
                     obstacles: list[str] = ()) -> dict:
-        """Check a move without keeping it. With `obstacles` (what the move must clear), what the moved elements stand
-        on is kept as a proposal keeps it (`verify.supports`): slid along a slab is not a clash, lifted off it is
-        refused (`reason`). Without them, every contact counts."""
+        """Check a move without keeping it. It keeps its joints (connections.plan_move): what it takes along is moved
+        too (`placements`), the segments it stretches come back as `preview` meshes, and `joints` says what it carried
+        and stretched. A move that can't keep them fails without being tried, with the `reason` (and `joints`: what it
+        would pull apart from). With `obstacles` (what the move must clear), what the moved elements stand on is kept
+        as a proposal keeps it (`verify.supports`): slid along a slab is not a clash, lifted off it is refused
+        (`reason`). Without them, every contact counts."""
         s = self.scene(scene_id)
         with self.lock:
+            plan = connections.plan_move(s, moved, delta_m)
+            if not plan.ok:
+                return {"passed": False, "hits": [], "min_clearance_m": None, "checked_against": 0, "placements": {},
+                        "reason": plan.refused, "joints": {"refused_at": plan.refused_at}}
+            if not plan.plain:
+                t = connections.trial_move(s, plan, clearance_m, preview=True)
+                return {"passed": not t.hits, "hits": [asdict(h) for h in t.hits], "min_clearance_m": t.least,
+                        "checked_against": t.checked, "placements": t.placements, "preview": t.preview,
+                        "reason": None, "joints": plan.edit(s, moved)}
             sup = verify.supports(s, moved, set(obstacles), clearance_m) if obstacles else None
             placements = s.translate(moved, tuple(delta_m))
             try:
@@ -206,8 +247,8 @@ class Workspace:
                     hits = v.hits
             finally:
                 s.translate(moved, tuple(-d for d in delta_m))
-        return {**asdict(v), "passed": not hits and not why, "hits": [asdict(h) for h in hits],
-                **({"reason": why} if why else {}), "placements": placements}
+        return {**asdict(v), "passed": not hits and not why, "hits": [asdict(h) for h in hits], "reason": why,
+                "placements": placements}
 
     def propose(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
                 images: list[str] | None = None, notes: str = "", report_id: str | None = None,
@@ -393,14 +434,29 @@ class Workspace:
                 out[mine] = kept
         return out
 
-    def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
+    def apply(self, scene_id: str, moved: list[str], delta_m: list[float], expect: dict | None = None) -> dict:
+        """Keep a move with its joints: what it takes along moves too and the segments it stretches change
+        (connections.plan_move, planned again here). With `expect` (the option's `edit`), a move whose plan has changed
+        since it was checked is refused."""
         s = self.scene(scene_id)
         with self.lock:
-            placements = s.translate(moved, tuple(delta_m))
-            for g in moved:  # kept: export writes these files
+            plan = connections.plan_move(s, moved, delta_m)
+            if not plan.ok:
+                raise edits.Unsupported(plan.refused)
+            if expect and expect.get("key") and expect["key"] != plan.key():
+                raise edits.Unsupported("the model changed since this move was checked: propose it again")
+            changed = plan.changed()
+            files = {s.index_of(g) for g in changed}
+            with edits.kept_files(s, files):
+                placements = connections.apply_move(s, plan)
+                broken = connections.check_joints(s, plan)
+                if broken:   # never kept: undone with the rest
+                    raise edits.Unsupported("a joint would not hold: " + "; ".join(w for *_, w in broken))
+            for g in changed:  # kept: export writes these files
                 s.mark_edited(g)
-            s.bump(s.index_of(g) for g in moved)
-        return {"placements": placements, "files": sorted({s.index_of(g) for g in moved}), "changed": list(moved)}
+            s.bump(files)
+        return {"placements": placements, "files": sorted(files), "changed": changed,
+                **({"joints": plan.edit(s, moved)} if not plan.plain else {})}
 
     PATCH_MAX_VERTS = 500_000   # past this, the page reloads the files instead
 
@@ -630,6 +686,7 @@ class Workspace:
         r = self.report(report_id)
         return {
             "id": r.id, "title": r.title, "sources": r.sources, "origin": r.origin,
+            "requirements_id": r.requirements_id,
             "clashes": [{**{k: v for k, v in asdict(c).items() if k != "images"},
                          "images": [label for label, _ in c.images]} for c in r.clashes],
         }
@@ -677,6 +734,7 @@ class Workspace:
         self._runs[scene_id] = {**run.state, "requirements": rid}
         self._carry(self.reports.get(self._run_reports.get(scene_id, "")), run.report)
         self._run_reports[scene_id] = run.report.id
+        run.report.requirements_id = rid
         report = self._keep(run.report)
         out = {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
                "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset,
@@ -781,6 +839,22 @@ class Workspace:
             v = verify.check(scene, [m["a"]], clearance_m=0.0)
             hit = next((h for h in v.hits if h.other == m["b"]), None)
             return {"matched": True, "physical": True, "distance_m": hit.distance_m if hit else None}
+
+
+def project_name(files: list[str]) -> str | None:
+    """The project a set of model files belongs to: their shared prefix ("Northbank-MEP.ifc", "Northbank-Site.ifc" →
+    "Northbank"), or the one file's own name; None when they share none. The page's `projectName` (About.tsx), less its
+    "first file + n more" fallback, which is no name for a download."""
+    names = [re.sub(r"\.(ifc|step|stp)$", "", f, flags=re.IGNORECASE) for f in files]
+    if len(names) <= 1:
+        return names[0] if names and names[0] else None
+    prefix = names[0]
+    for n in names[1:]:
+        while not n.startswith(prefix):
+            prefix = prefix[:-1]
+    m = re.match(r"^(.*[A-Za-z0-9])[\s_.-]", prefix)
+    cut = m.group(1) if m else prefix if all(n == prefix for n in names) else ""
+    return cut if len(cut) >= 3 else None
 
 
 def _spec(scene: IfcScene, element) -> dict:

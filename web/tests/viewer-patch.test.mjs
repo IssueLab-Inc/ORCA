@@ -97,8 +97,8 @@ test("an opening the host's team must cut is recorded as requested, and the clas
     const kept = { files: [1], pieces: [], scene_id: "scene", revision_before: 3, revision: 4,
       meshes: [box("pfv", [0, 0, 0], [1, 1, 1], { color: [0.96, 0.55, 0.12, 0.35] })],
       ...(cut ? {} : { cut: false, blocked_by: "Structure may not be edited: its team cuts the opening" }) };
-    let sent = null;
-    const host = await appHost({ api: { accept: async (_, o) => { sent = o; return kept; } } });
+    let sent = null, pair = null;
+    const host = await appHost({ api: { accept: async (_, o, p) => { sent = o; pair = p; return kept; } } });
     host.viewer.patch = () => true;
     host.refs.sceneRevision.current = 3;
     const opening = { ...option, title: "Opening through the beam's wall", kind: "penetration", moved: ["beam"], delta_m: [0, 0, 0],
@@ -107,6 +107,7 @@ test("an opening the host's team must cut is recorded as requested, and the clas
     host.requests.at(-1).resolve({ understanding: "An opening", options: [opening], attempts: [] }); await work; host.render();
     await host.button("Accept this fix").props.onClick(); host.render();
     assert.equal(sent.kind, "penetration");
+    assert.deepEqual(pair, ["duct", "beam"]);   // the clash on screen: the server tries the fix again against it
     const ev = host.state.evidence.clash;
     assert.equal(ev.status, cut ? "accepted" : "recommended");
     assert.equal(ev.edit, "Ø170 mm opening through Wall 'W1'");

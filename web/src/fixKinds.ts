@@ -29,18 +29,32 @@ export const reviewText = (review: string | null | undefined) => review ? REVIEW
 
 type EditLike = Pick<Attempt, "kind" | "split_m" | "delta_m" | "trim"> & { edit?: Option["edit"] };
 
-/** The edit a fix makes, in a few words: "move 0 · 0 · +400 mm", "offset 1.10–2.30 m by +400 mm", "trim one end
- * 60 mm", or the server's summary for the newer kinds. */
+/** A move in words, on the model's axes (+X east, +Y north, +Z up, as the server names them): "north 250 mm",
+ * "west 100 mm, up 400 mm". */
+export function moveWords(delta: number[]) {
+  const names = [["east", "west"], ["north", "south"], ["up", "down"]];
+  const out = delta.map((v, k) => Math.abs(v) >= 0.0005 ? `${names[k][v > 0 ? 0 : 1]} ${Math.abs(Math.round(v * 1000))} mm` : "").filter(Boolean);
+  return out.join(", ") || "0 mm";
+}
+
+/** The edit a fix makes, in a few words: "move up 400 mm", "offset 1.10–2.30 m by +400 mm", "trim one end 60 mm", or
+ * the server's summary for the newer kinds. */
 export const editText = (t: EditLike) => t.edit?.summary
   ? t.edit.summary
   : t.kind === "offset" && t.split_m
     ? `offset ${t.split_m.map((v) => v.toFixed(2)).join("–")} m by ${mm(t.delta_m[2])}`
     : t.kind === "trim"
       ? t.trim ? `trim one end ${Math.round(t.trim.by_m * 1000)} mm` : "trim at the joint"
-      : `move ${t.delta_m.map((v) => mm(v)).join(" · ")}`;
+      : `move ${moveWords(t.delta_m)}`;
 
-/** What a fix leaves between the elements: a trim butts them, anything else keeps a measured clearance. */
-export const clearanceText = (o: Pick<Option, "kind" | "min_clearance_m">) => o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m);
+/** What a fix leaves between the elements: a trim butts them, anything else keeps a measured clearance (a gap, so
+ * unsigned; a verified fix never overlaps). */
+export const clearanceText = (o: Pick<Option, "kind" | "min_clearance_m">) => o.kind === "trim" ? "butt joint"
+  : o.min_clearance_m == null ? "nothing within 500 mm" : o.min_clearance_m < 0 ? mm(o.min_clearance_m) : `${Math.round(o.min_clearance_m * 1000)} mm`;
+
+/** What else a fix needs, without the "none" Muse copies from the prompt's examples ("re-fix anchors; none"). */
+export const needsText = (text: string | null | undefined) => (text ?? "").split(";").map((x) => x.trim())
+  .filter((x) => x && !["none", "nothing", "n/a", "-"].includes(x.replace(/\.$/, "").toLowerCase())).join("; ");
 
 /** The new pieces to frame when showing a fix: the risers, bends and middle of a split run (not its shortened ends),
  * an opening's provision for void (not the whole wall it goes through). Empty: frame where the moved element meets
