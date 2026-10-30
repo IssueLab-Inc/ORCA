@@ -1,5 +1,6 @@
-import { CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Trash2, Wand2 } from "lucide-react";
+import { Building2, CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { Plan, PlanItem } from "./api";
+import { BuiltView, type BuiltRun } from "./BuiltView";
 import { mm } from "./ReportList";
 
 /** A plan while it is being built: what each pair is doing. */
@@ -15,15 +16,23 @@ export interface PlanRun {
 const editText = (i: PlanItem) => {
   const o = i.option;
   if (!o) return "";
+  if (o.edit?.summary) return o.edit.summary;
+  if (o.kind === "trim") return o.trim ? `trim one end ${Math.round(o.trim.by_m * 1000)} mm` : "trim at the joint";
   return o.kind === "offset" && o.split_m
     ? `offset ${(o.split_m[1] - o.split_m[0]).toFixed(2)} m of it ${o.delta_m[2] > 0 ? "up" : "down"} ${Math.abs(Math.round(o.delta_m[2] * 1000))} mm`
     : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
 };
 
-export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, error }: {
+export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, built, onBuild, stale, error }: {
   run: PlanRun | null; plan: Plan | null; now: number; busy: boolean; error?: string | null;
   onAccept: () => void; onDiscard: () => void; onFocus: (item: PlanItem) => void;
   onAsDesigned: (clashIds: string[], note: string) => void;
+  /** A second try on a larger model for one failed item (never automatic in a plan: the cost multiplies). */
+  onEscalate?: (item: PlanItem) => void; wonder?: string;
+  /** Show it built per verified fix (docs/show-it-built.md): its picture so far, and drawing it; absent when off. */
+  built?: (item: PlanItem) => BuiltRun | undefined; onBuild?: (item: PlanItem) => void;
+  /** A fix was kept since the plan was checked (one item's own second try, say): its joint check no longer holds. */
+  stale?: boolean;
 }) {
   if (!run && !plan) {
     return (
@@ -78,6 +87,15 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
                     : <span className="why">{st?.note ?? "waiting"}</span>}</div>
                 {res && !res.passed && res.reason && <div className="bad small">{res.reason}</div>}
                 {conflict && <div className="bad small">Collides with another fix in this plan ({conflict.detail})</div>}
+                {plan && it.option && res?.passed && onBuild && it.option.kind !== "trim" && !it.option.cleanup && (built?.(it)
+                  ? <BuiltView run={built(it)!} onRetry={() => onBuild(it)} />
+                  : <button className="link better-fix" disabled={busy} onClick={() => onBuild(it)}
+                    data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model. About a minute.">
+                    <Building2 size={13} aria-hidden /> Show it built</button>)}
+                {plan && !it.option && !it.recommended && onEscalate && (
+                  <button className="link better-fix" disabled={busy} onClick={() => onEscalate(it)}
+                    data-tip={`A larger model takes a second, longer look at this clash with everything this try learned. About a minute.`}>
+                    <Sparkles size={13} aria-hidden /> Ask {wonder ?? "Muse Wonder"}</button>)}
               </div>
               <button className="ibtn" aria-label="Go to this clash" data-tip="Go to this clash" data-tip-side="left" onClick={() => onFocus(it)}>
                 <LocateFixed size={16} aria-hidden /></button>
@@ -88,7 +106,9 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
 
       {plan && plan.strategy !== "as_designed" && (
         <div className="plan-actions">
-          <button className="btn primary" data-tour="accept-plan" disabled={busy || !items.some((i) => i.option)} onClick={onAccept}>
+          {stale && <p className="bad small">The model changed since this plan was checked (a fix was kept). Build the plan
+            again to check its fixes with that change.</p>}
+          <button className="btn primary" data-tour="accept-plan" disabled={busy || stale || !items.some((i) => i.option)} onClick={onAccept}>
             <CircleCheck size={15} aria-hidden /> {!ok ? "Nothing to accept yet" : plan.check.passed ? "Accept the plan" : `Accept the ${ok} verified`}</button>
           <button className="btn" onClick={onDiscard}><Trash2 size={15} aria-hidden /> Discard</button>
           <span className="hint">{plan.seconds.toFixed(0)} s · checked as one, so the fixes do not collide</span>

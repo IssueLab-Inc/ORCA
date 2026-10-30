@@ -4,6 +4,7 @@ import json
 import zipfile
 from collections import Counter
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -103,3 +104,22 @@ class _AllReal:
     def complete_json(self, system, text, images=None, schema=None):
         return {"understanding": "Clash.", "verdict": "real_clash", "severity": "high", "responsible": "MEP",
                 "action": "move_B", "fix_hint": "Move it.", "confidence": 0.9}
+
+
+def test_a_kept_fix_page_shows_its_built_view_or_why_not(tmp_path, monkeypatch):
+    from sightline import built
+    report = _report(tmp_path)
+    first, second = report.clashes[0], report.clashes[1]
+    first.images = [("A", tmp_path / "navisworks.jpg")]
+    monkeypatch.setattr(document, "_zone_crop", lambda _: _jpeg())   # four pictures: the crop, before, after, built
+    monkeypatch.setattr(built, "CACHE", tmp_path / "built")
+    out = built._keep("a" * 32, np.full((64, 64, 3), 120, np.uint8), b"lines",
+                      {"f": 0.9, "tile": 0.1, "passed": True}, [], 2, 30.0)
+    fix = {"status": "accepted", "title": "Raise the duct", "before_img": _jpeg(), "after_img": _jpeg()}
+    evidence = {first.id: {**fix, "built_img": out["image_url"]},
+                second.id: {**fix, "built_note": "Muse Image couldn't keep to the model here."}}
+    rows = document.build_rows(report, {}, {}, None, None, evidence, {}, {})
+    html_text = document.render_html("Report", "Coordination", rows, {}, {})
+    assert html_text.count("As it could look built (illustration by Muse Image") == 1
+    assert "class='pics four'" in html_text
+    assert "No built view: Muse Image couldn&#x27;t keep to the model here." in html_text

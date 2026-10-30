@@ -1,6 +1,8 @@
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
+import { patchModel, ROOM, type ElementMesh } from "./patch";
 
 const RED = new THREE.Color("#d0342c");
 const GREEN = new THREE.Color("#1f9d3a");
@@ -20,7 +22,17 @@ const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.g
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[] };
-/** A fix to preview: an offset's new pieces, or a move. `before`: what it changes, as it is now. */
+/** A fix's piece as Show it built frames it: its element (a kept piece), the element its run came from and its part
+ * (a combined fix's: "moved", "end" or "middle"). */
+export type BuiltPiece = Mesh & { global_id?: string; origin?: string; part?: string };
+/** Show it built's passes (Viewer.captureBuilt): PNG data URLs of one square view, and what the cutaway took away. */
+export interface BuiltPasses {
+  look: string; ids: string; normals: string; side: number;
+  cut: string[];        // elements taken away for the view (GlobalIds)
+  sectioned: string[];  // slabs, roofs or ceilings the section cuts at instead
+  shown: number;        // the share of the fix the view shows
+}
+/** A fix to preview: a move, or any other kind's pieces as world meshes. `before`: what it changes, as it is now. */
 export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pieces: Mesh[] | null; before: Mesh[] | null; worldMeshes?: boolean };
 
 /**
@@ -167,6 +179,37 @@ export class Viewer {
     this.sceneSize = 0;
     this.clearFocusCache();
     this.applyMode();
+  }
+
+  /** Swap a kept fix's changed and new elements into the models in place (viewer/patch.ts), instead of reloading the
+   * files it changed. `origin` maps a new piece to the element it was split from, for its colour when it has none.
+   * False when it cannot (a mesh for a file that is not loaded, or a batch refused it): reload the files then. */
+  patch(meshes: ElementMesh[], origin: Map<string, string> = new Map()): boolean {
+    const byFile = new Map<number, ElementMesh[]>();
+    for (const m of meshes) {
+      if (m.file == null || !this.models[m.file]) return false;
+      byFile.set(m.file, [...(byFile.get(m.file) ?? []), m]);
+    }
+    try {
+      for (const [index, list] of byFile) {
+        const model = this.models[index];
+        patchModel(model, list, () => {
+          const glass = new THREE.BatchedMesh(ROOM.instances, ROOM.vertices, ROOM.indices, this.glass);
+          this.scene.add(glass);
+          return glass;
+        }, (gid) => {
+          const from = model.byGlobalId.get(origin.get(gid) ?? "");
+          return from ? { color: from.baseColor, alpha: from.baseAlpha } : null;
+        });
+      }
+    } catch (e) {
+      console.warn("Patching the model failed; reloading the files instead.", e);
+      return false;
+    }
+    this.sceneSize = 0;
+    this.clearFocusCache();  // focus geometry shares the batches' buffers, which may have moved or grown
+    this.applyMode();
+    return true;
   }
 
   /** The diagonal of everything loaded, metres (cached until the models change). */
@@ -438,9 +481,16 @@ export class Viewer {
     this.moved.clear();
     if (mode !== "before") {
       for (const opt of opts) {
-        if ((opt.worldMeshes || opt.kind === "offset" || opt.kind === "trim") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
+        if ((opt.worldMeshes || opt.kind !== "move") && opt.pieces) {  // already positioned world meshes replace sources; never translate them twice
           for (const gid of opt.moved) this.hidden.add(gid);
-          this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          const solid = () => new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: this.clipping });
+          if (opt.kind === "penetration") {  // the provision for void solid, the wall or slab with its hole see-through round it
+            this.addMeshes(opt.pieces.slice(0, 1), solid());
+            this.addMeshes(opt.pieces.slice(1), new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6, transparent: true,
+              opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          } else {
+            this.addMeshes(opt.pieces, solid());
+          }
         } else {
           const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(opt.deltaM));
           for (const gid of opt.moved) this.moved.set(gid, t);
@@ -549,6 +599,286 @@ export class Viewer {
   /** A small picture of a clash for the list (view A's recipe, as a JPEG), taken off screen like `captureClash`. */
   thumbClash(a: string, b: string, side = 192): string | null {
     return this.posed(a, b, (shot) => shot("isolate", true, side, "image/jpeg"));
+  }
+
+  /** Show it built (docs/show-it-built.md): the fix rendered four ways from one camera, for Muse Image to restyle and
+   * the server to check, taken in one task with the user's view put back.
+   * - A cutaway the viewer picks: of 12 directions, the one that shows at least 85% of the fix having taken away the
+   *   least (ceilings, lights, grilles, furniture, slabs and glazing cost 1, walls 2, services, structure and machine
+   *   parts 6; never the pair or what the fix passes through). A slab, roof or ceiling taken away above the fix becomes
+   *   the section's top, one below its bottom. Zones (style alpha under 0.2) are never drawn.
+   * - `fix`: a verified option (its pieces drawn in their elements' colours, the originals hidden) or, `applied`, a
+   *   fix already in the model (its pieces only frame it).
+   * - Passes, all the same square: the look (true colours), ids (index + 1 per element in 24 bits, no light, no
+   *   antialiasing) and view-space normals. Null when there is nothing to frame. */
+  captureBuilt(fix: { kind: string; moved: string[]; deltaM: number[]; pieces: BuiltPiece[] | null; applied: boolean },
+    pair: [string, string], classOf: (gid: string) => string | undefined, radius = 3, side = 1024): BuiltPasses | null {
+    // What the fix changes, to frame: a split run's new middle (not its long shortened ends); a penetration's provision
+    // for void (the opening); a combined fix's new middles and the moved runs' parts near the clash.
+    const pa = this.boxOf([pair[0]]), pb = this.boxOf([pair[1]]);
+    const near = !pa.isEmpty() && !pb.isEmpty() ? meetingZone(pa, pb).expandByScalar(this.reach(1.5, 0.3)) : null;
+    const combinedChanged = (pieces: BuiltPiece[]) => {
+      const picked = pieces.filter((p) => p.part === "middle" || (p.part === "moved" && (!near || meshBox([p]).intersectsBox(near))));
+      return picked.length ? picked : pieces;
+    };
+    const changed = (fix.kind === "offset" || fix.kind === "route" || fix.kind === "resize") && fix.pieces ? fix.pieces.slice(1, -1)
+      : fix.kind === "penetration" && fix.pieces ? fix.pieces.slice(0, 1)
+      : fix.kind === "combined" && fix.pieces ? combinedChanged(fix.pieces) : fix.pieces ?? [];
+    const renderer = this.renderer, scene = this.scene, camera = this.camera;
+    const saved = { position: camera.position.clone(), target: this.controls.target.clone(), mode: this.mode, focus: this.focus,
+      flight: this.flight, marker: this.marker.visible, overlay: this.overlay.visible, hidden: new Set(this.hidden),
+      moved: new Map(this.moved), section: this.sectionBox?.clone() ?? null, background: scene.background, hits: this.hitLayer.visible,
+      measure: this.measureLayer.visible, clear: renderer.getClearColor(new THREE.Color()), clearAlpha: renderer.getClearAlpha() };
+    const temp = new THREE.Group();
+    const trash: { dispose(): void }[] = [];   // render targets and materials made here, freed however it ends
+    const all = this.models.flatMap((m) => [...m.byGlobalId.values()]);
+    const legend = new Map<string, number>(all.map((el, i) => [el.globalId, i + 1]));
+    const idColor = (k: number) => new THREE.Vector4((k & 255) / 255, ((k >> 8) & 255) / 255, ((k >> 16) & 255) / 255, 1);
+    let cut = new Set<string>();
+    const zonesAndCut = () => {
+      // Zones, what the cutaway took, and what is not physical ("" from classOf: a space, a provision for void).
+      for (const el of all) {
+        if (el.baseAlpha < 0.2 || cut.has(el.globalId) || classOf(el.globalId) === "") el.mesh.setVisibleAt(el.instanceId, false);
+      }
+    };
+    const shaded = () => { this.mode = "shaded"; this.applyMode(); zonesAndCut(); };
+    try {
+      this.flight = null; this.marker.visible = false; this.overlay.visible = false; this.hitLayer.visible = false;
+      this.measureLayer.visible = false;
+      this.focus = { a: null, b: null, group: {} };
+      // The fix in place: a proposed option's pieces as their own meshes in their elements' colours (a move translates
+      // its run), the originals hidden; an applied fix is the model itself.
+      const pieceMeshes: THREE.Mesh[] = [];
+      this.hidden = new Set(); this.moved = new Map();   // the model as it is, whatever preview is on screen
+      if (!fix.applied) {
+        if (fix.pieces && fix.kind !== "move") {
+          for (const g of fix.moved) this.hidden.add(g);
+          const first = this.find(fix.moved[0]);
+          fix.pieces.forEach((p, i) => {
+            // Its own element's colour, else its run's (a combined fix's new pieces), else the first moved element's.
+            const own = p.global_id ? this.find(p.global_id) : null;
+            const origin = p.origin ? this.find(p.origin) : null;
+            const colour = (own ?? origin ?? first)?.el.baseColor ?? GREY;
+            const pos = new Float32Array(p.verts.length);
+            for (let i = 0; i < p.verts.length; i += 3) { pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; }
+            const welded = new THREE.BufferGeometry();
+            welded.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+            welded.setIndex(p.faces);
+            // Sharp edges stay sharp (a wall with a hole, a box): normals averaged across them shade a flat face in
+            // streaks, which Muse Image draws as facets and the judges rightly reject.
+            const g = toCreasedNormals(welded, Math.PI / 6);
+            welded.dispose();
+            const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, metalness: 0, roughness: 0.85,
+              side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+            mesh.userData.piece = true;
+            // A penetration's provision for void frames the view but is not drawn: it would fill the opening.
+            if (fix.kind === "penetration" && i === 0) mesh.visible = false;
+            pieceMeshes.push(mesh); temp.add(mesh);
+          });
+        } else if (fix.kind === "move") {
+          const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(fix.deltaM));
+          for (const g of fix.moved) this.moved.set(g, t);
+        }
+      }
+      scene.add(temp);
+      shaded();
+      // What the fix is, to frame and to see: its changed pieces, or (a move, an applied fix) its elements as they are.
+      const fixObjects = (): THREE.Object3D[] => {
+        if (!fix.applied && pieceMeshes.length) {
+          const keep = new Set(changed);
+          return pieceMeshes.filter((_, i) => keep.has(fix.pieces![i]));
+        }
+        const ids = fix.applied && changed.length ? changed.map((p) => p.global_id).filter((g): g is string => !!g) : fix.moved;
+        let found = ids.map((g) => this.find(g)).filter((f): f is Found => !!f);
+        // Kept pieces whose ids the page doesn't know (a trial's): the elements the fix changed, as they now are.
+        if (!found.length) found = fix.moved.map((g) => this.find(g)).filter((f): f is Found => !!f);
+        return found.map((f) => {
+          const m = new THREE.Mesh(this.geometryOf(f));
+          m.matrixAutoUpdate = false; m.matrix.copy(this.matrixOf(f.el)); m.frustumCulled = false;
+          return m;
+        });
+      };
+      const zone = changed.length ? meshBox(changed) : this.boxOf(fix.moved);
+      if (!pa.isEmpty() && !pb.isEmpty()) zone.union(meetingZone(pa, pb));
+      if (zone.isEmpty()) return null;
+      const union = zone.clone().expandByScalar(this.reach(0.75, 0.2));
+      const box = zone.clone().expandByScalar(this.reach(radius, 0.4));
+      this.setSection(true, 0, box);
+      if (this.sectionHelper) this.sectionHelper.visible = false;
+      const keep = new Set(pair);
+      const tmp = new THREE.Box3(), inner = (changed.length ? meshBox(changed) : zone.clone()).expandByScalar(0.01);
+      for (const el of all) if (this.instanceBox(el, tmp).intersectsBox(inner)) keep.add(el.globalId);
+      for (const g of fix.moved) keep.add(g);
+      const aim = (dir: THREE.Vector3) => {
+        const [position, target] = this.zoneCameraFrom(zone, union, dir);
+        camera.position.copy(position); this.controls.target.copy(target); this.controls.update(); this.adjustClipRange();
+      };
+      const small = new THREE.WebGLRenderTarget(256, 256, { samples: 0 });
+      const white = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, polygonOffset: true,
+        polygonOffsetFactor: -2, polygonOffsetUnits: -8, clippingPlanes: this.clipping });
+      const idsMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, clippingPlanes: this.clipping });
+      trash.push(small, white, idsMaterial);
+      const read = (rt: THREE.WebGLRenderTarget) => {
+        const buf = new Uint8Array(rt.width * rt.height * 4);
+        renderer.readRenderTargetPixels(rt, 0, 0, rt.width, rt.height, buf);
+        return buf;
+      };
+      const draw = (rt: THREE.WebGLRenderTarget, material: THREE.Material | null, bg: THREE.Color | null, clear = true,
+        root: THREE.Object3D = scene) => {
+        scene.overrideMaterial = material;
+        scene.background = clear ? bg : null;   // a colour background clears the depth buffer too
+        renderer.setRenderTarget(rt);
+        if (clear) { renderer.setClearColor(bg ?? new THREE.Color(1, 1, 1), 1); renderer.clear(); }
+        const auto = renderer.autoClear;
+        renderer.autoClear = false;
+        renderer.render(root, camera);
+        renderer.autoClear = auto;
+        renderer.setRenderTarget(null);
+        scene.overrideMaterial = null;
+      };
+      // Ids: every batch drawn unlit with its instances' colours set to their ids; each proposed piece its own id after
+      // the model's elements. (An override material would draw the pieces white.)
+      const colourIds = () => {
+        for (const el of all) el.mesh.setColorAt(el.instanceId, idColor(legend.get(el.globalId)!));
+        for (const m of this.models) { m.mesh.material = idsMaterial; if (m.glass) m.glass.material = idsMaterial; }
+        pieceMeshes.forEach((m, i) => { m.userData.saved = m.material; m.material = new THREE.MeshBasicMaterial({
+          color: new THREE.Color().setRGB(...(idColor(all.length + 1 + i).toArray().slice(0, 3) as [number, number, number])),
+          side: THREE.DoubleSide, clippingPlanes: this.clipping }); });
+      };
+      const uncolourIds = () => { pieceMeshes.forEach((m) => { (m.material as THREE.Material).dispose(); m.material = m.userData.saved; }); shaded(); };
+      /** How much of the fix this view shows, and which elements hide the rest (pixels each). */
+      const measure = () => {
+        const objects = fixObjects();
+        const solo = new THREE.Group();
+        for (const o of objects) { const c = o.parent ? o.clone() : o; c.visible = true; solo.add(c); }
+        solo.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = white; });
+        scene.add(solo);
+        const visibleModels = this.models.map((m) => [m.mesh.visible, m.glass?.visible ?? false] as const);
+        for (const m of this.models) { m.mesh.visible = false; if (m.glass) m.glass.visible = false; }
+        temp.visible = false;
+        draw(small, null, new THREE.Color(0, 0, 0), true, solo);
+        const alone = read(small);
+        this.models.forEach((m, i) => { m.mesh.visible = visibleModels[i][0]; if (m.glass) m.glass.visible = visibleModels[i][1]; });
+        temp.visible = true; solo.visible = false;
+        colourIds();
+        draw(small, null, new THREE.Color(0, 0, 0));
+        uncolourIds();
+        solo.visible = true;
+        const ids = read(small);
+        draw(small, null, null, false, solo);
+        const seen = read(small);
+        scene.remove(solo);
+        let n = 0, shown = 0;
+        const hiders = new Map<string, number>();
+        const gidOf = new Map<number, string>(all.map((el, i) => [i + 1, el.globalId]));
+        for (let i = 0; i < alone.length; i += 4) {
+          if (alone[i] < 128) continue;
+          n++;
+          if (seen[i] > 128 && seen[i + 1] > 128 && seen[i + 2] > 128) { shown++; continue; }
+          const g = gidOf.get(ids[i] | (ids[i + 1] << 8) | (ids[i + 2] << 16));
+          if (g) hiders.set(g, (hiders.get(g) ?? 0) + 1);
+        }
+        return { shown: n ? shown / n : 0, hiders };
+      };
+      const CHEAP = /^Ifc(Covering|LightFixture|AirTerminal|Furniture|FurnishingElement|Slab|Roof|Plate|Window|Door|Space|Railing|SanitaryTerminal)$/;
+      const cost = (g: string) => { const c = classOf(g) ?? ""; return CHEAP.test(c) ? 1 : c === "IfcWall" || c === "IfcCurtainWall" ? 2 : 6; };
+      const dirs: THREE.Vector3[] = [];
+      for (const y of [0.8, 0.3, -0.5]) for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) dirs.push(new THREE.Vector3(x, y, z));
+      const views: { dir: THREE.Vector3; shown: number; cut: string[]; score: number }[] = [];
+      for (const dir of dirs) {
+        aim(dir);
+        cut = new Set(); shaded();
+        let spent = 0;
+        let m = measure();
+        while (m.shown < 0.85 && cut.size < 12) {
+          const next = [...m.hiders.entries()].filter(([g]) => !keep.has(g)).map(([g, px]) => ({ g, px, c: cost(g) }))
+            .sort((x, y) => y.px / y.c - x.px / x.c)[0];
+          if (!next || (next.c > 2 && m.shown >= 0.7)) break;
+          cut.add(next.g); spent += next.c; shaded();
+          m = measure();
+        }
+        views.push({ dir, shown: m.shown, cut: [...cut], score: spent + 10 * (1 - m.shown) + (m.shown < 0.6 ? 100 : 0) + (dir.y < 0 ? 1 : 0) });
+      }
+      const best = views.reduce((bi, v, i) => (v.score < views[bi].score - 1e-6 ? i : bi), 0);
+      cut = new Set(views[best].cut);
+      // A slab, roof or ceiling taken away above the fix becomes the section's top (its underside), one below its bottom.
+      const section = box.clone(), centre = zone.getCenter(new THREE.Vector3());
+      const sectioned: string[] = [];
+      for (const g of [...cut]) {
+        if (!/^Ifc(Slab|Roof|Covering)$/.test(classOf(g) ?? "")) continue;
+        const f = this.find(g);
+        if (!f) continue;
+        const eb = this.instanceBox(f.el, new THREE.Box3());
+        if (eb.min.y > centre.y) section.max.y = Math.min(section.max.y, eb.min.y - 0.002);
+        else if (eb.max.y < centre.y) section.min.y = Math.max(section.min.y, eb.max.y + 0.002);
+        else continue;
+        cut.delete(g); sectioned.push(g);
+      }
+      this.setSection(true, 0, section);
+      if (this.sectionHelper) this.sectionHelper.visible = false;
+      scene.background = saved.background;
+      shaded();
+      aim(views[best].dir);
+      // The passes: one square crop of the canvas's own view, so all three line up exactly.
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      const s = Math.min(size.x, size.y), out = Math.min(side, s);
+      const look = this.png(out, "image/png");
+      const rt = new THREE.WebGLRenderTarget(size.x, size.y, { samples: 0 });
+      trash.push(rt);
+      const crop = (buf: Uint8Array) => {
+        const full = document.createElement("canvas");
+        full.width = size.x; full.height = size.y;
+        const img = new ImageData(size.x, size.y);
+        for (let y = 0; y < size.y; y++) img.data.set(buf.subarray((size.y - 1 - y) * size.x * 4, (size.y - y) * size.x * 4), y * size.x * 4);
+        full.getContext("2d")!.putImageData(img, 0, 0);
+        const c = document.createElement("canvas");
+        c.width = c.height = out;
+        const ctx = c.getContext("2d")!;
+        ctx.imageSmoothingEnabled = false;   // ids must stay exact
+        ctx.drawImage(full, (size.x - s) / 2, (size.y - s) / 2, s, s, 0, 0, out, out);
+        return c.toDataURL("image/png");
+      };
+      colourIds();
+      draw(rt, null, new THREE.Color(0, 0, 0));
+      const ids = crop(read(rt));
+      uncolourIds();
+      const normalsMaterial = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide, clippingPlanes: this.clipping });
+      trash.push(normalsMaterial);
+      draw(rt, normalsMaterial, new THREE.Color(0, 0, 0));
+      const normals = crop(read(rt));
+      return { look, ids, normals, side: out, cut: [...cut], sectioned, shown: views[best].shown };
+    } finally {
+      scene.remove(temp);
+      temp.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });
+      renderer.setRenderTarget(null);
+      for (const t of trash) t.dispose();
+      renderer.setClearColor(saved.clear, saved.clearAlpha);
+      this.measureLayer.visible = saved.measure;
+      scene.overrideMaterial = null;
+      scene.background = saved.background;
+      this.hidden = saved.hidden; this.moved = saved.moved;
+      this.overlay.visible = saved.overlay; this.hitLayer.visible = saved.hits;
+      this.focus = saved.focus;
+      if (saved.section) { this.setSection(true, 0, saved.section); } else this.setSection(false);
+      this.mode = saved.mode; this.applyMode();
+      camera.position.copy(saved.position); this.controls.target.copy(saved.target);
+      this.flight = saved.flight; this.marker.visible = saved.marker;
+      this.controls.update(); this.adjustClipRange();
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /** `zoneCamera` from a given direction (zoneCamera keeps the user's angle). */
+  private zoneCameraFrom(zone: THREE.Box3, union: THREE.Box3, dir: THREE.Vector3): [THREE.Vector3, THREE.Vector3] {
+    const zoneDiag = zone.getSize(new THREE.Vector3()).length(), unionDiag = union.getSize(new THREE.Vector3()).length();
+    const least = Math.min(0.5, Math.max(0.25 * unionDiag, 2 * zoneDiag), this.reach(0.5, 0.15));
+    const margin = Math.min(Math.max(0.35 * zoneDiag, 0.1 * unionDiag, least), Math.max((unionDiag - zoneDiag) / (2 * Math.sqrt(3)), least));
+    const framed = zone.clone().expandByScalar(margin);
+    const centre = framed.getCenter(new THREE.Vector3());
+    const r = framed.getSize(new THREE.Vector3()).length() / 2;
+    const vFov = THREE.MathUtils.degToRad(this.camera.fov), hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
+    const dist = Math.max((r / Math.sin(Math.min(vFov, hFov) / 2)) * 1.1, 2 * r + least);
+    return [centre.clone().add(dir.clone().normalize().multiplyScalar(dist)), centre];
   }
 
   /** Point the camera at where `a` and `b` meet and let `take` render shots, then put everything back. It all happens

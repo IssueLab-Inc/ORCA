@@ -1,5 +1,5 @@
 import type { Attempt } from "./api";
-import { mm } from "./ReportList";
+import { editText, kindLabel } from "./fixKinds";
 
 /** What the agent is doing now, while a proposal runs. */
 export interface Progress {
@@ -10,16 +10,13 @@ export interface Progress {
   modelSeconds: number[];   // per finished round
   ideas: number;            // candidates in the current round
   checking: { index: number; title: string; kind: string } | null;
+  /** The model working now ("Muse Spark", or "Muse Wonder" on a second try). */
+  model?: string;
+  /** Ideas already in the table from an earlier try: a second try's own numbering starts after them. */
+  offset?: number;
 }
 
-/** The edit a fix makes, in a few words: "move 0 · 0 · +400 mm", "offset 1.10–2.30 m by +400 mm", "trim one end 60 mm". */
-export const editText = (t: Pick<Attempt, "kind" | "split_m" | "delta_m" | "trim">) => t.kind === "offset" && t.split_m
-  ? `offset ${t.split_m.map((v) => v.toFixed(2)).join("–")} m by ${mm(t.delta_m[2])}`
-  : t.kind === "trim"
-    ? t.trim ? `trim one end ${Math.round(t.trim.by_m * 1000)} mm` : "trim at the joint"
-    : `move ${t.delta_m.map((v) => mm(v)).join(" · ")}`;
-
-export const KIND_LABEL = { move: "Move", offset: "Offset", trim: "Trim" } as const;
+export { editText, KIND_LABEL } from "./fixKinds";
 
 /** "collision with IfcWall (-200 mm), collision with …" → first finding, plus how many more. */
 function firstReason(reason: string): [string, number] {
@@ -30,11 +27,14 @@ function firstReason(reason: string): [string, number] {
 export function statusLine(p: Progress | null, now: number, attempts: Attempt[]): string {
   if (!p) return "";
   const total = Math.round((now - p.started) / 1000);
+  const who = p.model || "Muse Spark";
   if (p.phase === "thinking") {
-    return `Round ${p.round}: Muse Spark is reading the clash and the model data… ${Math.round((now - p.thinkingSince) / 1000)} s`;
+    return p.offset
+      ? `${who}, round ${p.round}: reading the first try and the model around it… ${Math.round((now - p.thinkingSince) / 1000)} s`
+      : `Round ${p.round}: ${who} is reading the clash and the model data… ${Math.round((now - p.thinkingSince) / 1000)} s`;
   }
   if (p.phase === "checking" && p.checking) {
-    return `Round ${p.round}: checking idea ${p.checking.index + 1} (${p.checking.title}) against the whole model · ${total} s`;
+    return `Round ${p.round}: checking ${p.offset ? `${who}'s ` : ""}idea ${(p.offset ?? 0) + p.checking.index + 1} (${p.checking.title}) against the whole model · ${total} s`;
   }
   const ok = attempts.filter((a) => a.passed).length;
   if (!attempts.length) return `Done in ${total} s: nothing was tried on the model`;  // a recommendation only (requirements)
@@ -46,6 +46,9 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
     return <p className="hint">ORCA's steps appear here: each idea from Muse Spark, and what the geometry check found.</p>;
   }
   const running = progress && progress.phase !== "done";
+  // Name the model on each idea only when two tried (a second try): one model needs no label.
+  const models = new Set(attempts.map((t) => t.model || "Muse Spark"));
+  const offset = progress?.offset ?? 0;
   return (
     <div className="activity">
       <div className="activity-head">
@@ -62,16 +65,16 @@ export function Activity({ attempts, progress, now }: { attempts: Attempt[]; pro
             return (
               <tr key={i} className={t.passed ? "ok" : "fail"}>
                 <td className="mono" data-label="#">{i + 1}</td>
-                <td data-label="Kind"><span className={`badge ${t.kind}`}>{KIND_LABEL[t.kind] ?? t.kind}</span></td>
-                <td data-label="Idea">{t.title}</td>
+                <td data-label="Kind"><span className={`badge ${t.kind}`}>{kindLabel(t.kind)}</span></td>
+                <td data-label="Idea">{t.title}{models.size > 1 && <span className={`chip model ${t.model && t.model !== "Muse Spark" ? "wonder" : ""}`}>{t.model || "Muse Spark"}</span>}</td>
                 <td className="mono" data-label="Edit">{editText(t)}</td>
                 <td data-label="Check">{t.passed ? <span className="ok">✓ verified</span>
                   : <span className="bad" title={t.reason}>✗ {first}{more ? ` +${more} more` : ""}</span>}</td>
               </tr>
             );
           })}
-          {progress?.phase === "checking" && progress.checking && progress.checking.index >= attempts.length &&
-            <tr className="pending"><td className="mono">{progress.checking.index + 1}</td><td><span className={`badge ${progress.checking.kind}`}>{KIND_LABEL[progress.checking.kind as keyof typeof KIND_LABEL] ?? progress.checking.kind}</span></td>
+          {progress?.phase === "checking" && progress.checking && offset + progress.checking.index >= attempts.length &&
+            <tr className="pending"><td className="mono">{offset + progress.checking.index + 1}</td><td><span className={`badge ${progress.checking.kind}`}>{kindLabel(progress.checking.kind)}</span></td>
               <td>{progress.checking.title}</td><td /><td className="hint">checking…</td></tr>}
         </tbody>
       </table>

@@ -25,13 +25,21 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
 from mcp_types import ToolAnnotations
 
-from . import agents, chat, edits, plans, requirements
+from . import agents, chat, edits, escalation, plans, requirements, settings, spend
 from .service import Workspace
+
+
+def _local_escalate() -> str | None:
+    """A second try for the person running ORCA themselves (stdio): never when switched off; no caps, and the day's
+    budget only counted, as for the owner."""
+    if settings.escalation() == "off":
+        return "Second tries with Muse Wonder are switched off."
+    return spend.claim(escalation.ESTIMATE_USD, exempt=True)
 
 INSTRUCTIONS = """ORCA is an AI design coordinator for 3D models (buildings from IFC, machines from STEP). It finds
 clashes between models, proposes fixes that edit real model elements, and checks every fix with geometry before
 anyone sees it. Start with get_session to see what is open. Then report_summary or list_clashes, get_clash and
-get_clash_images to understand a clash, and check_move / check_offset to test your own idea, or propose_fixes to run
+get_clash_images to understand a clash, and check_move / check_offset / check_route / check_resize / check_penetration to test your own idea, or propose_fixes to run
 ORCA's fix agent. Nothing changes the model until apply_fix or apply_plan. Distances are metres, Z up; a negative
 distance is an overlap. When a person has ORCA open with this link, show_clash and set_view move their view and
 capture_view shows you what they see."""
@@ -42,6 +50,7 @@ class Hooks:
     """What the hosting web server lends the tools (`app.py`); `None` parts are not available there."""
     links: agents.Links | None = None                                # remote: links by token
     charge: Callable[[agents.Link, int], str | None] = lambda link, n: None   # proposals; why not, or None
+    escalate: Callable[[agents.Link], str | None] = lambda link: _local_escalate()   # a second try (docs/escalation.md)
     allow_call: Callable[[agents.Link], str | None] = lambda link: None     # per-link call cap
     start_triage: Callable[[str, str | None, agents.Link], Any] | None = None
     triage_state: Callable[[str, str | None], dict] | None = None
@@ -144,7 +153,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         link = call(ctx, name, args)
         result, summary, _ = T()._run(name, args, link.ctx, emit_for(link),
                                        propose_allowed=lambda: hooks.charge(link, 1),
-                                       propose_allowed_many=lambda n: hooks.charge(link, n))
+                                       propose_allowed_many=lambda n: hooks.charge(link, n),
+                                       escalate_allowed=lambda: hooks.escalate(link))
         done(link, name, summary)
         return result
 
@@ -155,7 +165,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         def work():
             result, summary, _ = T()._run(name, args, link.ctx, emit_for(link),
                                            propose_allowed=lambda: hooks.charge(link, 1),
-                                           propose_allowed_many=lambda n: hooks.charge(link, n))
+                                           propose_allowed_many=lambda n: hooks.charge(link, n),
+                                           escalate_allowed=lambda: hooks.escalate(link))
             done(link, name, summary)
             return after(result) if after else result
         return link.wait(link.start(name, work, hooks.spawn), wait_s)
@@ -327,10 +338,12 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     # ------------------------------------------------------------------ fixes
 
     @tool(read_only=True)
-    def check_move(global_ids: list[str], delta_m: list[float], ctx: Context) -> dict:
+    def check_move(global_ids: list[str], delta_m: list[float], ctx: Context, obstacle: str | None = None) -> dict:
         """Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it: passes,
-        or what it would hit and how deep."""
-        return run(ctx, "check_move", {"global_ids": global_ids, "delta_m": delta_m})
+        or what it would hit and how deep. With `obstacle` (what the move must clear) it is checked as a proposal is:
+        what the moved elements stand on may stay as it was, and lifting them off it fails."""
+        return run(ctx, "check_move", {"global_ids": global_ids, "delta_m": delta_m,
+                                       **({"obstacle": obstacle} if obstacle else {})})
 
     @tool(read_only=True)
     def check_offset(element: str, obstacle: str, split_m: list[float], dz_m: float, ctx: Context) -> dict:
@@ -338,18 +351,47 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         it from its start) around `obstacle`, and raise (+) or lower (-) the middle piece by dz_m with bends."""
         return run(ctx, "check_offset", {"element": element, "obstacle": obstacle, "split_m": split_m, "dz_m": dz_m})
 
+    @tool(read_only=True)
+    def check_route(element: str, obstacle: str, steps: list[dict], ctx: Context) -> dict:
+        """Check a route without keeping it: hold stretches of the straight segment `element` at offsets past
+        `obstacle`. Each step is {from_m, to_m, up_m, side_m}: metres along it from its start, and metres on its own
+        axes (up; side = to the left of its direction seen from above). Steps that share a boundary change straight
+        from one offset to the next; each change is one axis at a time. 90° bends join them."""
+        return run(ctx, "check_route", {"element": element, "obstacle": obstacle, "steps": steps})
+
+    @tool(read_only=True)
+    def check_resize(element: str, obstacle: str, split_m: list[float], depth_m: float, ctx: Context,
+                     keep: str = "bottom") -> dict:
+        """Check a flatter section for a stretch of the straight rectangular duct or cable tray `element` past
+        `obstacle` without keeping it: from split_m[0] to split_m[1] (metres along it) it becomes depth_m deep and as
+        wide as keeps its equivalent diameter (a duct, at most 4:1) or cross-section (a tray), the `keep` face (bottom,
+        top or centre) level, with transitions either side. Its services designer reviews it."""
+        return run(ctx, "check_resize", {"element": element, "obstacle": obstacle, "split_m": split_m, "depth_m": depth_m,
+                                         "keep": keep})
+
+    @tool(read_only=True)
+    def check_penetration(element: str, host: str, ctx: Context) -> dict:
+        """Check an opening for the straight service `element` through the wall or slab `host` without keeping it:
+        sized from the service with the clearance all round, cut in a trial, and the service checked against the
+        host and everything else. Kept with apply_fix after propose_fixes offers it: a provision for void always,
+        the opening itself only where the requirements let the host's team's model be edited."""
+        return run(ctx, "check_penetration", {"element": element, "host": host})
+
     @tool()
-    def propose_fixes(clash_id: str, ctx: Context, wait_s: float = 40) -> dict:
-        """Run ORCA's fix agent on a clash: it proposes moves, local offsets and trims, checks each against the whole
-        model, and returns the verified ones (numbered options). The person's page shows it working. Takes 20-60 s;
-        if it is not done within wait_s, you get a job_id for get_job. Costs one proposal from the allowance."""
+    def propose_fixes(clash_id: str, ctx: Context, wait_s: float = 40, escalate: bool = False) -> dict:
+        """Run ORCA's fix agent on a clash: it proposes moves, offsets, routes, flatter sections, trims and openings,
+        checks each against the whole model, and returns the verified ones (numbered options). The person's page
+        shows it working. Takes 20-60 s; if it is not done within wait_s, you get a job_id for get_job. Costs one
+        proposal from the allowance. With escalate true: a second, longer try on Muse Wonder that reads the last
+        try's failures and may change up to three elements together (about a minute; one escalation and one
+        proposal): use it when the first try found no fix, or only a resize or an opening."""
         def numbered(result: dict) -> dict:
             for i, o in enumerate(result.get("verified_options") or [], 1):
                 o["option"] = i
             if result.get("verified_options"):
                 result["note"] = "Apply one with apply_fix(clash_id, option). The person can also accept it in ORCA."
             return result
-        return job(ctx, "propose_fixes", {"clash_id": clash_id}, wait_s, numbered)
+        return job(ctx, "propose_fixes", {"clash_id": clash_id, "escalate": escalate}, wait_s, numbered)
 
     @tool()
     def plan_fixes_together(clash_ids: list[str], ctx: Context, wait_s: float = 40) -> dict:
@@ -395,7 +437,15 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         if not 1 <= option <= len(options):
             raise LookupError(f"no verified option {option} for {c.label}: run propose_fixes first")
         o = options[option - 1]
-        out = plans.apply(W(), link.ctx.scene_id, [o])
+        with W().lock:   # one request's edits between `before` and the patch
+            before = W().scene(link.ctx.scene_id).revision
+            out = plans.apply(W(), link.ctx.scene_id, [o])
+            out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
+        if out["not_cut"]:   # a penetration requested, not cut: the clash stays open until the host's team cuts it
+            _applied(link, out, [], [], [], {})
+            done(link, "apply_fix", f"requested '{o['title']}'")
+            return {"applied": o["title"], "kind": o["kind"], "clash": c.label, "files_changed": len(out["files"]),
+                    "requested_only": out["not_cut"][0]["blocked_by"]}
         pairs = [[proposal["element_a"], proposal["element_b"]]]
         _applied(link, out, pairs, [o["title"]], [c.id], {c.id: o["title"]})
         done(link, "apply_fix", f"applied '{o['title']}'")
@@ -413,13 +463,22 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
                                                                   or check.get("items", {}).get(it["key"], {}).get("passed"))]
         if not items:
             raise LookupError("this plan has no verified fix to apply")
-        out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
-        pairs = [[it["element_a"], o] for it in items for o in [it["element_b"], *(it.get("others") or [])]]
-        titles = [it["option"]["title"] for it in items for _ in [it["element_b"], *(it.get("others") or [])]]
-        _applied(link, out, pairs, titles, [cid for it in items for cid in it["clash_ids"]],
-                 {cid: it["option"]["title"] for it in items for cid in it["clash_ids"]})
+        with W().lock:   # one request's edits between `before` and the patch
+            before = W().scene(link.ctx.scene_id).revision
+            out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
+            out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
+        requested = {n["index"] for n in out["not_cut"]}   # penetrations only requested: their clashes stay open
+        cut = [it for k, it in enumerate(items) if k not in requested]
+        pairs = [[it["element_a"], o] for it in cut for o in [it["element_b"], *(it.get("others") or [])]]
+        titles = [it["option"]["title"] for it in cut for _ in [it["element_b"], *(it.get("others") or [])]]
+        _applied(link, out, pairs, titles, [cid for it in cut for cid in it["clash_ids"]],
+                 {cid: it["option"]["title"] for it in cut for cid in it["clash_ids"]})
         done(link, "apply_plan", f"applied {len(items)} fix(es)")
-        return {"applied": [it["option"]["title"] for it in items], "files_changed": len(out["files"])}
+        result = {"applied": [it["option"]["title"] for it in items], "files_changed": len(out["files"])}
+        if requested:
+            result["requested_only"] = [{"fix": items[n["index"]]["option"]["title"], "why": n["blocked_by"]}
+                                        for n in out["not_cut"]]
+        return result
 
     def _applied(link: agents.Link, out: dict, pairs: list, titles: list, clash_ids: list,
                  fixed: dict[str, str]) -> None:
@@ -427,7 +486,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         link.ctx.fixed = list(dict.fromkeys([*link.ctx.fixed, *clash_ids]))
         link.applied.update(fixed)
         link.publish({"type": "ui", "action": "applied", "files": out["files"], "pieces": out["pieces"],
-                      "pairs": pairs, "titles": titles, "clash_ids": clash_ids})
+                      "pairs": pairs, "titles": titles, "clash_ids": clash_ids,
+                      **{k: out.get(k) for k in ("scene_id", "revision_before", "revision", "meshes", "history")}})
 
     # ------------------------------------------------------------------ triage, report, export
 

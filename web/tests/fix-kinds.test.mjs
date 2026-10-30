@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { compiled } from "./app-host.mjs";
+
+const kinds = await import(await compiled("../src/fixKinds.ts"));
+
+test("each kind is described in one place, the newer kinds by the server's own summary", () => {
+  assert.equal(kinds.editText({ kind: "offset", split_m: [2.6, 4.4], delta_m: [0, 0, 0.4] }), "offset 2.60–4.40 m by +400 mm");
+  assert.equal(kinds.editText({ kind: "trim", split_m: null, delta_m: [0, 0, 0], trim: { end: "start", by_m: 0.04 } }), "trim one end 40 mm");
+  assert.equal(kinds.editText({ kind: "move", split_m: null, delta_m: [0, 0, -0.15] }), "move 0 mm · 0 mm · -150 mm");
+  assert.equal(kinds.editText({ kind: "route", split_m: null, delta_m: [0, 0.3, 0.4], edit: { summary: "route up 400 mm, then side 300 mm" } }),
+    "route up 400 mm, then side 300 mm");
+  assert.equal(kinds.kindLabel("penetration"), "Opening");
+  assert.equal(kinds.kindLabel("something new"), "something new");
+});
+
+test("framing shows a split run's new pieces, an opening whole, and a move or trim where it meets the other side", () => {
+  const preview = ["first", "bend", "middle", "bend", "last"];
+  assert.deepEqual(kinds.framePieces({ kind: "route", preview }), ["bend", "middle", "bend"]);
+  assert.deepEqual(kinds.framePieces({ kind: "offset", preview }), ["bend", "middle", "bend"]);
+  assert.deepEqual(kinds.framePieces({ kind: "penetration", preview: ["provision", "wall"] }), ["provision"]);
+  assert.deepEqual(kinds.framePieces({ kind: "trim", preview: ["member"] }), []);
+  assert.deepEqual(kinds.framePieces({ kind: "move", preview: null }), []);
+});
+
+test("clearance, change and recommendation lines for every kind", () => {
+  assert.equal(kinds.clearanceText({ kind: "trim", min_clearance_m: 0 }), "butt joint");
+  assert.equal(kinds.clearanceText({ kind: "route", min_clearance_m: 0.05 }), "+50 mm");
+  const offset = { kind: "offset", split_m: [2.6, 4.4], delta_m: [0, 0, 0.4], preview: new Array(9), moved: ["d"] };
+  assert.equal(kinds.changeText(offset), "1.80 m of it raised 400 mm; 4 bends and 2 short risers");
+  assert.equal(kinds.changeText({ kind: "resize", delta_m: [0, 0, -0.05], moved: ["d"], edit: { summary: "800×250 mm for 1.80 m" } }),
+    "800×250 mm for 1.80 m");
+  assert.equal(kinds.recEditText({ kind: "offset", delta_m: [0, 0, -0.25] }), "offset the middle down 250 mm");
+  assert.equal(kinds.recEditText({ kind: "penetration", delta_m: [0, 0, 0] }), "opening");
+  assert.match(kinds.reviewText("structure"), /structural engineer/);
+  assert.equal(kinds.reviewText(null), "");
+});
+
+test("an opening's card shows its host's reading and the hole against its limits", () => {
+  const o = { kind: "penetration", edit: { host_reading: "allowed with review, reviewed by structure (a hole at most 40% of its depth)",
+    reading_source: "muse", numbers: ["hole 170 mm in 600 mm of host (28%)", "915 mm from its nearest end"] } };
+  assert.deepEqual(kinds.hostRows(o), [["Host", "allowed with review, reviewed by structure (a hole at most 40% of its depth) (Muse Spark's reading)"],
+    ["Hole", "hole 170 mm in 600 mm of host (28%); 915 mm from its nearest end"]]);
+  assert.deepEqual(kinds.hostRows({ kind: "offset", edit: o.edit }), []);
+});
+
+test("a combined fix (a second try's several elements at once) says each step and frames them all", () => {
+  const o = { kind: "combined", split_m: null, delta_m: [0, 0, -0.5], moved: ["pipe", "duct"], preview: ["pipe", "duct"],
+    edit: { summary: "LTHW pipe: move [0, 0, -500] mm; Supply duct: move [0, 0, -400] mm" } };
+  assert.equal(kinds.kindLabel("combined"), "Combined");
+  assert.equal(kinds.editText(o), "LTHW pipe: move [0, 0, -500] mm; Supply duct: move [0, 0, -400] mm");
+  assert.equal(kinds.changeText(o), o.edit.summary);
+  assert.deepEqual(kinds.framePieces(o), ["pipe", "duct"]);
+});

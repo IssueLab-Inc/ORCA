@@ -1,5 +1,6 @@
+import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
-export interface Verdict { passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number }
+export interface Verdict { passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number; reason?: string }
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
   title: string; moved: string[]; delta_m: number[]; rationale: string; also_needs: string;
@@ -11,27 +12,64 @@ export interface Option {
   checked_against?: number;
   /** The coordination requirements it meets, in plain words (server: requirements.meets). */
   meets?: string[];
+  /** The newer kinds' parameters (route steps, a resize, a penetration), with the edit in a few words. */
+  edit?: FixEdit | null;
+  /** Who must review it before it is built ("structure", "services"), when geometry alone cannot say it works. */
+  review?: string | null;
+  /** Who proposed it, as people read it ("Muse Spark", "Muse Wonder"). */
+  model?: string;
 }
+export interface FixEdit { summary?: string; key?: string; [param: string]: unknown }
 export interface Attempt {
   title: string; delta_m: number[]; passed: boolean; reason: string; kind: FixKind; split_m: number[] | null;
   trim?: TrimCut | null;
   hit_ids?: string[];  // what it hit, worst first
+  edit?: FixEdit | null;
+  where?: number[][];  // where the worst hits are, world metres
+  model?: string;      // whose idea it was ("Muse Spark", "Muse Wonder")
 }
 /** A candidate in place while the agent checks it: a move's elements and delta, or an offset's new pieces. */
-export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m: number[]; pieces: Piece[] | null }
-/** move: shift the run; offset: split and raise or lower the middle; trim: cut one end back to butt the other element. */
-export type FixKind = "move" | "offset" | "trim";
+export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m: number[]; pieces: Piece[] | null; summary?: string }
+/** move: shift the run; offset: split and raise or lower the middle; trim: cut one end back to butt the other element;
+ * route: a detour of several steps; resize: a flatter section past the obstacle; penetration: an opening through it. */
+/** A kept fix: the files it changed, a split run's pieces, and how to patch the page's model (Patch). A penetration whose
+ * host the requirements lock comes back `cut: false`, with who cuts it. */
+/** A kept fix: `pieces`, its split run (the original first); `groups`, every run it split (a combined fix's several). */
+export type Kept = { files: number[]; pieces?: string[]; groups?: string[][]; cut?: boolean; blocked_by?: string } & Patch;
+export type FixKind = "move" | "offset" | "trim" | "route" | "resize" | "penetration" | "combined";
 export interface TrimCut { end: "start" | "end"; by_m: number }
 /** Under requirements that allow no edit: Muse Spark's best idea for the designer, never tried or applied. */
 export interface Recommendation {
   title: string; kind: FixKind; element: string; delta_m: number[]; split_m: number[] | null; rationale: string;
-  also_needs: string; blocked_by: string; others: string[];
+  also_needs: string; blocked_by: string; others: string[]; edit?: FixEdit | null;
 }
 export interface Proposal {
   understanding: string; options: Option[]; attempts: Attempt[]; advice?: string;
   recommendation?: Recommendation | null; requirements?: string | null;
   clearance_m?: number;  // the clearance every option had to keep (25 mm, or what the requirements ask)
+  model?: string;        // the model that ran these rounds ("Muse Spark", "Muse Wonder")
+  usage?: Usage | null;  // its tokens, and what they cost for a model billed per token
+  /** A second try on a larger model (docs/escalation.md): the first try's options and ideas are carried in. */
+  escalated?: boolean;
 }
+export interface Usage { model: string; calls: number; input_tokens: number; output_tokens: number; reasoning_tokens: number; usd: number }
+/** Show it built (server: built.make): Muse Image's restyle of a fix's view, checked against the model. */
+export interface BuiltResult {
+  status: "done" | "failed"; key?: string; image_url?: string; lines_url?: string; why?: string;
+  gate?: { f: number; tile: number }; verdicts?: { verdict: string; differences: { kind: string; what: string; where: string; size: string }[] }[];
+  tried?: number; seconds?: number; cached?: boolean;
+  judge?: string;   // who checked it: "Muse Wonder", or "Muse Spark" (the lighter check, when Wonder's budget was spent)
+}
+export type BuiltEvent =
+  | { type: "drawing"; round: number; pictures: number; shared?: boolean }
+  | { type: "gate"; round: number; picture: number; f?: number; tile?: number; passed: boolean; error?: string }
+  | { type: "judging"; round: number; picture: number }
+  | { type: "judged"; round: number; picture: number; verdicts: string[] }
+  | { type: "retry"; why: string }
+  | ({ type: "result" } & BuiltResult)
+  | { type: "error"; detail: string };
+/** Whether a clash Muse Spark could not fix may go to a larger model for a second try (server: escalation_info). */
+export interface EscalationInfo { model: string; label: string; mode: "off" | "button" | "auto"; available: boolean }
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
 export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
 export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
@@ -55,12 +93,18 @@ export type ContextEvent =
   | { type: "context_progress"; phase: "inspecting" | "thinking" | "checking" | "blocked"; message: string }
   | ContextResult
   | { type: "error"; detail: string };
-export interface ContextApplied {
+export interface ContextApplied extends Patch {
   files: number[]; pieces: string[][]; edits: ContextEdit[];
   resolved_pairs: { element_a: string; element_b: string }[]; checks: ContextChecks;
 }
+/** What a kept fix sends back so the page can update its model in place instead of reloading the files it changed
+ * (server: Workspace.patch). A page whose model is not at `revision_before`, or that gets no meshes, reloads. */
+export interface Patch {
+  scene_id?: string; revision_before?: number; revision?: number; meshes?: ElementMesh[] | null;
+  history?: [number, number[]][];   // (revision, files it changed): a page that missed an edit reloads those
+}
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
-export type AgentEvent =
+export type AgentEvent = (
   | { type: "thinking"; round: number }
   | { type: "reasoning"; round: number; text: string }  // a summary of what Muse Spark is working out, as it thinks
   | { type: "ideas"; round: number; seconds: number; understanding: string; count: number }
@@ -68,7 +112,10 @@ export type AgentEvent =
   | ({ type: "trial" } & Trial)
   | ({ type: "attempt"; index: number } & Attempt)
   | ({ type: "result" } & Proposal)
-  | { type: "error"; detail: string };
+  // A second try starts, on this model; with the first try as it stands (null: none to read).
+  | { type: "escalating"; model: string; first: boolean; first_try?: { understanding: string; advice?: string; attempts: Attempt[]; options?: Option[] } | null }
+  | { type: "note"; text: string }
+  | { type: "error"; detail: string }) & { model?: string };   // a second try names its model on every event
 
 /** One side of a clash as the Navisworks report describes it. */
 export interface ReportElement {
@@ -173,10 +220,17 @@ export interface ReqCheck {
 }
 export interface ReqMover { group: string; edits: "any" | "move" | "none"; max_move_mm: number | null; trims: boolean }
 export interface ReqByDesign { a_classes: string[]; b_classes: string[]; reason: string; source: ReqSource }
+/** Whether a group may take openings for services (server: requirements.PenRule); wins over Muse's reading. */
+export interface ReqPenRule {
+  group: string; rule: "allowed" | "review" | "never"; max_mm: number | null; reviewer: string | null; reason: string;
+  source: "user" | "orca";
+  kind?: string | null; kind_name?: string;   // only for one kind of host in the group (from Muse's reading of it)
+}
 export interface Requirements {
   format: "orca-requirements/1"; name: string; version: number; level: number; strictness: Strictness;
   groups: ReqGroup[]; checks: ReqCheck[]; duplicates: boolean; rules: Record<string, boolean>;
   who_moves: ReqMover[]; by_design: ReqByDesign[]; guidance: { triage: string; fixes: string }; notes: string;
+  penetrations?: ReqPenRule[];
 }
 /** The numbers a level and strictness resolve to (server: requirements.resolve). */
 export interface ReqParams {
@@ -200,12 +254,37 @@ export interface ReqPreview { clashes: number; baseline: number; seconds: number
 export type Effort = "minimal" | "low" | "medium" | "high";
 /** The owner's own settings (this browser): absent fields follow the settings for everyone. */
 /** An opened set of models: the scene id, the file names, and which came from STEP (index → STEP name). */
-export interface OpenedScene { id: string; files: string[]; step?: Record<string, string> }
-export interface OwnerSettings { effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean }
+export interface OpenedScene { id: string; files: string[]; step?: Record<string, string>; revision?: number }
+/** How an upload is going (server: app.upload_models_stream): packing here, sending, then the server opening it. */
+export type UploadEvent =
+  | { type: "packing"; done: number; total: number; name: string }
+  | { type: "upload"; loaded: number; total: number }
+  | { type: "received"; bytes: number }
+  | { type: "opening"; files: number }
+  | { type: "boxes"; done: number; total: number }
+  | { type: "tick" }
+  | { type: string; [k: string]: unknown };   // the STEP conversion's own events
+
+/** A file gzipped for the upload (the server unpacks `.gz` parts), or the file itself when the browser cannot or it is
+ * small. */
+async function pack(file: File): Promise<Blob> {
+  if (typeof CompressionStream === "undefined" || file.size < 1 << 20) return file;
+  return new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+}
+export type EscalationMode = "off" | "button" | "auto";
+export interface OwnerSettings {
+  effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean;
+  escalation?: EscalationMode; escalation_effort?: Effort; built_views?: boolean;
+}
 /** The settings for everyone (server: settings.py); null fields take the environment's default. */
-export interface EveryoneSettings { open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null }
+export interface EveryoneSettings {
+  open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null;
+  escalation: EscalationMode | null; escalation_effort: Effort | null; built_views: boolean | null;
+}
 export interface SettingsState {
-  everyone: EveryoneSettings; defaults: { open_weights: boolean; effort: Effort | null; triage_effort: Effort | null };
+  everyone: EveryoneSettings;
+  defaults: { open_weights: boolean; effort: Effort | null; triage_effort: Effort | null; escalation: EscalationMode;
+    escalation_effort: Effort | null; built_views: boolean };
   host: boolean;  // an open-weights host key is configured
 }
 let ownerSettings: OwnerSettings | null = null;
@@ -222,16 +301,22 @@ const settingsHeader = (): Record<string, string> => ({
 });
 const jsonHeaders = () => ({ "Content-Type": "application/json", ...settingsHeader() });
 
+/** Register the requirements in use again (the server forgot their id: a restart); true when it took them. */
+async function reRegister(): Promise<boolean> {
+  if (!requirementsId || !requirementsDoc) return false;
+  const again = await fetch("/api/requirements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requirementsDoc) });
+  if (!again.ok) return false;
+  requirementsId = ((await again.json()) as Registered).id;
+  return true;
+}
+
 /** fetch, registering the requirements again and retrying once when the server has forgotten them. */
 async function send(url: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(url, init);
   if (r.status !== 409 || !requirementsId || !requirementsDoc) return r;
   const detail = (await r.clone().json().catch(() => null))?.detail;
-  if (detail !== "requirements_unknown") return r;
-  const again = await fetch("/api/requirements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requirementsDoc) });
-  if (!again.ok) return r;
-  requirementsId = ((await again.json()) as Registered).id;
-  return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "X-Sightline-Requirements": requirementsId } });
+  if (detail !== "requirements_unknown" || !(await reRegister())) return r;
+  return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "X-Sightline-Requirements": requirementsId! } });
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -249,6 +334,7 @@ export interface PlanItem {
   key: string; element_a: string; element_b: string; label: string; clash_ids: string[]; in_report: boolean;
   distance_m: number | null; understanding: string; option: Option | null; alternatives: Option[]; tried: number; error: string;
   others?: string[];  // more elements the same movable element runs into: one fix clears them all
+  recommended?: boolean;  // the requirements allow no edit here: a recommendation, no second try
 }
 export interface PlanCheck {
   passed: boolean; items: Record<string, { passed: boolean; reason: string; min_clearance_m: number | null }>;
@@ -290,6 +376,7 @@ export type ChatEvent =
   | { type: "tool"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; summary: string }
   | { type: "ui"; action: "select_clash"; clash_id: string }
+  | { type: "ui"; action: "show_it_built"; clash_id: string }   // draw the chosen or kept fix (docs/show-it-built.md)
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   | { type: "ui"; action: "open_report"; report_id: string; detection: Detection }
   | { type: "detect_event"; event: DetectEvent }
@@ -311,11 +398,15 @@ export interface Evidence {
   /** recommended: the requirements allowed no edit; Muse Spark's recommendation for the designer. */
   status: "proposed" | "accepted" | "recommended"; meets?: string[]; blocked_by?: string; title: string; kind: FixKind | "context"; edit: string; clearance: string; clearance_m: number | null;
   rationale: string; also_needs: string; advice?: string; moved: string[]; before_img?: string; after_img?: string;
+  /** Who must review the fix before it is built ("structure", "services"). */
+  review?: string;
+  /** Show it built: the fix's checked picture (`/api/built/<key>.jpg`), or why none kept to the model. */
+  built_img?: string; built_note?: string;
 }
 /** A team's review of one clash, recorded in the app. */
 export interface Signoff { team: Team; name: string; decision: "approve" | "reject"; note: string; at: string }
 export type DocEvent =
-  | { type: "progress"; step: "explaining" | "summarising" | "rendering" | "bcf"; done?: number; total?: number }
+  | { type: "progress"; step: "drawing" | "explaining" | "summarising" | "rendering" | "bcf"; done?: number; total?: number }
   | { type: "ready"; url: string; name: string; bytes: number }
   | { type: "error"; message: string };
 
@@ -366,7 +457,7 @@ export type LinkEvent =
   | { type: "agent_result"; tool: string; summary: string }
   | { type: "capture_request"; id: string; what: "view" | "clash"; report_id?: string; clash_id?: string; a?: string; b?: string }
   | { type: "ui"; action: "open_models"; names: string[] }
-  | { type: "ui"; action: "applied"; files: number[]; pieces: string[][]; pairs: [string, string][]; titles: string[]; clash_ids: string[] }
+  | ({ type: "ui"; action: "applied"; files: number[]; pieces: string[][]; pairs: [string, string][]; titles: string[]; clash_ids: string[] } & Patch)
   | { type: "ui"; action: "follow_triage" }
   | ChatEvent;
 
@@ -403,7 +494,21 @@ export const api = {
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
   settings: () => call<SettingsState>("/settings"),
   /** Which model this browser's titles and triage would use now (the owner's choice, else the setting for everyone). */
-  models: () => call<{ triage: TriageModel }>("/models"),
+  models: () => call<{ triage: TriageModel; escalation?: EscalationInfo; built_views?: boolean; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
+  /** Every physical element's class and name (GlobalId → [class, name]): a built view's cutaway costs, its caption. */
+  classes: (sceneId: string) => call<Record<string, [string, string]>>(`/scenes/${sceneId}/classes`),
+  /** Show it built: the passes of one view (Viewer.captureBuilt) → a checked restyle, or why not. */
+  built: async (sceneId: string, passes: { look: string; ids: string; normals: string }, fixKind: string,
+                onEvent: (e: BuiltEvent) => void, signal?: AbortSignal): Promise<BuiltResult> => {
+    let out: BuiltResult | null = null;
+    await ndjson<BuiltEvent>(`/scenes/${sceneId}/built/stream`, { ...passes, fix_kind: fixKind }, (e) => {
+      if (e.type === "error") throw new ApiError(e.detail, 500);
+      if (e.type === "result") { out = e; return true; }
+      onEvent(e);
+    }, signal);
+    if (!out) throw new ApiError("The server stopped before the picture was checked. Try again.", 500);
+    return out;
+  },
   saveSettings: (changes: Partial<EveryoneSettings>) => call<SettingsState>("/settings", { method: "PUT", body: JSON.stringify(changes) }),
   teams: (reportId: string, sceneId: string | null) =>
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
@@ -437,7 +542,7 @@ export const api = {
     return plan;
   },
   applyPlan: (sceneId: string, options: Option[]) =>
-    call<{ files: number[]; pieces: string[][] }>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
+    call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
                  clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
@@ -452,20 +557,76 @@ export const api = {
     if (!r.ok) throw new ApiError((await r.json().catch(() => null))?.detail ?? `Upload failed (${r.status})`, r.status);
     return r.json() as Promise<OpenedScene>;
   },
+  /** Upload your own models with progress (UploadEvent): each file gzipped here first when the browser can (IFC text
+   * packs 5-10x), sent with XMLHttpRequest for upload progress, then the server's opening streamed back. */
+  uploadModelsStream: async (files: File[], onEvent: (e: UploadEvent) => void): Promise<OpenedScene> => {
+    const form = new FormData();
+    for (const [i, f] of files.entries()) {
+      onEvent({ type: "packing", done: i, total: files.length, name: f.name });
+      const packed = await pack(f);
+      form.append("files", packed, packed === f ? f.name : `${f.name}.gz`);
+    }
+    // Sent again once, as `send` does, when the server has forgotten the requirements' id (a restart).
+    const post = (retry: boolean) => new Promise<OpenedScene>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/models/upload/stream");
+      for (const [k, v] of Object.entries(settingsHeader())) xhr.setRequestHeader(k, v);
+      let seen = 0, opened: OpenedScene | null = null, failed: Error | null = null;
+      const read = () => {
+        const text = xhr.responseText;
+        for (let nl = text.indexOf("\n", seen); nl >= 0; nl = text.indexOf("\n", seen)) {
+          const line = text.slice(seen, nl);
+          seen = nl + 1;
+          if (!line.trim()) continue;
+          const e = JSON.parse(line) as UploadEvent;
+          if (e.type === "done") {
+            const d = e as unknown as OpenedScene;
+            opened = { id: d.id, files: d.files, step: d.step, revision: d.revision };
+          } else if (e.type === "error") {
+            const x = e as unknown as { status: number; detail: string };
+            failed = new ApiError(x.detail, x.status);
+          } else onEvent(e);
+        }
+      };
+      xhr.upload.onprogress = (e) => onEvent({ type: "upload", loaded: e.loaded, total: e.total });
+      xhr.onprogress = () => { if (xhr.status === 200) read(); };
+      xhr.onload = () => {
+        if (xhr.status !== 200) {
+          let detail = `Upload failed (${xhr.status})`;
+          try { detail = JSON.parse(xhr.responseText).detail ?? detail; } catch { /* not JSON */ }
+          if (retry && xhr.status === 409 && detail === "requirements_unknown") {
+            reRegister().then((ok) => (ok ? post(false) : Promise.reject(new ApiError(detail, 409)))).then(resolve, reject);
+            return;
+          }
+          reject(new ApiError(detail, xhr.status));
+          return;
+        }
+        read();
+        if (failed) reject(failed);
+        else if (opened) resolve(opened);
+        else reject(new Error("The server stopped before the models opened. Try again."));
+      };
+      xhr.onerror = () => reject(new Error("The upload stopped: the connection dropped."));
+      xhr.send(form);
+    });
+    return post(true);
+  },
   file: async (id: string, index: number) => {
     const r = await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" });
     if (!r.ok) throw new ApiError(`Model download failed (${r.status})`, r.status);
     return new Uint8Array(await r.arrayBuffer());
   },
-  verify: (id: string, moved: string[], delta_m: number[]) =>
-    call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
+  /** A move checked without keeping it; `obstacles` (what it must clear): what it stands on is kept, as a proposal's. */
+  verify: (id: string, moved: string[], delta_m: number[], obstacles: string[] = []) =>
+    call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m, obstacles }) }),
   propose: (id: string, element_a: string, element_b: string, from?: { report_id: string; clash_id: string }) =>
     call<Proposal>(`/scenes/${id}/propose`, { method: "POST", body: JSON.stringify({ element_a, element_b, ...from }) }),
-  /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. */
+  /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. `escalate`: a second, longer try
+   * on the larger model, reading the last try at this pair (docs/escalation.md). */
   proposeStream: async (id: string, element_a: string, element_b: string, from: { report_id: string; clash_id: string } | undefined,
-                        onEvent: (e: AgentEvent) => void): Promise<Proposal> => {
+                        onEvent: (e: AgentEvent) => void, escalate = false): Promise<Proposal> => {
     const r = await send(`/api/scenes/${id}/propose/stream`, {
-      method: "POST", headers: jsonHeaders(), body: JSON.stringify({ element_a, element_b, ...from }),
+      method: "POST", headers: jsonHeaders(), body: JSON.stringify({ element_a, element_b, ...from, ...(escalate ? { escalate } : {}) }),
     });
     if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
     const reader = r.body.getReader();
@@ -491,10 +652,15 @@ export const api = {
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
   /** Keep a fix in the server's model; returns the indexes of the files that changed. */
   accept: (id: string, o: Option) => (o.kind === "trim" && o.trim
-    ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
+    ? call<Kept>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
     : o.kind === "offset"
-    ? call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
-    : call<{ files: number[]; pieces?: string[] }>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })),
+    ? call<Kept>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
+    : o.kind === "move"
+    ? call<Kept>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
+    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there).
+    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there). A penetration
+    // whose host the requirements lock comes back `cut: false`: only its provision for void was written.
+    : call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). */

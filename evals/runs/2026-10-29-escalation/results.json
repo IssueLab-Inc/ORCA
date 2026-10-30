@@ -1,0 +1,1141 @@
+{
+  "cell C1 air/seg2 x cv/rail/north": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 3,
+      "seconds": 59.8,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 6,
+        "input_tokens": 15683,
+        "output_tokens": 12077,
+        "reasoning_tokens": 9707,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Local offset of pipe A down 150 mm under rail",
+        "kind": "offset",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          -0.15
+        ],
+        "clearance_mm": 38,
+        "summary": null
+      },
+      "advice": "Keep the rail fixed and move the DN25 pipe; the modeller for services should build the down-offset of A, with the conveyor owner confirming rail level must not change.",
+      "failures": [
+        "Drop pipe run A 150 mm: collision with IfcColumn x2 (worst -400 mm), collision with IfcWall (-200 mm), collision with IfcSlab (-150 mm)",
+        "Local offset of rail B down 150 mm: clearance with IfcPlate (+0 mm)"
+      ]
+    }
+  },
+  "cell C1 air/seg2 x cv/rail/south": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 3,
+      "seconds": 87.7,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 8,
+        "input_tokens": 20801,
+        "output_tokens": 15827,
+        "reasoning_tokens": 12634,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Offset pipe down 150 mm under the side rail",
+        "kind": "offset",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          -0.15
+        ],
+        "clearance_mm": 38,
+        "summary": null
+      },
+      "advice": "Keep the conveyor rail fixed and dip the DN25 air pipe under it; the offset is smallest and keeps the rest of the run on line. Modeller to build the offset, no designer review needed.",
+      "failures": [
+        "Drop whole pipe run 150 mm: collision with IfcColumn x2 (worst -400 mm), collision with IfcWall (-200 mm), collision with IfcSlab (-150 mm)"
+      ]
+    }
+  },
+  "cell C2 ct/h2 x fence/post/W5": {
+    "sweep": {
+      "verified": true,
+      "options": 2,
+      "tried": 3,
+      "seconds": 16.6,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 5329,
+        "output_tokens": 3226,
+        "reasoning_tokens": 2530,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Offset tray up over post top",
+        "kind": "offset",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          0.15
+        ],
+        "clearance_mm": 50,
+        "summary": null
+      },
+      "advice": "Keep the post full height; divert the tray. The modeller for services should build the west detour. Overlap is not by design for support here - a post must not be trimmed short to let a tray pass, so do not just trim the post in the model.",
+      "failures": [
+        "Shift tray run 250 mm west: collision with IfcCableCarrierSegment (-100 mm), clearance with IfcPlate (+0 mm), clearance with IfcElectricDistributionBoard (+3 mm)"
+      ]
+    }
+  },
+  "cell C3 fence/rail/S5-SE x fence/post/SE": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 1,
+      "seconds": 9.3,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 1,
+        "input_tokens": 2689,
+        "output_tokens": 785,
+        "reasoning_tokens": 567,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Trim top rail end to post face",
+        "kind": "trim",
+        "model": "Muse Spark",
+        "delta_m": [
+          -0.04,
+          -0.0,
+          -0.0
+        ],
+        "clearance_mm": 8,
+        "summary": null
+      },
+      "advice": "This 40 mm overlap is simply by design modelling of the rail into the post and needs only a model tidy by the PC-03 modeller if a clean butt joint is required; leave as built if the author models rails lapped into posts.",
+      "failures": []
+    }
+  },
+  "cell C4 r1/reach x fence/post/N3": {
+    "sweep": {
+      "verified": false,
+      "options": 0,
+      "tried": 7,
+      "seconds": 127.0,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 12,
+        "input_tokens": 32368,
+        "output_tokens": 30870,
+        "reasoning_tokens": 25851,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Keep the robot restricted space fixed and move the fence; the modeller with the fencing and civil/structural reviewer should confirm which west-dominant shift keeps the base on the slab and fence mesh compliant.",
+      "failures": [
+        "Move fence post N3 outward 250 mm: collision with IfcSlab (-70 mm), clearance with IfcBuildingElementProxy (+24 mm)",
+        "Move robot restricted space 250 mm away from fence: collision with IfcFurniture x2 (worst -1332 mm), collision with IfcMember x14 (worst -1223 mm), collision with IfcTransportElement (-1179 mm), collision with IfcBuildingElementProxy x2 (worst -1035 mm), collision with IfcPlate x7 (worst -1027 mm), collision with IfcBuildingElementPart (-1004 mm), collision with IfcElectricMotor (-930 mm), collision with IfcSensor x3 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-49 mm), collision with IfcMechanicalFastener x6 (worst -30 mm), clearance with IfcMechanicalFastener x2 (worst +2 mm), clearance with IfcSwitchingDevice (+7 mm), clearance with IfcDoor (+10 mm), clearance with IfcMember (+10 mm), clearance with IfcPlate (+24 mm)",
+        "Move post N3 north 300 mm to clear volume, extend slab under base: collision with IfcSlab (-70 mm)",
+        "Move post N3 north-east to clear volume and land on slab: collision with IfcSlab (-70 mm), clearance with IfcBuildingElementProxy (+2 mm)",
+        "Shift post NW 250 mm staying on slab: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-12 mm)",
+        "Shift post west 550 mm along fence line: collision with IfcSlab (-70 mm), collision with IfcPlate (-60 mm), collision with IfcBuildingElementProxy (-12 mm)"
+      ]
+    },
+    "spark_again": {
+      "verified": false,
+      "options": 0,
+      "tried": 6,
+      "seconds": 110.7,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 5385,
+        "output_tokens": 5879,
+        "reasoning_tokens": 4989,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Keep the robot restricted space fixed and re-establish the fence line outside the 2.7 m radius by moving along the fence, not radially off the slab; fencer and safety reviewer to confirm new post location and panel sizes.",
+      "failures": [
+        "Move fence post N3 radially out 250 mm: collision with IfcSlab (-70 mm), clearance with IfcBuildingElementProxy (+24 mm)",
+        "Move fence post N3 radially out 350 mm: collision with IfcSlab (-70 mm)",
+        "Move restricted space R1 away from post: collision with IfcFurniture x2 (worst -1332 mm), collision with IfcMember x14 (worst -1224 mm), collision with IfcTransportElement (-1180 mm), collision with IfcBuildingElementProxy x2 (worst -1035 mm), collision with IfcPlate x7 (worst -1028 mm), collision with IfcBuildingElementPart (-1005 mm), collision with IfcElectricMotor (-931 mm), collision with IfcSensor x3 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-49 mm), collision with IfcMechanicalFastener x6 (worst -30 mm), clearance with IfcMechanicalFastener x2 (worst +3 mm), clearance with IfcSwitchingDevice (+8 mm), clearance with IfcDoor (+11 mm), clearance with IfcMember (+11 mm), clearance with IfcPlate (+24 mm)",
+        "Shift post ~1.16 m west along fence to exit radius: collision with IfcSlab (-70 mm), clearance with IfcBuildingElementProxy (+15 mm)",
+        "Shift post ~1.16 m east along fence to exit radius: collision with IfcSlab (-70 mm)",
+        "Shift post 0.6 m west-south-west intermediate: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-20 mm)"
+      ]
+    },
+    "spark_brief": {
+      "verified": false,
+      "options": 0,
+      "tried": 5,
+      "seconds": 225.3,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 22055,
+        "output_tokens": 14261,
+        "reasoning_tokens": 13189,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Keep R1 and its restricted space fixed; the fencing contractor with structural reviewer should confirm a north-dominant shift that stays on the floor slab and what plinth / re-anchoring lets the geometry check pass without an anchor-slab penetration flag.",
+      "failures": [
+        "Move post N3 north 1200 mm off the slab edge: clearance with IfcSlab (+23 mm)",
+        "Shift post N3 north 450 mm onto plinth to clear zone: clearance with IfcSlab (+10 mm)",
+        "Shift post N3 north-west 400 mm onto plinth: clearance with IfcSlab (+10 mm)",
+        "Shift post N3 north 600 mm onto plinth: clearance with IfcSlab (+10 mm)",
+        "Move post with its curtain and anchors north onto plinth: cannot combine these: step 1: IfcMember 'Fence post N3' is structure and stays where it is"
+      ]
+    },
+    "wonder_brief": {
+      "verified": true,
+      "options": 3,
+      "tried": 9,
+      "seconds": 113.1,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 2,
+        "input_tokens": 22268,
+        "output_tokens": 8624,
+        "reasoning_tokens": 6753,
+        "usd": 0.2616
+      },
+      "best": {
+        "title": "Move post N3 north-west 300 mm and lift 180 mm clear of slab",
+        "kind": "move",
+        "model": "Muse Wonder",
+        "delta_m": [
+          -0.1,
+          0.3,
+          0.18
+        ],
+        "clearance_mm": 90,
+        "summary": null
+      },
+      "advice": "The restricted space and slab must not move; the fencing designer and the robot safety reviewer should confirm the relocated fence line, the plinth detail that replaces the 180-200 mm lift in the model, and that mesh panels and the light curtain still close the cell before this is built.",
+      "failures": [
+        "Relocate post N3 north-west and lift its anchors clear of the slab: cannot combine these: step 1: IfcMember 'Fence post N3' is structure and stays where it is",
+        "Move post N3 280 mm north with a 90 mm lift: clearance with IfcSlab (+20 mm)",
+        "Move post N3 north-east with a 90 mm lift: clearance with IfcSlab (+20 mm)",
+        "Move post N3 further north-west for extra safety margin: clearance with IfcSlab (+20 mm)",
+        "Relocate post and anchors due north 350 mm: cannot combine these: step 1: IfcMember 'Fence post N3' is structure and stays where it is"
+      ]
+    }
+  },
+  "cell C4 r1/reach x fence/post/N4": {
+    "sweep": {
+      "verified": false,
+      "options": 0,
+      "tried": 8,
+      "seconds": 108.0,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 11,
+        "input_tokens": 29373,
+        "output_tokens": 27817,
+        "reasoning_tokens": 23275,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "None of the east moves clear without leaving the slab; accept a north / west-north shift of the post and have the civil modeller extend the slab / plinth and the fencing contractor re-hang the bays. Do not move the R1 zone.",
+      "failures": [
+        "Move fence post N4 radially out 250 mm clear of R1 zone: collision with IfcSlab (-70 mm), clearance with IfcBuildingElementProxy (+24 mm)",
+        "Move R1 robot centre 250 mm away from fence: collision with IfcMember x14 (worst -1363 mm), collision with IfcFurniture x2 (worst -1340 mm), collision with IfcTransportElement (-1318 mm), collision with IfcPlate x7 (worst -1167 mm), collision with IfcBuildingElementPart (-1131 mm), collision with IfcElectricMotor (-1059 mm), collision with IfcBuildingElementProxy x2 (worst -1035 mm), collision with IfcSensor x4 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-49 mm), collision with IfcMechanicalFastener x7 (worst -30 mm), clearance with IfcMember (+10 mm), clearance with IfcPlate x2 (worst +15 mm)",
+        "Shift post N4 east-north-east to stay on slab: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-12 mm)",
+        "Shift post N4 pure east 600 mm: collision with IfcSlab (-70 mm), collision with IfcPlate (-60 mm), collision with IfcBuildingElementProxy (-7 mm)",
+        "Shift post N4 east-south-east around slab corner: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-20 mm), clearance with IfcPlate (+5 mm)",
+        "Move post N4 pure north 350 mm off the zone: collision with IfcSlab (-70 mm)"
+      ]
+    },
+    "spark_again": {
+      "verified": false,
+      "options": 0,
+      "tried": 5,
+      "seconds": 49.5,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 5353,
+        "output_tokens": 4466,
+        "reasoning_tokens": 3625,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Keep R1 restricted space fixed and move the fence outward east of the slab edge; fence designer to confirm revised bay widths and panel sizes if neither east move can be built.",
+      "failures": [
+        "Move post N4 radially out 250 mm: collision with IfcSlab (-70 mm), clearance with IfcBuildingElementProxy (+24 mm)",
+        "Move post N4 north 290 mm: collision with IfcSlab (-70 mm)",
+        "Move R1 restricted space 250 mm away from post: collision with IfcMember x14 (worst -1362 mm), collision with IfcFurniture x2 (worst -1340 mm), collision with IfcTransportElement (-1317 mm), collision with IfcPlate x7 (worst -1166 mm), collision with IfcBuildingElementPart (-1130 mm), collision with IfcElectricMotor (-1059 mm), collision with IfcBuildingElementProxy x2 (worst -1035 mm), collision with IfcSensor x4 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-49 mm), collision with IfcMechanicalFastener x7 (worst -30 mm), clearance with IfcMember (+11 mm), clearance with IfcPlate x2 (worst +16 mm)",
+        "Move post N4 east 800 mm: collision with IfcSlab (-70 mm), collision with IfcMechanicalFastener (-49 mm), collision with IfcPlate (-30 mm), clearance with IfcMember (+0 mm), clearance with IfcPlate x2 (worst +10 mm)",
+        "Move post N4 east 650 mm: collision with IfcSlab (-70 mm), clearance with IfcPlate (+5 mm)"
+      ]
+    },
+    "spark_brief": {
+      "verified": true,
+      "options": 3,
+      "tried": 6,
+      "seconds": 181.3,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 22407,
+        "output_tokens": 10115,
+        "reasoning_tokens": 8961,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Move post N4 north 400 mm onto 150 mm plinth",
+        "kind": "move",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.4,
+          0.15
+        ],
+        "clearance_mm": 80,
+        "summary": null
+      },
+      "advice": "Accept a north shift of the N4 fence line and build a plinth; have the civil modeller extend the plinth detail and the fencing contractor re-hang the bays. Do not move the R1 zone.",
+      "failures": [
+        "Move post N4 radially out 250 mm and set on plinth 80 mm: clearance with IfcSlab (+10 mm), clearance with IfcBuildingElementProxy (+24 mm)",
+        "Move post N4 north 350 mm and set on plinth 80 mm: clearance with IfcSlab (+10 mm)",
+        "Move post assembly radially out onto plinth: cannot combine these: step 1: IfcMember 'Fence post N4' is structure and stays where it is"
+      ]
+    },
+    "wonder_brief": {
+      "verified": true,
+      "options": 3,
+      "tried": 5,
+      "seconds": 111.5,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 1,
+        "input_tokens": 11102,
+        "output_tokens": 7268,
+        "reasoning_tokens": 6253,
+        "usd": 0.1898
+      },
+      "best": {
+        "title": "Move post N4 north 400 mm and lift 120 mm clear of its slab embedment",
+        "kind": "move",
+        "model": "Muse Wonder",
+        "delta_m": [
+          0.0,
+          0.4,
+          0.12
+        ],
+        "clearance_mm": 50,
+        "summary": null
+      },
+      "advice": "The deciding issue is the constant 70 mm slab clash on every flat move: the fencing contractor must confirm whether the post/anchors can be lifted onto a new raised base plate at the jogged position, or whether a completely new plinth past the slab edge is preferred; do not move the R1 restricted-space zone.",
+      "failures": [
+        "Relocate post N4 and its light curtain receiver north together, lifted: cannot combine these: step 1: IfcMember 'Fence post N4' is structure and stays where it is"
+      ]
+    }
+  },
+  "cell C4 r1/reach x fence/plate/N3": {
+    "sweep": {
+      "verified": false,
+      "options": 0,
+      "tried": 8,
+      "seconds": 131.3,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 15,
+        "input_tokens": 40418,
+        "output_tokens": 38693,
+        "reasoning_tokens": 32473,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Fence must end up outside the restricted space with margin; prefer moving the fence west if the slab/foundation can be extended, otherwise the robot cell owner must move the hazard east.",
+      "failures": [
+        "Move post N3 base radially out 0.30 m: collision with IfcSlab (-70 mm)",
+        "Move post N3 base north 0.30 m: collision with IfcSlab (-70 mm)",
+        "Shift robot restricted space south 0.30 m: collision with IfcFurniture x2 (worst -1397 mm), collision with IfcMember x14 (worst -1298 mm), collision with IfcTransportElement (-1250 mm), collision with IfcPlate x5 (worst -1099 mm), collision with IfcBuildingElementProxy x2 (worst -1087 mm), collision with IfcBuildingElementPart (-1042 mm), collision with IfcElectricMotor (-972 mm), collision with IfcSensor x2 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-110 mm), collision with IfcMechanicalFastener x6 (worst -30 mm)",
+        "Shift post N3 west along fence 0.80 m: collision with IfcSlab (-70 mm), collision with IfcMechanicalFastener (-30 mm), collision with IfcPlate (-30 mm), clearance with IfcMember (+0 mm), clearance with IfcPlate x2 (worst +10 mm)",
+        "Shift post N3 west 0.70 m and south 0.10 m: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-12 mm), collision with IfcPlate (-12 mm), clearance with IfcMember (+14 mm)",
+        "Slide post N3 west 0.65 m along fence line: collision with IfcSlab (-70 mm), collision with IfcPlate (-60 mm), clearance with IfcBuildingElementProxy (+16 mm)"
+      ]
+    },
+    "spark_again": {
+      "verified": false,
+      "options": 0,
+      "tried": 4,
+      "seconds": 54.4,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 5287,
+        "output_tokens": 3981,
+        "reasoning_tokens": 3214,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Keep the robot where it is and move only the fence post the minimum that clears the restricted space. Modeller to verify post remains on the slab and fence panel joints still work, with structural sign-off if the base needs an extended plinth.",
+      "failures": [
+        "Move fence post N3 out 0.30 m radially clear of restricted space: collision with IfcSlab (-70 mm)",
+        "Move robot restricted-space 0.30 m away from fence: collision with IfcFurniture x2 (worst -1379 mm), collision with IfcMember x15 (worst -1215 mm), collision with IfcTransportElement (-1168 mm), collision with IfcBuildingElementProxy x2 (worst -1083 mm), collision with IfcPlate x6 (worst -1017 mm), collision with IfcBuildingElementPart (-973 mm), collision with IfcElectricMotor (-901 mm), collision with IfcDoor (-496 mm), collision with IfcSensor x2 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-97 mm), collision with IfcMechanicalFastener x7 (worst -30 mm), clearance with IfcSwitchingDevice (+7 mm), clearance with IfcPlate (+15 mm)",
+        "Move post N3 0.20 m radially out of restricted space: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-12 mm)",
+        "Move post N3 0.18 m north to stay on slab: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-20 mm)"
+      ]
+    },
+    "spark_brief": {
+      "verified": true,
+      "options": 1,
+      "tried": 2,
+      "seconds": 102.7,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 1,
+        "input_tokens": 11634,
+        "output_tokens": 8360,
+        "reasoning_tokens": 7966,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Shift N3 base north 1250 mm beyond slab edge",
+        "kind": "move",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          1.25,
+          0.0
+        ],
+        "clearance_mm": 40,
+        "summary": null
+      },
+      "advice": "The safeguarding fix must put the fence outside the restricted space; on-slab positions always report anchor embedment, so the modeller must either lift the base or extend the slab/foundation and the fence designer must re-detail post N3.",
+      "failures": [
+        "Shift N3 base north 350 mm and lift 80 mm clear of slab: clearance with IfcSlab (+10 mm)"
+      ]
+    },
+    "wonder_brief": {
+      "verified": true,
+      "options": 3,
+      "tried": 10,
+      "seconds": 143.0,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 2,
+        "input_tokens": 23563,
+        "output_tokens": 12624,
+        "reasoning_tokens": 10634,
+        "usd": 0.3467
+      },
+      "best": {
+        "title": "Relocate N3 base plate 500 mm north, lifted 200 mm clear of slab",
+        "kind": "move",
+        "model": "Muse Wonder",
+        "delta_m": [
+          0.0,
+          0.5,
+          0.2
+        ],
+        "clearance_mm": 130,
+        "summary": null
+      },
+      "advice": "The buildable fix is relocating fence post N3 (post, base plate, anchors and adjoining mesh panels together) radially/north outside the 2.7 m radius on a new foundation pad; the lift in the candidates is only to pull the modelled anchors out of the slab for the geometry check, not a finished level. If the fence line cannot move north, the robot cell owner must re-validate the restricted space or move the fence line west past x about 0.65 m at this y.",
+      "failures": [
+        "Move N3 base plate radially out and lift clear of slab: clearance with IfcSlab (+20 mm)",
+        "Move N3 base plate 400 mm north and lift clear of slab: clearance with IfcSlab (+20 mm)",
+        "Relocate N3 base plate east along fence between N4 and N5: clearance with IfcSlab (+20 mm)",
+        "Move N3 base plate west-northwest outside the restricted radius: clearance with IfcSlab (+20 mm)",
+        "Move N3 base plate and its anchors together radially out: cannot combine these: step 1: IfcPlate 'Fence post N3 base plate' is structure and stays where it is",
+        "Raise restricted-space proxy 150 mm so its base clears the plate: collision with IfcMember x10 (worst -1262 mm), collision with IfcTransportElement (-1219 mm), collision with IfcBuildingElementPart (-1154 mm), collision with IfcElectricMotor (-1070 mm), collision with IfcPlate x3 (worst -1067 mm), collision with IfcBuildingElementProxy x2 (worst -789 mm), collision with IfcSensor x2 (worst -186 mm), collision with IfcSlab (-50 mm), clearance with IfcFurniture x2 (worst +6 mm)"
+      ]
+    }
+  },
+  "cell C4 r1/reach x fence/plate/N4": {
+    "sweep": {
+      "verified": false,
+      "options": 0,
+      "tried": 7,
+      "seconds": 229.5,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 28,
+        "input_tokens": 75138,
+        "output_tokens": 68306,
+        "reasoning_tokens": 56424,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Right fix is decided by slab edge and safety: fence must be outside restricted space, so extend the slab / foundation and move N4 outward; modeller to move fence, structural to extend support, robot integrator to sign off safety distance.",
+      "failures": [
+        "Move fence post N4 base 0.25 m outward clear of restricted space: collision with IfcSlab (-70 mm), clearance with IfcBuildingElementProxy (+24 mm)",
+        "Slide post N4 east along fence line clear of radius: collision with IfcSlab (-70 mm), collision with IfcPlate (-60 mm), clearance with IfcBuildingElementProxy (+16 mm)",
+        "Slide post N4 east-north-east to clear with less east shift: collision with IfcSlab (-70 mm)",
+        "Shift restricted space south away from post: collision with IfcFurniture x2 (worst -1399 mm), collision with IfcMember x15 (worst -1397 mm), collision with IfcTransportElement (-1350 mm), collision with IfcPlate x8 (worst -1199 mm), collision with IfcBuildingElementPart (-1130 mm), collision with IfcBuildingElementProxy x2 (worst -1096 mm), collision with IfcElectricMotor (-1062 mm), collision with IfcSensor x3 (worst -800 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-110 mm), collision with IfcMechanicalFastener x7 (worst -30 mm)",
+        "Move post N4 outward radial to clear safety volume: collision with IfcSlab (-70 mm)",
+        "Move post N4 further east to next fence module: collision with IfcSlab (-70 mm), clearance with IfcPlate (+5 mm)"
+      ]
+    },
+    "spark_again": {
+      "verified": false,
+      "options": 0,
+      "tried": 4,
+      "seconds": 70.3,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 5030,
+        "output_tokens": 4130,
+        "reasoning_tokens": 3375,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "The fence line and slab are fixed, so prefer the post move that stays on the slab; only the modeller with the slab edge and fence alignment can confirm which side has bearing. If neither post position has slab support, the R1 owner must approve shifting the robot cell.",
+      "failures": [
+        "Move post N4 base plate clear of R1: collision with IfcSlab (-70 mm)",
+        "Move post N4 base plate east-northeast to stay on slab: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-20 mm)",
+        "Move post N4 base plate west-north around slab edge: collision with IfcSlab (-70 mm), collision with IfcBuildingElementProxy (-20 mm)",
+        "Shift R1 cell south-west away from fence: collision with IfcMember x15 (worst -1365 mm), collision with IfcTransportElement (-1324 mm), collision with IfcFurniture x2 (worst -1280 mm), collision with IfcPlate x8 (worst -1173 mm), collision with IfcBuildingElementPart (-1166 mm), collision with IfcSensor x5 (worst -1100 mm), collision with IfcElectricMotor (-1091 mm), collision with IfcBuildingElementProxy x2 (worst -975 mm), collision with IfcSlab (-200 mm), collision with IfcMechanicalFastener x8 (worst -30 mm), clearance with IfcMechanicalFastener (+2 mm), clearance with IfcPlate (+5 mm), clearance with IfcMember x2 (worst +6 mm), clearance with IfcSwitchingDevice (+10 mm)"
+      ]
+    },
+    "spark_brief": {
+      "verified": true,
+      "options": 2,
+      "tried": 6,
+      "seconds": 127.5,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 22311,
+        "output_tokens": 10833,
+        "reasoning_tokens": 9705,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Move N4 base 350 mm north onto plinth clear of restricted volume",
+        "kind": "move",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.35,
+          0.12
+        ],
+        "clearance_mm": 50,
+        "summary": null
+      },
+      "advice": "Right fix is safety-driven: fence must be outside the 2.7 m restricted volume, so move the N4 bay north onto a plinth; modeller to move fence bay, structural to detail plinth and anchors, robot integrator to confirm safety distance.",
+      "failures": [
+        "Move N4 base outward radial and pack up to clear slab: clearance with IfcSlab (+10 mm)",
+        "Slide N4 east along fence and pack up to clear slab: collision with IfcPlate (-60 mm), clearance with IfcSlab (+10 mm), clearance with IfcBuildingElementProxy (+16 mm)",
+        "Move N4 to next module east and pack up to clear slab: clearance with IfcPlate (+5 mm), clearance with IfcSlab (+10 mm)",
+        "Move N4 base and anchors 350 mm north onto plinth together: cannot combine these: step 1: IfcPlate 'Fence post N4 base plate' is structure and stays where it is"
+      ]
+    },
+    "wonder_brief": {
+      "verified": true,
+      "options": 3,
+      "tried": 8,
+      "seconds": 116.5,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 2,
+        "input_tokens": 22305,
+        "output_tokens": 10680,
+        "reasoning_tokens": 9020,
+        "usd": 0.3028
+      },
+      "best": {
+        "title": "Move N4 base plate 500 mm north and raise it 150 mm",
+        "kind": "move",
+        "model": "Muse Wonder",
+        "delta_m": [
+          0.0,
+          0.5,
+          0.15
+        ],
+        "clearance_mm": 80,
+        "summary": null
+      },
+      "advice": "The deciding factors are the safety distance and the support: the fence must sit outside the 2.7 m restricted space on a real foundation, so the robot integrator confirms the new fence line and structural designs the plinth/pad and post extension; do not move or shrink the restricted-space volume. If a raised plate is unacceptable, use the beyond-slab relocation and build a new foundation there.",
+      "failures": [
+        "Move N4 base plate and its anchors radially out and lift them clear of the slab: cannot combine these: step 1: IfcPlate 'Fence post N4 base plate' is structure and stays where it is",
+        "Move base plate 320 mm north, 120 mm east and 90 mm up clear of slab and restricted space: clearance with IfcSlab (+20 mm)",
+        "Trim base plate back to the restricted-space face: cannot trim this element: R1 restricted space r 2.7 m (ISO 10218-2) can move instead; a trim only tidies a joint between members that stay put",
+        "Slide base plate east along the fence line and lift it clear of the slab: clearance with IfcSlab (+20 mm)"
+      ]
+    }
+  },
+  "cell C4 r1/reach x fence/panel/N2-N3": {
+    "sweep": {
+      "error": "HTTPStatusError: Server error '500 Internal Server Error' for url 'https://api.meta.ai/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500"
+    }
+  },
+  "cell C4 r1/reach x fence/panel/N4-N5": {
+    "sweep": {
+      "verified": true,
+      "options": 3,
+      "tried": 10,
+      "seconds": 122.4,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 20,
+        "input_tokens": 53652,
+        "output_tokens": 51565,
+        "reasoning_tokens": 42990,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Move guard N4-N5 north 350 mm, keep level",
+        "kind": "move",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.35,
+          0.0
+        ],
+        "clearance_mm": 150,
+        "summary": null
+      },
+      "advice": "Guard line must stay outside R1 restricted space. Fence modeller to shift panel N4-N5 north / radially out with its posts and remake adjoining joints; do not move or shrink the robot restricted volume.",
+      "failures": [
+        "Move guard panel N4-N5 radially out 80 mm: collision with IfcBuildingElementProxy (-150 mm)",
+        "Move guard panel north 100 mm: collision with IfcBuildingElementProxy (-150 mm)",
+        "Move R1 restricted space south-west 80 mm: collision with IfcMember x14 (worst -1300 mm), collision with IfcTransportElement (-1265 mm), collision with IfcFurniture x2 (worst -1172 mm), collision with IfcBuildingElementPart (-1162 mm), collision with IfcPlate x5 (worst -1113 mm), collision with IfcElectricMotor (-1082 mm), collision with IfcBuildingElementProxy x2 (worst -865 mm), collision with IfcSensor x2 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcMechanicalFastener x6 (worst -30 mm)",
+        "Move guard panel N4-N5 east 120 mm: collision with IfcBuildingElementProxy (-150 mm), collision with IfcMember (-60 mm), clearance with IfcPlate (+0 mm)",
+        "Move guard panel N4-N5 east 150 mm: collision with IfcBuildingElementProxy (-150 mm), collision with IfcMember (-60 mm), clearance with IfcPlate (+0 mm)",
+        "Move guard panel N4-N5 east-south-east 140 mm: collision with IfcBuildingElementProxy (-150 mm), collision with IfcMember (-60 mm), collision with IfcPlate (-10 mm)"
+      ]
+    }
+  },
+  "cell C4 r1/reach x fence/curtain/N/a": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 2,
+      "seconds": 20.4,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 17,
+        "input_tokens": 45721,
+        "output_tokens": 43133,
+        "reasoning_tokens": 36068,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Move light curtain emitter radially out of restricted space",
+        "kind": "move",
+        "model": "Muse Spark",
+        "delta_m": [
+          -0.084,
+          0.288,
+          0.0
+        ],
+        "clearance_mm": 76,
+        "summary": null
+      },
+      "advice": "Keep the robot where it is and move the curtain post if the pallet exit can tolerate a 0.3 m shift; the cell integrator and safety designer must confirm guard position and separation distances if neither move is acceptable.",
+      "failures": [
+        "Move R1 restricted space away from curtain: collision with IfcFurniture x2 (worst -1378 mm), collision with IfcMember x15 (worst -1213 mm), collision with IfcTransportElement (-1166 mm), collision with IfcBuildingElementProxy x2 (worst -1084 mm), collision with IfcPlate x6 (worst -1015 mm), collision with IfcBuildingElementPart (-971 mm), collision with IfcElectricMotor (-899 mm), collision with IfcDoor (-663 mm), collision with IfcSensor x2 (worst -200 mm), collision with IfcSlab (-200 mm), collision with IfcSwitchingDevice (-97 mm), collision with IfcMechanicalFastener x7 (worst -30 mm), clearance with IfcSwitchingDevice (+5 mm), clearance with IfcPlate (+13 mm)"
+      ]
+    }
+  },
+  "cell C4 r1/reach x fence/curtain/N/b": {
+    "sweep": {
+      "verified": true,
+      "options": 2,
+      "tried": 2,
+      "seconds": 24.3,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 18,
+        "input_tokens": 48204,
+        "output_tokens": 44972,
+        "reasoning_tokens": 37513,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Move receiver 350 mm in +Y to clear zone",
+        "kind": "move",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.35,
+          0.0
+        ],
+        "clearance_mm": 114,
+        "summary": null
+      },
+      "advice": "Keep the R1 restricted space fixed and move the light curtain post outward; controls/robotics reviewer to confirm new receiver position still guards pallet B exit and emitter can match it.",
+      "failures": []
+    }
+  },
+  "cell C5 hmi x ep301/space": {
+    "sweep": {
+      "verified": false,
+      "options": 0,
+      "tried": 9,
+      "seconds": 80.9,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 25,
+        "input_tokens": 67068,
+        "output_tokens": 63075,
+        "reasoning_tokens": 52089,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Check west side for slab edge and steel before committing; if neither HMI west nor panel east is free, the reviewer should consider swapping HMI to the opposite face of its plinth or turning EP-301 90 degrees. Modeller to test, electrical designer to approve working-space compliance.",
+      "failures": [
+        "Move HMI stand 1.3 m sideways clear of working space: clearance with IfcSlab (+0 mm)",
+        "Move HMI stand 1.3 m longitudinally clear of working space: collision with IfcBuildingElementProxy (-504 mm), collision with IfcPlate x5 (worst -315 mm), collision with IfcMember x2 (worst -270 mm), collision with IfcCableCarrierFitting (-100 mm), collision with IfcMechanicalFastener x2 (worst -20 mm), clearance with IfcSlab (+20 mm)",
+        "Move HMI stand 1.3 m opposite side clear of working space: collision with IfcTransportElement (-900 mm), collision with IfcPlate (-900 mm), collision with IfcMember x3 (worst -900 mm), collision with IfcBuildingElementProxy (-200 mm), collision with IfcMechanicalFastener (-30 mm), clearance with IfcSlab (+20 mm)",
+        "Shift HMI stand 1.0 m sideways to edge of working space: collision with IfcCableCarrierSegment (-100 mm), clearance with IfcSlab (+20 mm)",
+        "Shift HMI stand diagonally 0.35 m x + 0.85 m y to stay on slab: collision with IfcCableCarrierSegment (-100 mm), collision with IfcPlate (-10 mm), clearance with IfcMechanicalFastener (+5 mm), clearance with IfcMember (+20 mm), clearance with IfcSlab (+20 mm)",
+        "Shift HMI stand 0.8 m sideways minimum clear: collision with IfcCableCarrierSegment (-100 mm), clearance with IfcSlab (+20 mm)"
+      ]
+    },
+    "spark_again": {
+      "verified": false,
+      "options": 0,
+      "tried": 6,
+      "seconds": 60.0,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 5026,
+        "output_tokens": 4604,
+        "reasoning_tokens": 3664,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "The modeller should test the west-side HMI shift first as smallest buildable fix; the electrical designer must confirm EP-301 working clearance and HMI cable length if the panel is moved instead.",
+      "failures": [
+        "Move HMI stand OP-301 sideways clear of working space: collision with IfcPlate x5 (worst -360 mm), collision with IfcBuildingElementProxy (-240 mm), collision with IfcCableCarrierSegment (-100 mm), collision with IfcMechanicalFastener x2 (worst -30 mm), collision with IfcMember x2 (worst -8 mm), clearance with IfcSlab (+20 mm)",
+        "Move HMI stand forward out of working space depth: collision with IfcTransportElement (-900 mm), collision with IfcPlate (-900 mm), collision with IfcMember x4 (worst -900 mm), collision with IfcBuildingElementProxy (-200 mm), collision with IfcMechanicalFastener (-30 mm), clearance with IfcSlab (+20 mm)",
+        "Relocate EP-301 panel and its working space: collision with IfcMember (-430 mm), collision with IfcFilter (-50 mm), clearance with IfcSlab (+20 mm)",
+        "Shift HMI stand west clear of working space side: collision with IfcMember (-530 mm), collision with IfcFilter (-50 mm), clearance with IfcSlab (+20 mm)",
+        "Shift HMI stand south-west around working space corner: collision with IfcMember (-480 mm), collision with IfcPipeSegment (-463 mm), collision with IfcFilter (-370 mm), clearance with IfcSlab (+20 mm)",
+        "Shift EP-301 panel and working space east off HMI: collision with IfcPlate x5 (worst -440 mm), collision with IfcMember x2 (worst -370 mm), collision with IfcBuildingElementProxy (-150 mm), collision with IfcCableCarrierSegment (-100 mm), collision with IfcMechanicalFastener x2 (worst -20 mm), clearance with IfcSlab (+20 mm)"
+      ]
+    },
+    "spark_brief": {
+      "verified": false,
+      "options": 0,
+      "tried": 6,
+      "seconds": 100.6,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 23206,
+        "output_tokens": 5990,
+        "reasoning_tokens": 4837,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "South move of the HMI is cheapest if conveyor maintenance clearance allows; otherwise move the panel north with its riser. Modeller to test, electrical designer to approve working-space compliance.",
+      "failures": [
+        "Shift HMI 0.7 m east out of working space: collision with IfcPlate x5 (worst -315 mm), collision with IfcMember x2 (worst -270 mm), collision with IfcCableCarrierSegment (-100 mm), collision with IfcMechanicalFastener x2 (worst -20 mm), clearance with IfcCableCarrierSegment (+3 mm), clearance with IfcSlab (+20 mm)",
+        "Shift HMI 0.5 m west out of working space: collision with IfcMember (-270 mm), collision with IfcFilter (-50 mm), clearance with IfcCableCarrierSegment (+3 mm), clearance with IfcSlab (+20 mm)",
+        "Shift HMI 0.8 m north and shift CT-301 riser east: collision with IfcBuildingElementProxy x2 (worst -750 mm), collision with IfcCableCarrierSegment (-100 mm), clearance with IfcSlab (+20 mm), clearance with IfcMember (+20 mm)",
+        "Move HMI 0.9 m south clear of working space: collision with IfcMember x3 (worst -900 mm), collision with IfcTransportElement (-900 mm), collision with IfcPlate (-900 mm), collision with IfcMechanicalFastener (-30 mm), clearance with IfcSlab (+20 mm)",
+        "Move HMI 0.7 m south clear of working space: collision with IfcMember (-12 mm), clearance with IfcSlab (+20 mm)",
+        "Move EP-301 and its working space 0.8 m north: collision with IfcCableCarrierSegment (-100 mm), collision with IfcBuildingElementProxy (-100 mm), collision with IfcMember (-62 mm), clearance with IfcSlab (+0 mm), clearance with IfcMember (+20 mm)"
+      ]
+    },
+    "wonder_brief": {
+      "verified": false,
+      "options": 0,
+      "tried": 10,
+      "seconds": 124.3,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 2,
+        "input_tokens": 23098,
+        "output_tokens": 11673,
+        "reasoning_tokens": 9796,
+        "usd": 0.3259
+      },
+      "best": null,
+      "advice": "Prefer the due-west relocation if operator access to EP-301 remains acceptable; it avoids moving any other service. The electrical designer must confirm the new HMI position still serves EP-301 safely, and the modeller should verify slab fixing clear of the west wall and FRL stand.",
+      "failures": [
+        "Move HMI stand west-northwest into pocket west of EP-301: clearance with IfcSlab (+20 mm)",
+        "Move HMI stand further west with smaller north shift: clearance with IfcSlab (+20 mm)",
+        "Move HMI stand far west-northwest toward the west wall: clearance with IfcSlab (+20 mm)",
+        "Move HMI northwest and lift CT-301 riser clear of its top: clearance with IfcSlab (+20 mm)",
+        "Move HMI stand west-northwest with maximum north clearance from FRL: clearance with IfcSlab (+20 mm)",
+        "Move HMI stand 1.45 m due west past the FRL unit: collision with IfcFilter (-30 mm), clearance with IfcSlab (+20 mm), clearance with IfcMember (+20 mm)"
+      ]
+    }
+  },
+  "cell C6 air/pl302/seg3 x bldg/column/C3": {
+    "sweep": {
+      "verified": true,
+      "options": 2,
+      "tried": 3,
+      "seconds": 56.1,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 24,
+        "input_tokens": 64073,
+        "output_tokens": 60156,
+        "reasoning_tokens": 49692,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Reroute pipe north past column",
+        "kind": "route",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.22,
+          0.0
+        ],
+        "clearance_mm": 53,
+        "summary": "reroute 220 mm north at 1.60-2.70 m"
+      },
+      "advice": "The route around the north face is the buildable fix; the modeller for the compressed-air pipe should implement the side step and confirm no other services occupy that 0.20-0.29 m corridor.",
+      "failures": [
+        "Shift whole pipe run north 220 mm: collision with IfcWall (-200 mm), collision with IfcSwitchingDevice (-100 mm), collision with IfcUnitaryControlElement (-70 mm), collision with IfcMember x2 (worst -50 mm)"
+      ]
+    }
+  },
+  "cell C6 air/pl302/seg3 x bldg/column/C4": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 2,
+      "seconds": 24.2,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 24,
+        "input_tokens": 64073,
+        "output_tokens": 60156,
+        "reasoning_tokens": 49692,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Detour pipe north past column C4",
+        "kind": "route",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.22,
+          0.0
+        ],
+        "clearance_mm": 53,
+        "summary": "reroute 220 mm north at 4.25-5.05 m"
+      },
+      "advice": "Prefer the local northern detour; the modeller for compressed air should build it, checking the full run stays clear if the whole-run shift is chosen.",
+      "failures": [
+        "Shift whole air run north 220 mm: collision with IfcWall (-200 mm), collision with IfcSwitchingDevice (-100 mm), collision with IfcUnitaryControlElement (-70 mm), collision with IfcMember x2 (worst -50 mm)"
+      ]
+    }
+  },
+  "cell C7 air/main x bldg/wall/west": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 4,
+      "seconds": 53.4,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 29,
+        "input_tokens": 77647,
+        "output_tokens": 71086,
+        "reasoning_tokens": 58625,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Cored \u00d8130 mm opening for air main through west wall",
+        "kind": "penetration",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "clearance_mm": 35,
+        "summary": "\u00d8130 mm opening through Wall 'Plant 2 west wall 200 blockwork (existing)'"
+      },
+      "advice": "None of these avoids the approved penetration cleanly: the 0.10 m lead-in leaves <0.11 m for bends before the wall, and over-the-top needs a 3.4 m lift. Keep the passed 130 mm cored opening with sleeve and seals; use a route only if a wall end is proven nearby by survey.",
+      "failures": [
+        "Route air main round north end of west wall: cannot reroute this element: the steps leave a straight piece shorter than 50 mm at 0.00--0.01 m (run 3.10 m; each turn takes 60 mm of run either side)",
+        "Route air main round south end of west wall: cannot reroute this element: the steps leave a straight piece shorter than 50 mm at 0.00--0.01 m (run 3.10 m; each turn takes 60 mm of run either side)",
+        "Offset air main up over top of west wall: cannot offset this element: the split points leave a piece shorter than 50 mm (run 3.10 m, each bend takes 0.06 m of run)"
+      ]
+    },
+    "wonder_better": {
+      "verified": false,
+      "options": 0,
+      "tried": 2,
+      "seconds": 95.9,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 2,
+        "input_tokens": 17750,
+        "output_tokens": 8027,
+        "reasoning_tokens": 7274,
+        "usd": 0.2315
+      },
+      "best": null,
+      "advice": "Both geometry fixes are disproportionate for a DN50 air main compared with the already-passing \u00d8130 mm cored opening; keep the sleeved, fire-stopped penetration unless structure refuses it, in which case the services designer should choose between the over-top offset and the north-end route after surveying the wall ends.",
+      "failures": [
+        "Shift main 300 mm west, then offset up over the wall: cannot combine these: step 2: each step changes a different element",
+        "Shift main 300 mm west, then route around the north end of the wall: cannot combine these: step 2: each step changes a different element"
+      ]
+    }
+  },
+  "cell C8 elec/c302 x gland/ep301-top": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 4,
+      "seconds": 63.8,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 30,
+        "input_tokens": 80335,
+        "output_tokens": 73998,
+        "reasoning_tokens": 61047,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Glanded opening for C-302 conduit through EP-301 top gland plate",
+        "kind": "penetration",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "clearance_mm": 1,
+        "summary": "\u00d834 mm opening through Plate 'EP-301 top gland plate 3 mm (cable entry)'"
+      },
+      "advice": "Top gland entry is the intended detail; if it is refused, drop outside the enclosure and enter via the side wall with the enclosure vendor and electrical designer to confirm the new gland position.",
+      "failures": [
+        "Reroute conduit to drop clear of top plate: cannot reroute this element: a vertical run cannot be rerouted yet",
+        "Shift conduit 300 mm sideways to miss plate: collision with IfcCableCarrierSegment (-100 mm), clearance with IfcSlab (+20 mm)",
+        "Shift conduit 300 mm west past plate end: collision with IfcMember (-110 mm), collision with IfcFilter (-50 mm), clearance with IfcCableCarrierSegment (+3 mm), clearance with IfcSlab (+20 mm)"
+      ]
+    },
+    "wonder_better": {
+      "verified": false,
+      "options": 0,
+      "tried": 2,
+      "seconds": 100.5,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 2,
+        "input_tokens": 20784,
+        "output_tokens": 7360,
+        "reasoning_tokens": 6663,
+        "usd": 0.2303
+      },
+      "best": null,
+      "advice": "The glanded penetration from the first try remains the intended, buildable detail; use a geometric move only if it passes cleanly and the electrical designer plus enclosure vendor accept a side entry instead of the top gland plate.",
+      "failures": [
+        "Drop conduit 340 mm south, clear of the plate's south edge: clearance with IfcSlab (+20 mm)",
+        "Move conduit north with CT-301 riser shifted east and north: collision with IfcBuildingElementProxy (-64 mm), collision with IfcMember (-40 mm), clearance with IfcPlate (+0 mm), clearance with IfcCableCarrierSegment (+3 mm), clearance with IfcElectricDistributionBoard (+3 mm), clearance with IfcSlab (+20 mm)"
+      ]
+    }
+  },
+  "northbank #042 duct": {
+    "sweep": {
+      "verified": true,
+      "options": 2,
+      "tried": 3,
+      "seconds": 44.1,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 1,
+        "input_tokens": 2342,
+        "output_tokens": 1941,
+        "reasoning_tokens": 1498,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Offset duct up 400 mm through girder opening",
+        "kind": "offset",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          0.4
+        ],
+        "clearance_mm": 50,
+        "summary": null
+      },
+      "advice": "Use the preformed opening, do not cut the transfer girder elsewhere. The mechanical modeller to make the offset and the structural engineer to confirm the opening use.",
+      "failures": [
+        "Offset duct up 375 mm through girder opening: clearance with IfcBeam (+25 mm)"
+      ]
+    }
+  },
+  "northbank #057 tray": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 2,
+      "seconds": 46.8,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 4,
+        "input_tokens": 9319,
+        "output_tokens": 7415,
+        "reasoning_tokens": 5851,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Offset tray up 250 mm through girder opening",
+        "kind": "offset",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          0.25
+        ],
+        "clearance_mm": 50,
+        "summary": null
+      },
+      "advice": "The through-opening offset is preferred as the smallest buildable fix; have the structural modeller confirm the opening is in the girder model and the electrical designer confirm bend radii and cable bend limits.",
+      "failures": [
+        "Drop whole tray run 150 mm under girder: collision with IfcWall (-200 mm), collision with IfcLightFixture x9 (worst -100 mm), collision with IfcCovering (-4 mm)"
+      ]
+    }
+  },
+  "northbank #061 cold water": {
+    "sweep": {
+      "verified": true,
+      "options": 1,
+      "tried": 2,
+      "seconds": 27.6,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 4,
+        "input_tokens": 9319,
+        "output_tokens": 7415,
+        "reasoning_tokens": 5851,
+        "usd": 0.0
+      },
+      "best": {
+        "title": "Offset main up 280 mm through girder opening",
+        "kind": "offset",
+        "model": "Muse Spark",
+        "delta_m": [
+          0.0,
+          0.0,
+          0.28
+        ],
+        "clearance_mm": 53,
+        "summary": null
+      },
+      "advice": "Use the local offset through the provided opening; the structural reviewer owns the girder opening and the plumbing modeller owns the pipe offset. If the opening cannot be used, the main must be re-routed below the girder with fall checked.",
+      "failures": [
+        "Raise whole main run 280 mm to opening level: collision with IfcWall (-200 mm), collision with IfcDamper x5 (worst -200 mm)"
+      ]
+    }
+  },
+  "northbank B1 pad footing x lift pit wall": {
+    "sweep": {
+      "verified": false,
+      "options": 0,
+      "tried": 10,
+      "seconds": 96.0,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 6,
+        "input_tokens": 14519,
+        "output_tokens": 12538,
+        "reasoning_tokens": 9790,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "No offset, trim, resize or penetration is buildable here: the footing is too short for bends, trimming cuts its body, and a wall cannot penetrate a pad. The structural engineer should choose which side has room or combine the pad with the pit base.",
+      "failures": [
+        "Trim footing edge to lift pit wall face: cannot trim this element: it is not a slender member (1.80 m long, 1.80 m across): trimming would cut its body, not tidy a joint",
+        "Shift pad footing laterally clear of wall: collision with IfcWall x2 (worst -600 mm), collision with IfcFooting (-600 mm), collision with IfcMechanicalFastener x4 (worst -350 mm), clearance with IfcPlate (+0 mm)",
+        "Drop pad footing 700 mm below pit base: collision with IfcSlab (-150 mm)",
+        "Shift pad footing 1.1 m in Y clear of pit: collision with IfcFooting (-600 mm), clearance with IfcPlate (+0 mm)",
+        "Shift lift pit wall 0.35 m clear of footing: collision with IfcFooting (-600 mm), collision with IfcWall (-200 mm), clearance with IfcSlab x2 (worst +0 mm)",
+        "Shift pad footing south clear of pit: collision with IfcFooting (-600 mm), collision with IfcWall x2 (worst -600 mm), clearance with IfcPlate (+0 mm)"
+      ]
+    },
+    "spark_again": {
+      "verified": false,
+      "options": 0,
+      "tried": 9,
+      "seconds": 79.8,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 4997,
+        "output_tokens": 5044,
+        "reasoning_tokens": 3939,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "Previous +X/+Y moves hit adjacent footings, walls and slabs at 0 mm clearance, so any shift needs structural check for spacing and pit clear size; if no shift fits the modeller should ask the structural designer to combine or notch the footing versus the pit wall.",
+      "failures": [
+        "Trim footing edge to lift pit wall face: cannot trim this element: it is not a slender member (1.80 m long, 1.80 m across): trimming would cut its body, not tidy a joint",
+        "Shift footing 0.6 m in +X away from wall: collision with IfcWall x2 (worst -600 mm), collision with IfcFooting (-600 mm), collision with IfcMechanicalFastener x4 (worst -350 mm), clearance with IfcPlate (+0 mm)",
+        "Shift footing 0.6 m in +Y away from wall: collision with IfcFooting (-600 mm), collision with IfcMechanicalFastener x4 (worst -350 mm), clearance with IfcPlate (+0 mm)",
+        "Shift lift pit wall 0.4 m away from footing: collision with IfcFooting (-600 mm), collision with IfcWall (-200 mm), clearance with IfcSlab x2 (worst +0 mm)",
+        "Shift lift pit wall 0.4 m in -X away from footing: collision with IfcFooting x2 (worst -600 mm), collision with IfcWall (-200 mm), clearance with IfcSlab x2 (worst +0 mm)",
+        "Shift footing 0.6 m in -X away from wall: collision with IfcFooting (-600 mm), collision with IfcWall x2 (worst -600 mm), collision with IfcMechanicalFastener x4 (worst -350 mm), clearance with IfcPlate (+0 mm)"
+      ]
+    },
+    "spark_brief": {
+      "verified": false,
+      "options": 0,
+      "tried": 1,
+      "seconds": 34.1,
+      "usage": {
+        "model": "muse-spark-1.3-contributor",
+        "calls": 2,
+        "input_tokens": 21984,
+        "output_tokens": 2054,
+        "reasoning_tokens": 1730,
+        "usd": 0.0
+      },
+      "best": null,
+      "advice": "No move, offset, trim, resize or penetration is buildable by ORCA here: the footing is too short for bends and trimming would cut its body. The structural engineer should resolve by relocating grid B1, notching/combining the pad with the lift pit base and ground beam, to be modelled by the structural modeller.",
+      "failures": [
+        "Trim lift pit wall end to pad footing face: cannot trim this element: it is not a slender member (1.80 m long, 1.00 m across): trimming would cut its body, not tidy a joint"
+      ]
+    },
+    "wonder_brief": {
+      "verified": true,
+      "options": 3,
+      "tried": 3,
+      "seconds": 44.9,
+      "usage": {
+        "model": "muse-wonder-1.0",
+        "calls": 1,
+        "input_tokens": 10961,
+        "output_tokens": 3779,
+        "reasoning_tokens": 3170,
+        "usd": 0.1194
+      },
+      "best": {
+        "title": "Shift pad footing 1.30 m west clear of pit and ground beam",
+        "kind": "move",
+        "model": "Muse Wonder",
+        "delta_m": [
+          -1.3,
+          0.0,
+          0.0
+        ],
+        "clearance_mm": 175,
+        "summary": null
+      },
+      "advice": "No small, structurally neutral move exists because the footing is trapped by the pit, ground beam, base plate and bolts; the west relocations above clear geometrically but detach the footing from column B1, so the structural engineer must decide on a relocated, enlarged or combined pit-base footing rather than the modeller moving either element alone.",
+      "failures": []
+    }
+  }
+}

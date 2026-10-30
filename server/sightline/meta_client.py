@@ -9,6 +9,12 @@ or a partner host for the open-weights models (Baseten: meta-models/muse-spark-o
     META_REASONING_EFFORT  low (default) | minimal | medium | high | "" for the API's default. Muse Spark reasons
                         before answering; on Northbank "low" cut a proposal from ~58 s to ~23 s (evals/README.md).
 
+A clash Muse Spark finds no verified fix for can go to a larger model for a second, longer try (`escalation_model`,
+docs/escalation.md). It bills every token, so each call's usage is counted and charged to the day's limit (spend.py):
+
+    META_ESCALATION_MODEL   muse-wonder-1.0
+    META_ESCALATION_EFFORT  medium (default) | minimal | low | high
+
 Bulk triage can run on a different host (`triage_model`):
 
     TRIAGE_API_KEY      (or BASETEN_API_KEY) turns it on; without one, triage uses Muse Spark above
@@ -23,6 +29,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -40,6 +47,60 @@ def load_env(path: Path = ENV_FILE) -> None:
         key, sep, value = line.partition("=")
         if sep and key.strip() and not key.lstrip().startswith("#"):
             os.environ.setdefault(key.strip(), value.strip())
+
+
+# Models billed per token on the Meta Model API, by id prefix (any Muse Wonder version): USD per input and per output
+# token (reasoning counts as output). Muse Spark's contributor tier and the open-weights host are not counted here.
+PRICES = {"muse-wonder": (4 / 1e6, 20 / 1e6)}
+FIXED_EFFORT = ("judge",)   # roles whose effort is their own, whatever the owner or everyone's settings say
+LABELS = {"muse-wonder": "Muse Wonder", "muse-spark": "Muse Spark", "meta-models/muse-spark-open": "Muse Spark Open"}
+
+
+def model_label(model_id: str) -> str:
+    """A model's name as people read it ("Muse Wonder"), from its id."""
+    return next((name for prefix, name in LABELS.items() if model_id.startswith(prefix)), model_id)
+
+
+class Usage:
+    """Tokens a model's calls used (both endpoints' shapes), and what they cost when the model is priced."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.calls = self.input_tokens = self.output_tokens = self.reasoning_tokens = 0
+
+    @staticmethod
+    def of(raw: dict | None) -> tuple[int, int, int]:
+        """(input, output, reasoning) tokens from a chat completions or a Responses `usage`."""
+        raw = raw or {}
+        details = raw.get("completion_tokens_details") or raw.get("output_tokens_details") or {}
+        return (int(raw.get("prompt_tokens", raw.get("input_tokens", 0)) or 0),
+                int(raw.get("completion_tokens", raw.get("output_tokens", 0)) or 0),
+                int(details.get("reasoning_tokens", 0) or 0))
+
+    def add(self, raw: dict | None) -> tuple[int, int, int]:
+        tokens = self.of(raw)
+        with self._lock:
+            self.calls += 1
+            self.input_tokens += tokens[0]
+            self.output_tokens += tokens[1]
+            self.reasoning_tokens += tokens[2]
+        return tokens
+
+    def snapshot(self) -> tuple[int, int, int, int]:
+        with self._lock:
+            return self.calls, self.input_tokens, self.output_tokens, self.reasoning_tokens
+
+    def as_dict(self, model_id: str, since: tuple[int, int, int, int] = (0, 0, 0, 0)) -> dict:
+        """The usage (since a `snapshot`, for one run on a model other runs share), and what it cost."""
+        calls, tin, tout, reasoning = (now - then for now, then in zip(self.snapshot(), since))
+        return {"model": model_id, "calls": calls, "input_tokens": tin, "output_tokens": tout,
+                "reasoning_tokens": reasoning, "usd": round(cost(model_id, tin, tout), 4)}
+
+
+def cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
+    """What a call cost in USD (0 for a model not billed per token here)."""
+    price_in, price_out = next((p for prefix, p in PRICES.items() if model_id.startswith(prefix)), (0.0, 0.0))
+    return input_tokens * price_in + output_tokens * price_out
 
 
 class ChatModel(Protocol):
@@ -79,8 +140,11 @@ class MetaChatModel:
         self.model = model or os.environ.get("META_MODEL", "muse-spark-1.3-contributor")
         self.reasoning_effort = (reasoning_effort if reasoning_effort is not None
                                  else os.environ.get("META_REASONING_EFFORT", "low"))
-        self.role = "default"  # "triage" for the bulk triage model: the owner sets its effort separately
+        self.role = "default"  # "triage" / "escalation": the owner and settings set their effort separately
         self.client = httpx.Client(timeout=timeout_s)
+        self.usage = Usage()
+        # Hears each call's cost in USD as it lands (the escalation charges the day's limit with it, spend.py).
+        self.on_cost: Callable[[float], None] | None = None
         self.strict = True  # cleared when the host rejects json_schema; then plain JSON mode is used
         # Meta's Responses endpoint streams reasoning summaries (short notes on what the model is working out), which
         # the UI shows while the agent thinks. Cleared if the host does not offer it; chat completions are used then.
@@ -90,14 +154,25 @@ class MetaChatModel:
     def effort(self) -> str | None:
         """The owner's effort for this request (owner.py), else the one set for everyone (settings.py), else this model's."""
         from . import owner, settings
+        if self.role in FIXED_EFFORT:   # a check measured at its own effort (Show it built's judges): no setting moves it
+            return self.reasoning_effort
         return owner.effort(self.role) or settings.effort_for(self.role) or self.reasoning_effort
+
+    def _count(self, raw: dict | None) -> None:
+        """Count a call's usage, and charge what it cost to `on_cost`."""
+        tokens_in, tokens_out, _ = self.usage.add(raw)
+        usd = cost(self.model, tokens_in, tokens_out)
+        if usd and self.on_cost:
+            self.on_cost(usd)
 
     def _post(self, payload: dict, *, timeout_s: float | None = None) -> dict:
         r = self.client.post(f"{self.base_url}/chat/completions", json=payload,
                              headers={"Authorization": f"Bearer {self.api_key}"},
                              **({"timeout": timeout_s} if timeout_s is not None else {}))
         r.raise_for_status()
-        return r.json()
+        body = r.json()
+        self._count(body.get("usage"))
+        return body
 
     def complete_json(self, system: str, text: str, images: list[Path] | None = None,
                       schema: dict | None = None) -> dict:
@@ -194,8 +269,10 @@ class MetaChatModel:
                     on_reasoning(event["text"].strip())
                 elif kind == "response.output_text.delta":
                     out += event.get("delta", "")
-                elif kind in ("response.failed", "error"):
-                    raise RuntimeError(f"Muse Spark failed: {json.dumps(event)[:300]}")
+                elif kind in ("response.completed", "response.incomplete", "response.failed"):
+                    self._count((event.get("response") or {}).get("usage"))   # billed however it ended
+                if kind in ("response.failed", "error"):
+                    raise RuntimeError(f"{model_label(self.model)} failed: {json.dumps(event)[:300]}")
         return json.loads(_strip_fence(out))
 
     def chat(self, messages: list[dict], tools: list[dict], *, timeout_s: float | None = None) -> dict:
@@ -225,6 +302,28 @@ def transcribe(wav: bytes, keywords: list[str] | None = None, client: httpx.Clie
     r.raise_for_status()
     body = r.json()
     return {"transcript": (body.get("transcript") or "").strip(), "duration_ms": body.get("audioDurationMs")}
+
+
+def escalation_info() -> dict:
+    """The model a second try runs on, and whether escalations are offered to this request (`settings.escalation`):
+    {model, label, mode: off | button | auto, available}."""
+    from . import settings
+    load_env()
+    model = os.environ.get("META_ESCALATION_MODEL", "muse-wonder-1.0")
+    return {"model": model, "label": model_label(model), "mode": settings.escalation(),
+            "available": bool(os.environ.get("META_API_KEY"))}
+
+
+def escalation_model(timeout_s: float = 240) -> MetaChatModel:
+    """The larger model for a second try at a clash (docs/escalation.md): Muse Wonder by default, effort medium
+    unless the owner or the settings say otherwise (role "escalation"), every call charged to the day's limit."""
+    from . import spend
+    load_env()
+    model = MetaChatModel(model=escalation_info()["model"], timeout_s=timeout_s,
+                          reasoning_effort=os.environ.get("META_ESCALATION_EFFORT", "medium"))
+    model.role = "escalation"
+    model.on_cost = spend.charge
+    return model
 
 
 def triage_model_info() -> dict:

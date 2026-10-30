@@ -10,9 +10,13 @@ import queue
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 import wave
+import zlib
 from dataclasses import asdict
+from functools import partial
+from typing import Callable
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
@@ -21,13 +25,13 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
-from . import (agents, chat, context_planner, detect, document, edits, mcp_server, owner, plans, requirements, settings,
-               step, titles, triage, voice_live)
-from .meta_client import load_env, transcribe, triage_model, triage_model_info
+from . import (agents, built, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
+               requirements, settings, spend, step, titles, triage, voice_live)
+from .meta_client import escalation_info, load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
 from .service import MODEL_SUFFIXES, MODELS, Workspace
 
@@ -160,7 +164,12 @@ class _RequestEvents:
 
 
 propose_limit = ProposeLimit.from_env()
+escalate_limit = ProposeLimit.escalate_from_env()
 chat_limit = ProposeLimit.chat_from_env()
+# Show it built (docs/show-it-built.md): pictures checked by Muse Wonder, a few cents each (SIGHTLINE_BUILT_PER_HOUR per
+# visitor, _PER_DAY for everyone); a request costs up to two rounds of two pictures and two judges each.
+built_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_BUILT_PER_HOUR", "0")),
+                           int(os.environ.get("SIGHTLINE_BUILT_PER_DAY", "0")), noun="built views")
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
 # Clash titles: one titling run per report (a few model calls for a whole report): SIGHTLINE_TITLES_PER_HOUR per visitor.
 title_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_TITLES_PER_HOUR", "0")),
@@ -201,6 +210,7 @@ class Move(BaseModel):
     moved: list[str]
     delta_m: list[float]
     clearance_m: float = 0.025
+    obstacles: list[str] = []   # what the move must clear: what the moved elements stand on is then kept (verify.supports)
 
 
 class Propose(BaseModel):
@@ -210,6 +220,36 @@ class Propose(BaseModel):
     notes: str = ""
     report_id: str | None = None  # a clash from an open report: its distance and images go to the model
     clash_id: str | None = None
+    escalate: bool = False        # a second, longer try on Muse Wonder (docs/escalation.md), reading the last one
+
+
+def escalation_refused(who: str, exempt: bool) -> tuple[int, str] | None:
+    """Why this visitor may not make a second try now, as (HTTP status, words), or None: second tries switched off,
+    the day's Muse Wonder budget spent, or the caps (a second try is one escalation and one proposal). `exempt`: the
+    owner's own requests skip the caps and the budget."""
+    if settings.escalation() == "off":
+        return 403, "Second tries with Muse Wonder are switched off."
+    why = spend.claim(escalation.ESTIMATE_USD, exempt)   # checked and held at once; the second try takes it over
+    if why:
+        return 429, why
+    if exempt:
+        return None
+    why = ProposeLimit.take_all(who, escalate_limit, propose_limit)
+    if why:
+        spend.unclaim(escalation.ESTIMATE_USD)
+        return 429, why
+    return None
+
+
+def _escalation_check(request: HTTPConnection) -> Callable[[], str | None]:
+    """`escalation_refused` for this request, for work that decides later (automatic second tries, chat)."""
+    who = client_id(request.headers, request.client.host if request.client else None)
+    exempt = owner.no_caps()
+
+    def check() -> str | None:
+        r = escalation_refused(who, exempt)
+        return r[1] if r else None
+    return check
 
 
 class Offset(BaseModel):
@@ -305,8 +345,10 @@ def _settings_state() -> dict:
 
 @app.get("/api/models")
 def models():
-    """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy."""
-    return {"triage": triage_model_info()}
+    """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy, and
+    how much a visitor may upload (the page checks before sending, and says so)."""
+    return {"triage": triage_model_info(), "escalation": escalation_info(), "built_views": settings.built_views(),
+            "model_upload_max_mb": MODEL_UPLOAD_MAX_MB, "model_upload_max_files": MODEL_UPLOAD_MAX_FILES}
 
 
 @app.get("/api/settings")
@@ -348,24 +390,73 @@ def open_scene(body: Open):
     try:
         needs = any(Path(n).suffix.lower() in step.SUFFIXES for n in body.samples)
         sid = ws.open(body.samples, classify_with=_classifier() if needs else None)
-        return {"id": sid, "files": body.samples, "step": ws.step_files(sid)}
+        return {"id": sid, "files": body.samples, "step": ws.step_files(sid), "revision": ws.scene(sid).revision}
     except FileNotFoundError as e:
         raise HTTPException(404, f"No model called {e.args[0]}.")
     except step.StepError as e:
         raise HTTPException(400, str(e))
 
 
-@app.post("/api/models/upload")
-async def upload_models(request: Request, files: list[UploadFile] = File(...)):
-    """Open your own models: IFC, or STEP (converted to IFC to check; Export gives the STEP back with the fixes).
-    Files that share coordinates open together. Capped per visitor (SIGHTLINE_MODEL_UPLOADS_PER_HOUR/DAY) and in size
-    (SIGHTLINE_MODEL_UPLOAD_MAX_MB for all files together)."""
+class _TooBig(Exception):
+    pass
+
+
+UNPACK_STEP = 1 << 20   # bytes out of the gunzip per step: a small archive of zeros never inflates in one call
+
+
+def _unpack(src, dest: Path, gz: bool, room: int) -> int:
+    """Copy `src` (an uploaded part's file) to `dest`, gunzipping it when `gz`, writing at most `room` bytes
+    (else _TooBig, as soon as it is past). A truncated archive is a zlib.error. Blocking: run it off the event loop."""
+    written = 0
+    unzip = zlib.decompressobj(16 + zlib.MAX_WBITS) if gz else None
+    with dest.open("wb") as out:
+        def put(data: bytes) -> None:
+            nonlocal written
+            written += len(data)
+            if written > room:
+                raise _TooBig
+            out.write(data)
+        while chunk := src.read(1 << 20):
+            if unzip is None:
+                put(chunk)
+                continue
+            while True:   # bounded steps until this chunk is used up and nothing is pending
+                data = unzip.decompress(chunk, UNPACK_STEP)
+                put(data)
+                chunk = unzip.unconsumed_tail
+                if unzip.eof or (not chunk and len(data) < UNPACK_STEP):
+                    break
+        if unzip is not None:
+            put(unzip.flush())
+            if not unzip.eof:
+                raise zlib.error("the archive ends before its end")
+    return written
+
+
+async def _receive_models(request: Request) -> tuple[Path, list[Path], list[str]]:
+    """Check, receive and unpack an upload of model files: IFC or STEP, each as is or gzipped by the page (`.gz`, the
+    name without it). Refused before the body is read when it has no length (411: a chunked body would be spooled
+    whole before any check) or its length alone is over the cap; the cap (SIGHTLINE_MODEL_UPLOAD_MAX_MB, all files
+    together) counts the unpacked size, checked in bounded steps off the event loop. Returns the folder (deleted with
+    the scene, or here on failure), the paths and the names."""
+    cap = MODEL_UPLOAD_MAX_MB << 20
+    try:
+        length = int(request.headers["content-length"])
+    except (KeyError, ValueError):
+        raise HTTPException(411, "Send the upload with its length (Content-Length).") from None
+    if length > cap + (1 << 20):   # compressed or not, the body is never bigger than what it unpacks to (plus a form)
+        raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.")
+    form = await request.form(max_files=MODEL_UPLOAD_MAX_FILES + 1)
+    files = [v for v in form.getlist("files") if not isinstance(v, str)]
     if not files or len(files) > MODEL_UPLOAD_MAX_FILES:
         raise HTTPException(400, f"Choose 1 to {MODEL_UPLOAD_MAX_FILES} model files.")
-    names = [Path(f.filename or "").name for f in files]
+    packed = [Path(f.filename or "").name for f in files]
+    names = [n[:-3] if n.lower().endswith(".gz") else n for n in packed]
     bad = [n for n in names if Path(n).suffix.lower() not in MODEL_SUFFIXES]
     if bad:
         raise HTTPException(400, f"{bad[0]} is not an IFC or STEP file (.ifc, .step, .stp).")
+    if len(set(names)) < len(names):
+        raise HTTPException(400, "A file was given twice.")
     refused = _take(model_upload_limit, request)
     if refused:
         raise HTTPException(429, refused)
@@ -373,29 +464,80 @@ async def upload_models(request: Request, files: list[UploadFile] = File(...)):
     root = Path(tempfile.mkdtemp(dir=MODELS))
     total, paths = 0, []
     try:
-        for f, name in zip(files, names):
+        for f, name, sent in zip(files, names, packed):
             dest = root / name
-            if dest in paths:
-                raise HTTPException(400, f"{name} was given twice.")
-            with dest.open("wb") as out:
-                while chunk := await f.read(1 << 20):
-                    total += len(chunk)
-                    if total > MODEL_UPLOAD_MAX_MB << 20:
-                        raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.")
-                    out.write(chunk)
+            await f.seek(0)
+            total += await run_in_threadpool(_unpack, f.file, dest, sent != name, cap - total)
             paths.append(dest)
+        return root, paths, names
+    except _TooBig:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(413, f"Upload is over {MODEL_UPLOAD_MAX_MB} MB.") from None
+    except zlib.error:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(400, "A compressed model file could not be unpacked.")
+    except BaseException:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+
+
+@app.post("/api/models/upload")
+async def upload_models(request: Request):
+    """Open your own models: IFC, or STEP (converted to IFC to check; Export gives the STEP back with the fixes).
+    Files that share coordinates open together. Capped per visitor (SIGHTLINE_MODEL_UPLOADS_PER_HOUR/DAY) and in size
+    (SIGHTLINE_MODEL_UPLOAD_MAX_MB for all files together, unpacked). `/upload/stream` does the same with progress."""
+    root, paths, names = await _receive_models(request)
+    try:
         needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
         classifier = _classifier() if needs else None
         sid = await run_in_threadpool(lambda: ws.open_paths(paths, root, classify_with=classifier))
-        return {"id": sid, "files": names, "step": ws.step_files(sid)}
-    except HTTPException:
-        shutil.rmtree(root, ignore_errors=True)
-        raise
+        return {"id": sid, "files": names, "step": ws.step_files(sid), "revision": ws.scene(sid).revision}
     except step.StepError as e:  # open_paths already removed the folder
         raise HTTPException(400, str(e))
     except Exception as e:  # not a model IfcOpenShell can read
         shutil.rmtree(root, ignore_errors=True)
         raise HTTPException(400, f"Could not open the models: {type(e).__name__}: {e}")
+
+
+@app.post("/api/models/upload/stream")
+async def upload_models_stream(request: Request):
+    """The same as /upload, answered as newline-delimited JSON once the files are in, so a big model's opening shows
+    progress and never meets an idle timeout: {"type": "received", "bytes"}, the STEP conversion's events, {"type":
+    "opening"}, {"type": "boxes", "done", "total"} (elements measured), {"type": "tick"} every 5 s, then {"type":
+    "done", "id", "files", "step", "revision"} or {"type": "error", "status", "detail"}. Refusals before the files
+    are in (size, count, type, allowance) are plain HTTP errors."""
+    root, paths, names = await _receive_models(request)
+    events: queue.Queue = queue.Queue()
+    events.put({"type": "received", "bytes": sum(p.stat().st_size for p in paths)})
+
+    def work():
+        try:
+            needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
+            classifier = _classifier() if needs else None
+            sid = ws.open_paths(paths, root, classify_with=classifier, on_event=events.put)
+            events.put({"type": "done", "id": sid, "files": names, "step": ws.step_files(sid),
+                        "revision": ws.scene(sid).revision})
+        except step.StepError as e:  # open_paths already removed the folder
+            events.put({"type": "error", "status": 400, "detail": str(e)})
+        except Exception as e:  # not a model IfcOpenShell can read
+            shutil.rmtree(root, ignore_errors=True)
+            events.put({"type": "error", "status": 400, "detail": f"Could not open the models: {type(e).__name__}: {e}"})
+        events.put(None)
+
+    owner.spawn(work)
+
+    def stream():
+        while True:
+            try:
+                event = events.get(timeout=5)
+            except queue.Empty:   # opening a big model can take minutes: keep the connection busy
+                yield json.dumps({"type": "tick"}) + "\n"
+                continue
+            if event is None:
+                return
+            yield json.dumps(event) + "\n"
+
+    return _ndjson(stream())
 
 
 @app.get("/api/scenes/{scene_id}")
@@ -404,8 +546,26 @@ def scene_info(scene_id: str):
     return ws.scene_info(_scene(scene_id))
 
 
+EXPORTS_KEEP_S = 3600   # written models and exports older than this are deleted (a big model's export is big)
+
+
+def _tidy_exports() -> None:
+    cutoff = time.time() - EXPORTS_KEEP_S
+    for p in EXPORTS.iterdir():
+        try:
+            if p.stat().st_mtime >= cutoff:
+                continue
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                p.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
 @app.get("/api/scenes/{scene_id}/files/{index}")
 def scene_file(scene_id: str, index: int):
+    _tidy_exports()
     paths = ws.scene(_scene(scene_id)).paths
     if not 0 <= index < len(paths):
         raise HTTPException(404, "No such file in this model set.")
@@ -419,39 +579,142 @@ def element(scene_id: str, global_id: str):
     return ws.describe(_scene(scene_id), global_id)
 
 
+@app.get("/api/scenes/{scene_id}/classes")
+def element_classes(scene_id: str):
+    """Every physical element's IFC class and name (GlobalId → [class, name]): what a built view's cutaway may take
+    away costs by class (Viewer.captureBuilt), and its caption says what was taken away by name."""
+    return ws.classes(_scene(scene_id))
+
+
+BUILT_PASS_MAX = 12_000_000   # characters per pass: a 2048 px PNG as a data URL, with room
+
+
+class BuiltBody(BaseModel):
+    look: str = Field(max_length=BUILT_PASS_MAX)      # PNG data URLs of one camera (Viewer.captureBuilt): true colours,
+    ids: str = Field(max_length=BUILT_PASS_MAX)       # one flat colour per element (index + 1, 24 bits),
+    normals: str = Field(max_length=BUILT_PASS_MAX)   # and view-space normals
+    fix_kind: str = ""       # what kind of fix it shows (a trim is not drawn: too small at this scale)
+    title: str = ""
+
+
+@app.post("/api/scenes/{scene_id}/built/stream")
+def built_stream(scene_id: str, body: BuiltBody, request: Request):
+    """Show it built (docs/show-it-built.md): Muse Image restyles the page's view of a fix and the picture is checked
+    against the model (built.make). NDJSON: drawing, gate, judging, judged, retry, then {"type": "result",
+    status: "done" | "failed", ...} or {"type": "error"}. A picture already made for the same view costs nothing."""
+    _scene(scene_id)
+    if not settings.built_views():
+        raise HTTPException(403, "Show it built is switched off.")
+    if body.fix_kind in ("trim",):
+        raise HTTPException(422, "A trim is too small to show at this scale: the model's own view shows it.")
+    try:
+        p = built.passes(body.look, body.ids, body.normals)
+    except built.Refused as e:
+        raise HTTPException(422, str(e))
+    events = _RequestEvents(request)
+    exempt = owner.no_caps()
+    # Wonder's judges when the day's budget covers them; else the pictures with Muse Spark's lighter check.
+    lighter = bool(spend.refused(built.ESTIMATE_USD, exempt))
+    hit = built.cached(p.key)
+    if hit is not None and hit.get("judge") == "Muse Spark" and not lighter:
+        hit = None   # checked the lighter way when Wonder couldn't be paid for: check it properly now
+    hold = built.PICTURES_USD if lighter else built.ESTIMATE_USD
+    claimed = False
+    if hit is None and not built.running(p.key):   # one being made now is shared, at no cost
+        why = spend.claim(hold, exempt)           # checked and held at once; the work takes it over
+        claimed = why is None
+        why = why or _take(built_limit, request)
+        if why:
+            if claimed:
+                spend.unclaim(hold)
+            raise HTTPException(429, why)
+
+    def work():
+        try:
+            if hit:
+                events.put({"type": "result", **hit})
+                return
+            with spend.held(hold):
+                out = (built.make(p, events.put, judge_model_fn=built.spark_judge_model, judges=built.SPARK_JUDGES,
+                                  judged_by="Muse Spark") if lighter else built.make(p, events.put))
+            events.put({"type": "result", **out})
+        except Exception as e:  # the models or the check failed: tell the page rather than cut the stream
+            events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        finally:
+            events.put(None)
+
+    owner.spawn(work)
+    return _ndjson(events.stream())
+
+
+@app.get("/api/built/{name}")
+def built_file(name: str):
+    """A checked picture (`<key>.jpg`) or its outline (`<key>-lines.png`), by the name a result gave."""
+    path = built.path_of(name)
+    if path is None:
+        raise HTTPException(404, "No such picture.")
+    return FileResponse(path, media_type="image/jpeg" if name.endswith(".jpg") else "image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
 @app.post("/api/scenes/{scene_id}/verify")
 def verify_move(scene_id: str, body: Move):
-    return ws.verify_move(_scene(scene_id), body.moved, body.delta_m, body.clearance_m)
+    return ws.verify_move(_scene(scene_id), body.moved, body.delta_m, body.clearance_m, body.obstacles)
+
+
+def _refuse_escalation(request: HTTPConnection, scene_id: str, body: "Propose") -> None:
+    """Refuse a second try that cannot be made (nothing may be edited: 409) before charging anything, then one that
+    the switch, the budget or the caps refuse."""
+    recommend = ws.fix_settings(scene_id, body.element_a, body.element_b).get("recommend")
+    if recommend:
+        raise HTTPException(409, f"Nothing may be edited here ({recommend}), so there is no second try to make.")
+    r = escalation_refused(client_id(request.headers, request.client.host if request.client else None),
+                           owner.no_caps())
+    if r:
+        raise HTTPException(*r)
 
 
 @app.post("/api/scenes/{scene_id}/propose")
 def propose(scene_id: str, body: Propose, request: Request):
     _scene(scene_id)
+    if body.report_id:
+        _report(body.report_id)
+    if body.escalate:
+        _refuse_escalation(request, _scene(scene_id), body)
+        try:
+            return ws.escalate(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes,
+                               report_id=body.report_id, clash_id=body.clash_id)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
     refused = _take(propose_limit, request)
     if refused:
         raise HTTPException(429, refused)
-    if body.report_id:
-        _report(body.report_id)
     return ws.propose(_scene(scene_id), body.element_a, body.element_b, body.distance_m, notes=body.notes,
-                      report_id=body.report_id, clash_id=body.clash_id)
+                      report_id=body.report_id, clash_id=body.clash_id, escalate_check=_escalation_check(request))
 
 
 @app.post("/api/scenes/{scene_id}/propose/stream")
 def propose_stream(scene_id: str, body: Propose, request: Request):
     """The same as /propose, as newline-delimited JSON events while it works: the agent's progress
-    (see agent.resolve), then {"type": "result", ...} or {"type": "error", "detail": ...}."""
+    (see agent.resolve; a second try adds {"type": "escalating", "model", "first"} and names its model on every
+    event), then {"type": "result", ...} or {"type": "error", "detail": ...}."""
     _scene(scene_id)
     if body.report_id:
         _report(body.report_id)
-    refused = _take(propose_limit, request)
-    if refused:
-        raise HTTPException(429, refused)
+    if body.escalate:
+        _refuse_escalation(request, _scene(scene_id), body)
+    else:
+        refused = _take(propose_limit, request)
+        if refused:
+            raise HTTPException(429, refused)
+    check = _escalation_check(request)
     events: queue.Queue = queue.Queue()
 
     def work():
         try:
-            result = ws.propose(scene_id, body.element_a, body.element_b, body.distance_m, notes=body.notes,
-                                report_id=body.report_id, clash_id=body.clash_id, on_event=events.put)
+            run = ws.escalate if body.escalate else partial(ws.propose, escalate_check=check)
+            result = run(scene_id, body.element_a, body.element_b, body.distance_m, notes=body.notes,
+                         report_id=body.report_id, clash_id=body.clash_id, on_event=events.put)
             events.put({"type": "result", **result})
         except Exception as e:  # the model or the check failed: tell the browser rather than cut the stream
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
@@ -466,9 +729,18 @@ def propose_stream(scene_id: str, body: Propose, request: Request):
     return _ndjson(stream())
 
 
+def _with_patch(scene_id: str, kept) -> dict:
+    """Keep a fix (`kept()` returns the Workspace's reply, with "changed") and add what the page needs to update its
+    model in place (`Workspace.patch`)."""
+    with ws.lock:   # one request's edits between `before` and the patch, never another tab's
+        before = ws.scene(scene_id).revision
+        r = kept()
+        return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
+
+
 @app.post("/api/scenes/{scene_id}/apply")
 def apply(scene_id: str, body: Move):
-    return ws.apply(_scene(scene_id), body.moved, body.delta_m)
+    return _with_patch(_scene(scene_id), lambda: ws.apply(scene_id, body.moved, body.delta_m))
 
 
 class ContextObjective(BaseModel):
@@ -515,7 +787,8 @@ def context_stream(scene_id: str, body: ContextObjective, request: Request):
 def context_apply(scene_id: str, body: ContextApply):
     _scene(scene_id)
     try:
-        return context_planner.accept(ws, scene_id, body.proposal_id, body.acknowledged_conditions)
+        return _with_patch(scene_id, lambda: context_planner.accept(ws, scene_id, body.proposal_id,
+                                                                     body.acknowledged_conditions))
     except context_planner.ContextError as exc:
         raise HTTPException(exc.status, str(exc))
 
@@ -536,7 +809,7 @@ class TrimBody(BaseModel):
 @app.post("/api/scenes/{scene_id}/trim/apply")
 def apply_trim(scene_id: str, body: TrimBody):
     try:
-        return ws.apply_trim(_scene(scene_id), body.element, body.end, body.by_m)
+        return _with_patch(_scene(scene_id), lambda: ws.apply_trim(scene_id, body.element, body.end, body.by_m))
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot trim this element: {e}")
 
@@ -544,14 +817,40 @@ def apply_trim(scene_id: str, body: TrimBody):
 @app.post("/api/scenes/{scene_id}/offset/apply")
 def apply_offset(scene_id: str, body: Offset):
     try:
-        return ws.apply_offset(_scene(scene_id), body.element, body.split_m, body.dz_m)
+        return _with_patch(_scene(scene_id), lambda: ws.apply_offset(scene_id, body.element, body.split_m, body.dz_m))
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot offset this element: {e}")
+
+
+class FixApply(BaseModel):
+    option: dict
+
+
+@app.post("/api/scenes/{scene_id}/fix/apply")
+def fix_apply(scene_id: str, body: FixApply):
+    """Keep one verified option of any kind (`plans.apply`, which every kind is registered with). The page's preview
+    and before meshes are dropped: the fix is rebuilt on the server from its kind and parameters. A kind whose keeping
+    depends on the requirements decides that in its `plans.KEEP` entry, never from what the page sends."""
+    o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
+    if not isinstance(o.get("moved"), list) or not o["moved"]:
+        raise HTTPException(400, "The fix names no element.")
+    try:
+        r = _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, [o]))
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot apply this fix: {e}")
+    except (ValueError, KeyError, TypeError, IndexError) as e:
+        raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
+    # `pieces`: the first run's, as one fix of one run has always replied; `groups`: every run's (a combined fix).
+    out = {**r, "pieces": r["pieces"][0], "groups": r["groups"][0]}
+    if r.get("not_cut"):   # a penetration requested, not cut: the clash stays open until the host's team cuts it
+        out.update(cut=False, blocked_by=r["not_cut"][0]["blocked_by"])
+    return out
 
 
 @app.get("/api/scenes/{scene_id}/export")
 def export(scene_id: str):
     """The edited file. With edits in several discipline files, they come back as one zip."""
+    _tidy_exports()
     out = EXPORTS / scene_id
     out.mkdir(exist_ok=True)
     paths = ws.export(_scene(scene_id), out)
@@ -1063,9 +1362,11 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
 @app.post("/api/scenes/{scene_id}/plan/apply")
 def plan_apply(scene_id: str, body: PlanApply):
     try:
-        return plans.apply(ws, _scene(scene_id), body.options)
+        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, body.options))
     except edits.Unsupported as e:
         raise HTTPException(422, f"Cannot apply the plan: {e}")
+    except ValueError as e:
+        raise HTTPException(400, f"Cannot apply the plan: {e}")
 
 
 _chat: chat.Chat | None = None
@@ -1093,6 +1394,7 @@ def chat_turn(body: ChatTurn, request: Request):
     no_caps = owner.no_caps()
     allowed = lambda: None if no_caps else propose_limit.take(who)
     allowed_many = lambda n: None if no_caps else propose_limit.take_many(who, n)
+    escalate_allowed = _escalation_check(request)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
     events = _RequestEvents(request)
@@ -1105,7 +1407,8 @@ def chat_turn(body: ChatTurn, request: Request):
     def work():
         try:
             c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel,
-                   propose_allowed=allowed, propose_allowed_many=allowed_many, before_publish=finish)
+                   propose_allowed=allowed, propose_allowed_many=allowed_many, escalate_allowed=escalate_allowed,
+                   before_publish=finish)
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         finish()  # idempotent after successful completion; also close failed/cancelled turns
@@ -1378,6 +1681,10 @@ def mcp_hooks() -> mcp_server.Hooks:
     def charge(link: agents.Link, n: int) -> str | None:
         return None if link.owner else propose_limit.take_many(link.visitor, n)
 
+    def escalate(link: agents.Link) -> str | None:
+        r = escalation_refused(link.visitor, link.owner)
+        return r[1] if r else None
+
     def start_triage(report_id: str, scene_id: str | None, link: agents.Link):
         return _start_triage(ws.report(report_id), scene_id, lambda: charge(link, 1))
 
@@ -1390,7 +1697,7 @@ def mcp_hooks() -> mcp_server.Hooks:
         return _build_document(report, verdicts, scene_id, scope)
 
     return mcp_server.Hooks(
-        links=links, charge=charge, allow_call=lambda link: agent_call_limit.take(link.id),
+        links=links, charge=charge, escalate=escalate, allow_call=lambda link: agent_call_limit.take(link.id),
         start_triage=start_triage, triage_state=lambda rid, sid: triage_state(rid, sid),
         build_document=build_document, spawn=owner.spawn)
 

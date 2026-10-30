@@ -64,10 +64,11 @@ def test_tools_are_registered():
     tools = asyncio.run(mcp_server.build(Workspace()).list_tools())
     names = {t.name for t in tools}
     assert {"get_session", "open_models", "detect_clashes", "list_clashes", "get_clash_images", "capture_view",
-            "check_move", "check_offset", "propose_fixes", "get_job", "apply_fix", "apply_plan", "triage",
+            "check_move", "check_offset", "check_route", "check_resize", "check_penetration", "propose_fixes", "get_job", "apply_fix", "apply_plan", "triage",
             "generate_report", "export_models", "show_clash", "set_view"} <= names
     read_only = {t.name for t in tools if t.annotations and t.annotations.read_only_hint}
-    assert {"get_session", "list_clashes", "get_clash_images", "check_move", "check_offset", "capture_view"} <= read_only
+    assert {"get_session", "list_clashes", "get_clash_images", "check_move", "check_offset", "check_route",
+            "check_resize", "check_penetration", "capture_view"} <= read_only
     assert not read_only & {"propose_fixes", "apply_fix", "apply_plan", "detect_clashes", "triage", "generate_report",
                             "open_models", "find_patterns"}  # these change the model or the report, or spend
 

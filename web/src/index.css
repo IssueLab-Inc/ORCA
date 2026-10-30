@@ -448,6 +448,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .about-dialog .about { padding-top: 52px; }
 
 .badge.trim { background: #e3f4f6; color: #0b6c78; }
+.badge.route { background: #e8eefb; color: #2f4f9e; }
+.badge.resize { background: #f1e8fb; color: #64309a; }
+.badge.penetration { background: #fbebe4; color: #9a3b18; }
 
 /* When nothing passed (App.tsx NoFix) */
 .nofix { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-soft); border: 1px solid #ecd9b4; font-size: 12.5px; line-height: 1.5; }
@@ -455,6 +458,33 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .nofix p { margin: 0; }
 .nofix-blockers { margin: 2px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .nofix-actions { justify-content: flex-start; flex-wrap: wrap; }
+/* A second try on Muse Wonder (docs/escalation.md): the offer in the no-fix card, the quieter link under options, and
+   which model found each option or idea. */
+.escalate-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--radius);
+  background: var(--panel, #fff); border: 1px solid var(--accent-soft); }
+.escalate-card .hint { flex: 1 1 220px; }
+.link.better-fix { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 2px 0 6px; font-size: 12.5px; }
+/* Show it built (BuiltView.tsx): the picture over ORCA's view, a wipe between them, the model's lines on top. */
+.built { margin: 8px 0 4px; font-size: 12.5px; }
+.built.working, .built.failed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--raised); border: 1px solid var(--line); }
+.built.working p, .built.failed p { margin: 0; }
+.built-look { width: 100%; max-width: 360px; border-radius: 6px; opacity: .55; filter: saturate(.6); }
+.built-stage { position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--line-soft);
+  border: 1px solid var(--line); }
+.built-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.built-lines { mix-blend-mode: multiply; opacity: .9; pointer-events: none; }
+.built-wipe { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff;
+  box-shadow: 0 0 0 1px rgba(16, 24, 40, .35); pointer-events: none; }
+.built-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.built-slider { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 200px; color: var(--muted); font-size: 12px; }
+.built-slider input { flex: 1; }
+.built-tools .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.built figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.built figcaption .hint { width: 100%; }
+.chip.model { background: var(--bg); color: var(--muted); }
+.chip.model.wonder { background: #efe8fb; color: #5b3c99; }
+.steps .chip.model { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; }
 .proof-strip { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--ok-soft); font-size: 12px; font-weight: 600; }
 .proof-strip .why { font-weight: 500; }
 .impact-bar { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); font-size: 12.5px; }
@@ -765,6 +795,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .req-movers { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); counter-reset: mover; }
 .req-movers li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 10px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; counter-increment: mover; }
 .req-movers li:last-child { border-bottom: 0; }
+.req-pens { list-style: none; margin: 0 0 6px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.req-pens > li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 10px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+.req-pens > li:last-child { border-bottom: 0; }
+.req-kinds { list-style: none; margin: 0; padding: 0 0 2px 12px; flex-basis: 100%; font-size: 12px; }
+.req-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .req-mover-name { font-weight: 600; font-size: 13px; }
 .req-mover-name::before { content: counter(mover) "."; color: var(--muted); font-weight: 500; margin-right: 6px; font-variant-numeric: tabular-nums; }
 .req-mover-ctl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }

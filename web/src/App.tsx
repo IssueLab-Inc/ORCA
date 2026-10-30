@@ -1,15 +1,18 @@
-import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Building2, Check, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, editText, statusLine, type Progress } from "./Activity";
+import { Activity, statusLine, type Progress } from "./Activity";
+import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
+import { changeText, clearanceText, editText, framePieces, hostRows, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, LinkEvent, OpenedScene, OwnerSettings, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, BuiltResult, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
-import { addByDesign, hasByDesign, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
+import { localFile, uploadRefusal, uploadStatus } from "./uploads";
+import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About } from "./About";
@@ -24,7 +27,7 @@ import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
 import { Popover, Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
-import { Viewer, serverPointToViewer, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
+import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
 import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
@@ -33,6 +36,8 @@ import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
 type Tab = "clash" | "plan" | "chat";
+/** A fix as Show it built's capture takes it (Viewer.captureBuilt). */
+type BuiltFix = Parameters<Viewer["captureBuilt"]>[0];
 
 export function App() {
   const host = useRef<HTMLDivElement>(null);
@@ -172,7 +177,21 @@ export function App() {
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
   // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
-  useEffect(() => { api.models().then((m) => setTriageModel(m.triage)).catch(() => undefined); }, [ownerSettings]);
+  // Whether a clash Muse Spark could not fix may go to Muse Wonder for a second try (docs/escalation.md).
+  const [escalation, setEscalation] = useState<EscalationInfo | null>(null);
+  const [modelsAsked, setModelsAsked] = useState(0);   // ask again after the owner changes a setting for everyone
+  useEffect(() => {
+    api.models().then((m) => {
+      setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); setEscalation(m.escalation ?? null);
+      setBuiltOn(!!m.built_views);
+    }).catch(() => undefined);
+  }, [ownerSettings, modelsAsked]);
+  const canEscalate = !!escalation?.available && escalation.mode !== "off";
+  // Show it built (docs/show-it-built.md): pictures of fixes, only while the switch is on for this visitor.
+  const [builtOn, setBuiltOn] = useState(false);
+  const wonder = escalation?.label ?? "Muse Wonder";
+  // How much a visitor may upload, from the server (checked here before anything is sent).
+  const [uploadMax, setUploadMax] = useState<number | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [docReady, setDocReady] = useState(false);
   const [chatAsk, setChatAsk] = useState<{ text: string; send: boolean; n: number } | undefined>(undefined);
@@ -196,6 +215,12 @@ export function App() {
   const [viewContext, setViewContext] = useState(false);
   // Invalidate callbacks immediately when replacement starts, before the new scene ID arrives.
   const sceneEpoch = useRef(0);
+  // The server's revision of the open scene this page's model shows: a kept fix is patched in place only from here.
+  const sceneRevision = useRef<number | null>(null);
+  const planRevision = useRef<number | null>(null);   // the scene's revision when the plan on screen was checked
+  // A fix kept since the plan was checked (say, one item's own second try): its joint check no longer holds.
+  const planStale = !!plan && planRevision.current != null && sceneRevision.current != null
+    && planRevision.current !== sceneRevision.current;
   const workspaceEpoch = useRef(0);
   const chatOwner = useRef(new ChatRequestOwner());
   const contextRequest = useRef(0);
@@ -399,6 +424,15 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqId]);
 
+  /** An opening's host reading becomes the rule for the host's group (a file is started from the models when there is
+   * none: the option names the group in that file). */
+  async function addPenRule(o: Option) {
+    let doc = reqSaved?.doc ?? null;
+    if (!doc && sceneId) doc = (await api.requirementsDefault(sceneId).catch(() => null))?.doc ?? null;
+    if (!doc || !o.edit) return;
+    setReqSaved({ doc: addPenetration(doc, o.edit, o.review ?? null), enabled: true });
+  }
+
   /** A pattern Muse read as by design becomes a by-design rule (a file is started from the models when there is none):
    * its clashes are settled at once, without asking the model again. */
   async function addRule(p: Pattern, v?: PatternVerdict) {
@@ -485,18 +519,169 @@ export function App() {
   function noteRecommendation(r: Recommendation, pair: readonly [string | null, string | null]) {
     const ids = clashIdsOf([pair])[0];
     if (!ids.length) return;
-    const d = r.delta_m ?? [0, 0, 0];
-    const edit = r.kind === "offset" ? `offset the middle ${Math.round(d[2] * 1000)} mm` : r.kind === "trim" ? "trim at the joint"
-      : `move [${d.map((x) => Math.round(x * 1000)).join(", ")}] mm`;
-    const ev: Evidence = { status: "recommended", title: r.title, kind: r.kind, edit, clearance: "", clearance_m: null,
+    const ev: Evidence = { status: "recommended", title: r.title, kind: r.kind, edit: recEditText(r), clearance: "", clearance_m: null,
       rationale: r.rationale, also_needs: r.also_needs, moved: [r.element], blocked_by: r.blocked_by };
     setEvidence((all) => ({ ...all, ...Object.fromEntries(ids.filter((id) => !all[id] || all[id].status === "recommended").map((id) => [id, ev])) }));
   }
 
   function evidenceOf(o: Option, status: Evidence["status"], pics: { before_img?: string; after_img?: string }): Evidence {
     return { status, title: o.title, kind: o.kind, edit: editText(o), moved: o.moved,
-      clearance: o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m), clearance_m: o.min_clearance_m ?? null,
+      clearance: clearanceText(o), clearance_m: o.min_clearance_m ?? null, ...(o.review ? { review: o.review } : {}),
       rationale: o.rationale, also_needs: o.also_needs, ...(o.meets?.length ? { meets: o.meets } : {}), ...pics };
+  }
+
+  // ------------------------------------------------------------------ Show it built (docs/show-it-built.md)
+  // A fix's picture, drawn by Muse Image from ORCA's view and checked against the model. Runs are keyed by the pair and
+  // the fix's title, so an option's picture is still there once it is accepted.
+  const [builtRuns, setBuiltRuns] = useState<Record<string, BuiltRun>>({});
+  // What is on screen now, for work that lands after the render it started in (chat's show_it_built).
+  const latest = useRef({ proposal, chosen, a, b });
+  latest.current = { proposal, chosen, a, b };
+  const sceneClasses = useRef<{ scene: string; map: Record<string, [string, string]> } | null>(null);
+  // Accepted fixes as the viewer can frame them again (a report's missing pictures), by clash id; finished results by
+  // key; pictures still being drawn.
+  const builtFixes = useRef<Record<string, { key: string; title: string; fix: BuiltFix; pair: [string, string] }>>({});
+  const builtDone = useRef<Record<string, BuiltResult>>({});
+  const builtPending = useRef(new Map<string, Promise<BuiltResult | null>>());
+  useEffect(() => {
+    if (!builtOn || !sceneId || sceneClasses.current?.scene === sceneId) return;
+    api.classes(sceneId).then((map) => { sceneClasses.current = { scene: sceneId, map }; }).catch(() => undefined);
+  }, [builtOn, sceneId]);
+  useEffect(() => {
+    builtFixes.current = {}; builtDone.current = {}; builtPending.current = new Map(); setBuiltRuns({});
+  }, [sceneId]);
+  /** A picture's key: the pair and the fix itself (kind, numbers, its edit), never just its title, which two
+   * different fixes can share. */
+  const builtKey = (pair: readonly [string | null, string | null], o: Option) => [[pair[0], pair[1]].sort().join("|"), o.kind, o.title,
+    JSON.stringify([o.delta_m, o.split_m ?? null, o.trim ?? null, o.edit?.key ?? o.edit?.summary ?? null])].join("|");
+  /** Show it built is for fixes big enough to see at the view's scale: not a trim or a cleanup. */
+  const buildable = (o: Option) => o.kind !== "trim" && !o.cleanup;
+  const canBuild = (o: Option) => builtOn && buildable(o);
+  /** A fix as the viewer frames it; `ids`: an applied fix's pieces (the original first), in its preview's order. */
+  const builtFix = (o: Option, applied: boolean, ids?: string[]): BuiltFix => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m,
+    pieces: o.preview?.map((m, i) => (ids?.[i] ? { ...m, global_id: ids[i] } : m)) ?? null, applied });
+
+  /** ORCA's view of a fix in the passes the picture and its check need (Viewer.captureBuilt: one task, view put back). */
+  function builtPasses(fix: BuiltFix, pair: [string, string]): BuiltPasses | null {
+    const known = sceneClasses.current?.scene === sceneId ? sceneClasses.current.map : null;
+    const v = viewer.current;
+    if (!v) return null;
+    // "" for what the server lists as not physical (a space, a provision for void): not drawn in the picture.
+    try { return v.captureBuilt(fix, pair, (g) => known ? (known[g]?.[0] ?? "") : undefined); } catch { return null; }
+  }
+
+  /** Draw a fix's picture from its passes; the run shows under `key`. Resolves with the result, null when the request
+   * failed (switched off, capped: a report can try again). */
+  function drawBuilt(key: string, passes: BuiltPasses | null, kind: string): Promise<BuiltResult | null> {
+    const sid = sceneId, map = sceneClasses.current?.map ?? {}, epoch = sceneEpoch.current;
+    const already = builtPending.current.get(key);
+    if (already) return already;   // being drawn: one request, one charge
+    if (!sid || !passes) {
+      setBuiltRuns((r) => ({ ...r, [key]: { status: "failed", step: "", look: "", cut: "", error: "Nothing of the fix is in view to draw." } }));
+      return Promise.resolve(null);
+    }
+    const cut = cutText(passes.cut, passes.sectioned, (g) => map[g]?.[0]);
+    const set = (patch: Partial<BuiltRun>) => {
+      if (sceneEpoch.current !== epoch) return;   // another scene now: this picture belongs to none of it
+      setBuiltRuns((r) => ({ ...r, [key]: { ...(r[key] ?? { status: "working", step: "", look: passes.look, cut }), ...patch } }));
+    };
+    set({ status: "working", step: "Muse Image is drawing two pictures from ORCA's view…", look: passes.look, cut, result: undefined, error: undefined });
+    const work = api.built(sid, { look: passes.look, ids: passes.ids, normals: passes.normals }, kind, (e) => set({ step: builtStep(e) }))
+      .then((res) => {
+        if (sceneEpoch.current !== epoch) return null;
+        builtDone.current[key] = res; set({ status: res.status === "done" ? "done" : "failed", result: res }); return res;
+      })
+      .catch((e) => { set({ status: "failed", error: (e as Error).message }); return null; })
+      .finally(() => { if (builtPending.current.get(key) === work) builtPending.current.delete(key); });
+    builtPending.current.set(key, work);
+    return work;
+  }
+
+  /** A kept fix's picture again (or for the first time), framed on the model as it now is. */
+  function redrawKept(clashId: string) {
+    const f = builtFixes.current[clashId];
+    if (!f) return;
+    const ids = Object.entries(builtFixes.current).filter(([, g]) => g.key === f.key).map(([id]) => id);
+    void drawBuilt(f.key, builtPasses(f.fix, f.pair), f.fix.kind).then((res) => noteBuilt(ids, f.title, res));
+  }
+
+  /** Chat's show_it_built: the chosen option of the clash on screen, else its kept fix. */
+  function builtFromChat(clashId: string) {
+    const { proposal: p, chosen: k, a: x, b: y } = latest.current;
+    const o = p && k != null ? p.options[k] : null;
+    const m = matches?.[clashId];
+    const same = !!m && !!x && !!y && [m.a, m.b].sort().join("|") === [x, y].sort().join("|");   // the option is this clash's
+    if (o && same && canBuild(o)) { void drawBuilt(builtKey([x!, y!], o), builtPasses(builtFix(o, false), [x!, y!]), o.kind); return; }
+    if (builtFixes.current[clashId]) { redrawKept(clashId); return; }
+    setError("Nothing to draw for that clash yet: propose fixes and pick one, or accept one, then ask again.");
+  }
+
+  /** The chosen option's picture (the button on its card). */
+  function showBuilt(o: Option) {
+    if (!a || !b || !canBuild(o)) return;
+    void drawBuilt(builtKey([a, b], o), builtPasses(builtFix(o, false), [a, b]), o.kind);
+  }
+
+  /** A kept fix's picture (or why there is none) on its clashes' evidence: the PDF's third picture. */
+  function builtEvidence(ev: Evidence, res: BuiltResult | null | undefined): Evidence {
+    if (!res) return ev;
+    return res.status === "done" && res.image_url ? { ...ev, built_img: res.image_url, built_note: undefined }
+      : { ...ev, built_note: res.why ?? "Muse Image couldn't keep to the model here." };
+  }
+  function noteBuilt(ids: string[], title: string, res: BuiltResult | null) {
+    if (res) setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.filter((id) => ev[id]?.title === title).map((id) => [id, builtEvidence(ev[id], res)])) }));
+  }
+
+  /** At accept: the fix's picture in the background, from the passes taken before it was applied (or the option's own
+   * picture, if one was drawn), and the fix kept so a report can frame it again. */
+  function buildAccepted(o: Option, pair: [string, string], ids: string[], passes: BuiltPasses | null, pieces?: string[]) {
+    if (!buildable(o)) return;
+    const key = builtKey(pair, o);
+    const runs = o.kind === "offset" || o.kind === "route" || o.kind === "resize";
+    // Kept whether or not the switch is on, so a report drawn after it goes on can frame this fix again.
+    for (const id of ids) builtFixes.current[id] = { key, title: o.title, fix: builtFix(o, true, runs ? pieces : undefined), pair };
+    if (!builtOn) return;
+    const made = builtDone.current[key], drawing = builtPending.current.get(key);
+    if (made?.status === "done") noteBuilt(ids, o.title, made);
+    else if (drawing) void drawing.then((res) => noteBuilt(ids, o.title, res));
+    else if (passes) void drawBuilt(key, passes, o.kind).then((res) => noteBuilt(ids, o.title, res));
+  }
+
+  /** Before a report: the pictures still drawing, and those of accepted fixes that have none (switched on later, or
+   * capped then), at most 10 at once. Returns the evidence with every picture that came. */
+  async function prepareReport(onStep: (done: number, total: number) => void): Promise<Record<string, Evidence>> {
+    if (!builtOn) return evidence;
+    const keys = new Map<string, string[]>();
+    for (const id of Object.keys(evidence)) {
+      const ev = evidence[id], f = builtFixes.current[id];
+      if (ev.status === "accepted" && f && !ev.built_img && !ev.built_note && !builtDone.current[f.key])
+        keys.set(f.key, [...(keys.get(f.key) ?? []), id]);
+    }
+    const waiting = [...keys].filter(([key]) => !builtPending.current.has(key));
+    const todo = waiting.slice(0, 10);
+    const later = waiting.slice(10).flatMap((entry) => entry[1]);   // at most 10 drawn for one report: the rest say so
+    const withLater = (all: Record<string, Evidence>) => ({ ...all, ...Object.fromEntries(later.map((id) => [id,
+      { ...all[id], built_note: "Not drawn for this report (at most 10 at once); building the report again draws the next ones." }])) });
+    const pending = [...builtPending.current.values()];
+    const total = todo.length + pending.length;
+    if (!total) return withLater(withBuilt(evidence));
+    let done = 0;
+    onStep(0, total);
+    await Promise.all([
+      ...pending.map((w) => w.then(() => onStep(++done, total))),
+      ...todo.map(([key, ids]) => {
+        const f = builtFixes.current[ids[0]];
+        return drawBuilt(key, builtPasses(f.fix, f.pair), f.fix.kind).then((res) => { noteBuilt(ids, f.title, res); onStep(++done, total); });
+      }),
+    ]);
+    return withLater(withBuilt(evidence));
+  }
+  /** Evidence with every finished picture of its kept fix (state may not have caught up with the last ones yet). */
+  function withBuilt(all: Record<string, Evidence>): Record<string, Evidence> {
+    return Object.fromEntries(Object.entries(all).map(([id, ev]) => {
+      const f = builtFixes.current[id];
+      return [id, f && ev.status === "accepted" && ev.title === f.title ? builtEvidence(ev, builtDone.current[f.key]) : ev];
+    }));
   }
 
   function captureContext(p: ContextProposal): { before_img?: string; after_img?: string } {
@@ -618,17 +803,17 @@ export function App() {
   useEffect(() => {
     const v = viewer.current;
     if (!v || !plan || !viewPlan) return;
-    const meshes = planOptions.flatMap((o) => (o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : []));  // moves and trims: their pairs
-    const pairs = plan.items.flatMap((it) => it.option && it.option.kind !== "offset"
+    const meshes = planOptions.flatMap((o) => framePieces(o));  // moves and trims: their pairs
+    const pairs = plan.items.flatMap((it) => it.option && !framePieces(it.option).length
       ? movedPairs(it.option.moved, [it.element_a, it.element_b, ...(it.others ?? [])]) : []);
     if (meshes.length || pairs.length) v.frameFix(meshes, pairs);
     else if (plan.hub) v.frame([plan.hub.hub.global_id, ...plan.hub.partners.map((p) => p.global_id)]);
   }, [planOptions, plan, viewPlan]);
 
   function frameFix(o: { kind: string; moved: string[]; preview: Mesh[] | null }, sides: string[]) {
-    // An offset: its risers and middle piece. A move: where it now meets the other side. A trim: the joint it changes.
-    const meshes = o.kind === "offset" && o.preview ? o.preview.slice(1, -1) : [];
-    return !!viewer.current?.frameFix(meshes, o.kind === "offset" ? [] : movedPairs(o.moved, sides));
+    // A split run: its new pieces. A move: where it now meets the other side. A trim: the joint it changes.
+    const meshes = framePieces(o);
+    return !!viewer.current?.frameFix(meshes, meshes.length ? [] : movedPairs(o.moved, sides));
   }
 
   function clearManual() { ++previewRequest.current; setManual(null); setManualPreview(null); }
@@ -659,12 +844,27 @@ export function App() {
       : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`);
     setError(null); resetWork(false, true);
     try {
-      const { id, files, step } = existing ?? (upload ? await api.uploadModels(source as File[]) : await api.open(source as string[]));
+      if (upload && !existing) {
+        const refusal = uploadRefusal(source as File[], uploadMax);
+        if (refusal) throw new Error(refusal);
+      }
+      const { id, files, step, revision } = existing ?? (upload
+        ? await api.uploadModelsStream(source as File[], (e) => {
+          const line = uploadStatus(e, hasStep);
+          if (line && sceneEpoch.current === epoch) setBusy(line);
+        })
+        : await api.open(source as string[]));
       if (sceneEpoch.current !== epoch) return;
-      const bytes = await Promise.all(files.map((_, i) => api.file(id, i)));
+      if (upload) setBusy("Drawing the models…");
+      // An uploaded IFC is parsed from the visitor's own file; a STEP comes back converted, samples come from the server.
+      const bytes = await Promise.all(files.map(async (_, i) => {
+        const local = upload ? localFile(source as File[], files, step, i) : null;
+        return local ? new Uint8Array(await local.arrayBuffer()) : api.file(id, i);
+      }));
       if (sceneEpoch.current !== epoch) return;
       const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch);
       if (sceneEpoch.current !== epoch || !stats) return;
+      sceneRevision.current = revision ?? null;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
@@ -943,8 +1143,9 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  /** Start showing the agent's progress; returns the handler for its events and a function to call when done. */
-  function trackAgent() {
+  /** Start showing the agent's progress; returns the handler for its events and a function to call when done. With
+   * `first` (a second try), the first try's ideas stay in the activity table and the second's are numbered after them. */
+  function trackAgent(first: Proposal | null = null) {
     directContext.current?.retire();
     clearManual();
     const run = ++agentRun.current;
@@ -952,15 +1153,31 @@ export function App() {
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
     setError(null); setChosen(null); setViewPlan(false); setViewContext(false); setReplaying(false);
     const t = Date.now();
-    let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null };
+    let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null,
+      ...(first ? { model: wonder, offset: first.attempts.length } : {}) };
     setProgress(p); setNow(t);
-    setProposal({ understanding: "", options: [], attempts: [] });
+    setProposal(first ? { understanding: first.understanding, options: [], attempts: first.attempts, advice: first.advice }
+      : { understanding: "", options: [], attempts: [] });
     setThoughts([]);
-    pilot.current?.start();
+    pilot.current?.start(first ? wonder : undefined);
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
+    let attempts = first?.attempts.length ?? 0;
     const onEvent = (e: AgentEvent) => {
       if (!live()) return;
       pilot.current?.event(e);
+      // A second try starting in the same stream (automatic): its ideas are numbered after the first's.
+      if (e.type === "escalating") {
+        const seed = !first && !attempts && e.first_try?.attempts.length ? e.first_try : null;
+        if (seed) {   // a try the page didn't watch (a plan's item): its ideas lead the table
+          attempts = seed.attempts.length;
+          setProposal((q) => q && { ...q, understanding: seed.understanding, advice: seed.advice, attempts: seed.attempts });
+        }
+        update({ model: e.model, offset: attempts, round: 1, modelSeconds: [] }); setThoughts([]);
+        pilot.current?.model(e.model, attempts);
+      }
+      else if (e.model && e.model !== p.model && p.offset == null) update({ model: e.model });
+      if (e.type === "attempt") attempts += 1;
+      if (e.type === "note") setThoughts((t) => [...t, { round: p.round, text: e.text }]);   // e.g. why no second try
       if (e.type === "reasoning") setThoughts((t) => [...t, { round: e.round, text: e.text }]);
       if (e.type === "thinking") update({ round: e.round, phase: "thinking", thinkingSince: Date.now(), checking: null });
       if (e.type === "ideas") {
@@ -978,6 +1195,8 @@ export function App() {
       const show = () => {
         if (!live()) return;
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
+        // A second try that failed or was refused: the first try's fixes stand.
+        else if (first) { setProposal(first); setChosen(first.options.length ? 0 : null); }
         if (result?.recommendation) noteRecommendation(result.recommendation, [a, b] as const);
         update({ phase: "done", checking: null }); setNow(Date.now());
       };
@@ -995,18 +1214,33 @@ export function App() {
     return { onEvent, finish, live, retire };
   }
 
-  async function propose() {
-    if (!sceneId || !a || !b || busy) return;
+  /** Propose fixes for the pair (Muse Spark, up to three rounds). */
+  function propose() { return runProposal(false); }
+  /** A second, longer try on Muse Wonder, reading this try (docs/escalation.md): after no fix, or for a better one. */
+  function escalate() { return runProposal(true); }
+
+  /** A failed Fix-together item: its clash, then a second try on it (reading the plan's try at that pair). */
+  function escalateItem(it: PlanItem) {
+    const c = report?.clashes.find((x) => it.clash_ids.includes(x.id)) ?? null;
+    if (c) selectClash(c); else { resetWork(); setA(it.element_a); setB(it.element_b); }
+    setViewPlan(false); showClashTab();
+    void runProposal(true, { a: it.element_a, b: it.element_b, clash: c });
+  }
+
+  /** `pick`: a pair other than the one shown (a plan's item; the page's selection catches up as this runs). */
+  async function runProposal(second: boolean, pick?: { a: string; b: string; clash: ReportClash | null }) {
+    const ea = pick ? pick.a : a, eb = pick ? pick.b : b, on = pick ? pick.clash : clash;
+    if (!sceneId || !ea || !eb || busy) return;
     replaceChatWork();
-    const tracker = trackAgent(); directAgent.current = tracker;
+    const tracker = trackAgent(second && !pick ? proposal : null); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
-    const from = clash && report ? { report_id: report.id, clash_id: clash.id } : undefined;
+    const from = on && report ? { report_id: report.id, clash_id: on.id } : undefined;
     // A clash ORCA found: give the agent its views, as a Navisworks report would (waiting a few seconds at most).
-    if (clash && report?.origin === "sightline" && !clash.images.length && !views[clash.id])
-      await Promise.race([captureViews(report.id, clash.id, a, b), new Promise((r) => setTimeout(r, 4000))]);
+    if (on && report?.origin === "sightline" && !on.images.length && !views[on.id])
+      await Promise.race([captureViews(report.id, on.id, ea, eb), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
-    try { result = await api.proposeStream(sceneId, a, b, from, onEvent); }
+    try { result = await api.proposeStream(sceneId, ea, eb, from, onEvent, second); }
     catch (e) { if (agentRun.current === run) setError((e as Error).message); }
     finally { finish(result); }
   }
@@ -1105,7 +1339,11 @@ export function App() {
         state: e.status, ok: e.ok, note: e.status === "thinking" ? "Muse Spark is looking…" : e.status === "checking" ? `checked: ${e.attempt}` : e.title } } }));
       if (e.type === "checking_plan") update((r) => ({ ...r, phase: "checking" }));
     };
-    const finish = (p: Plan | null) => { if (!live()) return; if (p) setPlan(p); update((r) => ({ ...r, phase: "done" })); setNow(Date.now()); };
+    const finish = (p: Plan | null) => {
+      if (!live()) return;
+      if (p) { setPlan(p); planRevision.current = sceneRevision.current; }   // what its joint check was made on
+      update((r) => ({ ...r, phase: "done" })); setNow(Date.now());
+    };
     const retire = () => {
       if (!live()) return;
       const retiredRequest = ++planRequest.current, owned = run;
@@ -1134,40 +1372,73 @@ export function App() {
   }
 
   async function acceptPlan() {
-    if (!sceneId || !plan || busy) return;
+    if (!sceneId || !plan || busy || planStale) return;
     replaceChatWork(); retireDirectWork(); clearManual();
     const epoch = sceneEpoch.current;
     const live = () => sceneEpoch.current === epoch;
     const items = plan.items.filter((i) => i.option && (plan.check.passed || plan.check.items[i.key]?.passed));
     setBusy(`Applying ${items.length} fix${items.length > 1 ? "es" : ""}…`);
     const pics = captureFix(items.map((i) => i.option!), "#1f9d3a");
+    const built = items.map((i) => {
+      const key = builtKey([i.element_a, i.element_b], i.option!);
+      return canBuild(i.option!) && builtDone.current[key]?.status !== "done" && !builtPending.current.has(key)
+        ? builtPasses(builtFix(i.option!, false), [i.element_a, i.element_b]) : null;
+    });
     try {
-      const { files, pieces } = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      const kept = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
       viewer.current?.preview([]);
-      for (const i of files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, kept, pieces, live);
       if (!live()) return;
       setEdits((e) => {
         const next = { ...e };
         for (const ps of pieces) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
         return next;
       });
-      // A merged item (one pipe through two rails) fixes its clashes with every partner.
+      // A merged item (one pipe through two rails) fixes its clashes with every partner. A penetration its host's team
+      // must cut was only asked for: its clashes stay open.
       const pairsOf = (i: PlanItem) => [i.element_b, ...(i.others ?? [])].map((o) => [i.element_a, o] as const);
-      markFixed(items.flatMap(pairsOf), items.flatMap((i) => pairsOf(i).map(() => i.option!.title)));
+      const requested = new Map((kept.not_cut ?? []).map((n) => [n.index, n.blocked_by] as const));
+      const done = items.filter((_, k) => !requested.has(k));
+      markFixed(done.flatMap(pairsOf), done.flatMap((i) => pairsOf(i).map(() => i.option!.title)));
       const groups = items.map((i) => clashIdsOf(pairsOf(i)).flat());
       setEvidence((ev) => {
         const next = { ...ev };
-        items.forEach((it, k) => { for (const id of new Set([...groups[k], ...it.clash_ids])) next[id] = evidenceOf(it.option!, "accepted", pics); });
+        items.forEach((it, k) => {
+          const why = requested.get(k);
+          for (const id of new Set([...groups[k], ...it.clash_ids])) {
+            next[id] = why == null ? evidenceOf(it.option!, "accepted", pics) : { ...evidenceOf(it.option!, "recommended", pics), blocked_by: why };
+          }
+        });
         return next;
       });
+      items.forEach((it, k) => { if (!requested.has(k)) buildAccepted(it.option!, [it.element_a, it.element_b],
+        [...new Set([...groups[k], ...it.clash_ids])], built[k], kept.groups?.[k]?.[0]); });
       setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
+  }
+
+  /** Bring the viewer up to a kept fix: patch the changed elements in place when the server sent them and this page's
+   * model is at the revision the fix started from (viewer/patch.ts); otherwise reload the files it changed. */
+  async function applyToViewer(sid: string, kept: { files: number[] } & Patch, pieces: string[][] | undefined, live: () => boolean) {
+    const origin = new Map((pieces ?? []).flatMap((ps) => ps.slice(1).map((g) => [g, ps[0]] as const)));
+    if (kept.meshes && kept.scene_id === sid && kept.revision_before != null && kept.revision_before === sceneRevision.current
+        && viewer.current?.patch(kept.meshes, origin)) {
+      sceneRevision.current = kept.revision ?? null;
+      return;
+    }
+    // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
+    // them when it doesn't know), so it never jumps to a revision whose edits it hasn't drawn.
+    const drawn = sceneRevision.current;
+    const missed = (kept.history ?? []).filter(([rev]) => drawn == null || rev > drawn).flatMap(([, files]) => files);
+    for (const i of [...new Set([...kept.files, ...missed])].sort((x, y) => x - y)) {
+      const bytes = await api.file(sid, i);
+      if (!live()) return;
+      await viewer.current!.replace(i, bytes, live);
+    }
+    if (live()) sceneRevision.current = kept.revision ?? null;
   }
 
   /** Mark every report clash of these element pairs as fixed (one pair can be reported by several tests). */
@@ -1272,13 +1543,7 @@ export function App() {
       setProposal(null); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set());
       setContext((r) => r && { ...r, accepted: true });
       viewer.current?.preview([]);
-      // Download first; a replaced scene cannot receive any of this request's geometry.
-      const files = await Promise.all(applied.files.map(async (index) => ({ index, bytes: await api.file(sid, index) })));
-      if (!live()) return;
-      for (const file of files) {
-        if (!live()) return;
-        await viewer.current!.replace(file.index, file.bytes, live);
-      }
+      await applyToViewer(sid, applied, applied.pieces, live);
       if (!live()) return;
       setContext((r) => r && { ...r, accepted: true });
       setViewContext(false); setChosen(null); setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
@@ -1286,7 +1551,7 @@ export function App() {
       if (!live()) return;
       const conflict = e instanceof ApiError && (e.status === 409 || e.status === 404);
       setContext((r) => r && { ...r, accepted: committed, stale: conflict,
-        error: committed ? `The proposal was accepted on the server, but the viewer could not reload all files: ${(e as Error).message}. Export IFC includes the accepted edits.`
+        error: committed ? `The proposal was accepted on the server, but the viewer could not show it: ${(e as Error).message}. Export IFC includes the accepted edits.`
           : conflict ? `Revision conflict or fresh checks failed: ${(e as Error).message}` : (e as Error).message });
       if (committed) setViewContext(false);
       if (conflict) setAcknowledged([]);
@@ -1301,6 +1566,7 @@ export function App() {
     chatOwner.current.invalidate();
     chatAgent.current?.retire(); chatPlan.current?.retire(); chatContext.current?.retire();
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
+    chatEscalating.current = false;
   }
   function onChatEvent(e: ChatEvent) {
     if (e.type === "thinking") directContext.current?.retire();
@@ -1322,28 +1588,45 @@ export function App() {
     if (e.type === "detect_event") onDetectEvent(e.event);
     if (e.type === "tool_result" && e.name === "detect_clashes") setDetecting(null);
     if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
+    // After select_clash has had a render to land (the chat names a clash, then asks for its picture).
+    if (e.type === "ui" && e.action === "show_it_built") { const id = e.clash_id; setTimeout(() => builtFromChat(id), 80); }
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
     }
     if (e.type === "agent") {
-      if (e.event.type === "thinking" && e.event.round === 1) chatAgent.current = trackAgent();
+      // A second try from chat: the first try's ideas stay; its own round 1 is not a new proposal.
+      // Seeded from the server's own first try (the page's may be another clash's, or older than this turn).
+      if (e.event.type === "escalating" && !chatAgent.current) {
+        const f = e.event.first_try;
+        chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: f.options ?? [] }
+          : { understanding: "", attempts: [], options: [] });
+        chatEscalating.current = true;
+      } else if (e.event.type === "escalating") chatEscalating.current = true;
+      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent();
       chatAgent.current?.onEvent(e.event);
     }
     if (e.type === "proposal") {
       setA(e.element_a); setB(e.element_b);
       (chatAgent.current ?? trackAgent()).finish(e);
-      chatAgent.current = null;
+      chatAgent.current = null; chatEscalating.current = false;
     }
     if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind); planThisTurn.current = true; }
     if (e.type === "error") chatContext.current?.fail(e.detail);
     if (e.type === "tool_result" && e.name === "explore_wider_fix" && chatContext.current?.live()) {
       setContext((r) => r && r.phase !== "done" ? { ...r, phase: "done", error: e.summary } : r);
     }
+    // A proposal tool that ended without its proposal (a second try that failed): put back what stood before.
+    if (e.type === "tool_result" && e.name === "propose_fixes" && chatAgent.current) {
+      chatAgent.current.finish(null); chatAgent.current = null;
+    }
+    if (e.type === "tool_result" && e.name === "propose_fixes") chatEscalating.current = false;
+    if (e.type === "done" || e.type === "error") chatEscalating.current = false;
     if (e.type === "done") { planThisTurn.current = false; chatContext.current = null; }
     if (e.type === "plan_event") chatPlan.current?.onEvent(e.event);
     if (e.type === "plan") { (chatPlan.current ?? trackPlan(e.kind)).finish(e); chatPlan.current = null; }
   }
   const chatPlan = useRef<ReturnType<typeof trackPlan> | null>(null);
+  const chatEscalating = useRef(false);
   const planThisTurn = useRef(false);
 
   // ------------------------------------------------------------------ an agent over MCP
@@ -1410,11 +1693,7 @@ export function App() {
       if (!sceneId) return;
       const epoch = sceneEpoch.current, live = () => sceneEpoch.current === epoch;
       staleContext(); viewer.current?.preview([]);
-      for (const i of e.files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, e, e.pieces, live);
       if (!live()) return;
       setEdits((ed) => {
         const next = { ...ed };
@@ -1508,7 +1787,7 @@ export function App() {
     const r = resumable;
     if (!r || busy) return;
     const { saved, info } = r;
-    const id = await open(info.files, { id: info.id, files: info.files, step: info.step });
+    const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision });
     if (!id) return;
     if (saved.report_id) {
       const rep = await loadReport(() => api.report(saved.report_id!), "your clashes");
@@ -1540,23 +1819,30 @@ export function App() {
     const pics = ids.some((id) => evidence[id]?.after_img && evidence[id]?.title === o.title)
       ? { before_img: evidence[ids[0]]?.before_img, after_img: evidence[ids[0]]?.after_img }
       : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
+    // Show it built: the view of the fix as proposed, taken now (once applied, the preview is gone).
+    const pair: [string, string] | null = a && b ? [a, b] : null;
+    const built = pair && canBuild(o) && builtDone.current[builtKey(pair, o)]?.status !== "done"
+      && !builtPending.current.has(builtKey(pair, o)) ? builtPasses(builtFix(o, false), pair) : null;
     try {
-      const { files, pieces } = await api.accept(sceneId, o);
+      const kept = await api.accept(sceneId, o);
+      // Each split run's pieces, the original first (a combined fix can split several runs).
+      const groups = kept.groups ?? (kept.pieces?.length ? [kept.pieces] : []);
       if (!live()) return;
       staleContext();
-      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, evidenceOf(o, "accepted", pics)])) }));
+      // A penetration the host's team must cut: asked for (its provision for void is in the model), not yet fixed.
+      const requested = kept.cut === false;
+      setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.map((id) => [id, requested
+        ? { ...evidenceOf(o, "recommended", pics), blocked_by: kept.blocked_by ?? "" } : evidenceOf(o, "accepted", pics)])) }));
       viewer.current?.preview([]);
-      for (const i of files) {
-        const bytes = await api.file(sceneId, i);
-        if (!live()) return;
-        await viewer.current!.replace(i, bytes, live);
-      }
+      await applyToViewer(sceneId, kept, groups, live);
       if (!live()) return;
-      if (pieces?.length) {
-        const [first, ...added] = pieces;
-        setEdits((e) => ({ ...e, [first]: [...(e[first] ?? []), ...added] }));
-      }
-      markFixed([[a, b]], [o.title]);
+      setEdits((e) => {
+        const next = { ...e };
+        for (const ps of groups) if (ps.length) { const [first, ...added] = ps; next[first] = [...(next[first] ?? []), ...added]; }
+        return next;
+      });
+      if (!requested) markFixed([[a, b]], [o.title]);
+      if (!requested && pair) buildAccepted(o, pair, ids, built, groups[0]);
       resetWork(); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
   }
@@ -1569,7 +1855,7 @@ export function App() {
     const element = a, delta = [0, 0, manualDz];
     const live = () => sceneEpoch.current === epoch && workspaceEpoch.current === workspace && previewRequest.current === request;
     try {
-      const v = await api.verify(sceneId, [element], delta);
+      const v = await api.verify(sceneId, [element], delta, b && b !== element ? [b] : []);
       if (!live()) return;
       setViewContext(false); setViewPlan(false); setChosen(null);
       setManual(v); setManualPreview({ element, delta });
@@ -1736,11 +2022,7 @@ export function App() {
           <dt>Before</dt><dd>{measure && measure !== "busy" && measure.distance_m != null ? `overlap ${mm(measure.distance_m)}` : "clashing"}</dd>
           <dt>After</dt><dd className="ok">{option.kind === "trim" ? "clear: the two now butt at the joint"
             : `clear${option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}`}</dd>
-          <dt>Change</dt><dd>{option.kind === "offset" && option.split_m
-            ? `${(option.split_m[1] - option.split_m[0]).toFixed(2)} m of it ${option.delta_m[2] > 0 ? "raised" : "lowered"} ${Math.abs(Math.round(option.delta_m[2] * 1000))} mm; ${offsetParts(option.preview?.length ?? 5)}`
-            : option.kind === "trim" && option.trim
-              ? `one end cut back ${Math.round(option.trim.by_m * 1000)} mm; nothing moves`
-              : `${option.moved.length} element${option.moved.length > 1 ? "s" : ""} moved ${option.delta_m.map((v) => mm(v)).join(" · ")}`}</dd>
+          <dt>Change</dt><dd>{changeText(option)}</dd>
         </dl>
       ) : activeContext && contextProposal ? (
         <dl className="diff"><dt>Wider fix</dt><dd>{contextProposal.edits.length} coordinated edits shown together</dd>
@@ -1785,7 +2067,9 @@ export function App() {
       : option && clash ? { text: <><b>{chosen! + 1}</b> · {option.title}</>,
         action: { label: option.cleanup ? "Accept cleanup" : "Accept", run: () => void accept(option), disabled: !!busy, tour: "accept" } }
       : proposal && progress?.phase === "done" && !proposal.options.length ? { text: "No verified fix: see why",
-        action: { label: "See why", run: () => { showClashTab(); raise(); } } }
+        action: canEscalate && !proposal.escalated && !proposal.recommendation
+          ? { label: `Ask ${wonder.replace(/^Muse /, "")}`, run: () => { showClashTab(); void escalate(); }, disabled: !!busy }
+          : { label: "See why", run: () => { showClashTab(); raise(); } } }
       : clash && shownClash && (fixes[clash.id] || reviewed[clash.id]) ? {
         text: <><CircleCheck size={15} aria-hidden className="ok" /> <b>#{shownClash.number}</b> {fixes[clash.id] ? "fixed" : "reviewed"}{nextClash ? "" : ": nothing left open"}</>,
         action: nextClash ? { label: "Next clash", run: () => { setTab("clash"); selectClash(nextClash); } } : undefined }
@@ -1816,7 +2100,7 @@ export function App() {
     <p className="pop-title">Or your own</p>
     <button className="pop-item" disabled={!!busy} onClick={() => { close(); modelInput.current?.click(); }}>
       <Upload size={14} aria-hidden /> Upload models (IFC or STEP)…</button>
-    <p className="hint">Up to 150 MB together. A STEP machine is converted to IFC to check; Export gives your STEP back
+    <p className="hint">{uploadMax ? `Up to ${uploadMax} MB together.` : "Several files open together."} A STEP machine is converted to IFC to check; Export gives your STEP back
       with the fixes.</p>
   </>);
   const coordinateMenu = (close: () => void) => (<>
@@ -1847,7 +2131,7 @@ export function App() {
         {landing && layout === "tablet" && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {agentLink && <button className="btn agent-pill" onClick={() => setAgentOpen(true)} aria-label={`Agent connected · ${timeLeft(agentLink, now)} left`}><Bot size={16} aria-hidden /></button>}
-        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
+        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
         {layout === "tablet" && report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }}>
           <FileText size={15} aria-hidden /> Report</button>}
         {layout === "tablet" && sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)}>
@@ -1884,8 +2168,9 @@ export function App() {
             : <><Plug size={15} aria-hidden /><span className="lbl"> Connect an agent</span></>}</button>}
         {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
           owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
-          {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}</span>}
-        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
+          {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}
+          {ownerSettings.escalation ? ` · second try ${ownerSettings.escalation}` : ""}</span>}
+        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
         {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
         {sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
@@ -1945,7 +2230,7 @@ export function App() {
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
           onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {!stats && !report && blank && (
-          <ProjectStart busy={!!busy} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
+          <ProjectStart busy={!!busy} maxMb={uploadMax} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
             onReportFolder={() => folderInput.current?.click()} onBack={() => setBlank(false)} />
         )}
         {!stats && !busy && !blank && (
@@ -2032,6 +2317,10 @@ export function App() {
             onAccept={acceptContext} onRegenerate={() => { if (context.objective) void exploreContext(context.objective); }}
             onDiscard={() => { directContext.current?.retire(); ++contextRequest.current; clearManual(); setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
+            onEscalate={canEscalate ? escalateItem : undefined} wonder={wonder} stale={planStale}
+            built={(it) => it.option ? builtRuns[builtKey([it.element_a, it.element_b], it.option)] : undefined}
+            onBuild={builtOn ? (it) => { if (it.option && canBuild(it.option)) void drawBuilt(builtKey([it.element_a, it.element_b], it.option),
+              builtPasses(builtFix(it.option, false), [it.element_a, it.element_b]), it.option.kind); } : undefined}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
             onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />}
         </>}
@@ -2039,6 +2328,23 @@ export function App() {
           {clash && report
             ? (<><ClashPanel reportId={report.id} clash={shownClash ?? clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash: shownClash ?? clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]}
               origin={report.origin} capturing={capturing === clash.id} />
+              {evidence[clash.id]?.status === "recommended" && evidence[clash.id].kind === "penetration" &&
+                <div className="recommended">
+                  <h3>Opening requested</h3>
+                  <p><b>{evidence[clash.id].title}</b> · <span className="mono">{evidence[clash.id].edit}</span></p>
+                  <p className="hint">The provision for void is in the model; the opening is not cut yet: {evidence[clash.id].blocked_by}.
+                    This clash stays open until it is.</p>
+                </div>}
+              {builtOn && evidence[clash.id]?.status === "accepted" && builtFixes.current[clash.id] && (() => {
+                const f = builtFixes.current[clash.id], run = builtRuns[f.key];
+                return <div className="built-kept">
+                  <h3>As it could look built</h3>
+                  {run ? <BuiltView run={run} onRetry={() => redrawKept(clash.id)} />
+                    : <button className="btn small" disabled={!!busy} onClick={() => redrawKept(clash.id)}
+                      data-tip="Muse Image draws ORCA's view of the kept fix as a presentation render, checked against the model. About a minute.">
+                      <Building2 size={13} aria-hidden /> Show it built</button>}
+                </div>;
+              })()}
               {(evidence[clash.id] || triage[clash.id]?.verdict === "real_clash" || (signoffs[clash.id]?.length ?? 0) > 0) &&
                 <ReviewBlock clash={clash} teams={modelTeams} signoffs={signoffs[clash.id] ?? []}
                   onAdd={(so) => addSignoff(clash.id, so)} onRemove={(i) => removeSignoff(clash.id, i)} />}
@@ -2072,20 +2378,23 @@ export function App() {
           {(proposal?.understanding || proposing) && <>
             <h2>Understanding</h2>
             {(proposal?.understanding || !thoughts.length) &&
-              <p className="understanding">{proposal?.understanding || "Muse Spark is reading the clash…"}</p>}
+              <p className="understanding">{proposal?.understanding || `${progress?.model ?? "Muse Spark"} is reading the clash…`}</p>}
           </>}
-          <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"} />
+          <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"}
+            model={progress?.model ?? proposal?.model ?? "Muse Spark"} />
           {proposal && !proposing && <h2>Verified options</h2>}
           {proposal && !proposing && proposal.recommendation && <Recommended rec={proposal.recommendation} advice={proposal.advice} requirements={proposal.requirements ?? null}
             onRequirements={() => setReqOpen(true)} />}
-          {proposal && !proposing && !proposal.options.length && !proposal.recommendation && <NoFix proposal={proposal} onRetry={propose} onFlag={clash ? () => review([clash.id], "author", "No verified fix: needs the model's author") : undefined} />}
+          {proposal && !proposing && !proposal.options.length && !proposal.recommendation && <NoFix proposal={proposal} onRetry={propose}
+            onEscalate={canEscalate && !proposal.escalated ? () => void escalate() : undefined} wonder={wonder}
+            onFlag={clash ? () => review([clash.id], "author", "No verified fix: needs the model's author") : undefined} />}
           {clash && proposal && !proposing && proposal.options.length > 0 && proposal.options.every((o) => o.cleanup) && (
             <div className="cleanup-note">
               <b>Model cleanup, not a coordination clash</b>
               <p>Both elements are in the same model, and they overlap where one frames into the other. That is often how
                 they are built (a beam cast into its footing, a transom into its mullion). Tidy the joint if the model goes
                 to fabrication or quantities; otherwise mark it as not a clash.</p>
-              {proposal.advice && <p className="why">Muse Spark: {proposal.advice}</p>}
+              {proposal.advice && <p className="why">{proposal.model || "Muse Spark"}: {proposal.advice}</p>}
               {reviewed[clash.id]
                 ? <span className="chip ok"><CircleCheck size={12} aria-hidden /> marked {reviewed[clash.id].kind === "by_design" ? "by design" : "for the author"}</span>
                 : <button className="btn small" onClick={() => review([clash.id], "by_design", "A joint inside one model: built as modelled")}>
@@ -2096,18 +2405,43 @@ export function App() {
               <button className="card-body" onClick={() => { clearManual(); setChosen(chosen === i ? null : i); }} aria-pressed={chosen === i}>
                 <span className="row"><b>{i + 1} · {o.title}</b><span className="chips">
                   {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
+                  {o.review && <span className="chip warn" data-tip={reviewText(o.review)}>{o.review} review</span>}
+                  {proposal!.escalated && <span className={`chip model ${o.model === wonder ? "wonder" : ""}`}
+                    data-tip={o.model === wonder ? `Found on the second try, by ${wonder}` : "Found on the first try"}>{o.model || "Muse Spark"}</span>}
                   <span className="chip ok"><Check size={11} aria-hidden /> verified</span></span></span>
                 <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
-                <span className="row"><span>Clearance</span><span className="mono">{o.kind === "trim" ? "butt joint" : mm(o.min_clearance_m)}</span></span>
+                <span className="row"><span>Clearance</span><span className="mono">{clearanceText(o)}</span></span>
+                {o.review && <span className="row"><span>Review</span><span>{reviewText(o.review)}</span></span>}
+                {hostRows(o).map(([k, v]) => <span key={k} className="row"><span>{k}</span><span>{v}</span></span>)}
                 <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
                 {o.meets?.length ? <span className="meets">{o.meets.map((m) => <span key={m}><Check size={11} aria-hidden /> {m}</span>)}</span> : null}
                 <span className="why">{o.rationale}</span>
                 <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} need={proposal!.clearance_m} />
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
+              {chosen === i && canBuild(o) && a && b && (() => {
+                const run = builtRuns[builtKey([a, b], o)];
+                return run ? <BuiltView run={run} onRetry={() => showBuilt(o)} />
+                  : <button className="btn small" data-tour="show-built" disabled={!!busy} onClick={() => showBuilt(o)}
+                    data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model before you see it. About a minute.">
+                    <Building2 size={13} aria-hidden /> Show it built</button>;
+              })()}
+              {chosen === i && o.kind === "penetration" && o.edit?.reading_source === "muse" && sceneId && (
+                hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group, o.edit.host_kind)
+                  ? <span className="chip ok"><Check size={11} aria-hidden /> in the requirements</span>
+                  : <button className="btn small" onClick={() => void addPenRule(o)}
+                    data-tip="Make this reading a rule for the host's group in the coordination requirements"><ClipboardPlus size={13} aria-hidden /> Add to requirements</button>)}
             </div>
           ))}
 
+          {proposal && !proposing && proposal.options.length > 0 && canEscalate && !proposal.escalated && !hideFix && (
+            <button className="link better-fix" data-tour="better-fix" disabled={!!busy} onClick={() => void escalate()}
+              data-tip={`A larger model takes a second, longer look with everything this try learned. These options stay. About a minute.`}>
+              <Sparkles size={13} aria-hidden /> Look for a better fix with {wonder}</button>)}
+          {proposal?.escalated && !proposing && proposal.usage && ownerSettings && (
+            <p className="hint mono">{wonder}: {proposal.usage.calls} call{proposal.usage.calls === 1 ? "" : "s"},
+              {" "}{Math.round(proposal.usage.input_tokens / 1000)}k in, {Math.round(proposal.usage.output_tokens / 1000)}k out
+              {" "}({Math.round(proposal.usage.reasoning_tokens / 1000)}k reasoning) · ${proposal.usage.usd.toFixed(2)}</p>)}
           {compact && (proposing || (proposal?.attempts.length ?? 0) > 0) && <details className="activity-fold">
             <summary>Agent activity · {proposal?.attempts.length ?? 0} checked</summary>
             <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
@@ -2118,7 +2452,7 @@ export function App() {
               <input id="manual-dz" type="number" step="0.05" value={manualDz} onChange={(e) => setManualDz(Number(e.target.value))} />
             </label>
             <button className="btn" disabled={!a || !sceneId || !!busy} onClick={checkManual}>Check this move</button>
-            {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
+            {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.reason ?? manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
           </details>}
           {checked.size === 0 && report && matches && !proposal && !hideFix && (
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
@@ -2208,6 +2542,7 @@ export function App() {
       {reqOpen && <RequirementsDialog sceneId={sceneId} initial={reqSaved?.doc ?? null} enabled={!!reqSaved?.enabled}
         audit={triageAudit} canDetectAgain={!!sceneId} onApply={applyRequirements} onClose={() => setReqOpen(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
+        prepare={builtOn ? prepareReport : undefined}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
         triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} onReady={() => setDocReady(true)} />}
       {lightbox && report && lightbox.clash.images[lightbox.index] &&
@@ -2277,10 +2612,7 @@ function ProofStrip({ o, rank, options, before, need = 0.025 }: { o: Option; ran
 }
 /** The requirements allow no edit here: Muse Spark's recommendation for the designer, never tried or applied. */
 function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void }) {
-  const d = rec.delta_m ?? [0, 0, 0];
-  const size = Math.round(Math.max(...d.map(Math.abs)) * 1000);
-  const change = rec.kind === "trim" ? "trim at the joint" : rec.kind === "offset" ? `offset the middle ${d[2] >= 0 ? "up" : "down"} ${Math.abs(Math.round(d[2] * 1000))} mm`
-    : size ? `move ${size} mm` : "";
+  const change = recEditText(rec);
   return (
     <div className="recommended">
       <h3>Recommended for the designer</h3>
@@ -2296,8 +2628,11 @@ function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recom
 }
 
 /** When nothing passed: what ORCA learned, so the clash reaches a person with a head start, not a dead end. */
-function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: () => void; onFlag?: () => void }) {
+function NoFix({ proposal, onRetry, onFlag, onEscalate, wonder }: {
+  proposal: Proposal; onRetry?: () => void; onFlag?: () => void; onEscalate?: () => void; wonder: string;
+}) {
   const n = proposal.attempts.length;
+  const second = proposal.escalated ? proposal.attempts.filter((t) => t.model === wonder).length : 0;
   const counts = new Map<string, number>();
   for (const t of proposal.attempts) {
     for (const cls of new Set([...t.reason.matchAll(/(?:collision|clearance) with (Ifc\w+)/g)].map((m) => m[1]))) {
@@ -2314,20 +2649,27 @@ function NoFix({ proposal, onRetry, onFlag }: { proposal: Proposal; onRetry?: ()
       <h3>No edit passed the geometry check</h3>
       <p>
         ORCA tried {n} idea{n === 1 ? "" : "s"} and left the model unchanged.
+        {second > 0 && <> {wonder} took a second, longer look and tried {second} of them.</>}
         {top.length > 0 && <> What stood in the way: {top.map(([cls, k], i) => (
           <span key={cls}>{i ? ", and " : ""}<b>{cls.replace(/^Ifc/, "")}</b> elements in {k === n ? "every attempt" : `${k} of ${n}`}</span>))}.</>}
       </p>
       {proposal.advice && <p><b>What decides it:</b> {proposal.advice}</p>}
       {blockers.length > 0 && <ul className="nofix-blockers">{blockers.map((t, i) => <li key={i}><b>{t.title}</b> — {t.reason}</li>)}</ul>}
       <p><b>What this teaches:</b> {next}</p>
+      {onEscalate && <div className="escalate-card">
+        <button className="btn primary" data-tour="escalate" onClick={onEscalate}><Sparkles size={15} aria-hidden /> Ask {wonder}</button>
+        <span className="hint">A larger model takes a second, longer look, with everything this try learned. It may move a
+          neighbouring service too. About a minute.</span>
+      </div>}
       <div className="row nofix-actions">{onRetry && <button className="btn small" onClick={onRetry}>Propose again</button>}{onFlag && <button className="btn small" onClick={onFlag}>Flag for the model's author</button>}<span className="hint">Full detail in the activity table below.</span></div>
     </div>
   );
 }
 
 
-/** Muse Spark's reasoning, summarised by the model as it thinks: live while it works, then folded away. */
-function Thinking({ notes, live, thinking }: { notes: { round: number; text: string }[]; live: boolean; thinking: boolean }) {
+/** The model's reasoning (Muse Spark, or Muse Wonder on a second try), summarised as it thinks: live while it works,
+ * then folded away. */
+function Thinking({ notes, live, thinking, model }: { notes: { round: number; text: string }[]; live: boolean; thinking: boolean; model: string }) {
   const end = useRef<HTMLLIElement | null>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }); }, [notes.length]);
   if (!notes.length && !live) return null;
@@ -2344,22 +2686,18 @@ function Thinking({ notes, live, thinking }: { notes: { round: number; text: str
   );
   if (live) return (
     <div className="thinking live" aria-live="polite">
-      <h3><Brain size={14} aria-hidden /> {thinking ? "Muse Spark is thinking" : "Muse Spark's thinking so far"}</h3>{list}
+      <h3><Brain size={14} aria-hidden /> {thinking ? `${model} is thinking` : `${model}'s thinking so far`}</h3>{list}
     </div>
   );
   return (
     <details className="thinking">
-      <summary><Brain size={14} aria-hidden /> How Muse Spark reasoned <span className="hint">· {notes.length} note{notes.length === 1 ? "" : "s"}</span></summary>
+      <summary><Brain size={14} aria-hidden /> How {model} reasoned <span className="hint">· {notes.length} note{notes.length === 1 ? "" : "s"}</span></summary>
       {list}
     </details>
   );
 }
 
 /** What an offset adds, from its piece count: square corners make 5 straights; bends add four fittings (7 or 9 pieces). */
-function offsetParts(pieces: number) {
-  return pieces > 5 ? `4 bends${pieces === 9 ? " and 2 short risers" : ""}` : "square corners";
-}
-
 /** The new root causes in the order already on screen (new ones after), with any that dropped out kept as done rows. */
 function keepPlaces(prev: RootCause[] | null, next: RootCause[]): RootCause[] {
   if (!prev) return next;

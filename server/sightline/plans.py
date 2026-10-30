@@ -12,7 +12,6 @@ accordingly, and checks the combined result.
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +43,7 @@ class Item:
     tried: int = 0
     error: str = ""
     others: list[str] = field(default_factory=list)  # more elements the same movable element runs into: one fix for all
+    recommended: bool = False        # the requirements allow no edit: a recommendation, and no second try to make
 
 
 @dataclass
@@ -61,20 +61,73 @@ class Plan:
 
 # ---------------------------------------------------------------------------------------------------------- checks
 
-@contextlib.contextmanager
-def _trial(scene, indexes: set[int]):
-    """Edit several files of a scene, then undo every edit (cached boxes included)."""
-    before = dict(scene.bounds())
-    models = [scene.models[i] for i in sorted(indexes)]
-    for m in models:
-        m.begin_transaction()
-    try:
-        yield
-    finally:
-        for m in models:
-            m.end_transaction()
-            m.undo()
-        scene._bounds = before
+_trial = edits.trial_files
+
+
+def _in_trial_move(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    scene.translate(o["moved"], tuple(o["delta_m"]))
+    return list(o["moved"]), set(o["moved"]), None
+
+
+def _in_trial_offset(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    off = edits.apply_offset(scene, o["moved"][0], o["split_m"][0], o["split_m"][1], o["delta_m"][2])
+    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
+    return off.pieces, set(off.pieces), {other, *it.others}
+
+
+def _in_trial_trim(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    edits.apply_trim(scene, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
+    return list(o["moved"]), set(o["moved"]), None
+
+
+def _in_trial_route(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    r = edits.apply_route(scene, o["moved"][0], o["edit"]["steps"])
+    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
+    return r.pieces, set(r.pieces), {other, *it.others}
+
+
+def _in_trial_resize(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    e = o["edit"]
+    r = edits.apply_resize(scene, o["moved"][0], e["split_m"], e["depth_m"], e.get("keep", "bottom"))
+    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
+    return r.pieces, set(r.pieces), {other, *it.others}
+
+
+def _in_trial_penetration(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    service, host = o["edit"]["service"], o["edit"]["host"]
+    pen = edits.penetration(scene, service, host, o["edit"].get("clearance_m", 0.025), o["edit"].get("fit", "annular"))
+    edits.apply_penetration(scene, pen, cut=True)
+    return [service], {service}, None   # the host is not its own: the service is checked against it
+
+
+def _in_trial_combined(scene, it: Item, o: dict):
+    a, b = o["edit"]["pair"]
+    steps = agent.combined_steps(scene, {"steps": [agent.step_candidate(st) for st in o["edit"]["steps"]]}, a, b)
+    made = agent.apply_combined(scene, steps)
+    now = [g for _, els in made for g in els]
+
+    def check(clearance_m: float, owner: dict[str, str]):
+        # As a single proposal checks it (agent.check_combined), the plan's other fixes counted as obstacles too.
+        hits, least, _ = agent.check_combined(scene, made, a, b, clearance_m, [*it.others, *owner])
+        return hits, least
+    return now, set(now), check
+
+
+# How each kind of fix is applied inside a plan's trial: → (elements to check, the fix's own elements, the obstacles
+# its shortened end pieces are checked against; None when every element it changed is checked against everything;
+# or, for a fix of several runs, its own check: (clearance, the plan's elements by fix) → (hits, least clearance)).
+IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim, "route": _in_trial_route,
+            "resize": _in_trial_resize, "penetration": _in_trial_penetration, "combined": _in_trial_combined}
+# The files a fix changes beyond its moved elements' (a penetration's provision for void goes in the service's file).
+EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]]}
+# Kinds whose element keeps the contacts it had (a trimmed member is framed into its neighbours, a service through a
+# wall stays where it is): only contacts new or worse count, and the partner must clear (a trim may touch it).
+KEEPS_CONTACTS = {"trim": lambda o: o["moved"], "penetration": lambda o: [o["edit"]["service"]]}
+
+
+def option_files(scene, o: dict) -> set[int]:
+    """The indexes of the files a fix changes."""
+    return {scene.index_of(g) for g in [*o["moved"], *EXTRA_FILES.get(o["kind"], lambda _: [])(o)]}
 
 
 def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m: float | None = None) -> dict:
@@ -89,47 +142,63 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
     need = {it.key: clearance_m if clearance_m is not None else
             ws.fix_settings(scene_id, it.element_a, it.element_b).get("clearance_m", 0.025) for it in live}
     with ws.lock:
-        files = {scene.index_of(g) for it in live for g in it.option["moved"]}
+        for it in live:
+            if it.option["kind"] not in IN_TRIAL:
+                raise ValueError(f"unknown kind of fix: {it.option['kind']!r}")
+        files = set().union(*(option_files(scene, it.option) for it in live))
         # A trimmed member already touches what it is framed into: only contacts new or worse than these count.
-        before = {it.key: {h.other: h.distance_m for h in verify.check(scene, it.option["moved"], clearance_m=need[it.key]).hits}
-                  for it in live if it.option["kind"] == "trim"}
+        before = {it.key: {h.other: h.distance_m for h in verify.check(
+                      scene, KEEPS_CONTACTS[it.option["kind"]](it.option), clearance_m=need[it.key]).hits}
+                  for it in live if it.option["kind"] in KEEPS_CONTACTS}
+        # What a moved element stands on (a post's anchors in its slab) stays a contact, not a new clash.
+        footing = {it.key: verify.supports(scene, it.option["moved"],
+                                           {it.element_a, it.element_b, *it.others} - set(it.option["moved"]),
+                                           need[it.key])
+                   for it in live if it.option.get("kind", "move") == "move"}
         with _trial(scene, files):
-            changed: dict[str, tuple[list[str], set[str], str | None]] = {}  # key → (check these, own elements, obstacle)
+            # key → (check these, own elements, obstacles of the shortened ends)
+            changed: dict[str, tuple] = {}
             for it in live:
-                o = it.option
-                if o["kind"] == "offset":
-                    off = edits.apply_offset(scene, o["moved"][0], o["split_m"][0], o["split_m"][1], o["delta_m"][2])
-                    other = it.element_b if o["moved"][0] == it.element_a else it.element_a
-                    changed[it.key] = (off.pieces, set(off.pieces), other)
-                elif o["kind"] == "trim":
-                    edits.apply_trim(scene, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
-                    changed[it.key] = (list(o["moved"]), set(o["moved"]), None)
-                else:
-                    scene.translate(o["moved"], tuple(o["delta_m"]))
-                    changed[it.key] = (list(o["moved"]), set(o["moved"]), None)
+                changed[it.key] = IN_TRIAL[it.option["kind"]](scene, it, it.option)
             owner = {g: key for key, (_, own, _) in changed.items() for g in own}
             for it in live:
                 clearance_m = need[it.key]
-                check_ids, own, obstacle = changed[it.key]
+                check_ids, own, obstacles = changed[it.key]
                 ignore = own | {c for g in own for c in scene.element(g).connected if c not in owner}
-                if obstacle:  # an offset: new pieces against everything, the shortened ends only against the obstacle
+                least = None
+                if callable(obstacles):   # a combined fix: each of its runs as it is checked alone
+                    hits, least = obstacles(clearance_m, owner)
+                    v = None
+                elif obstacles:  # split runs: new pieces against everything, the shortened ends only against the obstacles
                     v = verify.check(scene, check_ids[1:-1], clearance_m=clearance_m, ignore=ignore)
                     ends = verify.check(scene, [check_ids[0], check_ids[-1]], clearance_m=clearance_m, ignore=ignore)
-                    hits = v.hits + [h for h in ends.hits if h.other == obstacle or h.other in owner]
+                    hits = v.hits + [h for h in ends.hits if h.other in obstacles or h.other in owner]
                 else:
                     v = verify.check(scene, check_ids, clearance_m=clearance_m, ignore=ignore)
                     hits = v.hits
-                if it.key in before:  # a trim butts its partner and keeps the contacts it had
-                    partner = it.element_b if it.option["moved"][0] == it.element_a else it.element_a
+                if it.key in before:  # it keeps the contacts it had; a trim may butt its partner (and a service its
+                    # fitted gland); a service through an annular opening must clear
+                    mine = KEEPS_CONTACTS[it.option["kind"]](it.option)[0]
+                    partner = it.element_b if mine == it.element_a else it.element_a
+                    touch = it.option["kind"] == "trim" or (it.option.get("edit") or {}).get("fit") == "fitted"
                     was = before[it.key]
-                    hits = [h for h in hits if (h.distance_m < -0.002 if h.other == partner
+                    # Every element the item is for must clear (a merged item's others too); the rest only must not
+                    # get worse.
+                    meant = {partner, *it.others}
+                    hits = [h for h in hits if ((h.distance_m < -0.002 or not touch) if h.other in meant
                                                 else h.other not in was or h.distance_m < was[h.other] - 0.002)]
+                why = None
+                if it.key in footing:
+                    hits, held, why = verify.keep_supports(scene, footing[it.key], hits)
+                    if held and not hits and not why:   # its clearance is to what is near it, not what carries it
+                        v = verify.check(scene, check_ids, clearance_m=clearance_m, ignore=ignore | held)
+                        hits = v.hits
                 for h in hits:
                     if h.other in owner and owner[h.other] != it.key:
                         out["conflicts"].append({"a": it.key, "b": owner[h.other],
                                                  "detail": f"{h.kind} {h.distance_m * 1000:+.0f} mm"})
-                out["items"][it.key] = {"passed": not hits, "reason": agent._reason(hits),
-                                        "min_clearance_m": v.min_clearance_m}
+                out["items"][it.key] = {"passed": not hits and not why, "reason": why or agent._reason(hits),
+                                        "min_clearance_m": v.min_clearance_m if v is not None else least}
     out["passed"] = all(r["passed"] for r in out["items"].values()) and len(live) == len(items)
     return out
 
@@ -202,6 +271,8 @@ def _merged_label(ws: Workspace, scene_id: str, g: str, partners: list[str]) -> 
 def _direction(a) -> str:
     """"up 150 mm", "down 300 mm", "sideways 120 mm", "offset down 250 mm", "trimming it": what an idea did."""
     d = [float(x) for x in (a.delta_m or [0, 0, 0])]
+    if getattr(a, "edit", None) and a.edit.get("summary"):
+        return a.edit["summary"]
     if a.kind == "trim":
         return "trimming it"
     vertical = abs(d[2]) >= max(abs(d[0]), abs(d[1]))
@@ -243,19 +314,26 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
                 also = ("It also runs into: " + "; ".join(f"{scene.element(o).ifc_class} '{scene.element(o).name}'"
                                                           for o in it.others) + ". One fix must clear all of them.")
             clash = ws.clash_for(it.element_a, it.element_b, it.distance_m, None,
-                                 "\n".join(filter(None, [notes, (prefer or {}).get(it.key, ""), also])), report_id, cid)
+                                 "\n".join(filter(None, [notes, (prefer or {}).get(it.key, ""), also])), report_id, cid,
+                                 scene_id)
+            clash.others = list(it.others)
 
             def progress(e: dict) -> None:
                 if e["type"] == "attempt":
                     emit({"type": "item", "key": it.key, "status": "checking", "attempt": e["title"], "passed": e["passed"]})
+            stamp = ws._stamp(scene_id)
             result = agent.resolve(ws.scene(scene_id), clash, ws.model, on_event=progress, lock=ws.lock, max_rounds=2,
+                                   hosts_model=ws.hosts_model,
                                    **ws.fix_settings(scene_id, it.element_a, it.element_b))
+            # What a second try on this pair reads (Ask Muse Wonder on a failed item: docs/escalation.md).
+            ws._remember(scene_id, it.element_a, it.element_b, asdict(result), stamp)
             it.understanding = result.understanding
             it.tried = len(result.attempts)
             options = [asdict(o) for o in result.options]
             it.option = options[0] if options else None
             it.alternatives = options[1:]
             if result.recommendation:
+                it.recommended = True
                 r = result.recommendation
                 it.error = (f"Not edited: {r['blocked_by']}. Muse Spark recommends for the designer: {r['title']}"
                             + (f" ({r['rationale']})" if r.get("rationale") else ""))
@@ -421,8 +499,10 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
     if strategy == "move_hub":
         first = cluster["partners"][0]
         others = ", ".join(f"{p['ifc_class']} '{p['name']}'" for p in cluster["partners"][1:])
+        # Every other partner is an obstacle of the same fix: a split hub's ends are checked against all of them.
         item = Item("|".join(sorted([hub, first["global_id"]])), hub, first["global_id"],
-                    _label(ws, scene_id, hub, first["global_id"]), cluster["clash_ids"], True, first["distance_m"])
+                    _label(ws, scene_id, hub, first["global_id"]), cluster["clash_ids"], True, first["distance_m"],
+                    others=[p["global_id"] for p in cluster["partners"][1:]])
         items = [item]
         prefer = {item.key: f"Move element A (the hub) so that it also clears: {others}. Do not move B."}
     else:
@@ -441,29 +521,76 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
     _resolve_items(ws, scene_id, report_id, items, notes, emit, prefer)
     check = _settle(ws, scene_id, items, emit)
     if strategy == "move_hub" and items[0].option:
-        # The hub moved: every partner pair must be clear, which the hub's own check (against everything) covers.
+        # The hub changed: every partner pair must be clear. A move is checked against everything; a split hub's new
+        # pieces against everything and its shortened ends against every partner (the item's `others`).
         check["covers"] = [p["global_id"] for p in cluster["partners"]]
     return Plan("root_cause", f"Root cause: {hub_el['ifc_class']} '{hub_el['name']}'", reply.get("root_cause", ""),
                 strategy, cluster, items, check, round(time.perf_counter() - started, 1))
 
 
+def _keep_move(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    return ws.apply(scene_id, o["moved"], o["delta_m"]), []
+
+
+def _keep_offset(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2])
+    return r, r["pieces"]
+
+
+def _keep_trim(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    return ws.apply_trim(scene_id, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"]), []
+
+
+def _keep_route(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    r = ws.apply_route(scene_id, o["moved"][0], o["edit"]["steps"])
+    return r, r["pieces"]
+
+
+def _keep_resize(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    e = o["edit"]
+    r = ws.apply_resize(scene_id, o["moved"][0], e["split_m"], e["depth_m"], e.get("keep", "bottom"))
+    return r, r["pieces"]
+
+
+def _keep_penetration(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    return ws.apply_penetration(scene_id, o["edit"]["service"], o["edit"]["host"]), []
+
+
+def _keep_combined(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[list[str]]]:
+    r = ws.apply_combined(scene_id, o["edit"]["steps"], *o["edit"]["pair"])
+    return r, r["pieces"]
+
+
+# How each kind of fix is kept in the scene: → (the Workspace's reply, with "files"; the pieces, the original first;
+# a fix of several runs, one such list per run).
+KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route": _keep_route,
+        "resize": _keep_resize, "penetration": _keep_penetration, "combined": _keep_combined}
+
+
 def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
-    """Keep every fix of an accepted plan. Returns the files changed and, per offset, its pieces."""
+    """Keep every fix of an accepted plan (or one accepted option). Returns the files changed, per run a fix split its
+    pieces with the original first (`pieces`: one list per fix, or per run of a combined fix; `groups`: those lists by
+    fix), and the penetrations only requested (`not_cut`: the host's team cuts the opening)."""
+    unknown = [o["kind"] for o in options if o.get("kind", "move") not in KEEP]
+    if unknown:
+        raise ValueError(f"unknown kind of fix: {unknown[0]!r}")
     files: set[int] = set()
     pieces: list[list[str]] = []
+    changed: list[str] = []
+    not_cut: list[dict] = []
+    groups: list[list[list[str]]] = []
     with ws.lock:
-        for o in options:
-            if o["kind"] == "offset":
-                r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2])
-                pieces.append(r["pieces"])
-            elif o["kind"] == "trim":
-                r = ws.apply_trim(scene_id, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"])
-                pieces.append([])
-            else:
-                r = ws.apply(scene_id, o["moved"], o["delta_m"])
-                pieces.append([])
+        for k, o in enumerate(options):
+            r, made = KEEP[o.get("kind", "move")](ws, scene_id, o)
+            runs = made if made and isinstance(made[0], list) else [made] if made else []
+            pieces += runs or [[]]
+            groups.append(runs)
             files.update(r["files"])
-    return {"files": sorted(files), "pieces": pieces}
+            changed += r.get("changed", [g for run in runs for g in run] or o["moved"])
+            if r.get("cut") is False:   # a penetration its host's team must cut: the clash stays open
+                not_cut.append({"index": k, "blocked_by": r["blocked_by"]})
+    return {"files": sorted(files), "pieces": pieces, "groups": groups, "changed": list(dict.fromkeys(changed)),
+            "not_cut": not_cut}
 
 
 def to_json(plan: Plan) -> str:

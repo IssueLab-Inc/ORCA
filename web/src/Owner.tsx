@@ -1,10 +1,12 @@
 import { KeyRound, Lock, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, setOwnerSettings, type Effort, type EveryoneSettings, type OwnerSettings, type SettingsState } from "./api";
+import { api, setOwnerSettings, type Effort, type EscalationMode, type EveryoneSettings, type OwnerSettings, type SettingsState } from "./api";
 import { Popover } from "./ui";
 
 const KEY = "sightline.owner";
 const EFFORTS: Effort[] = ["minimal", "low", "medium", "high"];
+/** Second tries on Muse Wonder (docs/escalation.md): off, offered as a button, or automatic after no fix. */
+const ESCALATION: [EscalationMode, string][] = [["off", "Off"], ["button", "Offered (a button)"], ["auto", "Automatic after no fix"]];
 
 function stored(): OwnerSettings {
   try { return JSON.parse(localStorage.getItem(KEY) ?? "{}") as OwnerSettings; } catch { return {}; }
@@ -17,7 +19,9 @@ function stored(): OwnerSettings {
  * unlocked, or on a page opened with #owner. The token is sent once; the server answers with a cookie this page's
  * scripts cannot read, so the token is never kept in the browser.
  */
-export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | null) => void }) {
+export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: OwnerSettings | null) => void;
+  /** A setting for everyone changed: this page asks again what it gets (second tries, Show it built). */
+  onEveryone?: () => void }) {
   const [state, setState] = useState<{ available: boolean; owner: boolean } | null>(null);
   const [settings, setSettings] = useState<OwnerSettings>(stored);
   const [token, setToken] = useState("");
@@ -46,7 +50,7 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
   };
   const saveEveryone = async (changes: Partial<EveryoneSettings>) => {
     setError(null); setSaved(null);
-    try { setEveryone(await api.saveSettings(changes)); setSaved("Saved for everyone"); }
+    try { setEveryone(await api.saveSettings(changes)); setSaved("Saved for everyone"); onEveryone?.(); }
     catch (e) { setError((e as Error).message); }
   };
   const ow = (v: boolean) => (v ? "on" : "off");
@@ -86,6 +90,26 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
                 <option value="off">Off: Muse Spark</option>
               </select>
             </label>
+            <label>Second try on Muse Wonder
+              <select value={settings.escalation ?? ""} onChange={(e) => change({ ...settings, escalation: (e.target.value || undefined) as EscalationMode | undefined })}>
+                <option value="">Same as everyone</option>
+                {ESCALATION.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </label>
+            <label>Muse Wonder reasoning
+              <select value={settings.escalation_effort ?? ""} onChange={(e) => change({ ...settings, escalation_effort: (e.target.value || undefined) as Effort | undefined })}>
+                <option value="">Same as everyone</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <label>Show it built (Muse Image pictures of fixes)
+              <select value={settings.built_views == null ? "" : ow(settings.built_views)}
+                onChange={(e) => change({ ...settings, built_views: e.target.value === "" ? undefined : e.target.value === "on" })}>
+                <option value="">Same as everyone</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
             <label className="check"><input type="checkbox" checked={settings.no_caps !== false}
               onChange={(e) => change({ ...settings, no_caps: e.target.checked })} /> Skip the demo caps</label>
             <p className="hint">Only your requests use these, and they win over the settings for everyone. A triage run you
@@ -113,6 +137,30 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
             </label>
             {!everyone.host && <p className="hint">No open-weights host is configured (TRIAGE_API_KEY), so titles and triage
               use Muse Spark.</p>}
+            <label>Second try on Muse Wonder
+              <select value={everyone.everyone.escalation ?? ""} onChange={(e) => void saveEveryone({ escalation: (e.target.value || null) as EscalationMode | null })}>
+                <option value="">Default ({ESCALATION.find(([v]) => v === everyone.defaults.escalation)?.[1].toLowerCase() ?? "offered"})</option>
+                {ESCALATION.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </label>
+            <label>Muse Wonder reasoning
+              <select value={everyone.everyone.escalation_effort ?? ""} onChange={(e) => void saveEveryone({ escalation_effort: (e.target.value || null) as Effort | null })}>
+                <option value="">Default ({everyone.defaults.escalation_effort ?? "medium"})</option>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <p className="hint">Muse Wonder bills every token (about $0.3 to $1 a second try), within the day's budget and
+              each visitor's caps.</p>
+            <label>Show it built (Muse Image pictures of fixes)
+              <select value={everyone.everyone.built_views == null ? "" : ow(everyone.everyone.built_views)}
+                onChange={(e) => void saveEveryone({ built_views: e.target.value === "" ? null : e.target.value === "on" })}>
+                <option value="">Default ({everyone.defaults.built_views ? "on" : "off"})</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <p className="hint">A picture costs about $0.3 (two drawings, four Muse Wonder judgements; up to $0.6 with a
+              second pair), and every accepted fix gets one for the PDF while it is on.</p>
             <p className="hint">Every visitor's requests use these, kept on the server across restarts. Runs already going
               keep their model.</p>
             {saved && <p className="ok small" role="status">{saved}</p>}

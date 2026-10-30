@@ -100,6 +100,52 @@ width across) and a trim inside one model is marked `cleanup`.
 |---|---|---|---|---|
 | 2026-10-28 | 3 | 3/3 | 0/3 | 3/3 (one trim each, on the beam, transom, beam) |
 
+## Big models
+
+`big_models.py` writes synthetic IFC4 files of a given size (a third of the elements tessellated, 100-600 triangles
+each; the rest extrusions; a property set of eight values on every element: about 3.6 kB an element) and measures the
+server opening one the way an upload does; `big_models_browser.cjs` uploads one through the page's **Use your own
+models** and times each stage it shows. Local, Oct 29: 4 CPUs, 15 GB, headless Chromium with software rendering.
+
+| File | Elements | Server: open, boxes, detection | Peak RSS | Through the page, end to end | JS heap |
+|---|---|---|---|---|---|
+| 150 MB | 41,457 | 5 s, 37 s, 5 s | 1.4 GB | 123 s (packed to 32 MB in 6 s; drawing 59 s) | 1.0 GB |
+| 250 MB | 68,915 | 9 s, 66 s, 9 s | 1.8 GB | 194 s (packed to 53 MB in 10 s; drawing 91 s) | 1.6 GB |
+| 500 MB | 137,181 | 17 s, 174 s, 18 s | 2.8 GB | 484 s (packed to 106 MB in 20 s; drawing 184 s) | 1.4 GB |
+
+The 500 MB rows were measured before big models used CGAL for every element (150 MB: boxes 45 → 37 s with it).
+
+What changed on the way (docs/uploads.md): boxes in one iterator peaked at 4.8 GB for the 150 MB model (2,000 at a
+time: 1.4 GB); meshes through OpenCASCADE took 20-30 ms each (CGAL: about 1 ms; the 5 MB model's boxes 11.9 → 1.6 s);
+detection's sweep was quadratic (500 MB: 482 → 18 s). Northbank's boxes and its 464 detected clashes are identical
+to before.
+
+**The cap stays 150 MB on the demo**: it opens in about two minutes (on Modal's 2 CPUs the server part takes longer).
+250 and 500 MB open too, in about 3 and 8 minutes. What stands between them and 500 MB: the boxes (one triangulation
+per element in IfcOpenShell, about 1 ms each on 4 CPUs) and drawing in the browser (web-ifc on the page's main
+thread, about 3 minutes, the page frozen meanwhile). The follow-ups are parsing in a Web Worker and boxes without
+triangulating.
+
+## Which hosts take an opening
+
+`penetration_hosts.py` reads 25 labelled hosts (16 in Northbank, 9 in the PC-03 cell) the way a proposal does
+(`hosts.decide`: hard rules, then Muse's reading of each kind of host, all kinds in one call) and scores the verdict,
+reviewer and fit against what a coordinator would accept (`penetration_hosts.csv`, append-only). Oct 29 on Muse Spark:
+25/25, 18 kinds read in 34-41 s, 7 hosts settled by hard rules (transfer girder, column, glazing, the cell's motor
+control centre, light curtain and robot restricted space). The first run scored 23/25: a ground-bearing slab read as
+not advised (the prompt now lists floor and ground slabs as reviewed by structure), and the opaque glass spandrel
+panel's label was wrong (its material is glass: never is right).
+
+## A second try on Muse Wonder (E0)
+
+`escalation.py --cell <palletising-cell> --northbank <northbank/IFC> --out runs/<date>-escalation` sweeps one Muse
+Spark proposal over every planted cell clash and Northbank's answer key and B1 (`--reuse` reads a saved
+`sweep.json`), then gives each clash left unfixed three arms of two rounds: Spark again, Spark with the escalation
+brief, Muse Wonder with it; clashes fixed only with a resize or an opening get Wonder's "better fix". Rows go in
+`results.csv` (run `escalation-*`); the arms' advice and failures in `results.json`, a table in `summary.md`. Oct 29:
+6 of 21 unfixed; Spark again 0/6, Spark + brief 3/6, Wonder + brief 5/6, Wonder $2.01 in all (`docs/escalation.md`
+reads the C4 fixes with care: four lift a post off its slab).
+
 ## ORCA detection
 
 `detection_navisworks.py` runs ORCA's own detection (`server/sightline/detect.py`, docs/detection.md) on Northbank

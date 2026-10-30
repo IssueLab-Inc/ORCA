@@ -373,8 +373,8 @@ See-through elements (Oct 28): web-ifc's style alpha now reaches the viewer. Eac
 per-element alpha (`setColorAt` with a Vector4); in focus they get a tinted see-through material. A pick takes the first
 solid hit and falls back to glass, so a zone does not swallow clicks on what stands inside it. Demo set 2 is
 the demo-models repo's `palletising-cell/` (PC-03: STEP + IFC, Rev A with five planted problems, Rev B fixed). ORCA's
-offset (C1), move (C2) and trim (C3) pass on it; a move of something standing on the floor (the C5 HMI) fails, because
-the clearance check counts the floor contact.
+offset (C1), move (C2) and trim (C3) pass on it. (A move of something standing on the floor, the C5 HMI, used to fail
+because the check counted the floor contact: fixed Oct 30, "A move keeps what it stands on" below.)
 
 ORCA detection (Oct 28): design in `docs/detection.md`, code `server/sightline/detect.py`; no Navisworks report
 needed.
@@ -668,7 +668,9 @@ Next, in order.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ ORCA
    detection (no Navisworks needed). ✅ #N numbers and Muse titles. ✅ Demo, tour and landing on detection. ✅ STEP
    models and the palletising cell (from STEP) as the second demo.
-6. Freeze Nov 3, record video; submit Nov 4 before noon ET.
+6. ✅ Escalating to Muse Wonder (`docs/escalation.md`) and ✅ Show it built (`docs/show-it-built.md`), both below.
+   Muse Image cannot design a fix (Oct 29: it redraws the geometry and invents numbers); it only restyles one.
+7. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
 offsets and trims on meshed STEP parts.
@@ -716,3 +718,232 @@ app, the PDF and BCF, the MCP server name `orca`, export names `<name>.orca.ifc`
 `sightline` (`server/sightline`), env vars `SIGHTLINE_*`, the Modal secret `sightline-meta` and Dict
 `sightline-settings`, the header `X-Sightline-Settings`, the owner cookie `sightline_owner`, browser storage keys
 `sightline.*`, a report's `origin: "sightline"`, and the model convention `Pset_SightlineConstraints`.
+
+Fix kinds in one registry (Oct 29, owner decision; design in `docs/edits.md`): groundwork for reroute, resize and
+penetration requests (planned, in that order, in `docs/edits.md`).
+- **Registered once per layer:** `agent.TRIES` / `agent.PARAMS` (try an idea), `plans.IN_TRIAL` / `plans.EXTRA_FILES`
+  (a plan's joint check), `plans.KEEP` behind `plans.apply` (keep it; the plan, MCP `apply_fix` and the new
+  `POST /api/scenes/{sid}/fix/apply` all use it), `requirements.SIZED` / `change_size`, and `web/src/fixKinds.ts`
+  (name, edit text, clearance, framing, review). A kind nobody registered is refused ("unknown kind"), never tried as
+  a move.
+- **Newer kinds** carry `edit` (parameters, `summary`, `key`) and `review` (who must review before building).
+- **Ranking:** `agent.TIERS`: plain geometry fixes, then resize, then penetration; a round with only those doesn't
+  end the search.
+- **Several obstacles:** `Clash.others` (a plan's merged item): placed along the run in Muse's text, and a split run's
+  end pieces are checked against all of them (before, only the first). Failed attempts tell Muse where they hit
+  (`Attempt.where`).
+- **Fixed on the way:** the "largest move" limit measured a lateral offset as 0 mm; it now measures how far it goes.
+- **Checked:** answer key 3/3 first try at Rev04 heights (rows in `evals/results.csv`); 399 server tests, 53 web tests.
+- **Web tests:** App imports `./fixKinds`; both stub harnesses compile the real module (`compiled("../src/fixKinds.ts")`).
+
+Reroute (Oct 29, owner decision; design in `docs/edits.md`, code `edits.apply_route`, `agent._try_route`): the fourth
+kind of fix, for what one offset can't pass.
+- **Shape:** `{"kind": "route", "steps": [{from_m, to_m, up_m, side_m}]}`, up to 3 steps on the run's own axes
+  (`edits.run_frame`: up square to the run; side = left of its direction, named by compass in Muse's text). Steps that
+  share a boundary change straight from one offset to the next; each change is one axis (a round pipe may roll: both
+  at once). One step straight up is tried and kept as an offset.
+- **Geometry:** 90° bends and risers per change (`bend_radius` on its own jump, the section's size in its own plane;
+  square corners for the whole route if any bend would fold). `_build_chain` (moved out of `apply_offset` unchanged)
+  chains copies, fittings and ports for both; a one-step route builds exactly the offset's meshes. Slopes up to 15°
+  keep their fall; vertical runs and falling drainage are refused; level drainage only steps sideways (`is_gravity`).
+- **What Muse reads:** `edits.free_bands` (room beside or above each obstacle, clear of everything along that stretch:
+  rays round the profile's outline every 30 mm, a ray inside a solid counts as blocked, only bands reachable from the
+  line count), "no side offset clears all of them in one stretch" when only separate detours fit, and for a single
+  report clash the movable element's other clashes within 3 m (`Workspace._nearby`, told, never required; never the
+  fixed side's partners). Prompt: `construction.md` "route".
+- **Everywhere:** `TRIES`/`PARAMS`/`IN_TRIAL`/`KEEP` entries, `Workspace.check_route`/`apply_route`, chat and MCP
+  `check_route`; the page needed nothing new (slice 0's `fixKinds.ts` and `/fix/apply`).
+- **STEP:** `IfcWall` is now a class STEP parts may take (`step.CLASSES`, `step_classes.md`).
+- **Demo case:** the cell's C6 (demo-models repo, Oct 29: plant walls drawn see-through, columns C3/C4, PL-302, ES-2;
+  Rev A 159 parts, 16 planted pairs). Only a detour round each column clears.
+  - In the browser, a single proposal on #22 (PL-302 × C3) got "Reroute pipe north past C3 and C4" (250 mm round each,
+    53 mm clear) in 37 s, accepted through `/fix/apply`.
+  - `evals/step_cell.py`: C6 Fix together → one job, a verified route in 31 s; classes 159/159; 16/16 planted.
+- **Checked:** answer key still 3/3 first try at Rev04 heights; 418 server tests, 53 web tests; landing and README cell numbers and
+  `web/public/demos/cell.webp` updated.
+
+Accept in place (Oct 29, owner decision; `docs/edits.md` "Keeping a fix"): a kept fix no longer reloads its file.
+- **Server:** apply replies and the link's `applied` event carry `Workspace.patch` (`scene_id`, `revision_before`,
+  `revision`, `meshes` from `edits.meshes(render=True)`: unwelded, normals, style colour and opacity, file); every apply
+  reports `changed`. Open, upload and scene-info replies carry `revision`.
+- **Page:** `applyToViewer` (App.tsx) patches through `Viewer.patch` → `viewer/patch.ts` when the page is at
+  `revision_before` (`sceneRevision` ref), else reloads the changed files as before. Batches keep spare room
+  (`patch.ROOM`); `makeRoom` packs, then grows ×2; new pieces take their mesh's colour, else their origin's; a
+  see-through piece makes the model's glass batch when it has none.
+- **Checked:** Northbank golden path and the cell's route accepted with no file download (headless Chromium); 4 server
+  tests (`test_accept_in_place.py`), 3 web tests (`viewer-patch.test.mjs`, real three.js batches). Web test harness:
+  `viewer-load.test.mjs` compiles the real `./patch`.
+
+Penetrations (Oct 29, owner decision; design in `docs/edits.md` "Penetration", code `edits.penetration` /
+`apply_penetration`, `agent._try_penetration`): the fifth kind of fix, an opening asked for where a straight service
+crosses a wall or slab.
+- **Hosts:** `IfcWall` / `IfcSlab` with extruded bodies only. Beams, columns, footings, piles, members, doors, windows
+  and curtain walls are refused (the girder is never cut); so is a hole the host would not surround by 50 mm.
+- **Opening:** the section + clearance + 5 mm all round, rounded up to 10 mm, round or rectangular, square to the
+  service, through the host's depth (rays from both faces) and 10 mm proud. Cell C7: Ø130 mm, 220 mm deep.
+- **Always a provision for void** in the service's model (`IfcBuildingElementProxy` PROVISIONFORVOID; IFC2X3 by
+  ObjectType; `Pset_ProvisionForVoid`; see-through orange). It is never physical (`scene.not_physical`: no box, not
+  in `products()`). **The opening** (`IfcOpeningElement` voiding the host) is cut in trials always, and when kept only
+  with no requirements or when the host's group may be edited (`requirements.can_cut`); otherwise `cut: false`,
+  `blocked_by`, the clash stays open and the page records "Opening requested" (evidence "recommended"; PDF "Opening
+  requested"; plans and MCP report `not_cut`).
+- **Check:** the service must clear the host by the clearance; elsewhere only contacts new or worse count. Option
+  clearance = the opening's gap. Review: structure for slabs and load-bearing walls, else architecture; a fire rating
+  adds fire-stopping. Tier 2 (after plain fixes and resize). Under "move only" requirements it is allowed (it asks).
+- **Muse is told** the opening a penetration would ask for, who cuts and reviews it, and that a service running out of
+  both faces must keep crossing; walls and slabs are no longer described as runs to split.
+- **Everywhere:** `TRIES`/`IN_TRIAL`/`EXTRA_FILES`/`KEEP`, `plans.KEEPS_CONTACTS`, chat and MCP `check_penetration`,
+  `Workspace.check_penetration` / `apply_penetration`; STEP export cuts the host (`BRepAlgoAPI_Cut`) and adds the
+  provision for void to the service's group. The viewer draws the host see-through in the preview and frames the
+  provision for void.
+- **Checked:** `tests/test_penetration.py` (15, incl. IFC2X3 and the endpoint/plan/patch); answer key still 3/3 first
+  try at Rev04 heights; `evals/step_cell.py` C7: Muse offers the opening (36 s), kept and cut, the STEP's wall 2,655
+  cm³ smaller with the provision for void in Compressed air; in the browser accepted in place, no file download.
+
+Which hosts take an opening (Oct 29, owner decision; `docs/edits.md` "Which hosts", code `server/sightline/hosts.py`,
+`domain_packs/penetrations.md`): beyond walls and slabs, Muse judges which kinds of element can take a hole.
+- **Order:** hard rules (`hosts.hard_rule`: columns, doors, windows, curtain walls, piles, footings, stairs, railings,
+  lifts, services and equipment, glazing by name or material, see-through proxies, and a **transfer element**: a beam
+  or member a column or wall stands on; Northbank's girder, which column B3 stands on) > the requirements'
+  `penetrations` rules per group (allowed / review / never, largest size, reviewer; omitted from the file when empty, so
+  its id is unchanged) > Muse's reading of each kind of host > the default (walls and slabs only).
+- **Muse's reading** (`hosts.read`, triage model, strict JSON, cached by kind for the server's life, read before a
+  proposal's first round): verdict, reviewer, fit (annular or fitted gland), limits (hole share of depth, distance from
+  ends and edges, middle third), conditions. Standard `Pset_*Common` facts only: a project's own psets (Northbank's
+  answer-key pset) never reach it. `Workspace.hosts_model` (none when a test injects the proposal model).
+- **The hole** (`hosts.check_hole`) against the limits; numbers on the option card (`hostRows` in fixKinds.ts).
+  Fitted openings: service + 1 mm, may touch. Openings in anything but a wall or slab rank after (`agent.tier`).
+- **Page:** Requirements dialog "Openings for services"; an opening read by Muse has **Add to requirements**, a rule
+  for that kind of host in its group only (`kind` = `hosts.profile` key, `edit.host_kind`), never the whole group. App imports `ClipboardPlus`, `addPenetration`, `hasPenetration`, `hostRows` (stubs updated).
+- **Cell C8** (demo-models): the 400 V feed's 32 mm conduit through EP-301's 3 mm gland plate. Rev A 161 parts, Rev B
+  185, 17 planted pairs. `step_classes.md` now names conduits (CONDUITSEGMENT); `samples/step-cache` regenerated.
+- **Checked:** `tests/test_hosts.py` (12); `evals/penetration_hosts.py` 25/25 on Muse Spark (18 kinds in one call,
+  34-41 s); `evals/step_cell.py` C7 and C8 (Ø34 mm fitted gland hole, kept, exported plate cut); answer key 3/3 first try
+  at Rev04 heights; 449 server tests, 59 web tests; C8 in the browser accepted in place.
+- **Review fixes (Oct 29):** host model resolved per request (60 s timeout), Muse's limits sanitised, narrow gland
+  plates still read, keeping an opening re-checks the hole, fitted options claim no clearance.
+
+Resize (Oct 29, owner decision; `docs/edits.md` "Resize", code `edits.resize_size` / `apply_resize`,
+`agent._try_resize`): the sixth kind of fix, a flatter section where an obstacle leaves too little depth.
+- **Shape:** `{"kind": "resize", "split_m": [a, b], "depth_m", "keep": "bottom" | "top" | "centre"}`; ORCA picks the
+  width: a duct keeps its equivalent diameter (Huebscher, to 5 mm, at most 4:1), a tray its cross-section (at least
+  50 mm deep). Pipes, round ducts, any profile but a plain `IfcRectangleProfileDef` (hollow, rounded, channel), STEP
+  parts, sloped runs and non-finite values refused with the reason.
+- **Geometry:** original, transition (`IfcDuctFitting` TRANSITION / `IfcCableCarrierFitting` REDUCER, lofted mesh, faces
+  at most 30°), resized middle (its own profile, keep face level), transition, rest; through `_build_chain`, which now
+  takes straights with their own profile and transition pieces. The middle and transitions carry the new size (name,
+  profile name, copied properties, `ORCA_Resize` pset); a centre-kept resize is sized by half its change (`face_move`).
+- **Review** services, performance line in `also_needs`; tier 1. Muse is told the depth that fits over or under the
+  obstacle and the width it makes (`_resize_text`). Everywhere: `TRIES`/`PARAMS`/`IN_TRIAL`/`KEEP`, `Workspace.check_resize`
+  / `apply_resize`, chat and MCP `check_resize`.
+- **Checked:** `tests/test_resize.py` (11, `fixtures.build_resize_fixture`); answer key 3/3 first try at Rev04 heights;
+  460 server tests; in the browser on the uploaded fixture Muse's only verified fix was "Flatten duct to 225 mm deep
+  under the beam" (710 x 225 mm), accepted in place. No planted demo case.
+
+Bigger uploads (Oct 29, owner decision: target 500 MB; design and measurements in `docs/uploads.md`, `evals/README.md`
+"Big models"):
+- **Way in:** the page checks the server's cap first (`GET /api/models`: `model_upload_max_mb`; `web/src/uploads.ts`),
+  gzips each file over 1 MB (`CompressionStream`, IFC packs about 5x), sends it with XHR (upload progress) to
+  `POST /api/models/upload/stream` (NDJSON: received, STEP events, opening, `boxes` done/total, a `tick` every 5 s, done
+  or error). The server refuses before reading (411 without Content-Length, 413 over the cap), unpacks `.gz` parts in
+  a thread, 1 MiB per gunzip step, capping the unpacked size as it goes and refusing a truncated archive
+  (`app._receive_models` / `_unpack`); a 409 `requirements_unknown` re-registers and resends once (`reRegister`). An
+  uploaded IFC is drawn from the visitor's own file, not downloaded back.
+- **Boxes** (`IfcScene.bounds`): meshes through CGAL (`hybrid-cgal-simple-opencascade`, 1 ms vs 20-30 ms), every
+  element through it from 50 MB (`SIGHTLINE_BIG_MODEL_MB`), in batches of 2,000 (one iterator held a 150 MB model's
+  shapes: 4.8 GB → 1.4 GB), threads from `sched_getaffinity`, progress callback. Northbank's boxes, order and 464
+  detected clashes are identical (checked).
+- **Detection's sweep** had no lower bound (quadratic): 500 MB 482 → 18 s; Northbank identical.
+- **Holding:** `SIGHTLINE_SCENE_BUDGET_MB` (IFC bytes, Modal 300) besides the count, room made before a new scene is
+  read (`Workspace._evict`); mesh-only bodies go through CGAL by one rule (`scene.meshes_only`); wider fixes refused above
+  `SIGHTLINE_WIDER_FIX_MAX_MB` (100: they copy the models); exports older than an hour deleted.
+- **Measured** (local, 4 CPUs): 150 MB through the page 123 s, 250 MB 194 s, 500 MB 484 s (2.8 GB server peak, 1.4 GB
+  JS heap). Cap stays **150 MB** on the demo by the plan's rule (about two minutes); 500 MB is blocked by box time and
+  web-ifc drawing on the main thread (next: a Web Worker). `evals/big_models.py`, `big_models_browser.cjs`.
+- **Checked:** `tests/test_uploads.py` (7), `web/tests/uploads.test.mjs` (3); 467 server tests, 62 web tests; golden
+  path unchanged. App imports `./uploads` (both harnesses compile it).
+- **After the reviews of PRs 26-32 (Oct 29):** 491 server tests, 63 web tests; answer key 3/3 first try at Rev04 heights
+  (Muse's girder opening refused as a transfer element); `evals/step_cell.py` passes (C1, C2, C6, C7, C8, Rev B 0);
+  golden path accepted in place, no file download.
+
+Escalating to Muse Wonder (Oct 29, owner decision; `docs/escalation.md`, code `server/sightline/escalation.py`,
+`spend.py`, `agent._try_combined`): a second, longer try on a larger model, for a clash Muse Spark could not fix or to
+look for a better fix.
+- **Model and money:** `meta_client.escalation_model()` (`META_ESCALATION_MODEL`, default `muse-wonder-1.0`, $4 / $20
+  per M tokens, no contributor tier). `MetaChatModel.usage` counts tokens (both endpoints, every final event);
+  `PRICES` by id prefix. One day's budget for every Wonder call, `SIGHTLINE_WONDER_MAX_USD_DAY` ($25): a request
+  claims its estimate when let through (`spend.claim`, checked and held in one step) and its work takes the claim
+  over (`spend.held`). Caps `SIGHTLINE_ESCALATE_PER_HOUR` / `_PER_DAY` plus one proposal, both or neither
+  (`ProposeLimit.take_all`). Setting `escalation` off / button / auto (+ `escalation_effort`), owner menu.
+- **The brief:** the first try (ideas, why each failed, what it hit by name, fixes found), openings and room past
+  the elements it ran into most, every element within 5 m, the kinds from the registry. The last try per scene and
+  pair is kept (`Workspace.last_try`, plan items too) and read only while its scene revision and requirements id
+  still match: a kept edit or a rule change makes its verified options stale.
+- **Combined fixes:** a seventh kind, 1-3 steps (move / offset / route) on different elements, one on A or B, never
+  structure (`agent.stays`, by inheritance) and nothing but services besides A and B; tried in one trial, checked
+  together, kept all or nothing (`edits.kept_files`), each split run's pieces as its own group (`groups` on
+  `/fix/apply`); ranks after one element's fix.
+- **Page:** NoFix **Ask Muse Wonder**, **Look for a better fix with Muse Wonder** under verified options, the same on a
+  failed Fix-together item; model chips; the pilot names the model; a failed second try puts the first's options
+  back. Chat and MCP: `propose_fixes(escalate=true)`.
+- **E0** (`evals/escalation.py`): on the 6 of 21 real clashes Spark left unfixed, Spark again 0/6, Spark + brief 3/6,
+  Wonder + brief 5/6 ($2.01 in all, ~2 min each). Four of Wonder's are C4 posts lifted off their slab, because a moved
+  element's existing embedment counted as a clash (the C5 HMI's floor contact): the move check now keeps what an
+  element stands on and refuses a lift off it (Oct 30, below).
+  B1 moves a pad footing (structure; no review chip yet). Answer key 3/3 first try at Rev04 heights.
+- **Checked:** 520 server tests, 64 web tests; in the browser Northbank #1 got Spark's offset and, on Look for a better
+  fix, Wonder's "Shorter offset up 400 mm through girder opening", both verified and chipped.
+
+Show it built (Oct 29, owner decision; `docs/show-it-built.md`, code `server/sightline/built.py`, `web/src/BuiltView.tsx`,
+`Viewer.captureBuilt`): Muse Image restyles ORCA's own view of a verified fix as a clean presentation render, checked
+against the model before anyone sees it.
+- **Capture:** `Viewer.captureBuilt(fix, pair, classOf)` in one task: a cutaway of 12 directions chosen by class costs
+  (`GET /api/scenes/{sid}/classes`; slabs/roofs/coverings become the section, zones never drawn), then look, ids and
+  normals from one camera. The ids pass swaps the batches' materials (an override material would draw pieces white).
+- **Check:** outline from ids + normals; two restyles at once (Responses, reasoning high); pixel gate (coarse edges
+  F ≥ 0.55, worst tile ≤ 0.45); two Muse Wonder judges per picture with the ids picture to read the model view by,
+  either unfaithful fails it; one more pair told the differences; else "Muse Image couldn't keep to the model here".
+  Cached by a hash of the passes and the prompt version (`SIGHTLINE_BUILT_CACHE`, `/api/built/<key>.jpg`).
+- **Money and who:** `built_views` (owner menu, For me / For everyone; `SIGHTLINE_BUILT_VIEWS`, default off). $0.62
+  held per request against the day's Wonder budget; over it, three Muse Spark judges (the lighter check, named in the
+  tooltip) while the pictures still fit. Caps `SIGHTLINE_BUILT_PER_HOUR` / `_PER_DAY`. Never a trim or a cleanup.
+- **Page:** **Show it built** on the chosen option and per verified fix in the Plan panel: the stage in words, then
+  the picture over ORCA's view with a wipe, **Lines from the model**, the check in a tooltip, the label "Illustration
+  by Muse Image from ORCA's model view. The model is the record." and what the cutaway took away. Accept (single,
+  plan, replayed) captures the fix as proposed and draws it in the background; the clash panel shows "As it could
+  look built". The report dialog waits for those and draws missing ones (at most 10); the PDF's fix page gets the
+  third picture or "No built view: …"; the BCF keeps the true capture. Chat `show_it_built`; MCP later.
+- **Once, keyed on the fix:** page keys are pair + kind + numbers + edit (titles repeat); a picture being drawn is
+  shared (page and server: `built.make` once per key); cache files written whole; a lighter-checked picture is drawn
+  again and checked by Wonder when it can be; judges keep their own effort (`meta_client.FIXED_EFFORT`); passes refused from their
+  header when oversized.
+- **Checked:** `tests/test_built.py` (11), `test_document.py`; in the browser Northbank #1's offset drew in ~70 s
+  (outline 0.94, both judges faithful), the cell's C6 route in ~80 s (0.88), wipe and lines work, Accept carried the
+  picture to the kept fix, and accept → triage → Report put it on the PDF's fix page as the fourth picture.
+- **Web tests:** App imports `./BuiltView` (`BuiltView`, `builtStep`, `cutText`) and the icon `Building2`: both stub
+  lists updated. The harness's transform cannot read `for (const [a, b] of …)` in App: use keys instead.
+- **After the final review (Oct 30):** pictures frame a combined fix by run and colour each piece by its run
+  (`agent._tagged`: `origin`, `part`), leave a penetration's provision for void undrawn (the opening stays open) and
+  anything not physical out; a kept fix whose pieces the page can't find is framed by the elements it changed. The
+  `escalating` event carries the first try's options (chat keeps them if the second try fails); a plan whose model
+  changed since it was checked can't be accepted (`planStale`); the stdio MCP hook respects the off switch; the owner's
+  page asks `/api/models` again after a change for everyone; a report draws at most 10 pictures and says so for the
+  rest. Known, not fixed: a combined step that moves another team's service doesn't add that team as a reviewer in the
+  PDF and BCF; a second try's options aren't de-duplicated against the first's.
+
+A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `verify.supports` / `keep_supports`):
+- **Why:** the cell's fence posts move as a run with their M10 anchors cast 70 mm into the slab, so every horizontal move
+  hit the slab; Muse Wonder lifted posts 100-200 mm off it to pass (E0). The C5 HMI's floor contact failed the same way.
+- **Rule:** for moved elements that are not runs (`IfcFlowSegment` / `IfcFlowFitting`) nor see-through zones
+  (`scene.opacity`), what they stand on or sit in (base at a host's top or ≤ 300 mm into it, `verify.stands_on`) is kept
+  when no deeper than before (a touch stays a touch); lifted off everything it stood on fails ("standing on nothing"),
+  sunk deeper fails, anything new it cuts into is a clash. Never the clash's partner. Clearance is to what is near it.
+- **Where:** `agent._try_move` (partners = B and a plan item's others), `plans.verify_together`, and
+  `Workspace.verify_move(obstacles=)` (the page's manual move sends B; chat / MCP `check_move(obstacle=)`); without an
+  obstacle every contact counts. Combined move steps keep the old rule. Runs are untouched, so the answer key and every
+  service move check as before.
+- **Checked:** `tests/test_supports.py` (8); `evals/step_cell.py` passes (C1, C2, C3, C6, C7, C8, Rev B 0); Muse Spark
+  single proposals now fix C4 first try with plain moves (post N3/N4 350 mm north, 21-25 s, no lifts), where before
+  every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
+  tests, 64 web tests.
+

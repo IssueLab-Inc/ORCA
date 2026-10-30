@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import context_planner, edits, plans
+from . import context_planner, edits, plans, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 
@@ -72,18 +72,42 @@ TOOLS = [
     _fn("find_openings", "Openings through `obstacle` on the line of the straight segment `element`, with the "
         "offset heights (dz, metres) that pass the segment through each with 25 mm clearance.",
         {"element": {"type": "string"}, "obstacle": {"type": "string"}}, ["element", "obstacle"]),
-    _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it.",
+    _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it. "
+        "Give `obstacle` (the element the move must clear) to check it as a proposal is: then what the moved elements "
+        "stand on (a slab, a plinth) may stay as it was, and lifting them off it fails.",
         {"global_ids": {"type": "array", "items": {"type": "string"}},
-         "delta_m": {"type": "array", "items": {"type": "number"}}}, ["global_ids", "delta_m"]),
+         "delta_m": {"type": "array", "items": {"type": "number"}},
+         "obstacle": {"type": "string"}}, ["global_ids", "delta_m"]),
     _fn("check_offset", "Check a local offset without keeping it: split the straight segment `element` at two points "
         "(metres along it from its start) around `obstacle` and raise (+) or lower (-) the middle by dz_m.",
         {"element": {"type": "string"}, "obstacle": {"type": "string"},
          "split_m": {"type": "array", "items": {"type": "number"}}, "dz_m": {"type": "number"}},
         ["element", "obstacle", "split_m", "dz_m"]),
-    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets and trims at joints, checks each "
+    _fn("check_route", "Check a route without keeping it: hold stretches of the straight segment `element` at offsets "
+        "(steps: from_m/to_m metres along it, up_m and side_m metres on its own axes: up, and side to the left of its "
+        "direction seen from above), with 90° bends, past `obstacle`. Each change is one axis at a time.",
+        {"element": {"type": "string"}, "obstacle": {"type": "string"},
+         "steps": {"type": "array", "items": {"type": "object", "properties": {
+             "from_m": {"type": "number"}, "to_m": {"type": "number"}, "up_m": {"type": "number"},
+             "side_m": {"type": "number"}}, "required": ["from_m", "to_m"]}}}, ["element", "obstacle", "steps"]),
+    _fn("check_resize", "Check a flatter section for a stretch of the straight rectangular duct or cable tray `element` "
+        "past `obstacle` without keeping it: from split_m[0] to split_m[1] (metres along it) it becomes depth_m deep "
+        "and as wide as keeps its equivalent diameter (a duct, at most 4:1) or its cross-section (a tray), with the "
+        "`keep` face (bottom, top or centre) level and transitions either side.",
+        {"element": {"type": "string"}, "obstacle": {"type": "string"},
+         "split_m": {"type": "array", "items": {"type": "number"}}, "depth_m": {"type": "number"},
+         "keep": {"type": "string", "enum": ["bottom", "top", "centre"]}}, ["element", "obstacle", "split_m", "depth_m"]),
+    _fn("check_penetration", "Check an opening for the straight service `element` through the wall or slab `host` "
+        "without keeping it: sized from the service with the clearance all round, cut in a trial, the service checked "
+        "against the host and everything else. Says who must review it (structure for slabs and load-bearing walls).",
+        {"element": {"type": "string"}, "host": {"type": "string"}}, ["element", "host"]),
+    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes, flatter sections, trims at joints and openings, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
-        "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes.",
-        {"clash_id": {"type": "string"}}, ["clash_id"]),
+        "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes. "
+        "With escalate true it is a second, longer try on Muse Wonder that reads the first try's failures and may "
+        "change several elements together (about a minute, and costs more): only after a first try found nothing, or "
+        "only a resize or an opening, or when the user asks for a better fix.",
+        {"clash_id": {"type": "string"}, "escalate": {"type": "boolean"}}, ["clash_id"]),
     _fn("find_root_causes", "Elements that are in several real clashes at once (the likely root causes), with clashes "
         "the geometry finds that the Navisworks report missed. Use it for 'why are there so many clashes here' or "
         "'what is the real problem'."),
@@ -99,6 +123,10 @@ TOOLS = [
         {"clash_ids": {"type": "array", "items": {"type": "string"}}}, ["clash_ids"]),
     _fn("show_clash", "Select a clash in the user's view and fly the camera to it.", {"clash_id": {"type": "string"}},
         ["clash_id"]),
+    _fn("show_it_built", "Show how the fix chosen for a clash (or the fix kept for it) would look built: the page draws "
+        "ORCA's own view of it as a clean presentation render (Muse Image), checked against the model, beside the "
+        "model's view. Only when the user asks to see a fix built; it costs a few cents a picture and takes about a "
+        "minute. Not for a trim.", {"clash_id": {"type": "string"}}, ["clash_id"]),
     _fn("set_view", "Change the user's 3D view.", {
         "mode": {"type": "string", "enum": ["shaded", "xray", "context", "isolate"]},
         "section_box": {"type": "boolean"}}),
@@ -131,6 +159,7 @@ class Chat:
         self.sessions: OrderedDict[str, Session] = OrderedDict()
         self.propose_allowed = propose_allowed or (lambda: None)
         self.propose_allowed_many: Callable[[int], str | None] = lambda n: None
+        self.escalate_allowed: Callable[[], str | None] = lambda: None
 
     @property
     def model(self) -> ToolModel:
@@ -152,12 +181,14 @@ class Chat:
              cancel: threading.Event | None = None,
              propose_allowed: Callable[[], str | None] | None = None,
              propose_allowed_many: Callable[[int], str | None] | None = None,
+             escalate_allowed: Callable[[], str | None] | None = None,
              before_publish: Callable[[], None] | None = None) -> str:
         cancel = cancel or threading.Event()
         # Defaults preserve constructor/direct-tool callers; each turn captures its
         # callbacks before a model wait can interleave with another visitor's turn.
         allowed = self.propose_allowed if propose_allowed is None else propose_allowed
         allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
+        escalate_ok = self.escalate_allowed if escalate_allowed is None else escalate_allowed
         target = session
         with target._history_lock:
             target._next_turn += 1
@@ -200,7 +231,8 @@ class Chat:
                     break
                 try:
                     result, summary, pics = self._run(name, args, ctx, emit, cancel=cancel,
-                                                     propose_allowed=allowed, propose_allowed_many=allowed_many)
+                                                     propose_allowed=allowed, propose_allowed_many=allowed_many,
+                                                     escalate_allowed=escalate_ok)
                 except Exception as e:  # a bad id, a shape that cannot be edited: tell the model, keep going
                     result, summary, pics = {"error": f"{type(e).__name__}: {e}"}, f"failed: {e}", []
                 if cancel.is_set():
@@ -280,10 +312,11 @@ class Chat:
                 "in_model": bool(m.get("a") and m.get("b")), "fixed": c.id in ctx.fixed}
 
     def _run(self, name: str, args: dict, ctx: Context, emit, *, cancel=None,
-             propose_allowed=None, propose_allowed_many=None) -> tuple[dict, str, list[Path]]:
+             propose_allowed=None, propose_allowed_many=None, escalate_allowed=None) -> tuple[dict, str, list[Path]]:
         ws = self.ws
         allowed = self.propose_allowed if propose_allowed is None else propose_allowed
         allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
+        escalate_ok = self.escalate_allowed if escalate_allowed is None else escalate_allowed
         if name == 'explore_wider_fix':
             report, sid = self._report(ctx), self._scene(ctx)
             c = report.clash(args['clash_id'])
@@ -400,33 +433,65 @@ class Chat:
             holes = edits.passages(ws.scene(self._scene(ctx)), args["element"], args["obstacle"])
             return {"openings": holes}, f"{len(holes)} opening(s)", []
         if name == "check_move":
-            v = ws.verify_move(self._scene(ctx), list(args["global_ids"]), [float(x) for x in args["delta_m"]])
+            v = ws.verify_move(self._scene(ctx), list(args["global_ids"]), [float(x) for x in args["delta_m"]],
+                               obstacles=[args["obstacle"]] if args.get("obstacle") else [])
             v.pop("placements", None)
-            return v, "passes" if v["passed"] else f"fails: {len(v['hits'])} hit(s)", []
+            return v, "passes" if v["passed"] else f"fails: {v.get('reason') or str(len(v['hits'])) + ' hit(s)'}", []
         if name == "check_offset":
             v = ws.check_offset(self._scene(ctx), args["element"], args["obstacle"],
                                 [float(x) for x in args["split_m"]], float(args["dz_m"]))
             v.pop("preview", None)
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
+        if name == "check_route":
+            v = ws.check_route(self._scene(ctx), args["element"], args["obstacle"], list(args["steps"]))
+            v.pop("preview", None)
+            return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
+        if name == "check_resize":
+            v = ws.check_resize(self._scene(ctx), args["element"], args["obstacle"], [float(x) for x in args["split_m"]],
+                                float(args["depth_m"]), args.get("keep") or "bottom")
+            v.pop("preview", None)
+            return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
+        if name == "check_penetration":
+            v = ws.check_penetration(self._scene(ctx), args["element"], args["host"])
+            v.pop("preview", None)
+            return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "propose_fixes":
-            refused = allowed()
-            if refused:
-                return {"error": refused}, "refused: allowance used", []
+            second = bool(args.get("escalate"))
             r, sid = self._report(ctx), self._scene(ctx)
             c = r.clash(args["clash_id"])
             m = self._matches(ctx).get(c.id, {})
             if not (m.get("a") and m.get("b")):
                 return {"error": "both elements must be in the open model"}, "not in the model", []
+            recommend = second and ws.fix_settings(sid, m["a"], m["b"]).get("recommend")
+            if recommend:   # nothing may be edited: no second try to make, and nothing charged for one
+                return ({"error": f"Nothing may be edited here ({recommend}); a first try gives the recommendation."},
+                        "no second try: recommendation only", [])
+            refused = escalate_ok() if second else allowed()
+            if refused:
+                return {"error": refused}, "refused: " + ("no second try" if second else "allowance used"), []
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
-            result = ws.propose(sid, m["a"], m["b"], report_id=r.id, clash_id=c.id,
-                                on_event=lambda e: emit({"type": "agent", "event": e}))
+            on_event = lambda e: emit({"type": "agent", "event": e})   # noqa: E731
+            if second:
+                result = ws.escalate(sid, m["a"], m["b"], report_id=r.id, clash_id=c.id, on_event=on_event)
+            else:
+                result = ws.propose(sid, m["a"], m["b"], report_id=r.id, clash_id=c.id, on_event=on_event,
+                                    escalate_check=escalate_ok)
             emit({"type": "proposal", "clash_id": c.id, "element_a": m["a"], "element_b": m["b"], **result})
             summary = [{"title": o["title"], "kind": o["kind"], "delta_m": o["delta_m"], "split_m": o["split_m"],
+                        "edit": (o.get("edit") or {}).get("summary"), "review": o.get("review"),
+                        "found_by": o.get("model") or None,
                         "clearance_mm": None if o["min_clearance_m"] is None else round(o["min_clearance_m"] * 1000)}
                        for o in result["options"]]
             failed = [{"title": a["title"], "reason": a["reason"]} for a in result["attempts"] if not a["passed"]]
+            note = "The verified options are now in the user's options panel to preview and accept."
+            if result.get("escalated"):
+                note += " This was a second try on Muse Wonder: the first try's fixes are included."
+            elif (not summary or all(o["kind"] in ("resize", "penetration") for o in summary)) and \
+                    not result.get("recommendation") and settings.escalation() != "off":
+                note += (" A second, longer try on Muse Wonder is possible (propose_fixes with escalate true) if the "
+                         "user wants one.")
             return ({"understanding": result["understanding"], "verified_options": summary, "failed": failed[:8],
-                     "note": "The verified options are now in the user's options panel to preview and accept."},
+                     "advice": result.get("advice") or None, "note": note},
                     f"{len(summary)} verified of {len(result['attempts'])} tried", [])
         if name == "find_root_causes":
             r, sid = self._report(ctx), self._scene(ctx)
@@ -468,6 +533,15 @@ class Chat:
             c = self._report(ctx).clash(args["clash_id"])
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
             return {"shown": c.id}, f"showing {c.label}", []
+        if name == "show_it_built":
+            if not settings.built_views():
+                return {"error": "Show it built is switched off here."}, "switched off", []
+            c = self._report(ctx).clash(args["clash_id"])
+            emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
+            emit({"type": "ui", "action": "show_it_built", "clash_id": c.id})
+            return ({"note": "The page draws the chosen or kept fix of this clash and shows it beside ORCA's view when "
+                             "it passes the check (about a minute). If no fix is chosen or kept, there is nothing to "
+                             "draw: propose fixes first."}, f"drawing {c.label}", [])
         if name == "set_view":
             emit({"type": "ui", "action": "set_view", **{k: args[k] for k in ("mode", "section_box") if k in args}})
             return {"done": True}, "view changed", []

@@ -292,6 +292,17 @@ def _data_url_ok(url: str | None) -> str | None:
     return url if isinstance(url, str) and url.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")) else None
 
 
+def _built_img(ev: dict) -> str | None:
+    """A fix's built view (Show it built, docs/show-it-built.md): a checked picture the page names by its URL
+    (`/api/built/<key>.jpg`), read from the cache as a data URL; None when there is none."""
+    url = ev.get("built_img")
+    if not isinstance(url, str) or not url.startswith("/api/built/"):
+        return None
+    from . import built
+    path = built.path_of(url.rsplit("/", 1)[-1])
+    return "data:image/jpeg;base64," + base64.b64encode(path.read_bytes()).decode() if path else None
+
+
 # ------------------------------------------------------------------------------------------------- HTML → PDF
 
 def _e(s) -> str:
@@ -328,14 +339,22 @@ def _page(r: Row, n: int) -> str:
     label_a, label_b = ("A", "B") if ev.get("kind") == "context" else ("A (red)", "B (green)")
     crop = _zone_crop(c.images[0][1]) if c.images else None
     found_by = "ORCA" if c.source == "sightline" else "Navisworks"  # who detected it, and whose depth this is
-    pics = "".join(
-        f"<figure><img src='{_e(u)}'/><figcaption>{_e(cap)}</figcaption></figure>" for u, cap in [
-            (crop, f"{found_by} view, zoomed to where they meet (red A, green B)"),
-            (_data_url_ok(ev.get("before_img")), "The model as it is"),
-            (_data_url_ok(ev.get("after_img")), "With the fix" + (" (applied)" if ev.get("status") == "accepted" else " (proposed)")),
-        ] if u)
+    shown = [(u, cap) for u, cap in [
+        (crop, f"{found_by} view, zoomed to where they meet (red A, green B)"),
+        (_data_url_ok(ev.get("before_img")), "The model as it is"),
+        (_data_url_ok(ev.get("after_img")), "With the fix" + (" (applied)" if ev.get("status") == "accepted" else " (proposed)")),
+        (_built_img(ev), "As it could look built (illustration by Muse Image from ORCA's view; the model is the record)"),
+    ] if u]
+    pics = "".join(f"<figure><img src='{_e(u)}'/><figcaption>{_e(cap)}</figcaption></figure>" for u, cap in shown)
+    if ev.get("built_note") and not _built_img(ev):   # Show it built tried, and no picture kept to the model
+        pics += f"<p class='note'>No built view: {_e(ev['built_note'])}</p>"
     fix = ""
-    if ev and ev.get("status") == "recommended":  # the requirements allow no edit here: Muse's recommendation stands
+    if ev and ev.get("status") == "recommended" and ev.get("kind") == "penetration":  # asked for: the host's team cuts it
+        fix = (f"<div class='fix'><h4>Opening requested: {_e(ev.get('title'))} <span class='tag'>provision for void only</span>"
+               f"</h4><dl><dt>Opening</dt><dd>{_e(ev.get('edit'))}</dd>"
+               f"<dt>Not cut</dt><dd>{_e(ev.get('blocked_by') or 'the host may not be edited')}</dd>"
+               f"<dt>Also needs</dt><dd>{_e(ev.get('also_needs') or 'nothing noted')}</dd></dl></div>")
+    elif ev and ev.get("status") == "recommended":  # the requirements allow no edit here: Muse's recommendation stands
         fix = (f"<div class='fix'><h4>Recommended for the designer: {_e(ev.get('title'))} <span class='tag'>not edited</span></h4><dl>"
                f"<dt>Why not edited</dt><dd>{_e(ev.get('blocked_by') or 'the coordination requirements allow no edit')}</dd>"
                f"<dt>Change</dt><dd>{_e(ev.get('edit'))}</dd>"
@@ -363,7 +382,7 @@ def _page(r: Row, n: int) -> str:
     <tr><th>Triage</th><td>{_e(VERDICT_LABEL.get(r.verdict, r.verdict))}{' · ' + _e(r.reading.get('severity')) if r.reading.get('severity') not in (None, 'none') else ''}</td>
         <td><b>Acts:</b> {_e(r.acting)} · <b>Reviews:</b> {_e(', '.join(r.reviewers))}</td></tr>
   </table>
-  <div class='pics'>{pics}</div>
+  <div class='pics{" four" if len(shown) > 3 else ""}'>{pics}</div>
   <div class='ai'><span class='ai-tag'>AI-drafted ({source}) · to be reviewed</span>
     <p>{_e(explanation)}</p>
     {f"<p><b>Recommended:</b> {_e(action)}</p>" if action else ""}
@@ -404,6 +423,7 @@ h4 { font-size: 10pt; margin: 10pt 0 4pt; }
 table { border-collapse: collapse; width: 100%; } .facts th { text-align: left; width: 18%; color: #5d6a7a; font-weight: normal; }
 .facts td, .facts th { padding: 3pt 6pt 3pt 0; border-bottom: .5pt solid #e9edf2; vertical-align: top; }
 .pics { margin: 8pt 0; } .pics figure { margin: 0 1.5% 0 0; width: 31.5%; display: inline-block; vertical-align: top; }
+.pics.four figure { width: 23.5%; } .pics .note { font-size: 8pt; color: #5d6a7a; margin: 2pt 0 0; }
 .pics img { width: 100%; max-height: 54mm; object-fit: cover; border-radius: 3pt; border: .5pt solid #d7dde5; } .pics figcaption { font-size: 7.5pt; color: #5d6a7a; }
 .fix { border: 1pt solid #b9e2c8; background: #f1faf4; padding: 6pt 10pt; border-radius: 3pt; }
 .fix h4 { margin: 0 0 4pt; } .fix dl { margin: 0; display: grid; grid-template-columns: 22% 78%; }

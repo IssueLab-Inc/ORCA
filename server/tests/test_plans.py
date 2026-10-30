@@ -1,3 +1,4 @@
+import pytest
 import json
 
 from fastapi.testclient import TestClient
@@ -51,6 +52,8 @@ def test_batch_dedupes_pairs_and_checks_the_plan_as_a_whole(tmp_path):
     assert plan.check["passed"] and plan.check["items"][item.key]["min_clearance_m"] > 0.04
     assert [e["status"] for e in events if e["type"] == "item"][-1] == "done"
     assert len(list(ws.scene(sid).model.by_type("IfcDuctSegment"))) == 2      # trials were all undone
+    assert ws.last_try(sid, main, beam)["attempts"]   # what a second try on this item reads (docs/escalation.md)
+    assert not item.recommended
 
 
 def test_verify_together_finds_fixes_that_collide(tmp_path):
@@ -62,6 +65,18 @@ def test_verify_together_finds_fixes_that_collide(tmp_path):
     items = [plans.Item("k1", main, beam, "", [], option=up), plans.Item("k2", end, main, "", [], option=clash)]
     check = plans.verify_together(ws, sid, items)
     assert not check["passed"] and check["conflicts"]
+
+
+def test_a_combined_fix_in_a_plan_is_checked_as_a_single_proposal_checks_it(tmp_path):
+    ws, sid, rid, main, beam = _setup(tmp_path)
+    combined = {"kind": "combined", "moved": [main], "delta_m": [0, 0, 0.4], "title": "t",
+                "edit": {"pair": [main, beam], "steps": [
+                    {"kind": "offset", "target": main, "split_m": [2.0, 4.0], "delta_m": [0, 0, 0.4]}]}}
+    check = plans.verify_together(ws, sid, [plans.Item("k1", main, beam, "", [], option=combined)])
+    assert check["passed"] and check["items"]["k1"]["min_clearance_m"] == pytest.approx(0.05, abs=1e-3)
+    low = {**combined, "edit": {**combined["edit"], "steps": [{**combined["edit"]["steps"][0], "delta_m": [0, 0, 0.3]}]}}
+    check = plans.verify_together(ws, sid, [plans.Item("k1", main, beam, "", [], option=low)])
+    assert not check["passed"] and "IfcBeam" in check["items"]["k1"]["reason"]
 
 
 def test_root_causes_and_plan_endpoints(tmp_path, monkeypatch):
@@ -106,6 +121,23 @@ def test_root_cause_charges_fixes_only_when_edits_are_needed(tmp_path):
     asked = []
     plan = plans.build_root_cause(ws, sid, rid2, beam, charge=lambda n: asked.append(n) or "no allowance left")
     assert asked == [2] and plan.advice == "no allowance left" and all(it.error for it in plan.items)
+
+
+def test_a_moved_hub_is_checked_against_every_partner(tmp_path):
+    ws, sid, rid, main, beam = _setup(tmp_path)
+    end = next(e for e in ws.scene(sid).model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    (tmp_path / "reports" / "r3").mkdir(parents=True)
+    from test_plans import _report_xml
+    (tmp_path / "reports" / "r3" / "report.xml").write_text(_report_xml([(main, beam, -0.15), (end, beam, -0.05)]))
+    rid3 = ws.open_report_sample("r3").id
+
+    class Cause:
+        def complete_json(self, system, text, images=None):
+            return {"root_cause": "the beam is low", "strategy": "move_hub", "reason": "raise the beam"}
+    ws._model = Cause()
+    plan = plans.build_root_cause(ws, sid, rid3, beam, charge=lambda n: "no allowance left")
+    [item] = plan.items
+    assert item.element_a == beam and {item.element_b, *item.others} == {main, end} and len(item.others) == 1
 
 
 def test_pairs_sharing_a_movable_element_become_one_fix():

@@ -89,7 +89,8 @@ def test_only_the_owner_reads_and_changes_the_settings_for_everyone(monkeypatch)
     r = c.put("/api/settings", json={"open_weights": True, "triage_effort": "low"})
     assert r.status_code == 200
     body = r.json()
-    assert body["everyone"] == {"open_weights": True, "effort": None, "triage_effort": "low"} and body["host"] is True
+    assert body["everyone"] == {"open_weights": True, "effort": None, "triage_effort": "low", "escalation": None,
+                                "escalation_effort": None, "built_views": None} and body["host"] is True
     assert c.put("/api/settings", json={"effort": "extreme"}).status_code == 400
     assert c.get("/api/settings").json()["everyone"]["open_weights"] is True
 
