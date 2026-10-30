@@ -969,3 +969,19 @@ Moves that keep their joints (Oct 30, slice 2 of connections; `docs/connections.
   tour: ladder copy updated, `web/public/tour/cell-ladder.json` recorded again (its move option carries).
 - **Tests:** `tests/test_connected_moves.py` (walk, refusals, tolerance, promotion, tee, stretch, agent, keep with a
   stale key, plans, STEP ladder export), `test_accept_in_place` (a lone move takes its joined end segment along).
+
+See connections (Oct 30, slice 3 of connections; `docs/connections.md`, code `connections.graph`, `web/src/links.ts`,
+`Viewer.setLinks`):
+- **Graph:** `GET /api/scenes/{sid}/connections`: edges `[a, b, kind, source]` (joint, assembly, hosted, rests_on,
+  contact), plus stops, systems, assemblies and names; cached by revision and contacts. Detection now keeps the pairs that only touch
+  (run state `contacts`). `Workspace.describe` (card, chat and MCP `describe_element`) gives `links` by kind with
+  names, `systems` and `part_of`. Northbank 0.38 s (875 rests on, 650 joints, 26 hosted, 6 contacts).
+- **Page:**
+  - Alt (Option) + point, or the **Connections** toggle (rail, key L; the phone's Tools sheet), lights what an element
+    is linked to, by kind: joined `#2563eb`, rests on / supports green, hosted brown, assembly slate, touches light
+    blue. A label names it with counts, and Shift lights the whole run (to equipment) and its assembly.
+  - A click or tap with the toggle on does the same and the card lists the links (a name selects and frames it).
+  - A carrying move's option shows what it takes along in blue.
+  - The layer is hidden in A/B/C pictures, thumbnails and built views.
+- **Phone popovers** now render into the body: inside the rail they sat under the bottom sheet.
+- **Web tests:** App imports `./links` (both harnesses compile it); `tests/links.test.mjs`, `tests/viewer-links.test.mjs`.

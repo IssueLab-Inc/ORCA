@@ -187,7 +187,27 @@ class Workspace:
             return {g: [s.element(g).ifc_class, s.element(g).name or s.element(g).ifc_class] for g in s.bounds()}
 
     def describe(self, scene_id: str, global_id: str) -> dict:
-        return asdict(self.scene(scene_id).element(global_id))
+        """An element, with what it is linked to by kind (connections.links_of: joints, assembly, hosted, what it rests
+        on and supports, contacts), its systems and the assembly it is part of."""
+        s = self.scene(scene_id)
+        with self.lock:
+            g = self.connections(scene_id)
+            links = connections.links_of(s, global_id, self._contacts(scene_id))
+        part_of = next(({"global_id": w, "name": a["name"], "parts": len(a["parts"])}
+                        for w, a in g["assemblies"].items() if global_id in a["parts"]), None)
+        named = {kind: [{"global_id": o, "name": s.element(o).name, "ifc_class": s.element(o).ifc_class} for o in gids]
+                 for kind, gids in links.items()}
+        return {**asdict(s.element(global_id)), "links": named, "systems": g["systems"].get(global_id, []),
+                "part_of": part_of}
+
+    def _contacts(self, scene_id: str) -> list:
+        return (self._runs.get(scene_id) or {}).get("contacts", [])
+
+    def connections(self, scene_id: str) -> dict:
+        """What is linked to what in the open models (connections.graph), with the last check's contacts."""
+        s = self.scene(scene_id)
+        with self.lock:
+            return connections.graph(s, self._contacts(scene_id))
 
     def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025) -> dict:
         """Check a move without keeping it. It keeps its joints (connections.plan_move): what it takes along is moved

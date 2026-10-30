@@ -656,6 +656,13 @@ def built_file(name: str):
                         headers={"Cache-Control": "private, max-age=86400"})
 
 
+@app.get("/api/scenes/{scene_id}/connections")
+def scene_connections(scene_id: str):
+    """What is linked to what (joints, assemblies, hosted elements, what rests on what, contacts from the last check),
+    for the viewer's connection highlight; cached until the scene changes."""
+    return ws.connections(_scene(scene_id))
+
+
 @app.post("/api/scenes/{scene_id}/verify")
 def verify_move(scene_id: str, body: Move):
     return ws.verify_move(_scene(scene_id), body.moved, body.delta_m, body.clearance_m)

@@ -1,4 +1,4 @@
-import { Box, Camera, Compass, Crop, Layers, LocateFixed, Maximize, Radar, Ruler, ScanEye, Shapes, SlidersHorizontal, Target } from "lucide-react";
+import { Box, Camera, Compass, Crop, Layers, LocateFixed, Maximize, Radar, Ruler, ScanEye, Shapes, SlidersHorizontal, Target, Waypoints } from "lucide-react";
 import { IconButton, Popover } from "./ui";
 import type { Preset, ViewMode } from "./viewer/Viewer";
 
@@ -18,6 +18,8 @@ export interface ToolbarState {
   edges: boolean;
   section: boolean;
   measure: boolean;
+  /** The connection highlight: pointing at an element (or tapping it) lights what it is linked to. */
+  links: boolean;
   hiddenModels: number[];
 }
 
@@ -26,7 +28,7 @@ export interface ToolbarState {
  * bottom), beside Go to the clash and Fit, the two people reach for most. */
 export function ViewerToolbar({ compact = false, state, models, hasFocus, onMode, onToggle, onView, onFit, onFocus, onModel, onShot }: {
   compact?: boolean; state: ToolbarState; models: string[]; hasFocus: boolean;
-  onMode: (m: ViewMode) => void; onToggle: (k: "edges" | "section" | "measure") => void; onView: (p: Preset) => void;
+  onMode: (m: ViewMode) => void; onToggle: (k: "edges" | "section" | "measure" | "links") => void; onView: (p: Preset) => void;
   onFit: () => void; onFocus: () => void; onModel: (i: number, visible: boolean) => void; onShot: () => void;
 }) {
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
@@ -48,6 +50,8 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, onMode
             onClick={() => { onToggle("edges"); close(); }}><Shapes size={16} aria-hidden /> Outline the pair through walls{state.edges && <b className="tick">✓</b>}</button>
           <button type="button" className={`pop-item ${state.measure ? "on" : ""}`} aria-pressed={state.measure}
             onClick={() => { onToggle("measure"); close(); }}><Ruler size={16} aria-hidden /> Measure between two points{state.measure && <b className="tick">✓</b>}</button>
+          <button type="button" className={`pop-item ${state.links ? "on" : ""}`} aria-pressed={state.links}
+            onClick={() => { onToggle("links"); close(); }}><Waypoints size={16} aria-hidden /> Show connections: tap an element{state.links && <b className="tick">✓</b>}</button>
           <button type="button" className="pop-item" onClick={() => { onShot(); close(); }}><Camera size={16} aria-hidden /> Save a screenshot</button>
           <p className="pop-title">Camera</p>
           <div className="tool-views" role="group" aria-label="Standard views">
@@ -75,6 +79,7 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, onMode
         <IconButton icon={Crop} label="Section box around the clash" shortcut="S" active={state.section} disabled={!hasFocus && !state.section} onClick={() => onToggle("section")} />
         <IconButton icon={Shapes} label="Outline the pair through walls" shortcut="E" active={state.edges} onClick={() => onToggle("edges")} />
         <IconButton icon={Ruler} label="Measure between two points" shortcut="M" active={state.measure} onClick={() => onToggle("measure")} />
+        <IconButton icon={Waypoints} label="Connections: point at an element to light what it is joined to (or hold Alt / Option); Shift for the whole run" shortcut="L" active={state.links} onClick={() => onToggle("links")} />
       </div>
       <div className="rail-group" role="group" aria-label="Camera">
         <IconButton icon={LocateFixed} label="Go to the clash" shortcut="F" disabled={!hasFocus} onClick={onFocus} />

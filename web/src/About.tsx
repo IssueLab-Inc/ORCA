@@ -176,6 +176,8 @@ export function About({ start, onClose, triageOpen = false }: {
             <li><i style={{ background: "#12b5cb" }} />An idea that passed the check</li>
             <li><i style={{ background: "#e040fb" }} />What a failed idea ran into</li>
             <li><i style={{ background: "#e67e22", opacity: 0.55 }} />The element as it was, before the fix</li>
+            <li><i style={{ background: "#2563eb" }} />What an element is joined to: hold Alt (Option on a Mac) and point at it, or
+              turn on Connections. Shift shows its whole run.</li>
           </ul>
         </div>
         <div>

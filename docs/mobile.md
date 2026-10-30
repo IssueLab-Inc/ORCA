@@ -56,10 +56,12 @@ way at full height when it has no button: an iPhone 13 at full shows 6 clashes (
   to do next ("A set. Now pick element B"). A long press (half a second, finger still) picks A then B like a double
   click. Hints say tap, not double-click.
 - **Viewer tools:** the rail becomes **Tools** (a sheet with the view modes as labelled cards, section box, outlines,
-  measure, screenshot, standard views, models shown), **Go to clash** and Fit.
+  measure, show connections, screenshot, standard views, models shown), **Go to clash** and Fit.
 - **Tooltips:** press and hold any control with a tip to read it without doing it; a tap on an informational element
   (`data-tip-tap`: info icons, chips, requirements cells) shows its tip for a few seconds.
 - **Popovers** open as sheets from the bottom with their name and a close button; they close on `pointerdown` outside.
+  On a phone the sheet is rendered into the page's body, or a popover in the viewer's rail would sit under the page's
+  bottom sheet.
 - **Dialogs** (How it works, Requirements, Report, Connect an agent) go full screen with the title and Close pinned.
   The requirements matrix becomes a list per group ("vs MEP: Clearance 50 mm"), the detection coverage and agent
   activity tables become rows, the team table stacks. The lightbox swipes between views.

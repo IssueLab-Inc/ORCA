@@ -26,7 +26,10 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
   const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const off = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const off = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
+    };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("pointerdown", off);
     document.addEventListener("keydown", esc);
@@ -41,20 +44,24 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
     if (over > 0) m.style.translate = `${-Math.round(over)}px 0`;
   }, [open]);
   const close = () => setOpen(false);
+  // On a phone the menu is a sheet over the whole page, so it goes to the body: inside the viewer's rail it would sit
+  // under the page's own bottom sheet, whatever its z-index.
+  const sheet = typeof window !== "undefined" && !!window.matchMedia?.("(max-width: 760px)").matches;
+  const body = open && <>
+    <div className="pop-scrim" aria-hidden onClick={close} />
+    <div className="pop-menu" role="menu" aria-label={label} ref={menu}>
+      <div className="pop-sheet-head"><b>{text ?? label}</b>
+        <button type="button" className="ibtn" aria-label="Close" onClick={close}><span aria-hidden>✕</span></button></div>
+      {children(close)}
+    </div>
+  </>;
   return (
     <div className={`pop pop-${tip} ${open ? "open" : ""}`} ref={ref}>
       {text
         ? <button type="button" className={`btn ghost ${open ? "on" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}>
             {(() => { const I = icon; return <I size={16} strokeWidth={1.8} aria-hidden />; })()} {text}</button>
         : <IconButton icon={icon} label={label} shortcut={shortcut} active={open} onClick={() => setOpen(!open)} tip={tip} />}
-      {open && <>
-        <div className="pop-scrim" aria-hidden onClick={close} />
-        <div className="pop-menu" role="menu" aria-label={label} ref={menu}>
-          <div className="pop-sheet-head"><b>{text ?? label}</b>
-            <button type="button" className="ibtn" aria-label="Close" onClick={close}><span aria-hidden>✕</span></button></div>
-          {children(close)}
-        </div>
-      </>}
+      {body && (sheet ? createPortal(body, document.body) : body)}
     </div>
   );
 }

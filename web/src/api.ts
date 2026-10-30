@@ -1,3 +1,4 @@
+import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
 export interface Verdict {
@@ -657,6 +658,9 @@ export const api = {
   },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
+  /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
+   *  check): the connection highlight's graph (docs/connections.md). */
+  connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),
   /** Keep a fix in the server's model; returns the indexes of the files that changed. */
   accept: (id: string, o: Option) => (o.kind === "trim" && o.trim
     ? call<Kept>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })

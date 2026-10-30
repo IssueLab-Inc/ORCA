@@ -93,6 +93,16 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .hint-bar { top: 12px; font-size: 12.5px; }
 .viewer-label { position: absolute; transform: translate(-50%, -150%); pointer-events: none; background: rgba(24,33,44,.85); color: #fff; font: 600 11.5px var(--mono); padding: 2px 7px; border-radius: 4px; white-space: nowrap; z-index: 2; }
 .measure-label { background: var(--accent); transform: translate(-50%, -130%); }
+.link-label { position: absolute; pointer-events: none; background: rgba(24,33,44,.88); color: #fff; font-size: 12px; padding: 4px 8px; border-radius: 5px; white-space: nowrap; z-index: 6; display: flex; flex-direction: column; gap: 1px; }
+.link-label small { color: rgba(255,255,255,.7); font-size: 11px; }
+.props .links { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.props .link-kind { display: flex; flex-direction: column; gap: 2px; }
+.props .link-head { display: flex; align-items: center; color: var(--muted); font-weight: 600; }
+.props .links ul { list-style: none; margin: 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 1px; }
+.props .links button.link { all: unset; cursor: pointer; font-size: 12.5px; text-decoration: underline; text-decoration-color: var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; display: block; }
+.props .links button.link:hover, .props .links button.link:focus-visible { text-decoration-color: currentColor; }
+.props .links .hint { margin: 0; color: var(--muted); }
+.props .links .btn { align-self: flex-start; }
 .props { position: absolute; top: 12px; right: 12px; width: 280px; background: var(--surface); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; z-index: 4; box-shadow: var(--shadow); }
 .compare { position: absolute; left: 64px; bottom: 12px; background: var(--surface); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; max-width: 360px; font-size: 12.5px; box-shadow: var(--shadow); z-index: 4; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; align-self: flex-start; }
@@ -992,6 +1002,7 @@ a.pop-item { color: inherit; }
   .sheet-peek-text { min-height: 44px; }
   .suggest { min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
   .btn.mic, .btn.mic-mode { min-width: 44px; }
+  .props .links button.link { min-height: 44px; display: flex; align-items: center; }
 }
 
 /* Dialogs on a phone: full screen, the title row (with Close) stays at the top while the body scrolls */
