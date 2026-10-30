@@ -99,7 +99,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `app.py` | Entry points | The FastAPI app: every `/api` route and stream, the owner and requirements middleware, the caps, `/mcp`, static files |
 | `built.py` | Report jobs | Show it built: outline, Muse Image restyles, pixel gate, judges, the picture cache |
 | `chat.py` | Workflows | Chat with Muse Spark through tools; `Chat._run` is also the MCP server's tool layer |
-| `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, and `plan_move`: moves that keep their joints (carry fittings, stretch segments) or are refused |
+| `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, `plan_move` (moves that keep their joints: carry fittings, stretch segments, or are refused) and the connection graph |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
 | `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
@@ -494,7 +494,8 @@ What is joined to what, so a fix that moves something never leaves a joint apart
   face, `_geometry_joints`, triangles cached per part), `classify` (straight / rigid / stays), `run` (straight segments
   joined cap to cap, the element first), `plan_move` → `MovePlan` (`moved`, `carried`, `stretched`, `refused`,
   `refused_at`, `key`, `edit`), `summary`, `apply_move`, `check_joints`, `baseline` / `check_applied`, `trial_move`
-  (`MoveTrial`), `describe` (Muse's text), `move_words`, `mode` (`SIGHTLINE_CONNECTED_MOVES`), `CARRY_MAX`,
+  (`MoveTrial`), `describe` (Muse's text), `graph` / `links_of` (every link by kind for the viewer and the properties
+  card, cached on the scene), `move_words`, `mode` (`SIGHTLINE_CONNECTED_MOVES`), `CARRY_MAX`,
   `PARALLEL_M`, `COVER`, `TOUCH_M`, `FACING`, `INLINE`.
 - **Imports:** `edits.py`, `scene.py`. **Imported by:** `agent.py`, `plans.py`, `service.py`.
 - **Rules:** every path that moves something plans first (`agent._try_move`, combined steps, `plans` joint hits,

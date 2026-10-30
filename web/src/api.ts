@@ -1,3 +1,4 @@
+import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
 export interface Verdict {
@@ -665,6 +666,9 @@ export const api = {
   },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
+  /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
+   *  check): the connection highlight's graph (docs/connections.md). */
+  connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),
   /** Keep a fix in the server's model; returns the indexes of the files that changed. One endpoint keeps every kind
    *  from the option itself (its meshes are not needed there): the server tries it again against the clash it names
    *  (`pair`: the option's own, else the clash on screen) and answers 409 with why when it no longer passes. A

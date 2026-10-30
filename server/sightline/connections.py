@@ -648,3 +648,109 @@ def describe(scene: IfcScene, label: str, gid: str, memo: dict | None = None) ->
     if memo is not None:
         memo[("joints", gid)] = lines
     return lines
+
+
+# ---------------------------------------------------------------------------------------------------- the graph
+
+KINDS = ("joint", "assembly", "hosted", "rests_on", "contact")
+RESTS_M = 0.005     # a foot within this of a top, overlapping in plan, rests on it (as hosts.STANDS_ON_M)
+PROVISION_PSET = "ORCA_Provision"
+
+
+def graph(scene: IfcScene, contacts=()) -> dict:
+    """Everything joined to anything in the open models, for the viewer and for describing an element: edges
+    [a, b, kind, source], kind one of
+    - "joint": connected ports, or STEP flow parts face to face ("ports" / "geometry");
+    - "assembly": an element and its parts (aggregated or nested elements), when the whole has a body of its own;
+    - "hosted": a door or window in the wall whose opening it fills, a provision for void and the service and host it
+      is for;
+    - "rests_on": a's foot within 5 mm of b's top, overlapping in plan ([a, b]: a rests on b);
+    - "contact": pairs the last check found touching (`contacts`), not already linked.
+    Also `stops` (flow elements a run ends at: equipment, terminals), `systems` (element → system names),
+    `assemblies` (whole → {name, parts}: a curtain wall's mullions and plates, a stair's flights; the whole often has
+    no body of its own) and `names` (every linked element's name, for the hover label). Cached on the scene until it
+    changes."""
+    key = (scene.revision, hash(tuple(sorted(tuple(c) for c in contacts))), len(scene.bounds()))
+    cached = getattr(scene, "_joint_graph", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    boxes = scene.bounds()
+    edges: dict[frozenset, list] = {}
+    assemblies: dict[str, dict] = {}
+
+    def add(a, b, kind, source=""):
+        if a != b and a in boxes and b in boxes and frozenset((a, b)) not in edges:
+            edges[frozenset((a, b))] = [a, b, kind, source]
+
+    for m in scene.models:
+        for rel in m.by_type("IfcRelConnectsPorts"):
+            owners = [system.get_port_element(p) for p in (rel.RelatingPort, rel.RelatedPort)]
+            if all(o is not None for o in owners):
+                add(owners[0].GlobalId, owners[1].GlobalId, "joint", "ports")
+        for e in m.by_type(FLOW):
+            if step_source(e).get("Group"):
+                for j in _geometry_joints(scene, e.GlobalId):
+                    add(j.a, j.b, "joint", "geometry")
+        for rel in list(m.by_type("IfcRelAggregates")) + list(m.by_type("IfcRelNests")):
+            whole = rel.RelatingObject
+            if whole.is_a("IfcElement"):
+                parts = [p.GlobalId for p in rel.RelatedObjects if p.is_a("IfcElement") and p.GlobalId in boxes]
+                for part in parts:
+                    add(whole.GlobalId, part, "assembly")
+                if parts:
+                    entry = assemblies.setdefault(whole.GlobalId, {"name": whole.Name or whole.is_a()[3:], "parts": []})
+                    entry["parts"] += parts
+        for rel in m.by_type("IfcRelFillsElement"):
+            for voids in rel.RelatingOpeningElement.VoidsElements or ():
+                add(rel.RelatedBuildingElement.GlobalId, voids.RelatingBuildingElement.GlobalId, "hosted")
+        for e in m.by_type("IfcBuildingElementProxy"):
+            pset = ifcopenshell.util.element.get_pset(e, PROVISION_PSET) or {}
+            for other in (pset.get("Service"), pset.get("Host")):
+                if isinstance(other, str):
+                    edges.setdefault(frozenset((e.GlobalId, other)), [e.GlobalId, other, "hosted", "provision"])
+    # Resting: sort tops, then for each foot look up the tops at its height.
+    gids = list(boxes)
+    if gids:
+        lo = np.array([boxes[g][0] for g in gids])
+        hi = np.array([boxes[g][1] for g in gids])
+        order = np.argsort(hi[:, 2])
+        tops = hi[order, 2]
+        for i, g in enumerate(gids):
+            first = np.searchsorted(tops, lo[i, 2] - RESTS_M, "left")
+            last = np.searchsorted(tops, lo[i, 2] + RESTS_M, "right")
+            for k in order[first:last]:
+                if k != i and np.all(lo[i, :2] < hi[k, :2] - 0.001) and np.all(hi[i, :2] > lo[k, :2] + 0.001):
+                    add(g, gids[k], "rests_on")
+    for a, b in contacts:
+        add(a, b, "contact")
+    stops, systems = [], {}
+    for m in scene.models:
+        for e in m.by_type(FLOW):
+            if e.GlobalId not in boxes:
+                continue
+            if classify(scene, e.GlobalId) == "stays":
+                stops.append(e.GlobalId)
+            names = [s.Name for s in system.get_element_systems(e) if s.Name]
+            if names:
+                systems[e.GlobalId] = names
+    linked = {g for edge in edges.values() for g in edge[:2]}
+    names = {}
+    for g in linked:
+        e = scene.entity(g)
+        names[g] = e.Name or e.is_a()[3:]
+    out = {"revision": scene.revision, "edges": list(edges.values()), "stops": stops, "systems": systems,
+           "assemblies": assemblies, "names": names, "kinds": list(KINDS)}
+    scene._joint_graph = (key, out)
+    return out
+
+
+def links_of(scene: IfcScene, gid: str, contacts=()) -> dict[str, list[str]]:
+    """An element's direct links by kind ("rests_on" are what it rests on; "supports" what rests on it)."""
+    out: dict[str, list[str]] = {}
+    for a, b, kind, _ in graph(scene, contacts)["edges"]:
+        if gid not in (a, b):
+            continue
+        other = b if a == gid else a
+        name = "supports" if kind == "rests_on" and b == gid else kind
+        out.setdefault(name, []).append(other)
+    return out

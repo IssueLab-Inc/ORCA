@@ -65,8 +65,9 @@ TOOLS = [
         "angle) so you can see it. Element A is red, element B green.", {"clash_id": {"type": "string"}}, ["clash_id"]),
     _fn("measure_clash", "ORCA's own geometry measure of a clash (signed distance, metres; negative = overlap).",
         {"clash_id": {"type": "string"}}, ["clash_id"]),
-    _fn("describe_element", "An element of the open model: class, name, tag, level, file, connected elements, and for "
-        "a straight duct/pipe/tray segment its run (start, end, length, profile).", {"global_id": {"type": "string"}},
+    _fn("describe_element", "An element of the open model: class, name, tag, level, file, what it is linked to by kind "
+        "(joints, assembly, hosted, what it rests on and supports, contacts), its systems, and for a straight "
+        "duct/pipe/tray segment its run (start, end, length, profile).", {"global_id": {"type": "string"}},
         ["global_id"]),
     _fn("find_elements", "Search the open model's elements by words in their name, tag or class.", {
         "query": {"type": "string"}, "ifc_class": {"type": "string"}, "limit": {"type": "integer"}}, ["query"]),

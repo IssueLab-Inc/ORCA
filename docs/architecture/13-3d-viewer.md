@@ -81,6 +81,7 @@ flowchart TD
   scene --> focus["focusLayer"]
   scene --> overlay["overlay"]
   scene --> hits["hitLayer"]
+  scene --> links["linkLayer"]
   scene --> marker["marker"]
   scene --> measure["measureLayer"]
   scene --> section["sectionHelper Box3Helper"]
@@ -90,6 +91,7 @@ flowchart TD
   overlay --> pieces["an option's pieces in its colour"]
   overlay --> ghostBefore["Both: what it replaces, orange ghost"]
   hits --> hitMesh["what a candidate hit, magenta, renderOrder 8"]
+  links --> linkMesh["what an element is linked to, a colour per kind, renderOrder 7"]
   marker --> dot["amber dot and ring, constant screen size, renderOrder 10"]
   measure --> pts["points and line, renderOrder 11"]
   labels["DOM labels over the canvas: marker-label, measure-label"]
@@ -117,11 +119,11 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 |---|---|
 | Loading | `load(files, names, isCurrent)`, `replace(index, bytes, isCurrent)`, `patch(meshes, origin)`, `dispose()`; fields `models`, `names` |
 | Visibility per model | `setModelVisible(index, visible)` (the toolbar's Models list; `App` keeps `tool.hiddenModels`) |
-| Modes and focus | `setMode(mode)`, `setFocus({ a, b, group })`, `setEdges(on)`, `setHits(ids)`; private `applyMode`, `drawFocus`, `nearFocus`, `focusSide` |
+| Modes and focus | `setMode(mode)`, `setFocus({ a, b, group })`, `setEdges(on)`, `setHits(ids)`, `setLinks(groups)`; private `applyMode`, `drawFocus`, `nearFocus`, `focusSide` |
 | Previews | `preview(moves)`, `showOption(shape, mode, colour)`, `showOptions(shapes, mode)` |
 | Camera | `focusClash(ids, point, label)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
 | Section box and marker | `setSection(on, margin, box)`, `setMarker(point, label)`; private `boxAroundFocus` |
-| Picking and measuring | `pickAt(event)`, `pick(event)`, `setMeasure(p1, p2)`, `has(gid)`, `boxOf(ids)` |
+| Picking and measuring | `pickAt(event, { ghosts })`, `pick(event)`, `setMeasure(p1, p2)`, `has(gid)`, `boxOf(ids)` |
 | Captures | `snapshot()`, `capture(side)`, `captureClash(a, b, side)`, `thumbClash(a, b, side)`, `captureBuilt(fix, pair, classOf, radius, side)`; private `posed`, `png` |
 | Module functions | `serverDeltaToViewer`, `serverPointToViewer`, `meetingZone(a, b)` (per axis the overlap, or the gap when apart) |
 
@@ -142,6 +144,10 @@ outlined. `applyMode` then sets, for every element of every model, its visibilit
 Without a focus every mode draws the whole model in its own colours. `App` starts in `xray` (its `tool` state); the
 `Viewer` field defaults to `shaded` until `App`'s effect sets it. `setEdges(false)` hides the outlines.
 `setHits(ids)` lights up what a candidate fix ran into (magenta, outlined through everything; `[]` clears).
+`setLinks(groups)` draws the connection highlight ([docs/connections.md](../connections.md)): each group's elements in
+its kind's colour (`links.ts` `LINK_COLOURS`), at most 150 per group, outlines on the first 40, hidden elements and
+models skipped, the section box respected; it never changes the mode. The layer is hidden while `posed` and
+`captureBuilt` take pictures, and cleared with the focus cache.
 
 ### Previews
 
@@ -219,6 +225,8 @@ The marker keeps a constant size on screen (scale = distance / 8, no floor in me
 - a solid batch hit returns its element (`byInstance` by `batchId`);
 - a glass hit is remembered and returned only if nothing solid lies behind it, so a robot's safety zone does not
   swallow clicks on what stands inside it.
+
+With `{ ghosts: true }` (the connection hover) ghosted context is picked too.
 
 `pick(event)` returns just the GlobalId. `setMeasure(p1, p2)` draws the picked points and the line and returns the
 distance in metres; its label reads "N mm (Δx · Δy · Δz)" in IFC axes.
@@ -323,7 +331,7 @@ textarea or select). The toolbar shows each key in its tooltip.
 | F | Go to the clash (`focusNow`) | C | Context |
 | S | Section box | I | Isolate |
 | E | Outlines | M | Measure |
-| Esc | Clear measure points, the properties card and the image dialog | | |
+| Esc | Clear measure points, the properties card, the image dialog and the connection highlight | L | Connections |
 
 - **Mouse:** a single click shows the element's properties card (with Set as A / Set as B) or, in measure mode, adds
   a point; a double click picks A, then B (a third pick starts over at A); a drag of more than 5 px is an orbit, never
@@ -336,6 +344,10 @@ textarea or select). The toolbar shows each key in its tooltip.
   outlines, measure; go to clash, fit, standard views, models shown, screenshot). On a phone (`compact`) one labelled
   **Tools** popover (a sheet from the bottom) holds the same, beside **Go to clash** and **Fit**. The rail stops click,
   double-click and pointer-down events so they never reach the canvas.
+- **Connections:** hold Alt (Option) and point, or turn on Connections (L): what the element under the pointer is
+  linked to lights up by kind, with a label (one pick per animation frame); Shift widens it to the run. A click or
+  tap with the toggle on pins them to the selection. Alt's own default (the menu bar) is suppressed except while
+  typing.
 - **While the agent drives** (`pilot.ts`), any camera move or click is a takeover; the pill's **Let ORCA drive**
   resumes.
 

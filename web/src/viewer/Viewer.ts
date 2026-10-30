@@ -22,6 +22,8 @@ const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.g
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[]; global_id?: string };
+/** The connection highlight draws at most this many elements, outlining the first LINK_EDGES of each kind. */
+const LINK_MAX = 150, LINK_EDGES = 40;
 /** A fix's piece as Show it built frames it: its element (a kept piece), the element its run came from and its part
  * (a combined fix's: "moved", "end" or "middle"). */
 export type BuiltPiece = Mesh & { global_id?: string; origin?: string; part?: string };
@@ -95,6 +97,9 @@ export class Viewer {
   showEdges = true;
   /** Elements a candidate fix ran into, while the agent shows its work. */
   private hitLayer = new THREE.Group();
+  /** The connection highlight: linked elements lit by kind (setLinks), over the model, never in captured pictures. */
+  private linkLayer = new THREE.Group();
+  private linkMaterials = new Map<string, { mesh: THREE.MeshStandardMaterial; edges: THREE.LineBasicMaterial }>();
   private hitMaterial = new THREE.MeshStandardMaterial({ color: "#e040fb", emissive: "#5c0a6b", roughness: 0.5,
     side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
   private hitEdges = new THREE.LineBasicMaterial({ color: "#f48fff", depthTest: false, transparent: true, opacity: 0.95 });
@@ -129,7 +134,7 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
-    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.marker, this.measureLayer);
+    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.marker, this.measureLayer);
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial]) m.clippingPlanes = this.clipping;
     this.markerLabel = this.label("marker-label");
     this.measureLabel = this.label("measure-label");
@@ -403,6 +408,42 @@ export class Viewer {
     }
   }
 
+  /** Light elements by group, each group in its colour (an element's connections by kind). At most LINK_MAX are
+   *  drawn, and outlines only for the first LINK_EDGES of each group: a slab can support hundreds of things. */
+  setLinks(groups: { color: string; ids: string[] }[]) {
+    this.linkLayer.clear();
+    for (const group of groups) {
+      const mats = this.linkMats(group.color);
+      group.ids.slice(0, LINK_MAX).forEach((gid, k) => {
+        const f = this.find(gid);
+        if (!f || this.hidden.has(gid) || this.hiddenModels.has(this.models.indexOf(f.model))) return;
+        const parts: THREE.Object3D[] = [new THREE.Mesh(this.geometryOf(f), mats.mesh)];
+        if (k < LINK_EDGES) parts.push(new THREE.LineSegments(this.edgeGeometryOf(gid, f), mats.edges));
+        for (const o of parts) {
+          o.matrixAutoUpdate = false;
+          o.matrix.copy(this.matrixOf(f.el));
+          o.frustumCulled = false;
+          o.renderOrder = 7;
+        }
+        this.linkLayer.add(...parts);
+      });
+    }
+  }
+
+  private linkMats(color: string) {
+    let mats = this.linkMaterials.get(color);
+    if (!mats) {
+      mats = {
+        mesh: new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color).multiplyScalar(0.35), roughness: 0.5,
+          transparent: true, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+          clippingPlanes: this.clipping }),
+        edges: new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9 }),
+      };
+      this.linkMaterials.set(color, mats);
+    }
+    return mats;
+  }
+
   /** A slow turn around the current target, while the agent thinks. */
   orbit(on: boolean) { this.controls.autoRotate = on; }
 
@@ -410,6 +451,7 @@ export class Viewer {
 
   private clearFocusCache() {
     this.setHits([]);
+    this.linkLayer.clear();   // its meshes share the batches' buffers too
     for (const g of this.edgeGeometry.values()) g.dispose();
     this.edgeGeometry.clear();
     this.edges.clear();
@@ -633,6 +675,7 @@ export class Viewer {
     const saved = { position: camera.position.clone(), target: this.controls.target.clone(), mode: this.mode, focus: this.focus,
       flight: this.flight, marker: this.marker.visible, overlay: this.overlay.visible, hidden: new Set(this.hidden),
       moved: new Map(this.moved), section: this.sectionBox?.clone() ?? null, background: scene.background, hits: this.hitLayer.visible,
+      links: this.linkLayer.visible,
       measure: this.measureLayer.visible, clear: renderer.getClearColor(new THREE.Color()), clearAlpha: renderer.getClearAlpha() };
     const temp = new THREE.Group();
     const trash: { dispose(): void }[] = [];   // render targets and materials made here, freed however it ends
@@ -649,7 +692,7 @@ export class Viewer {
     const shaded = () => { this.mode = "shaded"; this.applyMode(); zonesAndCut(); };
     try {
       this.flight = null; this.marker.visible = false; this.overlay.visible = false; this.hitLayer.visible = false;
-      this.measureLayer.visible = false;
+      this.measureLayer.visible = false; this.linkLayer.visible = false;
       this.focus = { a: null, b: null, group: {} };
       // The fix in place: a proposed option's pieces as their own meshes in their elements' colours (a move translates
       // its run), the originals hidden; an applied fix is the model itself.
@@ -866,7 +909,7 @@ export class Viewer {
       scene.overrideMaterial = null;
       scene.background = saved.background;
       this.hidden = saved.hidden; this.moved = saved.moved;
-      this.overlay.visible = saved.overlay; this.hitLayer.visible = saved.hits;
+      this.overlay.visible = saved.overlay; this.hitLayer.visible = saved.hits; this.linkLayer.visible = saved.links;
       this.focus = saved.focus;
       if (saved.section) { this.setSection(true, 0, saved.section); } else this.setSection(false);
       this.mode = saved.mode; this.applyMode();
@@ -899,7 +942,7 @@ export class Viewer {
     const zone = meetingZone(boxA, boxB);
     if (zone.isEmpty()) return null;
     const saved = { position: this.camera.position.clone(), target: this.controls.target.clone(), mode: this.mode,
-      focus: this.focus, flight: this.flight, marker: this.marker.visible };
+      focus: this.focus, flight: this.flight, marker: this.marker.visible, links: this.linkLayer.visible };
     const pair = Object.values(this.focusMaterials);
     const shot = (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => {
       for (const m of pair) { m.transparent = seeThrough; m.opacity = seeThrough ? 0.6 : 1; m.depthWrite = !seeThrough; m.needsUpdate = true; }
@@ -911,6 +954,7 @@ export class Viewer {
     try {
       this.flight = null;
       this.marker.visible = false;
+      this.linkLayer.visible = false;   // the connection highlight is the viewer's, never the pictures'
       this.setFocus({ a, b });
       const [position, target] = this.zoneCamera(zone, boxA.clone().union(boxB));
       this.camera.position.copy(position);
@@ -925,6 +969,7 @@ export class Viewer {
       this.controls.target.copy(saved.target);
       this.flight = saved.flight;
       this.marker.visible = saved.marker;
+      this.linkLayer.visible = saved.links;
       this.controls.update();
       this.adjustClipRange();
       // Draw the user's view again before the browser paints: the canvas keeps its last frame (preserveDrawingBuffer),
@@ -1010,7 +1055,7 @@ export class Viewer {
       this.scene.add(this.sectionHelper);
     }
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, ...Object.values(this.focusMaterials),
-      ...Object.values(this.focusGlass)]) m.needsUpdate = true;
+      ...Object.values(this.focusGlass), ...[...this.linkMaterials.values()].map((x) => x.mesh)]) m.needsUpdate = true;
     return true;
   }
 
@@ -1043,13 +1088,13 @@ export class Viewer {
   // ---------------------------------------------------------------- picking and measuring
 
   /** The element (and point on it) under the pointer, including elements in focus. */
-  pickAt(ev: MouseEvent): Pick | null {
+  pickAt(ev: MouseEvent, opts: { ghosts?: boolean } = {}): Pick | null {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     const targets: THREE.Object3D[] = [...this.focusLayer.children,
       ...this.models.filter((_, i) => !this.hiddenModels.has(i)).flatMap(batches)];
-    const ghostly = this.focusIds().length > 0 && this.mode !== "shaded";
+    const ghostly = !opts.ghosts && this.focusIds().length > 0 && this.mode !== "shaded";
     // A see-through element (a safety zone round a robot) is picked only where nothing solid is under the pointer,
     // or it would swallow every click on what stands inside it.
     let behindGlass: Pick | null = null;

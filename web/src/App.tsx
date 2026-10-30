@@ -12,6 +12,7 @@ import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } fro
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
 import { localFile, uploadRefusal, uploadStatus } from "./uploads";
+import { countsText, highlightGroups, indexGraph, LINK_COLOURS, LINK_ORDER, LINK_WORDS, type LinkIndex, type LinkKind } from "./links";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
@@ -71,7 +72,7 @@ export function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [a, setA] = useState<string | null>(null);
   const [b, setB] = useState<string | null>(null);
-  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", edges: true, section: false, measure: false, hiddenModels: [] });
+  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", edges: true, section: false, measure: false, links: false, hiddenModels: [] });
   const [modelNames, setModelNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
   const [measurePts, setMeasurePts] = useState<THREE.Vector3[]>([]);
@@ -781,6 +782,13 @@ export function App() {
         v.preview([{ globalIds: manualPreview.moved, deltaM: manualPreview.delta }]);
       }
     } else v.preview([]);
+    // A move that keeps its joints: what it takes along lit as joined, under the option's own colour.
+    const carried = option?.kind === "move" && compare !== "before" ? ((option.edit?.carried as string[] | undefined) ?? []) : [];
+    const base = carried.length ? [{ color: LINK_COLOURS.joint, ids: carried }] : [];
+    if (base.length || baseLinks.current.length) {   // only when it changes: nothing else draws the link layer
+      baseLinks.current = base;
+      if (!hover.current.gid) restoreLinks();
+    }
   }, [option, plan, planOptions, compare, a, viewPlan, activeContext, contextProposal, manualPreview]);
 
   useEffect(() => {
@@ -1052,6 +1060,7 @@ export function App() {
       return;
     }
     if (!hit) { setSelected(null); return; }
+    if (tool.links || ev.altKey) void pinLinks(hit.globalId, ev.shiftKey);   // a tap on a touch screen, too
     const epoch = sceneEpoch.current;
     setSelected({ globalId: hit.globalId, info: null });
     if (sceneId) api.element(sceneId, hit.globalId)
@@ -1102,10 +1111,125 @@ export function App() {
     if (p && !p.fired) { window.clearTimeout(p.timer); longPress.current = null; }
   }
 
-  function toggle(k: "edges" | "section" | "measure") {
+  function toggle(k: "edges" | "section" | "measure" | "links") {
     setTool((t) => ({ ...t, [k]: !t[k] }));
     if (k === "measure") setMeasurePts([]);
+    if (k === "links") clearHover();
   }
+
+  // The connection highlight (docs/connections.md): what an element is linked to, lit by kind. The graph comes from
+  // the server once per scene revision (and report: a check's contacts); pointing picks at most once a frame.
+  const linkIx = useRef<{ key: string; ix: LinkIndex } | null>(null);
+  const linkLoad = useRef<Promise<LinkIndex | null> | null>(null);
+  const hover = useRef<{ gid: string | null; wide: boolean }>({ gid: null, wide: false });
+  const hoverAt = useRef<{ clientX: number; clientY: number; wide: boolean } | null>(null);
+  const hoverFrame = useRef(0);
+  const hoverLabel = useRef<HTMLDivElement | null>(null);
+  const labelAt = useRef({ left: 0, top: 0 });   // where the label goes when it first shows; moves set it directly
+  const baseLinks = useRef<{ color: string; ids: string[] }[]>([]);   // what a shown option takes along
+  const pinned = useRef<{ gid: string | null; groups: { color: string; ids: string[] }[] }>({ gid: null, groups: [] });
+  const [hoverInfo, setHoverInfo] = useState<{ name: string | null; counts: string } | null>(null);
+
+  function ensureLinks(): Promise<LinkIndex | null> {
+    if (!sceneId) return Promise.resolve(null);
+    const key = `${sceneId}:${sceneRevision.current ?? ""}:${report?.id ?? ""}`;
+    if (linkIx.current?.key === key) return Promise.resolve(linkIx.current.ix);
+    if (!linkLoad.current) {
+      linkLoad.current = api.connections(sceneId)
+        .then((g) => { const ix = indexGraph(g); linkIx.current = { key, ix }; return ix; })
+        .catch(() => null)
+        .finally(() => { linkLoad.current = null; });
+    }
+    return linkLoad.current;
+  }
+
+  async function lightLinks(gid: string, wide: boolean): Promise<{ name: string | null; counts: string } | null> {
+    hover.current = { gid, wide };
+    const ix = await ensureLinks();
+    if (!ix || hover.current.gid !== gid) return null;
+    const groups = highlightGroups(ix, gid, wide);
+    viewer.current?.setLinks(groups);
+    return { name: ix.graph.names?.[gid] ?? null, counts: countsText(groups) + (wide ? " · whole run" : "") };
+  }
+
+  /** What shows when nothing is pointed at: a shown option's carried parts and the selected element's pinned links. */
+  function restoreLinks() {
+    viewer.current?.setLinks([...baseLinks.current, ...pinned.current.groups]);
+  }
+
+  /** A click (a tap) with the toggle on or Alt held, or the card's Light them up: the links stay lit while the element
+   *  is selected, under any hover. */
+  async function pinLinks(gid: string, wide: boolean) {
+    pinned.current = { gid, groups: [] };
+    const ix = await ensureLinks();
+    if (!ix || pinned.current.gid !== gid) return;
+    pinned.current = { gid, groups: highlightGroups(ix, gid, wide) };
+    if (!hover.current.gid) restoreLinks();
+  }
+
+  function unpin() {
+    if (!pinned.current.gid) return;
+    pinned.current = { gid: null, groups: [] };
+    if (!hover.current.gid) restoreLinks();
+  }
+
+  function clearHover() {
+    hover.current = { gid: null, wide: false };
+    hoverAt.current = null;
+    restoreLinks();
+    setHoverInfo(null);
+  }
+
+  /** Pointing with Alt (Option) held, or with the Connections toggle on, lights what the element under the pointer is
+   *  linked to; Shift widens it to the whole run. Never on touch (a tap does it), never while dragging. */
+  function stageMove(e: React.PointerEvent) {
+    pressMove(e);
+    // On a touch screen a tap does it (some browsers also send a mouse-type move with the tap): hover only with Alt.
+    if (e.pointerType === "touch" || e.buttons || (coarse && !e.altKey)) return;
+    if (!(e.altKey || tool.links) || tool.measure) {
+      if (hover.current.gid) clearHover();
+      return;
+    }
+    hoverAt.current = { clientX: e.clientX, clientY: e.clientY, wide: e.shiftKey };
+    const box = host.current?.getBoundingClientRect();
+    if (box) {
+      labelAt.current = { left: e.clientX - box.left + 14, top: e.clientY - box.top + 14 };
+      if (hoverLabel.current) { hoverLabel.current.style.left = `${labelAt.current.left}px`; hoverLabel.current.style.top = `${labelAt.current.top}px`; }
+    }
+    if (hoverFrame.current) return;
+    hoverFrame.current = window.requestAnimationFrame(() => {
+      hoverFrame.current = 0;
+      const at = hoverAt.current, v = viewer.current;
+      if (!at || !v) return;
+      const gid = v.pickAt({ clientX: at.clientX, clientY: at.clientY } as MouseEvent, { ghosts: true })?.globalId ?? null;
+      if (gid === hover.current.gid && at.wide === hover.current.wide) return;
+      if (!gid) { hover.current = { gid: null, wide: at.wide }; restoreLinks(); setHoverInfo(null); return; }
+      void lightLinks(gid, at.wide).then((info) => { if (info && hover.current.gid === gid) setHoverInfo(info); });
+    });
+  }
+
+  // Alt alone must not open the browser's menu bar (Windows), except while typing (Option composes characters on a
+  // Mac); letting go of it, or leaving the window, ends the highlight unless the toggle keeps it on.
+  useEffect(() => {
+    const typing = (e: KeyboardEvent) => e.target instanceof HTMLElement
+      && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
+    const onDown = (e: KeyboardEvent) => { if (e.key === "Alt" && !typing(e)) e.preventDefault(); };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key !== "Alt") return;
+      if (!typing(e)) e.preventDefault();
+      if (!tool.links && hover.current.gid) clearHover();
+    };
+    const onBlur = () => { if (hover.current.gid) clearHover(); };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => { window.removeEventListener("keydown", onDown); window.removeEventListener("keyup", onUp); window.removeEventListener("blur", onBlur); };
+  }, [tool.links]);
+
+  // Pinned links go with the selection that pinned them.
+  useEffect(() => {
+    if (pinned.current.gid && pinned.current.gid !== selected?.globalId) unpin();
+  }, [selected?.globalId]);
 
   function setModelVisible(i: number, visible: boolean) {
     viewer.current?.setModelVisible(i, visible);
@@ -1140,7 +1264,8 @@ export function App() {
       else if (k === "s") toggle("section");
       else if (k === "e") toggle("edges");
       else if (k === "m") toggle("measure");
-      else if (k === "escape") { setMeasurePts([]); setSelected(null); setLightbox(null); }
+      else if (k === "l") toggle("links");
+      else if (k === "escape") { setMeasurePts([]); setSelected(null); setLightbox(null); unpin(); clearHover(); }
       else return;
       e.preventDefault();
     };
@@ -2232,7 +2357,8 @@ export function App() {
       </aside>
 
       <main className={`stage ${tool.measure ? "measuring" : ""}`} ref={host} onClick={onClick}
-        onPointerDown={pressStart} onPointerMove={pressMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
+        onPointerDown={pressStart} onPointerMove={stageMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
+        onPointerLeave={() => { if (hover.current.gid) clearHover(); }}
         onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
         {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b)}
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
@@ -2259,6 +2385,9 @@ export function App() {
             </>,
           }} />
         )}
+        {hoverInfo && <div className="link-label" ref={hoverLabel} role="status" style={labelAt.current}>
+          {hoverInfo.name && <b>{hoverInfo.name}</b>}<span>{hoverInfo.counts}</span>
+          {!hoverInfo.counts.endsWith("whole run") && <small>Shift: the whole run</small>}</div>}
         {tool.measure && <div className="overlay hint-bar" onClick={(e) => e.stopPropagation()}>
           {measured != null ? `Measured ${Math.round(measured * 1000)} mm. ${coarse ? "Tap" : "Click"} again to start a new measurement.` : measurePts.length ? `${coarse ? "Tap" : "Click"} the second point.` : `${coarse ? "Tap" : "Click"} the first point to measure from.`}</div>}
         {selected && !tool.measure && (
@@ -2271,8 +2400,15 @@ export function App() {
               {selected.info?.tag ? <><dt>Tag</dt><dd>{String(selected.info.tag)}</dd></> : null}
               {selected.info?.storey ? <><dt>Level</dt><dd>{String(selected.info.storey)}</dd></> : null}
               {selected.info?.source ? <><dt>File</dt><dd>{String(selected.info.source)}</dd></> : null}
-              {Array.isArray(selected.info?.connected) ? <><dt>Connected</dt><dd>{(selected.info.connected as unknown[]).length} elements</dd></> : null}
             </dl>
+            <Links info={selected.info} onPick={(gid) => {
+              const epoch = sceneEpoch.current;
+              setSelected({ globalId: gid, info: null });
+              viewer.current?.frame([gid]);
+              if (sceneId) api.element(sceneId, gid)
+                .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === gid ? { ...s, info } : s)); })
+                .catch(() => undefined);
+            }} onShow={() => void pinLinks(selected.globalId, false)} />
             <div className="row">
               <button className="btn small" onClick={() => pickSide(selected.globalId, "a")}><i className="sw red" />Set as A</button>
               <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => pickSide(selected.globalId, "b")}><i className="sw green" />Set as B</button>
@@ -2720,4 +2856,34 @@ function keepPlaces(prev: RootCause[] | null, next: RootCause[]): RootCause[] {
   const out = prev.map((r) => now.get(r.hub.global_id) ?? { ...r, done: true });
   const seen = new Set(prev.map((r) => r.hub.global_id));
   return [...out, ...next.filter((r) => !seen.has(r.hub.global_id))];
+}
+
+
+type LinkEntry = { global_id: string; name: string | null; ifc_class: string };
+
+/** The properties card's links: what the element is joined to, hosts, rests on, supports or touches, by kind, each
+ *  clickable; its systems and the assembly it is part of. */
+function Links({ info, onPick, onShow }: { info: Record<string, unknown> | null; onPick: (gid: string) => void; onShow: () => void }) {
+  const links = (info?.links ?? {}) as Partial<Record<LinkKind, LinkEntry[]>>;
+  const kinds = LINK_ORDER.filter((k) => links[k]?.length);
+  const systems = (info?.systems ?? []) as string[];
+  const partOf = info?.part_of as { name: string; parts: number } | null | undefined;
+  if (!info || (!kinds.length && !systems.length && !partOf)) return null;
+  return (
+    <div className="links">
+      {kinds.map((k) => (
+        <div key={k} className="link-kind">
+          <span className="link-head"><i className="sw" style={{ background: LINK_COLOURS[k] }} />{LINK_WORDS[k]} · {links[k]!.length}</span>
+          <ul>
+            {links[k]!.slice(0, 6).map((l) => (
+              <li key={l.global_id}><button type="button" className="link" onClick={() => onPick(l.global_id)}
+                data-tip={`${l.ifc_class.replace(/^Ifc/, "")}: select and go to it`}>{l.name || l.ifc_class.replace(/^Ifc/, "")}</button></li>))}
+            {links[k]!.length > 6 && <li className="hint">and {links[k]!.length - 6} more</li>}
+          </ul>
+        </div>))}
+      {partOf && <p className="hint">Part of {partOf.name} ({partOf.parts} parts)</p>}
+      {systems.length > 0 && <p className="hint">System: {systems.join(", ")}</p>}
+      {kinds.length > 0 && <button type="button" className="btn small" onClick={onShow}>Light them up</button>}
+    </div>
+  );
 }

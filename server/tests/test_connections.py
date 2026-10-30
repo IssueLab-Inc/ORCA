@@ -214,6 +214,43 @@ def test_a_moved_part_is_joined_where_it_is_now(air):
     assert [air.entity(j.b).Name for j in cx.joints_of(air, by["Air pipe 4"])] == ["Air bend 1"]
 
 
+# ------------------------------------------------------------------------------------------------- the graph
+
+def test_the_graph_links_joints_resting_contacts_and_stops(scene, air):
+    g = cx.graph(scene)
+    joints = [e for e in g["edges"] if e[2] == "joint"]
+    assert len(joints) == len(scene.model.by_type("IfcRelConnectsPorts")) == 11 and {e[3] for e in joints} == {"ports"}
+    assert gid(scene, "Filter FRL1") in g["stops"] and gid(scene, "Valve V1") not in g["stops"]
+    s3a, column = gid(scene, "S3A"), gid(scene, "Column C3")
+    withc = cx.graph(scene, [[s3a, column]])
+    assert [s3a, column, "contact", ""] in withc["edges"] and withc is not g   # contacts from the last check
+    assert cx.links_of(scene, s3a, [[s3a, column]]) == {"joint": [gid(scene, "Bend B2"), gid(scene, "S3B")],
+                                                         "contact": [column]}
+    by = {air.entity(gg).Name: gg for gg in air.bounds()}
+    ga = cx.graph(air)
+    assert [by["Air filter F1"], by["Filter stand"], "rests_on", ""] in ga["edges"]       # the filter on its stand
+    assert {"geometry"} == {e[3] for e in ga["edges"] if e[2] == "joint"}
+    links = cx.links_of(air, by["Filter stand"])
+    assert links["supports"] == [by["Air filter F1"]]
+
+
+def test_the_endpoint_and_describe_give_the_links(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sightline import app as app_module
+    path = build_joints_fixture(tmp_path / "samples" / "joints.ifc")
+    ws = Workspace(path.parent)
+    sid = ws.open([path.name])
+    scene = ws.scene(sid)
+    d = ws.describe(sid, gid(scene, "Tee T1"))
+    assert tags(scene, [x["global_id"] for x in d["links"]["joint"]]) == ["BR", "M1", "M2"]
+    assert {x["name"] for x in d["links"]["joint"]} == {"Branch BR", "Main M1", "Main M2"}
+    assert d["part_of"] is None and d["systems"] == []
+    monkeypatch.setattr(app_module, "ws", ws)
+    r = TestClient(app_module.app).get(f"/api/scenes/{sid}/connections").json()
+    assert r["revision"] == 0 and len(r["edges"]) >= 11 and set(r["kinds"]) >= {"joint", "rests_on", "contact"}
+    assert r["names"][gid(scene, "Tee T1")] == "Tee T1" and set(r["names"]) == {g for e in r["edges"] for g in e[:2]}
+
+
 def test_keeping_a_move_that_would_pull_a_joint_apart_is_refused(tmp_path, monkeypatch):
     """/apply tries the move again before it keeps it (plans.apply): one that would pull a joint apart is a 409 with
     why, and nothing changes."""

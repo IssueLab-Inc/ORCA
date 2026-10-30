@@ -172,8 +172,9 @@ classes in `app.py`.
 | `POST` | `/api/models/upload/stream` | The same, with the opening streamed (below) | as above | NDJSON | as above; refusals before the files are in are plain HTTP errors |
 | `GET` | `/api/scenes/{scene_id}` | A scene the page had open, to resume it (`Workspace.scene_info`) | none | `{id, files, step, detection, revision}` | free; 404 once evicted |
 | `GET` | `/api/scenes/{scene_id}/files/{index}` | One model file as it is now: the original, or the edited model written out (`Workspace.file`); tidies exports older than an hour | none | IFC bytes, `no-store` | free; 404 |
-| `GET` | `/api/scenes/{scene_id}/elements/{global_id}` | One element's class, name, level, file, connections (`Workspace.describe`) | none | element dict | free |
+| `GET` | `/api/scenes/{scene_id}/elements/{global_id}` | One element's class, name, level, file, and its links by kind with names, systems and assembly (`Workspace.describe`) | none | element dict | free |
 | `GET` | `/api/scenes/{scene_id}/classes` | Every physical element's class and name, for a built view's cutaway (`Workspace.classes`) | none | `{GlobalId: [class, name]}` | free |
+| `GET` | `/api/scenes/{scene_id}/connections` | What is linked to what, for the connection highlight (`Workspace.connections` → `connections.graph`; contacts from the scene's last check; cached until the scene changes) | none | `{revision, edges: [[a, b, kind, source]], stops, systems, assemblies, names, kinds}` | free |
 
 ### Fixes
 

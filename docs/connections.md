@@ -15,6 +15,8 @@ Owner decisions (Oct 30, after a fix moved the cell's PL-302 segment 3 off colum
   2. moves that carry fittings and stretch segments;
   3. hover highlight.
 
+All three are done (below).
+
 ## Joints
 
 A `Joint(a, b, point_m, source, end_a, end_b)` is where two elements meet so that something passes through.
@@ -55,8 +57,8 @@ wider-fix planner relies on it.
 **What the samples have:**
 
 - **Northbank MEP:** 650 port joints.
-- **Northbank Structure and Architecture:** none. Their links (aggregates, fills, contacts) are for slice 3's
-  highlight.
+- **Northbank Structure and Architecture:** none. Their links (aggregates, fills, what rests on what, contacts) show in
+  slice 3's highlight.
 - **The cell from STEP:** every PL-301/PL-302 pipe, bend, valve and filter, and the CT-301 ladder, joined as built.
   V-302 is a branch on the plant main's side.
 
@@ -184,19 +186,62 @@ segment's own axis.
   true of offsets and trims; the cell's STEP has none.
 - Joints across files (a service on structure) are not modelled.
 
-## Slice 3: see connections (planned)
+## Slice 3: see connections (Oct 30)
 
-- **The graph:** `GET /api/scenes/{sid}/connections` lists typed edges:
-  - joint (ports or geometry);
-  - assembly;
-  - hosted (a door or window in its wall, an opening and its provision for void);
-  - rests on;
-  - contact (pairs touching within 1 mm, kept from the last check).
+**The graph** (`connections.graph(scene, contacts)`, `GET /api/scenes/{sid}/connections`): typed edges
+`[a, b, kind, source]`.
 
-  Systems are listed per element.
-- **On the page:**
-  - hold Alt (Option on a Mac) and hover, or turn on the **Connections** toggle (L), to light an element's direct
-    links by kind; Shift widens to the run;
-  - on a phone, tap with the toggle on;
-  - the properties card lists the links by kind;
-  - the highlight never shows in captured pictures.
+| Kind | What it is |
+|---|---|
+| joint | ports connected in the model, or STEP flow parts face to face (the joints above) |
+| assembly | an element and its aggregated or nested parts |
+| hosted | a door or window in the wall whose opening it fills; a provision for void and the service and host it is for |
+| rests_on | a's foot within 5 mm of b's top, overlapping in plan (read the other way round, b supports a) |
+| contact | pairs the last check found touching (within the test's tolerance, not overlapping), not linked otherwise |
+
+Also:
+
+- `stops`: flow elements a run ends at (equipment, terminals);
+- `systems`: each flow element's system names;
+- `assemblies`: whole → name and parts;
+- `names`: every linked element's name.
+
+The graph is cached on the scene by revision, the contacts and the number of boxes. Detection now keeps the pairs that
+only touch (`detect._measure` used to count them) in the run's state, and `Workspace.connections` passes them in.
+`Workspace.describe` (the properties card, chat and MCP `describe_element`) returns `links` by kind with names and
+classes, `systems` and `part_of`.
+
+**Measured:**
+
+- Northbank's three coordination files: 875 rests on, 650 joints, 26 hosted and 6 contacts, in 0.38 s.
+- The cell: 84 rests on and 18 joints, in 3.8 s (mostly the first triangulation of each part; then cached).
+
+**On the page** (`web/src/links.ts`, pure and tested; `Viewer.setLinks`; App's hover):
+
+- **Point at an element** with Alt held (Option on a Mac), or with the **Connections** toggle on (viewer rail, key
+  **L**; in the phone's Tools sheet, "Show connections"). What it is linked to lights in its kind's colour: joined
+  blue, rests on and supports green, hosted brown, assembly slate, touches light blue.
+  - A label by the pointer names the element and counts per kind ("2 joined").
+  - **Shift** widens it to the whole run: joints walked on until equipment or a terminal, which is lit but not walked
+    through, plus the rest of its assembly.
+  - One pick per animation frame; ghosted context can be pointed at (`pickAt(..., {ghosts: true})`).
+  - Letting go of Alt, leaving the viewer or the window, or Escape clears it.
+- **A click** with the toggle on (or Alt) lights the clicked element's links too. On a phone that is a tap, which also
+  opens the card.
+- **The properties card** lists the links by kind, with swatches and counts (six names per kind, then "and n more").
+  A name selects and frames that element; **Light them up** lights them all.
+- **A move that keeps its joints** shows what it takes along in joined blue while its option is shown (not in Before).
+- **Never in pictures:** the link layer is hidden while A/B/C pictures, list thumbnails and built views are taken.
+- **Drawing:** at most 150 elements per kind, edges on the first 40, hidden elements and models skipped, the section
+  box respected, the viewer's mode untouched.
+
+**Fixed on the way:** on a phone, a popover's sheet (Tools, for one) opened inside the viewer's rail and sat under the
+page's bottom sheet once a clash was picked. It now goes to the page's body (`Popover` in ui.tsx).
+
+**Checked in headless Chromium** on the cell's #22:
+
+- Alt over PL-302 segment 3 lights bends 2 and 3 ("2 joined"); with Shift, 14 joined, the run from the plant main to
+  FRL-302.
+- L does the same without Alt, and a click lists both bends on the card. Picking bend 2 there selects it.
+- On an iPhone 13, Show connections, then a tap on segment 3, gives the same card.
+- #61's proposal "move up 100 mm; takes … along" shows the flat bend, run 1 and the vertical bend in blue.
