@@ -44,6 +44,8 @@ export interface Attempt {
   edit?: FixEdit | null;
   where?: number[][];  // where the worst hits are, world metres
   model?: string;      // whose idea it was ("Muse Spark", "Muse Wonder")
+  seconds?: number;    // the geometry check's seconds (the stream's attempt events; none for an idea refused before any geometry)
+  checked?: number;    // how many elements a passing fix was tested against
 }
 /** A candidate in place while the agent checks it: a move's elements and delta, or an offset's new pieces. */
 export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m: number[]; pieces: Piece[] | null; summary?: string }
@@ -131,7 +133,7 @@ export interface Patch {
 export type AgentEvent = (
   | { type: "thinking"; round: number }
   | { type: "reasoning"; round: number; text: string }  // a summary of what Muse Spark is working out, as it thinks
-  | { type: "ideas"; round: number; seconds: number; understanding: string; count: number }
+  | { type: "ideas"; round: number; seconds: number; understanding: string; count: number; candidates?: { title: string; kind: string }[] }
   | { type: "checking"; index: number; title: string; kind: string }
   | ({ type: "trial" } & Trial)
   | ({ type: "attempt"; index: number } & Attempt)
@@ -402,7 +404,8 @@ export interface RootCause {
 }
 export type PlanEvent =
   | { type: "plan_items"; items: PlanItem[]; skipped: string[] }
-  | { type: "item"; key: string; status: "thinking" | "checking" | "done"; attempt?: string; passed?: boolean; ok?: boolean; title?: string }
+  | { type: "item"; key: string; status: "thinking" | "checking" | "done"; attempt?: string; passed?: boolean; ok?: boolean; title?: string;
+      seconds?: number; checked?: number; reason?: string }
   | { type: "thinking"; what: string }
   | { type: "root_cause"; root_cause: string; strategy: string; reason: string }
   | { type: "checking_plan"; retry?: string[] }

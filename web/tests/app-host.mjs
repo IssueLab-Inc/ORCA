@@ -116,7 +116,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const context = await compiled("../src/ContextPlan.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), "lucide-react": icons, "./ReportList": mocks });
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds, "./uploads": uploads, "./links": links,
-    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./viewer/views": views };
+    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./runlog": await compiled("../src/runlog.ts"), "./viewer/views": views };
   for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel", "./Properties", "./Brand"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   function render() {

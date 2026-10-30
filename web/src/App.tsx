@@ -1,6 +1,6 @@
 import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LayoutPanelLeft, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, RotateCcw, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, statusLine, type Progress } from "./Activity";
+import { Activity, statusLine, type ActivityView, type Progress } from "./Activity";
 import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
 import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, needsText, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
@@ -43,9 +43,22 @@ import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type 
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { PropertySets } from "./Properties";
+import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
+/** Workings in the Activity panel (docs/workings.md): on or off, and the view the panel shows (Workings by default). */
+const WORKINGS_KEY = "sightline.workings";
+type WorkingsSetting = { on: boolean; view: ActivityView };
+function readWorkings(): WorkingsSetting {
+  try {
+    const w = JSON.parse(localStorage.getItem(WORKINGS_KEY) ?? "null") as WorkingsSetting | null;
+    if (w && typeof w.on === "boolean" && (w.view === "steps" || w.view === "work")) return w;
+  } catch { /* a private window: the default */ }
+  return { on: true, view: "work" };
+}
+/** The bottom bar's height for Workings: it grows to this for a run when it is shorter than WORKINGS_SHORT. */
+const WORKINGS_HEIGHT = 380, WORKINGS_SHORT = 240;
 /** A saved view (docs/views.md): camera, projection, style, mode, visibility and section box. */
 type SavedView = { name: string; pose: Pose; ortho: boolean; style: VisualStyle; mode: ViewMode; filters: Filters;
   section: [number[], number[]] | null };
@@ -432,6 +445,8 @@ export function App() {
   useEffect(() => { viewer.current?.setLayout(shownLayout); }, [shownLayout, stats]);
   useEffect(() => { try { localStorage.setItem("sightline.views.layout", viewLayout); } catch { /* kept for this visit */ } }, [viewLayout]);
   useEffect(() => { try { localStorage.setItem(CLASSIC_KEY, classic ? "1" : "0"); } catch { /* kept for this visit */ } }, [classic]);
+  const [workings, setWorkings] = useState<WorkingsSetting>(readWorkings);
+  useEffect(() => { try { localStorage.setItem(WORKINGS_KEY, JSON.stringify(workings)); } catch { /* kept for this visit */ } }, [workings]);
   // The tour reads the main page: panels in their own windows come back for it.
   useEffect(() => { if (touring) dock.current?.gather(); }, [touring]);
   useEffect(() => { viewer.current?.setDrawingsFollow(drawingsFollow); }, [drawingsFollow]);
@@ -532,15 +547,18 @@ export function App() {
   const explained = useRef<string | null>(null);
 
   /** Run the bulk triage, or follow the run already going for this report. */
-  async function runTriage(rerun = false) {
+  async function runTriage(rerun = false, origin: Origin = "you") {
     if (!report) return;
     const rid = report.id;
+    const trace = traceStart("triage", origin, report.title, { names: Object.fromEntries(report.clashes.map((c) => [c.id, clashLabel(c)])) });
     if (rerun) { setTriage({}); setTriageFilter(null); setTriageAudit({}); }
     setTriageStale(false);
     setTriageLive({});
     setTriageRun((r) => r ?? { model: "", open_weights: false, total: report.clashes.length, started: Date.now(), done: false });
     try {
       await api.triageStream(rid, sceneId, (e) => {
+        if (e.type !== "ping") trace.add(e);
+        if (e.type === "done") trace.end(e.error ?? null);
         if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false, requirements: e.requirements?.label ?? null });
         else if (e.type === "audit") setTriageAudit(e.rules);
         else if (e.type === "clash") {
@@ -551,7 +569,8 @@ export function App() {
         else if (e.type === "reasoning") setTriageLive((l) => ({ ...l, [e.id]: ((l[e.id] ?? "") + e.text).slice(-600) }));
         else if (e.type === "done") { setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error }); setTriageLive({}); }
       }, rerun);
-    } catch (e) { setError((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
+    } catch (e) { setError((e as Error).message); trace.add({ type: "error", detail: (e as Error).message }); trace.end((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
+    trace.end("The stream ended before triage finished");   // nothing if it ended with its done event
   }
 
   // The requirements in use: registered with the server (content-addressed), then their id goes with every call.
@@ -732,7 +751,7 @@ export function App() {
 
   /** Draw a fix's picture from its passes; the run shows under `key`. Resolves with the result, null when the request
    * failed (switched off, capped: a report can try again). */
-  function drawBuilt(key: string, passes: BuiltPasses | null, kind: string): Promise<BuiltResult | null> {
+  function drawBuilt(key: string, passes: BuiltPasses | null, kind: string, title = "", origin: Origin = "you"): Promise<BuiltResult | null> {
     const sid = sceneId, map = sceneClasses.current?.map ?? {}, epoch = sceneEpoch.current;
     const already = builtPending.current.get(key);
     if (already) return already;   // being drawn: one request, one charge
@@ -746,12 +765,15 @@ export function App() {
       setBuiltRuns((r) => ({ ...r, [key]: { ...(r[key] ?? { status: "working", step: "", look: passes.look, cut }), ...patch } }));
     };
     set({ status: "working", step: "Muse Image is drawing two pictures from ORCA's view…", look: passes.look, cut, result: undefined, error: undefined });
-    const work = api.built(sid, { look: passes.look, ids: passes.ids, normals: passes.normals }, kind, (e) => set({ step: builtStep(e) }))
+    // Several pictures can be drawn at once (a plan's): each is a run of its own, and none grows the panel.
+    const trace = traceStart("built", origin, title, {}, { alone: false, grow: false });
+    const work = api.built(sid, { look: passes.look, ids: passes.ids, normals: passes.normals }, kind, (e) => { trace.add(e); set({ step: builtStep(e) }); })
       .then((res) => {
+        trace.add({ ...res, type: "result" }); trace.end();
         if (sceneEpoch.current !== epoch) return null;
         builtDone.current[key] = res; set({ status: res.status === "done" ? "done" : "failed", result: res }); return res;
       })
-      .catch((e) => { set({ status: "failed", error: (e as Error).message }); return null; })
+      .catch((e) => { trace.add({ type: "error", detail: (e as Error).message }); trace.end((e as Error).message); set({ status: "failed", error: (e as Error).message }); return null; })
       .finally(() => { if (builtPending.current.get(key) === work) builtPending.current.delete(key); });
     builtPending.current.set(key, work);
     return work;
@@ -762,7 +784,7 @@ export function App() {
     const f = builtFixes.current[clashId];
     if (!f) return;
     const ids = Object.entries(builtFixes.current).filter(([, g]) => g.key === f.key).map(([id]) => id);
-    void drawBuilt(f.key, builtPasses(f.fix, f.pair), f.fix.kind).then((res) => noteBuilt(ids, f.title, res));
+    void drawBuilt(f.key, builtPasses(f.fix, f.pair), f.fix.kind, f.title).then((res) => noteBuilt(ids, f.title, res));
   }
 
   /** Chat's show_it_built: the chosen option of the clash on screen, else its kept fix. */
@@ -771,7 +793,7 @@ export function App() {
     const o = p && k != null ? p.options[k] : null;
     const m = matches?.[clashId];
     const same = !!m && !!x && !!y && [m.a, m.b].sort().join("|") === [x, y].sort().join("|");   // the option is this clash's
-    if (o && same && canBuild(o)) { void drawBuilt(builtKey([x!, y!], o), builtPasses(builtFix(o, false), [x!, y!]), o.kind); return; }
+    if (o && same && canBuild(o)) { void drawBuilt(builtKey([x!, y!], o), builtPasses(builtFix(o, false), [x!, y!]), o.kind, o.title, "chat"); return; }
     if (builtFixes.current[clashId]) { redrawKept(clashId); return; }
     setError("Nothing to draw for that clash yet: propose fixes and pick one, or accept one, then ask again.");
   }
@@ -779,7 +801,7 @@ export function App() {
   /** The chosen option's picture (the button on its card). */
   function showBuilt(o: Option) {
     if (!a || !b || !canBuild(o)) return;
-    void drawBuilt(builtKey([a, b], o), builtPasses(builtFix(o, false), [a, b]), o.kind);
+    void drawBuilt(builtKey([a, b], o), builtPasses(builtFix(o, false), [a, b]), o.kind, o.title);
   }
 
   /** A kept fix's picture (or why there is none) on its clashes' evidence: the PDF's third picture. */
@@ -804,7 +826,7 @@ export function App() {
     const made = builtDone.current[key], drawing = builtPending.current.get(key);
     if (made?.status === "done") noteBuilt(ids, o.title, made);
     else if (drawing) void drawing.then((res) => noteBuilt(ids, o.title, res));
-    else if (passes) void drawBuilt(key, passes, o.kind).then((res) => noteBuilt(ids, o.title, res));
+    else if (passes) void drawBuilt(key, passes, o.kind, o.title).then((res) => noteBuilt(ids, o.title, res));
   }
 
   /** Before a report: the pictures still drawing, and those of accepted fixes that have none (switched on later, or
@@ -831,7 +853,7 @@ export function App() {
       ...pending.map((w) => w.then(() => onStep(++done, total))),
       ...todo.map(([key, ids]) => {
         const f = builtFixes.current[ids[0]];
-        return drawBuilt(key, builtPasses(f.fix, f.pair), f.fix.kind).then((res) => { noteBuilt(ids, f.title, res); onStep(++done, total); });
+        return drawBuilt(key, builtPasses(f.fix, f.pair), f.fix.kind, f.title).then((res) => { noteBuilt(ids, f.title, res); onStep(++done, total); });
       }),
     ]);
     return withLater(withBuilt(evidence));
@@ -1017,6 +1039,7 @@ export function App() {
     const names = (source as (string | File)[]).map((x) => (typeof x === "string" ? x : x.name));
     const hasStep = names.some((n) => /\.(step|stp)$/i.test(n));
     ++workspaceEpoch.current; replaceChatWork(); retireDirectWork();
+    runs.stopAll("The models were opened again");
     const epoch = ++sceneEpoch.current;
     ++contextRequest.current; ++agentRun.current; ++planRequest.current;
     pilot.current?.cancel();
@@ -1141,6 +1164,9 @@ export function App() {
   }, [sceneId, reqId]);
 
   function onDetectEvent(e: DetectEvent) {
+    const trace = traces.current.detect;
+    trace?.add(e.type === "done" ? { ...e, report: undefined } : e);   // the report itself is the clash list's
+    if (e.type === "done" || e.type === "error") trace?.end(e.type === "error" ? e.detail : null);
     setDetecting((p) => {
       const cur = p ?? { phase: "Starting…", tests: [] };
       if (e.type === "phase") return { ...cur, phase: e.text };
@@ -1159,6 +1185,7 @@ export function App() {
     const keep = report?.origin === "sightline" ? reviewed : {};
     const selected = report?.origin === "sightline" ? clash?.id : undefined;
     lastTests.current = tests;
+    traceStart("detect", "you", "The open models");
     setDetecting({ phase: "Starting…", tests: [] }); setError(null);
     try {
       const done = await api.detect(sid, tests, onDetectEvent);
@@ -1170,7 +1197,7 @@ export function App() {
       setReviewed(Object.fromEntries(Object.entries(keep).filter(([id]) => ids.has(id))));
       const still = selected && r.clashes.find((c) => c.id === selected);
       if (still) selectClash(still);
-    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); }
+    } catch (e) { traces.current.detect?.end((e as Error).message); if (sceneEpoch.current === epoch) setError((e as Error).message); }
     finally { setDetecting(null); }
   }
 
@@ -1522,6 +1549,7 @@ export function App() {
       else if (k === "m") toggle("measure");
       else if (k === "n" && tool.measure) setSnapping((on) => !on);
       else if (k === "l") toggle("links");
+      else if (k === "w" && workings.on && !compact) setActivityView(workings.view === "work" ? "steps" : "work");
       else if (k === "escape") {
         // One thing at a time: the measure, the image dialog, the selected element, then the clash.
         unpin(); clearHover();
@@ -1544,9 +1572,10 @@ export function App() {
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. With
    * `first` (a second try), the first try's ideas stay in the activity table and the second's are numbered after them. */
-  function trackAgent(first: Proposal | null = null) {
+  function trackAgent(first: Proposal | null = null, origin: Origin = "you", title = "") {
     directContext.current?.retire();
     clearManual();
+    const trace = traceStart("propose", origin, title, { second: !!first });
     const run = ++agentRun.current;
     const epoch = sceneEpoch.current;
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
@@ -1561,8 +1590,11 @@ export function App() {
     pilot.current?.start(first ? wonder : undefined);
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
     let attempts = first?.attempts.length ?? 0;
+    // Work that took over ends this run's record too (a plan, a wider fix, other models), whichever of these sees it first.
+    const superseded = () => { if (live()) return false; trace.end("Stopped when newer work took over"); return true; };
     const onEvent = (e: AgentEvent) => {
-      if (!live()) return;
+      if (superseded()) return;
+      trace.add(e);
       pilot.current?.event(e);
       // A second try starting in the same stream (automatic): its ideas are numbered after the first's.
       if (e.type === "escalating") {
@@ -1590,7 +1622,9 @@ export function App() {
       }
     };
     const finish = (result: Proposal | null) => {
-      if (!live()) return;
+      if (superseded()) return;
+      if (result) trace.add({ ...result, type: "result" });
+      trace.end(result ? null : "Stopped before a result");
       const show = () => {
         if (!live()) return;
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
@@ -1602,7 +1636,8 @@ export function App() {
       if (pilot.current) pilot.current.finish(show); else show();
     };
     const retire = () => {
-      if (!live()) return;
+      if (superseded()) return;
+      trace.end("Stopped");
       ++agentRun.current; pilot.current?.cancel();
       const owned = p;
       if (owned.phase !== "done") {
@@ -1610,7 +1645,43 @@ export function App() {
         setProgress((current) => current === owned ? retired : current);
       }
     };
-    return { onEvent, finish, live, retire };
+    return { onEvent, finish, live, retire, trace };
+  }
+
+  /** Each run the page watches, logged for Workings (docs/workings.md): one of each kind at a time, a new one ending the
+   * one it replaces. Workings needs more room than the table, so the bottom bar grows for a run when it is short. */
+  const traces = useRef<Partial<Record<RunKind, RunHandle>>>({});
+  const chatTitle = useRef("");   // the clash the chat's propose_fixes named, for its run's title
+  const grownFrom = useRef<number | null>(null);
+  function traceStart(kind: RunKind, origin: Origin, title: string, meta: Record<string, unknown> = {},
+                      { alone = true, grow = true }: { alone?: boolean; grow?: boolean } = {}) {
+    if (alone) traces.current[kind]?.end("Another run took its place");
+    const trace = runs.start(kind, { origin, title, meta });
+    if (alone) traces.current[kind] = trace;
+    if (grow && docked && workings.on && workings.view === "work") growActivity();
+    return trace;
+  }
+  /** An element's name, from the open report's clashes (for a run's title). */
+  const elementName = (id: string) => { for (const c of report?.clashes ?? []) for (const e of [c.a, c.b]) if (e.global_id === id) return e.name; return ""; };
+  /** A proposal's title: its clash, else the pair by name. */
+  const pairTitle = (c: ReportClash | null | undefined, x?: string | null, y?: string | null) => c ? clashLabel(c)
+    : x && y ? `${elementName(x) || "Element A"} × ${elementName(y) || "Element B"}` : "";
+  function growActivity() {
+    const was = dock.current?.fitBar("activity", WORKINGS_HEIGHT, { below: WORKINGS_SHORT }) ?? null;
+    if (was != null && grownFrom.current == null) grownFrom.current = was;
+  }
+  /** Steps or Workings in the Activity panel; back on Steps, a bar Workings grew is given back. */
+  function setActivityView(view: ActivityView) {
+    setWorkings((w) => ({ ...w, view }));
+    if (!docked) return;
+    if (view === "work") growActivity();
+    // Only from the height Workings set: a bar the person has resized since stays as they left it.
+    else if (grownFrom.current != null) { dock.current?.fitBar("activity", grownFrom.current, { at: WORKINGS_HEIGHT }); grownFrom.current = null; }
+  }
+  function setWorkingsOn(on: boolean) {
+    if (!on && workings.view === "work") setActivityView("steps");
+    setWorkings((w) => ({ on, view: on ? "work" : w.view === "work" ? "steps" : w.view }));
+    if (on && docked) growActivity();
   }
 
   /** Propose fixes for the pair (Muse Spark, up to three rounds). */
@@ -1631,7 +1702,7 @@ export function App() {
     const ea = pick ? pick.a : a, eb = pick ? pick.b : b, on = pick ? pick.clash : clash;
     if (!sceneId || !ea || !eb || busy) return;
     replaceChatWork();
-    const tracker = trackAgent(second && !pick ? proposal : null); directAgent.current = tracker;
+    const tracker = trackAgent(second && !pick ? proposal : null, "you", pairTitle(on, ea, eb)); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     const from = on && report ? { report_id: report.id, clash_id: on.id } : undefined;
@@ -1640,7 +1711,7 @@ export function App() {
       await Promise.race([captureViews(report.id, on.id, ea, eb), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
     try { result = await api.proposeStream(sceneId, ea, eb, from, onEvent, second); }
-    catch (e) { if (agentRun.current === run) setError((e as Error).message); }
+    catch (e) { if (agentRun.current === run) { setError((e as Error).message); tracker.trace.add({ type: "error", detail: (e as Error).message }); } }
     finally { finish(result); }
   }
 
@@ -1656,7 +1727,7 @@ export function App() {
     const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } =
       await (await fetch(`/tour/${{ duct: "c0053", joint: "c0051", ladder: "cell-ladder" }[which]}.json`)).json();
     if (sceneEpoch.current !== epoch) return;
-    const tracker = trackAgent(); directAgent.current = tracker;
+    const tracker = trackAgent(null, "replay", clashLabel(c)); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     setReplaying(true);
@@ -1664,7 +1735,7 @@ export function App() {
     for (const { t, event } of rec.events) {
       const wait = start + t * 1000 - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      if (agentRun.current !== run) return;
+      if (agentRun.current !== run) { tracker.trace.end("Stopped when newer work took over"); return; }
       if (event.type === "result") { finish(event as Proposal); setReplaying(false); return; }
       onEvent(event as AgentEvent);
     }
@@ -1703,14 +1774,15 @@ export function App() {
       return out;
     };
     rec.events = rec.events.map((e) => ({ ...e, event: remap(e.event) as PlanEvent }));
-    const tracker = trackPlan(which === "girder" ? "root_cause" : "batch"); directPlan.current = tracker;
+    const tracker = trackPlan(which === "girder" ? "root_cause" : "batch", "replay",
+      which === "girder" ? "Transfer plate girder 1000 deep - grid 3" : "The air pipe through both rails"); directPlan.current = tracker;
     const { onEvent, finish, live } = tracker;
     setReplaying(true);
     const start = Date.now();
     for (const { t, event } of rec.events) {
       const wait = start + t * 1000 - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      if (!live()) return;
+      if (!live()) { tracker.trace.end("Stopped when newer work took over"); return; }
       if (event.type === "plan") { finish(event); setReplaying(false); return; }
       if (event.type !== "error") onEvent(event);
     }
@@ -1718,8 +1790,9 @@ export function App() {
   }
 
   /** Start showing a plan being built; returns the handler for its events and a function to call when done. */
-  function trackPlan(kind: "batch" | "root_cause") {
+  function trackPlan(kind: "batch" | "root_cause", origin: Origin = "you", title = "") {
     directContext.current?.retire();
+    const trace = traceStart("plan", origin, title, { kind });
     const epoch = sceneEpoch.current, request = ++planRequest.current;
     const live = () => sceneEpoch.current === epoch && planRequest.current === request;
     ++agentRun.current; pilot.current?.cancel();
@@ -1729,8 +1802,10 @@ export function App() {
     let run: PlanRun = { kind, started: t, phase: kind === "root_cause" ? "cause" : "fixing", rootCause: "", items: [], status: {} };
     setPlanRun(run); setNow(t);
     const update = (f: (r: PlanRun) => PlanRun) => { run = f(run); setPlanRun(run); };
+    const superseded = () => { if (live()) return false; trace.end("Stopped when newer work took over"); return true; };
     const onEvent = (e: PlanEvent) => {
-      if (!live()) return;
+      if (superseded()) return;
+      trace.add(e);
       if (e.type === "root_cause") update((r) => ({ ...r, rootCause: e.root_cause, phase: "fixing" }));
       if (e.type === "plan_items") update((r) => ({ ...r, phase: "fixing", items: e.items,
         status: Object.fromEntries(e.items.map((i) => [i.key, { state: "waiting" as const }])) }));
@@ -1739,12 +1814,15 @@ export function App() {
       if (e.type === "checking_plan") update((r) => ({ ...r, phase: "checking" }));
     };
     const finish = (p: Plan | null) => {
-      if (!live()) return;
+      if (superseded()) return;
+      if (p) trace.add({ ...p, type: "plan" });
+      trace.end(p ? null : "Stopped before a plan");
       if (p) { setPlan(p); planRevision.current = sceneRevision.current; }   // what its joint check was made on
       update((r) => ({ ...r, phase: "done" })); setNow(Date.now());
     };
     const retire = () => {
-      if (!live()) return;
+      if (superseded()) return;
+      trace.end("Stopped when newer work took over");
       const retiredRequest = ++planRequest.current, owned = run;
       if (owned.phase !== "done") {
         const note = "Stopped when newer work took over.";
@@ -1754,7 +1832,7 @@ export function App() {
         setPlanError((current) => planRequest.current === retiredRequest ? note : current);
       }
     };
-    return { onEvent, finish, live, retire };
+    return { onEvent, finish, live, retire, trace };
   }
 
   /** Build a plan: several ticked clashes together, or the root cause around one element. */
@@ -1762,11 +1840,12 @@ export function App() {
     if (!sceneId || !report || busy) return;
     replaceChatWork();
     setTab("plan");
-    const tracker = trackPlan(body.hub ? "root_cause" : "batch"); directPlan.current = tracker;
+    const tracker = trackPlan(body.hub ? "root_cause" : "batch", "you",
+      body.hub ? elementName(body.hub) : `${body.clash_ids?.length ?? 0} clashes`); directPlan.current = tracker;
     const { onEvent, finish, live } = tracker;
     let p: Plan | null = null;
     try { p = await api.planStream(sceneId, { report_id: report.id, fixed: resolved, ...body }, onEvent); }
-    catch (e) { if (live()) setPlanError((e as Error).message); }
+    catch (e) { if (live()) { setPlanError((e as Error).message); tracker.trace.add({ type: "error", detail: (e as Error).message }); } }
     finally { finish(p); }
   }
 
@@ -1977,8 +2056,12 @@ export function App() {
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
     chatEscalating.current = false;
   }
-  function onChatEvent(e: ChatEvent) {
+  function onChatEvent(e: ChatEvent, origin: Origin = "chat") {
     if (e.type === "thinking") directContext.current?.retire();
+    if (e.type === "tool" && e.name === "propose_fixes") {
+      const c = report?.clashes.find((x) => x.id === e.args.clash_id);
+      chatTitle.current = c ? clashLabel(c) : "";
+    }
     if (e.type === "tool" && e.name === "explore_wider_fix") {
       const c = report?.clashes.find((x) => x.id === e.args.clash_id), pair = c && matches?.[c.id];
       chatContext.current = trackContext(c && pair?.a && pair.b ? { element_a: pair.a, element_b: pair.b, report_id: report!.id, clash_id: c.id } : null);
@@ -1993,7 +2076,7 @@ export function App() {
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
       if (c) selectClash(c, planThisTurn.current);
     }
-    if (e.type === "tool" && e.name === "detect_clashes") setDetecting({ phase: "Starting…", tests: [] });
+    if (e.type === "tool" && e.name === "detect_clashes") { traceStart("detect", origin, "The open models"); setDetecting({ phase: "Starting…", tests: [] }); }
     if (e.type === "detect_event") onDetectEvent(e.event);
     if (e.type === "tool_result" && e.name === "detect_clashes") setDetecting(null);
     if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
@@ -2008,18 +2091,18 @@ export function App() {
       if (e.event.type === "escalating" && !chatAgent.current) {
         const f = e.event.first_try;
         chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: f.options ?? [] }
-          : { understanding: "", attempts: [], options: [] });
+          : { understanding: "", attempts: [], options: [] }, origin, chatTitle.current);
         chatEscalating.current = true;
       } else if (e.event.type === "escalating") chatEscalating.current = true;
-      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent();
+      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent(null, origin, chatTitle.current);
       chatAgent.current?.onEvent(e.event);
     }
     if (e.type === "proposal") {
       setA(e.element_a); setB(e.element_b);
-      (chatAgent.current ?? trackAgent()).finish(e);
+      (chatAgent.current ?? trackAgent(null, origin, chatTitle.current)).finish(e);
       chatAgent.current = null; chatEscalating.current = false;
     }
-    if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind); planThisTurn.current = true; }
+    if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind, origin); planThisTurn.current = true; }
     if (e.type === "error") chatContext.current?.fail(e.detail);
     if (e.type === "tool_result" && e.name === "explore_wider_fix" && chatContext.current?.live()) {
       setContext((r) => r && r.phase !== "done" ? { ...r, phase: "done", error: e.summary } : r);
@@ -2032,7 +2115,7 @@ export function App() {
     if (e.type === "done" || e.type === "error") chatEscalating.current = false;
     if (e.type === "done") { planThisTurn.current = false; chatContext.current = null; }
     if (e.type === "plan_event") chatPlan.current?.onEvent(e.event);
-    if (e.type === "plan") { (chatPlan.current ?? trackPlan(e.kind)).finish(e); chatPlan.current = null; }
+    if (e.type === "plan") { (chatPlan.current ?? trackPlan(e.kind, origin)).finish(e); chatPlan.current = null; }
   }
   const chatPlan = useRef<ReturnType<typeof trackPlan> | null>(null);
   const chatEscalating = useRef(false);
@@ -2097,7 +2180,7 @@ export function App() {
       return;
     }
     if (e.type === "ui" && e.action === "open_models") { if (!busy) void openDemo(e.names); return; }
-    if (e.type === "ui" && e.action === "follow_triage") { if (!triageRun || triageRun.done) void runTriage(false); return; }
+    if (e.type === "ui" && e.action === "follow_triage") { if (!triageRun || triageRun.done) void runTriage(false, "agent"); return; }
     if (e.type === "ui" && e.action === "applied") {
       if (!sceneId) return;
       const epoch = sceneEpoch.current, live = () => sceneEpoch.current === epoch;
@@ -2113,7 +2196,7 @@ export function App() {
       resetWork(); setRemeasure((n) => n + 1);  // as when the person accepts: the options are spent
       return;
     }
-    onChatEvent(e as ChatEvent);
+    onChatEvent(e as ChatEvent, "agent");
   }
   // When the tab closes, tell the server at once (a proxy may hold a dropped stream open for a while), so the agent
   // is not told a browser is following.
@@ -2649,6 +2732,7 @@ export function App() {
     {docked && <p className="hint">Drag a tab to dock it anywhere. The buttons beside the tabs collapse a side bar, float a
       panel or open it in its own window; a right click on a tab does the same.</p>}
     {docked && <button className="pop-item" onClick={() => { close(); dock.current?.reset(); }}><RotateCcw size={14} aria-hidden /> Reset the layout</button>}
+    <label className="pop-item check"><input type="checkbox" checked={workings.on} onChange={(e) => { close(); setWorkingsOn(e.target.checked); }} /> Workings in Activity</label>
     <label className="pop-item check"><input type="checkbox" checked={classic} onChange={(e) => { close(); setClassic(e.target.checked); }} /> Classic layout (fixed panels)</label>
   </>);
 
@@ -3054,8 +3138,9 @@ export function App() {
       {docked && inSlot(slots.properties, <div className="props in-panel">
         {selected ? <>{elementCard}{elementSets}</> : <p className="hint">Click any element in the model to see its properties.</p>}
       </div>)}
-      {!compact && inSlot(slots.activity, <footer className="dock">
-        <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
+      {!compact && inSlot(slots.activity, <footer className={`dock${workings.on && workings.view === "work" ? " working" : ""}`}>
+        <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} workings={workings.on} view={workings.view}
+          onView={setActivityView} onHide={() => setWorkingsOn(false)} inView={pilotStatus?.step ?? null} />
       </footer>)}
       {layout === "tablet" && listOpen && !landing && <div className="drawer-scrim" aria-hidden onClick={() => setListOpen(false)} />}
       {layout === "phone" && !landing && !starting && (

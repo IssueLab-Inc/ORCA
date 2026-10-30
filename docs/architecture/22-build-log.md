@@ -1277,3 +1277,33 @@ Team names typed, titles and the rule audit by domain (Oct 30; code `domains.py`
 - **Checked:** `test_domains.py` (14: titles and audit by domain, guesses never fixed, typed names in the report and its
   prompt); 621 server tests; 124 web tests, build clean. In Chromium on Northbank: the dialog's first model retyped to
   "Acme Mechanical" kept it; the second cleared and left went back to "MEP".
+
+Workings (Oct 30, owner decision; code `web/src/runlog.ts`, `workingsGraph.ts`, `Workings.tsx`, `Activity.tsx`, `App.tsx`,
+`dock.tsx`, `pilot.ts`, `index.css`, `server/sightline/agent.py`; design [docs/workings.md](../workings.md)):
+- **What:** the Activity panel draws each run as it happens, as lanes (who started it, Muse, ORCA) of steps joined by
+  edges: proposals (rounds, ideas, checks, a second try, the stop, the rank, the options), Fix together and root
+  causes (a row per item), triage (rules, alike groups, the model's calls, verdicts, dots along the busy edges), Show
+  it built (rounds, the pixel gate, judges, the retry) and ORCA's check. Follow, zoom, Fit, a minimap, event labels, a
+  timeline to replay a finished run, a picker for the last 12 runs, "in view" on the idea the pilot shows. It is the
+  panel's default view beside Steps (`W`), with an off switch in the panel and in Panels and layout; the bottom bar
+  grows to 380 px for a run and gives the room back on Steps; phones and tablets keep Steps.
+- **How:** a run log written by the trackers that already gather each run (so the chat, an agent over MCP and the
+  tour's replays show, each named), pure builders per kind, and a canvas that takes its timers and sizes from the
+  window it is in, so it works floated and popped out. The `ideas` event now names its candidates, so a round's ideas
+  show together. No new dependency.
+- **Checked:** 135 web tests (`workings.test.mjs`, 11, on the tour's recordings and fixtures); `test_agent.py` for
+  `ideas.candidates`; build clean. In Chromium on Northbank against a local server: the demo's check; a live proposal
+  on #1 (the duct) followed at a readable zoom; the cable tray with Activity floated, then popped out mid-run, `W` in
+  that window; off and on again; Fix together on #1–#3 (37 s, 18 steps); triage of all 464 (58 s); the cold-water
+  main's ideas shown together. Show it built was not run live (it spends Muse Wonder's budget).
+- **Review (PR 58):** `workings.ts` became `workingsGraph.ts` (it and `Workings.tsx` differ only in case, which breaks
+  the build on Windows and macOS); a run whose tracker finds newer work has taken over is ended then, and a detection
+  that throws or a triage stream that closes without `done` is ended too; titles come from the pair being worked on;
+  `stopAll` moved to `open()`; live runs are never let go of; meshes are dropped from logged events and Show it built
+  keeps no capture; the bar goes back only from Workings' own height; detection phases last until the next event; a
+  judge without a verdict draws; Follow's glide is no longer cut short; a newer run takes over from a picked one;
+  effects measure only when the drawing changes; the edit words come from `fixKinds.ts`; `checking.kind` matches
+  `ideas.candidates`. And the server now times each check: `attempt` has `seconds` and, for a passing fix, `checked`,
+  which a plan's `item` events pass on with the failure's `reason`; Workings shows them. 607 server tests, 136 web
+  tests.
+

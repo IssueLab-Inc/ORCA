@@ -6,6 +6,8 @@ export interface PilotStatus {
   driving: boolean;
   state: "thinking" | "trying" | "passed" | "failed" | "idle";
   text: string;
+  /** The idea on screen while trying it and showing its verdict (its number in the run, from 0), for Workings. */
+  step?: number;
 }
 
 type Step = { trial: Trial; n: number; title: string; attempt: Attempt | null; arrived: () => void };
@@ -33,6 +35,7 @@ export class Pilot {
   private waits = new Set<() => void>();
   private who = "Muse Spark";   // the model proposing now (a second try's, after `model`)
   private offset = 0;           // ideas before this try's (a second try numbers its own after the first's)
+  private shown: number | null = null;   // the idea on screen now
 
   constructor(private viewer: () => Viewer | null, private frame: (t: Trial) => void,
               private onStatus: (s: PilotStatus | null) => void) {}
@@ -129,6 +132,7 @@ export class Pilot {
       v.setHits([]);
       v.showOption({ kind: t.kind, moved: t.moved, deltaM: t.delta_m, pieces: t.pieces, before: null }, "after", TRYING);
       this.frame(t);
+      this.shown = step.n;
       this.status("trying", `Trying idea ${step.n + 1}: ${step.title || describe(t)}`);
       const arrived = step.attempt ? Promise.resolve() : new Promise<void>((r) => { step.arrived = r; });
       await Promise.all([arrived, this.wait(busy ? 500 : 1100)]);
@@ -147,6 +151,7 @@ export class Pilot {
     }
     if (!current()) return;
     this.playing = false;
+    this.shown = null;
     if (n && this.driving && !this.done) {
       this.status("thinking", `${this.who} is weighing what it found…`);
       this.viewer()?.orbit(true);
@@ -178,6 +183,7 @@ export class Pilot {
 
   private reset() {
     this.active = this.driving = false;
+    this.shown = null;
     this.queue = [];
     for (const s of this.steps.values()) s.arrived();  // nothing waits on a step that will not come
     this.steps.clear();
@@ -185,7 +191,8 @@ export class Pilot {
   }
 
   private status(state: PilotStatus["state"], text: string) {
-    this.onStatus({ driving: this.driving, state, text });
+    const step = state === "trying" || state === "passed" || state === "failed" ? this.shown ?? undefined : undefined;
+    this.onStatus({ driving: this.driving, state, text, ...(step != null ? { step } : {}) });
   }
 }
 
