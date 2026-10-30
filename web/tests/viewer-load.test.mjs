@@ -13,7 +13,7 @@ async function stage({ glass = false, realAdopt = false } = {}) {
   Object.assign(v, { models: [old], names: ["old.ifc"], solid: {}, glass: {},
     scene: { remove: (...meshes) => removed.push(...meshes), add: (...meshes) => added.push(...meshes) },
     adopt: (m) => { adopted.push(m); return realAdopt ? Viewer.prototype.adopt.call(v, m) : m; },
-    clearFocusCache() {}, applyMode() {}, fitAll() {}, preview() {}, hiddenModels: new Set(), pane3d: {}, history: { clear() {} }, panes: [], configureViews() {} });
+    clearFocusCache() {}, applyMode() {}, fitAll() {}, preview() {}, hiddenModels: new Set(), pane3d: {}, history: { clear() {} }, panes: [], configureViews() {}, snapCache: new Map() });
   return { v, pending, old, model, removed, adopted, added };
 }
 
