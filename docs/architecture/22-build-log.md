@@ -1123,3 +1123,23 @@ Approved identity and motion library (Oct 30, owner request; `assets/brand/orca/
   actual gallery/native-element/standalone-SVG browser checks (motion, pause, size/speed/theme, accessible labels,
   safe dynamic text, real phase control, one-shot final states, reduced motion, 320/390/768 px and desktop layouts);
   static and motion export validation. The pack is ready for integration in a subsequent application redesign.
+
+Measure in every view, and the rail split (Oct 30; owner request; design [docs/measure.md](../measure.md); code
+`web/src/viewer/measure.ts`, `Viewer.ts`, `web/src/MeasurePanel.tsx`, `ViewerToolbar.tsx`, `App.tsx`):
+- **Measure everywhere:** M works in the 3D view and in every drawing. In a drawing both points lie on its plane (a
+  plan measures on its cut, a section in its plane), with a drawing's ticks at the ends; the 3D view shows every
+  measurement. A rubber band with its length runs to the pointer before the second click.
+- **Snapping** (on by default; the panel's toggle or N): ends, midpoints and edges of the element under the pointer
+  (its feature edges), and in a cut drawing the cut outline, joined into straight runs so a face split in two triangles
+  has one midpoint; the elements 10 px round it when that gives nothing. A glyph shows what it found.
+- **Several measurements** in the Measure panel (beside the rail; drag its header, fold it): copy one or all (length,
+  components, view and both ends in model coordinates), delete one, clear all. The old single 3D measure goes.
+- **The rail:** in Two and Quad the 3D view's own tools (modes, style, section box, outlines, connections, Home, camera,
+  saved views) move into the 3D pane, folded to its height; go to clash, measure, views, visibility and the screenshot
+  stay at the left. Fly to clash moves to the Views menu.
+- **Checked** in Chromium on Northbank (software GL), Quad: snaps on a grid of pointer positions (plan: 8 ends, 4
+  midpoints, 24 edges; 3D: 5 ends, 3 midpoints, 7 edges); measurements in the plan (on its cut, Δz 0), the 3D view and
+  the section; Copy all to the clipboard; delete, Clear all, N, Esc (first point, then the tool), drag and fold; the
+  rails in Single, Two, Quad and with the plan maximised, at 1600×1000 and 1366×768 (the 3D group inside its pane each
+  time); A/B/C, thumbnails, `capture()` and Show it built's passes still byte-identical; `web/tests/measure.test.mjs`
+  (6); 108 web tests.

@@ -42,6 +42,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `Tour.tsx` | Both guided tours (steps, spotlight, "Show me", recorded-run offer) | `Tour`, `TourState`, `TourActions`, `TOUR`, `CELL`, `TOUR_QUESTION`, `BUILDING_STEPS`, `CELL_STEPS` | `App` |
 | `Triage.tsx` | The Triage card (run, two stages, verdict bar and rows, compact mode) | `TriageCard`, `TRIAGE`, `TriageRun` | `App`, `ClashPanel.tsx`, `ReportList.tsx` |
 | `ViewerToolbar.tsx` | The viewer's icon rail (modes, styles, tools, camera, views and layouts, saved views, visibility), or one Tools menu on a phone | `ViewerToolbar`, `ToolbarState`, `ViewsControls`, `STYLES` | `App` |
+| `MeasurePanel.tsx` | The Measure panel beside the rail while measuring: snap toggle, what to click next, the measurements (copy or delete each, Copy all, Clear all); its header drags it and folds it ([docs/measure.md](../measure.md)) | `MeasurePanel` | `App` |
 | `ViewPanes.tsx` | Each pane's header over the viewer (view picker, view range or depth and crop, pin, go to the clash, fit, maximise), the clash chip, and the lines between panes to drag | `ViewPanes` | `App` |
 | `chatRequest.ts` | Who owns the chat's current turn, so a newer action can cut off an older stream | `ChatRequestOwner`, `ChatRequest` | `App`, `Chat.tsx` |
 | `clashImage.ts` | Reads a Navisworks clash picture by colour (red A, green B, where they meet) | `readClashImage`, `focusSquare`, `drawOverlay`, `ClashRead`, `Box` | `ClashPanel.tsx` |
@@ -133,6 +134,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 | Report | `report`, `reportSamples`, `matches`, `clash`, `measure`, `remeasure`, `titles`, `naming`, `views`, `capturing`, `lightbox` | `reportRef`, `captures`, `folderInput`, `filesInput` | `shown()`, `shownReport`, `shownClash` |
 | Detection | `detectSetup`, `detecting`, `detection` | `lastTests`, `pendingDetect` | |
 | Selection and the view's tools | `a`, `b`, `standIns`, `selected`, `tool` (`ToolbarState`: mode, style, ortho, grey, edges, section, measure, links, hidden models), `measurePts`, `measured`, `toast` | `down`, `longPress`, `flashTimer`, `sides` | `group` |
+| Measuring ([docs/measure.md](../measure.md)) | `snapping`, `measureAt` (the viewer keeps the measurements; `viewsTick` redraws the panel) | `measureFrame` (one snap per animation frame) | `rail3d()` (where the 3D view's tools go) |
 | Views and navigation ([docs/views.md](../views.md)) | `fly`, `filters`, `temporary`, `savedViews`, `viewsTick` (the viewer's `onChange`: history, Home, panes or hides changed; at most one tick a frame), `viewLayout`, `drawingsFollow`, `infoRev` (bumped after a kept fix, so classes and storeys are read again for its new elements) | `sectionTo`, `viewsQueued` | `shownLayout` (phone Single, tablet at most Two), `viewsControls`, `counts`, `clashBusy` |
 | Proposal and options | `proposal`, `chosen`, `progress`, `thoughts`, `compare`, `tab`, `fixAnyway`, `pilotStatus`, `escalation`, `manual`, `manualDz`, `manualPreview` | `pilot`, `agentRun`, `previewRequest`, `directAgent`, `golden` | `option`, `proposing`, `notAClash`, `hideFix`, `canEscalate`, `wonder`, `nextClash` |
 | Kept work | `edits` (element → pieces a fix added), `fixes` (clash id → fix title), `reviewed`, `evidence`, `checked` | | `resolved`, `resolvedSet`, `fixedCount` |
@@ -241,7 +243,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 | mount; then `sceneId`, report, files, fixes, link | `api.sceneInfo` / `api.report` / `api.linkState`; `localStorage` | `resumable`; the saved session |
 
 Other effects drive the viewer from state: `setFocus` (A/B, `group`, `planGroup`, `contextGroup`), `setMode`,
-`setEdges`, `setSection`, `setMeasure`, and the preview (`showOption` for the chosen option, `showOptions` for a plan
+`setEdges`, `setSection`, `setMeasuring` and `setSnap`, and the preview (`showOption` for the chosen option, `showOptions` for a plan
 or wider fix, `preview` for a manual move), plus framing (`frameFix`, `frameMeshes`).
 
 ```mermaid
@@ -514,6 +516,8 @@ Everything is `localStorage`, read and written inside `try` (a private window ju
 | `sightline.views.fly` | `App` | Fly to clash: whether picking a clash takes every view to it (default on) |
 | `sightline.views.layout` | `App` | The view layout: `single`, `two` or `quad` |
 | `sightline.views.<project>` | `App` (`viewsKey`, `saveViews`) | `ViewsStore`: Home pose and saved views for this set of models |
+| `sightline.measure.snap` | `App` | Snapping while measuring, on or off (default on) |
+| `sightline.measure.at` | `App` | Where the Measure panel was dragged to (`{x, y}` in the stage) |
 
 No `sessionStorage` or IndexedDB is used.
 

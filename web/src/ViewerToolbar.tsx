@@ -58,8 +58,12 @@ type Toggle = "edges" | "section" | "measure" | "links" | "ortho" | "grey";
 /** The viewer's tools as a vertical icon rail: modes, then tools, then camera. Every icon has a tooltip. On a phone
  * (`compact`) a touch screen shows no tooltips, so the same tools sit in one labelled Tools menu (a sheet from the
  * bottom), beside Go to the clash and Fit, the two people reach for most. */
-export function ViewerToolbar({ compact = false, state, models, hasFocus, views, onMode, onStyle, onToggle, onView, onFit, onFocus, onModel, onShot }: {
-  compact?: boolean; state: ToolbarState; models: string[]; hasFocus: boolean; views: ViewsControls;
+/** Where the 3D view's own tools go when the stage shows several panes: inside the 3D pane (its rectangle in the stage),
+ * or nowhere while a drawing is maximised. Null: one rail for everything, at the stage's left. */
+export interface Rail3d { shown: boolean; x: number; y: number; h: number }
+
+export function ViewerToolbar({ compact = false, state, models, hasFocus, views, split = null, onMode, onStyle, onToggle, onView, onFit, onFocus, onModel, onShot }: {
+  compact?: boolean; state: ToolbarState; models: string[]; hasFocus: boolean; views: ViewsControls; split?: Rail3d | null;
   onMode: (m: ViewMode) => void; onStyle: (s: VisualStyle) => void; onToggle: (k: Toggle) => void; onView: (p: Preset) => void;
   onFit: () => void; onFocus: () => void; onModel: (i: number, visible: boolean) => void; onShot: () => void;
 }) {
@@ -95,7 +99,7 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, views,
           <div className="tool-views" role="group" aria-label="Standard views">
             {VIEWS.map((v) => <button key={v.id} type="button" className="btn small" onClick={() => { onView(v.id); close(); }}>{v.label}</button>)}
           </div>
-          <CameraItems state={state} views={views} onToggle={onToggle} close={close} />
+          <CameraItems state={state} views={views} onToggle={onToggle} close={close} fly />
           <VisibilityItems models={models} state={state} views={views} onModel={onModel} />
         </>)}
       </Popover>
@@ -103,54 +107,90 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, views,
       <button type="button" className="btn rail-btn" aria-label="Home view" onClick={onFit}><Maximize size={16} aria-hidden /></button>
     </nav>
   );
-  return (
-    <nav className="rail" aria-label="Viewer tools" onClick={stop} onDoubleClick={stop} onPointerDown={stop}>
-      <div className="rail-group" role="group" aria-label="View mode">
-        {MODES.map((m) => <IconButton key={m.id} icon={m.icon} label={m.label} shortcut={m.key} active={state.mode === m.id} onClick={() => onMode(m.id)} />)}
-        <Popover icon={Palette} label={`Visual style: ${STYLES.find((s) => s.id === state.style)?.label ?? "Shaded"}`} shortcut="G">
-          {(close) => (<>
-            <p className="pop-title">Visual style</p>
-            {STYLES.map((s) => (
-              <button key={s.id} role="menuitemradio" aria-checked={state.style === s.id} className={`pop-item ${state.style === s.id ? "on" : ""}`}
-                onClick={() => { onStyle(s.id); close(); }}><span><b>{s.label}</b> <small className="why">{s.hint}</small></span>{check(state.style === s.id)}</button>))}
-            <label className="pop-item check"><input type="checkbox" checked={state.grey} onChange={() => onToggle("grey")} /> With a clash, grey the rest in Shaded</label>
-          </>)}
+  const style = (
+    <Popover icon={Palette} label={`Visual style: ${STYLES.find((x) => x.id === state.style)?.label ?? "Shaded"}`} shortcut="G">
+      {(close) => (<>
+        <p className="pop-title">Visual style</p>
+        {STYLES.map((x) => (
+          <button key={x.id} role="menuitemradio" aria-checked={state.style === x.id} className={`pop-item ${state.style === x.id ? "on" : ""}`}
+            onClick={() => { onStyle(x.id); close(); }}><span><b>{x.label}</b> <small className="why">{x.hint}</small></span>{check(state.style === x.id)}</button>))}
+        <label className="pop-item check"><input type="checkbox" checked={state.grey} onChange={() => onToggle("grey")} /> With a clash, grey the rest in Shaded</label>
+      </>)}
+    </Popover>);
+  const mode = MODES.find((m) => m.id === state.mode) ?? MODES[1];
+  const modes = (folded: boolean) => folded
+    ? (<Popover icon={mode.icon} label={`Mode: ${mode.label.split(":")[0]}`} shortcut="V X C I">
+      {(close) => (<>
+        <p className="pop-title">Mode</p>
+        {MODES.map((m) => (
+          <button key={m.id} role="menuitemradio" aria-checked={state.mode === m.id} className={`pop-item ${state.mode === m.id ? "on" : ""}`}
+            onClick={() => { onMode(m.id); close(); }}><m.icon size={15} aria-hidden /><span><b>{m.label.split(":")[0]}</b> <small className="why">{m.label.split(": ")[1]}</small></span><kbd>{m.key}</kbd></button>))}
+      </>)}
+    </Popover>)
+    : MODES.map((m) => <IconButton key={m.id} icon={m.icon} label={m.label} shortcut={m.key} active={state.mode === m.id} onClick={() => onMode(m.id)} />);
+  const tools = (
+    <>
+      <IconButton icon={Crop} label="Section box: round the clash, the selected element or what is in view; drag a face's grip" shortcut="S" active={state.section} onClick={() => onToggle("section")} />
+      <IconButton icon={Shapes} label="Outline the pair through walls" shortcut="E" active={state.edges} onClick={() => onToggle("edges")} />
+      <IconButton icon={Waypoints} label="Connections: point at an element to light what it is joined to (or hold Alt / Option); Shift for the whole run" shortcut="L" active={state.links} onClick={() => onToggle("links")} />
+    </>);
+  const toolsMenu = (
+    <Popover icon={Crop} label="3D tools: section box, outlines, connections">
+      {() => (<>
+        <p className="pop-title">3D tools</p>
+        <button type="button" className={`pop-item ${state.section ? "on" : ""}`} aria-pressed={state.section} onClick={() => onToggle("section")}><Crop size={15} aria-hidden /> Section box{check(state.section)}<kbd>S</kbd></button>
+        <button type="button" className={`pop-item ${state.edges ? "on" : ""}`} aria-pressed={state.edges} onClick={() => onToggle("edges")}><Shapes size={15} aria-hidden /> Outline the pair{check(state.edges)}<kbd>E</kbd></button>
+        <button type="button" className={`pop-item ${state.links ? "on" : ""}`} aria-pressed={state.links} onClick={() => onToggle("links")}><Waypoints size={15} aria-hidden /> Connections{check(state.links)}<kbd>L</kbd></button>
+      </>)}
+    </Popover>);
+  const camera = (
+    <Popover icon={Compass} label="Camera: standard views, perspective or orthographic, back and forward" shortcut="1-4">
+      {(close) => (<>
+        {VIEWS.map((v) => (
+          <button key={v.id} role="menuitem" className="pop-item" onClick={() => { onView(v.id); close(); }}>
+            <span>{v.label}</span><kbd>{v.key}</kbd></button>))}
+        <CameraItems state={state} views={views} onToggle={onToggle} close={close} />
+      </>)}
+    </Popover>);
+  const home = <IconButton icon={Home} label={views.hasHome ? "Home view" : "Home view: the whole model"} shortcut="H" onClick={onFit} />;
+  /** The 3D view's own tools, folded to fit: modes into one menu, then the tools and the camera into menus too. */
+  const threeD = (form: "full" | "short" | "tiny") => form === "tiny"
+    ? (<div className="rail-group" role="group" aria-label="3D view">{modes(true)}{style}{toolsMenu}{home}{camera}<SavedViews views={views} /></div>)
+    : (<>
+      <div className="rail-group" role="group" aria-label="View mode">{modes(form === "short")}{style}</div>
+      <div className="rail-group" role="group" aria-label="3D tools">{tools}</div>
+      <div className="rail-group" role="group" aria-label="3D camera">{home}{camera}<SavedViews views={views} /></div>
+    </>);
+  /** What acts on every view: the clash, measuring, the layout, visibility, the screenshot. */
+  const everyView = (
+    <div className="rail-group" role="group" aria-label="Every view">
+      <IconButton icon={LocateFixed} label="Go to the clash, or frame the selected element" shortcut="F" disabled={!hasFocus} onClick={onFocus} />
+      <IconButton icon={Ruler} label="Measure: in the 3D view or any drawing, snapping to corners and edges" shortcut="M" active={state.measure} onClick={() => onToggle("measure")} />
+      {views.layouts.length > 1 && (
+        <Popover icon={LayoutGrid} label="Views: plans, sections and elevations beside the 3D view" shortcut="Q">
+          {(close) => <LayoutItems views={views} close={close} />}
+        </Popover>)}
+      {models.length > 0 && (
+        <Popover icon={Layers} label="Visibility: models, levels, classes">
+          {() => <VisibilityItems models={models} state={state} views={views} onModel={onModel} />}
         </Popover>
-      </div>
-      <div className="rail-group" role="group" aria-label="Tools">
-        <IconButton icon={Crop} label="Section box: round the clash, the selected element or what is in view; drag a face's grip" shortcut="S" active={state.section} onClick={() => onToggle("section")} />
-        <IconButton icon={Shapes} label="Outline the pair through walls" shortcut="E" active={state.edges} onClick={() => onToggle("edges")} />
-        <IconButton icon={Ruler} label="Measure between two points" shortcut="M" active={state.measure} onClick={() => onToggle("measure")} />
-        <IconButton icon={Waypoints} label="Connections: point at an element to light what it is joined to (or hold Alt / Option); Shift for the whole run" shortcut="L" active={state.links} onClick={() => onToggle("links")} />
-      </div>
-      <div className="rail-group" role="group" aria-label="Camera">
-        <IconButton icon={LocateFixed} label="Go to the clash, or frame the selected element" shortcut="F" disabled={!hasFocus} onClick={onFocus} />
-        <IconButton icon={Home} label={views.hasHome ? "Home view" : "Home view: the whole model"} shortcut="H" onClick={onFit} />
-        <Popover icon={Compass} label="Camera: standard views, perspective or orthographic, back and forward" shortcut="1-4">
-          {(close) => (<>
-            {VIEWS.map((v) => (
-              <button key={v.id} role="menuitem" className="pop-item" onClick={() => { onView(v.id); close(); }}>
-                <span>{v.label}</span><kbd>{v.key}</kbd></button>))}
-            <CameraItems state={state} views={views} onToggle={onToggle} close={close} />
-          </>)}
-        </Popover>
-        {views.layouts.length > 1 && (
-          <Popover icon={LayoutGrid} label="Views: plans, sections and elevations beside the 3D view" shortcut="Q">
-            {(close) => <LayoutItems views={views} close={close} />}
-          </Popover>)}
-        <SavedViews views={views} />
-        {models.length > 0 && (
-          <Popover icon={Layers} label="Visibility: models, levels, classes">
-            {() => <VisibilityItems models={models} state={state} views={views} onModel={onModel} />}
-          </Popover>
-        )}
-        <IconButton icon={Camera} label="Save a screenshot" onClick={onShot} />
-      </div>
-    </nav>
-  );
+      )}
+      <IconButton icon={Camera} label="Save a screenshot" onClick={onShot} />
+    </div>);
+  if (!split) return (
+    <nav className="rail" aria-label="Viewer tools" onClick={stop} onDoubleClick={stop} onPointerDown={stop}>{threeD("full")}{everyView}</nav>);
+  // Several panes: the 3D view's tools in the 3D pane, under its header (folded to its height); the rest stay here.
+  const room = split.h - 58;
+  return (<>
+    <nav className="rail" aria-label="Tools for every view" onClick={stop} onDoubleClick={stop} onPointerDown={stop}>{everyView}</nav>
+    {split.shown && (
+      <nav className="rail rail-3d" aria-label="3D view tools" style={{ left: split.x + 8, top: split.y + 50 }} onClick={stop} onDoubleClick={stop} onPointerDown={stop}>
+        {threeD(room >= 470 ? "full" : room >= 350 ? "short" : "tiny")}
+      </nav>)}
+  </>);
 }
 
-function CameraItems({ state, views, onToggle, close }: { state: ToolbarState; views: ViewsControls; onToggle: (k: Toggle) => void; close: () => void }) {
+function CameraItems({ state, views, onToggle, close, fly = false }: { state: ToolbarState; views: ViewsControls; onToggle: (k: Toggle) => void; close: () => void; fly?: boolean }) {
   return (<>
     <p className="pop-title">Projection</p>
     <button role="menuitemcheckbox" aria-checked={state.ortho} className={`pop-item ${state.ortho ? "on" : ""}`} onClick={() => onToggle("ortho")}>
@@ -160,7 +200,7 @@ function CameraItems({ state, views, onToggle, close }: { state: ToolbarState; v
       <button className="btn small" disabled={!views.canBack} onClick={() => views.onBack()}><ArrowLeft size={14} aria-hidden /> Back <kbd>[</kbd></button>
       <button className="btn small" disabled={!views.canForward} onClick={() => views.onForward()}>Forward <kbd>]</kbd> <ArrowRight size={14} aria-hidden /></button>
     </div>
-    <label className="pop-item check"><input type="checkbox" checked={views.fly} onChange={(e) => views.onFly(e.target.checked)} /> Take every view to the clash I pick</label>
+    {fly && <label className="pop-item check"><input type="checkbox" checked={views.fly} onChange={(e) => views.onFly(e.target.checked)} /> Take every view to the clash I pick</label>}
     <p className="pop-title">Home</p>
     <button className="pop-item" onClick={() => { views.onSetHome(); close(); }}><Home size={14} aria-hidden /> Set this view as Home</button>
     {views.hasHome && <button className="pop-item" onClick={() => views.onClearHome()}>Home back to the whole model</button>}
@@ -178,6 +218,8 @@ function LayoutItems({ views, close }: { views: ViewsControls; close: () => void
       <span>The whole model</span>{!views.follow && <b className="tick">✓</b>}</button>
     <button role="menuitemradio" aria-checked={views.follow} className={`pop-item ${views.follow ? "on" : ""}`} onClick={() => views.onFollow(true)}>
       <span>What the 3D view shows <small className="why">(Context, Isolate)</small></span>{views.follow && <b className="tick">✓</b>}</button>
+    <p className="pop-title">Picking a clash</p>
+    <label className="pop-item check"><input type="checkbox" checked={views.fly} onChange={(e) => views.onFly(e.target.checked)} /> Take every view to the clash I pick</label>
   </>);
 }
 

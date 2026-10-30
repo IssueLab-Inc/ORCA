@@ -35,6 +35,7 @@ import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, 
 import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./ViewerToolbar";
 import { escStep, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
 import { ViewPanes } from "./ViewPanes";
+import { MeasurePanel } from "./MeasurePanel";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
@@ -53,6 +54,19 @@ function saveViews(files: string[], store: ViewsStore) {
   try { localStorage.setItem(viewsKey(files), JSON.stringify(store)); } catch { /* private window: views last this visit */ }
 }
 type Tab = "clash" | "plan" | "chat";
+/** Text to the clipboard: the Clipboard API, else a hidden text area and the copy command (an older browser, or a page
+ * the API is not allowed on). */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* try the old way */ }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text; area.style.position = "fixed"; area.style.opacity = "0";
+    document.body.appendChild(area); area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  } catch { return false; }
+}
 /** A fix as Show it built's capture takes it (Viewer.captureBuilt). */
 type BuiltFix = Parameters<Viewer["captureBuilt"]>[0];
 
@@ -112,8 +126,12 @@ export function App() {
   const [drawingsFollow, setDrawingsFollow] = useState(false);
   const [modelNames, setModelNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
-  const [measurePts, setMeasurePts] = useState<THREE.Vector3[]>([]);
-  const [measured, setMeasured] = useState<number | null>(null);
+  // Measuring (docs/measure.md): the viewer keeps the measurements; snapping is kept in this browser.
+  const [snapping, setSnapping] = useState(() => { try { return localStorage.getItem("sightline.measure.snap") !== "0"; } catch { return true; } });
+  const measureFrame = useRef(0);
+  const [measureAt, setMeasureAt] = useState<{ x: number; y: number } | null>(() => {
+    try { const v = JSON.parse(localStorage.getItem("sightline.measure.at") ?? "null"); return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? v : null; } catch { return null; }
+  });
   const down = useRef<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -412,9 +430,12 @@ export function App() {
     sectionTo.current = null;
     if (!(box ? viewer.current?.setSection(true, 0, box) : viewer.current?.setSection(true))) setTool((t) => ({ ...t, section: false }));
   }, [tool.section, a, b, contextGroup, planGroup]);
+  useEffect(() => { viewer.current?.setMeasuring(tool.measure); viewsChanged(); }, [tool.measure]);
   useEffect(() => {
-    setMeasured(viewer.current?.setMeasure(measurePts[0] ?? null, measurePts[1] ?? null) ?? null);
-  }, [measurePts]);
+    viewer.current?.setSnap(snapping);
+    try { localStorage.setItem("sightline.measure.snap", snapping ? "1" : "0"); } catch { /* kept for this visit */ }
+  }, [snapping]);
+  useEffect(() => { try { if (measureAt) localStorage.setItem("sightline.measure.at", JSON.stringify(measureAt)); } catch { /* kept for this visit */ } }, [measureAt]);
 
   // A clock for the live status lines while an agent works.
   const working = (!!progress && progress.phase !== "done") || (!!planRun && planRun.phase !== "done")
@@ -1163,7 +1184,8 @@ export function App() {
       return;
     }
     if (tool.measure) {
-      if (hit) setMeasurePts((p) => (p.length >= 2 ? [hit.point] : [...p, hit.point]));
+      viewer.current?.measureClick(ev.nativeEvent);
+      viewsChanged();   // the panel says what to click next
       return;
     }
     if (!hit) { setSelected(null); return; }
@@ -1220,7 +1242,6 @@ export function App() {
 
   function toggle(k: "edges" | "section" | "measure" | "links" | "ortho" | "grey") {
     setTool((t) => ({ ...t, [k]: !t[k] }));
-    if (k === "measure") setMeasurePts([]);
     if (k === "links") clearHover();
   }
 
@@ -1293,6 +1314,11 @@ export function App() {
     pressMove(e);
     // On a touch screen a tap does it (some browsers also send a mouse-type move with the tap): hover only with Alt.
     if (e.pointerType === "touch" || e.buttons || (coarse && !e.altKey)) return;
+    if (tool.measure) {   // what the pointer snaps to, once a frame
+      const at = { clientX: e.clientX, clientY: e.clientY } as MouseEvent;
+      cancelAnimationFrame(measureFrame.current);
+      measureFrame.current = requestAnimationFrame(() => viewer.current?.measureHover(at));
+    }
     if (!(e.altKey || tool.links) || tool.measure) {
       if (hover.current.gid) clearHover();
       return;
@@ -1401,6 +1427,17 @@ export function App() {
     link.click();
   }
 
+  /** Where the 3D view's own tools go (docs/measure.md, "The rail"): with several panes, into the 3D pane (none while a
+   * drawing is maximised); with one view, null: one rail at the stage's left. */
+  function rail3d(): { shown: boolean; x: number; y: number; h: number } | null {
+    const v = viewer.current;
+    if (!v || v.panes.length < 2) return null;
+    const shown = v.visiblePanes();
+    if (shown.length === 1 && shown[0].spec.kind === "3d") return null;
+    const r = v.rect3d();
+    return { shown: shown.some((p) => p.spec.kind === "3d"), x: r.x, y: r.y, h: r.h };
+  }
+
   /** F: frame the selected element, else go to the clash. */
   function focusNow() {
     if (selected) viewer.current?.frame([selected.globalId]);
@@ -1431,6 +1468,7 @@ export function App() {
       else if (k === "s") toggle("section");
       else if (k === "e") toggle("edges");
       else if (k === "m") toggle("measure");
+      else if (k === "n" && tool.measure) setSnapping((on) => !on);
       else if (k === "l") toggle("links");
       else if (k === "escape") {
         // One thing at a time: the measure, the image dialog, the selected element, then the clash.
@@ -1438,7 +1476,7 @@ export function App() {
         // The clash is left only where its chip shows: a clash plan or a wider fix keeps it (their own panels close them).
         const step = escStep({ measuring: tool.measure, lightbox: !!lightbox, selection: !!selected,
           clash: !!(clash || a || b) && !viewPlan && !activeContext, working: clashBusy });
-        if (step === "measure") { if (measurePts.length) setMeasurePts([]); else toggle("measure"); }
+        if (step === "measure") { if (viewer.current?.measureCancel()) viewsChanged(); else toggle("measure"); }
         else if (step === "lightbox") setLightbox(null);
         else if (step === "selection") setSelected(null);
         else if (step === "clash") leaveClash();
@@ -2539,9 +2577,9 @@ export function App() {
 
       <main className={`stage ${tool.measure ? "measuring" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
         onPointerDown={pressStart} onPointerMove={stageMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
-        onPointerLeave={() => { if (hover.current.gid) clearHover(); }}
+        onPointerLeave={() => { if (hover.current.gid) clearHover(); if (tool.measure) viewer.current?.measureHover(null); }}
         onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
-        {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b || selected)} views={viewsControls}
+        {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b || selected)} views={viewsControls} split={rail3d()}
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onStyle={(style) => setTool((t) => ({ ...t, style }))} onToggle={toggle}
           onView={(p) => viewer.current?.view(p)} onFit={() => viewer.current?.home()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
         {stats && <ViewPanes viewer={viewer.current} offset={layout === "phone" ? 8 : 64} compact={layout === "phone"} chip={(clash || a || b) && !viewPlan && !activeContext ? (
@@ -2580,8 +2618,9 @@ export function App() {
         {hoverInfo && <div className="link-label" ref={hoverLabel} role="status" style={labelAt.current}>
           {hoverInfo.name && <b>{hoverInfo.name}</b>}<span>{hoverInfo.counts}</span>
           {!hoverInfo.counts.endsWith("whole run") && <small>Shift: the whole run</small>}</div>}
-        {tool.measure && <div className="overlay hint-bar" onClick={(e) => e.stopPropagation()}>
-          {measured != null ? `Measured ${Math.round(measured * 1000)} mm. ${coarse ? "Tap" : "Click"} again to start a new measurement.` : measurePts.length ? `${coarse ? "Tap" : "Click"} the second point.` : `${coarse ? "Tap" : "Click"} the first point to measure from.`}</div>}
+        {tool.measure && viewer.current && <MeasurePanel measures={viewer.current.measurements} open={viewer.current.measureOpen} snap={snapping} coarse={coarse}
+          at={layout === "phone" ? null : measureAt} onMove={setMeasureAt} onSnap={setSnapping} onCopy={(text, what) => void copyToClipboard(text).then((ok) => flash(ok ? `Copied ${what}.` : "Could not copy: the browser said no."))}
+          onRemove={(id) => viewer.current?.removeMeasurement(id)} onClear={() => viewer.current?.clearMeasurements()} onClose={() => toggle("measure")} />}
         {selected && !tool.measure && (
           <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             <div className="row"><b>{String(selected.info?.ifc_class ?? "Element").replace(/^Ifc/, "")}</b>

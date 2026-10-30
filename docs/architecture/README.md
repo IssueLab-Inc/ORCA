@@ -12,7 +12,7 @@ How this set relates to the other docs:
 - **`CLAUDE.md` and `AGENTS.md`** hold the rules, the traps and the current status. They point here for how things
   work.
 - **The feature designs in [`docs/`](../)** ([connections](../connections.md), [detection](../detection.md), [edits](../edits.md),
-  [escalation](../escalation.md), [mcp](../mcp.md), [mobile](../mobile.md), [requirements](../requirements.md),
+  [escalation](../escalation.md), [mcp](../mcp.md), [measure](../measure.md), [mobile](../mobile.md), [requirements](../requirements.md),
   [show-it-built](../show-it-built.md), [step](../step.md), [uploads](../uploads.md), [views](../views.md), [voice](../voice.md)) hold
   the reasoning and measurements behind each feature. This map summarises them and links to them; it does not copy
   them.
