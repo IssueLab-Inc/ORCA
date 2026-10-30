@@ -123,14 +123,18 @@ which the page no longer uses. Routes in full: [10](10-http-api-and-streams.md).
 
 - **Shape:** `{"kind": "move", "move": "A", "delta_m": [dx, dy, dz]}`, metres on the model's axes (+X east, +Y north,
   +Z up; `agent.move_words` says it in words).
-- **What moves:** `IfcScene.connected_run(target)`: the element and the segments joined to it through ports, up to
-  the fittings at each end (a STEP part: `step_run`). Nothing new is built; `Option.placements` carries the new
-  matrices for the page's preview.
+- **What moves:** `connections.run(target)`: the element and the straight segments joined to it cap to cap (ports,
+  or for STEP parts flow parts meeting face to face), the element first; a part that is not a flow element keeps
+  `IfcScene.connected_run` without flow parts. Nothing new is built; `Option.placements` carries the new matrices for
+  the page's preview. Design: [docs/connections.md](../connections.md).
+- **Joints first** (`connections.plan_move`): a move that would pull a joint apart (a bend, a valve or equipment
+  joined to the run that would stay where it is) is refused before it is tried, naming the joint ("cannot keep its
+  joints: …"); the joints are the attempt's hits, so the pilot shows them.
 - **Checked** (`_try_move`): the run is translated, checked, and translated back in a `finally` (no transaction is
   needed). The fittings at the run's ends (connected but outside it) are ignored. The supports rule applies, with the
   clash's partner and a plan item's `others` as what the move must clear ([06](06-geometry-and-detection.md)): what a
   post or stand sits on stays a contact, a lift off it fails.
-- **Refused:** only by the requirements (`_refused`) or a failed check.
+- **Refused:** by the joints, by the requirements (`_refused`) or by a failed check.
 
 ### Offset
 

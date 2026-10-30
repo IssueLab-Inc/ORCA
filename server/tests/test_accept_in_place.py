@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sightline import app as app_module
-from sightline import edits
+from sightline import connections, edits
 from sightline.fixtures import build_route_fixture, build_run_fixture
 from sightline.service import Workspace
 
@@ -57,9 +57,9 @@ def test_an_offset_comes_back_as_its_pieces_triangles(client):
 def test_a_move_a_route_and_a_plan_come_back_as_meshes_too(client):
     c, ws = client
     r, scene, main = open_run(c)
-    run = scene.connected_run(main)   # the supply main and its end segment: a move takes the whole run
+    run = connections.run(scene, main)   # the supply main and its end segment: a move takes the whole run
     moved = drop(c, r, scene, main)
-    assert [m["global_id"] for m in moved["meshes"]] == run and moved["revision"] == 1
+    assert {m["global_id"] for m in moved["meshes"]} == set(run) and moved["revision"] == 1
     plan = c.post(f"/api/scenes/{r['id']}/plan/apply", json={"options": [
         {"kind": "move", "moved": [main], "delta_m": [0, 0, -0.1], "pair": [main, beam_of(scene)]}]}).json()
     assert plan["revision_before"] == 1 and plan["revision"] == 2 and [m["global_id"] for m in plan["meshes"]] == run

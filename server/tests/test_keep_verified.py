@@ -148,7 +148,7 @@ def test_a_plan_is_kept_all_or_nothing(run, monkeypatch):
 def test_the_server_keeps_what_it_checked_not_what_the_page_says(run):
     c, ws, sid, s, main, beam, _ = run
     kept = c.post(f"/api/scenes/{sid}/fix/apply", json={"option": move(main, -0.4, [main, beam])}).json()
-    assert kept["changed"] == s.connected_run(main) and len(kept["changed"]) == 2   # the whole run, not one segment
+    assert set(kept["changed"]) == set(s.connected_run(main)) and len(kept["changed"]) == 2   # the whole run, not one segment
     jid = c.post("/api/scenes", json={"samples": ["joint.ifc"]}).json()["id"]
     j = ws.scene(jid)
     transom, mullion = (next(e.GlobalId for e in j.model.by_type("IfcMember") if e.Name.startswith(n))

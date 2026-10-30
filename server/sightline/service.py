@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
+from . import agent, connections, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -200,11 +200,16 @@ class Workspace:
 
     def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025,
                     obstacles: list[str] = ()) -> dict:
-        """Check a move without keeping it. With `obstacles` (what the move must clear), what the moved elements stand
-        on is kept as a proposal keeps it (`verify.supports`): slid along a slab is not a clash, lifted off it is
-        refused (`reason`). Without them, every contact counts."""
+        """Check a move without keeping it. A move that would pull a joint apart fails without being tried, with the
+        `reason` and the elements it would pull apart from (`joints`). With `obstacles` (what the move must clear),
+        what the moved elements stand on is kept as a proposal keeps it (`verify.supports`): slid along a slab is not
+        a clash, lifted off it is refused (`reason`). Without them, every contact counts."""
         s = self.scene(scene_id)
         with self.lock:
+            plan = connections.plan_move(s, moved, delta_m)
+            if not plan.ok:
+                return {"passed": False, "hits": [], "min_clearance_m": None, "checked_against": 0, "placements": {},
+                        "reason": plan.refused, "joints": {"refused_at": plan.refused_at}}
             sup = verify.supports(s, moved, set(obstacles), clearance_m) if obstacles else None
             placements = s.translate(moved, tuple(delta_m))
             try:
@@ -215,8 +220,8 @@ class Workspace:
                     hits = v.hits
             finally:
                 s.translate(moved, tuple(-d for d in delta_m))
-        return {**asdict(v), "passed": not hits and not why, "hits": [asdict(h) for h in hits],
-                **({"reason": why} if why else {}), "placements": placements}
+        return {**asdict(v), "passed": not hits and not why, "hits": [asdict(h) for h in hits], "reason": why,
+                "placements": placements}
 
     def propose(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
                 images: list[str] | None = None, notes: str = "", report_id: str | None = None,
@@ -405,6 +410,9 @@ class Workspace:
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
         s = self.scene(scene_id)
         with self.lock:
+            plan = connections.plan_move(s, moved, delta_m)
+            if not plan.ok:
+                raise edits.Unsupported(plan.refused)
             placements = s.translate(moved, tuple(delta_m))
             for g in moved:  # kept: export writes these files
                 s.mark_edited(g)

@@ -99,6 +99,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `app.py` | Entry points | The FastAPI app: every `/api` route and stream, the owner and requirements middleware, the caps, `/mcp`, static files |
 | `built.py` | Report jobs | Show it built: outline, Muse Image restyles, pixel gate, judges, the picture cache |
 | `chat.py` | Workflows | Chat with Muse Spark through tools; `Chat._run` is also the MCP server's tool layer |
+| `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, and `plan_move`: a move that would pull a joint apart is refused |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
 | `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
@@ -482,6 +483,19 @@ keep them. Deeper design: [docs/edits.md](../edits.md).
 - **Rules:** a shape that cannot take an edit raises `Unsupported` with the reason; the original keeps its GlobalId on
   the first piece; `trial` and `trial_files` always undo (cached boxes included); `kept_files` keeps all or nothing;
   never nest one transaction inside another on the same file.
+
+### `connections.py`: joints
+
+What is joined to what, so a fix that moves something never leaves a joint apart. Deeper design:
+[docs/connections.md](../connections.md).
+
+- **Main symbols:** `Joint`, `joints_of` (ports read live; for STEP parts, flow parts of one group meeting face to
+  face, `_geometry_joints`, triangles cached per part), `classify` (straight / rigid / stays), `run` (straight segments
+  joined cap to cap, the element first), `plan_move` → `MovePlan` (`refused`, `refused_at`), `describe` (Muse's text),
+  `move_words`, `mode` (`SIGHTLINE_CONNECTED_MOVES`), `TOUCH_M`, `FACING`, `INLINE`.
+- **Imports:** `edits.py`, `scene.py`. **Imported by:** `agent.py`, `plans.py`, `service.py`.
+- **Rules:** every path that moves something plans first (`agent._try_move`, combined steps, `plans` joint hits,
+  `Workspace.verify_move` / `apply`); `scene.connected_run` stays as it was, because the wider-fix planner uses it.
 
 ### `detect.py`: ORCA's own detection
 

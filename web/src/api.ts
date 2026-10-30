@@ -1,6 +1,13 @@
 import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
-export interface Verdict { passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number; reason?: string }
+export interface Verdict {
+  passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number;
+  /** Why a move fails without a hit: it would pull a joint apart (connections.plan_move) or leave what stood on
+   *  something standing on nothing (verify.keep_supports). */
+  reason?: string | null;
+  /** Set when a move was refused before it was tried, for pulling these joints apart. */
+  joints?: { refused_at: string[] };
+}
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
   title: string; moved: string[]; delta_m: number[]; rationale: string; also_needs: string;

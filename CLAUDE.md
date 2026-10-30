@@ -181,12 +181,12 @@ Live (Modal app `orca`): https://dodzikojo--orca-web.us-east.modal.run.
 
 Built Oct 27–30, all verified by geometry before anyone sees a fix: ORCA's own detection (and Navisworks reports),
 `#N` numbers and Muse titles, bulk triage, six fix kinds (move, offset with bends, trim, route, penetration, resize)
-plus combined fixes, Fix together and root causes, Insights patterns, chat and live voice, the MCP server with pairing
-links, coordination requirements, STEP models (the palletising cell), PDF reports and BCF, IFC/STEP export, accept in
-place, escalation to Muse Wonder, Show it built, phones and tablets, guided tours. Latest validation (Oct 30): 574
-server tests, 70 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1, C2, C3, C6,
-C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was built when, with the numbers measured at the
-time: `docs/architecture/22-build-log.md`.
+plus combined fixes, joints (no fix pulls one apart: `docs/connections.md`), Fix together and root causes, Insights
+patterns, chat and live voice, the MCP server with pairing links, coordination requirements, STEP models (the
+palletising cell), PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder, Show it built,
+phones and tablets, guided tours. Latest validation (Oct 30): 582 server tests, 70 web tests; answer key 3/3 first try
+at Rev04 heights; `evals/step_cell.py` passes (C1, C2, C3, C6, C7, C8, Rev B 0). How each part works now:
+`docs/architecture/`. What was built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).
