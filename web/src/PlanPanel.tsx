@@ -1,6 +1,7 @@
 import { Building2, CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { Plan, PlanItem } from "./api";
 import { BuiltView, type BuiltRun } from "./BuiltView";
+import { moveWords } from "./fixKinds";
 import { mm } from "./ReportList";
 
 /** A plan while it is being built: what each pair is doing. */
@@ -20,7 +21,7 @@ const editText = (i: PlanItem) => {
   if (o.kind === "trim") return o.trim ? `trim one end ${Math.round(o.trim.by_m * 1000)} mm` : "trim at the joint";
   return o.kind === "offset" && o.split_m
     ? `offset ${(o.split_m[1] - o.split_m[0]).toFixed(2)} m of it ${o.delta_m[2] > 0 ? "up" : "down"} ${Math.abs(Math.round(o.delta_m[2] * 1000))} mm`
-    : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
+    : `move ${moveWords(o.delta_m)}`;
 };
 
 export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, built, onBuild, stale, error }: {
