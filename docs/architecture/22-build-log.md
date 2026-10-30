@@ -1371,3 +1371,12 @@ Collapsed side bars' strips, centred (Oct 30; owner report; `web/src/index.css`)
 strip tab's content sat against the right edge of the 40 px strip (22–39 px): on the left bar the text touched the
 marker line and on the right bar it sat far from it. The tab's content now fills the strip and centres across it
 (11–28 px, the same gap on both sides). Checked in Chromium on Northbank at 3× scale, both bars collapsed.
+
+Properties floating or on the right (Oct 30; owner request; `feature/properties-dock-right`; code `web/src/dock.tsx`,
+`dockLayout.ts`; [docs/panels.md](../panels.md)): a floating Properties panel has Dock Properties on the right (a tab
+after Chat); Float floats it again; where it was last put (button, Float or a drag) is kept in
+`sightline.dock.properties` and the next selection after a close or reload opens it there. With four tabs a bar's tabs
+behind the front one show as icons with a tooltip, so nothing goes behind dockview's overflow menu. Checked: 143 web tests
+(`dock.test.mjs`: the stored place); in Chromium on Northbank, float → dock right → select with Clash in front → close
+and select → reload and select (all in the right bar, no overflow) → Float → close and select (floating); the tabs get
+their names back when Properties closes.

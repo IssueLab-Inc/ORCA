@@ -5,9 +5,9 @@ import { DockviewReact, type DockviewApi, type DockviewGroupPanelApi, type Dockv
   type SerializedDockview } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { Activity as Pulse, AppWindow, Box, Info, List, LocateFixed, MessageSquare, Network, PanelBottomClose, PanelBottomOpen,
-  PanelLeftClose, PanelRightClose, PictureInPicture2, Undo2, X, type LucideIcon } from "lucide-react";
-import { EDGE_GROUP, EDGE_SIZE, PANELS, PANEL_IDS, homeOf, isPanel, readLayout, showSteps, titleOf, writeLayout,
-  type Edge, type PanelId, type SavedLayout, type Where } from "./dockLayout";
+  PanelLeftClose, PanelRight, PanelRightClose, PictureInPicture2, Undo2, X, type LucideIcon } from "lucide-react";
+import { EDGE_GROUP, EDGE_SIZE, PANELS, PANEL_IDS, PROPS_KEY, homeOf as defaultHome, readPropsHome, isPanel, readLayout, showSteps, titleOf, writeLayout,
+  type Edge, type PanelId, type PropsHome, type SavedLayout, type Where } from "./dockLayout";
 
 /*
  * The desktop's panels (docs/panels.md). dockview's free core lays them out: side bars that collapse to a strip,
@@ -101,6 +101,16 @@ const THEME: DockviewTheme = { name: "orca", className: "dockview-theme-orca", c
 const SAVE_MS = 400;
 const RIGHT: PanelId[] = ["clash", "plan", "chat"];
 
+const storage = () => { try { return window.localStorage; } catch { return null; } };
+
+/** Properties lives where it was last put: floating (the default) or docked in the right side bar. */
+let propsHome: PropsHome = readPropsHome(storage());
+function setPropsHome(home: PropsHome) {
+  propsHome = home;
+  try { storage()?.setItem(PROPS_KEY, home); } catch { /* private window: kept for this visit */ }
+}
+const homeOf = (id: PanelId) => (id === "properties" && propsHome === "right" ? "right" : defaultHome(id));
+
 /** Each panel is its slot. */
 function PanelView({ api }: IDockviewPanelProps) {
   const ctx = useContext(DockContext)!;
@@ -120,10 +130,24 @@ const COMPONENTS = { panel: PanelView };
 /** A panel's tab: its icon, title and what App says about it (a count, a spinner). A click is the user choosing it.
  *  In a side bar a click opens the bar and never closes it (dockview toggles it on the active tab): the bar's own
  *  button collapses it, so a tab never hides the panel it names. */
-function Tab({ api }: IDockviewPanelHeaderProps) {
+function Tab({ api, containerApi }: IDockviewPanelHeaderProps) {
   const ctx = useContext(DockContext)!;
   const id = api.id as PanelId;
   const Icon = ICONS[id] ?? Box;
+  const [, redraw] = useState(0);
+  const group = api.group;
+  useEffect(() => {
+    const again = () => redraw((n) => n + 1);
+    const subs = [api.onDidActiveChange(again), api.onDidGroupChange(again), group.api.onDidCollapsedChange(again),
+      containerApi.onDidAddPanel(again), containerApi.onDidRemovePanel(again), containerApi.onDidMovePanel(again)];
+    return () => { for (const s of subs) s.dispose(); };
+  }, [api, containerApi, group]);
+  // Four tabs and the bar's buttons don't fit a side bar's width (dockview would hide some behind a menu): with more
+  // than three, the tabs behind the one in front show their icon only, and their name as a tooltip. A collapsed strip
+  // runs down the window's height, so it keeps the names.
+  const strip = group.api.location.type === "edge" && group.api.isCollapsed();
+  const title = api.title ?? titleOf(id);
+  const short = group.panels.length > 3 && !api.isActive && !strip;
   const click = (e: React.MouseEvent) => {
     const g = api.group.api;
     if (g.location.type === "edge") {
@@ -134,8 +158,9 @@ function Tab({ api }: IDockviewPanelHeaderProps) {
     ctx.onTab(id);
   };
   return (
-    <div className="dock-tab" data-tour={TOUR_TAG[id]} data-panel-tab={id} onClick={click}>
-      <Icon size={14} aria-hidden /><span className="dock-tab-title">{api.title ?? titleOf(id)}</span>{ctx.tabs[id]}
+    <div className={`dock-tab ${short ? "short" : ""}`} data-tour={TOUR_TAG[id]} data-panel-tab={id} onClick={click}
+      aria-label={short ? title : undefined} data-tip={short ? title : undefined} data-tip-side={short ? "bottom" : undefined}>
+      <Icon size={14} aria-hidden />{!short && <span className="dock-tab-title">{title}</span>}{ctx.tabs[id]}
     </div>
   );
 }
@@ -166,6 +191,8 @@ function Actions({ api, containerApi, activePanel }: IDockviewHeaderActionsProps
         `Collapse the ${edge} bar`, () => collapseEdge(api, edge))}
       {where.type !== "floating" && where.type !== "popout" && button(PictureInPicture2, `Float ${activePanel.title ?? "this panel"}`,
         () => floatPanel(containerApi, activePanel))}
+      {activePanel.id === "properties" && !(edge === "right") && button(PanelRight, "Dock Properties on the right",
+        () => { setPropsHome("right"); moveHome(containerApi, activePanel); })}
       {where.type !== "popout" && button(AppWindow, `Open ${activePanel.title ?? "this panel"} in its own window`,
         () => popOut(containerApi, activePanel))}
       {away && button(Undo2, "Put it back", () => moveHome(containerApi, activePanel))}
@@ -253,7 +280,7 @@ function moveHome(api: DockviewApi, panel: IDockviewPanel) {
   }
   const group = edgeGroup(api, home);
   // In its place among the bar's tabs (Clash, Plan, Chat), not at the end.
-  const order = PANELS.filter((p) => p.home === home).map((p) => p.id as string);
+  const order = [...PANELS.filter((p) => p.home === home).map((p) => p.id as string), "properties"];
   const index = group ? group.panels.filter((p) => p !== panel && order.indexOf(p.id) < order.indexOf(panel.id)).length : 0;
   if (group && group !== panel.group) panel.api.moveTo({ group: group as never, index });
   if (group?.api.location.type === "edge" && group.api.isCollapsed()) group.api.expand();
@@ -316,7 +343,6 @@ function menu({ panel, api }: GetTabContextMenuItemsParams) {
     ...(atHome(panel) ? [] : [{ label: "Put it back", action: () => moveHome(api, panel) }]), "separator" as const, "close" as const];
 }
 
-const storage = () => { try { return window.localStorage; } catch { return null; } };
 
 export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, onWindows }: {
   slots: Slots; sizes: { left: number; right: number }; tabs: Tabs;
@@ -380,6 +406,13 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
     rewire();
     let building = false;
     const fit = () => { if (!building) fitEdges(api); };
+    // Properties stays where it was last put: docked in the right bar (its button, or dragged there) or floating.
+    const remember = (panel: IDockviewPanel) => {
+      if (panel.id !== "properties") return;
+      const where = panel.group.api.location;
+      if (where.type === "floating") setPropsHome("float");
+      else if (where.type === "edge" && where.position === "right") setPropsHome("right");
+    };
     fit();
     // A pop-out window opens after its panel has left (and closes after it is back): the bars are fitted then too.
     const windows = () => {
@@ -389,7 +422,7 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
     };
     const front = (id?: string) => { if (id && (RIGHT as string[]).includes(id)) live.current.onShown(id as "clash" | "plan" | "chat"); };
     const subs = [api.onDidLayoutChange(() => { fit(); save(); }), api.onDidLayoutFromJSON(() => { rewire(); fit(); }),
-      api.onDidAddPanel(fit), api.onDidRemovePanel(fit), api.onDidMovePanel(fit), api.onDidAddPopoutGroup(windows),
+      api.onDidAddPanel(fit), api.onDidRemovePanel(fit), api.onDidMovePanel((e) => { fit(); remember(e.panel); }), api.onDidAddPopoutGroup(windows),
       api.onDidRemovePopoutGroup(windows), api.onDidActivePanelChange((e) => front(e.panel?.id))];
     front(api.getGroup(EDGE_GROUP.right)?.activePanel?.id);   // a restored layout may have Plan or Chat in front
     cleanup.current = () => { window.clearTimeout(timer); unwire(); for (const s of subs) s.dispose(); };

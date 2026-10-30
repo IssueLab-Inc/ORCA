@@ -123,3 +123,12 @@ test("the dock uses dockview's free core only (the public repo must build for an
     assert.ok(!source.includes(option), `${option} needs the paid modules`);
   }
 });
+
+test("Properties floats unless it was last docked on the right", () => {
+  const store = (v) => ({ getItem: (k) => (k === dock.PROPS_KEY ? v : null) });
+  assert.equal(dock.readPropsHome(store(null)), "float");
+  assert.equal(dock.readPropsHome(store("right")), "right");
+  assert.equal(dock.readPropsHome(store("left")), "float", "only the right bar is offered");
+  assert.equal(dock.readPropsHome({ getItem: () => { throw new Error("blocked"); } }), "float");
+  assert.equal(dock.readPropsHome(null), "float");
+});

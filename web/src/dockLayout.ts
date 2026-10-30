@@ -30,6 +30,12 @@ export const EDGE_SIZE: Record<Edge, readonly [number, number, number]> = { ...P
 /** Where the layout is kept in this browser, and the switch back to the classic layout. */
 export const LAYOUT_KEY = "sightline.dock.v1";
 export const CLASSIC_KEY = "sightline.dock.classic";
+/** Where Properties lives: floating over the model (the default) or docked in the right side bar, as last put there. */
+export const PROPS_KEY = "sightline.dock.properties";
+export type PropsHome = "float" | "right";
+export function readPropsHome(storage: Pick<Storage, "getItem"> | null): PropsHome {
+  try { return storage?.getItem(PROPS_KEY) === "right" ? "right" : "float"; } catch { return "float"; }
+}
 
 /** A saved layout, as far as ORCA reads it (dockview's `toJSON`; the rest is passed through untouched). */
 export interface SavedLayout {

@@ -571,6 +571,7 @@ does without.
 | `sightline.views.layout` | `App.tsx` | The view layout (`single`, `two`, `quad`); a phone shows Single and a tablet at most Two whatever is kept |
 | `sightline.measure.snap`, `sightline.measure.at` | `App.tsx` | Snapping while measuring (default on), and where the Measure panel was dragged to |
 | `sightline.workings` | `App.tsx` | Workings on or off in the Activity panel (`"0"` / `"1"`, default on) and the view it shows ([docs/workings.md](../workings.md)) |
+| `sightline.dock.properties` | `dock.tsx` (`setPropsHome`) | Where the Properties panel opens: floating or the right side bar ([docs/panels.md](../panels.md)) |
 | `sightline.dock.v1`, `sightline.dock.classic` | `dockLayout.ts` (`saveLayout`, called by `dock.tsx`) | The desktop's panel layout (dockview's `toJSON`) and whether the Classic layout is on ([docs/panels.md](../panels.md)) |
 | `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box) for a set of models, keyed by `About.projectName` |
 
