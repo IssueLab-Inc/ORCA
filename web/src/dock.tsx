@@ -162,18 +162,47 @@ function Actions({ api, containerApi, activePanel }: IDockviewHeaderActionsProps
       {where.type !== "floating" && where.type !== "popout" && button(PictureInPicture2, `Float ${activePanel.title ?? "this panel"}`,
         () => floatPanel(containerApi, activePanel))}
       {where.type !== "popout" && button(AppWindow, `Open ${activePanel.title ?? "this panel"} in its own window`,
-        () => void containerApi.addPopoutGroup(activePanel))}
+        () => popOut(containerApi, activePanel))}
       {away && button(Undo2, "Put it back", () => moveHome(containerApi, activePanel))}
       {activePanel.id === "properties" && button(X, "Close Properties", () => activePanel.api.close())}
     </div>
   );
 }
 
-/** A floating window at the model's top right, about the size of a side bar. */
-const floatBox = (api: DockviewApi) => ({ position: { top: 56, right: 16 }, width: 360,
-  height: Math.round(Math.min(560, Math.max(260, api.height - 112))) });
+/** A floating window at the model's top right, about the size of a side bar; each one floated while others are out
+ *  steps down and left, so none hides another's tabs. */
+const floatBox = (api: DockviewApi) => {
+  const step = 32 * (api.groups.filter((g) => g.api.location.type === "floating").length % 6);
+  return { position: { top: 56 + step, right: 16 + step }, width: 360,
+    height: Math.round(Math.min(560, Math.max(260, api.height - 112 - step))) };
+};
 function floatPanel(api: DockviewApi, panel: IDockviewPanel) {
   api.addFloatingGroup(panel, floatBox(api));
+}
+
+/** Side bars' only panels that are in a window of their own: back to their bar when the window closes. */
+const backToBar = new Set<string>();
+
+/** Open a panel in a window of its own. dockview does nothing for a side bar's only panel (it won't take the bar
+ *  out), so that one floats first, and goes back to its bar when the window closes, as the others do. */
+function popOut(api: DockviewApi, panel: IDockviewPanel) {
+  const alone = panel.group.api.location.type === "edge" && panel.group.panels.length === 1;
+  if (alone) { floatPanel(api, panel); backToBar.add(panel.id); }
+  void api.addPopoutGroup(panel).then((opened) => {
+    if (opened || !alone) return;
+    backToBar.delete(panel.id);   // blocked: back in its bar at once
+    if (api.getPanel(panel.id)) moveHome(api, panel);
+  });
+}
+
+/** After a pop-out window closed: what came from a side bar alone goes back there (dockview floats it). */
+function returnToBars(api: DockviewApi) {
+  for (const id of [...backToBar]) {
+    const panel = api.getPanel(id);
+    if (panel?.group.api.location.type === "popout") continue;
+    backToBar.delete(id);
+    if (panel) moveHome(api, panel);
+  }
 }
 
 /** Whether a panel is where it lives: its side bar, or floating for a floating one. */
@@ -231,6 +260,17 @@ function clearAll(api: DockviewApi) {
   for (const edge of ["left", "right", "bottom"] as Edge[]) if (api.getEdgeGroup(edge)) api.removeEdgeGroup(edge);
 }
 
+/** A side bar with nothing in it (its panels floated, popped out, closed or docked beside the model) gives its room to
+ *  the model, and takes it back, at the width it had, when a panel docks there again (Put it back, the Layout menu). */
+function fitEdges(api: DockviewApi) {
+  for (const edge of ["left", "right", "bottom"] as Edge[]) {
+    const bar = api.getEdgeGroup(edge);
+    if (!bar) continue;
+    const used = (api.getGroup(bar.id)?.panels.length ?? 0) > 0;
+    if (api.isEdgeGroupVisible(edge) !== used) api.setEdgeGroupVisible(edge, used);
+  }
+}
+
 /** The default layout: the classic one, as panels. The model in the middle (no tab, nothing docks into it, it never
  *  floats); the clash list on the left; Clash, Plan and Chat as tabs on the right; Activity along the bottom. */
 function build(api: DockviewApi, sizes: { left: number; right: number }) {
@@ -266,7 +306,8 @@ function wireEdges(api: DockviewApi, changed: (collapsed: boolean) => void) {
 
 function menu({ panel, api }: GetTabContextMenuItemsParams) {
   if (!isPanel(panel.id) || panel.id === "model") return [];
-  return ["float" as const, "popout" as const,
+  return ["float" as const,
+    ...(panel.group.api.location.type === "popout" ? [] : [{ label: "Open in New Window", action: () => popOut(api, panel) }]),
     ...(atHome(panel) ? [] : [{ label: "Put it back", action: () => moveHome(api, panel) }]), "separator" as const, "close" as const];
 }
 
@@ -332,9 +373,18 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
     }
     if (!loaded) build(api, live.current.sizes);
     rewire();
-    const windows = () => live.current.onWindows(api.getPopouts().map((p) => p.window).filter((w): w is Window => !!w));
+    let building = false;
+    const fit = () => { if (!building) fitEdges(api); };
+    fit();
+    // A pop-out window opens after its panel has left (and closes after it is back): the bars are fitted then too.
+    const windows = () => {
+      fit();
+      window.setTimeout(() => returnToBars(api), 0);   // a closed window's panels are back by then
+      live.current.onWindows(api.getPopouts().map((p) => p.window).filter((w): w is Window => !!w));
+    };
     const front = (id?: string) => { if (id && (RIGHT as string[]).includes(id)) live.current.onShown(id as "clash" | "plan" | "chat"); };
-    const subs = [api.onDidLayoutChange(save), api.onDidLayoutFromJSON(rewire), api.onDidAddPopoutGroup(windows),
+    const subs = [api.onDidLayoutChange(() => { fit(); save(); }), api.onDidLayoutFromJSON(() => { rewire(); fit(); }),
+      api.onDidAddPanel(fit), api.onDidRemovePanel(fit), api.onDidMovePanel(fit), api.onDidAddPopoutGroup(windows),
       api.onDidRemovePopoutGroup(windows), api.onDidActivePanelChange((e) => front(e.panel?.id))];
     front(api.getGroup(EDGE_GROUP.right)?.activePanel?.id);   // a restored layout may have Plan or Chat in front
     cleanup.current = () => { window.clearTimeout(timer); unwire(); for (const s of subs) s.dispose(); };
@@ -355,9 +405,10 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
         }
       },
       reset() {
-        clearAll(api);
-        build(api, live.current.sizes);
+        building = true;   // the bars are empty for a moment while they fill: they stay as they are made
+        try { clearAll(api); build(api, live.current.sizes); } finally { building = false; }
         rewire();
+        fit();
       },
       gather() {
         // Closed ones too (Properties, which floats in on a selection, stays as it is).

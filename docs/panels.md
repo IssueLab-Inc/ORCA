@@ -34,10 +34,21 @@ It is new work, written for ORCA during the event. No code from other products.
   button at the end of the tabs collapses a bar to a strip of its tabs down its outer edge (the bottom one to a strip
   along the bottom); a click on a tab in the strip opens it again. A click on an open bar's active tab never closes it
   (dockview would): the tour clicks tabs, and a tab should never hide the panel it names.
-- **Floating:** the second button (or Float on a tab's right-click menu) floats the panel at the model's top right;
-  drag it by its tabs, resize it from its edges, drop a tab anywhere to dock it again.
+- **An empty side bar gives its room to the model.** When the last panel leaves a bar (floated, opened in a window,
+  closed, or docked beside the model), the bar goes and the model takes the space; float every panel and the model has
+  the whole window. The bar comes back, at the width it had, when a panel docks there again: Put it back, the Layout
+  menu, Reset, the tour, or its window closing (owner request, Oct 30).
+- **Floating:** the second button (or Float on a tab's right-click menu) floats the panel at the model's top right,
+  each one floated while others are out a step down and left, so none hides another's tabs; drag it by its tabs,
+  resize it from its edges, drop a tab anywhere to dock it again.
 - **Pop out:** the third button (or Open in New Window) moves the panel into a window of its own, for a second
-  screen. Closing that window puts the panel back.
+  screen. Closing that window puts the panel back. dockview does nothing for a side bar's only panel (Coordination,
+  Activity, or Clash once Plan and Chat are out): it won't take the bar out. ORCA floats that one first and opens the
+  window from there (`popOut`), and puts it back in its bar when the window closes (`returnToBars`).
+- **On top:** a tooltip, a dialog and a menu opened in the model (the rail's, a view's) are above floating panels.
+  dockview stacks floating panels from z-index 999 up; the dock area is a stacking layer of its own (`isolation`), so
+  the page's tooltips (200) and dialogs (40) stay above it, and a rail or view header holding an open menu rises over
+  the floating panels while it is open.
 - **Put it back** (a button, and on the right-click menu) returns a floating, popped-out or moved panel to its side
   bar, in its place among the tabs.
 - **Close** is on the right-click menu. **Panels and layout** (the header's layout button) shows any panel, closed
@@ -109,6 +120,9 @@ main window.
   panes in them draw no background of their own (dockview's group paints the panel). Seen and fixed Oct 30.
 - **StrictMode** runs an effect's cleanup and the effect again at once; the dock's subscriptions are let go only when
   `DockHost` really unmounts, and then only the handle it published (`onGone`), with its pop-out windows.
+- **Owner's test (Oct 30):** with every panel floated, the empty side bars still took their width; tooltips and the
+  rail's menus went behind floating panels (dockview's 999 against 200 and 25; dialogs would have too); and Open in
+  New Window did nothing for a panel alone in its bar (never worked for Coordination and Activity). All fixed above.
 - **From the review (Oct 30):** a floating or pop-out window split into several groups is saved as a grid, not a group
   (`windowViews`), so a reload kept it and a pop-out's panels all go home; `fromJSON` brings the model's lock back as
   plain `true`, so it is set again; a new `components` object on each render made dockview lay out again several times a
@@ -128,6 +142,11 @@ main window.
 - `web/tests/dock.test.mjs` (9): every panel has a home, which saved layouts load (a window split in several groups
   too), the widths the classic panes and the side bars share, what was popped out goes back to its bar, storage and
   versions, what showing a panel takes, and the free-core-only rule.
+- Browser, empty bars (Playwright, Northbank, 1440×900): Coordination floated, the model 750 → 1060 px wide and the
+  canvas with it; all five floated, 1440 × 850 (the whole dock); a reload keeps that; Clash put back, the right bar back at
+  380 px; Coordination, Activity and a lone Clash opened in a window (button and menu) and back in their bars on close;
+  Reset brings every bar back. Layering: a floating panel's tooltip, a rail tooltip and the Visibility menu over a
+  floating panel, a view's menu over one in Quad; closed, the panel is on top again.
 - Browser (Playwright, Northbank, 1440×900): the default layout; float, collapse, reopen, tab clicks; pop out Chat
   (styles, typing, a tooltip, M from the window reaching the page), close the window, pop out again; reload with a
   popped-out, a floating and a collapsed panel; Reset; Classic; the tour bringing panels home; #1 proposed with the
