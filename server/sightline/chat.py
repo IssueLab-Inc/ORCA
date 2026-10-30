@@ -432,7 +432,8 @@ class Chat:
         if name == "check_move":
             v = ws.verify_move(self._scene(ctx), list(args["global_ids"]), [float(x) for x in args["delta_m"]])
             v.pop("placements", None)
-            return v, "passes" if v["passed"] else f"fails: {len(v['hits'])} hit(s)", []
+            why = v.get("reason") or f"{len(v['hits'])} hit(s)"
+            return v, "passes" if v["passed"] else f"fails: {why}", []
         if name == "check_offset":
             v = ws.check_offset(self._scene(ctx), args["element"], args["obstacle"],
                                 [float(x) for x in args["split_m"]], float(args["dz_m"]))

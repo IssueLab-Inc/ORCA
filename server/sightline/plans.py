@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import agent, edits, owner, requirements, verify
+from . import agent, connections, edits, owner, requirements, verify
 from .service import Workspace
 
 PACKS = Path(__file__).parent / "domain_packs"
@@ -64,7 +64,11 @@ class Plan:
 _trial = edits.trial_files
 
 
-def _in_trial_move(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+def _in_trial_move(scene, it: Item, o: dict):
+    plan = connections.plan_move(scene, o["moved"], o["delta_m"])
+    if not plan.ok:   # never tried: it would pull a joint apart (the check reports which)
+        broken = [verify.Hit(g, scene.entity(g).is_a(), "joint", 0.0) for g in plan.refused_at]
+        return list(o["moved"]), set(o["moved"]), lambda clearance_m, owner: (broken, None)
     scene.translate(o["moved"], tuple(o["delta_m"]))
     return list(o["moved"]), set(o["moved"]), None
 

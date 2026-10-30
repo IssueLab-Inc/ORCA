@@ -13,7 +13,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import edits, hosts, meta_client, requirements, verify
+from . import connections, edits, hosts, meta_client, requirements, verify
 from .meta_client import ChatModel
 from .scene import FIXED_CLASSES, IfcScene
 
@@ -104,6 +104,7 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025, memo: d
         if any(scene.entity(this).is_a(c) for c in edits.PENETRABLE):   # a wall or slab is not split or rerouted
             continue
         lines += _run_text(scene, label, this, other, clearance_m, more, memo)
+        lines += connections.describe(scene, label, this, memo)
         lines += _resize_text(scene, label, this, other, clearance_m)
         lines += _nearby_text(scene, label, this, [n for n in clash.nearby.get(this, []) if n not in (other, *more)])
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
@@ -588,9 +589,16 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
 
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
               on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
-    """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds."""
-    run = scene.connected_run(target)
+    """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds. A move
+    that would pull a joint apart is refused before it is tried (connections.plan_move)."""
+    run = connections.run(scene, target)
     delta = [float(v) for v in cand.get("delta_m", [0, 0, 0])]
+    plan = connections.plan_move(scene, run, delta)
+    if not plan.ok:
+        if on_trial:   # the pilot still shows the idea, and what it would have pulled apart
+            on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
+        return Attempt(cand.get("title", "move"), delta, False, f"cannot keep its joints: {plan.refused}",
+                       hit_ids=plan.refused_at[:8]), None
     # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
     neighbours = {c for g in run for c in scene.element(g).connected} - set(run)
     if on_trial:
@@ -613,8 +621,9 @@ def _reason(hits: list[verify.Hit]) -> str:
     groups: dict[tuple[str, str], list[float]] = {}
     for h in hits:
         groups.setdefault((h.kind, h.other_class), []).append(h.distance_m)
-    return ", ".join(f"{kind} with {cls}" + (f" x{len(ds)} (worst {min(ds) * 1000:+.0f} mm)" if len(ds) > 1
-                                              else f" ({ds[0] * 1000:+.0f} mm)")
+    return ", ".join((f"breaks its joint with {cls}" + (f" x{len(ds)}" if len(ds) > 1 else "")) if kind == "joint" else
+                     f"{kind} with {cls}" + (f" x{len(ds)} (worst {min(ds) * 1000:+.0f} mm)" if len(ds) > 1
+                                             else f" ({ds[0] * 1000:+.0f} mm)")
                      for (kind, cls), ds in groups.items())
 
 
@@ -955,7 +964,10 @@ def combined_steps(scene: IfcScene, cand: dict, a: str, b: str) -> list[dict]:
                 delta = [float(v) for v in st.get("delta_m", [])]
                 if len(delta) != 3 or not all(np.isfinite(delta)) or not any(delta):
                     raise Refused(f"step {i}: a move needs delta_m [dx, dy, dz] in metres, not all zero")
-                step = {"kind": "move", "moved": scene.connected_run(gid), "delta_m": delta}
+                step = {"kind": "move", "moved": connections.run(scene, gid), "delta_m": delta}
+                plan = connections.plan_move(scene, step["moved"], delta)
+                if not plan.ok:
+                    raise Refused(f"step {i}: cannot keep its joints: {plan.refused}")
             elif kind == "offset":
                 split = [float(v) for v in st.get("split_m", [])]
                 dz = float(st.get("dz_m", 0.0))

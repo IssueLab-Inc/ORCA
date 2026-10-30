@@ -16,7 +16,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
+from . import agent, connections, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
 
@@ -190,15 +190,20 @@ class Workspace:
         return asdict(self.scene(scene_id).element(global_id))
 
     def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025) -> dict:
-        """Check a move without keeping it."""
+        """Check a move without keeping it. A move that would pull a joint apart fails without being tried, with the
+        `reason` and the elements it would pull apart from (`joints`)."""
         s = self.scene(scene_id)
         with self.lock:
+            plan = connections.plan_move(s, moved, delta_m)
+            if not plan.ok:
+                return {"passed": False, "hits": [], "min_clearance_m": None, "checked_against": 0, "placements": {},
+                        "reason": plan.refused, "joints": {"refused_at": plan.refused_at}}
             placements = s.translate(moved, tuple(delta_m))
             try:
                 v = verify.check(s, moved, clearance_m=clearance_m)
             finally:
                 s.translate(moved, tuple(-d for d in delta_m))
-        return {**asdict(v), "placements": placements}
+        return {**asdict(v), "placements": placements, "reason": None}
 
     def propose(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
                 images: list[str] | None = None, notes: str = "", report_id: str | None = None,
@@ -387,6 +392,9 @@ class Workspace:
     def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
         s = self.scene(scene_id)
         with self.lock:
+            plan = connections.plan_move(s, moved, delta_m)
+            if not plan.ok:
+                raise edits.Unsupported(plan.refused)
             placements = s.translate(moved, tuple(delta_m))
             for g in moved:  # kept: export writes these files
                 s.mark_edited(g)

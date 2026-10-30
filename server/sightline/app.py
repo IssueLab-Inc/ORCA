@@ -739,7 +739,10 @@ def _with_patch(scene_id: str, kept) -> dict:
 
 @app.post("/api/scenes/{scene_id}/apply")
 def apply(scene_id: str, body: Move):
-    return _with_patch(_scene(scene_id), lambda: ws.apply(scene_id, body.moved, body.delta_m))
+    try:
+        return _with_patch(_scene(scene_id), lambda: ws.apply(scene_id, body.moved, body.delta_m))
+    except edits.Unsupported as e:   # it would pull a joint apart
+        raise HTTPException(422, f"Cannot apply this move: {e}")
 
 
 class ContextObjective(BaseModel):

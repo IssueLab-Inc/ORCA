@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sightline import app as app_module
-from sightline import edits
+from sightline import connections, edits
 from sightline.fixtures import build_route_fixture, build_run_fixture
 from sightline.service import Workspace
 
@@ -23,6 +23,11 @@ def open_run(c):
     scene = app_module.ws.scene(r["id"])
     main = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag == "SA-1").GlobalId
     return r, scene, main
+
+
+def whole(scene, main):
+    """The duct's run: it and the segment joined to its end (a move of the duct alone would pull that joint apart)."""
+    return connections.run(scene, main)
 
 
 def test_opening_says_the_revision_the_page_starts_from(client):
@@ -46,11 +51,12 @@ def test_an_offset_comes_back_as_its_pieces_triangles(client):
 def test_a_move_a_route_and_a_plan_come_back_as_meshes_too(client):
     c, ws = client
     r, scene, main = open_run(c)
-    moved = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]}).json()
-    assert [m["global_id"] for m in moved["meshes"]] == [main] and moved["revision"] == 1
+    run = whole(scene, main)
+    moved = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": run, "delta_m": [0, 0, -0.2]}).json()
+    assert [m["global_id"] for m in moved["meshes"]] == run and moved["revision"] == 1
     plan = c.post(f"/api/scenes/{r['id']}/plan/apply",
-                  json={"options": [{"kind": "move", "moved": [main], "delta_m": [0, 0, 0.2]}]}).json()
-    assert plan["revision_before"] == 1 and plan["revision"] == 2 and [m["global_id"] for m in plan["meshes"]] == [main]
+                  json={"options": [{"kind": "move", "moved": run, "delta_m": [0, 0, 0.2]}]}).json()
+    assert plan["revision_before"] == 1 and plan["revision"] == 2 and [m["global_id"] for m in plan["meshes"]] == run
     o = c.post("/api/scenes", json={"samples": ["route.ifc"]}).json()
     duct = next(e for e in ws.scene(o["id"]).model.by_type("IfcDuctSegment") if e.Tag == "RT-2").GlobalId
     route = c.post(f"/api/scenes/{o['id']}/fix/apply", json={"option": {
@@ -63,21 +69,21 @@ def test_no_meshes_when_an_element_will_not_triangulate_or_there_is_too_much(cli
     c, ws = client
     r, scene, main = open_run(c)
     monkeypatch.setattr(Workspace, "PATCH_MAX_VERTS", 10)
-    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]}).json()
+    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": whole(scene, main), "delta_m": [0, 0, -0.2]}).json()
     assert kept["meshes"] is None and kept["revision"] == 1  # the page reloads the file
     monkeypatch.setattr(Workspace, "PATCH_MAX_VERTS", 500_000)
 
     def broken(*a, **k):
         raise RuntimeError("no shape")
     monkeypatch.setattr(edits, "meshes", broken)
-    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, 0.2]}).json()
+    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": whole(scene, main), "delta_m": [0, 0, 0.2]}).json()
     assert kept["meshes"] is None and kept["files"] == [0]
 
 
 def test_every_reply_says_which_files_each_revision_changed(client):
     c, ws = client
     r, scene, main = open_run(c)
-    c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]})
+    c.post(f"/api/scenes/{r['id']}/apply", json={"moved": whole(scene, main), "delta_m": [0, 0, -0.2]})
     kept = c.post(f"/api/scenes/{r['id']}/offset/apply", json={"element": main, "split_m": [2.6, 3.4], "dz_m": 0.6}).json()
     # A page still at revision 0 missed the move: it reloads file 0 as well as this fix's own.
     assert kept["revision_before"] == 1 and kept["history"] == [[1, [0]], [2, [0]]]
@@ -88,5 +94,13 @@ def test_an_unstyled_element_keeps_no_colour_when_a_fix_is_kept(client):
     c, ws = client
     r, scene, main = open_run(c)
     assert not scene.entity(main).Representation.Representations[0].Items[0].StyledByItem   # the fixture's duct
-    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]}).json()
+    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": whole(scene, main), "delta_m": [0, 0, -0.2]}).json()
     assert kept["meshes"][0]["color"] is None   # the page keeps the colour it drew, not IfcOpenShell's class default
+
+
+def test_a_move_that_would_pull_a_joint_apart_is_not_kept(client):
+    c, ws = client
+    r, scene, main = open_run(c)
+    refused = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]})
+    assert refused.status_code == 422 and "would pull it apart from" in refused.json()["detail"]
+    assert scene.revision == 0

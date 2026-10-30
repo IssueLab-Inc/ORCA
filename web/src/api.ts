@@ -1,6 +1,10 @@
 import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
-export interface Verdict { passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number }
+export interface Verdict {
+  passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number;
+  /** Why a move was not tried: it would pull a joint apart (server connections.plan_move). */
+  reason?: string | null;
+}
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
   title: string; moved: string[]; delta_m: number[]; rationale: string; also_needs: string;

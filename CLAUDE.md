@@ -929,3 +929,21 @@ against the model before anyone sees it.
   page asks `/api/models` again after a change for everyone; a report draws at most 10 pictures and says so for the
   rest. Known, not fixed: a combined step that moves another team's service doesn't add that team as a reviewer in the
   PDF and BCF; a second try's options aren't de-duplicated against the first's.
+
+Joints (Oct 30, owner decision after a fix moved the cell's PL-302 segment 3 off column C3 and left it apart from its
+bend; design in `docs/connections.md`, code `server/sightline/connections.py`): slice 1 of 3 (joints → moves that
+carry and stretch → hover highlight).
+- **Joints:** connected ports (read live), and for STEP parts (no ports) flow parts of one group meeting face to face:
+  a straight segment offers its two caps, anything else its large planar faces; within 2 mm, normals opposed, the face
+  centre inside the other's triangle. Ends: "start"/"end" cap or "side" (a branch). Classes: straight / rigid
+  (fittings, in-line valves, dampers, meters) / stays (equipment, terminals, filters, structure, non-flow).
+- **Runs:** `connections.run` = straight segments joined cap to cap, the element first; a non-flow part keeps
+  `connected_run` without flow parts. `scene.connected_run` is unchanged (the wider-fix planner uses it).
+- **A move that would pull a joint apart is refused** (`plan_move`, `SIGHTLINE_CONNECTED_MOVES` refuse | carry | off):
+  `_try_move` ("cannot keep its joints: …", the joints as hits), combined steps, plans (`joint` hits),
+  `Workspace.verify_move` (`reason`) / `apply` (`/apply` 422), chat and MCP `check_move`, the page's manual move ("Not
+  tried: …"). Muse reads what each side is joined to (`connections.describe`); `construction.md` says joints stay joined.
+- **Measured:** every Northbank MEP segment is joined at an end; answer key 3/3 first try at Rev04 heights (Muse stopped
+  proposing whole moves of joined runs); cell #22 gets only routes; the cell's 40 flow parts' joints in 3.8 s.
+- **Tests:** `tests/test_connections.py` (`fixtures.build_joints_fixture`: a PL-302 with ports, a tee, a valve, a
+  filter; a STEP air line written with OCP and classified by a stand-in); `test_accept_in_place` moves whole runs.
