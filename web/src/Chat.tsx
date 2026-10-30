@@ -121,9 +121,11 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
   }, [voice.state, voice.since, handsFree]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!handsFree || !voiceOn) return;
-    const away = () => { if (document.hidden) live.current?.finish(); };  // hands-free stops when the tab is put away
-    document.addEventListener("visibilitychange", away);
-    return () => { document.removeEventListener("visibilitychange", away); };
+    // Hands-free stops when the tab is put away: the tab the chat is in, which is a window of its own when popped out.
+    const doc = end.current?.ownerDocument ?? document;
+    const away = () => { if (doc.hidden) live.current?.finish(); };
+    doc.addEventListener("visibilitychange", away);
+    return () => { doc.removeEventListener("visibilitychange", away); };
   }, [handsFree, voiceOn]);
   useEffect(() => {
     if (!queue.length || busy || !ready) return;

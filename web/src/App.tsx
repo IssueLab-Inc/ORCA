@@ -1,4 +1,4 @@
-import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LayoutPanelLeft, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, RotateCcw, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
 import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
@@ -39,6 +39,8 @@ import { MeasurePanel } from "./MeasurePanel";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
+import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
+import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
@@ -182,7 +184,16 @@ export function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [now, setNow] = useState(Date.now());
   const [compare, setCompare] = useState<"before" | "after" | "both">("after");
-  const [tab, setTab] = useState<Tab>("clash");
+  const [tab, setTabState] = useState<Tab>("clash");
+  // Desktop panels (dock.tsx, docs/panels.md): each panel's content is drawn into a slot of its own, which the dock or
+  // the classic layout places. The dock shows the panel App asks for; the classic layout is a switch away.
+  const slots = usePanelSlots();
+  const dock = useRef<DockHandle | null>(null);
+  const dockedNow = useRef(false);
+  const [classic, setClassic] = useState(() => { try { return localStorage.getItem(CLASSIC_KEY) === "1"; } catch { return false; } });
+  const [popouts, setPopouts] = useState<Window[]>([]);
+  /** Switch the right-hand panel: on a desktop the dock shows it too (opens its side bar, brings its window forward). */
+  const setTab = (t: Tab) => { setTabState(t); if (dockedNow.current) dock.current?.show(t); };
   // What the viewer shows: the selected clash, or the plan. It follows the latest activity, not the open tab: a plan
   // started from Chat takes the view while the chat stays open; picking a clash or proposing gives it back.
   const [viewPlan, setViewPlan] = useState(false);
@@ -393,6 +404,9 @@ export function App() {
   const shownLayout: Layout = layout === "phone" ? "single" : layout === "tablet" && viewLayout === "quad" ? "two" : viewLayout;
   useEffect(() => { viewer.current?.setLayout(shownLayout); }, [shownLayout, stats]);
   useEffect(() => { try { localStorage.setItem("sightline.views.layout", viewLayout); } catch { /* kept for this visit */ } }, [viewLayout]);
+  useEffect(() => { try { localStorage.setItem(CLASSIC_KEY, classic ? "1" : "0"); } catch { /* kept for this visit */ } }, [classic]);
+  // The tour reads the main page: panels in their own windows come back for it.
+  useEffect(() => { if (touring) dock.current?.gather(); }, [touring]);
   useEffect(() => { viewer.current?.setDrawingsFollow(drawingsFollow); }, [drawingsFollow]);
   // Each set of models has its own Home and saved views.
   useEffect(() => {
@@ -1484,8 +1498,10 @@ export function App() {
       else return;
       e.preventDefault();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // A panel in its own window (dock.tsx) takes the same keys.
+    const windows = [window, ...popouts];
+    for (const w of windows) w.addEventListener("keydown", onKey);
+    return () => { for (const w of windows) w.removeEventListener("keydown", onKey); };
   });
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. With
@@ -2234,6 +2250,9 @@ export function App() {
   const landing = !stats && !report && !blank;
   // A blank project before anything opens: the drop zone has the whole stage (no sheet on a phone).
   const starting = blank && !stats && !report;
+  // The dock is the desktop's; the landing, phones, tablets and the Classic layout switch use the classic layout.
+  const docked = layout === "desktop" && !landing && !classic;
+  dockedNow.current = docked;
   const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   // Phones and tablets: the sheet (or drawer) follows what happens, so the panel people need is the one showing. The
@@ -2343,6 +2362,11 @@ export function App() {
     reveal: (sel, el) => {
       const view = el?.closest("[data-left-view]")?.getAttribute("data-left-view");
       if (view === "clashes" || view === "insights") setLeftView(view);
+      if (docked) {  // the panel it is in, open and in this window
+        const id = el?.closest("[data-panel]")?.getAttribute("data-panel") ?? el?.closest("[data-panel-tab]")?.getAttribute("data-panel-tab");
+        if (id && isPanel(id)) dock.current?.show(id, { dock: true });
+        return;
+      }
       if (!compact) return;
       if (!el) { if (/data-tour=["']?(report|export|requirements)\b/.test(sel) && layout === "phone") setMenuOpen(true); return; }
       if (el.closest(".pane.left")) { setListOpen(true); if (snap === "peek") setSnap("half"); }
@@ -2399,6 +2423,19 @@ export function App() {
     setTab("plan"); setViewContext(planKind === "context" && !!context); setViewPlan(planKind === "batch" && !!(plan || planRun));
   };
   const showChatTab = () => { setListOpen(false); setTab("chat"); };
+  /** A panel picked on the desktop (its tab, or the Layout menu): Clash, Plan and Chat as their classic tabs, the
+   *  others just shown. */
+  const showPanel = (id: PanelId) => {
+    if (id === "clash") showClashTab(); else if (id === "plan") showPlanTab(); else if (id === "chat") showChatTab();
+    else dock.current?.show(id);
+  };
+  // What the Clash and Plan tabs say beside their titles (a count, a spinner): the classic tabs, the phone sheet's and
+  // the dock's show the same.
+  const clashBadge = proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null;
+  const planBadge = planning || contextWorking ? <i className="spinner" aria-hidden />
+    : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
+    : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null;
+  const dockTabs: Partial<Record<PanelId, React.ReactNode>> = { clash: clashBadge, plan: planBadge };
   const raise = () => { if (snap === "peek") setSnap("half"); };
   // The next clash still open after the selected one (the report's order), for "Next clash" once one is done.
   const nextClash = (() => {
@@ -2469,9 +2506,21 @@ export function App() {
     <button className="pop-item" disabled={!!busy} onClick={() => { close(); filesInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload XML files…</button>
     {!noFolders && <p className="hint">Upload the whole export folder to get each clash's images.</p>}
   </>);
+  // The desktop's panels: show one (also a closed one), go back to the default layout, or to the classic one.
+  const layoutMenu = (close: () => void) => (<>
+    <p className="pop-title">Panels</p>
+    {docked ? PANELS.filter((p) => p.id !== "model").map((p) => (
+      <button key={p.id} className="pop-item" onClick={() => { close(); showPanel(p.id); }}>
+        {p.title}{dock.current && !dock.current.isOpen(p.id) ? <span className="why"> closed</span> : null}</button>))
+      : <p className="hint">The list on the left, Clash, Plan and Chat on the right, Activity below.</p>}
+    {docked && <p className="hint">Drag a tab to dock it anywhere. The buttons beside the tabs collapse a side bar, float a
+      panel or open it in its own window; a right click on a tab does the same.</p>}
+    {docked && <button className="pop-item" onClick={() => { close(); dock.current?.reset(); }}><RotateCcw size={14} aria-hidden /> Reset the layout</button>}
+    <label className="pop-item check"><input type="checkbox" checked={classic} onChange={(e) => { close(); setClassic(e.target.checked); }} /> Classic layout (fixed panels)</label>
+  </>);
 
   return (
-    <div className={`app ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${starting ? "starting" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
+    <div className={`app ${docked ? "docked" : ""} ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${starting ? "starting" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
       style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}>
       {compact ? (
       <header className="bar">
@@ -2513,6 +2562,7 @@ export function App() {
         <div className="bar-side end">
         {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
+        {!landing && <Popover icon={LayoutPanelLeft} label="Panels and layout" tip="bottom">{layoutMenu}</Popover>}
         {!landing && <button className={`btn ${agentLink ? "agent-pill" : "ghost"}`} onClick={() => setAgentOpen(true)}
           aria-label={agentLink ? "Agent connected" : "Connect an agent"} data-tip-side="bottom"
           data-tip={agentLink ? `An agent works on this session over MCP · the link has ${timeLeft(agentLink, now)} left` : "Let an AI agent (Muse Code, Claude) work on this session over MCP"}>
@@ -2536,7 +2586,7 @@ export function App() {
       <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
       <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
 
-      <aside className="pane left">
+      {inSlot(slots.clashes, <aside className="pane left">
         {report
           ? <ReportList report={shownReport ?? report} naming={naming} matches={matches}
               thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb}
@@ -2573,9 +2623,9 @@ export function App() {
               <h2>Nothing to coordinate yet</h2>
               <p className="hint">Open the models: ORCA checks them for clashes.</p>
             </div>}
-      </aside>
+      </aside>)}
 
-      <main className={`stage ${tool.measure ? "measuring" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
+      {inSlot(slots.model, <main className={`stage ${tool.measure ? "measuring" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
         onPointerDown={pressStart} onPointerMove={stageMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
         onPointerLeave={() => { if (hover.current.gid) clearHover(); if (tool.measure) viewer.current?.measureHover(null); }}
         onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
@@ -2672,27 +2722,61 @@ export function App() {
         {compareBar}
         {error && <div className="overlay error" role="alert" onClick={() => setError(null)}>{error}<X size={14} aria-hidden /></div>}
         {toast && <div className="toast" role="status">{toast}</div>}
-      </main>
+      </main>)}
 
-      <aside className={`pane right ${tab === "chat" ? "chatting" : ""}`}>
-        <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={showClashTab}>
-            <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
-          <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={showPlanTab}>
-            <Network size={14} aria-hidden /> Plan{planning || contextWorking ? <i className="spinner" aria-hidden />
-              : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
-              : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
-          <button role="tab" data-tour="tab-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={showChatTab}>
-            <MessageSquare size={14} aria-hidden /> Chat</button>
-        </div>
-        <div className="chat-slot" hidden={tab !== "chat"}>
+      {docked ? <div className="dock-area"><DockHost slots={slots} sizes={widths} tabs={dockTabs} onReady={(d) => { dock.current = d; }}
+        onGone={(d) => { if (dock.current === d) dock.current = null; }} onShown={setTabState} onTab={showPanel}
+        onWindows={setPopouts} /></div> : <>
+        <SlotHost slot={slots.clashes} />
+        <SlotHost slot={slots.model} />
+        <aside className={`pane right ${tab === "chat" ? "chatting" : ""}`}>
+          <div className="tabs" role="tablist">
+            <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={showClashTab}>
+              <LocateFixed size={14} aria-hidden /> Clash{clashBadge}</button>
+            <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={showPlanTab}>
+              <Network size={14} aria-hidden /> Plan{planBadge}</button>
+            <button role="tab" data-tour="tab-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={showChatTab}>
+              <MessageSquare size={14} aria-hidden /> Chat</button>
+          </div>
+          <SlotHost slot={slots.chat} />
+          <SlotHost slot={slots.plan} />
+          <SlotHost slot={slots.clash} />
+        </aside>
+        {(["left", "right"] as const).map((side) => (
+          <div key={side} className={`resizer ${side} ${resizing === side ? "on" : ""}`} role="separator" aria-orientation="vertical"
+            aria-label={`Resize the ${side} panel`} aria-valuenow={widths[side]} aria-valuemin={PANE[side][0]} aria-valuemax={PANE[side][1]}
+            tabIndex={0} title="Drag to resize · double-click to reset"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              (e.target as HTMLElement).setPointerCapture(e.pointerId);
+              setResizing(side);
+            }}
+            onPointerMove={(e) => {
+              if (resizing !== side) return;
+              const w = side === "left" ? e.clientX : window.innerWidth - e.clientX;
+              setWidths((ws) => ({ ...ws, [side]: clampPane(side, w, ws[side === "left" ? "right" : "left"]) }));
+            }}
+            onPointerUp={() => { setResizing(null); remember(side, widths[side]); }}
+            onDoubleClick={() => { setWidths((ws) => ({ ...ws, [side]: PANE[side][2] })); remember(side, PANE[side][2]); }}
+            onKeyDown={(e) => {
+              const step = e.key === "ArrowLeft" ? -20 : e.key === "ArrowRight" ? 20 : 0;
+              if (!step) return;
+              e.preventDefault();
+              const w = clampPane(side, widths[side] + (side === "left" ? step : -step), widths[side === "left" ? "right" : "left"]);
+              setWidths((ws) => ({ ...ws, [side]: w })); remember(side, w);
+            }} />
+        ))}
+        {!compact && <SlotHost slot={slots.activity} />}
+      </>}
+      {inSlot(slots.chat, <div className="chat-slot" hidden={!docked && tab !== "chat"}>
           {context && <button className="context-chat-link btn" onClick={() => { clearManual(); setTab("plan"); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${chatReport}`} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
             context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
-        </div>
-        {tab === "plan" && <>
+        </div>)}
+      {inSlot(slots.plan, <div className="plan-slot" hidden={!docked && tab !== "plan"}>
+        {(docked || tab === "plan") && <>
           {context && (plan || planRun) && <div className="seg plan-switch" role="group" aria-label="Plan type">
             <button className={planKind === "context" ? "on" : ""} onClick={() => { clearManual(); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>Wider fix</button>
             <button className={planKind === "batch" ? "on" : ""} onClick={() => { clearManual(); setPlanKind("batch"); setViewContext(false); setViewPlan(true); }}>Clash plan</button>
@@ -2710,7 +2794,8 @@ export function App() {
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
             onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />}
         </>}
-        <div className="tab-body" hidden={tab !== "clash"}>
+      </div>)}
+      {inSlot(slots.clash, <div className="tab-body" hidden={!docked && tab !== "clash"}>
           {clash && report
             ? (<><ClashPanel reportId={report.id} clash={shownClash ?? clash} match={matches?.[clash.id]} measure={measure} onImage={(index) => setLightbox({ clash: shownClash ?? clash, index })} fix={fixes[clash.id]} triage={shownTriage[clash.id]}
               origin={report.origin} capturing={capturing === clash.id} />
@@ -2852,36 +2937,10 @@ export function App() {
           {checked.size === 0 && report && matches && !proposal && !hideFix && (
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
           )}
-        </div>
-      </aside>
-
-      {(["left", "right"] as const).map((side) => (
-        <div key={side} className={`resizer ${side} ${resizing === side ? "on" : ""}`} role="separator" aria-orientation="vertical"
-          aria-label={`Resize the ${side} panel`} aria-valuenow={widths[side]} aria-valuemin={PANE[side][0]} aria-valuemax={PANE[side][1]}
-          tabIndex={0} title="Drag to resize · double-click to reset"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            (e.target as HTMLElement).setPointerCapture(e.pointerId);
-            setResizing(side);
-          }}
-          onPointerMove={(e) => {
-            if (resizing !== side) return;
-            const w = side === "left" ? e.clientX : window.innerWidth - e.clientX;
-            setWidths((ws) => ({ ...ws, [side]: clampPane(side, w, ws[side === "left" ? "right" : "left"]) }));
-          }}
-          onPointerUp={() => { setResizing(null); remember(side, widths[side]); }}
-          onDoubleClick={() => { setWidths((ws) => ({ ...ws, [side]: PANE[side][2] })); remember(side, PANE[side][2]); }}
-          onKeyDown={(e) => {
-            const step = e.key === "ArrowLeft" ? -20 : e.key === "ArrowRight" ? 20 : 0;
-            if (!step) return;
-            e.preventDefault();
-            const w = clampPane(side, widths[side] + (side === "left" ? step : -step), widths[side === "left" ? "right" : "left"]);
-            setWidths((ws) => ({ ...ws, [side]: w })); remember(side, w);
-          }} />
-      ))}
-      {!compact && <footer className="dock">
+        </div>)}
+      {!compact && inSlot(slots.activity, <footer className="dock">
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
-      </footer>}
+      </footer>)}
       {layout === "tablet" && listOpen && !landing && <div className="drawer-scrim" aria-hidden onClick={() => setListOpen(false)} />}
       {layout === "phone" && !landing && !starting && (
         <SheetBar snap={snap} onSnap={setSnap}>
@@ -2897,12 +2956,10 @@ export function App() {
               <List size={17} aria-hidden /><span>Clashes</span>{report ? <span className="badge-n">{report.clashes.length}</span> : null}</button>
             <button role="tab" aria-selected={!listOpen && tab === "clash"} className={!listOpen && tab === "clash" ? "on" : ""} data-tour="sheet-fix"
               onClick={() => { showClashTab(); raise(); }}>
-              <LocateFixed size={17} aria-hidden /><span>Fix</span>{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
+              <LocateFixed size={17} aria-hidden /><span>Fix</span>{clashBadge}</button>
             <button role="tab" aria-selected={!listOpen && tab === "plan"} className={!listOpen && tab === "plan" ? "on" : ""} data-tour="tab-plan"
               onClick={() => { showPlanTab(); raise(); }}>
-              <Network size={17} aria-hidden /><span>Plan</span>{planning || contextWorking ? <i className="spinner" aria-hidden />
-                : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
-                : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
+              <Network size={17} aria-hidden /><span>Plan</span>{planBadge}</button>
             <button role="tab" aria-selected={!listOpen && tab === "chat"} className={!listOpen && tab === "chat" ? "on" : ""} data-tour="tab-chat"
               onClick={() => { showChatTab(); raise(); }}>
               <MessageSquare size={17} aria-hidden /><span>Chat</span></button>
@@ -2930,6 +2987,7 @@ export function App() {
       </MenuSheet>}
 
       <Tooltips />
+      {popouts.map((w, i) => <Tooltips key={i} doc={w.document} />)}
       {aboutTab && <AboutOrca tab={aboutTab} onTab={switchAbout} onClose={closeAbout} triageOpen={!!triageModel?.open_weights} />}
       {agentOpen && <AgentDialog link={agentLink} log={agentLog} now={now} creating={agentBusy} error={agentError}
         canCreate={!!sceneId} onCreate={() => void connectAgent()} onRevoke={() => void disconnectAgent()} onClose={() => setAgentOpen(false)} />}
@@ -2979,8 +3037,6 @@ function contextEvidence(p: ContextProposal, checks: ContextProposal["checks"], 
     clearance_m: g.min_clearance_m, also_needs: p.review_conditions.map((c) => c.message).join("\n"), ...pics };
 }
 
-/** Side panel widths in px: [min, max, default]. */
-const PANE = { left: [240, 640, 310], right: [300, 720, 380] } as const;
 /** Within the side's limits, leaving the viewer at least 360 px beside the other panel (`other`). */
 const clampPane = (side: "left" | "right", w: number, other = 0) =>
   Math.round(Math.max(Math.min(w, PANE[side][1], window.innerWidth - other - 360), PANE[side][0]));

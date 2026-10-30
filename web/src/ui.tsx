@@ -32,22 +32,24 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
     };
     // Esc closes the menu and nothing else (not the viewer's selection or clash, which listen on the window).
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
-    document.addEventListener("pointerdown", off);
-    document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", esc); };
+    const doc = ref.current?.ownerDocument ?? document;  // a panel in its own window has its own document
+    doc.addEventListener("pointerdown", off);
+    doc.addEventListener("keydown", esc);
+    return () => { doc.removeEventListener("pointerdown", off); doc.removeEventListener("keydown", esc); };
   }, [open]);
-  // Kept inside the window: a menu that would run off the right edge opens to the left of its trigger's edge instead, and
-  // one that would run off the bottom moves up (scrolling inside when taller than the window). Nothing on the page
-  // clips it, so past the bottom it would make the whole page scroll.
+  // Kept inside what shows it: a menu that would run off the right edge opens to the left of its trigger's edge instead,
+  // and one that would run off the bottom moves up (scrolling inside when taller than the room). The room is the window,
+  // or a dock panel that clips what overflows it (docs/panels.md); past the window's bottom a menu would make the whole
+  // page scroll, past a panel's it would be cut off.
   useLayoutEffect(() => {
     const m = menu.current;
     if (!open || !m || getComputedStyle(m).position === "fixed") return;
     m.style.translate = ""; m.style.maxHeight = ""; m.style.overflowY = "";
-    const r = m.getBoundingClientRect();
-    const overX = r.right - (window.innerWidth - 8), overY = r.bottom - (window.innerHeight - 8);
-    const up = overY > 0 ? Math.min(overY, Math.max(r.top - 8, 0)) : 0;
+    const room = roomFor(m), r = m.getBoundingClientRect();
+    const overX = r.right - (room.right - 8), overY = r.bottom - (room.bottom - 8);
+    const up = overY > 0 ? Math.min(overY, Math.max(r.top - room.top - 8, 0)) : 0;
     if (overX > 0 || up > 0) m.style.translate = `${overX > 0 ? -Math.round(overX) : 0}px ${-Math.round(up)}px`;
-    if (r.height > window.innerHeight - 16) { m.style.maxHeight = `${window.innerHeight - 16}px`; m.style.overflowY = "auto"; }
+    if (r.height > room.bottom - room.top - 16) { m.style.maxHeight = `${room.bottom - room.top - 16}px`; m.style.overflowY = "auto"; }
   }, [open]);
   const close = () => setOpen(false);
   // On a phone the menu is a sheet over the whole page, so it goes to the body: inside the viewer's rail it would sit
@@ -72,19 +74,36 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
   );
 }
 
+/** The box a menu can show in: its window (a panel in its own window: that one), narrowed by every ancestor that clips
+ *  what overflows it. */
+function roomFor(m: HTMLElement) {
+  const view = m.ownerDocument.defaultView ?? window;
+  const room = { top: 0, left: 0, right: view.innerWidth, bottom: view.innerHeight };
+  for (let e = m.parentElement; e; e = e.parentElement) {
+    const cs = view.getComputedStyle(e);
+    if (!/hidden|clip|auto|scroll/.test(`${cs.overflowX} ${cs.overflowY}`)) continue;
+    const r = e.getBoundingClientRect();
+    room.top = Math.max(room.top, r.top); room.left = Math.max(room.left, r.left);
+    room.right = Math.min(room.right, r.right); room.bottom = Math.min(room.bottom, r.bottom);
+  }
+  return room;
+}
+
 type Side = "right" | "left" | "top" | "bottom";
 const OPPOSITE: Record<Side, Side> = { right: "left", left: "right", top: "bottom", bottom: "top" };
 
 /**
  * The page's one tooltip, for any element with `data-tip` (and `data-tip-side`, right by default). It sits in a layer
  * above everything, flips to the other side when there is no room, and is kept inside the window, so a tip on a
- * control near an edge or in a scrolled panel is never cut off.
+ * control near an edge or in a scrolled panel is never cut off. A panel in its own window (dock.tsx) gets one of its
+ * own, on that window's document.
  */
-export function Tooltips() {
+export function Tooltips({ doc = document }: { doc?: Document }) {
   const [tip, setTip] = useState<{ el: HTMLElement; text: string; side: Side } | null>(null);
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const document = doc, window = doc.defaultView ?? globalThis.window;  // the page, or a pop-out window's
     let current: HTMLElement | null = null;
     const show = (target: EventTarget | null) => {
       const el = (target as HTMLElement | null)?.closest?.("[data-tip]") as HTMLElement | null;
@@ -147,22 +166,23 @@ export function Tooltips() {
       window.removeEventListener("keydown", key);
       window.removeEventListener("blur", hide);
     };
-  }, []);
+  }, [doc]);
 
   // Leaving the element (or it being removed) hides the tip.
   useEffect(() => {
     if (!tip) return;
     const leave = (e: PointerEvent) => { if (e.pointerType !== "touch" && !tip.el.contains(e.relatedTarget as Node | null)) setTip(null); };
     tip.el.addEventListener("pointerleave", leave);
-    const gone = window.setInterval(() => { if (!tip.el.isConnected) setTip(null); }, 300);
-    return () => { tip.el.removeEventListener("pointerleave", leave); window.clearInterval(gone); };
+    const gone = globalThis.setInterval(() => { if (!tip.el.isConnected) setTip(null); }, 300);
+    return () => { tip.el.removeEventListener("pointerleave", leave); globalThis.clearInterval(gone); };
   }, [tip]);
 
   useLayoutEffect(() => {
     const b = box.current;
     if (!tip || !b) return;
     const r = tip.el.getBoundingClientRect();
-    const w = b.offsetWidth, h = b.offsetHeight, vw = window.innerWidth, vh = window.innerHeight, gap = 8, pad = 6;
+    const view = doc.defaultView ?? window;
+    const w = b.offsetWidth, h = b.offsetHeight, vw = view.innerWidth, vh = view.innerHeight, gap = 8, pad = 6;
     const at = (side: Side) => side === "right" ? { x: r.right + gap, y: r.top + r.height / 2 - h / 2 }
       : side === "left" ? { x: r.left - gap - w, y: r.top + r.height / 2 - h / 2 }
         : side === "top" ? { x: r.left + r.width / 2 - w / 2, y: r.top - gap - h }
@@ -179,5 +199,5 @@ export function Tooltips() {
     b.style.visibility = "visible";
   }, [tip]);
 
-  return tip ? createPortal(<div ref={box} className="tooltip" role="tooltip" style={{ visibility: "hidden" }}>{tip.text}</div>, document.body) : null;
+  return tip ? createPortal(<div ref={box} className="tooltip" role="tooltip" style={{ visibility: "hidden" }}>{tip.text}</div>, doc.body) : null;
 }

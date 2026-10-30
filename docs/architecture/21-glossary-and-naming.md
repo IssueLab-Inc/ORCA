@@ -155,6 +155,10 @@ each feature see [01](01-product-and-journeys.md).
 | **Landing, blank project** | The page before anything opens; the drop zone for one's own models. | `landing`, `blank`, `starting` in `App.tsx`; `About.tsx`, `ProjectStart.tsx` |
 | **Insights** | The left pane's second tab: the run's summary, root causes and patterns. | `Insights.tsx`; `leftView` |
 | **Sheet, peek, half, full** | The phone's bottom sheet and its heights. | `Sheet.tsx`, `layout.ts` (`Snap`, `follow`) |
+| **Panel, dock** | On a desktop: Model, Coordination, Clash, Plan, Chat and Activity, laid out by the dock (dockview). | `dock.tsx`, `dockLayout.ts` (`PANELS`); [docs/panels.md](../panels.md) |
+| **Side bar, float, pop out, put back** | A panel's places: a bar along the left, right or bottom that collapses to a strip of tabs; a floating window over the model; a browser window of its own; back in its bar. | dockview edge, floating and pop-out groups; `collapseEdge`, `floatPanel`, `moveHome` |
+| **Slot** | The element a panel's content is drawn into, moved by the dock or placed by the classic layout, so nothing remounts. | `usePanelSlots`, `inSlot`, `SlotHost` |
+| **Classic layout** | The fixed panes of before: phones, tablets, the landing, and the desktop with the switch on. | `classic`, `sightline.dock.classic` |
 | **Tour, recorded run** | The guided walk through the real app; a committed real run it replays when the live one is slow. | `Tour.tsx`; `web/public/tour/*.json` ([19](19-demo-data.md)) |
 
 ## Naming rules

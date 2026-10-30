@@ -165,7 +165,7 @@ export const BUILDING_STEPS: Step[] = [
     body: () => <>The same girder is also hit by a cable tray and a cold water main: the next two in the list. (Navisworks
       never reported the cold water main; ORCA's check did.) Fixed one at a time, the three fixes could run into each
       other. Leave this one for now: we'll come back to the girder and fix all three together.</>,
-    target: ".pane.right",
+    target: ".pane.right, .slot-clash.in-dock",  // the classic right pane, or the Clash panel (docs/panels.md)
   },
   // 4. A different kind of fix
   {

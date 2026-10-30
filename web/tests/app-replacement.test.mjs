@@ -7,12 +7,12 @@ Error.prepareStackTrace = (error, frames) => `${error.name}: ${error.message}\n$
   `    at ${frame.getFunctionName() ?? "anonymous"} (${frame.getFileName()?.startsWith("data:") ? "transpiled production module" : frame.getFileName()}:${frame.getLineNumber()})`).join("\n")}`;
 
 const url = (js) => `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
-const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "MeasurePanel"];
+const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "DockHost", "SlotHost", "MeasurePanel"];
 const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
   export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
-  export const clashLabel=(c)=>"#"+c.number; export const STYLES=[{id:"shaded"},{id:"consistent"},{id:"edges"},{id:"hidden"},{id:"xray"}];
+  export const clashLabel=(c)=>"#"+c.number; export const inSlot=(s,n)=>n; export const usePanelSlots=()=>({}); export const STYLES=[{id:"shaded"},{id:"consistent"},{id:"edges"},{id:"hidden"},{id:"xray"}];
   export class Viewer{} export const serverPointToViewer=(v)=>v; export class Pilot{};`);
-const icons = url(["Bot", "Plug", "Boxes", "Brain", "Building2", "Check", "ChevronRight", "CircleCheck", "ClipboardCheck", "ClipboardPlus", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu"].map((name) => `export function ${name}(){return null;}`).join("\n"));
+const icons = url(["Bot", "Plug", "Boxes", "Brain", "Building2", "Check", "ChevronRight", "CircleCheck", "ClipboardCheck", "ClipboardPlus", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu", "LayoutPanelLeft", "RotateCcw"].map((name) => `export function ${name}(){return null;}`).join("\n"));
 
 async function compiled(path, dependencies, labelState = false) {
   const input = await readFile(new URL(path, import.meta.url), "utf8");
@@ -65,12 +65,13 @@ async function appHost() {
   const links = await compiled("../src/links.ts", {});
   const signoffs = await compiled("../src/signoffs.ts", {});
   const aboutRoute = await compiled("../src/aboutRoute.ts", {});
+  const dockLayout = await compiled("../src/dockLayout.ts", {});
   const views = await compiled("../src/viewer/views.ts", { three: import.meta.resolve("three") });
   const context = await compiled("../src/ContextPlan.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), "lucide-react": icons, "./ReportList": mocks });
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": api, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds, "./uploads": uploads, "./links": links,
-    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./viewer/views": views };
-  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./MeasurePanel"]) dependencies[name] = mocks;
+    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./viewer/views": views };
+  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   let tree;
   const render = () => { cursor = 0; tree = App(); };

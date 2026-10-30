@@ -1143,3 +1143,41 @@ Measure in every view, and the rail split (Oct 30; owner request; design [docs/m
   rails in Single, Two, Quad and with the plan maximised, at 1600×1000 and 1366×768 (the 3D group inside its pane each
   time); A/B/C, thumbnails, `capture()` and Show it built's passes still byte-identical; `web/tests/measure.test.mjs`
   (6); 108 web tests.
+
+Panels that dock, collapse, float and pop out (Oct 30; `feature/dockable-panels`; design [docs/panels.md](../panels.md);
+code `web/src/dock.tsx`, `web/src/dockLayout.ts`, `web/src/App.tsx`, `web/src/ui.tsx`, `web/src/Tour.tsx`,
+`web/src/index.css`, `web/public/popout.html`):
+- **Owner decisions:** a real docking library (dockview 8.5.1, MIT, pinned with `overrides`; never its paid package),
+  before the freeze, the default layout the classic one, pop-out windows in the first version.
+- **How:** each panel's content is drawn into a slot that only moves, so nothing `App` draws remounts; the classic
+  layout (phones, tablets, the landing, the Classic switch) places the same slots as `display: contents`, so its CSS is
+  unchanged. Side bars keep their tabs on top while open and collapse to a strip; `setTab` shows the panel in the dock;
+  a dock tab runs the classic tab handler; the layout is saved per browser with pop-outs put back; the tour brings
+  panels home. Keys, tooltips and popovers work in a pop-out window.
+- **Found on the way:** a floating panel's opaque scroller culled the WebGL canvas under it (fixed: docked slots draw
+  no background); StrictMode disposed the dock's subscriptions (fixed: let go only on a real unmount); dockview's
+  `clear()` leaves side bars collapsed (Reset removes them). The blank viewer (a lost WebGL context) was fixed on
+  `main` meanwhile (the entry above) and merged in.
+- **Checked:** `web/tests/dock.test.mjs` (7); 109 web tests; `npm run build` and `tsc` clean; bundle +93 kB JS and
+  +11 kB CSS gzipped. In Playwright on Northbank (software GL): the default layout; float, collapse, reopen, tab
+  clicks; Chat popped out (styles, typing, a tooltip, M reaching the page), its window closed and popped out again;
+  reload with a popped-out, a floating and a collapsed panel; Reset; Classic; the tour gathering panels; #1 proposed
+  with the Clash panel floating, put back mid-run and accepted (1 fixed); tablet and phone unchanged.
+
+Review of the panels (Oct 30; PR review on `feature/dockable-panels`; code `web/src/dock.tsx`, `dockLayout.ts`,
+`App.tsx`, `index.css`, `ReportList.tsx`, `Chat.tsx`, `ui.tsx`):
+- **Saved layouts:** a floating or pop-out window split into several groups is written as a grid; reading only a group's
+  views threw the whole layout away on reload (`windowViews`). After `fromJSON` the model is locked against drops
+  again (dockview restores `no-drop-target` as `true`).
+- **The dock:** one `components` object (a new one each render re-laid the dock out several times a second while an
+  agent worked); the handle and pop-out windows let go on a real unmount, and only the handle this dock published;
+  `tab` follows whatever brings Clash, Plan or Chat to the front; the tour reopens closed panels; tab padding inside the
+  part that sees clicks (an edge click collapsed the bar); the scroll memory prunes removed scrollers; the badges and
+  side widths computed once (`clashBadge`, `planBadge`, `PANE`).
+- **Pop-outs:** the clash list scrolls its row in its own document; hands-free voice follows the chat's window.
+- **After merging main:** a menu in a dock panel was cut off at the panel's edge; `Popover` keeps it inside the
+  window narrowed by whatever clips it (`roomFor`).
+- **Checked:** 111 web tests (a split floating and pop-out window, shared widths); in Chromium on Northbank: an edge
+  click on the right bar's active tab leaves it at 380 px; after a reload the model's group saves `no-drop-target`;
+  Chat closed, the tour opens it again; the Visibility menu fits the Model panel at 1440×800.
+
