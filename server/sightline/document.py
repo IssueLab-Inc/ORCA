@@ -38,7 +38,8 @@ from . import domains, owner, triage as triage_mod
 from .meta_client import ChatModel, model_label, triage_model_info
 from .reports import Report, ReportClash
 
-TEAMS = ["Structure", "MEP", "Architecture", "Site"]
+# Team names are the user's: each model's team is typed in the report dialog. ORCA only guesses one per model to start
+# from: a building discipline from the model's content, else the model's own name.
 STAYS_FIRST = ["Structure", "Architecture", "Site", "MEP"]  # who keeps their element when two disciplines meet
 
 EXPLAIN_SCHEMA = {
@@ -83,9 +84,13 @@ def _class_team(cls: str) -> str | None:
     return None
 
 
-def guess_team(classes: Counter, file_name: str = "") -> str:
-    """The team a model most likely belongs to, from how many of its elements are typically each discipline's. The
-    file name only breaks ties: names like "Model-02.ifc" say nothing."""
+def guess_team(classes: Counter, file_name: str = "", domain: str = domains.CONSTRUCTION) -> str:
+    """A first guess at the team a model belongs to (the user types the real one). A building's model: the discipline
+    most of its elements typically belong to, the file name only breaking ties (names like "Model-02.ifc" say
+    nothing). A machine cell's, or a model with nothing to go on: the model's own name."""
+    own = Path(file_name).stem or "Model"
+    if domain != domains.CONSTRUCTION:
+        return own
     score = Counter()
     for cls, n in classes.items():
         team = _class_team(cls)
@@ -96,7 +101,7 @@ def guess_team(classes: Counter, file_name: str = "") -> str:
                         ("Architecture", ("arch",)), ("Site", ("site", "civil", "landscape"))):
         if any(w in name for w in words):
             score[team] += 0.5
-    return score.most_common(1)[0][0] if score else "Architecture"
+    return score.most_common(1)[0][0] if score else own
 
 
 def model_files(report: Report, scene=None) -> list[str]:
@@ -107,8 +112,8 @@ def model_files(report: Report, scene=None) -> list[str]:
     return sorted(names)
 
 
-def guess_teams(report: Report, scene=None) -> list[dict]:
-    """[{file, guess, elements}] for the report dialog: what each model contains decides; the user confirms."""
+def guess_teams(report: Report, scene=None, domain: str = domains.CONSTRUCTION) -> list[dict]:
+    """[{file, guess, elements}] for the report dialog: what each model contains suggests a team; the user types it."""
     out = []
     for name in model_files(report, scene):
         classes: Counter = Counter()
@@ -117,7 +122,7 @@ def guess_teams(report: Report, scene=None) -> list[dict]:
             classes.update(e.is_a() for e in m.by_type("IfcElement"))
         else:
             classes.update(e.ifc_class for c in report.clashes for e in (c.a, c.b) if e.file == name and e.ifc_class)
-        out.append({"file": name, "guess": guess_team(classes, name), "elements": sum(classes.values())})
+        out.append({"file": name, "guess": guess_team(classes, name, domain), "elements": sum(classes.values())})
     return out
 
 
@@ -141,21 +146,32 @@ class Row:
     ai: dict | None = None        # Muse Spark's explanation for its page
 
 
-def teams_for(team_a: str, team_b: str, moved_side: str | None, responsible: str | None) -> tuple[str, list[str]]:
-    """(acting team, teams that review). See the module docstring for the rule."""
+def teams_for(team_a: str, team_b: str, moved_side: str | None, responsible: str | None,
+              discipline: dict[str, str] | None = None) -> tuple[str, list[str]]:
+    """(acting team, teams that review). See the module docstring for the rule. `discipline`: a typed team name's
+    guessed discipline (`guess_teams`), which `STAYS_FIRST` ranks; a name with none ranks with the movers."""
     reviewers = list(dict.fromkeys([team_a, team_b]))
     if moved_side in ("a", "b"):
         return (team_a if moved_side == "a" else team_b), reviewers
-    if responsible in TEAMS and responsible in reviewers:
+    if responsible and responsible in reviewers:
         return responsible, reviewers
     if team_a == team_b:
         return team_a, reviewers
     rank = {t: i for i, t in enumerate(STAYS_FIRST)}
-    return max((team_a, team_b), key=lambda t: rank.get(t, len(STAYS_FIRST))), reviewers
+    of = discipline or {}
+    return max((team_a, team_b), key=lambda t: rank.get(of.get(t, t), len(STAYS_FIRST))), reviewers
 
 
 def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str, str], matches: dict | None,
-               scene, evidence: dict, reviews: dict, marks: dict) -> list[Row]:
+               scene, evidence: dict, reviews: dict, marks: dict, guesses: dict[str, str] | None = None) -> list[Row]:
+    """`model_teams`: the team the user typed for each model file; `guesses`: ORCA's guess per file (`guess_teams`),
+    the names triage's "responsible" uses, which are translated to the typed ones."""
+    guesses = guesses or {}
+    typed = {f: model_teams.get(f) or g for f, g in guesses.items()}
+    discipline = {t: guesses[f] for f, t in typed.items()}
+    as_typed = {}
+    for f, g in guesses.items():
+        as_typed.setdefault(g, typed[f])
     rows = []
     for c in report.clashes:
         m = (matches or {}).get(c.id, {})
@@ -170,7 +186,8 @@ def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str,
             return (c.a if side == "a" else c.b).file or "unknown model"
 
         ma, mb = model_of("a"), model_of("b")
-        ta, tb = model_teams.get(ma) or guess_team(Counter(), ma), model_teams.get(mb) or guess_team(Counter(), mb)
+        ta = model_teams.get(ma) or typed.get(ma) or guess_team(Counter(), ma)
+        tb = model_teams.get(mb) or typed.get(mb) or guess_team(Counter(), mb)
         ev = evidence.get(c.id)
         moved_side = None
         if ev and ev.get("moved"):
@@ -178,7 +195,8 @@ def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str,
             show = m.get("show") or [None, None]
             moved_side = ("a" if {m.get("a"), show[0]} & moved else "b" if {m.get("b"), show[1]} & moved else None)
         reading = verdicts.get(c.id, {})
-        acting, reviewers = teams_for(ta, tb, moved_side, reading.get("responsible"))
+        responsible = reading.get("responsible")
+        acting, reviewers = teams_for(ta, tb, moved_side, as_typed.get(responsible, responsible), discipline)
         mark = marks.get(c.id)
         verdict = reading.get("verdict")
         if ev:
@@ -217,9 +235,11 @@ def _facts(r: Row) -> str:
 
 def explain(model: ChatModel, rows: list[Row], emit: Callable[[dict], None], workers: int = 6,
             domain: str = domains.CONSTRUCTION) -> None:
-    """Muse Spark's explanation for every page, in parallel; a failure leaves that page with the triage reading."""
+    """Muse Spark's explanation for every page, in parallel; a failure leaves that page with the triage reading. The
+    prompt names the report's teams as the user typed them."""
     pages = [r for r in rows if r.section == "page"]
-    system = domains.prompt("report", domain)
+    teams = ", ".join(dict.fromkeys(t for r in rows for t in (r.team_a, r.team_b)))
+    system = domains.prompt("report", domain, teams=teams)
     done = [0]
     lock = threading.Lock()
 
@@ -695,7 +715,8 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
     run's `info`), else the one triage would run on now. `domain`: the scene's (`domains.of`), whose voice the
     explanations and the summary take."""
     triage_info = triage_info or triage_model_info()
-    rows = build_rows(report, verdicts, model_teams, matches, scene, evidence, reviews, marks)
+    guesses = {g["file"]: g["guess"] for g in guess_teams(report, scene, domain)}
+    rows = build_rows(report, verdicts, model_teams, matches, scene, evidence, reviews, marks, guesses)
     emit({"type": "progress", "step": "explaining", "done": 0, "total": sum(r.section == "page" for r in rows)})
     explain(model, rows, emit, domain=domain)
     emit({"type": "progress", "step": "summarising"})

@@ -639,7 +639,7 @@ Coordination reports from a clash report, its triage and the page's evidence (pi
 (WeasyPrint) and BCF 2.1. Details in [14](14-files-in-and-out.md).
 
 - **Main symbols:** `generate`, `build_rows`, `Row`, `teams_for`, `guess_team`, `guess_teams`, `model_files`,
-  `explain`, `summarise`, `render_html`, `requirements_html`, `to_pdf`, `bcf_zip`, `TEAMS`, `STAYS_FIRST`,
+  `explain`, `summarise`, `render_html`, `requirements_html`, `to_pdf`, `bcf_zip`, `STAYS_FIRST`, `LOCKUP`,
   `VERDICT_LABEL`.
 - **Imports:** `domains.py`, `meta_client.py`, `owner.py`, `reports.py`, `triage.py`; lazily `built.py`,
   `requirements.py`. `generate`, `explain` and `summarise` take the scene's `domain` (from `app._build_document`).

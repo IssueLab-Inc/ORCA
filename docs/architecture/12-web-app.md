@@ -40,7 +40,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `PlanPanel.tsx` | A Fix-together or root-cause plan: its items, their status, the joint check, Accept | `PlanPanel`, `PlanRun` | `App` |
 | `Properties.tsx` | The selected element's properties under its card: type, material, size, attributes, each property set and quantity set, a filter, click to copy | `PropertySets`, `sections`, `filtered`, `shown` | `App` |
 | `ProjectStart.tsx` | The blank project's drop zone (IFC/STEP models, or a Navisworks report or folder) | `ProjectStart` | `App` |
-| `ReportDoc.tsx` | The coordination report dialog (scope, teams, build PDF and BCF) and the per-clash review block | `ReportDialog`, `ReviewBlock`, `reviewersOf`, `TEAMS` | `App` |
+| `ReportDoc.tsx` | The coordination report dialog (scope, a typed team name per model, build PDF and BCF) and the per-clash review block | `ReportDialog`, `ReviewBlock`, `reviewersOf` | `App` |
 | `ReportList.tsx` | The left pane over a report: Clashes / Insights tabs, impact bar, search and filters, the list with lazy thumbnails | `ReportList`, `clashLabel`, `mm`, `linkState`, `Review` | `App`, `ClashPanel.tsx`, `ContextPlan.tsx`, `PlanPanel.tsx`, `ReportDoc.tsx` |
 | `Requirements.tsx` | The requirements dialog: level cards, strictness, the check matrix, who moves, rules and Muse's audit, openings | `RequirementsDialog` | `App` |
 | `Sheet.tsx` | The phone's bottom sheet bar: handle, drag and flick, snap heights | `SheetBar` | `App` |

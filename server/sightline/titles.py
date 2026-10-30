@@ -14,14 +14,12 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Callable
 
-from . import owner
+from . import domains, owner
 from .meta_client import ChatModel
 from .reports import Report, ReportClash
 
-PROMPT = Path(__file__).parent / "domain_packs" / "titles.md"
 BATCH = 40            # clashes per model call
 WORKERS = 8           # calls at a time (as triage runs on the same host)
 MAX_CHARS = 90        # a title longer than this is cut at a word
@@ -58,10 +56,11 @@ def _tidy(title: str) -> str:
     return t
 
 
-def title_batch(model: ChatModel, clashes: list[ReportClash]) -> dict[str, str]:
-    """Titles for up to BATCH clashes in one call: {clash id: title}. A number the model leaves out stays untitled."""
+def title_batch(model: ChatModel, clashes: list[ReportClash], domain: str = domains.CONSTRUCTION) -> dict[str, str]:
+    """Titles for up to BATCH clashes in one call: {clash id: title}. A number the model leaves out stays untitled.
+    `domain` (`domains.of`) names the meeting they are read out in."""
     by_number = {c.number: c for c in clashes}
-    reply = model.complete_json(PROMPT.read_text(), "\n".join(facts(c) for c in clashes), [],  # type: ignore[call-arg]
+    reply = model.complete_json(domains.prompt("titles", domain), "\n".join(facts(c) for c in clashes), [],  # type: ignore[call-arg]
                                 schema=SCHEMA)
     out = {}
     for item in reply.get("titles", []):
@@ -73,7 +72,7 @@ def title_batch(model: ChatModel, clashes: list[ReportClash]) -> dict[str, str]:
 
 
 def title_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
-                 batch: int = BATCH, workers: int = WORKERS) -> dict[str, str]:
+                 batch: int = BATCH, workers: int = WORKERS, domain: str = domains.CONSTRUCTION) -> dict[str, str]:
     """Title every clash in `report` that has no title yet. Emits {"type": "titles", "items": {id: title}} per batch
     as it lands, and sets each clash's `title`."""
     todo = sorted((c for c in report.clashes if not c.title), key=lambda c: c.number)
@@ -81,7 +80,7 @@ def title_report(report: Report, model: ChatModel, emit: Callable[[dict], None] 
     done: dict[str, str] = {}
     by_id = {c.id: c for c in report.clashes}
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures = [owner.submit(pool, title_batch, model, chunk) for chunk in chunks]
+        futures = [owner.submit(pool, title_batch, model, chunk, domain) for chunk in chunks]
         for f in as_completed(futures):
             try:
                 items = f.result()
@@ -98,8 +97,8 @@ def title_report(report: Report, model: ChatModel, emit: Callable[[dict], None] 
 class Job:
     """One titling run over a report, shared by everyone who opens it (like triage.Job): late subscribers replay it."""
 
-    def __init__(self, report: Report, model: ChatModel, info: dict):
-        self.report, self.model, self.info = report, model, info
+    def __init__(self, report: Report, model: ChatModel, info: dict, domain: str = domains.CONSTRUCTION):
+        self.report, self.model, self.info, self.domain = report, model, info, domain
         self.titles: dict[str, str] = {c.id: c.title for c in report.clashes if c.title}
         self.events: list[dict] = []
         self.done = False
@@ -120,7 +119,7 @@ class Job:
 
         def work():
             try:
-                title_report(self.report, self.model, self._emit)
+                title_report(self.report, self.model, self._emit, domain=self.domain)
             except Exception as e:
                 self.error = f"{type(e).__name__}: {e}"
             self._emit({"type": "done", "titled": len(self.titles), "seconds": round(time.time() - self.started, 1),

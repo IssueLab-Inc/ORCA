@@ -1125,7 +1125,7 @@ export function App() {
         setNaming((n) => Math.max(0, n - Object.keys(e.items).length));
       }
       if (e.type === "done") setNaming(0);
-    }).catch(() => { if (live) setNaming(0); });  // no titles (no key, cap reached): the plain names stay
+    }, sceneId).catch(() => { if (live) setNaming(0); });  // no titles (no key, cap reached): the plain names stay
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report?.id]);

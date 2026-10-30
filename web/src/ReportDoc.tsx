@@ -3,13 +3,13 @@ import { useEffect, useState } from "react";
 import { api, type DocEvent, type Evidence, type ModelTeam, type Report, type ReportClash, type Signoff, type Team, type TriageVerdict } from "./api";
 import type { Review } from "./ReportList";
 
-export const TEAMS: Team[] = ["Structure", "MEP", "Architecture", "Site"];
 type Scope = "combined" | "team" | "model";
 
-/** The teams with an element in this clash: they review it (the server applies the same rule). */
+/** The teams with an element in this clash: they review it (the server applies the same rule). Neither model has a
+ *  team yet: every team named so far. */
 export function reviewersOf(c: ReportClash, teams: Record<string, Team>): Team[] {
   const out = [c.a.file, c.b.file].map((f) => (f && teams[f]) || null).filter((t): t is Team => !!t);
-  return out.length ? [...new Set(out)] : TEAMS;
+  return out.length ? [...new Set(out)] : [...new Set(Object.values(teams).filter(Boolean))];
 }
 
 /** Reviews recorded per team for one clash, and a form to add one. Feeds the report's review blocks. */
@@ -131,17 +131,21 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
           ? "Each team gets the clashes it acts on or reviews." : "Each model's file gets the clashes it is part of."}</p>
 
         <h3>Which team owns each model</h3>
-        <p className="hint">Guessed from what each model contains (ducts and pipes, beams and columns, walls and doors), not
-          its name. Check it: it decides who acts and who reviews.</p>
+        <p className="hint">Type each team's name. ORCA starts from a guess: a building model's discipline from what it
+          contains (ducts and pipes, beams and columns, walls and doors), else the model's own name. It decides who acts and
+          who reviews, and the report uses these names.</p>
         {!models ? <p className="hint"><LoaderCircle size={13} className="spin" aria-hidden /> Reading the models…</p> : (
           <table className="team-table"><tbody>
             {models.map((m) => (
               <tr key={m.file}><td className="mono">{m.file}</td>
-                <td><select value={teams[m.file] ?? m.guess} aria-label={`Team for ${m.file}`}
-                  onChange={(e) => onTeams({ ...teams, [m.file]: e.target.value as Team })}>
-                  {TEAMS.map((t) => <option key={t}>{t}</option>)}</select></td>
+                <td><input type="text" list="team-names" value={teams[m.file] ?? m.guess} aria-label={`Team for ${m.file}`}
+                  placeholder={m.guess} maxLength={60} onChange={(e) => onTeams({ ...teams, [m.file]: e.target.value })}
+                  onBlur={(e) => onTeams({ ...teams, [m.file]: e.target.value.trim() || m.guess })} /></td>
                 <td className="why">{m.elements ? `${m.elements} elements` : ""}</td></tr>))}
           </tbody></table>)}
+        {models && <datalist id="team-names">
+          {[...new Set([...Object.values(teams), ...models.map((m) => m.guess)].filter(Boolean))].map((t) => <option key={t} value={t} />)}
+        </datalist>}
 
         <label className="check"><input type="checkbox" checked={bcf} onChange={(e) => setBcf(e.target.checked)} /> Include BCF issues
           (one per clash that needs action, assigned to the team that acts)</label>

@@ -1263,3 +1263,17 @@ shared prompts, `service.py`, `plans.py`, `chat.py`, `triage.py`, `document.py`,
   report summary, patterns and root cause fill `{role}` per domain; construction's text is byte-identical.
 - **Checked:** `test_domains.py` (11); 618 server tests; `evals/step_cell.py` passes on the real models (17 of 17
   planted pairs, C1, C2, C3, C6, C7, C8, Rev B 0 planted; `evals/runs/2026-10-30-cell-step-machines/`).
+
+Team names typed, titles and the rule audit by domain (Oct 30; code `domains.py`, `titles.py`, `triage.py`,
+`document.py`, `app.py`, `domain_packs/titles.md`, `triage.md`, `report.md`, `web/src/ReportDoc.tsx`, `api.ts`):
+- **Teams:** no team name is fixed any more. The report dialog has a text field per model (a cleared field goes back to
+  the guess; a list suggests the names in use). `document.TEAMS` and the web's `TEAMS` are gone. ORCA's guess stays a
+  building discipline from the model's content, and becomes the model's own name for a machine cell or a model with
+  nothing to go on. Triage's `responsible` is held to the guessed teams (`triage.schema_for`); the report translates it
+  to the typed name for that model, ranks typed names by their model's guessed discipline (`STAYS_FIRST`), and
+  `report.md` names the typed teams.
+- **Titles:** `titles.md` says `{meeting}` ("a BIM coordination meeting" or "a machine cell design review"); the page
+  sends `?scene_id=` so a cell's titles are written for its domain. **Rule audit:** `triage.AUDIT` takes `{role}`.
+- **Checked:** `test_domains.py` (14: titles and audit by domain, guesses never fixed, typed names in the report and its
+  prompt); 621 server tests; 124 web tests, build clean. In Chromium on Northbank: the dialog's first model retyped to
+  "Acme Mechanical" kept it; the second cleared and left went back to "MEP".

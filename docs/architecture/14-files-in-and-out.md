@@ -323,14 +323,18 @@ flowchart TB
   edit, clearance, `meets`, and `before_img` / `after_img` pictures the browser captured with `Viewer.capture`,
   plus `built_img` / `built_note`), `reviews` (team, name, decision, note, date: kept per report in the browser),
   `marks` (by design or for the author) and the user-confirmed `teams` per model file. Costs one proposal.
-- **Team per model** (`document.guess_team`, `GET /api/reports/{rid}/teams`): a score per discipline from the
-  model's IFC classes (`_class_team`: flow and distribution classes are MEP; beams, columns, footings, fasteners are
-  Structure; doors, windows, curtain walls, coverings, spaces are Architecture; geographic and civil are Site); the
-  file name only breaks ties. The dialog shows the guess for the user to confirm.
+- **Team per model:** the user types each model's team in the report dialog (any name; a cleared field goes back to
+  the guess; a list suggests the names in use). Nothing fixes the names. ORCA's first guess (`document.guess_team`,
+  `GET /api/reports/{rid}/teams`, which returns the guesses as suggestions): for a building, a score per discipline from
+  the model's IFC classes (`_class_team`: flow and distribution classes are MEP; beams, columns, footings, fasteners
+  are Structure; doors, windows, curtain walls, coverings, spaces are Architecture; geographic and civil are Site), the
+  file name only breaking ties; for a machine cell (`domains.of`), or a model with nothing to go on, the model's own
+  name.
 - **Who acts and who reviews** (`document.teams_for`): every team with an element in the clash reviews. The acting
-  team is the one whose element the fix changed, else the discipline triage named (`responsible`), else one team when
-  both sides are the same team, else the one later in `STAYS_FIRST` (Structure, Architecture, Site, MEP: structure
-  stays, services move).
+  team is the one whose element the fix changed, else the team triage named (`responsible`, one of the guessed names,
+  translated to the name typed for that model), else one team when both sides are the same team, else the one whose
+  guessed discipline is later in `STAYS_FIRST` (Structure, Architecture, Site, MEP: structure stays, services move);
+  typed names map to their model's guess for this.
 - **Sections** (`build_rows`): a clash with evidence, or a real clash, gets a **page**; a model error or "for the
   author" mark goes in the authors' table; everything else (by design, not physical, touching) is **noise**,
   grouped by test.

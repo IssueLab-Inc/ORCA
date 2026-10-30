@@ -252,7 +252,7 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 | `GET` | `/api/reports/{report_id}/triage` | The report's triage so far (`triage.Job.state`), with facts the open model settles (`_triage_facts`). Under requirements that only change rules since a finished run, starts a run from its readings at no charge; under a different prompt, returns the last run with `stale: true` | `?scene_id=` | `{results, done, total, seconds, error, summary, audit, model, open_weights, …}`, plus `stale` for an older run, or `{results: {}, done: false, started: false}` | free |
 | `POST` | `/api/reports/{report_id}/triage/stream` | Starts or follows the report's shared triage run (`_start_triage`, `triage.Job.follow`) | `?rerun=true` to run a finished one again, `?scene_id=`; empty body | NDJSON | one proposal to start a run; following one, or carrying readings over to new rules, is free |
 | `GET` | `/api/reports/{report_id}/titles` | Titles so far (from the shared run, `_with_titles`) | none | `{titles: {id: title}, running}` | free |
-| `POST` | `/api/reports/{report_id}/titles/stream` | Starts or follows the report's shared titling run (`titles.Job`); a finished run with untitled clashes starts again for those | empty body | NDJSON | `title_limit` (`SIGHTLINE_TITLES_PER_HOUR`/`_DAY`) to start; following is free |
+| `POST` | `/api/reports/{report_id}/titles/stream` | Starts or follows the report's shared titling run (`titles.Job`); a finished run with untitled clashes starts again for those | empty body; `?scene_id=` (the open models: their domain names the meeting in `titles.md`) | NDJSON | `title_limit` (`SIGHTLINE_TITLES_PER_HOUR`/`_DAY`) to start; following is free |
 
 Shared runs are keyed by `_triage_key`: a sample report by `sample:<root>` (every visitor's copy has the same ids),
 an uploaded or detected one by its id, and under requirements also by `model_key|rules_key`. The server keeps 16
@@ -277,7 +277,7 @@ triage jobs (`_triage_jobs`) and 32 titling jobs (`_title_jobs`).
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `GET` | `/api/reports/{report_id}/teams` | Each model with the team its content suggests (`document.guess_teams`) | `?scene_id=` | `{teams, models: [{file, guess, elements}]}` | free |
+| `GET` | `/api/reports/{report_id}/teams` | Each model with a first guess at its team (`document.guess_teams`; the user types the real names) | `?scene_id=` | `{teams (the distinct guesses, as suggestions), models: [{file, guess, elements}]}` | free |
 | `POST` | `/api/reports/{report_id}/document/stream` | Builds the coordination report: PDF(s) combined, per team or per model, plus BCF (`document.generate` via `_build_document`) | `DocumentRequest {scene_id?, scope, teams, bcf, evidence, reviews, marks, triage}` | NDJSON | one proposal; 422 bad scope; 409 when fewer than half the clashes have a verdict (the page's `triage`, else the server's finished run) |
 | `GET` | `/api/documents/{doc_id}` | Downloads a built report (kept in memory, 24 at most) | none | PDF or zip, as an attachment | free; 404 once dropped |
 

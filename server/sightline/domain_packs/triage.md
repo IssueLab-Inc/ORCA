@@ -25,7 +25,7 @@ Return JSON only, matching the schema:
 - "understanding": two or three plain sentences: what the two elements are, what is happening where they meet,
   and why that is or is not a problem.
 - "verdict", "severity" ("high" blocks construction or structure, "medium" needs a design change, "low" is minor,
-  "none" for anything that is not a real clash), "responsible" (the discipline that should act, or "none"),
+  "none" for anything that is not a real clash), "responsible" (the team that should act ({teams}), or "none"),
 - "action": "move_A" / "move_B" (relocate one element), "modify_A" / "modify_B" (resize, reroute, add an opening or
   offset), "exclude_with_rule" (hide this class of result), "fix_model" (author cleans up), "none".
 - "fix_hint": one sentence, or "" when there is nothing to fix.

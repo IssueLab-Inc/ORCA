@@ -19,7 +19,7 @@ each feature see [01](01-product-and-journeys.md).
 | **IFC** | Industry Foundation Classes, the open model format. ORCA reads and writes IFC4 (IFC2X3 where noted, e.g. a provision for void by ObjectType). | IfcOpenShell on the server, web-ifc in the browser ([14](14-files-in-and-out.md)). |
 | **IFC class** | An element's type: `IfcBeam`, `IfcColumn`, `IfcSlab`, `IfcWall`, `IfcDuctSegment`, `IfcPipeSegment`, `IfcCableCarrierSegment`, … | Shown without the `Ifc` prefix in the UI; never in Muse's titles (`domain_packs/titles.md`). |
 | **GlobalId** | The 22-character id every IFC element carries, stable across revisions. | ORCA addresses elements by GlobalId everywhere: picks, clashes, fixes, the API. |
-| **Discipline / team** | Who models what: Structure, MEP (services), Architecture, Site. | `document.TEAMS`; a file's team is guessed from its class histogram (`document.guess_team`) and confirmed in the report dialog. |
+| **Discipline / team** | Who models what. A team is named by the user per model in the report dialog; detection and requirements group a building's models by the discipline ORCA guesses (Structure, MEP (services), Architecture, Site). | `document.guess_team` (from the class histogram; a machine cell's model, or one with nothing to go on, gets its own name), typed in `ReportDialog`. |
 | **MEP** | Mechanical, electrical and plumbing: ducts, pipes, cable trays, lights. "Services" in plain words. | |
 | **Federation** | Several discipline files that share one coordinate system, opened together. | One `IfcScene` per set; `COORDINATE_TO_ORIGIN` stays off in the viewer. |
 | **Storey / level** | `IfcBuildingStorey`: Level 01, Level 02… (not ORCA's design level, below). | `ReportElement.level`; the properties card's "Level". |

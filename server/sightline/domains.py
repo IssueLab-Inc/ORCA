@@ -16,6 +16,11 @@ ROLES = {
     CONSTRUCTION: "a senior BIM coordinator",
     MACHINES: "a senior mechanical integration engineer on a machine and automation cell",
 }
+# Where the clash titles are read out (titles.md).
+MEETINGS = {
+    CONSTRUCTION: "a BIM coordination meeting",
+    MACHINES: "a machine cell design review",
+}
 
 
 def of(ws, scene_id: str | None) -> str:
@@ -26,7 +31,19 @@ def of(ws, scene_id: str | None) -> str:
     return MACHINES if names and len(sources) == len(names) else CONSTRUCTION
 
 
-def prompt(name: str, domain: str = CONSTRUCTION) -> str:
-    """`domain_packs/<name>.md` with ORCA's role for `domain` in place of `{role}` (plain replacement: the prompts'
-    JSON examples keep their braces)."""
-    return (PACKS / f"{name}.md").read_text().replace("{role}", ROLES.get(domain, ROLES[CONSTRUCTION]))
+def fill(text: str, domain: str = CONSTRUCTION, **fields: str) -> str:
+    """`text` with ORCA's role and meeting for `domain` in place of `{role}` and `{meeting}`, and each of `fields`
+    (say `teams`) in place of its `{name}`; an empty field drops its " ({name})" or "{name}". Plain replacement: the
+    prompts' JSON examples keep their braces."""
+    known = {"role": ROLES.get(domain, ROLES[CONSTRUCTION]), "meeting": MEETINGS.get(domain, MEETINGS[CONSTRUCTION]),
+             "teams": "", **fields}
+    for key, value in known.items():
+        if not value:
+            text = text.replace(f" ({{{key}}})", "")
+        text = text.replace(f"{{{key}}}", value)
+    return text
+
+
+def prompt(name: str, domain: str = CONSTRUCTION, **fields: str) -> str:
+    """`domain_packs/<name>.md`, filled for `domain` (`fill`)."""
+    return fill((PACKS / f"{name}.md").read_text(), domain, **fields)

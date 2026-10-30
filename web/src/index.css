@@ -852,7 +852,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .report-dialog .row { justify-content: space-between; }
 .team-table { border-collapse: collapse; font-size: 12.5px; }
 .team-table td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line); }
-.team-table select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.team-table input { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; width: 200px; max-width: 100%; }
 .report-dialog .check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin-top: 6px; }
 .report-dialog .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .spin { animation: spin 1s linear infinite; vertical-align: -2px; }
@@ -1649,7 +1649,7 @@ a.pop-item { color: inherit; }
   .team-table { width: 100%; }
   .team-table td { display: block; padding: 2px 0; border: 0; }
   .team-table tr { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); }
-  .team-table select { width: 100%; }
+  .team-table input { width: 100%; }
   .detect-coverage table, .detect-coverage tbody, .detect-coverage tr { display: block; }
   .detect-coverage thead { display: none; }
   .detect-coverage tr { padding: 6px 0; border-bottom: 1px solid var(--line); }
@@ -1701,7 +1701,7 @@ a.pop-item { color: inherit; }
   .more { min-height: 40px; }
 }
 @media (pointer: coarse) {
-  .review-form select, .review-form input, .team-table select, .req-cell select, .req-movers select, .detect-tol input { min-height: 40px; }
+  .review-form select, .review-form input, .team-table input, .req-cell select, .req-movers select, .detect-tol input { min-height: 40px; }
 }
 @media (max-width: 760px) { .lightbox { background: rgba(10, 14, 20, .95); } }
 
