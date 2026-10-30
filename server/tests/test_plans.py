@@ -110,6 +110,41 @@ def test_patterns_group_same_kind_clashes_and_triage_maps_back(tmp_path):
     assert plans.patterns(ws, sid, rid, fixed=["c0001", "c0002"], min_pairs=1) == []   # resolved clashes drop out
 
 
+def test_a_pattern_reading_is_made_and_paid_for_once(tmp_path):
+    import threading
+    import time
+
+    ws, sid, rid, main, beam = _setup(tmp_path)
+    pats = plans.patterns(ws, sid, rid, min_pairs=1)
+    started, go = threading.Event(), threading.Event()
+
+    class Slow:
+        calls = 0
+
+        def complete_json(self, system, text, images=None):
+            Slow.calls += 1
+            started.set()
+            go.wait(5)
+            return {"patterns": [{"id": "P1", "verdict": "modelling_error"}]}
+    ws._model = Slow()
+    charged, out = [], []
+    read = lambda: out.append(plans.read_patterns(ws, sid, rid, pats, lambda: charged.append(1)))
+    first = threading.Thread(target=read)
+    first.start()
+    started.wait(5)
+    second = threading.Thread(target=read)   # comes while the first is being made: waits for it
+    second.start()
+    time.sleep(0.2)
+    go.set()
+    first.join(5), second.join(5)
+    assert Slow.calls == 1 and charged == [1]
+    assert out[0] == out[1] == ({p["id"]: {"verdict": "modelling_error", "cause": "", "action": "", "rule": ""}
+                                 for p in pats}, None)
+    assert plans.read_patterns(ws, sid, rid, pats, lambda: "spent") == out[0]   # kept: no charge asked
+    assert plans.read_patterns(ws, sid, "other", pats, lambda: "spent") == (None, "spent")
+    assert plans.read_patterns(ws, sid, rid, [], lambda: "spent") == ({}, None)   # nothing to read
+
+
 def test_root_cause_charges_fixes_only_when_edits_are_needed(tmp_path):
     ws, sid, rid, main, beam = _setup(tmp_path)
     end = next(e for e in ws.scene(sid).model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId

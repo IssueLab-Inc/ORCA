@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
+from starlette.datastructures import Headers
 
 from sightline import app as app_module
 from sightline.fixtures import build_clash_fixture
-from sightline.limits import HOUR, ProposeLimit
+from sightline.limits import HOUR, ProposeLimit, client_id
 from sightline.service import Workspace
 
 
@@ -56,3 +57,48 @@ def test_workspace_keeps_only_the_most_recent_scenes(tmp_path):
     ws = Workspace(samples=tmp_path, max_scenes=2)
     first, second, third = (ws.open(["fixture-clash.ifc"]) for _ in range(3))
     assert list(ws.scenes) == [second, third]
+
+
+def _xff(*lines: str) -> Headers:
+    return Headers(raw=[(b"x-forwarded-for", line.encode()) for line in lines])
+
+
+def test_a_visitor_is_the_peer_unless_proxies_are_trusted(monkeypatch):
+    monkeypatch.delenv("SIGHTLINE_TRUST_FORWARDED", raising=False)
+    assert client_id(_xff("1.2.3.4"), "203.0.113.9") == "203.0.113.9"   # Modal: the header is never trusted
+    monkeypatch.setenv("SIGHTLINE_TRUST_FORWARDED", "0")
+    assert client_id(_xff("1.2.3.4"), "203.0.113.9") == "203.0.113.9"
+    monkeypatch.setenv("SIGHTLINE_TRUST_FORWARDED", "yes")   # not a number of proxies: none
+    assert client_id(_xff("1.2.3.4"), "203.0.113.9") == "203.0.113.9"
+    assert client_id(Headers(), None) == "unknown"
+
+
+def test_behind_trusted_proxies_a_visitor_is_what_the_outermost_one_appended(monkeypatch):
+    monkeypatch.setenv("SIGHTLINE_TRUST_FORWARDED", "1")
+    # The client wrote 1.2.3.4; the proxy appended the address it saw. The left end is the client's to choose.
+    assert client_id(_xff("1.2.3.4, 198.51.100.7"), "10.0.0.1") == "198.51.100.7"
+    assert client_id(_xff("9.9.9.9", "198.51.100.7"), "10.0.0.1") == "198.51.100.7"   # two header lines are one list
+    assert client_id(_xff("198.51.100.7"), "10.0.0.1") == "198.51.100.7"
+    assert client_id(Headers(), "10.0.0.1") == "10.0.0.1"   # no header: the proxy wrote nothing, the peer stands
+    monkeypatch.setenv("SIGHTLINE_TRUST_FORWARDED", "2")
+    assert client_id(_xff("1.2.3.4, 198.51.100.7, 10.0.0.2"), "10.0.0.1") == "198.51.100.7"
+    assert client_id(_xff("198.51.100.7"), "10.0.0.1") == "10.0.0.1"   # fewer entries than proxies: not theirs
+
+
+def test_a_spoofed_forwarded_for_does_not_reset_a_visitors_caps(tmp_path, monkeypatch):
+    build_clash_fixture(tmp_path / "fixture-clash.ifc")
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))
+    monkeypatch.setattr(app_module, "detect_limit", ProposeLimit(1, 0, noun="detection runs"))
+    c = TestClient(app_module.app)
+    sid = c.post("/api/scenes", json={"samples": ["fixture-clash.ifc"]}).json()["id"]
+    detect = lambda xff: c.post(f"/api/scenes/{sid}/detect/stream", json={}, headers={"x-forwarded-for": xff})
+
+    monkeypatch.setenv("SIGHTLINE_TRUST_FORWARDED", "1")   # a proxy that appends the visitor's address
+    assert detect("1.1.1.1, 198.51.100.7").status_code == 200
+    assert detect("2.2.2.2, 198.51.100.7").status_code == 429   # a new left end is the same visitor
+    assert detect("198.51.100.8").status_code == 200            # another visitor is not
+
+    monkeypatch.setenv("SIGHTLINE_TRUST_FORWARDED", "0")   # Modal: the peer, whatever the header says
+    monkeypatch.setattr(app_module, "detect_limit", ProposeLimit(1, 0, noun="detection runs"))
+    assert detect("3.3.3.3").status_code == 200
+    assert detect("4.4.4.4").status_code == 429

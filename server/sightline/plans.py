@@ -13,6 +13,7 @@ accordingly, and checks the combined result.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import agent, edits, owner, requirements, verify
-from .service import Workspace
+from .service import PATTERNS_KEPT, Workspace
 
 PACKS = Path(__file__).parent / "domain_packs"
 MAX_ITEMS = 8
@@ -639,6 +640,38 @@ def patterns(ws: Workspace, scene_id: str, report_id: str, fixed: list[str] | No
         })
     out.sort(key=lambda p: (not p["cross_discipline"], -p["pairs"]))
     return out
+
+
+def read_patterns(ws: Workspace, scene_id: str, report_id: str, pats: list[dict],
+                  charge: Callable[[], str | None]) -> tuple[dict[str, dict] | None, str | None]:
+    """Muse Spark's reading of these patterns (`triage_patterns`), made once per report, scene, set of patterns and
+    triage prompt, and shared by the route, the chat and MCP. Only a reading not made yet asks `charge` (one proposal:
+    why not, or None); a caller who comes while it is being made waits for it. Returns (verdicts, None), or (None, the
+    refusal). No patterns: nothing to read, nothing charged."""
+    if not pats:
+        return {}, None
+    doc = requirements.current()
+    key = (report_id, scene_id, tuple(p["id"] for p in pats), requirements.model_key(doc) if doc else None)
+    with ws._patterns_lock:
+        if key in ws._patterns:
+            return ws._patterns[key], None
+        lock = ws._pattern_locks.setdefault(key, threading.Lock())
+    with lock:
+        try:
+            if key in ws._patterns:   # made while this caller waited
+                return ws._patterns[key], None
+            refused = charge()
+            if refused:
+                return None, refused
+            verdicts = triage_patterns(ws, pats)
+            with ws._patterns_lock:
+                ws._patterns[key] = verdicts
+                while len(ws._patterns) > PATTERNS_KEPT:
+                    ws._patterns.pop(next(iter(ws._patterns)), None)
+            return verdicts, None
+        finally:
+            with ws._patterns_lock:
+                ws._pattern_locks.pop(key, None)
 
 
 def triage_patterns(ws: Workspace, pats: list[dict]) -> dict[str, dict]:

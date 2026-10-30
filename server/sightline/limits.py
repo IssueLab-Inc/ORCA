@@ -4,7 +4,7 @@ Off unless configured, so local runs and tests are unaffected:
 
     SIGHTLINE_PROPOSE_PER_HOUR   proposals per visitor per rolling hour (0 = no limit)
     SIGHTLINE_PROPOSE_PER_DAY    proposals for everyone per rolling day (0 = no limit)
-    SIGHTLINE_TRUST_FORWARDED    1 behind a proxy that sets X-Forwarded-For (Modal does)
+    SIGHTLINE_TRUST_FORWARDED    N proxies in front that each append to X-Forwarded-For (0 = none; Modal needs none)
 
 State is in memory, which is only correct with a single server process; the Modal app pins one container
 for the same reason (scenes are in memory too).
@@ -99,9 +99,25 @@ class ProposeLimit:
         return None
 
 
+def trusted_hops() -> int:
+    try:
+        return max(int(os.environ.get("SIGHTLINE_TRUST_FORWARDED") or 0), 0)
+    except ValueError:
+        return 0
+
+
 def client_id(headers, peer: str | None) -> str:
-    if os.environ.get("SIGHTLINE_TRUST_FORWARDED") == "1":
-        forwarded = headers.get("x-forwarded-for", "")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+    """Who a visitor is, for their caps: the socket's peer address, or behind `trusted_hops()` proxies that each append
+    the address they saw to X-Forwarded-For, the entry the outermost of them wrote (that many from the right). Never
+    the left end: a client writes what it likes there, and a proxy that appends keeps it. A header with fewer entries
+    than trusted proxies was not written by them, so it is ignored.
+
+    Modal's edge strips any X-Forwarded-For a client sends, adds none, and hands the app the visitor's own address as
+    the peer, HTTP and WebSocket alike (measured Oct 30 from outside and from inside Modal), so the deploy trusts none."""
+    hops = trusted_hops()
+    if hops:
+        lines = headers.getlist("x-forwarded-for") if hasattr(headers, "getlist") else [headers.get("x-forwarded-for", "")]
+        entries = [a.strip() for line in lines for a in (line or "").split(",") if a.strip()]
+        if len(entries) >= hops:
+            return entries[-hops]
     return peer or "unknown"
