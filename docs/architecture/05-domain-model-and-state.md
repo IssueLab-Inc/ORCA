@@ -248,8 +248,11 @@ everywhere; express ids are file-local and never leave the server.
 | `_edited` | Indexes of the files a kept fix changed: what `export` and `Workspace.file` write |
 | `revision`, `history` | A counter bumped by every kept fix (`bump`), and `(revision, files it changed)` for each, so a page that missed an edit knows which files to reload |
 
-`IfcScene.element(gid)` builds an `Element` on demand (class, name, tag, storey, file, `fixed` for
-`FIXED_CLASSES`, port-connected neighbours); nothing caches it. `IfcScene.snapshot()` copies the models from their
+`IfcScene.element(gid)` builds an `Element` on demand (class, name, tag, storey, file, `fixed` from `IfcScene.stays`,
+port-connected neighbours); nothing caches it. `IfcScene.domain` is building or machine as opened (all from STEP: a
+machine); `IfcScene.stays_rule`, set by `Workspace.open_paths`, asks the scene's effective requirements
+(`Workspace.requirements_for`: the user's, else the demo's) what stays in place, per call, so each request's
+requirements decide (`Workspace._stays` caches the rule per scene and file). `IfcScene.snapshot()` copies the models from their
 current text, edits included, for the wider-fix search.
 
 ### The workspace: `Workspace` (`service.py`)

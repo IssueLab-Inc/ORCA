@@ -239,7 +239,10 @@ def explain(model: ChatModel, rows: list[Row], emit: Callable[[dict], None], wor
     prompt names the report's teams as the user typed them."""
     pages = [r for r in rows if r.section == "page"]
     teams = ", ".join(dict.fromkeys(t for r in rows for t in (r.team_a, r.team_b)))
-    system = domains.prompt("report", domain, teams=teams)
+    from . import requirements
+    doc = requirements.current()
+    clear = requirements.resolve(doc).fix_clearance_mm if doc is not None else requirements.DEFAULT_CLEARANCE_MM
+    system = domains.prompt("report", domain, teams=teams, clearance=f"at least {clear:.0f} mm")
     done = [0]
     lock = threading.Lock()
 
@@ -566,7 +569,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
 
     meta = "".join(f"<tr><th>{_e(k)}</th><td>{_e(v)}</td></tr>" for k, v in context.items())
     from . import requirements
-    clear_mm = f"{requirements.resolve(requirements_doc).fix_clearance_mm:.0f}" if requirements_doc is not None else "25"
+    clear_mm = f"{requirements.resolve(requirements_doc).fix_clearance_mm:.0f}" if requirements_doc is not None else f"{requirements.DEFAULT_CLEARANCE_MM}"
     stamp = (f"<div class='stamp ok'>REVIEWED · {reviewed} of {len(pages)}</div>" if final else
              f"<div class='stamp'>DRAFT · AI-assisted · {reviewed} of {len(pages)} reviewed</div>")
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{_e(title)}</title><style>{CSS}</style></head><body>

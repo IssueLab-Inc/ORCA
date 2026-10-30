@@ -2,6 +2,7 @@ import { KeyRound, Lock, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, setOwnerSettings, type Effort, type EscalationMode, type EveryoneSettings, type OwnerSettings, type SettingsState } from "./api";
 import { Popover } from "./ui";
+import { aiName } from "./aiNames";
 
 const KEY = "sightline.owner";
 const EFFORTS: Effort[] = ["minimal", "low", "medium", "high"];
@@ -70,7 +71,7 @@ export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: Owne
             <button className={scope === "everyone" ? "on" : ""} aria-pressed={scope === "everyone"} onClick={() => setScope("everyone")}>For everyone</button>
           </div>
           {scope === "me" ? (<>
-            <label>Muse Spark reasoning
+            <label>{aiName("proposal")} reasoning
               <select value={settings.effort ?? ""} onChange={(e) => change({ ...settings, effort: (e.target.value || undefined) as Effort | undefined })}>
                 <option value="">Same as everyone</option>
                 {EFFORTS.map((x) => <option key={x}>{x}</option>)}
@@ -86,23 +87,23 @@ export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: Owne
               <select value={settings.open_weights == null ? "" : ow(settings.open_weights)}
                 onChange={(e) => change({ ...settings, open_weights: e.target.value === "" ? undefined : e.target.value === "on" })}>
                 <option value="">Same as everyone</option>
-                <option value="on">On: Muse Spark Open</option>
-                <option value="off">Off: Muse Spark</option>
+                <option value="on">On: the open-weights model</option>
+                <option value="off">Off: {aiName("proposal")}</option>
               </select>
             </label>
-            <label>Second try on Muse Wonder
+            <label>Second try on {aiName("escalation")}
               <select value={settings.escalation ?? ""} onChange={(e) => change({ ...settings, escalation: (e.target.value || undefined) as EscalationMode | undefined })}>
                 <option value="">Same as everyone</option>
                 {ESCALATION.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
               </select>
             </label>
-            <label>Muse Wonder reasoning
+            <label>{aiName("escalation")} reasoning
               <select value={settings.escalation_effort ?? ""} onChange={(e) => change({ ...settings, escalation_effort: (e.target.value || undefined) as Effort | undefined })}>
                 <option value="">Same as everyone</option>
                 {EFFORTS.map((x) => <option key={x}>{x}</option>)}
               </select>
             </label>
-            <label>Show it built (Muse Image pictures of fixes)
+            <label>Show it built ({aiName("image")} pictures of fixes)
               <select value={settings.built_views == null ? "" : ow(settings.built_views)}
                 onChange={(e) => change({ ...settings, built_views: e.target.value === "" ? undefined : e.target.value === "on" })}>
                 <option value="">Same as everyone</option>
@@ -115,7 +116,7 @@ export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: Owne
             <p className="hint">Only your requests use these, and they win over the settings for everyone. A triage run you
               start uses your triage settings for everyone following it.</p>
           </>) : everyone ? (<>
-            <label>Muse Spark reasoning
+            <label>{aiName("proposal")} reasoning
               <select value={everyone.everyone.effort ?? ""} onChange={(e) => void saveEveryone({ effort: (e.target.value || null) as Effort | null })}>
                 <option value="">Default ({everyone.defaults.effort ?? "the API's"})</option>
                 {EFFORTS.map((x) => <option key={x}>{x}</option>)}
@@ -131,27 +132,27 @@ export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: Owne
               <select disabled={!everyone.host} value={everyone.everyone.open_weights == null ? "" : ow(everyone.everyone.open_weights)}
                 onChange={(e) => void saveEveryone({ open_weights: e.target.value === "" ? null : e.target.value === "on" })}>
                 <option value="">Default ({everyone.defaults.open_weights ? "on" : "off"})</option>
-                <option value="on">On: Muse Spark Open</option>
-                <option value="off">Off: Muse Spark</option>
+                <option value="on">On: the open-weights model</option>
+                <option value="off">Off: {aiName("proposal")}</option>
               </select>
             </label>
             {!everyone.host && <p className="hint">No open-weights host is configured (TRIAGE_API_KEY), so titles and triage
-              use Muse Spark.</p>}
-            <label>Second try on Muse Wonder
+              use {aiName("proposal")}.</p>}
+            <label>Second try on {aiName("escalation")}
               <select value={everyone.everyone.escalation ?? ""} onChange={(e) => void saveEveryone({ escalation: (e.target.value || null) as EscalationMode | null })}>
                 <option value="">Default ({ESCALATION.find(([v]) => v === everyone.defaults.escalation)?.[1].toLowerCase() ?? "offered"})</option>
                 {ESCALATION.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
               </select>
             </label>
-            <label>Muse Wonder reasoning
+            <label>{aiName("escalation")} reasoning
               <select value={everyone.everyone.escalation_effort ?? ""} onChange={(e) => void saveEveryone({ escalation_effort: (e.target.value || null) as Effort | null })}>
                 <option value="">Default ({everyone.defaults.escalation_effort ?? "medium"})</option>
                 {EFFORTS.map((x) => <option key={x}>{x}</option>)}
               </select>
             </label>
-            <p className="hint">Muse Wonder bills every token (about $0.3 to $1 a second try), within the day's budget and
+            <p className="hint">{aiName("escalation")} bills every token (about $0.3 to $1 a second try), within the day's budget and
               each visitor's caps.</p>
-            <label>Show it built (Muse Image pictures of fixes)
+            <label>Show it built ({aiName("image")} pictures of fixes)
               <select value={everyone.everyone.built_views == null ? "" : ow(everyone.everyone.built_views)}
                 onChange={(e) => void saveEveryone({ built_views: e.target.value === "" ? null : e.target.value === "on" })}>
                 <option value="">Default ({everyone.defaults.built_views ? "on" : "off"})</option>
@@ -159,7 +160,7 @@ export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: Owne
                 <option value="off">Off</option>
               </select>
             </label>
-            <p className="hint">A picture costs about $0.3 (two drawings, four Muse Wonder judgements; up to $0.6 with a
+            <p className="hint">A picture costs about $0.3 (two drawings, four {aiName("escalation")} judgements; up to $0.6 with a
               second pair), and every accepted fix gets one for the PDF while it is on.</p>
             <p className="hint">Every visitor's requests use these, kept on the server across restarts. Runs already going
               keep their model.</p>

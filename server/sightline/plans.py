@@ -21,8 +21,11 @@ from typing import Callable
 
 from . import agent, connections, domains, edits, owner, requirements, verify
 from .service import PATTERNS_KEPT, Workspace
+from .limits import env_int
 
-MAX_ITEMS = 8
+MAX_ITEMS = env_int("SIGHTLINE_PLAN_MAX_ITEMS", 8)     # clashes one plan takes on
+PLAN_WORKERS = env_int("SIGHTLINE_PLAN_WORKERS", 4)   # its items proposed at a time
+PLAN_ROUNDS = env_int("SIGHTLINE_PLAN_ROUNDS", 2)     # model rounds per item (a single clash gets agent.ROUNDS)
 NOT_PHYSICAL = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
 
 
@@ -106,7 +109,7 @@ def _in_trial_resize(scene, it: Item, o: dict) -> tuple[list[str], set[str], set
 
 def _in_trial_penetration(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
     service, host = o["edit"]["service"], o["edit"]["host"]
-    pen = edits.penetration(scene, service, host, o["edit"].get("clearance_m", 0.025), o["edit"].get("fit", "annular"))
+    pen = edits.penetration(scene, service, host, o["edit"].get("clearance_m", requirements.DEFAULT_CLEARANCE_M), o["edit"].get("fit", "annular"))
     edits.apply_penetration(scene, pen, cut=True)
     return [service], {service}, None   # the host is not its own: the service is checked against it
 
@@ -151,7 +154,7 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
     if not live:
         return {**out, "passed": False}
     need = {it.key: clearance_m if clearance_m is not None else
-            ws.fix_settings(scene_id, it.element_a, it.element_b).get("clearance_m", 0.025) for it in live}
+            ws.fix_settings(scene_id, it.element_a, it.element_b).get("clearance_m", requirements.DEFAULT_CLEARANCE_M) for it in live}
     with ws.lock:
         for it in live:
             if it.option["kind"] not in IN_TRIAL:
@@ -260,7 +263,7 @@ def merge_shared(ws: Workspace, scene_id: str, items: list[Item]) -> list[Item]:
     for it in items:
         for g in (it.element_a, it.element_b):
             count[g] = count.get(g, 0) + 1
-    shared = sorted((g for g, n in count.items() if n > 1 and not scene.element(g).fixed), key=lambda g: -count[g])
+    shared = sorted((g for g, n in count.items() if n > 1 and not scene.stays(g)), key=lambda g: -count[g])
     used: set[str] = set()
     out: list[Item] = []
     for g in shared:
@@ -347,7 +350,7 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
                           **{k: e[k] for k in ("seconds", "checked", "reason") if e.get(k) not in (None, "")}})
             stamp = ws._stamp(scene_id)
             result = agent.resolve(ws.scene(scene_id), clash, ws.model, pack=domains.of(ws, scene_id),
-                                   on_event=progress, lock=ws.lock, max_rounds=2,
+                                   on_event=progress, lock=ws.lock, max_rounds=PLAN_ROUNDS,
                                    hosts_model=ws.hosts_model,
                                    **ws.fix_settings(scene_id, it.element_a, it.element_b))
             # What a second try on this pair reads (Ask Muse Wonder on a failed item: docs/escalation.md).
@@ -369,7 +372,7 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
         emit({"type": "item", "key": it.key, "status": "done", "ok": bool(it.option),
               "title": it.option["title"] if it.option else it.error})
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=PLAN_WORKERS) as pool:
         [f.result() for f in [owner.submit(pool, one, it) for it in items]]
 
 
@@ -474,7 +477,7 @@ def _describe_cluster(ws: Workspace, scene_id: str, cluster: dict) -> str:
     scene = ws.scene(scene_id)
     hub = cluster["hub"]
     settings = ws.fix_settings(scene_id, hub["global_id"], cluster["partners"][0]["global_id"]) if cluster["partners"] else {}
-    clearance_m = settings.get("clearance_m", 0.025)
+    clearance_m = settings.get("clearance_m", requirements.DEFAULT_CLEARANCE_M)
     lines = [f"Element in several clashes (the hub): {hub['ifc_class']} '{hub['name']}', level {hub['storey']}, "
              f"file {hub['source']}, GlobalId {hub['global_id']}"]
     with ws.lock:
@@ -672,7 +675,7 @@ def recheck(ws: Workspace, scene_id: str, o: dict, index: int = 0, count: int = 
         elif fix.get("policy") and (refused := agent._refused(scene, cand, target, other, fix["policy"])):
             why = refused.reason
         else:
-            attempt, option = agent.TRIES[kind](scene, cand, target, other, fix.get("clearance_m", 0.025),
+            attempt, option = agent.TRIES[kind](scene, cand, target, other, fix.get("clearance_m", requirements.DEFAULT_CLEARANCE_M),
                                                 others=others)
             why = None if option else attempt.reason or "it did not pass"
     if option is not None and kind == "trim" and o["trim"].get("end") not in (None, option.trim["end"]):

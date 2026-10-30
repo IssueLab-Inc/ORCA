@@ -18,10 +18,12 @@ from typing import Callable
 
 from . import domains, owner
 from .meta_client import ChatModel
+from .limits import env_int
 from .reports import Report, ReportClash
 
-BATCH = 40            # clashes per model call
-WORKERS = 8           # calls at a time (as triage runs on the same host)
+BATCH = env_int("SIGHTLINE_TITLE_BATCH", 40)       # clashes per model call
+# Calls at a time: as triage, which runs on the same host
+WORKERS = env_int("SIGHTLINE_TITLE_WORKERS", env_int("SIGHTLINE_TRIAGE_WORKERS", 8))
 MAX_CHARS = 90        # a title longer than this is cut at a word
 
 SCHEMA = {

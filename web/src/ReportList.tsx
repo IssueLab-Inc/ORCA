@@ -4,6 +4,7 @@ import { api, type Matches, type Report, type ReportClash, type TriageKind, type
 import { ClashThumb } from "./ClashPanel";
 import { TRIAGE } from "./Triage";
 import { noClash } from "./noClash";
+import { aiName } from "./aiNames";
 
 /** A clash someone looked at and decided needs no model edit here. */
 export interface Review { kind: "by_design" | "author"; note: string }
@@ -119,7 +120,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
             {reviewedCount > 0 && <span className="chip">{reviewedCount} reviewed</span>}</span></div>
         <p className="hint">{new Set(report.clashes.map((c) => c.test)).size} tests
           {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}
-          {naming > 0 && <span className="naming"> · Muse is naming {naming}…</span>}</p>
+          {naming > 0 && <span className="naming"> · {aiName("triage")} is naming {naming}…</span>}</p>
         {status}
       </div>
       {triageCard}

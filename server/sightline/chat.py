@@ -27,10 +27,11 @@ from typing import Callable
 from . import context_planner, domains, edits, plans, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
+from .limits import env_int
 
-MAX_STEPS = 8          # model calls per user message
-MAX_SESSIONS = 200
-MAX_HISTORY = 40       # messages kept per session (oldest dropped first, the system prompt stays)
+MAX_STEPS = env_int("SIGHTLINE_CHAT_MAX_STEPS", 8)       # model calls per user message
+MAX_SESSIONS = env_int("SIGHTLINE_CHAT_SESSIONS", 200)
+MAX_HISTORY = env_int("SIGHTLINE_CHAT_HISTORY", 40)      # messages kept per session (oldest dropped first, the system prompt stays)
 NOT_PHYSICAL = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
 
 
@@ -71,7 +72,8 @@ TOOLS = [
     _fn("find_elements", "Search the open model's elements by words in their name, tag or class.", {
         "query": {"type": "string"}, "ifc_class": {"type": "string"}, "limit": {"type": "integer"}}, ["query"]),
     _fn("find_openings", "Openings through `obstacle` on the line of the straight segment `element`, with the "
-        "offset heights (dz, metres) that pass the segment through each with 25 mm clearance.",
+        "offset heights (dz, metres) that pass the segment through each with the required clearance (25 mm unless the "
+        "requirements ask for more).",
         {"element": {"type": "string"}, "obstacle": {"type": "string"}}, ["element", "obstacle"]),
     _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it. "
         "The move keeps their joints (fittings beyond go along, a segment it runs along gets longer or shorter) or "
@@ -443,7 +445,9 @@ class Chat:
             limit = max(1, min(int(args.get("limit") or 20), 50))
             return {"total": len(out), "elements": out[:limit]}, f"{len(out)} elements", []
         if name == "find_openings":
-            holes = edits.passages(ws.scene(self._scene(ctx)), args["element"], args["obstacle"])
+            sid = self._scene(ctx)
+            holes = edits.passages(ws.scene(sid), args["element"], args["obstacle"],
+                                   ws.clearance(sid, args["element"], args["obstacle"]))
             return {"openings": holes}, f"{len(holes)} opening(s)", []
         if name == "check_move":
             v = ws.verify_move(self._scene(ctx), list(args["global_ids"]), [float(x) for x in args["delta_m"]],

@@ -5,6 +5,7 @@
 import type { Option as FixOption } from "./api";
 import { clearanceText, editText, kindLabel } from "./fixKinds";
 import type { Run, RunEvent } from "./runlog";
+import { aiName } from "./aiNames";
 
 export type Actor = "you" | "orca" | "spark" | "wonder" | "image";
 export type Status = "run" | "ok" | "fail" | "done" | "ghost";
@@ -136,12 +137,12 @@ interface Check { idea: Step; check: Step; checking: number; trial?: number; sha
 
 function proposal(run: Run, at: number): Graph {
   const events = upTo(run, at), done = finished(run, at), cols = new Columns();
-  const lanes: Lane[] = [youLane(run, 104), { id: "muse", label: "Muse", sub: "proposes", actor: "spark", h: 200 },
+  const lanes: Lane[] = [youLane(run, 104), { id: "muse", label: aiName("proposal"), sub: "proposes", actor: "spark", h: 200 },
     { id: "orca", label: "ORCA", sub: "checks the geometry", actor: "orca", h: 146 }];
   const steps: Step[] = [], edges: Edge[] = [], bars: Bar[] = [], ticks: Tick[] = [{ lane: "you", at: 0, tone: "you" }];
   const add = (s: Step) => { steps.push(s); return s; };
   add(startStep(run, "propose fixes", run.origin === "replay" ? "the tour's recording" : "POST /propose/stream", cols.next()));
-  let prev = "start", tryNo = 0, model = "Muse Spark", offset = 0, seen = 0, inTry = 0, firstIdea = true;
+  let prev = "start", tryNo = 0, model = aiName("proposal"), offset = 0, seen = 0, inTry = 0, firstIdea = true;
   // Ideas named before they are checked (the server sends their titles with `ideas`), by their index in the try.
   const named = new Map<string, Step>();
   let round = null as Round | null;
@@ -157,7 +158,7 @@ function proposal(run: Run, at: number): Graph {
       tryNo += 1;
       const first = e.first_try as { attempts?: Attempt[]; advice?: string; options?: Option[] } | null | undefined;
       offset = first?.attempts?.length ?? seen;
-      model = String(e.model ?? "Muse Wonder");
+      model = String(e.model ?? aiName("escalation"));
       const passed = (first?.attempts ?? []).filter((a) => a.passed).length;
       const id = `try${tryNo}`;
       add({ id, lane: "muse", col: cols.next(), dy: 10, actor: actorOf(model), model, status: "done", t0: t, ev: "escalating",
@@ -169,7 +170,7 @@ function proposal(run: Run, at: number): Graph {
     } else if (e.type === "thinking") {
       const r = Number(e.round ?? 1), key = `${tryNo}-${r}`;
       const brief = add({ id: `b${key}`, lane: "orca", col: cols.next(), actor: "orca", status: "done", t0: t, newEv: "new event: brief", ev: "",
-        title: r === 1 ? "Brief for Muse" : `Brief for round ${r}`,
+        title: r === 1 ? `Brief for ${aiName("proposal")}` : `Brief for round ${r}`,
         body: [text(r === 1 ? "The pair in words and numbers: classes, levels, how far they overlap, openings it could use, and pictures A, B and C"
           : "The same brief, with every idea tried so far and why each failed")], detail: [] });
       edges.push(r > 1 ? { from: prev, to: brief.id, kind: "feedback", label: "what failed, and why" } : { from: prev, to: brief.id });
@@ -301,7 +302,7 @@ function proposal(run: Run, at: number): Graph {
       edges.push({ from: end.id, to: "accept", kind: "ghost" });
     }
     if (!result.escalated && !result.recommendation) {
-      add({ id: "better", lane: "muse", col, dy: 62, actor: "wonder", model: "Muse Wonder", status: "ghost", t0: resultAt, title: "Look for a better fix",
+      add({ id: "better", lane: "muse", col, dy: 62, actor: "wonder", model: aiName("escalation"), status: "ghost", t0: resultAt, title: "Look for a better fix",
         ev: "escalating", body: [text("A second, longer try that starts from this one: each idea, why it failed and what it hit.")], detail: [] });
       const from = steps.find((s) => s.id === "stop") ? "stop" : end.id;
       edges.push({ from, to: "better", kind: "feedback", label: "what failed, and why", fa: from === "stop" ? "t" : undefined, ta: from === "stop" ? "l" : undefined });
@@ -314,7 +315,7 @@ function proposal(run: Run, at: number): Graph {
   }
   const duration = Math.min(at, run.ended ?? at);
   return { lanes, cols: cols.widths, steps, edges, bars, ticks, flows: [], duration, done,
-    rows: [{ id: "you", label: lanes[0].label }, { id: "muse", label: "Muse" }, { id: "orca", label: "ORCA" }] };
+    rows: [{ id: "you", label: lanes[0].label }, { id: "muse", label: aiName("proposal") }, { id: "orca", label: "ORCA" }] };
 }
 
 /** How a run that ended early ends its drawing: a step in your lane saying why. */
@@ -355,9 +356,9 @@ function plan(run: Run, at: number): Graph {
     else if (e.type === "error") failure = String(e.detail ?? "The plan failed");
   }
   const lanes: Lane[] = [youLane(run, 100)];
-  if (rootCause) lanes.push({ id: "muse", label: "Muse", sub: "finds the cause", actor: "spark", h: 176 });
+  if (rootCause) lanes.push({ id: "muse", label: aiName("proposal"), sub: "finds the cause", actor: "spark", h: 176 });
   lanes.push({ id: "orca", label: "ORCA", sub: "plans and checks", actor: "orca", h: 128 });
-  items.forEach((it, k) => lanes.push({ id: `it${k}`, label: firstName(it.label).slice(0, 26), sub: "Muse + ORCA", actor: "spark", h: 108 }));
+  items.forEach((it, k) => lanes.push({ id: `it${k}`, label: firstName(it.label).slice(0, 26), sub: `${aiName("proposal")} + ORCA`, actor: "spark", h: 108 }));
   const steps: Step[] = [], edges: Edge[] = [], bars: Bar[] = [], ticks: Tick[] = [{ lane: "you", at: 0, tone: "you" }];
   const add = (s: Step) => { steps.push(s); return s; };
   add(startStep(run, rootCause ? "find the root cause" : "fix them together", "POST /plan/stream", cols.next()));
@@ -365,7 +366,7 @@ function plan(run: Run, at: number): Graph {
   let prev = "start";
   if (rootCause) {
     const t0 = thinkingAt ?? 0, live = !cause && !done && !failure;
-    add({ id: "cause", lane: "muse", col: cols.next(300), dy: 10, actor: "spark", model: "Muse Spark", t0, t1: cause?.t, title: "Root cause",
+    add({ id: "cause", lane: "muse", col: cols.next(300), dy: 10, actor: "spark", model: aiName("proposal"), t0, t1: cause?.t, title: "Root cause",
       status: cause ? "done" : live ? "run" : "done", time: cause ? sec(cause.t - t0) : live ? sec(at - t0) : "",
       ev: "thinking · root_cause",
       body: cause ? [{ kind: "quote", text: cause.text }] : [text(live ? "Reading the element and every clash on it" : "Stopped before it answered", { live })],
@@ -377,7 +378,7 @@ function plan(run: Run, at: number): Graph {
     add({ id: "jobs", lane: "orca", col: cols.next(252), actor: "orca", status: "done", t0: itemsAt, ev: "plan_items",
       title: `${items.length} job${items.length === 1 ? "" : "s"}, run at once`,
       body: [{ kind: "list", items: items.map((it) => ({ text: firstName(it.label), note: it.in_report === false ? "not in the report" : it.clash_ids?.length ? `${it.clash_ids.length} in the report` : "" })) }],
-      detail: [text(`Muse thinks for all of them at once; their geometry checks take turns.${skipped ? ` ${skipped} skipped.` : ""}`, { tone: "muted" })] });
+      detail: [text(`${aiName("proposal")} thinks for all of them at once; their geometry checks take turns.${skipped ? ` ${skipped} skipped.` : ""}`, { tone: "muted" })] });
     edges.push({ from: prev, to: "jobs" }); prev = "jobs";
     const most = Math.max(1, ...[...per.values()].map((s) => s.checks.length));
     const c0 = cols.next(), checkCols = Array.from({ length: most }, () => cols.next()), cDone = cols.next();
@@ -385,7 +386,7 @@ function plan(run: Run, at: number): Graph {
       const s = per.get(it.key)!, lane = `it${k}`, firstAt = s.checks[0]?.t ?? s.done?.t;
       const live = !done && !failure;
       if (s.think != null) {
-        add({ id: `${lane}-t`, lane, col: c0, actor: "spark", model: "Muse Spark", t0: s.think, title: "Proposes", ev: "item: thinking",
+        add({ id: `${lane}-t`, lane, col: c0, actor: "spark", model: aiName("proposal"), t0: s.think, title: "Proposes", ev: "item: thinking",
           status: firstAt != null ? "done" : live ? "run" : "done", time: firstAt != null ? `${sec(s.think)}–${sec(firstAt)}` : live ? sec(at - s.think) : "",
           body: [text(firstAt != null ? "Ideas in, and the first verdict back" : live ? "Working on this pair" : "Stopped before its ideas", { live: firstAt == null && live })], detail: [] });
         edges.push({ from: "jobs", to: `${lane}-t` });
@@ -467,7 +468,7 @@ function triage(run: Run, at: number): Graph {
     else if (e.type === "done") end = { t, seconds: Number(e.seconds ?? t), error: e.error ? String(e.error) : undefined };
     else if (e.type === "error") failure = String(e.detail ?? "Triage failed");
   }
-  const muse = !start || start.open ? "Muse Spark Open" : "Muse Spark";
+  const muse = aiName("triage");
   const all = [...verdict.values()].map((x) => x.v);
   const byRule = all.filter((v) => v.source === "rule"), byModel = all.filter((v) => v.source !== "rule");
   // A model call is a clash read for itself (not copied from an alike one): it lands with its seconds.
@@ -482,7 +483,7 @@ function triage(run: Run, at: number): Graph {
   const add = (s: Step) => { steps.push(s); return s; };
   add(startStep(run, `triage ${start ? `all ${start.total}` : "the"} clashes`, "POST /triage/stream · start", cols.next()));
   if (run.origin === "you") steps[0].title = `Triage ${start ? `all ${start.total} clashes` : "the clashes"}`;
-  steps[0].body = [text(start?.open ? "Muse Spark Open, the open-weights model" : start ? "Muse Spark" : "Waiting for the model")];
+  steps[0].body = [text(start?.open ? `${aiName("triage")}, the open-weights model` : start ? aiName("triage") : "Waiting for the model")];
   const basis = Object.entries(BASIS).map(([k, label]) => [label, byRule.filter((v) => v.basis === k).length] as const).filter(([, n]) => n);
   add({ id: "rules", lane: "orca", col: cols.next(244), actor: "orca", t0: ruleFirst ?? start?.t ?? 0, title: "Settled without a model", ev: "clash (source: rule, basis)",
     status: live && modelFirst == null && !byRule.length ? "run" : "done", time: byRule.length ? sec(ruleLast) : "",
@@ -512,7 +513,7 @@ function triage(run: Run, at: number): Graph {
   let last = "verdicts";
   if (audit) {
     const answers = Object.values(audit.rules), disputed = answers.filter((a) => a.answer === "looks_real").length;
-    add({ id: "audit", lane: "open", col: cols.next(252), dy: 10, actor: "spark", model: "Muse Spark", t0: audit.t, status: disputed ? "fail" : "done",
+    add({ id: "audit", lane: "open", col: cols.next(252), dy: 10, actor: "spark", model: aiName("proposal"), t0: audit.t, status: disputed ? "fail" : "done",
       title: "Audit of the by-design rules", ev: "audit", body: [text(`${answers.length} rule${answers.length === 1 ? "" : "s"} read · ${disputed} disputed`)], detail: [] });
     edges.push({ from: last, to: "audit" }); last = "audit";
   }
@@ -540,7 +541,7 @@ function triage(run: Run, at: number): Graph {
     { from: "settle", to: "verdicts", a: modelFirst ?? at, b: Infinity, n: 3 });
   return { lanes, cols: cols.widths, steps, edges, bars, flows, duration: Math.min(at, run.ended ?? at), done,
     ticks: [{ lane: "you", at: 0, tone: "you" }, ...(end ? [{ lane: "you", at: end.t, tone: "ok" as BarTone }] : [])],
-    rows: [{ id: "you", label: lanes[0].label }, { id: "orca", label: "ORCA" }, { id: "open", label: "Muse", subs: Math.max(1, Math.min(8, rowsEnd.length)) }] };
+    rows: [{ id: "you", label: lanes[0].label }, { id: "orca", label: "ORCA" }, { id: "open", label: aiName("triage"), subs: Math.max(1, Math.min(8, rowsEnd.length)) }] };
 }
 
 /* ---------- Show it built: Muse Image restyles ORCA's view, judged against the model ---------- */
@@ -562,9 +563,9 @@ function built(run: Run, at: number): Graph {
     else if (e.type === "result") result = { t, ...(e as unknown as { status: string }) };
     else if (e.type === "error") failure = String(e.detail ?? "The picture failed");
   }
-  const judge = result?.judge ?? "Muse Wonder", live = !result && !done && !failure;
+  const judge = result?.judge ?? aiName("escalation"), live = !result && !done && !failure;
   const lanes: Lane[] = [youLane(run, 196), { id: "orca", label: "ORCA", sub: "captures and checks", actor: "orca", h: 150 },
-    { id: "image", label: "Muse Image", sub: "restyles the view", actor: "image", h: 150 }, { id: "judges", label: "Judges", sub: judge, actor: actorOf(judge), h: 150 }];
+    { id: "image", label: aiName("image"), sub: "restyles the view", actor: "image", h: 150 }, { id: "judges", label: "Judges", sub: judge, actor: actorOf(judge), h: 150 }];
   const steps: Step[] = [], edges: Edge[] = [], bars: Bar[] = [], ticks: Tick[] = [{ lane: "you", at: 0, tone: "you" }];
   const add = (s: Step) => { steps.push(s); return s; };
   add(startStep(run, "show it built", "POST /built/stream", cols.next()));
@@ -577,7 +578,7 @@ function built(run: Run, at: number): Graph {
     const gateAt = r.gates[0]?.t, drawId = `draw${n}`;
     if (r.drawing != null) {
       const drawing = gateAt == null && live;
-      add({ id: drawId, lane: "image", col: cols.next(), actor: "image", model: "Muse Image", t0: r.drawing, t1: gateAt, ev: "drawing",
+      add({ id: drawId, lane: "image", col: cols.next(), actor: "image", model: aiName("image"), t0: r.drawing, t1: gateAt, ev: "drawing",
         title: `Round ${n} · ${r.pictures} restyle${r.pictures === 1 ? "" : "s"} at once`, status: drawing ? "run" : "done",
         time: gateAt != null ? sec(gateAt - r.drawing) : drawing ? sec(at - r.drawing) : "",
         body: [text(r.shared ? "Waiting for the same picture another request is making" : drawing ? "Drawing ORCA's view as a presentation render" : "Drawn", { live: drawing })], detail: [] });
@@ -616,11 +617,11 @@ function built(run: Run, at: number): Graph {
     const ok = result.status === "done";
     add({ id: "kept", lane: "orca", col: cols.next(), actor: "orca", t0: result.t, status: ok ? "ok" : "fail", ev: "result",
       title: ok ? (result.cached ? "From the cache" : "Kept the picture") : "No faithful picture",
-      body: [text(ok ? (result.gate ? `F ${result.gate.f.toFixed(2)} · worst tile ${result.gate.tile.toFixed(2)}` : "Every judge passed it") : result.why ?? "Muse Image couldn't keep to the model here", { tone: ok ? undefined : "bad" })],
+      body: [text(ok ? (result.gate ? `F ${result.gate.f.toFixed(2)} · worst tile ${result.gate.tile.toFixed(2)}` : "Every judge passed it") : result.why ?? `${aiName("image")} couldn't keep to the model here`, { tone: ok ? undefined : "bad" })],
       detail: [text(ok ? "JPEG, outline and verdicts cached for this view" : `${result.tried ?? 0} pictures tried`, { tone: "muted" })] });
     edges.push({ from: prev, to: "kept", win: true });
     add({ id: "ready", lane: "you", col: cols.next(262), actor: "you", t0: result.t, status: ok ? "ok" : "fail", time: sec(result.seconds ?? result.t), ev: "result",
-      title: ok ? "Built view ready" : "No picture this time", body: ok && result.image_url ? [{ kind: "image", src: result.image_url, alt: "Muse Image's picture of the fix" }] : [],
+      title: ok ? "Built view ready" : "No picture this time", body: ok && result.image_url ? [{ kind: "image", src: result.image_url, alt: `${aiName("image")}'s picture of the fix` }] : [],
       detail: [text(ok ? "Checked against the model before you see it" : "The option card says why", { tone: "muted" })] });
     edges.push({ from: "kept", to: "ready", win: true });
     ticks.push({ lane: "you", at: result.t, tone: ok ? "ok" : "fail" });

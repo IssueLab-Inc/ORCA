@@ -16,7 +16,7 @@ import { countsText, highlightGroups, indexGraph, LINK_COLOURS, LINK_ORDER, LINK
 import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setGoneHandler, setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
-import { api, ApiError, type ElementProperties, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
+import { api, ApiError, type Demo, type ElementProperties, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About, projectName } from "./About";
 import { AboutOrca } from "./AboutOrca";
 import { aboutTabFromHash, currentHash, showAboutHash, type AboutTab } from "./aboutRoute";
@@ -39,6 +39,8 @@ import { MeasurePanel } from "./MeasurePanel";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
+import { shortNames } from "./names";
+import { DEFAULT_AI_NAMES, setAiNames, type AiNames } from "./aiNames";
 import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type NotchStatus } from "./Brand";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
@@ -113,6 +115,8 @@ export function App() {
   const folderInput = useRef<HTMLInputElement>(null);
   const filesInput = useRef<HTMLInputElement>(null);
   const [samples, setSamples] = useState<string[]>([]);
+  // The demos among the samples (server: demos.py): their default files, the start button's words, their tours.
+  const [demos, setDemos] = useState<Demo[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [stepFiles, setStepFiles] = useState<string[]>([]);  // open models that came from STEP (Export gives STEP back)
   const modelInput = useRef<HTMLInputElement>(null);
@@ -299,16 +303,20 @@ export function App() {
   // Whether a clash Muse Spark could not fix may go to Muse Wonder for a second try (docs/escalation.md).
   const [escalation, setEscalation] = useState<EscalationInfo | null>(null);
   const [modelsAsked, setModelsAsked] = useState(0);   // ask again after the owner changes a setting for everyone
+  // The model behind each role (server: meta_client.labels), for the words on screen; and triage's calls at a time.
+  const [labels, setLabels] = useState<AiNames>(DEFAULT_AI_NAMES);
+  const [triageWorkers, setTriageWorkers] = useState<number | null>(null);
   useEffect(() => {
     api.models().then((m) => {
       setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); setEscalation(m.escalation ?? null);
+      setLabels(setAiNames(m.labels)); setTriageWorkers(m.triage_workers ?? null);
       setBuiltOn(!!m.built_views);
     }).catch(() => undefined);
   }, [ownerSettings, modelsAsked]);
   const canEscalate = !!escalation?.available && escalation.mode !== "off";
   // Show it built (docs/show-it-built.md): pictures of fixes, only while the switch is on for this visitor.
   const [builtOn, setBuiltOn] = useState(false);
-  const wonder = escalation?.label ?? "Muse Wonder";
+  const wonder = escalation?.label ?? labels.escalation;
   // How much a visitor may upload, from the server (checked here before anything is sent).
   const [uploadMax, setUploadMax] = useState<number | null>(null);
   const [replaying, setReplaying] = useState(false);
@@ -374,11 +382,11 @@ export function App() {
       (t) => frameFix({ kind: t.kind, moved: t.moved, preview: t.pieces }, sides.current), setPilotStatus);
     v.onUserCamera = () => pilot.current?.takeOver();
     v.onChange = viewsChanged;
-    api.samples().then((list) => {
-      setSamples(list);
-      // Default to the building disciplines and the site (the report's site clashes need it), not the grids or a later revision.
-      const set = list.filter((f) => /(structure|mep|architecture|site)\.ifc$/i.test(f));
-      setPicked(set.length ? set : list.slice(0, 1));
+    api.samples().then(({ files, demos: listed }) => {
+      setSamples(files); setDemos(listed);
+      // Default to the first demo's own set (its context files, a grid or a later revision, stay unticked), else the
+      // first sample.
+      setPicked(listed[0]?.files ?? files.slice(0, 1));
     }).catch((e) => setError(`Can't reach the ORCA server: ${e.message}`));
     api.reportSamples().then(setReportSamples).catch(() => undefined);
     return () => {
@@ -770,7 +778,7 @@ export function App() {
       if (sceneEpoch.current !== epoch) return;   // another scene now: this picture belongs to none of it
       setBuiltRuns((r) => ({ ...r, [key]: { ...(r[key] ?? { status: "working", step: "", look: passes.look, cut }), ...patch } }));
     };
-    set({ status: "working", step: "Muse Image is drawing two pictures from ORCA's view…", look: passes.look, cut, result: undefined, error: undefined });
+    set({ status: "working", step: `${labels.image} is drawing two pictures from ORCA's view…`, look: passes.look, cut, result: undefined, error: undefined });
     // Several pictures can be drawn at once (a plan's): each is a run of its own, and none grows the panel.
     const trace = traceStart("built", origin, title, {}, { alone: false, grow: false });
     const work = api.built(sid, { look: passes.look, ids: passes.ids, normals: passes.normals }, kind, (e) => { trace.add(e); set({ step: builtStep(e) }); })
@@ -814,7 +822,7 @@ export function App() {
   function builtEvidence(ev: Evidence, res: BuiltResult | null | undefined): Evidence {
     if (!res) return ev;
     return res.status === "done" && res.image_url ? { ...ev, built_img: res.image_url, built_note: undefined }
-      : { ...ev, built_note: res.why ?? "Muse Image couldn't keep to the model here." };
+      : { ...ev, built_note: res.why ?? `${labels.image} couldn't keep to the model here.` };
   }
   function noteBuilt(ids: string[], title: string, res: BuiltResult | null) {
     if (res) setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.filter((id) => ev[id]?.title === title).map((id) => [id, builtEvidence(ev[id], res)])) }));
@@ -1099,7 +1107,7 @@ export function App() {
     const title = existing ? "Reopening your session…" : upload ? `Uploading ${names.length} model${names.length > 1 ? "s" : ""}${hasStep ? " and converting the STEP" : ""}…`
       : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`;
     setBusy(title);
-    let load: LoadProgress = { title: title.replace(/…$/, ""), files: names.map(shortName), step: "server", fetched: 0, bytes: 0, drawn: 0, elements: 0, started: Date.now(), ends: {} };
+    let load: LoadProgress = { title: title.replace(/…$/, ""), files: shortNames(names), step: "server", fetched: 0, bytes: 0, drawn: 0, elements: 0, started: Date.now(), ends: {} };
     const step = (next: Partial<LoadProgress>) => { load = { ...load, ...next }; if (sceneEpoch.current === epoch) setLoading(load); };
     step({}); setNow(Date.now());
     setError(null); resetWork(false, true);
@@ -1116,7 +1124,7 @@ export function App() {
         : await api.open(source as string[]));
       if (sceneEpoch.current !== epoch) return;
       if (upload) setBusy("Drawing the models…");
-      step({ step: "download", files: files.map(shortName), ends: { server: Date.now() - load.started } });
+      step({ step: "download", files: shortNames(files), ends: { server: Date.now() - load.started } });
       // An uploaded IFC is parsed from the visitor's own file; a STEP comes back converted, samples come from the server.
       const bytes = await Promise.all(files.map(async (_, i) => {
         const local = upload ? localFile(source as File[], files, stepMap, i) : null;
@@ -1130,7 +1138,7 @@ export function App() {
         (drawn, elements) => step({ drawn, elements }));
       if (sceneEpoch.current !== epoch || !stats) return;
       sceneRevision.current = revision ?? null;
-      setModelNames(files.map(shortName));
+      setModelNames(shortNames(files));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
@@ -1147,7 +1155,8 @@ export function App() {
     if (id) await runDetect(null, id);
   }
   // The second demo: the palletising cell, opened from its STEP file.
-  const cellSample = samples.find((f) => /palletising-cell-reva\.(step|stp)$/i.test(f));
+  const cellDemo = demos.find((d) => d.tour === "cell");
+  const cellSample = cellDemo?.files[0];
 
   /** A clash of the cell tour, by its parts' names (the STEP's own): one of `names` on each side. */
   function clashOfNames(a: readonly string[], b: readonly string[], r: Report | null = report): ReportClash[] {
@@ -1863,7 +1872,7 @@ export function App() {
       if (e.type === "plan_items") update((r) => ({ ...r, phase: "fixing", items: e.items,
         status: Object.fromEntries(e.items.map((i) => [i.key, { state: "waiting" as const }])) }));
       if (e.type === "item") update((r) => ({ ...r, status: { ...r.status, [e.key]: {
-        state: e.status, ok: e.ok, note: e.status === "thinking" ? "Muse Spark is looking…" : e.status === "checking" ? `checked: ${e.attempt}` : e.title } } }));
+        state: e.status, ok: e.ok, note: e.status === "thinking" ? `${labels.proposal} is looking…` : e.status === "checking" ? `checked: ${e.attempt}` : e.title } } }));
       if (e.type === "checking_plan") update((r) => ({ ...r, phase: "checking" }));
     };
     const finish = (p: Plan | null) => {
@@ -2092,7 +2101,7 @@ export function App() {
       if (!live()) return;
       const conflict = e instanceof ApiError && (e.status === 409 || e.status === 404);
       setContext((r) => r && { ...r, accepted: committed, stale: conflict,
-        error: committed ? `The proposal was accepted on the server, but the viewer could not show it: ${(e as Error).message}. Export IFC includes the accepted edits.`
+        error: committed ? `The proposal was accepted on the server, but the viewer could not show it: ${(e as Error).message}. ${stepFiles.length ? "Export STEP + IFC" : "Export IFC"} includes the accepted edits.`
           : conflict ? `Revision conflict or fresh checks failed: ${(e as Error).message}` : (e as Error).message });
       if (committed) setViewContext(false);
       if (conflict) setAcknowledged([]);
@@ -2491,7 +2500,8 @@ export function App() {
   dockedNow.current = docked;
   // Selecting an element shows its Properties panel (floating at first, wherever the user put it after).
   useEffect(() => { if (selected?.globalId && docked) dock.current?.show("properties"); }, [selected?.globalId, docked]);
-  const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
+  const pickedDemo = demos.find((d) => d.files.length === picked.length && d.files.every((f) => picked.includes(f)));
+  const startLabel = pickedDemo?.label ?? "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   // Phones and tablets: the sheet (or drawer) follows what happens, so the panel people need is the one showing. The
   // list when a report or the models open, the clash once one is picked, out of the way while ORCA drives the model,
@@ -2568,7 +2578,7 @@ export function App() {
   }
   const fixedCount = Object.keys(fixes).length;
   const tourDuct = clashOfPair(TOUR.duct), tourJoint = clashOfPair(TOUR.joint);
-  const cellOpen = stepFiles.some((f) => /palletising-cell/i.test(f));
+  const cellOpen = !!cellDemo && stepFiles.some((f) => [...cellDemo.files, ...cellDemo.context].includes(f));
   const tourLadder = cellOpen ? clashOfNames(CELL.ladder, CELL.post)[0] : undefined;
   const tourPipes = cellOpen ? clashOfNames(CELL.pipe, CELL.rails) : [];
   const tourState: TourState = {
@@ -2874,7 +2884,7 @@ export function App() {
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
               view={leftView} onView={setLeftView} insightsCount={insightsOpen}
               status={detecting && <p className="live-line"><i className="spinner" aria-hidden /> {detecting.phase}</p>}
-              triageCard={<TriageCard run={triageRun} active={triageModel} forceCompact={!!listFocus} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+              triageCard={<TriageCard run={triageRun} active={triageModel} workers={triageWorkers} forceCompact={!!listFocus} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
                 total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
@@ -2938,8 +2948,8 @@ export function App() {
             resume: resumable ? { files: resumable.info.files, clashes: resumable.clashes, fixed: Object.keys(resumable.saved.fixes ?? {}).length,
               agent: !!resumable.saved.link, agentLeft: resumable.saved.link ? timeLeft(resumable.saved.link, now) : null, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,
             details: <>
-              Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
-              checks them, in about 25 seconds. Other models: <b>Menu</b>, then <b>Models</b>.
+              Loads {picked.length} model{picked.length === 1 ? "" : "s"} ({shortNames(picked).join(", ")}) and checks
+              them. Other models: <b>Menu</b>, then <b>Models</b>.
             </>,
           }} />
         )}
@@ -3029,7 +3039,7 @@ export function App() {
       {inSlot(slots.chat, <div className="chat-slot" hidden={!docked && tab !== "chat"}>
           {context && <button className="context-chat-link btn" onClick={() => { clearManual(); setTab("plan"); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
-          <ChatPanel key={`${sceneId}:${chatReport}`} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
+          <ChatPanel key={`${sceneId}:${chatReport}`} voiceModel={labels.voice} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
             context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
         </div>)}
@@ -3039,7 +3049,7 @@ export function App() {
             <button className={planKind === "context" ? "on" : ""} onClick={() => { clearManual(); setPlanKind("context"); setViewContext(true); setViewPlan(false); }}>Wider fix</button>
             <button className={planKind === "batch" ? "on" : ""} onClick={() => { clearManual(); setPlanKind("batch"); setViewContext(false); setViewPlan(true); }}>Clash plan</button>
           </div>}
-          {planKind === "context" && context ? <ContextPlan run={context} names={contextNames} chosen={contextChosen} acknowledged={acknowledged} busy={!!busy} now={now}
+          {planKind === "context" && context ? <ContextPlan exportLabel={stepFiles.length ? "Export STEP + IFC" : "Export IFC"} run={context} names={contextNames} chosen={contextChosen} acknowledged={acknowledged} busy={!!busy} now={now}
             onChoose={(id) => { clearManual(); setContextChosen(id); setAcknowledged([]); setViewContext(true); setViewPlan(false); }}
             onAcknowledge={(id, checked) => setAcknowledged((ids) => checked ? [...new Set([...ids, id])] : ids.filter((x) => x !== id))}
             onAccept={acceptContext} onRegenerate={() => { if (context.objective) void exploreContext(context.objective); }}
@@ -3070,7 +3080,7 @@ export function App() {
                   <h3>As it could look built</h3>
                   {run ? <BuiltView run={run} onRetry={() => redrawKept(clash.id)} reopen={builtReopen} />
                     : <button className="btn small" disabled={!!busy} onClick={() => redrawKept(clash.id)}
-                      data-tip="Muse Image draws ORCA's view of the kept fix as a presentation render, checked against the model. About a minute.">
+                      data-tip={`${labels.image} draws ORCA's view of the kept fix as a presentation render, checked against the model. About a minute.`}>
                       <Building2 size={13} aria-hidden /> Show it built</button>}
                 </div>;
               })()}
@@ -3107,12 +3117,12 @@ export function App() {
           {(proposal?.understanding || proposing) && <>
             <h2>Understanding</h2>
             {(proposal?.understanding || !thoughts.length) &&
-              <p className="understanding">{proposal?.understanding || `${progress?.model ?? "Muse Spark"} is reading the clash…`}</p>}
+              <p className="understanding">{proposal?.understanding || `${progress?.model ?? labels.proposal} is reading the clash…`}</p>}
           </>}
           <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"}
-            model={progress?.model ?? proposal?.model ?? "Muse Spark"} />
+            model={progress?.model ?? proposal?.model ?? labels.proposal} />
           {proposal && !proposing && <h2 ref={optionsHead}>Verified options</h2>}
-          {proposal && !proposing && proposal.recommendation && <Recommended rec={proposal.recommendation} advice={proposal.advice} requirements={proposal.requirements ?? null}
+          {proposal && !proposing && proposal.recommendation && <Recommended rec={proposal.recommendation} advice={proposal.advice} model={proposal.model || labels.proposal} requirements={proposal.requirements ?? null}
             onRequirements={() => setReqOpen(true)} />}
           {proposal && !proposing && !proposal.options.length && !proposal.recommendation && <NoFix proposal={proposal} onRetry={propose}
             onEscalate={canEscalate && !proposal.escalated ? () => void escalate() : undefined} wonder={wonder}
@@ -3123,7 +3133,7 @@ export function App() {
               <p>Both elements are in the same model, and they overlap where one frames into the other. That is often how
                 they are built (a beam cast into its footing, a transom into its mullion). Tidy the joint if the model goes
                 to fabrication or quantities; otherwise mark it as not a clash.</p>
-              {proposal.advice && <p className="why">{proposal.model || "Muse Spark"}: {proposal.advice}</p>}
+              {proposal.advice && <p className="why">{proposal.model || labels.proposal}: {proposal.advice}</p>}
               {reviewed[clash.id]
                 ? <span className="chip ok"><CircleCheck size={12} aria-hidden /> marked {reviewed[clash.id].kind === "by_design" ? "by design" : "for the author"}</span>
                 : <button className="btn small" onClick={() => review([clash.id], "by_design", "A joint inside one model: built as modelled")}>
@@ -3137,7 +3147,7 @@ export function App() {
                   <RotateCcw size={13} aria-hidden /> Undo</button></span>
               <b className="opt-title">{o.title}</b>
               <input className="rej-why" value={rejected[optionKey(o)].why} maxLength={200} aria-label={`Why reject ${o.title}`}
-                placeholder="Why? (optional: Muse reads it on the next try)"
+                placeholder={`Why? (optional: ${labels.proposal} reads it on the next try)`}
                 onChange={(e) => { const why = e.target.value; setRejected((r) => r[optionKey(o)] ? { ...r, [optionKey(o)]: { ...r[optionKey(o)], why } } : r); }} />
             </div>
           ) : (
@@ -3149,7 +3159,7 @@ export function App() {
                     {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
                     {o.review && <span className="chip warn" data-tip={reviewText(o.review)}>{o.review} review</span>}
                     {proposal!.escalated && <span className={`chip model ${o.model === wonder ? "wonder" : ""}`}
-                      data-tip={o.model === wonder ? `Found on the second try, by ${wonder}` : "Found on the first try"}>{o.model || "Muse Spark"}</span>}
+                      data-tip={o.model === wonder ? `Found on the second try, by ${wonder}` : "Found on the first try"}>{o.model || labels.proposal}</span>}
                   </span></span>
                 <b className="opt-title">{o.title}</b>
                 <span className="opt-facts">
@@ -3167,13 +3177,13 @@ export function App() {
               {chosen === i && <div className="opt-actions">
                 <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>
                 <button type="button" className="btn" disabled={!!busy} onClick={() => reject(o, i)}
-                  data-tip="Set it aside: the next proposal for this clash tells Muse you rejected it, and why if you say"><X size={15} aria-hidden /> Reject</button>
+                  data-tip={`Set it aside: the next proposal for this clash tells ${labels.proposal} you rejected it, and why if you say`}><X size={15} aria-hidden /> Reject</button>
               </div>}
               {chosen === i && canBuild(o) && a && b && (() => {
                 const run = builtRuns[builtKey([a, b], o)];
                 return run ? <BuiltView run={run} onRetry={() => showBuilt(o)} reopen={builtReopen} />
                   : <button className="btn small" data-tour="show-built" disabled={!!busy} onClick={() => showBuilt(o)}
-                    data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model before you see it. About a minute.">
+                    data-tip={`${labels.image} draws ORCA's view of this fix as a presentation render, checked against the model before you see it. About a minute.`}>
                     <Building2 size={13} aria-hidden /> Show it built</button>;
               })()}
               {chosen === i && o.kind === "penetration" && o.edit?.reading_source === "muse" && sceneId && (
@@ -3187,7 +3197,7 @@ export function App() {
             const all = proposal.options.every((o) => rejected[optionKey(o)]);
             return <div className={`rejected-note${all ? " all" : ""}`}>
               <span>{all ? "You rejected every option." : `${proposal.options.filter((o) => rejected[optionKey(o)]).length} rejected.`}
-                {" "}A new proposal tells {proposal.model || "Muse Spark"} what you rejected and why, so it looks for something else.</span>
+                {" "}A new proposal tells {proposal.model || labels.proposal} what you rejected and why, so it looks for something else.</span>
               <button type="button" className="btn small" disabled={!!busy} onClick={() => void propose()}><RotateCcw size={13} aria-hidden /> Propose again</button>
             </div>;
           })()}
@@ -3338,8 +3348,6 @@ function remember(side: "left" | "right", w: number) {
   try { localStorage.setItem(`sightline.${side}-w`, String(w)); } catch { /* private window: not remembered */ }
 }
 
-/** "Northbank-Structure.ifc" → "Structure" */
-function shortName(file: string) { return file.replace(/\.(ifc|step|stp)$/i, "").replace(/^Northbank-/, ""); }
 
 function ProofStrip({ o, rank, options, before, need = 0.025 }: { o: Option; rank: number; options: Option[]; before: number | null; need?: number }) {
   const change = options.map((x) => x.delta_m.reduce((s, v) => s + Math.abs(v), 0));
@@ -3349,7 +3357,7 @@ function ProofStrip({ o, rank, options, before, need = 0.025 }: { o: Option; ran
   return <span className="proof-strip"><span className="ok">✓ Clash gone</span>{before != null && <span>{before < 0 ? `was ${Math.round(-before * 1000)} mm overlap` : `was ${Math.round(before * 1000)} mm apart`}</span>}<span>{o.checked_against ? `checked vs ${o.checked_against} elements` : "checked vs the model"}</span><span className="why">{why}</span></span>;
 }
 /** The requirements allow no edit here: Muse Spark's recommendation for the designer, never tried or applied. */
-function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void }) {
+function Recommended({ rec, advice, requirements, onRequirements, model }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void; model: string }) {
   const change = recEditText(rec);
   return (
     <div className="recommended">
@@ -3358,7 +3366,7 @@ function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recom
       {rec.rationale && <p>{rec.rationale}</p>}
       {rec.also_needs && <p><b>Also needs:</b> {rec.also_needs}</p>}
       {advice && <p><b>What decides it:</b> {advice}</p>}
-      {rec.others.length > 0 && <p className="hint">Muse Spark also considered: {rec.others.join("; ")}</p>}
+      {rec.others.length > 0 && <p className="hint">{model} also considered: {rec.others.join("; ")}</p>}
       <p className="hint">Not edited: {rec.blocked_by}{requirements ? ` (requirements ${requirements})` : ""}. Nothing was tried
         on the model. <button className="btn small ghost" onClick={onRequirements}>Requirements</button></p>
     </div>

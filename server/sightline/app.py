@@ -30,9 +30,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
-from . import (agents, built, chat, context_planner, detect, document, domains, edits, escalation, mcp_server, owner,
-               plans, requirements, settings, spend, step, titles, triage, voice_live)
-from .meta_client import escalation_info, transcribe, triage_model, triage_model_info
+from . import (agents, built, chat, context_planner, demos, detect, document, domains, edits, escalation, mcp_server,
+               meta_client, owner, plans, requirements, settings, spend, step, titles, triage, voice_live)
+from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
 
@@ -192,13 +192,12 @@ preview_limit = ProposeLimit(env_int("SIGHTLINE_PREVIEW_PER_HOUR", 60),
 
 MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
 # Live voice (voice_live.py): hold to talk runs as long as a recording may; hands-free keeps the mic open longer.
-VOICE_HOLD_MAX_S = 60
+VOICE_HOLD_MAX_S = env_float("SIGHTLINE_VOICE_HOLD_MAX_S", 60)
 VOICE_HANDS_FREE_MAX_S = env_float("SIGHTLINE_VOICE_LIVE_MAX_S", 120)
-# Words Muse Voice Transcribe should lean toward: what people say to ORCA about a building model.
-VOICE_WORDS = ["ORCA", "Orca", "Northbank", "clash", "clashes", "duct", "ductwork", "supply air", "cable tray", "pipe",
-               "transfer girder", "girder", "beam", "column", "slab", "mullion", "transom", "curtain wall", "web opening",
-               "offset", "trim", "clearance", "Level 01", "Level 02", "Level 03", "MEP", "IFC", "BCF", "Navisworks",
-               "triage", "root cause", "x-ray", "section box", "isolate", "Muse Spark"]
+# Words Muse Voice Transcribe should lean toward: what people say to ORCA about any model, then the domain's own
+# (`domains.VOICE`) and the open models' and report's names (`_voice_words`).
+VOICE_WORDS = ["ORCA", "Orca", "clash", "clashes", "offset", "trim", "reroute", "clearance", "IFC", "STEP", "BCF",
+               "Navisworks", "triage", "root cause", "x-ray", "section box", "isolate", "requirements"]
 # The built web app (`cd web && npm run build`), served from the same origin when present.
 WEB_DIST = Path(os.environ.get("SIGHTLINE_WEB_DIST", Path(__file__).resolve().parents[2] / "web" / "dist"))
 
@@ -210,7 +209,7 @@ class Open(BaseModel):
 class Move(BaseModel):
     moved: list[str]
     delta_m: list[float]
-    clearance_m: float = 0.025
+    clearance_m: float | None = None   # None: the pair's (Workspace.clearance)
     obstacles: list[str] = []   # what the move must clear: what the moved elements stand on is then kept (verify.supports)
 
 
@@ -258,7 +257,7 @@ class Offset(BaseModel):
     split_m: list[float]
     dz_m: float
     other: str | None = None   # the obstacle, for checking
-    clearance_m: float = 0.025
+    clearance_m: float | None = None   # None: the pair's (Workspace.clearance)
 
 
 class ChatTurn(BaseModel):
@@ -295,7 +294,7 @@ UPLOAD_MAX_MB = env_int("SIGHTLINE_UPLOAD_MAX_MB", 200)
 UPLOAD_MAX_FILES = env_int("SIGHTLINE_UPLOAD_MAX_FILES", 5000)
 UPLOAD_TYPES = {".xml", ".png", ".jpg", ".jpeg"}
 MODEL_UPLOAD_MAX_MB = env_int("SIGHTLINE_MODEL_UPLOAD_MAX_MB", UPLOAD_MAX_MB)
-MODEL_UPLOAD_MAX_FILES = 8
+MODEL_UPLOAD_MAX_FILES = env_int("SIGHTLINE_MODEL_UPLOAD_MAX_FILES", 8)
 
 
 def _gone(kind: str, ident: str) -> dict[str, str]:
@@ -356,6 +355,7 @@ def models():
     """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy, and
     how much a visitor may upload (the page checks before sending, and says so)."""
     return {"triage": triage_model_info(), "escalation": escalation_info(), "built_views": settings.built_views(),
+            "labels": model_labels(), "triage_workers": env_int("SIGHTLINE_TRIAGE_WORKERS", 8),
             "model_upload_max_mb": MODEL_UPLOAD_MAX_MB, "model_upload_max_files": MODEL_UPLOAD_MAX_FILES}
 
 
@@ -380,7 +380,9 @@ def put_settings(body: dict):
 
 @app.get("/api/samples")
 def samples():
-    return ws.list_samples()
+    """The sample models, and the demos among them (`demos.listing`: their files, start label and tour)."""
+    files = ws.list_samples()
+    return {"files": files, "demos": demos.listing(files)}
 
 
 def _classifier():
@@ -554,7 +556,7 @@ def scene_info(scene_id: str):
     return ws.scene_info(_scene(scene_id))
 
 
-EXPORTS_KEEP_S = 3600   # written models and exports older than this are deleted (a big model's export is big)
+EXPORTS_KEEP_S = env_int("SIGHTLINE_EXPORTS_KEEP_S", 3600)   # written models and exports older than this are deleted (a big model's export is big)
 
 
 def _tidy_exports() -> None:
@@ -1096,12 +1098,12 @@ async def register_requirements(request: Request):
 
 @app.get("/api/scenes/{scene_id}/requirements/default")
 def requirements_default(scene_id: str):
-    """A starting point from the open models (L3 Coordinated, balanced: what ORCA checks without requirements), and
-    what the models contain."""
+    """A starting point: a demo's own requirements (`demos.py`), else one from the open models (L3 Coordinated,
+    balanced: what ORCA checks without requirements, in the models' domain), and what the models contain."""
     scene = ws.scene(_scene(scene_id))
     # Read-only (classes, teams, systems), so it does not wait for a preview or a fix trial holding the lock.
-    doc = requirements.default_doc(scene)
-    inv = requirements.inventory(scene)
+    doc = demos.requirements_for(ws.names.get(scene_id) or []) or requirements.default_doc(scene)
+    inv = requirements.inventory(scene, requirements.domain_of(scene, doc))
     return {**_requirements_out(doc), "inventory": inv}
 
 
@@ -1118,6 +1120,7 @@ def requirements_suggest(scene_id: str, body: RequirementsDraft, request: Reques
         doc, summary = requirements.suggest(ws.model, inv, body.level, body.strictness, body.name)
     except Exception as e:
         raise HTTPException(502, f"Muse Spark could not draft requirements: {type(e).__name__}: {e}")
+    doc.domain = doc.domain or inv["domain"]   # the draft keeps the models' domain unless it says otherwise
     return {**_requirements_out(doc), "summary": summary, "inventory": inv}
 
 
@@ -1577,10 +1580,11 @@ def get_document(doc_id: str):
 
 
 @app.post("/api/transcribe")
-async def transcribe_voice(request: Request, audio: UploadFile = File(...), report_id: str | None = Form(None)):
+async def transcribe_voice(request: Request, audio: UploadFile = File(...), report_id: str | None = Form(None),
+                           scene_id: str | None = Form(None)):
     """A spoken message to ORCA (Muse Voice Transcribe): a WAV clip in, its transcript out. The browser sends the
-    transcript to the chat, so voice can do whatever the chat can. Biased toward BIM words and the open report's
-    clash names."""
+    transcript to the chat, so voice can do whatever the chat can. Biased toward coordination words, the domain's and
+    the open models' and report's names (`_voice_words`)."""
     data = await audio.read(MAX_VOICE_BYTES + 1)
     if len(data) > MAX_VOICE_BYTES:
         raise HTTPException(413, "That recording is too long: keep it under a minute.")
@@ -1595,14 +1599,20 @@ async def transcribe_voice(request: Request, audio: UploadFile = File(...), repo
     if refused:
         raise HTTPException(429, refused)
     try:
-        return await run_in_threadpool(transcribe, data, _voice_words(report_id))
+        return await run_in_threadpool(lambda: transcribe(data, _voice_words(report_id, scene_id)))
     except Exception as e:  # the key, the network or the service: say so rather than fail silently
         raise HTTPException(502, f"Transcription failed: {type(e).__name__}")
 
 
-def _voice_words(report_id: str | None) -> list[str]:
-    """Words Muse Voice Transcribe should lean toward: BIM words, and what people call the open report's clashes."""
-    words = list(VOICE_WORDS)
+def _voice_words(report_id: str | None, scene_id: str | None = None) -> list[str]:
+    """Words Muse Voice Transcribe should lean toward: coordination words, the domain's, the open models' levels and
+    systems, and what people call the open report's clashes."""
+    scene_id = scene_id if scene_id in ws.scenes else None
+    domain = domains.of(ws, scene_id)
+    words = [*VOICE_WORDS, *domains.VOICE[domain], *([meta_client.model_label(meta_client.model_id("proposal"))])]
+    if scene_id:
+        inv = requirements.inventory(ws.scene(scene_id), requirements.domain_of(ws.scene(scene_id)))
+        words += [*list(inv["storeys"])[:12], *list(inv["systems"])[:12]]
     if report_id and report_id in ws.reports:
         # What people say about a report's clashes: the elements' names (and Muse's titles), not their numbers.
         clashes = ws.report(report_id).clashes
@@ -1614,7 +1624,7 @@ def _voice_words(report_id: str | None) -> list[str]:
 @app.websocket("/api/voice/live")
 async def voice_live_socket(socket: WebSocket):
     """Talk to ORCA live (voice_live.py): the words come back as they are said. The first frame says how
-    (`{mode: "hold" | "hands_free", report_id}`); one session is one voice message against the caps, hands-free too."""
+    (`{mode: "hold" | "hands_free", report_id, scene_id}`); one session is one voice message against the caps, hands-free too."""
     if not voice_live.same_origin(socket.headers):
         await socket.close(code=1008)  # before accepting: the browser sees a refused handshake
         return
@@ -1632,7 +1642,9 @@ async def voice_live_socket(socket: WebSocket):
         await socket.close(code=1000)
         return
     report_id = first.get("report_id") if isinstance(first.get("report_id"), str) else None
-    await voice_live.relay(socket, voice_live.MODES["hands_free" if hands_free else "hold"], _voice_words(report_id),
+    scene_id = first.get("scene_id") if isinstance(first.get("scene_id"), str) else None
+    words = await run_in_threadpool(_voice_words, report_id, scene_id)
+    await voice_live.relay(socket, voice_live.MODES["hands_free" if hands_free else "hold"], words,
                            VOICE_HANDS_FREE_MAX_S if hands_free else VOICE_HOLD_MAX_S)
 
 # ---------------------------------------------------------------------------------------------------------- agents

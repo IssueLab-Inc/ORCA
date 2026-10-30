@@ -1222,6 +1222,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .req-mm input { width: 4.6em; font: inherit; font-size: 12.5px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 6px; }
 .req-orca { color: var(--accent); }
 .req-movers { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); counter-reset: mover; }
+.req-domain { margin: 2px 0 4px; }
+.req-stays { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.req-stays .chip { display: inline-flex; align-items: center; gap: 2px; }
+.req-stays .chip .ibtn { width: 18px; height: 18px; }
+.req-stays select { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
 .req-movers li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 10px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; counter-increment: mover; }
 .req-movers li:last-child { border-bottom: 0; }
 .req-pens { list-style: none; margin: 0 0 6px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
@@ -1231,6 +1236,8 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .req-kinds li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .req-mover-name { font-weight: 600; font-size: 13px; }
 .req-mover-name::before { content: counter(mover) "."; color: var(--muted); font-weight: 500; margin-right: 6px; font-variant-numeric: tabular-nums; }
+/* The openings list reuses the row's look, but it is not an order: no numbers. */
+.req-pens .req-mover-name::before { content: none; }
 .req-mover-ctl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .req-mover-ctl .ibtn { width: 28px; height: 28px; }
 .req-trim { display: inline-flex; gap: 4px; align-items: center; font-size: 12.5px; }

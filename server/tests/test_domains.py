@@ -1,5 +1,6 @@
 """The domain follows the work (domains.py): a scene opened from STEP is a machine cell, read by the machines pack and
 a mechanical integration engineer; anything else is a building, whose prompts are exactly what they were."""
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -106,9 +107,18 @@ def test_shared_prompts_say_who_orca_is_by_domain_and_nothing_else_differs(name)
 def test_the_machines_pack_keeps_the_contract_and_claims_only_static_geometry():
     building = (domains.PACKS / "construction.md").read_text()
     cell = (domains.PACKS / "machines.md").read_text()
-    # The fix kinds and the JSON Muse returns are the construction pack's, word for word: parsing is unchanged.
-    tail = building[building.index("Six kinds of fix:"):]
-    assert cell.endswith(tail)
+    # The fix kinds and the JSON Muse returns are the construction pack's: parsing is unchanged. The examples are each
+    # domain's own, and none of them is a demo's answer (Northbank Rev04's +400 mm duct, the cell's C6 route).
+    def kinds(text):
+        return re.findall(r'^- "(\w+)":', text[text.index("Six kinds of fix:"):], re.M)
+
+    def keys(text):
+        return sorted(set(re.findall(r'"(\w+)":', text[text.index("return JSON only"):])))
+    assert kinds(cell) == kinds(building) == ["move", "offset", "route", "resize", "trim", "penetration"]
+    assert keys(cell) == keys(building)
+    for pack in (building, cell, (domains.PACKS / "escalation.md").read_text()):
+        assert '"dz_m": 0.4' not in pack and "1.75" not in pack and "2.6, 4.4" not in pack
+    assert "transom" not in cell and "curtain-wall" not in cell
     assert "BIM" not in cell and "mechanical integration engineer" in cell
     assert "static geometry only" in cell and "does not simulate robot motion" in cell
     for word in ("guarding", "fencing", "conveyor", "pallet", "robot base", "cable chain", "pneumatic",

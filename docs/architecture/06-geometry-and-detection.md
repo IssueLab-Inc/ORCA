@@ -124,7 +124,7 @@ not a thing that stands or can be cut.
 | Symbol | What it does |
 |---|---|
 | `element(gid)` | An `Element`: class, name, tag, storey (its spatial container), source file name, `fixed`, and `connected` (owners of the ports joined to its ports) |
-| `Element.fixed` | Class exactly in `FIXED_CLASSES` (beam, column, slab, wall, footing, member, plate). Used by `agent._try_trim`, `Workspace._nearby`, the wider-fix ranking. Exact class, so IFC2X3's `IfcWallStandardCase` is not fixed here (`agent.stays` uses inheritance instead) |
+| `stays(gid)` / `Element.fixed` | Fixed in place: the requirements' `stays` classes (by inheritance) or a group they allow no edits, else the domain's default classes (`domains.STAYS`: beam, column, slab, wall, footing, pile, member, plate). Used by combined steps, `agent._try_trim`, `connections.classify`, `Workspace._nearby`, `plans.merge_shared`, the wider-fix ranking and review, the second try's brief |
 | `near(gids, margin_m)` | Elements whose box comes within `margin_m` of the union box of `gids` (every element when none of `gids` has a box) |
 | `connected_run(gid)` | The element plus segments joined to it through ports, up to but not including fittings (`FITTINGS`). A part converted from STEP has no ports, so it falls back to `step_run` |
 | `step_run(gid)` | Parts of the same STEP group (`ORCA_STEP` pset, `step_group`) whose boxes touch within 1 mm, transitively. A cable ladder's pieces move together; a fence post moves alone |
@@ -140,7 +140,8 @@ the rules above.
 
 ## The check (`verify.py`)
 
-`verify.check(scene, moved, clearance_m=0.025, ignore=None, *, exclude_connected=True, touching=None)` checks the
+`verify.check(scene, moved, clearance_m=DEFAULT_CLEARANCE_M, ignore=None, *, exclude_connected=True, touching=None)` (25 mm
+unless the caller passes the pair's, `Workspace.clearance`) checks the
 elements in `moved`, where they are now, against every other physical element. A fix passes when nothing penetrates
 the moved elements and nothing sits closer than `clearance_m`.
 
@@ -274,8 +275,9 @@ A `Test` asks one question of two selections, or of one selection against itself
    so its tests are listed with `enabled=False` and duplicates cover the other files, unless Site is all that is
    open.
 
-`presets(scene)` offers tests that are not run by default: "MEP vs Structure, 25 mm clearance" when both teams are
-present. `Workspace.detect_tests` (`GET /api/scenes/{scene_id}/detect/tests`) returns the default tests plus presets,
+`presets(scene)` offers tests that are not run by default: "MEP vs Structure, 25 mm clearance" (the default
+clearance) when both teams are present, which only a building's guesses make. Each file's team is guessed in the
+scene's domain (`requirements._file_teams`, the same names requirements groups select by). `Workspace.detect_tests` (`GET /api/scenes/{scene_id}/detect/tests`) returns the default tests plus presets,
 or the compiled requirement tests, with each file's team and element count and the rule labels.
 
 ### Never a clash
@@ -466,7 +468,7 @@ All from recorded runs; the build log keeps the dates ([22](22-build-log.md)).
 - A change to how a scene opens or measures boxes: `IfcScene.__init__`, `bounds`, the kernel rule, `BOUNDS_BATCH`,
   `THREADS`, `SIGHTLINE_BIG_MODEL_MB`, or `Workspace.open_paths`.
 - A change to what counts as physical (`not_physical`, `NOT_PHYSICAL`, `is_provision`, `products`) or to
-  `FIXED_CLASSES`, `FITTINGS`, `connected_run`, `step_run`.
+  what stays in place (`IfcScene.stays`, `domains.STAYS`), `FITTINGS`, `connected_run`, `step_run`.
 - A change to `verify.check` (queries, tolerances, `SEARCH_M`, the empty-set guard, what is ignored), to the supports
   rule (`EMBED_M`, `RUNS`, `stands_on`, `keep_supports`) or a new caller of the check.
 - A new test kind, selection field, never-a-clash rule, default test or preset in `detect.py`, or a change to

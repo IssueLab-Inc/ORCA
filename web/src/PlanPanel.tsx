@@ -3,6 +3,7 @@ import type { Plan, PlanItem } from "./api";
 import { BuiltView, type BuiltRun } from "./BuiltView";
 import { moveWords } from "./fixKinds";
 import { mm } from "./ReportList";
+import { aiName } from "./aiNames";
 
 /** A plan while it is being built: what each pair is doing. */
 export interface PlanRun {
@@ -55,7 +56,7 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
         {plan && plan.strategy !== "as_designed" && <span className={`chip ${plan.check.passed ? "ok" : "warn"}`}>{plan.check.passed ? "verified together" : `${ok} of ${items.length} verified`}</span>}
       </div>
       {working && <p className="live-line"><LoaderCircle size={14} className="spin" aria-hidden />{
-        run!.phase === "cause" ? "Muse Spark is working out the cause…" : run!.phase === "checking" ? "Checking every fix together…"
+        run!.phase === "cause" ? `${aiName("proposal")} is working out the cause…` : run!.phase === "checking" ? "Checking every fix together…"
           : `Finding a fix for each pair… ${seconds} s`}</p>}
       {cause && <div className="cause"><b>Cause</b><p>{cause}</p></div>}
       {error && !plan && <p className="bad" role="alert">The plan could not be built: {error}</p>}
@@ -91,12 +92,12 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
                 {plan && it.option && res?.passed && onBuild && it.option.kind !== "trim" && !it.option.cleanup && (built?.(it)
                   ? <BuiltView run={built(it)!} onRetry={() => onBuild(it)} />
                   : <button className="btn small" disabled={busy} onClick={() => onBuild(it)}
-                    data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model. About a minute.">
+                    data-tip={`${aiName("image")} draws ORCA's view of this fix as a presentation render, checked against the model. About a minute.`}>
                     <Building2 size={13} aria-hidden /> Show it built</button>)}
                 {plan && !it.option && !it.recommended && onEscalate && (
                   <button className="btn small wonder" disabled={busy} onClick={() => onEscalate(it)}
                     data-tip={`A larger model takes a second, longer look at this clash with everything this try learned. About a minute.`}>
-                    <Sparkles size={13} aria-hidden /> Ask {wonder ?? "Muse Wonder"}</button>)}
+                    <Sparkles size={13} aria-hidden /> Ask {wonder ?? aiName("escalation")}</button>)}
               </div>
               <button className="ibtn" aria-label="Go to this clash" data-tip="Go to this clash" data-tip-side="left" onClick={() => onFocus(it)}>
                 <LocateFixed size={16} aria-hidden /></button>

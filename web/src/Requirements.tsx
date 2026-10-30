@@ -1,7 +1,8 @@
 import { AlertTriangle, ArrowDown, ArrowUp, ClipboardCheck, Download, LoaderCircle, RotateCcw, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, type ReqCheck, type ReqParams, type ReqPenRule, type ReqPreview, type ReqScale, type Requirements, type RuleAudit, type Strictness } from "./api";
-import { cellFor, download, parseUpload, removeByDesign, setCell, setMover, setPenetration, shiftMover, STRICTNESS, STRICTNESS_NAME } from "./reqFile";
+import { api, type Inventory, type ReqCheck, type ReqParams, type ReqPenRule, type ReqPreview, type ReqScale, type Requirements, type RuleAudit, type Strictness } from "./api";
+import { cellFor, download, parseUpload, removeByDesign, setCell, setDomain, setMover, setPenetration, setStays, shiftMover, STRICTNESS, STRICTNESS_NAME } from "./reqFile";
+import { aiName } from "./aiNames";
 
 const RULES: [string, string][] = [["same_element", "Same element"], ["connected", "Joined by ports"],
   ["assembly", "Parts of one assembly"], ["host", "A door or window in its wall"]];
@@ -33,15 +34,20 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [kept, setKept] = useState<Set<string>>(new Set());
+  // What the open models contain: their domain, its classes fixed in place by default, and the classes to pick from.
+  const [inventory, setInventory] = useState<Inventory | null>(null);
   const upload = useRef<HTMLInputElement>(null);
   const previewSeq = useRef(0);
 
   useEffect(() => { api.requirementsScale().then(setScale).catch((e) => setError((e as Error).message)); }, []);
   // A start from the open models when there is no file yet: what ORCA checks today, ready to tighten.
   useEffect(() => {
-    if (draft || !sceneId) return;
-    api.requirementsDefault(sceneId).then((r) => setDraft(r.doc)).catch((e) => setError((e as Error).message));
-  }, [sceneId, draft]);
+    if (!sceneId) return;
+    api.requirementsDefault(sceneId).then((r) => {
+      setInventory(r.inventory);
+      setDraft((d) => d ?? r.doc);
+    }).catch((e) => setError((e as Error).message));
+  }, [sceneId]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -95,7 +101,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
         <div className="row"><h2><ClipboardCheck size={18} aria-hidden /> Coordination requirements</h2>
           <button className="ibtn" aria-label="Close" onClick={onClose}><X size={16} aria-hidden /></button></div>
         <p className="hint">Optional. Set the standard ORCA checks, triages and fixes to: the design stage, how strict to be,
-          what is checked against what and who moves. Muse Spark still reads every clash a rule doesn't settle and
+          what is checked against what and who moves. {aiName("proposal")} still reads every clash a rule doesn't settle and
           proposes every fix, told these requirements. Off, ORCA uses its defaults.</p>
 
         {!draft ? <p className="hint"><LoaderCircle size={13} className="spin" aria-hidden /> {sceneId ? "Reading the models…" : "Open models to start from them, or upload a file."}</p> : <>
@@ -107,8 +113,8 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
           </div>
           <div className="req-tools">
             <button className="btn small primary" disabled={!sceneId || suggesting} data-tour="req-suggest"
-              data-tip="Muse Spark drafts groups, checks, who moves and by-design rules from what the open models contain, at this level and strictness. Counts as one proposal."
-              onClick={suggest}>{suggesting ? <><i className="spinner" aria-hidden /> Muse Spark is drafting…</> : <><Sparkles size={14} aria-hidden /> Suggest with Muse Spark</>}</button>
+              data-tip={`${aiName("proposal")} drafts groups, checks, who moves and by-design rules from what the open models contain, at this level and strictness. Counts as one proposal.`}
+              onClick={suggest}>{suggesting ? <><i className="spinner" aria-hidden /> {aiName("proposal")} is drafting…</> : <><Sparkles size={14} aria-hidden /> Suggest with {aiName("proposal")}</>}</button>
             <button className="btn small" onClick={() => download(draft)} data-tip="Save the file to reuse on another project or share with the team">
               <Download size={14} aria-hidden /> Download</button>
             <button className="btn small" onClick={() => upload.current?.click()} data-tip="Open a requirements file (.json)">
@@ -118,7 +124,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
             <input ref={upload} type="file" accept=".json,application/json" hidden
               onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
           </div>
-          {summary && <p className="req-summary"><Sparkles size={13} aria-hidden /> <span><b>Muse Spark:</b> {summary}</span></p>}
+          {summary && <p className="req-summary"><Sparkles size={13} aria-hidden /> <span><b>{aiName("proposal")}:</b> {summary}</span></p>}
 
           <fieldset className="req-body" disabled={!enabled}>
             <h3>Design level</h3>
@@ -155,7 +161,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                 <span className="chip">fixes clear by {params.fix_clearance_mm} mm</span>
                 <span className="chip">{params.max_move_mm ? `moves ≤ ${params.max_move_mm} mm` : "no move limit"}</span>
                 <span className="chip">{TRIMS[params.trims]}</span>
-                {params.edits !== "any" && <span className="chip warn">{params.edits === "none" ? "no edits: Muse recommends" : "whole moves only"}</span>}
+                {params.edits !== "any" && <span className="chip warn">{params.edits === "none" ? `no edits: ${aiName("proposal")} recommends` : "whole moves only"}</span>}
                 {params.lean && <span className="chip">{LEAN[params.lean]}</span>}
               </> : step ? <>
                 <span className="chip">fixes clear by {step.fix_clearance_mm} mm</span>
@@ -197,7 +203,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
 
             <h3>Who moves</h3>
             <p className="hint">Top stays put the most; bottom moves first. ORCA refuses a fix a row forbids before trying it and
-              tells Muse Spark why.</p>
+              tells {aiName("proposal")} why.</p>
             <ol className="req-movers">
               {draft.who_moves.map((m, i) => (
                 <li key={m.group}>
@@ -215,9 +221,37 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                 </li>))}
             </ol>
 
+            <h3>Kind of project</h3>
+            <div className="seg req-domain" role="group" aria-label="Kind of project">
+              {([["construction", "Building"], ["machines", "Machine"]] as const).map(([k, label]) => {
+                const on = (draft.domain ?? inventory?.domain ?? "construction") === k;
+                return <button key={k} className={on ? "on" : ""} aria-pressed={on} onClick={() => update(setDomain(draft, k))}>{label}</button>;
+              })}
+            </div>
+            <p className="hint">Who ORCA speaks as, and the rules its fixes start from: a building's coordinator or a machine
+              cell's integration engineer. Without a choice, models all from STEP are a machine.</p>
+
+            <h3>Fixed in place</h3>
+            <p className="hint">A fix never moves these to make room for another (it may still trim one against another that
+              stays). A group above that may never be edited stays too.{draft.stays ? "" : " These are the defaults."}</p>
+            <div className="req-stays" data-tour="req-stays">
+              {(draft.stays ?? inventory?.stays ?? []).map((c) => (
+                <span className="chip" key={c}>{c.replace(/^Ifc/, "")}
+                  <button className="ibtn" aria-label={`${c.replace(/^Ifc/, "")} may move`}
+                    onClick={() => update(setStays(draft, (draft.stays ?? inventory?.stays ?? []).filter((x) => x !== c)))}><X size={12} aria-hidden /></button></span>))}
+              <select value="" aria-label="Add a class fixed in place" onChange={(e) => {
+                if (e.target.value) update(setStays(draft, [...(draft.stays ?? inventory?.stays ?? []), e.target.value]));
+              }}>
+                <option value="">Add a class…</option>
+                {Object.keys(inventory?.classes ?? {}).filter((c) => !(draft.stays ?? inventory?.stays ?? []).includes(c)).sort()
+                  .map((c) => <option key={c} value={c}>{c.replace(/^Ifc/, "")}</option>)}
+              </select>
+              {draft.stays && <button className="btn small ghost" onClick={() => update(setStays(draft, null))}>Use the defaults</button>}
+            </div>
+
             <h3>Openings for services</h3>
             <p className="hint">Whether a group's elements may take an opening for a duct, pipe or cable to pass through.
-              Without a rule, ORCA asks Muse Spark about each kind of element (a partition, a beam's web, a gland plate);
+              Without a rule, ORCA asks {aiName("proposal")} about each kind of element (a partition, a beam's web, a gland plate);
               columns, glazing, equipment and transfer beams never take one.</p>
             <ul className="req-pens">
               {draft.groups.map((g) => {
@@ -225,11 +259,11 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                 const kinds = (draft.penetrations ?? []).filter((x) => x.group === g.id && x.kind);
                 return (
                   <li key={g.id}>
-                    <span className="req-mover-name">{g.name}{r?.source === "orca" && <Sparkles size={11} className="req-orca" aria-label="From Muse Spark's reading" />}</span>
+                    <span className="req-mover-name">{g.name}{r?.source === "orca" && <Sparkles size={11} className="req-orca" aria-label={`From ${aiName("proposal")}'s reading`} />}</span>
                     <span className="req-mover-ctl">
                       <select value={r?.rule ?? ""} aria-label={`Openings in ${g.name}`}
                         onChange={(e) => update(setPenetration(draft, g.id, e.target.value ? { rule: e.target.value as ReqPenRule["rule"], source: "user" } : null))}>
-                        <option value="">Muse decides</option><option value="allowed">Allowed</option>
+                        <option value="">{aiName("proposal")} decides</option><option value="allowed">Allowed</option>
                         <option value="review">With review</option><option value="never">Never</option></select>
                       {r && r.rule !== "never" && <label className="req-mm" data-tip="The largest opening, any side or diameter (empty: no limit)">≤
                         <input type="number" min={10} step={10} value={r.max_mm ?? ""} placeholder="any" aria-label={`Largest opening in ${g.name}`}
@@ -242,7 +276,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
                     {kinds.length > 0 && <ul className="req-kinds">{kinds.map((k) => (
                       <li key={k.kind ?? ""}>
                         <span>Only <b>{k.kind_name || "one kind"}</b>: {k.rule === "allowed" ? "allowed" : k.rule === "review" ? `with review${k.reviewer ? ` by ${k.reviewer}` : ""}` : "never"}
-                          {k.source === "orca" && <Sparkles size={11} className="req-orca" aria-label="From Muse Spark's reading" />}</span>
+                          {k.source === "orca" && <Sparkles size={11} className="req-orca" aria-label={`From ${aiName("proposal")}'s reading`} />}</span>
                         <button className="ibtn" aria-label={`Remove the rule for ${k.kind_name}`}
                           onClick={() => update(setPenetration(draft, g.id, null, k.kind ?? null))}><Trash2 size={14} aria-hidden /></button>
                       </li>))}</ul>}
@@ -252,7 +286,7 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
 
             <h3>Never a clash</h3>
             <p className="hint">Pairs that are meant to meet. They are counted, not reported, or settled at triage without a model
-              call; Muse Spark then checks each rule on the clashes it set aside.</p>
+              call; {aiName("proposal")} then checks each rule on the clashes it set aside.</p>
             <div className="req-rules">{RULES.map(([k, label]) => (
               <label key={k} className="check"><input type="checkbox" checked={draft.rules[k] !== false}
                 onChange={(e) => update({ ...draft, rules: { ...draft.rules, [k]: e.target.checked }, version: draft.version + 1 })} /> {label}</label>))}</div>
@@ -263,16 +297,16 @@ export function RequirementsDialog({ sceneId, initial, enabled: wasEnabled, audi
               return (
                 <li key={text + i} className={disputed ? "disputed" : ""}>
                   <span><b>{text}</b>{r.reason ? <> · {r.reason}</> : null} <span className="chip small">{r.source === "orca" ? "ORCA suggests" : r.source === "triage" ? "from Insights" : "yours"}</span>
-                    {a && !disputed && a.answer === "consistent" && <span className="chip small ok">Muse agrees</span>}</span>
+                    {a && !disputed && a.answer === "consistent" && <span className="chip small ok">{aiName("proposal")} agrees</span>}</span>
                   <button className="ibtn" aria-label={`Remove ${text}`} onClick={() => update(removeByDesign(draft, i))}><Trash2 size={14} aria-hidden /></button>
-                  {disputed && <p className="req-dispute"><AlertTriangle size={13} aria-hidden /> Muse Spark thinks this rule hides real
+                  {disputed && <p className="req-dispute"><AlertTriangle size={13} aria-hidden /> {aiName("proposal")} thinks this rule hides real
                     clashes ({a.settled.length} set aside): {a.note}
                     <span><button className="btn small" onClick={() => setKept(new Set([...kept, text]))}>Keep rule</button>
                       <button className="btn small" onClick={() => update(removeByDesign(draft, i))}>Remove rule</button></span></p>}
                 </li>);
-            })}</ul> : <p className="hint">No by-design pairs yet: add them from Insights (a pattern Muse reads as by design) or ask Muse to suggest.</p>}
+            })}</ul> : <p className="hint">No by-design pairs yet: add them from Insights (a pattern {aiName("proposal")} reads as by design) or ask {aiName("proposal")} to suggest.</p>}
 
-            <h3>Guidance for Muse Spark</h3>
+            <h3>Guidance for {aiName("proposal")}</h3>
             <div className="req-guidance">
               <label>For triage<textarea maxLength={1000} rows={2} value={draft.guidance.triage} placeholder="e.g. Fire dampers must keep 300 mm access."
                 onChange={(e) => update({ ...draft, guidance: { ...draft.guidance, triage: e.target.value } })} /></label>

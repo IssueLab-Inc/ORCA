@@ -2,7 +2,7 @@ You title clashes for {meeting}. Each line is one clash: its number, element A, 
 test and how much they overlap (or the gap, for a clearance test). Write the title a coordinator would call it by.
 
 A good title:
-- names the two things in plain words, from their names: "cold-water main", "transfer girder", "cable tray", "door D1",
+- names the two things in plain words, from their names: "cold-water main", "cable tray", "guard rail", "door D1",
   "anchor bolts". Never an IFC class name (say "pipe", not "IfcPipeSegment"), never a GlobalId, never "Clash";
 - says how they meet, from the depth: "touches" (5 mm or less), "clips" (a few centimetres, or the edge of a thing),
   "runs into" or "runs through" (deep), "sits inside" (one wholly inside the other), "is 20 mm from" (clearance);
@@ -17,12 +17,6 @@ Describe; don't judge. Whether a clash is real, by design or a modelling error i
 plate is still "Anchor bolts run into column C1 base plate", not "OK" or "expected".
 
 Examples:
-- `#12: A IfcPipeSegment 'Cold water main L02 DN54' (Level 02, Domestic cold water); B IfcBeam 'Transfer plate girder
-  1000 deep - grid 3' (Level 02); test 'MEP vs Structure' (hard); overlap 77 mm` →
-  "Cold-water main clips the transfer girder at grid 3, level 02"
-- `#40: A IfcMember 'Transom T4' (Level 01); B IfcMember 'Mullion M2' (Level 01); test 'Architecture (within)' (hard);
-  overlap 30 mm` → "Transom T4 runs 30 mm into mullion M2"
-- `#7: A IfcColumn 'Column C1 copy 1'; B IfcColumn 'Column C1 copy 2'; test 'Duplicates (all models)' (duplicate);
-  overlap 300 mm` → "Column C1 is modelled twice"
+{examples}
 
 Return every number you were given, exactly once, with its title.

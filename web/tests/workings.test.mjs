@@ -4,7 +4,7 @@ import test from "node:test";
 import { compiled } from "./app-host.mjs";
 
 const log = await import(await compiled("../src/runlog.ts", {}));
-const workings = await import(await compiled("../src/workingsGraph.ts", { "./runlog": "data:text/javascript,", "./fixKinds": await compiled("../src/fixKinds.ts", {}) }));
+const workings = await import(await compiled("../src/workingsGraph.ts", { "./runlog": "data:text/javascript,", "./fixKinds": await compiled("../src/fixKinds.ts", {}), "./aiNames": await compiled("../src/aiNames.ts", {}) }));
 
 /** A run as the page logs it, from a recording's events ({t, event}) or plain events (one second apart). */
 function runOf(kind, events, { origin = "you", end = true, error = null, meta = {} } = {}) {

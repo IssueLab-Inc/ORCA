@@ -1,7 +1,7 @@
 # 04 · Server code map
 
-> **Covers:** `server/sightline/*.py` (34 modules), `server/sightline/domain_packs/`, `server/pyproject.toml`,
-> `server/tests/` · **Checked against code:** 2026-10-30 (`a34b1e7` + `domains.py`) · **Deeper design:** the feature docs linked
+> **Covers:** `server/sightline/*.py` (35 modules), `server/sightline/demos/`, `server/sightline/domain_packs/`, `server/pyproject.toml`,
+> `server/tests/` · **Checked against code:** 2026-10-30 (`fix/hardcoded-defaults`: `demos.py`, what stays, settings) · **Deeper design:** the feature docs linked
 > from each module below ([detection](../detection.md), [edits](../edits.md), [escalation](../escalation.md),
 > [mcp](../mcp.md), [requirements](../requirements.md), [show-it-built](../show-it-built.md), [step](../step.md),
 > [uploads](../uploads.md), [voice](../voice.md))
@@ -30,7 +30,7 @@ imports made inside functions, which are drawn dotted below).
 | Report jobs | `triage.py`, `titles.py`, `built.py` | Bulk verdicts, Muse titles, Show it built pictures: work over a whole report or one picture, no scene edits |
 | Documents and inputs | `reports.py`, `document.py` | Navisworks XML in; PDF and BCF out |
 | Geometry | `scene.py`, `verify.py`, `edits.py`, `detect.py`, `step.py`, `context_eval.py` | The federated IFC scene, the geometric check, model edits, ORCA's own detection, STEP conversion, whole-arrangement checks |
-| Policy and request context | `requirements.py`, `settings.py`, `owner.py`, `limits.py`, `spend.py`, `domains.py` | Coordination requirements, settings for everyone, the owner's context, demo caps, the Muse Wonder budget, which domain's prompts a scene gets |
+| Policy and request context | `requirements.py`, `settings.py`, `owner.py`, `limits.py`, `spend.py`, `domains.py`, `demos.py` | Coordination requirements, settings for everyone, the owner's context, demo caps, the Muse Wonder budget, a scene's domain and what stays in place by default, the demo projects |
 | Model client | `meta_client.py` | Chat completions, Responses, transcription; model choice, effort, usage and price |
 | Test support | `fixtures.py` | Small synthetic IFC models for tests and spikes |
 
@@ -105,7 +105,8 @@ Three edges go "up" and are worth knowing before you add an import:
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
 | `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
-| `domains.py` | Policy | Which domain a scene is in (`of`: opened wholly from STEP is `machines`, else `construction`) and the shared prompts in that domain's voice (`prompt` fills `{role}`) |
+| `demos.py` | Policy | The demo projects in one place: their sample files, start labels, tours, default requirements (`demos/*.json`), and what only the demo models need (their property set, their Navisworks smart tags) |
+| `domains.py` | Policy | Which domain a scene is in (`of`: the effective requirements' `domain`, else opened wholly from STEP is `machines`), the classes that stay in place by default (`STAYS`), voice words, and the shared prompts in that domain's voice (`prompt` fills `{role}`, `{meeting}`, `{teams}`, `{examples}`) |
 | `document.py` | Documents | Coordination reports: PDF (combined, per team, per model) and BCF 2.1, team guessing, who acts and reviews |
 | `edits.py` | Geometry | Model edits: offsets with bends, routes, resizes, trims, penetrations; trial and keep transactions; meshes |
 | `escalation.py` | Fix agent | The brief a second try on Muse Wonder reads (first try, neighbourhood, blockers) |
@@ -448,11 +449,12 @@ Detail on all of these: [06](06-geometry-and-detection.md) (scene, check, detect
 ### `scene.py`: the federated scene
 
 Elements are addressed by IFC GlobalId everywhere, never by express id. From the package it imports only `limits.py`
-(`env_int`).
+(`env_int`) and `domains.py` (the default classes that stay).
 
 - **Main symbols:** `IfcScene` (`bounds`, `refresh_bounds`, `translate`, `placement`, `element`, `entity`,
   `index_of`, `products`, `near`, `connected_run`, `step_run`, `step_group`, `mark_edited`, `bump`, `snapshot`,
-  `write_edited`), `Element`, `FIXED_CLASSES`, `NOT_PHYSICAL`, `not_physical`, `is_provision`, `meshes_only`,
+  `write_edited`, `domain`, `stays` and `stays_rule`: what stays in place, as the requirements say), `Element`
+  (`fixed` = `stays`), `NOT_PHYSICAL`, `not_physical`, `is_provision`, `meshes_only`,
   `opacity`, `step_source`, `STEP_PSET` (`ORCA_STEP`; `STEP_PSETS` also reads `Sightline_STEP`), `FITTINGS`,
   `MESH_KERNEL`, `BIG_MODEL_BYTES` (`SIGHTLINE_BIG_MODEL_MB`), `BOUNDS_BATCH`, `THREADS`.
 - **Imported by:** `agent.py`, `context_eval.py`, `detect.py`, `edits.py`, `escalation.py`, `fixtures.py`,
@@ -654,10 +656,12 @@ lines, fix policies). Deeper design: [docs/requirements.md](../requirements.md);
 - **Main symbols:** `Doc`, `Group`, `Check`, `Mover`, `ByDesign`, `PenRule`, `Params`, `Policy`, `PenAnswer`,
   `Matcher`; `parse`, `canonical`, `doc_id`, `model_key`, `rules_key`, `resolve`, `scale`, `label`; the registry and
   context `register`, `lookup`, `enter`, `leave`, `current`, `current_id`, `using`; `inventory`, `default_groups`,
-  `default_doc`, `suggest`; `compile_tests`, `policy`, `fix_clearance`, `blocked`, `change_size`, `SIZED`,
+  `default_doc`, `suggest`; `domain_of`, `stays_classes`, `stays_rule`, `DEFAULT_CLEARANCE_MM` / `_M`; `compile_tests`,
+  `policy`, `fix_clearance`, `blocked`, `change_size`, `SIZED`,
   `penetration_rule`, `can_cut`, `meets`, `settle`, `overlay`, `prompt_text`, `RECOMMEND`; tables `LEVELS`,
   `STRICTNESS`; `FORMAT`, `HEADER`, `MAX_BYTES`, `REGISTRY_MAX` (500).
-- **Imports:** nothing at load; lazily `detect.py`, `document.py`, `triage.py`. **Imported by:** `agent.py`,
+- **Imports:** `domains.py` at load; lazily `detect.py`, `document.py`, `triage.py`. **Imported by:** `agent.py`,
+  `demos.py` (lazily), `detect.py`, `edits.py`, `escalation.py`, `verify.py`,
   `app.py`, `context_eval.py`, `document.py`, `hosts.py`, `mcp_server.py`, `plans.py`, `service.py`, `triage.py`.
 - **Rules:** no requirements (no header) is today's behaviour exactly; ids are content-addressed; level and
   strictness only turn into numbers through `LEVELS` and `STRICTNESS`; the request's file lives in a context variable
@@ -680,12 +684,26 @@ ORCA works on buildings and on machine cells. A scene whose every model was open
 `machines`; IFC, a mix of IFC and STEP, or no scene is `construction`. Deeper detail: the prompts in
 [08](08-ai-models-prompts-and-spend.md#how-the-domain-is-chosen).
 
-- **Main symbols:** `of(ws, scene_id)`, `prompt(name, domain)`, `ROLES`, `CONSTRUCTION`, `MACHINES`, `PACKS`.
-- **Imports:** nothing from the package. **Imported by:** `app.py`, `chat.py`, `document.py`, `plans.py`,
-  `service.py`, `triage.py`.
-- **Rules:** one helper decides the domain; callers never test for STEP themselves. `prompt` replaces `{role}` only
-  (plain replacement, the prompts' JSON keeps its braces), so a building's prompts are byte for byte what they were
-  before the placeholder (`tests/test_domains.py`).
+- **Main symbols:** `of(ws, scene_id)` (the effective requirements' domain, else `infer`), `infer`, `fill`,
+  `prompt(name, domain, **fields)`, `ROLES`, `MEETINGS`, `EXAMPLES`, `STAYS`, `VOICE`, `NAMES`, `DOMAINS`,
+  `CONSTRUCTION`, `MACHINES`, `PACKS`.
+- **Imports:** nothing from the package. **Imported by:** `app.py`, `chat.py`, `context_planner.py`, `document.py`,
+  `plans.py`, `requirements.py`, `scene.py`, `service.py`, `titles.py`, `triage.py`.
+- **Rules:** one helper decides the domain; callers never test for STEP themselves. `fill` is plain replacement (the
+  prompts' JSON keeps its braces); an empty field drops its " ({name})" (`tests/test_domains.py`).
+
+### `demos.py`: the demo projects
+
+Everything that knows a demo by name, so the rest of the server does not (the tour, the landing and the evals name
+them too). Deeper detail: [19](19-demo-data.md).
+
+- **Main symbols:** `Demo`, `DEMOS` (Northbank, the PC-03 cell), `find(files)`, `listing(samples)` (for
+  `GET /api/samples`), `requirements_for(files)` (a demo's own `demos/<name>.json`), `PSET_NAMES`,
+  `HIDDEN_PROPERTIES`, `SMART_TAG_SET`, `HERE`.
+- **Imports:** nothing at load; lazily `requirements.py`. **Imported by:** `app.py`, `properties.py`, `reports.py`,
+  `service.py`.
+- **Rules:** a demo's requirements decide only its domain and what stays while the user's are off
+  (`Workspace.requirements_for`).
 
 ### `owner.py`: the owner
 
@@ -731,8 +749,10 @@ An OpenAI-style client for Meta's API, the open-weights host, and transcription.
 `owner.py`, `settings.py`, `spend.py`. Model plumbing in [08](08-ai-models-prompts-and-spend.md).
 
 - **Main symbols:** `MetaChatModel` (`complete_json`, `complete_json_streamed`, `complete_json_reasoning`, `chat`,
-  `effort`, `usage`, `on_cost`, `role`, `strict`, `streams_reasoning`), `ChatModel` and `ToolModel` (protocols tests
-  script), `Usage`, `cost`, `PRICES`, `LABELS`, `model_label`, `FIXED_EFFORT`, `image_part`, `load_env`,
+  `effort`, `usage`, `on_cost`, `role`, `strict`, `streams_reasoning`: `META_STREAMS_REASONING`), `ChatModel` and
+  `ToolModel` (protocols tests script), `Usage`, `cost`, `prices`, `PRICES` (+ `SIGHTLINE_MODEL_PRICES`), `LABELS`
+  (+ `SIGHTLINE_MODEL_LABELS`), `model_label` (longest prefix), `labels` (each role's name for the page),
+  `model_id(role)`, `DEFAULT_MODELS`, `FIXED_EFFORT`, `image_part`, `load_env`,
   `transcribe`, `triage_model`, `triage_model_info`, `escalation_model`, `escalation_info`.
 - **Imported by:** the package's `__init__.py` (`load_env`), `agent.py`, `app.py`, `built.py`, `chat.py`,
   `document.py`, `service.py`, `titles.py`, `triage.py`, `voice_live.py`.

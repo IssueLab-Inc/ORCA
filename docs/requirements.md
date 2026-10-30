@@ -57,6 +57,8 @@ clamped. A group that selects nothing, or a check or mover naming a missing grou
 | `who_moves[]` | In order, from the group that stays put most to the one that moves first: `edits` (`any`, `move`, `none`), `max_move_mm`, `trims` |
 | `by_design[]` | `a_classes` with `b_classes`, `reason`, `source` |
 | `guidance` | `triage` and `fixes`, up to 1,000 characters each, for Muse Spark |
+| `domain` | `construction` (a building) or `machines` (owner decision, Oct 30): ORCA's voice, its fix pack, how teams are guessed. Unset: as the models were opened (all from STEP: a machine) |
+| `stays` | IFC classes fixed in place: a fix never moves them to make room (a trim between two that stay is still allowed). Unset: the domain's defaults (beam, column, slab, wall, footing, pile, member, plate). A `who_moves` group with `edits: none` stays too |
 
 **Selectors** name teams, classes, systems or files, never GlobalIds, so a file is reusable on another project.
 `source` says where an item came from: `level` (ORCA's start), `orca` (Muse's draft), `triage` (Insights) or
@@ -67,6 +69,10 @@ The **starting point** comes from the open models (`default_doc`):
   is open. Kinds are frame and structure, services, and equipment and other: the palletising cell gets those three.
 - **Checks:** hard between every pair of groups and within each, with Site off.
 - **Who moves:** structure stays, then architecture and site, and services move.
+
+The starting point names the models' domain. A **demo** starts from its own checked-in file instead
+(`server/sightline/demos/northbank.json`, `palletising-cell.json`), and while requirements are off those files decide
+the demo's domain and what stays in place (nothing else: clearance, edit limits and guidance need the switch on).
 
 At L3 Balanced this is what ORCA checks without requirements. That is the invariant, and it is tested: on the
 fixtures, and measured on Northbank (464 = 464) and the cell (107 = 107, the same pairs).

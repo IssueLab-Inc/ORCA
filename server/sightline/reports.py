@@ -18,6 +18,8 @@ from xml.etree.ElementTree import Element as XmlElement
 
 import defusedxml.ElementTree as ET
 
+from . import demos
+
 SPATIAL = {"IfcProject", "IfcSite", "IfcBuilding", "IfcBuildingStorey"}
 THREE_VIEW = [("A", "A-transparent.png"), ("B", "B-context.png"), ("C", "C-alternate.png")]
 GUID = re.compile(r"^[0-9A-Za-z_$]{22}$")
@@ -122,8 +124,8 @@ def _element(obj: XmlElement) -> ReportElement:
         return ReportElement(
             global_id=tags.get("Element / GlobalId") or tags.get("Element / IfcGUID") or None,
             ifc_class=tags["Element / IfcClass"], name=name,
-            level=tags.get("ClashWise_Demo / Level") or storey, file=file,
-            system=tags.get("ClashWise_Demo / System") or None,
+            level=tags.get(f"{demos.SMART_TAG_SET} / Level") or storey, file=file,
+            system=tags.get(f"{demos.SMART_TAG_SET} / System") or None,
             description=tags.get("Element / Description") or None,
             part_of=found[1][0] if len(found) > 1 else None,
         )

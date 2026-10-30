@@ -12,14 +12,15 @@ import math
 import ifcopenshell
 import ifcopenshell.util.element
 
+from . import demos
 from .scene import IfcScene
 
 ATTRIBUTES = ("Name", "Description", "ObjectType", "Tag", "PredefinedType")
 
 # The demo models carry their own notes in a property set named for the tool that generated them. The page shows the
 # set as "Model data", and leaves out the scripting note on the clash host (it says the answer key was planted).
-RENAMED = {"ClashWise_Demo": "Model data"}
-HIDDEN = {"ClashRole"}
+RENAMED = demos.PSET_NAMES      # the demo models' own set, by a plain name
+HIDDEN = demos.HIDDEN_PROPERTIES
 
 # Quantities are in the file's units: lengths scale once, areas twice, volumes three times. The others are SI already
 # or have no unit.

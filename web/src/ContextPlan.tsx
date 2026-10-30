@@ -21,11 +21,12 @@ export function contextStep(run: ContextRun, event: ContextEvent): ContextRun {
   return { ...run, phase: event.phase, messages: [...run.messages, event.message] };
 }
 
-export function ContextPlan({ run, names, chosen, acknowledged, busy, now, onChoose, onAcknowledge, onAccept, onRegenerate, onDiscard }: {
+export function ContextPlan({ run, names, chosen, acknowledged, busy, now, onChoose, onAcknowledge, onAccept, onRegenerate, onDiscard, exportLabel = "Export" }: {
   names: Record<string, Record<string, unknown>>;
   run: ContextRun; chosen: string | null; acknowledged: string[]; busy: boolean; now: number;
   onChoose: (id: string) => void; onAcknowledge: (id: string, checked: boolean) => void;
   onAccept: () => void; onRegenerate: () => void; onDiscard: () => void;
+  exportLabel?: string;   // what the Export button says for the open models ("Export IFC", "Export STEP + IFC")
 }) {
   const working = run.phase !== "done";
   const proposals = run.result?.proposals ?? [];
@@ -46,7 +47,7 @@ export function ContextPlan({ run, names, chosen, acknowledged, busy, now, onCho
     {run.result && <p className="hint">{run.result.trials} trials · {run.result.model_calls} model calls · {run.result.seconds.toFixed(1)} s</p>}
     {run.error && <p className="bad" role="alert">{run.error}</p>}
     {run.stale && <p className="context-warning" role="status">The model has changed or fresh checks could not confirm this proposal. Regenerate for the original objective before accepting.</p>}
-    {run.accepted && <p className="ok" role="status">Complete proposal kept in the open model. Export IFC to download all edited files.</p>}
+    {run.accepted && <p className="ok" role="status">Complete proposal kept in the open model. {exportLabel} to download all edited files.</p>}
     {proposals.map((p, i) => <div className={`card context-card ${chosen === p.id ? "pick" : ""}`} key={p.id}>
       <button className="card-body" aria-pressed={chosen === p.id} disabled={busy || run.accepted} onClick={() => onChoose(p.id)}>
         <span className="row"><b>{i + 1} · {p.title}</b><span className="chip ok">checks passed</span></span>

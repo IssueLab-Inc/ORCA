@@ -1,5 +1,6 @@
 import type { AgentEvent, Attempt, Trial } from "./api";
 import type { Viewer } from "./viewer/Viewer";
+import { aiName } from "./aiNames";
 
 /** What the pilot tells the page: is it driving, and what is on screen now. */
 export interface PilotStatus {
@@ -33,7 +34,7 @@ export class Pilot {
   private done: (() => void) | null = null;
   private generation = 0;
   private waits = new Set<() => void>();
-  private who = "Muse Spark";   // the model proposing now (a second try's, after `model`)
+  private who = aiName("proposal");   // the model proposing now (a second try's, after `model`)
   private offset = 0;           // ideas before this try's (a second try numbers its own after the first's)
   private shown: number | null = null;   // the idea on screen now
 
@@ -41,7 +42,7 @@ export class Pilot {
               private onStatus: (s: PilotStatus | null) => void) {}
 
   /** A proposal started: take the view. `model`: who proposes (a second try's model). */
-  start(model = "Muse Spark") {
+  start(model = aiName("proposal")) {
     this.cancel();
     this.active = this.driving = true;
     this.who = model; this.offset = 0;

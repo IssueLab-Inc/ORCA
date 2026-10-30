@@ -1,6 +1,7 @@
 import { Brain, ChevronDown, CircleCheck, ClipboardCheck, Flag, Info, RotateCcw, ScanSearch } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { TriageKind, TriageModel, TriageVerdict } from "./api";
+import { aiName } from "./aiNames";
 
 export const TRIAGE: Record<TriageKind, { label: string; cls: string; tip: string; colour: string; long: string }> = {
   real_clash: { label: "real", cls: "bad", tip: "A real clash: something has to move", colour: "var(--fail)", long: "Real problem" },
@@ -48,9 +49,10 @@ export interface TriageRun extends Omit<TriageModel, "requirements"> {
 }
 
 /** Bulk triage of the whole report, the first step: run it, watch it land, filter by verdict, set the noise aside. */
-export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active, forceCompact = false, requirements = null, stale = false, onRequirements }: {
+export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active, workers = null, forceCompact = false, requirements = null, stale = false, onRequirements }: {
   run: TriageRun | null; results: Record<string, TriageVerdict>; now: number; total: number;
   active?: TriageModel | null;  // the model a run would use now (server: /api/models), before one starts
+  workers?: number | null;      // how many clashes it reads at a time (server: SIGHTLINE_TRIAGE_WORKERS)
   forceCompact?: boolean;       // the list is filtered to a pattern or root cause: give it the room (unless opened)
   live?: { id: string; name: string; text: string }[]; onOpen?: (id: string) => void;
   filter: TriageKind | null; onFilter: (k: TriageKind | null) => void; onRun: (rerun: boolean) => void;
@@ -73,7 +75,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   const byRule = ids.filter((id) => results[id].source === "rule").length;
   const n = run?.total || total;
   const seconds = run ? Math.round(run.done ? run.seconds ?? 0 : Math.max(0, now - run.started) / 1000) : 0;
-  const model = run?.model ? (run.open_weights ? "Muse Spark Open" : "Muse Spark") : "";
+  const model = run?.model ? aiName("triage") : "";
   const state = !run ? "idle" : run.done ? "done" : "running";
   const compact = forceCompact ? !openedAnyway : chosen ?? state !== "running";  // room for the list, open while it reads
   const toggle = () => {
@@ -138,8 +140,8 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <button className="btn primary triage-go" onClick={() => onRun(false)}>
           <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>
         <p className="hint">Sure cases (spaces, ports, touches) are settled by rule at once;{" "}
-          {active?.open_weights ? "Muse Spark Open, an open-weights model," : "Muse Spark"} reads the rest, eight at a time,
-          and alike clashes once. A minute or two for the demo.</p>
+          {aiName("triage")}{active?.open_weights ? ", an open-weights model," : ""} reads the rest
+          {workers ? `, ${workers} at a time,` : ""} and alike clashes once.</p>
       </>}
 
       {state === "running" && run && <>
@@ -154,7 +156,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
           <Brain size={15} aria-hidden />
           <div>
             <b>{model || "The model"} has read {ids.length - byRule} of {Math.max(0, n - byRule)}</b>
-            <small>the rest, eight at a time · {seconds} s</small>
+            <small>the rest{workers ? `, ${workers} at a time` : ""} · {seconds} s</small>
           </div>
         </div>
         {modelBar}

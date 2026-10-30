@@ -33,6 +33,7 @@ import ifcopenshell.util.system
 import numpy as np
 
 from .scene import MESH_KERNEL, STEP_PSET, IfcScene, is_provision, meshes_only, step_source
+from .requirements import DEFAULT_CLEARANCE_M
 
 UP = np.array([0.0, 0.0, 1.0])
 MIN_PIECE_M = 0.05  # shortest straight piece left either side of a riser
@@ -1039,7 +1040,7 @@ class Penetration:
     start: list[float]     # world metres: where the void starts, on the service's axis
     axis: list[float]      # the service's direction (the void's)
     xdir: list[float]      # the service profile's X
-    clearance_m: float = 0.025
+    clearance_m: float = DEFAULT_CLEARANCE_M
     gap_m: float = 0.0             # the least gap between the service and the opening's edge, by construction
     fit: str = "annular"           # "annular" (clearance round it) or "fitted" (a gland fits it)
     provision: str | None = None   # the provision for void's GlobalId, once applied
@@ -1081,7 +1082,7 @@ def _outline(shape: str, w: float, h: float, px, py, step_m: float = 0.03) -> li
             + [px * x + py * y for y in ys[1:-1] for x in (-w / 2, w / 2)])
 
 
-def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: float = 0.025,
+def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: float = DEFAULT_CLEARANCE_M,
                 fit: str = "annular") -> Penetration:
     """The opening a straight service needs through a host: its section plus the clearance and 5 mm all round, rounded
     up to 10 mm ("annular": a sleeve or fire-stopping fills the gap), or plus 1 mm, to the mm ("fitted": a cable gland
@@ -1481,7 +1482,7 @@ def _kernel(p) -> str:
     return MESH_KERNEL if meshes_only(p) else "opencascade"
 
 
-def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = "side", clearance_m: float = 0.025,
+def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = "side", clearance_m: float = DEFAULT_CLEARANCE_M,
                reach_m: float = 1.0, step_m: float = 0.01) -> list[dict]:
     """Offsets of a straight segment, on its own "up" or "side" axis (`run_frame`), at which its profile (with
     `clearance_m` all round) passes the stretch where `obstacles` sit along it without touching anything there: the
@@ -1603,7 +1604,7 @@ def free_bands(scene: IfcScene, run_gid: str, obstacles: list[str], axis: str = 
     return out
 
 
-def passages(scene: IfcScene, run_gid: str, obstacle_gid: str, clearance_m: float = 0.025,
+def passages(scene: IfcScene, run_gid: str, obstacle_gid: str, clearance_m: float = DEFAULT_CLEARANCE_M,
              step_m: float = 0.005) -> list[dict]:
     """Openings through `obstacle` on the line of the straight segment `run_gid`, big enough for its profile.
 

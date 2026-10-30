@@ -11,6 +11,7 @@ import ifcopenshell.geom
 import numpy as np
 
 from .scene import IfcScene, opacity
+from .requirements import DEFAULT_CLEARANCE_M
 
 # How far to look for the nearest neighbour, so a passing fix can still report its real clearance.
 SEARCH_M = 0.5
@@ -39,7 +40,7 @@ def _settings():
     return s
 
 
-def check(scene: IfcScene, moved: list[str], clearance_m: float = 0.025,
+def check(scene: IfcScene, moved: list[str], clearance_m: float = DEFAULT_CLEARANCE_M,
           ignore: set[str] | None = None, *, exclude_connected: bool = True,
           touching: set[str] | None = None) -> Verdict:
     """Check the moved elements against every other element in the model.

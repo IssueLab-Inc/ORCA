@@ -3,6 +3,7 @@ import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type 
 import { kindLabel } from "./fixKinds";
 import { runs, type Run } from "./runlog";
 import { graphOf, sec, type Actor, type Edge, type Graph, type Part, type Peek, type Side, type Step } from "./workingsGraph";
+import { aiName } from "./aiNames";
 
 /*
  * Workings (docs/workings.md): the Activity panel's drawing of a run as it happens. The graph comes from `workingsGraph.ts`;
@@ -16,8 +17,10 @@ const LABELS = 126, LABELS_NARROW = 84, FAR = 0.6, MIN_K = 0.22, MAX_K = 1.6, GX
 const SPEEDS = [1, 2, 4, 8];
 const ACTOR: Record<Actor, { label: string; icon: LucideIcon; color: string }> = {
   you: { label: "You", icon: User, color: "#8592a3" }, orca: { label: "ORCA", icon: CircleDot, color: "#2f5d8a" },
-  spark: { label: "Muse Spark", icon: Sparkles, color: "#4b4fb3" }, wonder: { label: "Muse Wonder", icon: Sparkles, color: "#5b3c99" },
-  image: { label: "Muse Image", icon: ImageIcon, color: "#9c3a6b" },
+  // The models' names as the server reports them (aiNames.ts), read when drawn.
+  spark: { get label() { return aiName("proposal"); }, icon: Sparkles, color: "#4b4fb3" },
+  wonder: { get label() { return aiName("escalation"); }, icon: Sparkles, color: "#5b3c99" },
+  image: { get label() { return aiName("image"); }, icon: ImageIcon, color: "#9c3a6b" },
 };
 const ORIGIN_ICON: Record<Run["origin"], LucideIcon> = { you: User, chat: MessageSquare, agent: Bot, replay: RotateCcw };
 const KIND_NAME: Record<Run["kind"], string> = { propose: "Fixes", plan: "Plan", triage: "Triage", built: "Show it built", detect: "Check" };

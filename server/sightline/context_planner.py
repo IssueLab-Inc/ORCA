@@ -9,7 +9,6 @@ from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 import json
-from pathlib import Path
 import threading
 import time
 import uuid
@@ -17,10 +16,9 @@ import uuid
 import ifcopenshell.util.system as system
 import numpy as np
 
-from . import context_eval, edits, verify
+from . import context_eval, domains, edits, verify
 from .limits import env_float, env_int
 
-PROMPT = Path(__file__).parent / 'domain_packs' / 'context.md'
 MAX_STORED_SCENES = 16
 MAX_STORED_PROPOSALS = 24
 
@@ -107,6 +105,10 @@ def validate_objective(ws, scene_id, objective):
             matched = ws.match(rid, scene_id).get(cid)
             if not matched or {matched.get('a'), matched.get('b')} != {a, b}:
                 raise ContextError(422, 'Report clash does not identify this objective pair.')
+    # The clearance the pair needs, from the requirements as they are now (Workspace.clearance): checked with that.
+    clearance = getattr(ws, 'clearance', None)
+    if clearance is not None:
+        obj['clearance_m'] = clearance(scene_id, a, b)
     return obj
 
 
@@ -175,7 +177,8 @@ class Inspection:
             if other == gid or 'offset' not in capabilities:
                 continue
             try:
-                openings.append(dict(obstacle=other, passages=edits.passages(scene, gid, other)))
+                openings.append(dict(obstacle=other, passages=edits.passages(
+                    scene, gid, other, context_eval.clearance_of(self.objective))))
             except (edits.Unsupported, RuntimeError, ValueError) as exc:
                 openings.append(dict(obstacle=other, unavailable=str(exc)))
         return dict(**info, bounds_m=scene.bounds().get(gid).tolist() if gid in scene.bounds() else None,
@@ -222,7 +225,7 @@ def _identity(evaluated_edits):
 
 def _rank(scene, proposal):
     changes = proposal['edits']
-    structural = any(scene.element(g).fixed for e in changes for g in e['moved'])
+    structural = any(scene.stays(g) for e in changes for g in e['moved'])
     # The supported radiused detour has four bend fittings, with optional straight risers.
     fittings = sum(4 for e in changes if e['kind'] == 'offset')
     displacement = sum(float(np.linalg.norm(e.get('delta_m', [e.get('by_m', 0)]))) for e in changes)
@@ -263,7 +266,8 @@ def build(ws, scene_id, objective, emit=lambda e: None, model=None, *, limits=No
     progress('inspecting', 'Inspecting the objective and local geometry, connections and supported edits.')
     initial = dict(objective=objective, objective_elements=[inspection.element(objective[k]) for k in ('element_a', 'element_b')],
                    neighbourhood=inspection.neighbourhood(objective['element_a']), limits=asdict(limits))
-    messages = [dict(role='system', content=PROMPT.read_text()), dict(role='user', content=json.dumps(initial))]
+    system = domains.prompt('context', domains.of(ws, scene_id))   # in the voice of the scene's domain
+    messages = [dict(role='system', content=system), dict(role='user', content=json.dumps(initial))]
     candidates, seen, blockers = [], set(), set()
     trials = calls = 0
     stop = 'Search completed within its bounds.'
@@ -387,7 +391,7 @@ def _resolved_pairs(ws, sid, scene, objective, result):
         left, right = sources.get(a, [a]), set(sources.get(b, [b]))
         if any(g not in scene.bounds() for g in [*left, *right]):
             continue
-        if all(not any(h.other in right for h in verify.check(scene, [g], context_eval.CLEARANCE,
+        if all(not any(h.other in right for h in verify.check(scene, [g], context_eval.clearance_of(objective),
                    exclude_connected=False).hits) for g in left):
             resolved.append(dict(element_a=a, element_b=b))
     return resolved

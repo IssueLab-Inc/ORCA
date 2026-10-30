@@ -12,10 +12,9 @@ import ifcopenshell.util.system as system
 import ifcopenshell.util.element
 
 from . import edits, requirements, verify
-from .scene import IfcScene, FIXED_CLASSES
+from .scene import IfcScene
 
 TOL = .002
-CLEARANCE = .025
 
 
 def element_constraints(scene: IfcScene, gid: str) -> list[str]:
@@ -383,8 +382,8 @@ def _integrity(before, after, originals, sources, result):
             allowed.add(pair)
     for gid in originals:
         entity = before.entity(gid)
-        if any(entity.is_a(cls) for cls in FIXED_CLASSES):
-            review.append(dict(id='structural_review', message='A structural element changes; a structural designer must review adequacy, bearing and connections.'))
+        if before.stays(gid):  # fixed in place (the requirements' list, else the domain's)
+            review.append(dict(id='structural_review', message='An element fixed in place changes; a structural designer must review adequacy, bearing and connections.'))
         if entity.is_a('IfcDistributionElement'):
             review.append(dict(id='service_review', message='Review service performance, access, maintenance space and supports for the changed route.'))
             if not system.get_ports(entity):
@@ -395,11 +394,17 @@ def _integrity(before, after, originals, sources, result):
     return allowed
 
 
-def _findings(scene, changed, allowed):
+def clearance_of(objective: dict) -> float:
+    """The clearance the objective's pair needs (`context_planner.validate_objective` sets it from the requirements:
+    `Workspace.clearance`), else the default."""
+    return float(objective.get('clearance_m') or requirements.DEFAULT_CLEARANCE_M)
+
+
+def _findings(scene, changed, allowed, clearance_m=requirements.DEFAULT_CLEARANCE_M):
     findings, gaps = {}, []
     for gid in sorted(changed):
         touch = {next(iter(pair - {gid})) for pair in allowed if gid in pair and len(pair) == 2}
-        v = verify.check(scene, [gid], CLEARANCE, exclude_connected=False, touching=touch)
+        v = verify.check(scene, [gid], clearance_m, exclude_connected=False, touching=touch)
         if v.min_clearance_m is not None:
             gaps.append(v.min_clearance_m)
         for h in v.hits:
@@ -436,7 +441,8 @@ def _run(scene, objective, operations, discovered):
         groups = _validate(scene, objective, operations, discovered)
         before = scene.snapshot()
         originals = {g for group in groups for g in group}
-        baseline, _ = _findings(before, originals | {objective['element_a'], objective['element_b']}, set())
+        baseline, _ = _findings(before, originals | {objective['element_a'], objective['element_b']}, set(),
+                                clearance_of(objective))
         sources = {}
         offset_chains = []
         for op, group in zip(operations, groups):
@@ -471,7 +477,8 @@ def _run(scene, objective, operations, discovered):
         for op in operations:
             if op['kind'] == 'trim' and op['element'] in (objective['element_a'],objective['element_b']):
                 allowed.add(frozenset((objective['element_a'],objective['element_b'])))
-        final, gap = _findings(scene,set(sources) | {objective['element_a'],objective['element_b']},allowed)
+        final, gap = _findings(scene,set(sources) | {objective['element_a'],objective['element_b']},allowed,
+                               clearance_of(objective))
         geometry = result['checks']['geometry']
         target = frozenset((objective['element_a'],objective['element_b']))
         geometry['target_resolved'] = True

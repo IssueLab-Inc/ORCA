@@ -30,10 +30,15 @@ from typing import Any
 import ifcopenshell.util.element
 import ifcopenshell.util.system
 
+from . import domains
+
 FORMAT = "orca-requirements/1"
 HEADER = "x-sightline-requirements"
 MAX_BYTES = 64 * 1024
 MAX_GUIDANCE = 1000
+# The clearance a fix keeps when no requirements say otherwise (balanced strictness says the same).
+DEFAULT_CLEARANCE_MM = 25
+DEFAULT_CLEARANCE_M = DEFAULT_CLEARANCE_MM / 1000
 PROMPT = Path(__file__).parent / "domain_packs" / "requirements.md"
 
 ROLES = ("structure", "services", "architecture", "equipment", "site", "other")
@@ -167,6 +172,8 @@ class Doc:
     guidance: dict[str, str] = field(default_factory=lambda: {"triage": "", "fixes": ""})
     notes: str = ""
     penetrations: list[PenRule] = field(default_factory=list)
+    domain: str | None = None        # "construction" (a building) or "machines"; None: as the models were opened
+    stays: list[str] | None = None   # IFC classes that stay in place; None: the domain's (`domains.STAYS`)
 
     def group(self, gid: str) -> Group | None:
         return next((g for g in self.groups if g.id == gid), None)
@@ -175,6 +182,9 @@ class Doc:
         d = {"format": FORMAT, **asdict(self)}
         if not self.penetrations:   # a file without the section keeps its id (content-addressed: docs/requirements.md)
             d.pop("penetrations")
+        for key in ("domain", "stays"):   # the same for files written before these existed
+            if d[key] is None:
+                d.pop(key)
         for r in d.get("penetrations", []):
             if r["kind"] is None:   # a group-wide rule says nothing about kinds
                 del r["kind"], r["kind_name"]
@@ -306,7 +316,9 @@ def parse(data: Any, classes: set[str] | None = None, teams: set[str] | None = N
                groups=groups, checks=checks, duplicates=bool(data.get("duplicates", True)), rules=rules,
                who_moves=movers, by_design=designs,
                guidance={k: _text(guidance.get(k), MAX_GUIDANCE) for k in ("triage", "fixes")},
-               notes=_text(data.get("notes"), 2000), penetrations=pens)
+               notes=_text(data.get("notes"), 2000), penetrations=pens,
+               domain=data.get("domain") if data.get("domain") in domains.DOMAINS else None,
+               stays=_names(data["stays"], 60, _CLASS) if isinstance(data.get("stays"), list) else None)
 
 
 def canonical(doc: Doc) -> str:
@@ -324,8 +336,11 @@ def _hash(obj: Any) -> str:
 def model_key(doc: Doc) -> str:
     """What changes the triage model's prompt (and the strictness overlay on its answers). Rules are not in it: adding
     a by-design rule never re-asks the model."""
-    return _hash({"level": doc.level, "strictness": doc.strictness, "guidance": doc.guidance.get("triage", ""),
-                  "checks": prompt_text(doc, "triage", rules=False)})
+    key = {"level": doc.level, "strictness": doc.strictness, "guidance": doc.guidance.get("triage", ""),
+           "checks": prompt_text(doc, "triage", rules=False)}
+    if doc.domain:   # the triage prompt's voice (domains.prompt); unset keeps the keys runs were shared under
+        key["domain"] = doc.domain
+    return _hash(key)
 
 
 def rules_key(doc: Doc) -> str:
@@ -435,17 +450,55 @@ class using:
 
 # ------------------------------------------------------------------------------------------------- the open models
 
-def _file_teams(scene) -> list[str]:
-    """Team per open file, guessed from its content (`document.guess_team`, as detection does); cached on the scene."""
-    cached = getattr(scene, "_req_teams", None)
+def domain_of(scene, doc: Doc | None = None) -> str:
+    """Building or machine: what the requirements say, else as the models were opened (`IfcScene.domain`)."""
+    if doc is not None and doc.domain in domains.DOMAINS:
+        return doc.domain
+    return getattr(scene, "domain", domains.CONSTRUCTION)
+
+
+def _file_teams(scene, domain: str | None = None) -> list[str]:
+    """Team per open file, guessed from its content in the scene's domain (`document.guess_team`, as detection does);
+    cached on the scene per domain."""
+    domain = domain or domain_of(scene)
+    cache = getattr(scene, "_req_teams", None)
+    if not isinstance(cache, dict):
+        cache = scene._req_teams = {}
+    cached = cache.get(domain)
     if cached is not None and len(cached) == len(scene.models):
         return cached
     from .document import guess_team
     boxes = scene.bounds()
-    teams = [guess_team(Counter(e.is_a() for e in m.by_type("IfcElement") if e.GlobalId in boxes), p.name)
+    teams = [guess_team(Counter(e.is_a() for e in m.by_type("IfcElement") if e.GlobalId in boxes), p.name, domain)
              for m, p in zip(scene.models, scene.paths)]
-    scene._req_teams = teams
+    cache[domain] = teams
     return teams
+
+
+def stays_classes(scene, doc: Doc | None = None) -> tuple[str, ...]:
+    """The classes that stay in place: the requirements' list, else the domain's default (`domains.STAYS`)."""
+    if doc is not None and doc.stays is not None:
+        return tuple(doc.stays)
+    return domains.STAYS[domain_of(scene, doc)]
+
+
+def stays_rule(scene, doc: Doc | None = None):
+    """gid -> stays in place: its class is on `stays_classes`, or its group may not be edited (`Mover.edits` "none").
+    The requirements decide it fully; without them the domain's classes do."""
+    classes = stays_classes(scene, doc)
+    frozen = {m.group for m in doc.who_moves if m.edits == "none"} if doc is not None else set()
+    matcher = Matcher(scene, doc) if frozen else None
+
+    def rule(gid: str) -> bool:
+        try:
+            ent = scene.entity(gid)
+        except KeyError:
+            return False
+        if any(ent.is_a(c) for c in classes):
+            return True
+        group = matcher.group_of(gid) if matcher is not None else None
+        return group is not None and group.id in frozen
+    return rule
 
 
 def _family(cls: str) -> str:
@@ -465,11 +518,12 @@ FAMILY_NAME = {"structure": "Frame and structure", "services": "Services", "equi
                "site": "Site"}
 
 
-def inventory(scene) -> dict:
+def inventory(scene, domain: str | None = None) -> dict:
     """What the open models contain, for a draft and for the panel: files with their team and top classes, systems,
     storeys, STEP groups, and the default groups (one per team; one per kind of thing when only one team is open)."""
     boxes = scene.bounds()
-    teams = _file_teams(scene)
+    domain = domain or domain_of(scene)
+    teams = _file_teams(scene, domain)
     files, all_classes, systems, storeys, step_groups = [], Counter(), Counter(), Counter(), Counter()
     for i, (m, p) in enumerate(zip(scene.models, scene.paths)):
         classes = Counter()
@@ -491,11 +545,12 @@ def inventory(scene) -> dict:
                       "classes": dict(classes.most_common(30))})
     return {"files": files, "classes": dict(all_classes), "systems": dict(systems.most_common(40)),
             "storeys": dict(storeys.most_common(30)), "step_groups": dict(step_groups.most_common(40)),
-            "groups": [asdict(g) for g in default_groups(scene)]}
+            "groups": [asdict(g) for g in default_groups(scene, domain)], "domain": domain,
+            "stays": list(domains.STAYS[domain])}
 
 
-def default_groups(scene) -> list[Group]:
-    teams = _file_teams(scene)
+def default_groups(scene, domain: str | None = None) -> list[Group]:
+    teams = _file_teams(scene, domain)
     present = list(dict.fromkeys(teams))
     if len(present) >= 2:
         order = {"Structure": 0, "Architecture": 1, "MEP": 2, "Site": 3}
@@ -512,10 +567,12 @@ def default_groups(scene) -> list[Group]:
             for f in order if f in fams]
 
 
-def default_doc(scene, name: str = "Coordination requirements") -> Doc:
+def default_doc(scene, name: str = "Coordination requirements", domain: str | None = None) -> Doc:
     """L3 Coordinated, balanced: hard checks between every pair of groups and within each, Site off (as
-    `detect.default_tests`), structure moves last and services first. Compiles to what ORCA checks today."""
-    groups = default_groups(scene)
+    `detect.default_tests`), structure moves last and services first, the domain's classes in place. Compiles to what
+    ORCA checks today. It names its domain, so the dialog shows it."""
+    domain = domain or domain_of(scene)
+    groups = default_groups(scene, domain)
     only_site = all(g.role == "site" for g in groups)
     checks = []
     for i, g in enumerate(groups):
@@ -526,7 +583,7 @@ def default_doc(scene, name: str = "Coordination requirements") -> Doc:
                                 source="level"))
     rank = {"structure": 0, "architecture": 1, "site": 2, "equipment": 3, "other": 4, "services": 5}
     movers = [Mover(group=g.id) for g in sorted(groups, key=lambda g: rank.get(g.role, 4))]
-    return Doc(name=name, groups=groups, checks=checks, who_moves=movers)
+    return Doc(name=name, groups=groups, checks=checks, who_moves=movers, domain=domain)
 
 
 class Matcher:
@@ -534,7 +591,7 @@ class Matcher:
 
     def __init__(self, scene, doc: Doc):
         self.scene, self.doc = scene, doc
-        self.teams = _file_teams(scene)
+        self.teams = _file_teams(scene, domain_of(scene, doc))
         self._cache: dict[str, Group | None] = {}
 
     def group_of(self, gid: str) -> Group | None:

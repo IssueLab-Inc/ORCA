@@ -81,7 +81,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
         old?.cleanup?.(); cells[index] = { deps, cleanup: effect() };
       }); },
   };
-  const api = { samples: async () => ["model.ifc"], reportSamples: async () => ["sample"], match: async () => matches,
+  const api = { samples: async () => ({ files: ["model.ifc"], demos: [] }), reportSamples: async () => ["sample"], match: async () => matches,
     models: async () => ({ triage: { model: "m", open_weights: false } }), rootCauses: async () => [], patterns: async () => [], triage: async () => ({}), teams: async () => ({ models: [] }),
     measure: async () => ({ matched: true, physical: true, distance_m: -.3 }), element: async () => ({}), properties: async () => null, exportUrl: () => "/export",
     proposeStream: (...args) => new Promise((resolve, reject) => requests.push({ args, onEvent: args[4], resolve, reject })),
@@ -112,11 +112,13 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const signoffs = await compiled("../src/signoffs.ts", {});
   const aboutRoute = await compiled("../src/aboutRoute.ts", {});
   const dockLayout = await compiled("../src/dockLayout.ts", {});
+  const fileNames = await compiled("../src/names.ts", {});
+  const aiNames = await compiled("../src/aiNames.ts", {});
   const views = await compiled("../src/viewer/views.ts", { three: import.meta.resolve("three") });
   const context = await compiled("../src/ContextPlan.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), "lucide-react": icons, "./ReportList": mocks });
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds, "./uploads": uploads, "./links": links,
-    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./runlog": await compiled("../src/runlog.ts"), "./viewer/views": views };
+    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./names": fileNames, "./aiNames": aiNames, "./runlog": await compiled("../src/runlog.ts"), "./viewer/views": views };
   for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel", "./Properties", "./Brand"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   function render() {

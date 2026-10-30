@@ -2,7 +2,7 @@
 
 > **Covers:** `web/src/` (all but `viewer/`, which is [13](13-3d-viewer.md)), `web/index.html`, `web/vite.config.ts`,
 > `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/`, `assets/brand/orca/` · **Checked against code:**
-> 2026-10-30 (`main` at `b74d70b`; the dock again on `fix/dock-empty-bars-tooltips`; the notch, menu and brand on `claude/laughing-allen-29oggh`) · **Deeper design:** [docs/mobile.md](../mobile.md),
+> 2026-10-30 (`main` at `b74d70b`; the dock again on `fix/dock-empty-bars-tooltips`; the notch, menu and brand on `claude/laughing-allen-29oggh`; demos, model names and the requirements' domain on `fix/hardcoded-defaults`) · **Deeper design:** [docs/mobile.md](../mobile.md),
 > [docs/views.md](../views.md), [docs/panels.md](../panels.md), [docs/brand-assets.md](../brand-assets.md)
 
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
@@ -21,6 +21,8 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `App.tsx` | The whole page: state, handlers, effects, the notch and corner (desktop) or the compact header, panes, sheet, dialogs. Also small local components `ProofStrip`, `Recommended`, `NoFix`, `Thinking` and helpers `keepPlaces`, `movedPairs`, `clampPane`, `shortName` | `App` | `main.tsx` |
 | `index.css` | The one stylesheet: tokens, layout grid, every feature's styles, then the "Responsive" block | (CSS) | `main.tsx` |
 | `api.ts` | Every server call, the NDJSON reader, the wire types, the two request headers | `api`, `ApiError`, `setOwnerSettings`, `setRequirements`, `requirementsInUse`, ~100 types | everything |
+| `aiNames.ts` | The name of the AI model behind each role (proposal, escalation, triage, image, voice) as the server reports it (`GET /api/models` labels), for every panel's words; App sets them, the defaults until then | `aiName`, `setAiNames`, `DEFAULT_AI_NAMES`, `AiRole`, `AiNames` | `App`, `Activity.tsx`, `pilot.ts`, `PlanPanel.tsx`, `BuiltView.tsx`, `Triage.tsx`, `Insights.tsx`, `ReportDoc.tsx`, `ClashPanel.tsx`, `ReportList.tsx`, `Requirements.tsx`, `Owner.tsx`, `Workings.tsx`, `workingsGraph.ts` |
+| `names.ts` | Model files' names as people read them: no extension, and no prefix the set shares, whatever the project is called | `shortNames`, `sharedPrefix` | `App` |
 | `About.tsx` | Landing page in the empty viewer (hero, demo cards, resume card, before/after picture, the "Go deeper" card that opens About ORCA) | `About`, `Resume`, `projectName` | `App` |
 | `AboutOrca.tsx` | About ORCA: a full page over the app in six tabs (Overview, How it works, The fixes, The AI, Under the hood, Proof and limits), with animated SVG pictures (the ORCA loop, the girder clash before and after, each fix kind, the propose-check loop), count-up numbers and sections that fade up as they scroll in; reduced motion shows it all still. Its numbers are the landing's measured ones | `AboutOrca` | `App` |
 | `aboutRoute.ts` | The About page's tabs and address: `#about` and `#about/<tab>`, pushed when it opens (Back closes it), replaced on a tab change | `ABOUT_TABS`, `AboutTab`, `aboutTabFromHash`, `aboutHash`, `nextTab`, `currentHash`, `showAboutHash` | `App`, `AboutOrca.tsx` |
@@ -45,7 +47,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `ProjectStart.tsx` | The blank project's drop zone (IFC/STEP models, or a Navisworks report or folder) | `ProjectStart` | `App` |
 | `ReportDoc.tsx` | The coordination report dialog (scope, a typed team name per model, build PDF and BCF) and the per-clash review block | `ReportDialog`, `ReviewBlock`, `reviewersOf` | `App` |
 | `ReportList.tsx` | The left pane over a report: Clashes / Insights tabs, impact bar, search and filters, the list with lazy thumbnails | `ReportList`, `clashLabel`, `mm`, `linkState`, `Review` | `App`, `ClashPanel.tsx`, `ContextPlan.tsx`, `PlanPanel.tsx`, `ReportDoc.tsx` |
-| `Requirements.tsx` | The requirements dialog: level cards, strictness, the check matrix, who moves, rules and Muse's audit, openings | `RequirementsDialog` | `App` |
+| `Requirements.tsx` | The requirements dialog: level cards, strictness, the check matrix, who moves, the kind of project (building or machine) and what is fixed in place, rules and Muse's audit, openings | `RequirementsDialog` | `App` |
 | `Sheet.tsx` | The phone's bottom sheet bar: handle, drag and flick, snap heights | `SheetBar` | `App` |
 | `Tour.tsx` | Both guided tours (steps, spotlight, "Show me", recorded-run offer) | `Tour`, `TourState`, `TourActions`, `TOUR`, `CELL`, `TOUR_QUESTION`, `BUILDING_STEPS`, `CELL_STEPS` | `App` |
 | `Triage.tsx` | The Triage card (run, two stages, verdict bar and rows, compact mode) | `TriageCard`, `TRIAGE`, `TriageRun` | `App`, `ClashPanel.tsx`, `ReportList.tsx` |
@@ -59,7 +61,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `layout.ts` | Desktop / tablet / phone by width, touch detection, sheet snapping, `follow()` | `useLayout`, `layoutFor`, `useCoarse`, `isCoarse`, `follow`, `nearestSnap`, `nextSnap`, `SNAPS`, `PHONE_MAX`, `TABLET_MAX` | `App`, `Sheet.tsx`, `About.tsx` |
 | `noClash.ts` | Why a reported clash needs no fix (same element, not physical, a touch, no overlap, by design) | `noClash`, `oneElement`, `sameWhy`, `NoClash` | `App`, `ReportList.tsx`, `ClashPanel.tsx` |
 | `pilot.ts` | Lets the fix agent drive the viewer while it works; its status names the idea on screen (`step`), for Workings | `Pilot`, `PilotStatus` | `App` |
-| `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
+| `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules, the domain and the classes fixed in place (`setDomain`, `setStays`) | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
 | `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
 | `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (kept inside its window, or the dock panel that clips it (`roomFor`): it moves left or up, and scrolls inside when taller, so it never makes the page scroll or gets cut off; Esc closes only the menu; it listens on its own document, so it works in a pop-out window; on a phone its sheet renders into the body, above the bottom sheet), and the tooltip layer (`Tooltips`, one per document: the page and each pop-out window) | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
 | `uploads.ts` | The size check before an upload and the words for each upload stage | `uploadRefusal`, `uploadStatus`, `localFile` | `App` |
@@ -151,7 +153,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 
 | Concern | State | Refs | Derived |
 |---|---|---|---|
-| Scene and files | `sceneId`, `stats`, `modelNames`, `sceneFiles`, `stepFiles`, `samples`, `picked`, `uploadMax`, `blank` | `viewer`, `host`, `sceneRevision`, `modelInput` | `landing`, `starting`, `startLabel`, `cellSample`, `cellOpen` |
+| Scene and files | `sceneId`, `stats`, `modelNames`, `sceneFiles`, `stepFiles`, `samples`, `demos`, `picked`, `uploadMax`, `blank`, `labels`, `triageWorkers` | `viewer`, `host`, `sceneRevision`, `modelInput` | `landing`, `starting`, `startLabel`, `cellSample`, `cellOpen` |
 | Report | `report`, `reportSamples`, `matches`, `clash`, `measure`, `remeasure`, `titles`, `naming`, `views`, `capturing`, `lightbox` | `reportRef`, `captures`, `folderInput`, `filesInput` | `shown()`, `shownReport`, `shownClash` |
 | Detection | `detectSetup`, `detecting`, `detection` | `lastTests`, `pendingDetect` | |
 | Selection and the view's tools | `a`, `b`, `standIns`, `selected`, `tool` (`ToolbarState`: mode, style, ortho, grey, edges, section, measure, links, hidden models), `measurePts`, `measured`, `toast` | `down`, `longPress`, `flashTimer`, `sides` | `group` |
@@ -258,7 +260,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 
 | Runs when | Calls | Sets |
 |---|---|---|
-| Mount | `new Viewer`, `new Pilot`, `api.samples`, `api.reportSamples` | `samples`, `picked` (structure, MEP, architecture, site), `reportSamples` |
+| Mount | `new Viewer`, `new Pilot`, `api.samples`, `api.reportSamples` | `samples`, `demos` (server: `demos.py`), `picked` (the first demo's own files, else the first sample), `reportSamples`; the start label, the cell's sample and `cellOpen` come from `demos`, never a file-name pattern |
 | `ownerSettings`, `modelsAsked` change | `api.models` | `triageModel`, `uploadMax`, `escalation`, `builtOn` |
 | `report`, `sceneId` | `api.match` | `matches` |
 | `report`, `sceneId`, `matches` | `api.patterns` (and clears root causes) | `patterns` |

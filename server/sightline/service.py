@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, connections, datums, detect, domains, edits, escalation, hosts, properties, reports, requirements, settings, spend, step, verify
+from . import agent, connections, datums, demos, detect, domains, edits, escalation, hosts, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -28,7 +28,7 @@ MAX_SCENES = env_int("SIGHTLINE_MAX_SCENES", 0)  # 0 = no limit
 # Open model sets also held within a size budget: the IFC bytes they were opened from, a stand-in for memory (a scene
 # holds several times its file: docs/uploads.md). 0 = by count only.
 SCENE_BUDGET_MB = env_int("SIGHTLINE_SCENE_BUDGET_MB", 0)
-HOSTS_TIMEOUT_S = 60   # a host reading that takes longer (a cold open-weights host) leaves the defaults
+HOSTS_TIMEOUT_S = env_int("SIGHTLINE_HOSTS_TIMEOUT_S", 60)   # a host reading that takes longer (a cold open-weights host) leaves the defaults
 LAST_KEPT = 200        # the last try per clash pair kept for a second try to read (docs/escalation.md)
 PATTERNS_KEPT = 64     # Muse's readings of report patterns kept (plans.read_patterns)
 MAX_REPORTS = env_int("SIGHTLINE_MAX_REPORTS", 0)  # open clash reports kept, same rule
@@ -78,6 +78,8 @@ class Workspace:
         # read: what was tried and why it failed. Pairs are sorted; the oldest go past LAST_KEPT.
         self._last: dict[tuple[str, str, str], tuple[tuple, dict]] = {}   # → (what it was tried on, the try)
         self._last_lock = threading.Lock()
+        # Scene id → (the requirements a stays rule was made from, the rule): `requirements.stays_rule`, per request.
+        self._stays: dict[str, tuple[object, object]] = {}
         # (report id, scene id, pattern ids, triage prompt) → Muse's reading of those patterns (plans.read_patterns),
         # made once and shared by the route, the chat and MCP; the oldest go past PATTERNS_KEPT. One lock per reading
         # being made, so a second caller waits for it instead of paying for it again.
@@ -146,6 +148,9 @@ class Workspace:
                 shutil.rmtree(root, ignore_errors=True)
             raise
         scene_id = uuid.uuid4().hex[:12]
+        # Models wholly from STEP are a machine (domains.infer); the requirements may say otherwise.
+        scene.domain = domains.MACHINES if len(sources) == len(paths) else domains.CONSTRUCTION
+        scene.stays_rule = lambda gid, sid=scene_id: self._stays_rule(sid)(gid)
         self.scenes[scene_id] = scene
         self.sources[scene_id] = sources
         self.names[scene_id] = [p.name for p in paths]
@@ -169,11 +174,30 @@ class Workspace:
             self.sources.pop(old, None)
             self.names.pop(old, None)
             self.detections.pop(old, None)
+            self._stays.pop(old, None)
             with self._last_lock:
                 for key in [k for k in self._last if k[0] == old]:
                     self._last.pop(key, None)
             if old in self._roots:
                 shutil.rmtree(self._roots.pop(old), ignore_errors=True)
+
+    def requirements_for(self, scene_id: str) -> requirements.Doc | None:
+        """The requirements that decide a scene's domain and what stays in place: the user's, when switched on
+        (`requirements.current()`), else the demo's own when the scene is a demo set (`demos.requirements_for`), else
+        none (the models decide: `domains.infer`, `domains.STAYS`). Clearance, edit limits and prompt guidance come
+        only from the user's (`fix_settings`)."""
+        doc = requirements.current()
+        if doc is not None:
+            return doc
+        return demos.requirements_for(self.names.get(scene_id) or [])
+
+    def _stays_rule(self, scene_id: str):
+        doc = self.requirements_for(scene_id)
+        held = self._stays.get(scene_id)
+        if held is None or held[0] is not doc:
+            held = (doc, requirements.stays_rule(self.scenes[scene_id], doc))
+            self._stays[scene_id] = held
+        return held[1]
 
     @property
     def step_cache(self) -> Path:
@@ -232,15 +256,28 @@ class Workspace:
         with self.lock:
             return connections.graph(s, self._contacts(scene_id))
 
-    def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025,
+    def clearance(self, scene_id: str, element: str | None = None, other: str | None = None) -> float:
+        """The clearance a check of this pair keeps, in metres: what the requirements ask of it (`fix_settings`), their
+        floor when there is no pair, else the default (`requirements.DEFAULT_CLEARANCE_M`). A check by hand, by chat or
+        over MCP then agrees with keeping the fix."""
+        doc = requirements.current()
+        if doc is None:
+            return requirements.DEFAULT_CLEARANCE_M
+        if element and other and element != other:
+            return self.fix_settings(scene_id, element, other)["clearance_m"]
+        return requirements.resolve(doc).fix_clearance_mm / 1000
+
+    def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float | None = None,
                     obstacles: list[str] = ()) -> dict:
         """Check a move without keeping it. It keeps its joints (connections.plan_move): what it takes along is moved
         too (`placements`), the segments it stretches come back as `preview` meshes, and `joints` says what it carried
         and stretched. A move that can't keep them fails without being tried, with the `reason` (and `joints`: what it
         would pull apart from). With `obstacles` (what the move must clear), what the moved elements stand on is kept
         as a proposal keeps it (`verify.supports`): slid along a slab is not a clash, lifted off it is refused
-        (`reason`). Without them, every contact counts."""
+        (`reason`). Without them, every contact counts. The clearance: given, else the pair's (`clearance`)."""
         s = self.scene(scene_id)
+        if clearance_m is None:
+            clearance_m = self.clearance(scene_id, moved[0] if moved else None, obstacles[0] if obstacles else None)
         with self.lock:
             plan = connections.plan_move(s, moved, delta_m)
             if not plan.ok:
@@ -354,13 +391,13 @@ class Workspace:
             on_event({"type": "escalating", "model": label, "first": bool(first),
                       "first_try": {k: first.get(k) for k in ("understanding", "advice", "attempts", "options")}
                       if first else None})
-        clearance = fix.get("clearance_m", 0.025)
+        clearance = fix.get("clearance_m", requirements.DEFAULT_CLEARANCE_M)
         with self.lock:
             brief = escalation.brief(scene, clash, first, clearance)
-        fix["guidance"] = fix.get("guidance", "") + "\n" + escalation.PACK.read_text()
+        fix["guidance"] = fix.get("guidance", "") + "\n" + domains.prompt("escalation", domains.of(self, scene_id))
         second = asdict(agent.resolve(scene, clash, model, pack=domains.of(self, scene_id), on_event=on_event,
                                       lock=self.lock,
-                                      trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=2,
+                                      trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=escalation.ROUNDS,
                                       brief=brief, label=label, **fix))
         out = {**second, "escalated": True}
         if first:
@@ -425,7 +462,7 @@ class Workspace:
             return float(np.linalg.norm(np.maximum(0, np.maximum(x[0] - y[1], y[0] - x[1]))))
         scene = self.scenes[scene_id]
         # Only partners of a side that can move: a girder's other services are its own clashes, not this fix's.
-        movable = {g for g in (element_a, element_b) if g in scene.bounds() and not scene.element(g).fixed}
+        movable = {g for g in (element_a, element_b) if g in scene.bounds() and not scene.stays(g)}
         found: dict[str, set[str]] = {}
         for c in report.clashes:
             ga, gb = c.a.global_id, c.b.global_id
@@ -495,8 +532,9 @@ class Workspace:
         return out
 
     def check_offset(self, scene_id: str, element: str, other: str, split_m: list[float], dz_m: float,
-                     clearance_m: float = 0.025) -> dict:
+                     clearance_m: float | None = None) -> dict:
         """Try a local offset of `element` around `other` without keeping it (see edits.py)."""
+        clearance_m = self.clearance(scene_id, element, other) if clearance_m is None else clearance_m
         with self.lock:
             attempt, option = agent._try_offset(self.scene(scene_id), {"split_m": split_m, "dz_m": dz_m}, element, other,
                                                 clearance_m)
@@ -513,8 +551,10 @@ class Workspace:
             s.bump([s.index_of(element)])
         return {**asdict(off), "files": [s.index_of(element)], "changed": list(off.pieces)}
 
-    def check_route(self, scene_id: str, element: str, other: str, steps: list[dict], clearance_m: float = 0.025) -> dict:
+    def check_route(self, scene_id: str, element: str, other: str, steps: list[dict],
+                    clearance_m: float | None = None) -> dict:
         """Try a route of `element` past `other` without keeping it (edits.apply_route)."""
+        clearance_m = self.clearance(scene_id, element, other) if clearance_m is None else clearance_m
         with self.lock:
             attempt, option = agent._try_route(self.scene(scene_id), {"steps": steps}, element, other, clearance_m)
         return {"passed": attempt.passed, "reason": attempt.reason, "kind": attempt.kind,
@@ -550,8 +590,9 @@ class Workspace:
                 "pieces": [els for st, els in made if st["kind"] != "move"]}
 
     def check_resize(self, scene_id: str, element: str, other: str, split_m: list[float], depth_m: float,
-                     keep: str = "bottom", clearance_m: float = 0.025) -> dict:
+                     keep: str = "bottom", clearance_m: float | None = None) -> dict:
         """Try a flatter section for a stretch of `element` past `other` without keeping it (edits.apply_resize)."""
+        clearance_m = self.clearance(scene_id, element, other) if clearance_m is None else clearance_m
         with self.lock:
             attempt, option = agent._try_resize(self.scene(scene_id), {"split_m": split_m, "depth_m": depth_m, "keep": keep},
                                                 element, other, clearance_m)
@@ -569,10 +610,11 @@ class Workspace:
             s.bump([s.index_of(element)])
         return {**asdict(r), "files": [s.index_of(element)], "changed": list(r.pieces)}
 
-    def check_penetration(self, scene_id: str, service: str, host: str, clearance_m: float = 0.025) -> dict:
+    def check_penetration(self, scene_id: str, service: str, host: str, clearance_m: float | None = None) -> dict:
         """Try an opening for `service` through `host` without keeping it (edits.penetration), after reading what may
         be done to that kind of host (hosts.read)."""
         s = self.scene(scene_id)
+        clearance_m = self.clearance(scene_id, service, host) if clearance_m is None else clearance_m
         with self.lock:
             prof = None if hosts.hard_rule(s, host) else hosts.profile(s, host)
         model = self.hosts_model if prof else None
@@ -604,7 +646,7 @@ class Workspace:
             if reading.refuses:
                 raise edits.Unsupported(f"{s.element(host).name} may not take an opening: "
                                         f"{reading.reasoning or hosts.reading_text(reading)}")
-            pen = edits.penetration(s, service, host, settings.get("clearance_m", 0.025), reading.fit)
+            pen = edits.penetration(s, service, host, settings.get("clearance_m", requirements.DEFAULT_CLEARANCE_M), reading.fit)
             problems, _ = hosts.check_hole(s, pen, reading)
             if problems:   # the limits as they are now (the requirements may have changed since it was proposed)
                 raise edits.Unsupported("; ".join(problems))

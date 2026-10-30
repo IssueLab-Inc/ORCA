@@ -15,6 +15,7 @@ Fixes cost proposals from the demo's allowance, charged to whoever made the link
 from __future__ import annotations
 
 import functools
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,8 +74,9 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             chats.clear()
             chats[id(w)] = chat.Chat(w)
         return chats[id(w)]
+    # Where people find ORCA, for the client to show: the deploy's own address (SIGHTLINE_PUBLIC_URL), else none.
     mcp = MCPServer("orca", title="ORCA", instructions=INSTRUCTIONS,
-                    website_url="https://dodzikojo--orca-web.us-east.modal.run")
+                    website_url=os.environ.get("SIGHTLINE_PUBLIC_URL") or None)
 
     # ------------------------------------------------------------------ plumbing
 
@@ -337,7 +339,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     @tool(read_only=True)
     def find_openings(element: str, obstacle: str, ctx: Context) -> dict:
         """Openings through `obstacle` in line with the straight segment `element`, with the offset heights (dz,
-        metres) that pass the segment through each with 25 mm clearance."""
+        metres) that pass the segment through each with the required clearance (25 mm unless the requirements ask for
+        more)."""
         return run(ctx, "find_openings", {"element": element, "obstacle": obstacle})
 
     # ------------------------------------------------------------------ fixes

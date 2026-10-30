@@ -1334,3 +1334,35 @@ Workings in the viewer, rejecting a fix, landing in view (Oct 30; owner requests
   reserved for sprinklers", the next request carrying it and Muse Spark's understanding repeating it (no other fix in
   8 ideas, 138 s); the panel scrolled to the result; Workings off and on from the status line; the timeline on one line
   (1,182 and 1,582 px) and wrapped (about 720 px). No page errors.
+
+Nothing fixed to one project, domain, demo or vendor (Oct 30; owner decisions: the requirements fully decide, demos get
+requirements of their own; code `requirements.py`, `domains.py`, `demos.py` and `demos/*.json`, `scene.py`,
+`service.py`, `agent.py`, `connections.py`, `context_eval.py`, `context_planner.py`, `meta_client.py`, `app.py`,
+`mcp_server.py`, the prompts, `web/src/aiNames.ts`, `names.ts`, `Requirements.tsx`, `App.tsx` and the panels):
+- **The requirements decide:** `Doc.domain` (building or machine) and `Doc.stays` (classes fixed in place, plus groups
+  allowed no edits) are new optional fields (older files keep their ids). `IfcScene.stays` replaces `FIXED_CLASSES`,
+  `agent.STAYS` and `Element.fixed` everywhere (combined steps, trims, joints, the wider fix, a second try's brief,
+  nearby clashes, plan merges), asking `Workspace.requirements_for`: the user's file, else the demo's own, else the
+  domain's default classes. Detection and requirements guess teams in the scene's domain. The dialog has "Kind of
+  project" and "Fixed in place".
+- **Demos in one place:** `demos.py` holds the demo sets, start labels, tours, the demo models' property set and smart
+  tags, and each demo's default requirements (`northbank.json`, `palletising-cell.json`, from `default_doc` with the
+  domain and classes written out). `GET /api/samples` lists them; the page picks, labels and finds the cell from them,
+  and file names lose whatever prefix the set shares (`names.ts`), not "Northbank-".
+- **Clearance:** `requirements.DEFAULT_CLEARANCE_M` replaces every 0.025; `Workspace.clearance` gives a check by hand,
+  by chat or over MCP, an opening search and the wider fix the pair's required clearance; `report.md` says it.
+- **Prompts:** `escalation.md` and `context.md` through `domains.prompt`; no example is a demo's answer any more
+  (Rev04's +400 mm duct and split 2.6-4.4 m, the cell's C6 route at 1.75-2.55 / 4.25-5.05 m); per-domain title
+  examples; triage's tolerance is the test's; no fixed 2.5 m; "fixed in place" for "structure" as a rule.
+- **Settings:** `SIGHTLINE_PUBLIC_URL` (MCP website, set by the deploy), `SIGHTLINE_MODEL_LABELS` / `_PRICES`,
+  `META_STREAMS_REASONING`, timeouts and about 20 limits; `GET /api/models` sends each role's model name and the
+  panels use it (`aiNames.ts`). Voice keywords come from the domain and the open models, not Northbank.
+- **Checked:** 629 server tests (`test_defaults.py`, 8 new), 139 web tests, build clean. Evals on the real models,
+  this branch against main: the answer key with images, 3/3 first try at Rev04 heights (+0.40, +0.25, +0.28 m) on
+  main, here with requirements off, and here with Northbank's own requirements switched on (`--requirements demo`);
+  text only, main 3/3 and here 3/3 with them on, and off #061 first try in 3 of 4 runs (its one miss found +0.28 m
+  second). `evals/step_cell.py` passes off and on (17 of 17 planted pairs, C1, C2, C3, C6, C7, C8, Rev B 0).
+  Northbank's check: 464 clashes in 1,732 elements, unchanged. In Chromium: the start buttons from the demos, the
+  requirements dialog on Northbank (Building, the eight classes), switched to Machine and a class removed.
+- **Merged with main after #61:** its Reject words name the model the server reports (`labels.proposal`), not
+  "Muse"; 629 server tests, 142 web tests, build clean.

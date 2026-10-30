@@ -12,8 +12,8 @@ const LAYOUTS: { id: Layout; label: string; hint: string; icon: typeof Square }[
 
 const MODES = [
   { id: "shaded", icon: Box, label: "Shaded: every element in its own colour", key: "V" },
-  { id: "xray", icon: ScanEye, label: "X-ray: see the clash through the building", key: "X" },
-  { id: "context", icon: Radar, label: "Context: only what is within 2.5 m", key: "C" },
+  { id: "xray", icon: ScanEye, label: "X-ray: see the clash through what stands in front of it", key: "X" },
+  { id: "context", icon: Radar, label: "Context: only what is close to the clash", key: "C" },
   { id: "isolate", icon: Target, label: "Isolate: only the clashing elements", key: "I" },
 ] as const;
 const VIEWS: { id: Preset; label: string; key: string }[] = [

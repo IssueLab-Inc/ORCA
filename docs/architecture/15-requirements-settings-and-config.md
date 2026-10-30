@@ -4,7 +4,7 @@
 > `server/sightline/owner.py`, `meta_client.load_env` and `server/sightline/__init__.py`, `limits.env_int` /
 > `env_float`, every environment variable the server, deploy and evals read,
 > `.env.example`, `web/src/reqFile.ts`, `web/src/Requirements.tsx`, the header plumbing in `web/src/api.ts` ·
-> **Checked against code:** 2026-10-30 (`feature/brand-assets`, based on `0390a12`) · **Deeper design:** [docs/requirements.md](../requirements.md)
+> **Checked against code:** 2026-10-30 (`fix/hardcoded-defaults`, based on `069984b`) · **Deeper design:** [docs/requirements.md](../requirements.md)
 
 Three layers decide how ORCA behaves for a request. **Coordination requirements** are a project's own standard
 (what is checked, how strictly, who may move), sent by the page as a file id. **Settings** are the owner's switches
@@ -40,6 +40,8 @@ are dropped, numbers clamped, and anything that names a group that does not exis
 | `by_design[]` | `a_classes` with `b_classes`, `reason`, `source` (user, orca, triage) | Both sides need a class; at most 20 classes a side and 40 rules |
 | `penetrations[]` | Per group (and optionally one `kind` of host, a `hosts.profile` key, with `kind_name`): `rule` (`allowed`, `review`, `never`), `max_mm`, `reviewer` (structure, architecture, fire, safety, services), `reason`, `source` | Default rule `review`; size 10–5,000 mm; left out of the file when empty, so a file without it keeps its id |
 | `guidance` | `triage` and `fixes`, text for Muse | 1,000 chars each (`MAX_GUIDANCE`) |
+| `domain` | `construction` (a building) or `machines`: ORCA's voice, its fix pack, how teams are guessed and the default classes fixed in place | Anything else is unset; unset means as the models were opened (all from STEP: a machine). Left out when unset, so older files keep their ids |
+| `stays` | IFC classes fixed in place: a fix never moves them to make room, nor a run that holds them (a trim between two that stay is still allowed). A `who_moves` group with `edits: none` stays too | Classes like `Ifc…`, at most 60; unset means the domain's (`domains.STAYS`); left out when unset |
 
 - **Selectors** name teams, classes, systems or files, never GlobalIds, so a file can be reused on another project.
   `requirements.Matcher` puts each element in the first group that selects it (a file's team is guessed from its
@@ -49,7 +51,16 @@ are dropped, numbers clamped, and anything that names a group that does not exis
 - **The starting point** (`requirements.default_doc`, `GET /api/scenes/{sid}/requirements/default`): one group per
   team present (or, with one team, one per kind of thing: frame and structure, services, equipment and other, site),
   hard checks between every pair and within each with Site off, and who moves from structure (stays most) to
-  services (moves first). It compiles to what ORCA checks with no file.
+  services (moves first), naming the models' domain. It compiles to what ORCA checks with no file. A demo's scene
+  starts from its own checked-in file instead (`demos.requirements_for`, [19](19-demo-data.md)).
+- **What decides a scene's domain and what stays** (`Workspace.requirements_for`): the user's file when switched on,
+  else the demo's own when the scene is a demo set, else none (the models decide: `domains.infer`, `domains.STAYS`).
+  Only these two come from a demo's file when requirements are off; clearance, edit limits and the prompt guidance
+  come only from a file the user switched on (`Workspace.fix_settings`). `requirements.stays_rule` is the one
+  predicate every fix path asks (`IfcScene.stays`).
+- **Clearance** (`requirements.DEFAULT_CLEARANCE_MM`, 25 mm without a file): every check takes the pair's
+  (`Workspace.clearance`): a proposal, a keep, a check by hand, by chat or over MCP, an opening's search and the wider
+  fix (`context_planner.validate_objective` puts it on the objective).
 
 ### Level and strictness become numbers
 
@@ -265,6 +276,14 @@ everyone per rolling day; 0 means no limit, and unset or empty is the default co
 | `TRIAGE_MODEL` | `meta-models/muse-spark-open` | `meta_client.triage_model_info` | Open-weights model id |
 | `TRIAGE_IMAGES` | `1` | `meta_client.triage_model_info` | `0` sends triage no clash pictures (a text-only host) |
 | `TRIAGE_REASONING_EFFORT` | empty (none sent) | `meta_client.triage_model`, `settings.defaults` | The open-weights model's effort |
+| `SIGHTLINE_MODEL_LABELS` | empty | `meta_client.model_label` (each call) | JSON object, model-id prefix → the name people read (`{"acme-coder": "Acme Coder"}`), over the built-in Muse names (`meta_client.LABELS`); the longest prefix wins. The page gets each role's name from `GET /api/models` (`labels`) |
+| `SIGHTLINE_MODEL_PRICES` | empty | `meta_client.prices`, `cost` (each call) | JSON object, model-id prefix → [USD per million input tokens, per million output tokens], over `meta_client.PRICES` (Muse Wonder's). Spend and the day's budget count what it prices |
+| `META_STREAMS_REASONING` | unset (auto) | `MetaChatModel` | `1` or `0`: the host streams reasoning summaries (the Responses endpoint) or not. Unset: only Meta's own host is assumed to |
+| `SIGHTLINE_MODEL_TIMEOUT_S` | 120 | `MetaChatModel` (each client) | How long one model call may take (proposals, chat, triage, titles, plans) |
+| `SIGHTLINE_ESCALATION_TIMEOUT_S` | 240 | `meta_client.escalation_model` | A second try's model calls |
+| `SIGHTLINE_JUDGE_TIMEOUT_S` | 240 | `built.judge_model`, `spark_judge_model` | Show it built's judges |
+| `SIGHTLINE_VOICE_TIMEOUT_S` | 60 | `meta_client.transcribe` | One recorded voice clip's transcription |
+| `SIGHTLINE_HOSTS_TIMEOUT_S` | 60 | `service.HOSTS_TIMEOUT_S` (import) | A host reading for openings; slower leaves the defaults |
 
 **Caps and budgets**
 
@@ -299,7 +318,22 @@ everyone per rolling day; 0 means no limit, and unset or empty is the default co
 | `SIGHTLINE_STEP_MAX_PARTS` | 20000 | not set | `step.MAX_PARTS` (import) | Parts in one STEP file |
 | `SIGHTLINE_STEP_MAX_TRIANGLES` | 5000000 | not set | `step.MAX_TRIANGLES` (import) | Triangles in one STEP conversion |
 | `SIGHTLINE_VOICE_LIVE_MAX_S` | 120 | not set | `app.VOICE_HANDS_FREE_MAX_S` | How long a hands-free voice session may run (hold to talk is 60 s) |
-| `SIGHTLINE_TRIAGE_WORKERS` | 8 | not set | `app._start_triage` | Triage model calls at a time |
+| `SIGHTLINE_TRIAGE_WORKERS` | 8 | not set | `app._start_triage`, `GET /api/models` (`triage_workers`, the card's "n at a time") | Triage model calls at a time |
+| `SIGHTLINE_TITLE_BATCH` | 40 | not set | `titles.BATCH` (import) | Clashes per titling call |
+| `SIGHTLINE_TITLE_WORKERS` | `SIGHTLINE_TRIAGE_WORKERS` | not set | `titles.WORKERS` (import) | Titling calls at a time (the same host as triage) |
+| `SIGHTLINE_AGENT_ROUNDS` / `SIGHTLINE_AGENT_OPTIONS` | 3 / 3 | not set | `agent.ROUNDS`, `agent.OPTIONS` (import) | A proposal's model rounds, and the verified options it stops at |
+| `SIGHTLINE_PLAN_MAX_ITEMS` | 8 | not set | `plans.MAX_ITEMS` (import) | Clashes one Fix together or root-cause plan takes on |
+| `SIGHTLINE_PLAN_WORKERS` / `SIGHTLINE_PLAN_ROUNDS` | 4 / 2 | not set | `plans.PLAN_WORKERS`, `plans.PLAN_ROUNDS` (import) | A plan's items proposed at a time, and model rounds per item |
+| `SIGHTLINE_ESCALATION_ROUNDS` | 2 | not set | `escalation.ROUNDS` (import) | Model rounds of a second try |
+| `SIGHTLINE_ESCALATION_NEAR_M` / `SIGHTLINE_ESCALATION_NEAR_MAX` | 5 / 80 | not set | `escalation.NEAR_M`, `NEAR_MAX` (import) | The wider neighbourhood a second try is told about: how far, and how many elements |
+| `SIGHTLINE_ESCALATION_ESTIMATE_USD` | 1.0 | not set | `escalation.ESTIMATE_USD` (import) | What a second try holds against the day's budget while it runs |
+| `SIGHTLINE_CHAT_MAX_STEPS` / `SIGHTLINE_CHAT_SESSIONS` / `SIGHTLINE_CHAT_HISTORY` | 8 / 200 / 40 | not set | `chat.MAX_STEPS`, `MAX_SESSIONS`, `MAX_HISTORY` (import) | Model calls per chat message, chats held, messages kept per chat |
+| `SIGHTLINE_AGENT_LINK_TTL_H` / `SIGHTLINE_AGENT_LINK_MAX_AGE_H` | 12 / 24 | not set | `agents.TTL`, `MAX_AGE` (import) | An agent link's life after its last use, and at most |
+| `SIGHTLINE_AGENT_LINKS` / `SIGHTLINE_AGENT_LINK_JOBS` | 200 / 16 | not set | `agents.MAX_LINKS`, `JOBS_PER_LINK` (import) | Agent links held, and jobs per link |
+| `SIGHTLINE_DETECT_CAP` | 5000 | not set | `detect.CAP` (import) | Clashes kept per test (a test that reaches it is partial) |
+| `SIGHTLINE_MODEL_UPLOAD_MAX_FILES` | 8 | not set | `app.MODEL_UPLOAD_MAX_FILES` (import) | Model files in one upload; the page reads it from `GET /api/models` |
+| `SIGHTLINE_EXPORTS_KEEP_S` | 3600 | not set | `app.EXPORTS_KEEP_S` (import) | How long written models and exports are kept |
+| `SIGHTLINE_VOICE_HOLD_MAX_S` | 60 | not set | `app.VOICE_HOLD_MAX_S` (import) | How long hold-to-talk may run |
 | `SIGHTLINE_CONTEXT_MODEL_CALLS` | 6 | not set | `context_planner.Limits.from_env` (each run) | Model calls in one wider-fix search |
 | `SIGHTLINE_CONTEXT_TRIALS` | 12 | not set | same | Arrangements a wider fix may evaluate |
 | `SIGHTLINE_CONTEXT_SECONDS` | 120 | not set | same | Time a wider-fix search may take |
@@ -336,6 +370,7 @@ its default, so a bad value fails the wider-fix run with a `ValueError` rather t
 | Variable | Default | Modal | Read in | What it does |
 |---|---|---|---|---|
 | `MODAL_TASK_ID` | unset | set by Modal | `settings._modal_dict` | Its presence switches the settings store to the Modal Dict |
+| `SIGHTLINE_PUBLIC_URL` | unset | the deploy's URL | `mcp_server.build` (import) | The address MCP clients show as ORCA's website; unset, none is sent |
 | `SIGHTLINE_TRUST_FORWARDED` | unset | `0` | `limits.client_id` | N proxies in front that each append to `X-Forwarded-For`: visitors are keyed by the N-th entry from the right instead of the peer. 0 on Modal, whose edge strips the header and gives the visitor as the peer |
 
 ### Standalone brand-tool overrides

@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO = Path(os.environ.get("DEMO_MODELS", ROOT.parent / "demo-models"))
 sys.path.insert(0, str(ROOT / "server"))
 
-from sightline import agent, escalation  # noqa: E402
+from sightline import agent, domains, escalation  # noqa: E402
 from sightline.meta_client import MetaChatModel, escalation_model, triage_model  # noqa: E402
 from sightline.service import Workspace  # noqa: E402
 
@@ -79,7 +79,7 @@ def _arm(ws: Workspace, sid: str, a: str, b: str, model, first: dict | None, bri
     if brief:
         with ws.lock:
             text = escalation.brief(scene, clash, first, fix.get("clearance_m", 0.025))
-        fix["guidance"] = fix.get("guidance", "") + "\n" + escalation.PACK.read_text()
+        fix["guidance"] = fix.get("guidance", "") + "\n" + domains.prompt("escalation")
     if hasattr(model, "usage"):
         model.usage = type(model.usage)()   # this arm's tokens only
     t = time.perf_counter()

@@ -51,14 +51,58 @@ def load_env(path: Path = ENV_FILE) -> None:
 
 # Models billed per token on the Meta Model API, by id prefix (any Muse Wonder version): USD per input and per output
 # token (reasoning counts as output). Muse Spark's contributor tier and the open-weights host are not counted here.
+# SIGHTLINE_MODEL_PRICES adds or replaces prices: a JSON object of id prefix → [USD per million input tokens, per
+# million output tokens], for another host's models.
 PRICES = {"muse-wonder": (4 / 1e6, 20 / 1e6)}
 FIXED_EFFORT = ("judge",)   # roles whose effort is their own, whatever the owner or everyone's settings say
-LABELS = {"muse-wonder": "Muse Wonder", "muse-spark": "Muse Spark", "meta-models/muse-spark-open": "Muse Spark Open"}
+# Names people read, by id prefix (the longest prefix that matches wins). SIGHTLINE_MODEL_LABELS adds or replaces
+# them: a JSON object of id prefix → name.
+LABELS = {"muse-wonder": "Muse Wonder", "muse-spark": "Muse Spark", "meta-models/muse-spark-open": "Muse Spark Open",
+          "muse-spark-open": "Muse Spark Open", "muse-image": "Muse Image", "muse-voice": "Muse Voice",
+          "muse-voice-transcribe": "Muse Voice Transcribe"}
+# The model each role runs on, when its env var is unset.
+DEFAULT_MODELS = {"proposal": ("META_MODEL", "muse-spark-1.3-contributor"),
+                  "escalation": ("META_ESCALATION_MODEL", "muse-wonder-1.0"),
+                  "image": ("META_IMAGE_MODEL", "muse-image-1.0"),
+                  "voice": ("META_VOICE_MODEL", "muse-voice-transcribe-1.0")}
+
+
+def _env_float(name: str, default: float) -> float:
+    """A number from the environment (limits.env_float, here without importing the app's limits)."""
+    from .limits import env_float
+    return env_float(name, default)
+
+
+def _env_json(name: str) -> dict:
+    """A JSON object from the environment, or {} (unset, empty or not an object)."""
+    try:
+        value = json.loads(os.environ.get(name) or "{}")
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _longest(table: dict, model_id: str):
+    return next((table[p] for p in sorted(table, key=len, reverse=True) if model_id.startswith(p)), None)
+
+
+def model_id(role: str) -> str:
+    """The model id a role runs on (`DEFAULT_MODELS`, its env var first)."""
+    load_env()
+    var, default = DEFAULT_MODELS[role]
+    return os.environ.get(var) or default
 
 
 def model_label(model_id: str) -> str:
-    """A model's name as people read it ("Muse Wonder"), from its id."""
-    return next((name for prefix, name in LABELS.items() if model_id.startswith(prefix)), model_id)
+    """A model's name as people read it ("Muse Wonder"), from its id (`LABELS`, `SIGHTLINE_MODEL_LABELS`)."""
+    labels = {**LABELS, **{str(k): str(v) for k, v in _env_json("SIGHTLINE_MODEL_LABELS").items()}}
+    return _longest(labels, model_id) or model_id
+
+
+def labels() -> dict:
+    """The name of the model behind each role, for the page: proposal, escalation, triage, image, voice."""
+    return {**{role: model_label(model_id(role)) for role in DEFAULT_MODELS},
+            "triage": model_label(triage_model_info()["model"])}
 
 
 class Usage:
@@ -97,9 +141,20 @@ class Usage:
                 "reasoning_tokens": reasoning, "usd": round(cost(model_id, tin, tout), 4)}
 
 
+def prices() -> dict:
+    """`PRICES` with `SIGHTLINE_MODEL_PRICES` over them, USD per token."""
+    extra = {}
+    for prefix, p in _env_json("SIGHTLINE_MODEL_PRICES").items():
+        try:
+            extra[str(prefix)] = (float(p[0]) / 1e6, float(p[1]) / 1e6)
+        except (TypeError, ValueError, IndexError):
+            continue
+    return {**PRICES, **extra}
+
+
 def cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
     """What a call cost in USD (0 for a model not billed per token here)."""
-    price_in, price_out = next((p for prefix, p in PRICES.items() if model_id.startswith(prefix)), (0.0, 0.0))
+    price_in, price_out = _longest(prices(), model_id) or (0.0, 0.0)
     return input_tokens * price_in + output_tokens * price_out
 
 
@@ -133,11 +188,13 @@ def _strip_fence(raw: str) -> str:
 
 class MetaChatModel:
     def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None,
-                 timeout_s: float = 120, reasoning_effort: str | None = None):
+                 timeout_s: float | None = None, reasoning_effort: str | None = None):
         load_env()
+        if timeout_s is None:   # how long one model call may take (SIGHTLINE_MODEL_TIMEOUT_S)
+            timeout_s = _env_float("SIGHTLINE_MODEL_TIMEOUT_S", 120)
         self.base_url = (base_url or os.environ.get("META_API_BASE_URL", "https://api.meta.ai/v1")).rstrip("/")
         self.api_key = api_key or os.environ["META_API_KEY"]
-        self.model = model or os.environ.get("META_MODEL", "muse-spark-1.3-contributor")
+        self.model = model or model_id("proposal")
         self.reasoning_effort = (reasoning_effort if reasoning_effort is not None
                                  else os.environ.get("META_REASONING_EFFORT", "low"))
         self.role = "default"  # "triage" / "escalation": the owner and settings set their effort separately
@@ -148,7 +205,9 @@ class MetaChatModel:
         self.strict = True  # cleared when the host rejects json_schema; then plain JSON mode is used
         # Meta's Responses endpoint streams reasoning summaries (short notes on what the model is working out), which
         # the UI shows while the agent thinks. Cleared if the host does not offer it; chat completions are used then.
-        self.streams_reasoning = "api.meta.ai" in self.base_url
+        # META_STREAMS_REASONING: "1" or "0" says so for any host; unset, Meta's own host is assumed to.
+        streams = os.environ.get("META_STREAMS_REASONING", "").strip()
+        self.streams_reasoning = streams == "1" if streams in ("0", "1") else "api.meta.ai" in self.base_url
 
     @property
     def effort(self) -> str | None:
@@ -293,9 +352,9 @@ def transcribe(wav: bytes, keywords: list[str] | None = None, client: httpx.Clie
     """
     load_env()
     base = os.environ.get("META_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/")
-    settings = {"model": os.environ.get("META_VOICE_MODEL", "muse-voice-transcribe-1.0"), "audioEncoding": "WAV",
+    settings = {"model": model_id("voice"), "audioEncoding": "WAV",
                 "mode": "PUSH_TO_TALK", "languageBias": ["English"], **({"keywords": keywords} if keywords else {})}
-    c = client or httpx.Client(timeout=60)
+    c = client or httpx.Client(timeout=_env_float("SIGHTLINE_VOICE_TIMEOUT_S", 60))
     r = c.post(f"{base}/asr/transcribe", headers={"Authorization": f"Bearer {os.environ['META_API_KEY']}",
                                                   "Accept": "application/json"},
                files={"request": (None, json.dumps(settings), "application/json"), "audio": ("clip.wav", wav, "audio/wav")})
@@ -309,16 +368,18 @@ def escalation_info() -> dict:
     {model, label, mode: off | button | auto, available}."""
     from . import settings
     load_env()
-    model = os.environ.get("META_ESCALATION_MODEL", "muse-wonder-1.0")
+    model = model_id("escalation")
     return {"model": model, "label": model_label(model), "mode": settings.escalation(),
             "available": bool(os.environ.get("META_API_KEY"))}
 
 
-def escalation_model(timeout_s: float = 240) -> MetaChatModel:
+def escalation_model(timeout_s: float | None = None) -> MetaChatModel:
     """The larger model for a second try at a clash (docs/escalation.md): Muse Wonder by default, effort medium
     unless the owner or the settings say otherwise (role "escalation"), every call charged to the day's limit."""
     from . import spend
     load_env()
+    if timeout_s is None:
+        timeout_s = _env_float("SIGHTLINE_ESCALATION_TIMEOUT_S", 240)
     model = MetaChatModel(model=escalation_info()["model"], timeout_s=timeout_s,
                           reasoning_effort=os.environ.get("META_ESCALATION_EFFORT", "medium"))
     model.role = "escalation"
@@ -336,12 +397,12 @@ def triage_model_info() -> dict:
     if key and settings.open_weights():
         return {"model": os.environ.get("TRIAGE_MODEL", "meta-models/muse-spark-open"), "open_weights": True,
                 "images": os.environ.get("TRIAGE_IMAGES", "1") != "0"}
-    return {"model": os.environ.get("META_MODEL", "muse-spark-1.3-contributor"), "open_weights": False, "images": True,
+    return {"model": model_id("proposal"), "open_weights": False, "images": True,
             "note": "The open-weights model is switched off; using Muse Spark." if key
             else "No open-weights host configured (TRIAGE_API_KEY); using Muse Spark."}
 
 
-def triage_model(timeout_s: float = 120) -> tuple[MetaChatModel, dict]:
+def triage_model(timeout_s: float | None = None) -> tuple[MetaChatModel, dict]:
     """The model for bulk triage and clash titles, and a description of it for the UI (`triage_model_info`)."""
     info = triage_model_info()
     if info["open_weights"]:

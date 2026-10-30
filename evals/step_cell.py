@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO = Path(os.environ.get("DEMO_MODELS", ROOT.parent / "demo-models"))
 sys.path.insert(0, str(ROOT / "server"))
 
-from sightline import connections, detect, edits, plans, step, verify  # noqa: E402
+from sightline import connections, demos, detect, edits, plans, requirements, step, verify  # noqa: E402
 from sightline.meta_client import triage_model  # noqa: E402
 from sightline.service import Workspace  # noqa: E402
 
@@ -61,7 +61,13 @@ def main():
     ap.add_argument("--cell", type=Path, default=DEMO / "palletising-cell")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--no-classes", action="store_true", help="convert without the model (every part a proxy)")
+    ap.add_argument("--requirements", help="run switched on under a requirements file: a path, or 'demo' for the "
+                                           "cell's own (server/sightline/demos/palletising-cell.json)")
     args = ap.parse_args()
+    if args.requirements:   # as the page sends it: every call of the run reads it (requirements.current)
+        doc = (demos.requirements_for(["PC-03-Palletising-Cell-RevA.step"]) if args.requirements == "demo"
+               else requirements.parse(json.loads(Path(args.requirements).read_text())))
+        requirements.enter(requirements.register(doc))
     sys.path.insert(0, str(args.cell / "Code"))
     from celllayout import build
     from verify_cell import PLANTED, by_design

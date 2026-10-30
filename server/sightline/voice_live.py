@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from websockets.asyncio.client import connect  # module level so tests can swap in a fake Meta
 
+from . import meta_client
 from .meta_client import load_env
 
 RATE_BYTES = 32_000  # 16 kHz x 16-bit mono
@@ -52,7 +53,7 @@ def handshake(mode: str, keywords: list[str]) -> dict:
     """The first frame Meta expects, with the key: never logged, never sent to the browser."""
     load_env()
     return {"authorization": {"accessToken": f"Bearer {os.environ['META_API_KEY']}"},
-            "audioEncoding": "PCM_16KHZ", "model": os.environ.get("META_VOICE_MODEL", "muse-voice-transcribe-1.0"),
+            "audioEncoding": "PCM_16KHZ", "model": meta_client.model_id("voice"),
             "mode": mode, "partialMode": "CUMULATIVE", "emitAudioProgress": False,
             "languageBias": ["English"], **({"keywords": keywords} if keywords else {})}
 

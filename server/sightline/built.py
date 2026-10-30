@@ -36,8 +36,9 @@ import httpx
 import numpy as np
 from PIL import Image, ImageFilter
 
-from . import owner, spend
+from . import meta_client, owner, spend
 from .meta_client import MetaChatModel, load_env
+from .limits import env_float
 
 PROMPT_VERSION = "1"
 CACHE = Path(os.environ.get("SIGHTLINE_BUILT_CACHE") or Path(tempfile.gettempdir()) / "sightline-built")  # empty: unset
@@ -216,12 +217,12 @@ def gate(picture: np.ndarray, p: Passes, n: int = 8) -> dict:
 
 # ------------------------------------------------------------------------------------------------- the models
 
-def restyle(look: bytes, lines: bytes, extra: str = "", timeout_s: float = 300) -> bytes:
+def restyle(look: bytes, lines: bytes, extra: str = "", timeout_s: float | None = None) -> bytes:
     """One picture from Muse Image (Responses, reasoning high: S0's most faithful setting). Charges $0.01."""
     load_env()
     base = os.environ.get("META_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/")
     url = lambda b: "data:image/png;base64," + base64.b64encode(b).decode()  # noqa: E731
-    body = {"model": os.environ.get("META_IMAGE_MODEL", "muse-image-1.0"), "store": False,
+    body = {"model": meta_client.model_id("image"), "store": False,
             "input": [{"role": "user", "content": [{"type": "input_text", "text": PROMPT + extra},
                                                    {"type": "input_image", "image_url": url(look)},
                                                    {"type": "input_image", "image_url": url(lines)}]}],
@@ -241,7 +242,7 @@ def restyle(look: bytes, lines: bytes, extra: str = "", timeout_s: float = 300) 
 def judge_model() -> MetaChatModel:
     """Muse Wonder at medium effort (S0's judge), its tokens charged to the day's budget."""
     load_env()
-    model = MetaChatModel(model=os.environ.get("META_ESCALATION_MODEL", "muse-wonder-1.0"), timeout_s=240,
+    model = MetaChatModel(model=meta_client.model_id("escalation"), timeout_s=env_float("SIGHTLINE_JUDGE_TIMEOUT_S", 240),
                           reasoning_effort="medium")
     model.role = "judge"   # neither the owner's nor everyone's effort for Muse Spark or a second try
     model.on_cost = spend.charge
@@ -252,7 +253,7 @@ def spark_judge_model() -> MetaChatModel:
     """The lighter check, when the day's Muse Wonder budget is spent: Muse Spark (contributor tier, not billed per
     token), three judges where Wonder has two. S0: it passed shape changes Wonder caught, so the picture says so."""
     load_env()
-    model = MetaChatModel(timeout_s=240, reasoning_effort="medium")
+    model = MetaChatModel(timeout_s=env_float("SIGHTLINE_JUDGE_TIMEOUT_S", 240), reasoning_effort="medium")
     model.role = "judge"
     return model
 

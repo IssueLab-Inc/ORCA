@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Building2, Info, PenLine, RotateCcw } from "lucide-react";
 import type { BuiltEvent, BuiltResult } from "./api";
+import { aiName } from "./aiNames";
 
 /** Show it built (docs/show-it-built.md): one fix's picture, while it is drawn and checked, then beside ORCA's view. */
 export interface BuiltRun {
@@ -16,7 +17,7 @@ export interface BuiltRun {
 export function builtStep(e: BuiltEvent): string {
   switch (e.type) {
     case "drawing": return e.shared ? "This view is already being drawn: waiting for that picture…"
-      : e.round === 1 ? "Muse Image is drawing two pictures from ORCA's view…" : "Drawing two more, told what the judges found…";
+      : e.round === 1 ? `${aiName("image")} is drawing two pictures from ORCA's view…` : "Drawing two more, told what the judges found…";
     case "gate": return e.passed ? `Picture ${e.picture} keeps to the model's outline; the judges look next…`
       : e.error ? `Picture ${e.picture} failed: ${e.error}` : `Picture ${e.picture} strayed from the model's outline: dropped`;
     case "judging": return `The judges are comparing picture ${e.picture} with the model view…`;
@@ -55,14 +56,14 @@ export function BuiltView({ run, onRetry, reopen }: { run: BuiltRun; onRetry?: (
     </div>);
   if (run.status === "failed" || !r || r.status !== "done" || !r.image_url) return (
     <div className="built failed" role="status">
-      <p><b>No built view.</b> {run.error ?? r?.why ?? "Muse Image couldn't keep to the model here."}</p>
+      <p><b>No built view.</b> {run.error ?? r?.why ?? `${aiName("image")} couldn't keep to the model here.`}</p>
       <p className="hint">ORCA's own views of the fix stand; the model is the record.</p>
       {reopen ? <button className="btn small" onClick={reopen.onClick}><RotateCcw size={13} aria-hidden /> {reopen.label}</button>
         : onRetry && <button className="btn small" onClick={onRetry}><RotateCcw size={13} aria-hidden /> Try again</button>}
     </div>);
-  const judge = r.judge ?? "Muse Wonder";
+  const judge = r.judge ?? aiName("escalation");
   const check = `Checked against the model: outline match ${r.gate ? r.gate.f.toFixed(2) : "?"}${verdictText(r) ? `; ${judge} judges: ${verdictText(r)}` : ""}`
-    + `${judge !== "Muse Wonder" ? " (the lighter check: today's Muse Wonder budget was spent)" : ""}${r.cached ? " (drawn before)" : ""}.`;
+    + `${judge !== aiName("escalation") ? ` (the lighter check: today's ${aiName("escalation")} budget was spent)` : ""}${r.cached ? " (drawn before)" : ""}.`;
   return (
     <figure className="built done">
       <div className="built-stage">
@@ -81,7 +82,7 @@ export function BuiltView({ run, onRetry, reopen }: { run: BuiltRun; onRetry?: (
         <span className="ibtn" tabIndex={0} aria-label={check} data-tip={check}><Info size={14} aria-hidden /></span>
       </div>
       <figcaption>
-        <Building2 size={13} aria-hidden /> Illustration by Muse Image from ORCA's model view. The model is the record.
+        <Building2 size={13} aria-hidden /> Illustration by {aiName("image")} from ORCA's model view. The model is the record.
         {run.cut && <span className="hint"> {run.cut}</span>}
       </figcaption>
     </figure>);

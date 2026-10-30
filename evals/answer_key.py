@@ -19,9 +19,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 
-from sightline import agent, reports  # noqa: E402
+import json  # noqa: E402
+
+from sightline import agent, demos, reports, requirements  # noqa: E402
 from sightline.meta_client import MetaChatModel  # noqa: E402
 from sightline.scene import IfcScene  # noqa: E402
+from sightline.service import Workspace  # noqa: E402
 
 GIRDER = "1eVHoPtl1IhAbbhivqVqb0"
 KEY = {  # label: (service GlobalId, Rev04's fix as offset dz)
@@ -49,9 +52,21 @@ def main() -> None:
     p.add_argument("--runs", type=int, default=1)
     p.add_argument("--no-images", action="store_true")
     p.add_argument("--effort", help="reasoning effort (default: META_REASONING_EFFORT, else low)")
+    p.add_argument("--requirements", help="run under a requirements file: a path, or 'demo' for the demo's own "
+                                          "(server/sightline/demos/northbank.json); the fixes then read it as the app does")
     args = p.parse_args()
 
-    scene = IfcScene([SAMPLES / f"Northbank-{n}.ifc" for n in ("Structure", "MEP", "Architecture")])
+    files = [f"Northbank-{n}.ifc" for n in ("Structure", "MEP", "Architecture")]
+    ws, sid, doc = None, None, None
+    if args.requirements:
+        doc = (demos.requirements_for(files) if args.requirements == "demo"
+               else requirements.parse(json.loads(Path(args.requirements).read_text())))
+        requirements.enter(requirements.register(doc))
+        ws = Workspace(samples=SAMPLES)
+        sid = ws.open(files)
+        scene = ws.scene(sid)
+    else:
+        scene = IfcScene([SAMPLES / f for f in files])
     scene.bounds()
     model = MetaChatModel(timeout_s=240, reasoning_effort=args.effort)
     out = ROOT / "evals" / "results.csv"
@@ -60,7 +75,8 @@ def main() -> None:
         pics = [] if args.no_images else images_for(service)
         for run in range(1, args.runs + 1):
             t = time.perf_counter()
-            result = agent.resolve(scene, agent.Clash(GIRDER, service, images=pics), model, max_rounds=1, want=3)
+            fix = ws.fix_settings(sid, GIRDER, service) if ws is not None else {}
+            result = agent.resolve(scene, agent.Clash(GIRDER, service, images=pics), model, max_rounds=1, want=3, **fix)
             latency = time.perf_counter() - t
             first = result.attempts[0] if result.attempts else None
             top = result.options[0] if result.options else None
@@ -69,7 +85,8 @@ def main() -> None:
                 return f"offset {a.split_m} {a.delta_m[2]:+.2f}" if a.kind == "offset" else f"move {a.delta_m}"
             notes = (f"first: {first.title} ({describe(first)}){'' if first.passed else ', ' + first.reason}"
                      if first else "no candidates")
-            row = [datetime.date.today().isoformat(), "northbank-rev03", label, model.model, "ABC" if pics else "none",
+            row = [datetime.date.today().isoformat(), "northbank-rev03", label, model.model,
+                   ("ABC" if pics else "none") + (f"; requirements {requirements.label(doc)}" if doc else ""),
                    run, f"{latency:.1f}", len(result.attempts), sum(a.passed for a in result.attempts),
                    "yes" if first and first.passed else "no",
                    ",".join(f"{v:g}" for v in first.delta_m) if first else "",
