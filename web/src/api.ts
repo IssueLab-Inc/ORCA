@@ -1,5 +1,6 @@
 import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
+import type { Datums } from "./viewer/views";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
 export interface Verdict {
   passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number;
@@ -516,6 +517,8 @@ export const api = {
   models: () => call<{ triage: TriageModel; escalation?: EscalationInfo; built_views?: boolean; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
   /** Every physical element's class and name (GlobalId → [class, name]): a built view's cutaway costs, its caption. */
   classes: (sceneId: string) => call<Record<string, [string, string]>>(`/scenes/${sceneId}/classes`),
+  /** Levels, grid axes and each element's storey (docs/views.md, "Datums from the server"). */
+  datums: (sceneId: string) => call<Datums>(`/scenes/${sceneId}/datums`),
   /** Show it built: the passes of one view (Viewer.captureBuilt) → a checked restyle, or why not. */
   built: async (sceneId: string, passes: { look: string; ids: string; normals: string }, fixKind: string,
                 onEvent: (e: BuiltEvent) => void, signal?: AbortSignal): Promise<BuiltResult> => {

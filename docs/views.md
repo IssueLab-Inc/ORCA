@@ -26,7 +26,31 @@ It is new work, written for ORCA during the event. No code from other products.
   model, class and level, hide and isolate.
 - This document first, then a branch per slice (`feature/…`) and a PR.
 
-## What the viewer has now (Oct 30)
+## Built (Oct 30)
+
+All four phases (below) are built on `feature/drawing-views`, one branch rather than a PR per phase. Where the build
+differs from the design that follows, the build wins and the design text says so:
+
+- **`OrbitControls` stays.** The orbit pivot is the point under the pointer: at the press the controls' target slides
+  along the view ray to that depth (`Viewer.press`), so nothing jumps; `camera-controls` was not needed. A pick on
+  Northbank takes about 8 ms.
+- **Wireframe is left out.** three.js cannot draw a `BatchedMesh` as wireframe (its multi-draw ranges index
+  triangles), and building feature edges per model was not worth it with Shaded with edges and Hidden line there. The
+  styles are Shaded, Consistent colours, Shaded with edges, Hidden line and X-ray.
+- **Walk is left out** (later).
+- **The view cube** sits at the 3D pane's bottom right (104 px) with Home beside it; Set this view as Home is in the
+  rail's Camera popover.
+- **Pane headers** sit at each pane's top left; maximise is a button in the header (not a double-click). A right-click
+  in a drawing view turns the 3D view to that point at once (no menu).
+- **Elevations** have a far clip (header only); no crop. A section's look direction flips from its header, not by
+  clicking a head in plan.
+- **Card actions:** Zoom to it, Hide, Isolate, Section box, Hide all / Isolate all of its class. Show in plan is later.
+- **Measured** (Playwright, software GL in the cloud session; frame times on a real GPU are still to measure): idle,
+  no drawing view redraws; orbiting the 3D view in Quad, none (only the plan's 3D camera mark is redrawn); a new clash,
+  three (one per drawing view). A/B/C pictures, thumbnails, `capture()` and Show it built's passes are byte-identical in
+  Single and Quad, and with a user style, filters, a temporary hide and orthographic on.
+
+## What the viewer had before (Oct 30)
 
 - `web/src/viewer/Viewer.ts`: one `WebGLRenderer` (`preserveDrawingBuffer`), one perspective camera, `OrbitControls`
   on the canvas. One `BatchedMesh` per file (plus `glass` for see-through elements); the pair in focus is drawn as its
@@ -59,7 +83,7 @@ with a clash still picked. So the clash and the camera become independent.
   chat, the tour or an agent link, including a click on the clash already picked (as today): the 3D view flies to
   where the pair meets, and each drawing view goes to it as well (Views and layouts, "Every view goes to the clash").
   Between clicks the views are free: navigating away keeps the clash drawn, and the next click brings every view back.
-- **Fly to clash** (Views popover, on by default, kept per browser in `sightline.views.fly`) is the way to turn that off
+- **Fly to clash** (Camera popover, on by default, kept per browser in `sightline.views.fly`) is the way to turn that off
   for those who want it: picking then only highlights the clash in every view and nothing moves (Navisworks' auto-zoom
   off); **F** takes the views there when wanted.
 - **The camera moves only when asked:** picking a clash (Fly on), F, H, a preset or the view cube, a saved view,
@@ -81,29 +105,26 @@ with a clash still picked. So the clash and the camera become independent.
 - **Mouse:** left drag orbits **around the point under the pointer** (the pivot moves there at the press, without a
   jump; empty sky keeps the last pivot), right or middle drag pans, the wheel zooms to the cursor (as today),
   Shift + left drag pans (trackpads). Touch as today: one finger orbits, two pan and pinch.
-- **Controls:** `camera-controls` (MIT, pinned) replaces `OrbitControls` for the 3D view. It has the pivot without a jump
-  (`setOrbitPoint`), dolly to the cursor, orthographic cameras, smooth moves (replacing `Viewer.flight`) and fitting a
-  box with padding. The Viewer keeps its own API (`flyTo`, `frameFix`, `orbit`, `onUserCamera`), so the pilot,
-  captures and tour do not change. First step of the phase: a spike. If it breaks a capture or the pilot, keep
-  `OrbitControls` and shift the target along the view ray for the pivot.
-- **View cube** at the 3D pane's top right: click a face, edge or corner (26 directions); drag it to orbit; Home above
-  it. Front looks north (from the south), Right from the east, Back from the north, Left from the west, as in the
+- **Controls:** `OrbitControls` stays (built: the target shifts along the view ray for the pivot; `camera-controls`
+  was the alternative and was not needed). The Viewer keeps its own API (`flyTo`, `frameFix`, `orbit`,
+  `onUserCamera`), so the pilot, captures and tour do not change.
+- **View cube** at the 3D pane's bottom right: click a face, edge or corner (26 directions); drag it to orbit; Home
+  beside it. Front looks north (from the south), Right from the east, Back from the north, Left from the west, as in the
   elevations. It turns about the current pivot and keeps the distance.
 - **Perspective or orthographic** (**O**, or the cube's menu). Orthographic zooms by scale; picking works in both.
 - **Presets:** 1–4 stay (Top, Front, Right, Iso); the cube has the rest, including the four isometrics.
-- **Home:** H fits the whole model as today; "Set this view as Home" in the cube's menu makes H fly there instead (per
-  project, `sightline.views.<project>`).
+- **Home:** H fits the whole model as today; "Set this view as Home" (the rail's Camera popover) makes H fly there
+  instead (per project, `sightline.views.<project>`).
 - **F frames the selection:** the selected element if one is selected (the 3D view frames it), else the clash (every
   unpinned view, as a click on it does).
 - **Back and forward:** each camera jump (a clash, F, H, a preset, the cube, a saved view) goes on a history; **[** and
-  **]** step through it, and so do buttons in the Views popover.
+  **]** step through it, and so do buttons in the Camera popover.
 - **Saved views:** "Save this view" names the camera (position, pivot, projection), style, visibility and section box;
-  the Views popover lists them; per project in `localStorage`.
+  the Saved views popover lists them; per project in `localStorage`.
 - **Section box anywhere:** round the clash, the selected element, what is in view (the model's box near the pivot) or
   the whole model; each face has a grip to drag, live. **S** toggles it: round the clash if there is one, else the
   selection, else what is in view.
-- **Walk** (first person: W A S D, mouse look, speed from the model's size, Esc leaves): last in its phase if time
-  allows, else later.
+- **Walk** (first person: W A S D, mouse look, speed from the model's size, Esc leaves): not built, later.
 
 ### Visual styles
 
@@ -116,7 +137,7 @@ shown, as today.
 | **Consistent colours** | unlit, own colours | disciplines read by colour, no shading |
 | **Shaded with edges** | Shaded plus dark outlines on every element | the drawing views' linework pass, in 3D |
 | **Hidden line** | paper white and dark lines | the drawing views' fill and linework |
-| **Wireframe** | element outlines only, see-through | feature edges per model, built once on first use; moved and replaced elements draw their own, like the pair's. Measure on Northbank first: dropped if too slow |
+| ~~Wireframe~~ | element outlines only, see-through | not built: three.js cannot draw a `BatchedMesh` as wireframe |
 | **X-ray** | everything see-through, the pair and the selection solid | today's X-ray (**X**), now with no clash too: services seen through the façade |
 
 The pair, the selection, previews, trials and hits keep their colours in every style.
@@ -129,9 +150,9 @@ Three layers, each applying to every open view (the toggle above covers only the
    the key again goes back to All. The focus is the clash, or the selected element when no clash is picked: isolate an
    element without making it side A. Off when there is no focus, as today.
 2. **Filters** (Revit's visibility / graphics, simplified): by model (as today), by class (Walls, Slabs, Beams, Ducts…,
-   with counts) and by level (one level, or a range). A Visibility popover with checkboxes and Show all. The loader
-   records each element's class (web-ifc `GetLineType`) and storey (`IfcRelContainedInSpatialStructure`) from the
-   model it already has open. Filters are for viewing only: the check, triage and fixes never see them.
+   with counts) and by level. A Visibility popover with checkboxes and Show all. Each element's class comes from
+   `GET /api/scenes/{sid}/classes` and its storey from the datums route (built: the server reads both, rather than the
+   loader). Filters are for viewing only: the check, triage and fixes never see them.
 3. **Hide and isolate, for now** (Revit's temporary hide / isolate): Hide, Isolate, Hide this class, Isolate this
    class, from the element card. While any is on, the 3D pane has a cyan frame and a "3 hidden · Reset" chip. Hidden
    elements are not picked.
@@ -140,8 +161,8 @@ What wins: a hidden model, then a temporary hide or isolate, then the filters, t
 a fix preview and the agent's trials always show while they are on screen.
 
 **Selection.** A single click selects an element (as today) and now draws it in blue (`#2f8fdf`) with an outline in
-every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate, Section box round it and Show in plan
-(the plan goes to its level and centres it), beside Set as A / B.
+every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate, Section box round it and Hide all /
+Isolate all of its class, beside Set as A / B (Show in plan is later).
 
 ### Keys
 
@@ -154,7 +175,7 @@ every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate
 | [ and ] | back / forward through camera jumps | new |
 | Q | layout: Single, Two, Quad | new |
 | S, E, M | section box, outlines, measure | as today |
-| Esc | the measure, card, lightbox, selection, then the clash | longer chain |
+| Esc | the measure, lightbox, selection (and its card), then the clash | longer chain |
 
 ## Views and layouts
 
@@ -166,7 +187,8 @@ every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate
 | **Elevation** N / S / E / W | orthographic, from outside the model's box | far clip (off by default), crop | the side facing the section's look direction |
 
 - **Layouts.** Single (3D, as today), Two (Plan · 3D), Quad (Plan · 3D / Section · Elevation). Each pane can show any
-  view. Double-click a pane's title to maximise it; again to go back. Key **Q** cycles Single → Two → Quad.
+  view. The maximise button in a pane's header gives it the stage; again to go back. Key **Q** cycles Single → Two →
+  Quad.
 - **Per device.** Desktop up to Quad; tablet Single or Two; phone Single only (its bottom sheet needs the room).
 - **Every view goes to the clash.** Each click on a clash (Fly to clash on, the default) frames it in every unpinned
   view and sets:
@@ -210,17 +232,16 @@ Revit's view range, without its separate top):
 | Setting | What it does | Default |
 |---|---|---|
 | **Line** (position and direction) | the cut plane; the near side removed | through the clash, along the service's run |
-| **Look direction** | which side is kept (flip) | the side the 3D camera is on |
-| **Far clip** | everything further than this behind the line is removed, not cut; off = to the model's edge | 2.000 behind the pair (`reach`-scaled for small models) |
-| **Crop width** (left, right) | the extent along the line | the pair plus 2.000 each side |
-| **Crop top and bottom** | the extent up and down | lowest level − 1.000 to highest + 1.000 (the model's box with no levels) |
+| **Look direction** | which side is kept (flip) | the line's left (north for a line running east) |
+| **Far clip** | everything further than this behind the line is removed, not cut; off = to the model's edge | 2.000 beyond where the pair meets (`reach`-scaled for small models) |
+| **Crop width** (left, right) | the extent along the line | half the run (at most 6.000) plus 2.000 each side |
+| **Crop top and bottom** | the extent up and down | the model's box, 0.5 m beyond it (`reach`-scaled) |
 
 - In plan the section is drawn as its box: the line (heavy, with look-direction heads and the section's name), the far
   clip (dashed) and the crop sides (thin). Drag the line along its normal to move it, its end grips to turn it (Shift
-  for 15° steps), the far clip line to set the depth, the sides to set the width; click a head to flip.
+  for 15° steps), the far clip line to set the depth, the sides to set the width; flip from the header.
 - In the section itself, the crop's top and bottom edges have grips. Header fields hold the same values.
-- **Elevations** have a far clip and a crop the same way (far clip off by default), set in plan from the elevation
-  marker's line, and in the header.
+- **Elevations** have a far clip (off by default), set in the header; no crop (later).
 
 **What gets cut.** Only the cut plane (a plan's cut, a section's line) cuts: the stencil passes that fill cut faces
 run with that one plane, so a column through both a plan's cut and its bottom is filled, and nothing is filled at a
@@ -279,7 +300,7 @@ view's camera (three.js is Y up: server point (x, y, z) → (x, z, −y)).
 - **Levels** in sections and elevations: a line across the view with a head ("Level 02 · +4.000").
 - **The clash:** a revision cloud round where the pair meets (`meetingZone`) and its number (#1).
 - **Linked marks:** in plan, each section's box (line with look-direction heads, far clip, crop sides), each
-  elevation's marker and far clip, and the 3D camera (position and field of view); in sections and elevations, each
+  elevation's marker, and the 3D camera (position and field of view); in sections and elevations, each
   plan's cut plane (dashed) and bottom (dotted) with their values.
 - **Sheet furniture:** view title bottom left ("Level 01 · Floor plan · cut +1.200 · bottom +0.000"; a section's far clip), scale bar and the nearest
   standard scale ("≈ 1:100", from pixels per metre at 96 dpi), project north arrow in plans (true north is later).
@@ -292,6 +313,7 @@ with it):
 ```json
 {"levels": [{"name": "Level 02", "elevation_m": 4.0, "height_m": 4.0}],
  "grids":  [{"tag": "1", "grid": "Structural grid", "start": [-10.5, -8.5, 0.0], "end": [-10.5, 8.5, 0.0]}],
+ "storeys": {"1eVHoPtl1IhAbbhivqVqb0": "Level 02"},
  "sources": {"grids": "Northbank-Grids.ifc"}}
 ```
 
@@ -299,6 +321,7 @@ with it):
   sometimes relative), scaled per file. Levels are merged across files by name and elevation (to the millimetre);
   `height_m` is the gap to the next level.
 - Grid axes are their polylines (`IfcGrid` U, V and W axes) through the grid's placement.
+- `storeys` names each element's storey (`IfcRelContainedInSpatialStructure`), for the level filter.
 - **Grids as context.** When none of the scene's files has an `IfcGrid` and the scene was opened from samples, the server
   reads one from `<prefix>-Grids.ifc` in the samples folder, where the prefix is the files' shared name ("Northbank").
   It is read for its grid only: never added to the scene, the check or export. Uploads use their own grids.
@@ -314,7 +337,7 @@ with it):
   clip planes and outside its crop. In
   3D the section box rules, as today. Double-click picks A then B in any view.
 - **Linked handles** (View range and clip planes, above): in plan, a section's line, ends, far clip and sides, and an
-  elevation's far clip; in sections and elevations, each plan's cut and bottom, and the view's own crop top and
+  elevation's marker; in sections and elevations, each plan's cut and bottom, and the view's own crop top and
   bottom. The view a handle belongs to redraws as it is dragged. A handle drag never pans the view it is in; Escape
   puts the value back.
 - **Pane chrome** (`web/src/ViewPanes.tsx`): a header per pane with the view picker (3D, Plan per level, Section,
@@ -324,8 +347,8 @@ with it):
   starts after it.
 - **Camera tools.** F takes every unpinned view to the clash, as a click on it does (or frames the selected element in
   3D). H, the presets, the view cube, back / forward and saved views act on the 3D view. Fit in a
-  drawing view's header frames the model there; a right-click (no drag) on a point in a drawing view offers Look here
-  in 3D, which turns the 3D view to it.
+  drawing view's header frames the model there; a right-click (no drag) on a point in a drawing view turns the 3D
+  view to it (Look here).
 - **Labels.** The marker and measure labels stay with the 3D pane, offset by its rectangle.
 
 ## What must not change
@@ -371,21 +394,22 @@ time while orbiting in Quad, and while the pilot plays a proposal.
 0. **Navigate freely (3D only, before any new view):** leaving a clash, Fly to clash, the Esc chain, the clash chip,
    selection in blue and its card actions, round-the-focus on a selection, filters by model / class / level, temporary
    hide and isolate, X-ray and Consistent colours without a clash, orbit about the point under the pointer, view cube,
-   perspective / orthographic, presets, Home, back / forward, saved views, section box anywhere with grips. Walk if
-   time allows.
+   perspective / orthographic, presets, Home, back / forward, saved views, section box anywhere with grips. (Walk:
+   later.)
 1. **Views:** layouts, orthographic plan / section / elevation, live cuts, every clip plane set in the header
    (view range, presets, far clip, crop), panes and picking per view, the toggle,
    the datums endpoint, the capture guard.
 2. **Drawing style:** fill, poché with the interference colour, linework, cut outline, grids, levels, cloud, title,
-   scale, north; in 3D, Shaded with edges, Hidden line and Wireframe from the same passes.
+   scale, north; in 3D, Shaded with edges and Hidden line from the same passes (Wireframe left out).
 3. **Linked:** clash defaults, the handles (section box in plan, cut and bottom in sections and elevations, crop
    edges), the 3D camera in plan, Screenshot of the layout.
 
-Each phase is its own PR and leaves the app working.
+Each phase leaves the app working. Built Oct 30, all four on `feature/drawing-views`.
 
 ## Later, not in the hackathon build
 
-Per-view visibility and styles (each view its own filters); Revit's "reveal hidden"; multi-select with Shift;
+Walk; Wireframe; Show in plan on the element card; an elevation's crop and its far clip dragged in plan;
+per-view visibility and styles (each view its own filters); Revit's "reveal hidden"; multi-select with Shift;
 Exact vector cuts (plane-triangle intersection on the CPU) for DXF / PDF sheets; dimensions; hatches by material
 (the models carry no materials ORCA reads yet); Revit's separate top and view depth; plan crop regions; true north; reflected
 ceiling plans; saved views and sheets.

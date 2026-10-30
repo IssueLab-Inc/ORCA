@@ -564,10 +564,13 @@ does without.
 | `sightline.triage.compact` | `Triage.tsx` | Whether the Triage card is folded |
 | `sightline.voice.handsfree` | `Chat.tsx` | Hands-free voice on or off |
 | `sightline.agent.setup` | `Agent.tsx` | Set once this browser has made a link (folds the first-time setup) |
+| `sightline.views.fly` | `App.tsx` | Fly to clash on or off (`"1"` / `"0"`, default on) |
+| `sightline.views.layout` | `App.tsx` | The view layout (`single`, `two`, `quad`); a phone shows Single and a tablet at most Two whatever is kept |
+| `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box) for a set of models, keyed by `About.projectName` |
 
 The browser also holds the `sightline_owner` cookie (HttpOnly, Secure, SameSite=Strict, path `/api`, 30 days),
-which scripts cannot read. Everything else on the page (the open report, verdicts, `reviewed` marks, plans, views,
-built pictures) is React state that a reload loses; see [12](12-web-app.md).
+which scripts cannot read. Everything else on the page (the open report, verdicts, `reviewed` marks, plans, clash views,
+built pictures, filters and hides, what each pane shows) is React state that a reload loses; see [12](12-web-app.md).
 
 ### What survives a restart
 

@@ -1008,3 +1008,36 @@ Sign-offs kept per report (Oct 30; code `web/src/signoffs.ts`, `Report.requireme
 - **Checked:** `tests/test_detect.py` (a run names its requirements), `web/tests/signoffs.test.mjs` (5: keys, a rerun
   under new rules and with fewer models, junk and no storage, the migration with an imported report and two projects of
   one title, the page); 80 web tests.
+
+Navigate freely, and drawing views beside 3D (Oct 30; design [docs/views.md](../views.md); code `web/src/viewer/views.ts`,
+`cube.ts`, `drawing.ts`, `annotate.ts`, `Viewer.ts`, `web/src/ViewPanes.tsx`, `ViewerToolbar.tsx`, `App.tsx`,
+`server/sightline/datums.py`; branch `feature/drawing-views`):
+- **Why:** once a clash was picked there was no plain model to move around in, and one view only, where coordinators
+  read a clash in plan at its level and in section through it (owner, Oct 29–30).
+- **Navigation:** leaving a clash (Esc, one thing at a time, or ✕ on the clash chip; not while ORCA works on it); Fly to
+  clash (on: every click on a clash takes every unpinned view there); F frames the selection first; orbit about the
+  point under the pointer (`OrbitControls`' target slid along the view ray, about 8 ms a press); a view cube with 26
+  directions and Home; orthographic; back and forward; Home and saved views per project; a section box round the clash,
+  the selection or what is in view, with grips.
+- **Styles and visibility:** Shaded, Consistent colours, Shaded with edges, Hidden line and X-ray (G); with a clash in
+  Shaded the rest grey or in its own colours; the selection blue in every view; filters by model, class and level; hide
+  and isolate for now (element card, cyan frame and chip). Wireframe left out (three.js cannot draw a `BatchedMesh`
+  as wireframe).
+- **Drawing views:** Single, Two, Quad (Q); plans, a section, elevations as orthographic cameras with global clip planes;
+  paper fills, cut faces filled by stencil parity (grey hatch, red, green, purple, amber where A and B overlap), the
+  pair's hidden parts ghosted, linework and a heavy cut outline from normals and depth in one composite shader; grids,
+  levels, a revision cloud with `#N`, the other views' marks, title, scale and north. Every clash click sets each
+  unpinned view: plan at its storey with the cut through it, section along the run that moves with a far clip 2 m
+  beyond the pair, elevation facing the section's way. Headers set view range, presets, far clip and crop; handles
+  in other views drag a section's line, ends, far clip and sides, a plan's cut and bottom, a section's crop (Esc
+  reverts). A right click in a drawing turns the 3D view there.
+- **Server:** `GET /api/scenes/{sid}/datums` (`datums.py`): levels merged across files at world z, grid axes (a sample
+  scene with none reads `<prefix>-Grids.ifc` as context, never added to the scene), each element's storey.
+- **Captures unchanged:** every capture goes through `fullCanvas` with the user's style, filters, hides, selection and
+  projection lifted, and restores the drawings' version so thumbnails redraw nothing.
+- **Checked:** in Playwright on Northbank (software GL): A/B/C, thumbnails, `capture()` and Show it built's passes
+  byte-identical in Single and Quad and with a style, filters, a hide and orthographic on; redraws in Quad: idle 0,
+  orbiting 0 (the plan's 3D camera mark only), a new clash 3; a cut dragged in a section from +3.058 to +3.568 and a
+  section line moved in plan; phone shows Single only with no sideways scroll. `server/tests/test_datums.py` (6),
+  `web/tests/views.test.mjs` (11), `web/tests/drawing.test.mjs` (4); 95 web tests; `npm run build` and `tsc` clean.
+  Frame times on a real GPU are still to measure.

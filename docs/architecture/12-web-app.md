@@ -2,7 +2,7 @@
 
 > **Covers:** `web/src/` (all but `viewer/`, which is [13](13-3d-viewer.md)), `web/index.html`, `web/vite.config.ts`,
 > `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/` · **Checked against code:** 2026-10-30
-> (`104fda9`) · **Deeper design:** [docs/mobile.md](../mobile.md)
+> (`feature/drawing-views`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/views.md](../views.md)
 
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
 almost all of the page's state and every call that changes it; the other components draw what `App` hands them and
@@ -39,7 +39,8 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `Sheet.tsx` | The phone's bottom sheet bar: handle, drag and flick, snap heights | `SheetBar` | `App` |
 | `Tour.tsx` | Both guided tours (steps, spotlight, "Show me", recorded-run offer) | `Tour`, `TourState`, `TourActions`, `TOUR`, `CELL`, `TOUR_QUESTION`, `BUILDING_STEPS`, `CELL_STEPS` | `App` |
 | `Triage.tsx` | The Triage card (run, two stages, verdict bar and rows, compact mode) | `TriageCard`, `TRIAGE`, `TriageRun` | `App`, `ClashPanel.tsx`, `ReportList.tsx` |
-| `ViewerToolbar.tsx` | The viewer's icon rail (modes, tools, camera, models), or one Tools menu on a phone | `ViewerToolbar`, `ToolbarState` | `App` |
+| `ViewerToolbar.tsx` | The viewer's icon rail (modes, styles, tools, camera, views and layouts, saved views, visibility), or one Tools menu on a phone | `ViewerToolbar`, `ToolbarState`, `ViewsControls`, `STYLES` | `App` |
+| `ViewPanes.tsx` | Each pane's header over the viewer (view picker, view range or depth and crop, pin, go to the clash, fit, maximise), the clash chip, and the lines between panes to drag | `ViewPanes` | `App` |
 | `chatRequest.ts` | Who owns the chat's current turn, so a newer action can cut off an older stream | `ChatRequestOwner`, `ChatRequest` | `App`, `Chat.tsx` |
 | `clashImage.ts` | Reads a Navisworks clash picture by colour (red A, green B, where they meet) | `readClashImage`, `focusSquare`, `drawOverlay`, `ClashRead`, `Box` | `ClashPanel.tsx` |
 | `fixKinds.ts` | Every fix kind in words: label, edit text, clearance, framing, reviewer, host rows | `KIND_LABEL`, `kindLabel`, `editText`, `changeText`, `clearanceText`, `needsText`, `framePieces`, `hostRows`, `moveWords`, `reviewText`, `recEditText` | `App`, `Activity.tsx`, `PlanPanel.tsx` |
@@ -52,7 +53,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (on a phone its sheet renders into the body, above the bottom sheet), and the page's one tooltip layer | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
 | `uploads.ts` | The size check before an upload and the words for each upload stage | `uploadRefusal`, `uploadStatus`, `localFile` | `App` |
 | `voice.ts` | Live voice over a socket, and the record-then-upload fallback | `LiveVoice`, `VoiceRecorder`, `LiveVoiceError`, `MAX_SECONDS`, `VoiceMode` | `Chat.tsx` |
-| `viewer/Viewer.ts`, `viewer/ifcLoader.ts`, `viewer/patch.ts` | The 3D viewer | see [13](13-3d-viewer.md) | `App`, `pilot.ts`, `api.ts` (the `ElementMesh` type) |
+| `viewer/Viewer.ts`, `viewer/ifcLoader.ts`, `viewer/patch.ts`, `viewer/views.ts`, `viewer/cube.ts`, `viewer/drawing.ts`, `viewer/annotate.ts` | The viewer: 3D, the view cube and the drawing views | see [13](13-3d-viewer.md) | `App`, `pilot.ts`, `ViewPanes.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
 
 ## The component tree
 
@@ -95,6 +96,7 @@ flowchart LR
   end
   subgraph stagePane["stage"]
     toolbar["ViewerToolbar"]
+    panes["ViewPanes: pane headers, clash chip, splitters"]
     landing["About (landing) or ProjectStart"]
     overlays["props card, pilot pill, compare bar, toasts"]
   end
@@ -125,7 +127,8 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 | Scene and files | `sceneId`, `stats`, `modelNames`, `sceneFiles`, `stepFiles`, `samples`, `picked`, `uploadMax`, `blank` | `viewer`, `host`, `sceneRevision`, `modelInput` | `landing`, `starting`, `startLabel`, `cellSample`, `cellOpen` |
 | Report | `report`, `reportSamples`, `matches`, `clash`, `measure`, `remeasure`, `titles`, `naming`, `views`, `capturing`, `lightbox` | `reportRef`, `captures`, `folderInput`, `filesInput` | `shown()`, `shownReport`, `shownClash` |
 | Detection | `detectSetup`, `detecting`, `detection` | `lastTests`, `pendingDetect` | |
-| Selection and the view's tools | `a`, `b`, `standIns`, `selected`, `tool` (`ToolbarState`), `measurePts`, `measured`, `toast` | `down`, `longPress`, `flashTimer`, `sides` | `group` |
+| Selection and the view's tools | `a`, `b`, `standIns`, `selected`, `tool` (`ToolbarState`: mode, style, ortho, grey, edges, section, measure, links, hidden models), `measurePts`, `measured`, `toast` | `down`, `longPress`, `flashTimer`, `sides` | `group` |
+| Views and navigation ([docs/views.md](../views.md)) | `fly`, `filters`, `temporary`, `savedViews`, `viewsTick` (the viewer's `onChange`: history, Home, layout or hides changed), `viewLayout`, `drawingsFollow` | `sectionTo` | `shownLayout` (phone Single, tablet at most Two), `viewsControls`, `counts`, `clashBusy` |
 | Proposal and options | `proposal`, `chosen`, `progress`, `thoughts`, `compare`, `tab`, `fixAnyway`, `pilotStatus`, `escalation`, `manual`, `manualDz`, `manualPreview` | `pilot`, `agentRun`, `previewRequest`, `directAgent`, `golden` | `option`, `proposing`, `notAClash`, `hideFix`, `canEscalate`, `wonder`, `nextClash` |
 | Kept work | `edits` (element → pieces a fix added), `fixes` (clash id → fix title), `reviewed`, `evidence`, `checked` | | `resolved`, `resolvedSet`, `fixedCount` |
 | Plan and `viewPlan` | `plan`, `planRun`, `planError`, `viewPlan`, `planKind` | `planRequest`, `planRevision`, `directPlan`, `chatPlan`, `planThisTurn` | `planGroup`, `planOptions`, `planStale`, `planning` |
@@ -160,6 +163,15 @@ Notes on the less obvious ones:
   `planRevision` records the revision a plan was checked at; `planStale` blocks Accept when they differ.
 - **`standIns`** are elements drawn in place of a side the model cannot draw (a port's pipe or valve); a pipe that
   stands in for both sides is `"ab"` (purple). `group` adds the pieces accepted offsets added to A or B.
+- **The clash and the camera are independent.** `goToClash(c, m, force)` marks the clash and, with `fly` on (or
+  `force`, from F or a click on the clash), takes every unpinned view to it (`Viewer.focusClash(…, fly)`).
+  `leaveClash()` clears the pair, stand-ins, marker and previews and leaves the camera, style and visibility as they
+  are; Esc reaches it last (`views.escStep`) and the ✕ on the clash chip calls it, but not while ORCA works on the clash
+  (`clashBusy`). `focusNow` (F) frames the selected element first.
+- **Saved views and Home** are per project (`viewsKey`, from `About.projectName` of the open files): `saveView` keeps
+  the pose, projection, style, mode, filters and section box; `applyView` puts them back. The element card adds Zoom
+  to it, Hide, Isolate, Section box round it (`sectionRound`) and Hide all / Isolate all of its class (temporary hides,
+  shown by a cyan frame and a "N hidden · Reset" chip).
 - **`evidence`** (clash id → `Evidence`) is what the PDF shows per clash: proposed (captured 1.4 s after an option is
   picked), accepted, or recommended, with before/after pictures and the built picture.
 
@@ -177,7 +189,8 @@ All are functions inside `App`. Names confirmed at HEAD.
 | `runDetect(tests, sid)` | `api.detect` with `onDetectEvent` (progress into `detecting`), then `loadReport` with the done event's report; keeps `reviewed` marks whose ids survive and re-selects the selected clash. |
 | `adoptChatReport(id, detection)` | The chat ran detection: show its report without restarting the chat. |
 | `selectClash(c, keepPlan)` | Select a report clash and fly to it (`goToClash`); with `keepPlan` only select it while a plan keeps the view. |
-| `goToClash(c, m)` | `Viewer.focusClash` on the matched (or shown) elements and the report's point. |
+| `goToClash(c, m, force)` | `Viewer.focusClash` on the matched (or shown) elements and the report's point; it moves the views only with Fly to clash on or `force`. |
+| `leaveClash()` | Leave the clash (Esc's last step, the chip's ✕): clears the pair, stand-ins, marker and previews; the camera stays. |
 | `onClick`, `pickSide`, `pressStart` / `pressMove` / `pressEnd` | Mouse and touch picking (see [13](13-3d-viewer.md), "Keyboard, mouse and touch"). |
 | `propose()`, `escalate()`, `escalateItem(it)`, `runProposal(second, pick?)` | Start a proposal (or a second try on Muse Wonder) through `api.proposeStream`; for a detected clash without views, `captureViews` first (waits up to 4 s). |
 | `trackAgent(first?)` | Returns `{ onEvent, finish, live, retire }` for one proposal run (below). |
@@ -493,6 +506,9 @@ Everything is `localStorage`, read and written inside `try` (a private window ju
 | `sightline.triage.compact` | `Triage.tsx` | Whether the Triage card is folded |
 | `sightline.voice.handsfree` | `Chat.tsx` | Hands-free voice on or off |
 | `sightline.agent.setup` | `Agent.tsx` | Whether this browser has made a link (folds "First time? Set up your agent") |
+| `sightline.views.fly` | `App` | Fly to clash: whether picking a clash takes every view to it (default on) |
+| `sightline.views.layout` | `App` | The view layout: `single`, `two` or `quad` |
+| `sightline.views.<project>` | `App` (`viewsKey`, `saveViews`) | `ViewsStore`: Home pose and saved views for this set of models |
 
 No `sessionStorage` or IndexedDB is used.
 

@@ -185,8 +185,9 @@ plus combined fixes, joints (a move takes its fittings along and stretches what 
 viewer lights what an element is linked to: `docs/connections.md`), Fix together and root causes, Insights patterns,
 chat and live voice, the MCP server with pairing links, coordination requirements, STEP models (the palletising cell),
 PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder, Show it built, phones and tablets,
-guided tours. Latest validation (Oct 30): 595 server tests, 80 web tests; answer key 3/3 first try at Rev04 heights;
-`evals/step_cell.py` passes (C1, C2, C3, C6, C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was
+guided tours, free navigation and drawing views (plans, sections, elevations beside 3D, up to four). Latest validation
+(Oct 30): 601 server tests, 95 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1,
+C2, C3, C6, C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was
 built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
 
 Next, in order.
@@ -194,8 +195,8 @@ Next, in order.
 2. ✅ Local-offset edit, verified on #042/#057/#061 at Rev04's heights. ✅ Bends. Later: sideways offsets, splitting
    at fittings.
 3. ✅ Viewer: context/x-ray modes, section box, measure. ✅ A/B/C capture in the browser (detected clashes).
-   Still to do: free navigation (leave a clash, CAD-style 3D views, styles, visibility), then plan, section and
-   elevation views beside the 3D view, up to four (design in `docs/views.md`, Oct 29-30).
+   ✅ Free navigation (leave a clash, view cube, orthographic, styles, visibility, saved views) and plan, section and
+   elevation views beside the 3D view, up to four (`docs/views.md`, Oct 30). Later: walk, an elevation's crop.
 4. ✅ Agent loop end to end in the UI, streamed. ✅ Chat panel with tools. Later: expose the report tools on the MCP
    server too.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ ORCA

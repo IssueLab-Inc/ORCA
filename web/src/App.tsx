@@ -17,7 +17,7 @@ import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./s
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
-import { About } from "./About";
+import { About, projectName } from "./About";
 import { AgentDialog, timeLeft, type AgentLogEntry } from "./Agent";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
@@ -29,14 +29,27 @@ import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
 import { Popover, Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
-import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
-import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
+import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode, type VisualStyle } from "./viewer/Viewer";
+import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./ViewerToolbar";
+import { escStep, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
+import { ViewPanes } from "./ViewPanes";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
+/** A saved view (docs/views.md): camera, projection, style, mode, visibility and section box. */
+type SavedView = { name: string; pose: Pose; ortho: boolean; style: VisualStyle; mode: ViewMode; filters: Filters;
+  section: [number[], number[]] | null };
+type ViewsStore = { home: Pose | null; saved: SavedView[] };
+const viewsKey = (files: string[]) => `sightline.views.${projectName(files)}`;
+function loadViews(files: string[]): ViewsStore {
+  try { return { home: null, saved: [], ...JSON.parse(localStorage.getItem(viewsKey(files)) ?? "{}") }; } catch { return { home: null, saved: [] }; }
+}
+function saveViews(files: string[], store: ViewsStore) {
+  try { localStorage.setItem(viewsKey(files), JSON.stringify(store)); } catch { /* private window: views last this visit */ }
+}
 type Tab = "clash" | "plan" | "chat";
 /** A fix as Show it built's capture takes it (Viewer.captureBuilt). */
 type BuiltFix = Parameters<Viewer["captureBuilt"]>[0];
@@ -73,7 +86,19 @@ export function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [a, setA] = useState<string | null>(null);
   const [b, setB] = useState<string | null>(null);
-  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", edges: true, section: false, measure: false, links: false, hiddenModels: [] });
+  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", style: "shaded", ortho: false, grey: true, edges: true, section: false, measure: false, links: false, hiddenModels: [] });
+  // Free navigation (docs/views.md): every clash picked takes the views to it unless turned off; visibility filters and
+  // what is hidden for now (viewing only); saved views and Home per project, in this browser.
+  const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
+  const [filters, setFilters] = useState<Filters>({ classes: [], levels: [] });
+  const [temporary, setTemporary] = useState<Temporary>({ hidden: [], isolated: null });
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [viewsTick, setViewsTick] = useState(0);
+  const viewsChanged = () => setViewsTick((n) => n + 1);   // the viewer's history, Home or hides changed: redraw the menus
+  const sectionTo = useRef<THREE.Box3 | null>(null);
+  // Views beside the 3D one (docs/views.md): Single, Two or Quad, kept per browser; a phone shows one, a tablet two.
+  const [viewLayout, setViewLayout] = useState<Layout>(() => { try { return (localStorage.getItem("sightline.views.layout") as Layout) || "single"; } catch { return "single"; } });
+  const [drawingsFollow, setDrawingsFollow] = useState(false);
   const [modelNames, setModelNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
   const [measurePts, setMeasurePts] = useState<THREE.Vector3[]>([]);
@@ -256,6 +281,7 @@ export function App() {
     pilot.current = new Pilot(() => viewer.current,
       (t) => frameFix({ kind: t.kind, moved: t.moved, preview: t.pieces }, sides.current), setPilotStatus);
     v.onUserCamera = () => pilot.current?.takeOver();
+    v.onChange = viewsChanged;
     api.samples().then((list) => {
       setSamples(list);
       // Default to the building disciplines and the site (the report's site clashes need it), not the grids or a later revision.
@@ -313,11 +339,45 @@ export function App() {
   }, [a, b, group, planGroup, viewPlan, contextGroup]);
   useEffect(() => { if (viewPlan || activeContext) viewer.current?.setMarker(null); }, [viewPlan, activeContext]);
   useEffect(() => { viewer.current?.setMode(tool.mode); }, [tool.mode]);
+  useEffect(() => { viewer.current?.setStyle(tool.style); }, [tool.style]);
+  useEffect(() => { viewer.current?.setProjection(tool.ortho ? "orthographic" : "perspective"); }, [tool.ortho]);
+  useEffect(() => { viewer.current?.setGreyContext(tool.grey); }, [tool.grey]);
+  useEffect(() => { viewer.current?.setSelection(selected?.globalId ?? null); }, [selected?.globalId]);
+  useEffect(() => { viewer.current?.setFilters(filters); }, [filters]);
+  useEffect(() => { viewer.current?.setTemporary(temporary); }, [temporary]);
+  useEffect(() => { try { localStorage.setItem("sightline.views.fly", fly ? "1" : "0"); } catch { /* kept for this visit */ } }, [fly]);
+  const shownLayout: Layout = layout === "phone" ? "single" : layout === "tablet" && viewLayout === "quad" ? "two" : viewLayout;
+  useEffect(() => { viewer.current?.setLayout(shownLayout); }, [shownLayout, stats]);
+  useEffect(() => { try { localStorage.setItem("sightline.views.layout", viewLayout); } catch { /* kept for this visit */ } }, [viewLayout]);
+  useEffect(() => { viewer.current?.setDrawingsFollow(drawingsFollow); }, [drawingsFollow]);
+  // Each set of models has its own Home and saved views.
+  useEffect(() => {
+    if (!modelNames.length) return;
+    const store = loadViews(modelNames);
+    setSavedViews(store.saved);
+    viewer.current?.setHome(store.home);
+  }, [modelNames]);
+  // What the filters read: each element's class (the server's) and storey (datums).
+  useEffect(() => {
+    if (!sceneId) return;
+    let live = true;
+    setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null });
+    void Promise.all([api.classes(sceneId), api.datums(sceneId)]).then(([classes, datums]) => {
+      if (!live) return;
+      sceneClasses.current = { scene: sceneId, map: classes };
+      viewer.current?.setInfo(Object.fromEntries(Object.keys(classes).map((g) => [g, classes[g][0]])), datums.storeys);
+      viewer.current?.setDatums(datums);
+      viewsChanged();
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [sceneId]);
   useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
   // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
   useEffect(() => {
     if (!tool.section) { viewer.current?.setSection(false); return; }
-    if (!viewer.current?.setSection(true)) setTool((t) => ({ ...t, section: false }));
+    const box = sectionTo.current;
+    sectionTo.current = null;
+    if (!(box ? viewer.current?.setSection(true, 0, box) : viewer.current?.setSection(true))) setTool((t) => ({ ...t, section: false }));
   }, [tool.section, a, b, contextGroup, planGroup]);
   useEffect(() => {
     setMeasured(viewer.current?.setMeasure(measurePts[0] ?? null, measurePts[1] ?? null) ?? null);
@@ -736,10 +796,20 @@ export function App() {
   }
 
   /** Take the camera to a report clash: where its elements meet, or its reported point. */
-  function goToClash(c: ReportClash, m = matches?.[c.id]) {
+  /** Take the views to a clash (every pick does, unless Fly to clash is off; `force`: F, Go to clash). */
+  function goToClash(c: ReportClash, m = matches?.[c.id], force = false) {
     const ids = [m?.show?.[0] ?? m?.a, m?.show?.[1] ?? m?.b].filter((g): g is string => !!g);
     const point = c.point && c.point.every((v) => v != null) ? serverPointToViewer(c.point as number[]) : null;
-    if (!viewer.current?.focusClash(ids, point, `#${c.number}`)) setError("This clash has no geometry or point to show in the open model.");
+    if (!viewer.current?.focusClash(ids, point, `#${c.number}`, fly || force)) setError("This clash has no geometry or point to show in the open model.");
+  }
+
+  /** Leave the clash (Esc, or ✕ on its chip): no pair, marker or preview; the camera, style and visibility stay. Not
+   * while ORCA works on it. Fixes, reviews and triage are untouched. */
+  function leaveClash() {
+    if (clashBusy) return;
+    clearManual();
+    setClash(null); setA(null); setB(null); resetWork(); setStandIns({});
+    viewer.current?.setMarker(null);
   }
 
   // A selected report clash: its pair in the viewer, and ORCA's own measure of it.
@@ -1115,7 +1185,7 @@ export function App() {
     if (p && !p.fired) { window.clearTimeout(p.timer); longPress.current = null; }
   }
 
-  function toggle(k: "edges" | "section" | "measure" | "links") {
+  function toggle(k: "edges" | "section" | "measure" | "links" | "ortho" | "grey") {
     setTool((t) => ({ ...t, [k]: !t[k] }));
     if (k === "measure") setMeasurePts([]);
     if (k === "links") clearHover();
@@ -1235,6 +1305,55 @@ export function App() {
     if (pinned.current.gid && pinned.current.gid !== selected?.globalId) unpin();
   }, [selected?.globalId]);
 
+  /** Keep the saved views and Home for these models. */
+  function storeViews(next: Partial<ViewsStore>) {
+    const store = { ...loadViews(modelNames), ...next };
+    saveViews(modelNames, store);
+    if (next.saved) setSavedViews(next.saved);
+  }
+  function saveView(name: string) {
+    const v = viewer.current;
+    if (!v) return;
+    const box = v.section;
+    const view: SavedView = { name, pose: v.pose(), ortho: tool.ortho, style: tool.style, mode: tool.mode, filters,
+      section: box ? [box.min.toArray(), box.max.toArray()] : null };
+    storeViews({ saved: [...savedViews, view] });
+  }
+  function applyView(view: SavedView) {
+    const v = viewer.current;
+    if (!v) return;
+    v.applyPose(view.pose);
+    setFilters(view.filters);
+    setTool((t) => ({ ...t, ortho: view.ortho, style: view.style, mode: view.mode, section: !!view.section }));
+    if (view.section) {
+      const box = v.boxOf([]);
+      box.min.fromArray(view.section[0]); box.max.fromArray(view.section[1]);
+      if (tool.section) v.setSection(true, 0, box); else sectionTo.current = box;
+    }
+  }
+  /** A section box round the selected element (its card), on or moved. */
+  function sectionRound(gid: string) {
+    const box = viewer.current?.boxOf([gid]);
+    if (!box || box.isEmpty()) return;
+    if (tool.section) viewer.current?.setSection(true, undefined, box);
+    else { sectionTo.current = box.expandByScalar(0.5); setTool((t) => ({ ...t, section: true })); }
+  }
+  const temporaryCount = temporary.hidden.length + (temporary.isolated ? 1 : 0);
+  // The Visibility menu's levels and classes, with counts, read again when the viewer learns them.
+  const counts = useMemo(() => viewer.current?.infoCounts() ?? { classes: [], levels: [] }, [viewsTick, stats]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const viewsControls: ViewsControls = {
+    canBack: !!viewer.current?.canBack, canForward: !!viewer.current?.canForward, fly, hasHome: !!viewer.current?.homeView,
+    onBack: () => viewer.current?.back(), onForward: () => viewer.current?.forward(), onFly: setFly,
+    onSetHome: () => { const p = viewer.current?.pose() ?? null; viewer.current?.setHome(p); storeViews({ home: p }); },
+    onClearHome: () => { viewer.current?.setHome(null); storeViews({ home: null }); },
+    saved: savedViews.map((v) => v.name), onSave: saveView, onApply: (i) => applyView(savedViews[i]),
+    onDelete: (i) => storeViews({ saved: savedViews.filter((_, k) => k !== i) }),
+    levels: counts.levels, classes: counts.classes, filters, onFilters: setFilters,
+    temporary: temporaryCount, onResetTemporary: () => setTemporary({ hidden: [], isolated: null }),
+    layout: shownLayout, layouts: layout === "phone" ? ["single"] : layout === "tablet" ? ["single", "two"] : ["single", "two", "quad"],
+    onLayout: setViewLayout, follow: drawingsFollow, onFollow: setDrawingsFollow,
+  };
+
   function setModelVisible(i: number, visible: boolean) {
     viewer.current?.setModelVisible(i, visible);
     setTool((t) => ({ ...t, hiddenModels: visible ? t.hiddenModels.filter((x) => x !== i) : [...t.hiddenModels, i] }));
@@ -1249,12 +1368,15 @@ export function App() {
     link.click();
   }
 
+  /** F: frame the selected element, else go to the clash. */
   function focusNow() {
-    if (clash) goToClash(clash);
+    if (selected) viewer.current?.frame([selected.globalId]);
+    else if (clash) goToClash(clash, undefined, true);
     else if (a || b) viewer.current?.frame([a, b].filter((g): g is string => !!g));
   }
 
-  // Keyboard: 1-4 views, H fit, F clash, X/C/I/V modes, S section, E edges, M measure, Esc clears.
+  // Keyboard: 1-4 views, H home, F selection or clash, X/C/I/V modes, G style, O projection, Q layout, [ ] back and
+  // forward, S section, E edges, M measure, L links, Esc one thing at a time.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
@@ -1262,14 +1384,27 @@ export function App() {
       const modes: Record<string, ViewMode> = { x: "xray", c: "context", i: "isolate", v: "shaded" };
       const k = e.key.toLowerCase();
       if (views[k]) viewer.current?.view(views[k]);
-      else if (k === "h") viewer.current?.fitAll();
+      else if (k === "h") viewer.current?.home();
+      else if (k === "g") setTool((t) => ({ ...t, style: STYLES[(STYLES.findIndex((s) => s.id === t.style) + 1) % STYLES.length].id }));
+      else if (k === "o") toggle("ortho");
+      else if (k === "q" && layout !== "phone") setViewLayout((l) => (l === "single" ? "two" : l === "two" && layout !== "tablet" ? "quad" : "single"));
+      else if (k === "[") viewer.current?.back();
+      else if (k === "]") viewer.current?.forward();
       else if (k === "f") focusNow();
       else if (modes[k]) setTool((t) => ({ ...t, mode: modes[k] }));
       else if (k === "s") toggle("section");
       else if (k === "e") toggle("edges");
       else if (k === "m") toggle("measure");
       else if (k === "l") toggle("links");
-      else if (k === "escape") { setMeasurePts([]); setSelected(null); setLightbox(null); unpin(); clearHover(); }
+      else if (k === "escape") {
+        // One thing at a time: the measure, the image dialog, the selected element, then the clash.
+        unpin(); clearHover();
+        const step = escStep({ measuring: tool.measure, lightbox: !!lightbox, selection: !!selected, clash: !!(clash || a || b), working: clashBusy });
+        if (step === "measure") { if (measurePts.length) setMeasurePts([]); else toggle("measure"); }
+        else if (step === "lightbox") setLightbox(null);
+        else if (step === "selection") setSelected(null);
+        else if (step === "clash") leaveClash();
+      }
       else return;
       e.preventDefault();
     };
@@ -1999,6 +2134,8 @@ export function App() {
   }
 
   const proposing = !!progress && progress.phase !== "done";
+  // ORCA working on the clash on screen: it can't be left until that finishes.
+  const clashBusy = proposing || (!!planRun && planRun.phase !== "done") || contextWorking || replaying;
   // A detected clash's views, taken once the camera has reached it (selecting a clash flies there first).
   useEffect(() => {
     if (!clash || !report || report.origin !== "sightline" || clash.images.length || views[clash.id] || !a || !b) return;
@@ -2360,13 +2497,24 @@ export function App() {
             </div>}
       </aside>
 
-      <main className={`stage ${tool.measure ? "measuring" : ""}`} ref={host} onClick={onClick}
+      <main className={`stage ${tool.measure ? "measuring" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
         onPointerDown={pressStart} onPointerMove={stageMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
         onPointerLeave={() => { if (hover.current.gid) clearHover(); }}
         onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
-        {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b)}
-          onMode={(mode) => setTool((t) => ({ ...t, mode }))} onToggle={toggle} onView={(p) => viewer.current?.view(p)}
-          onFit={() => viewer.current?.fitAll()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
+        {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b || selected)} views={viewsControls}
+          onMode={(mode) => setTool((t) => ({ ...t, mode }))} onStyle={(style) => setTool((t) => ({ ...t, style }))} onToggle={toggle}
+          onView={(p) => viewer.current?.view(p)} onFit={() => viewer.current?.home()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
+        {stats && <ViewPanes viewer={viewer.current} offset={layout === "phone" ? 8 : 64} compact={layout === "phone"} chip={(clash || a || b) && !viewPlan && !activeContext ? (
+          <div className="clash-chip">
+            <span className="sw-pair"><i className="sw red" /><i className="sw green" /></span>
+            <span className="clash-chip-text">{clashBusy ? `ORCA is working on ${clash ? `#${clash.number}` : "this pair"}` : clash ? clashLabel(clash) : "Your pair"}</span>
+            <button className="ibtn" disabled={clashBusy} onClick={leaveClash} aria-label="Leave this clash" data-tip={clashBusy ? "ORCA is working on it" : "Leave this clash  ·  Esc"} data-tip-side="bottom"><X size={14} aria-hidden /></button>
+          </div>) : null} />}
+        {stats && temporaryCount > 0 && (
+          <div className="temp-chip" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+            {temporary.isolated ? "Isolated for now" : `${temporary.hidden.length} hidden for now`}
+            <button className="btn small" onClick={() => setTemporary({ hidden: [], isolated: null })}>Reset</button>
+          </div>)}
         {!stats && !report && blank && (
           <ProjectStart busy={!!busy} maxMb={uploadMax} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
             onReportFolder={() => folderInput.current?.click()} onBack={() => setBlank(false)} />
@@ -2416,6 +2564,17 @@ export function App() {
             <div className="row">
               <button className="btn small" onClick={() => pickSide(selected.globalId, "a")}><i className="sw red" />Set as A</button>
               <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => pickSide(selected.globalId, "b")}><i className="sw green" />Set as B</button>
+            </div>
+            <div className="card-actions">
+              <button className="btn small ghost" onClick={() => viewer.current?.frame([selected.globalId])}>Zoom to it</button>
+              <button className="btn small ghost" onClick={() => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, selected.globalId] })); setSelected(null); }}>Hide</button>
+              <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: [selected.globalId] })}>Isolate</button>
+              <button className="btn small ghost" onClick={() => sectionRound(selected.globalId)}>Section box</button>
+              {selected.info?.ifc_class ? <>
+                <button className="btn small ghost" onClick={() => { const ids = viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [];
+                  setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); }}>Hide all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
+                <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [] })}>Isolate all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
+              </> : null}
             </div>
           </div>
         )}
