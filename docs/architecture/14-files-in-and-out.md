@@ -255,7 +255,8 @@ what it compiles into and how pages send it: [15](15-requirements-settings-and-c
 
 - **Only kept fixes count.** A file is marked edited only when a fix is kept: `IfcScene.mark_edited` from the
   `Workspace.apply*` methods (`apply`, `apply_offset`, `apply_trim`, `apply_route`, `apply_resize`,
-  `apply_penetration`, `apply_combined`, which `plans.apply` and `/fix/apply` call), and a wider fix's commit
+  `apply_penetration`, `apply_combined`, which `plans.apply` calls after trying each fix again; a plan or a combined
+  fix refused part way puts the edited marks back with the edits), and a wider fix's commit
   (`context_eval.commit_candidate`). Trials move and move back without marking. With nothing kept the answer is
   **409** "Nothing has been changed yet. Accept a fix first."
 - **Each edited discipline file once**, with every edit it holds (moves, offsets, trims, routes, resizes,

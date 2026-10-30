@@ -141,7 +141,8 @@ def test_one_endpoint_keeps_a_fix_of_any_kind(tmp_path, monkeypatch):
     sid = ws.open([path.name])
     main, beam = _ids_two(ws.scene(sid))
     option = {"title": "Offset up 400", "kind": "offset", "moved": [main], "delta_m": [0, 0, 0.4],
-              "split_m": [2.6, 3.4], "preview": [{"global_id": main, "verts": [], "faces": []}], "before": None}
+              "split_m": [2.6, 3.4], "preview": [{"global_id": main, "verts": [], "faces": []}], "before": None,
+              "pair": [main, beam]}
     r = client.post(f"/api/scenes/{sid}/fix/apply", json={"option": option})
     assert r.status_code == 200, r.text
     assert r.json()["files"] == [0]

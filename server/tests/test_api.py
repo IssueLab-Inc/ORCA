@@ -15,10 +15,16 @@ def test_open_verify_apply_export(tmp_path, monkeypatch):
     assert c.get("/api/samples").json() == ["fixture-clash.ifc"]
     sid = c.post("/api/scenes", json={"samples": ["fixture-clash.ifc"]}).json()["id"]
     duct = app_module.ws.scene(sid).model.by_type("IfcDuctSegment")[0].GlobalId
+    beam = app_module.ws.scene(sid).model.by_type("IfcBeam")[0].GlobalId
 
     assert c.post(f"/api/scenes/{sid}/verify", json={"moved": [duct], "delta_m": [0, 0, -0.4]}).json()["passed"] is False
     assert c.post(f"/api/scenes/{sid}/verify", json={"moved": [duct], "delta_m": [0, 0, -0.8]}).json()["passed"] is True
-    c.post(f"/api/scenes/{sid}/apply", json={"moved": [duct], "delta_m": [0, 0, -0.8]})
+    # Kept only once it passes again; a move still clashing is refused and leaves nothing to export.
+    assert c.post(f"/api/scenes/{sid}/apply", json={"moved": [duct], "delta_m": [0, 0, -0.4],
+                                                     "obstacles": [beam]}).status_code == 409
+    assert c.get(f"/api/scenes/{sid}/export").status_code == 409
+    assert c.post(f"/api/scenes/{sid}/apply", json={"moved": [duct], "delta_m": [0, 0, -0.8],
+                                                     "obstacles": [beam]}).status_code == 200
     r = c.get(f"/api/scenes/{sid}/export")
     assert r.status_code == 200 and r.content.startswith(b"ISO-10303-21")
 
@@ -44,7 +50,8 @@ def test_federated_set_exports_only_the_edited_file(tmp_path, monkeypatch):
     duct = app_module.ws.scene(sid).models[1].by_type("IfcDuctSegment")[0].GlobalId
     assert c.post(f"/api/scenes/{sid}/verify", json={"moved": [duct], "delta_m": [0, 0, 0]}).json()["passed"] is False
     assert c.get(f"/api/scenes/{sid}/export").status_code == 409  # a check moves and moves back: still nothing changed
-    c.post(f"/api/scenes/{sid}/apply", json={"moved": [duct], "delta_m": [0, 0, -0.8]})
+    beam = app_module.ws.scene(sid).models[0].by_type("IfcBeam")[0].GlobalId
+    c.post(f"/api/scenes/{sid}/apply", json={"moved": [duct], "delta_m": [0, 0, -0.8], "obstacles": [beam]})
     r = c.get(f"/api/scenes/{sid}/export")
     assert r.status_code == 200 and "services.orca.ifc" in r.headers["content-disposition"]
 
@@ -73,13 +80,19 @@ def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypat
     slab = services.by_type("IfcSlab")[0].GlobalId
     other_beam = structure.by_type("IfcBeam")[0].GlobalId
 
-    agent._try_move(scene, {"title": "tried, not kept", "delta_m": [0, 0, -1.0]}, other_beam, 0.025)
+    agent._try_move(scene, {"title": "tried, not kept", "delta_m": [0, 0, -2.0]}, other_beam, 0.025)
     agent._try_offset(scene, {"split_m": [2.0, 4.0], "dz_m": 0.5}, main, beam, 0.025)
     assert c.get(f"/api/scenes/{sid}/export").status_code == 409  # trials only
 
-    pieces = c.post(f"/api/scenes/{sid}/offset/apply", json={"element": main, "split_m": [2.0, 4.0], "dz_m": 0.4}).json()["pieces"]
-    c.post(f"/api/scenes/{sid}/apply", json={"moved": [slab], "delta_m": [0, 0, 0.1]})        # same file, second fix
-    c.post(f"/api/scenes/{sid}/apply", json={"moved": [other_beam], "delta_m": [0.5, 0, 0]})  # another discipline
+    def keep(moved, delta):
+        return c.post(f"/api/scenes/{sid}/apply", json={"moved": [moved], "delta_m": delta, "obstacles": [main]})
+    offset = {"element": main, "other": beam, "split_m": [2.0, 4.0], "dz_m": 0.4}
+    # The structure model's beam runs along the supply main: the offset's risers would cut it, so it is not kept.
+    assert c.post(f"/api/scenes/{sid}/offset/apply", json=offset).status_code == 409
+    assert c.get(f"/api/scenes/{sid}/export").status_code == 409
+    assert keep(other_beam, [0.5, 0, -1.0]).status_code == 200   # another discipline: that beam out of the way
+    pieces = c.post(f"/api/scenes/{sid}/offset/apply", json=offset).json()["pieces"]
+    assert keep(slab, [0, 0, 0.1]).status_code == 200            # same file, second fix
 
     r = c.get(f"/api/scenes/{sid}/export")
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"

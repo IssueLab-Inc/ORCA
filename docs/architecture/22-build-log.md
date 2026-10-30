@@ -913,3 +913,23 @@ ORCA in every download, and the cell tour on the current cell (Oct 30, owner req
   unexpected (`evals/runs/2026-10-30-cell-detection/`); in headless Chromium the cell tour live (recording) and again
   with the live streams refused: both recordings offered, replayed and accepted in place (one model download, at open),
   all 12 steps; the live export and report downloads carry the new names.
+
+Keeping a fix tries it again (Oct 30, owner request; [07](07-fixes-and-edits.md) "Keeping a fix", code `plans.recheck` /
+`plans.apply`, `edits.kept_files`):
+- **Why:** `POST .../fix/apply`, `.../plan/apply` and the older `/apply`, `/offset/apply`, `/trim/apply` rebuilt a fix from
+  the page's kind and parameters without checking it again, so any client could keep an edit that was never verified
+  (an arbitrary move, an offset with any split or height), and a plan refused part way kept the fixes before it.
+- **Now:** every keep goes through `plans.apply`: each option is tried again as its proposal tried it (`plans.CANDIDATE`
+  back to Muse's parameters, `agent.TRIES` with the clearance, policies and recommend-only `Workspace.fix_settings` sets
+  for the clash it names), several are checked together (`verify_together`), then all are kept in one
+  `edits.kept_files` (now re-entrant, and restoring the edited marks, revision and history on failure) or none. What
+  the trial made is kept: a move's whole run, the trim's end at the joint. A fix that no longer passes is a 409
+  (`plans.NotVerified`) with why. Options carry `pair` and `others` (`agent.resolve`); the page sends every kind to
+  `/fix/apply` with the clash pair, plans send each item's; the old routes need their partner (`obstacles` / `other`).
+- **Checked:** `tests/test_keep_verified.py` (9); existing tests now keep honest fixes (one export test was keeping an
+  offset the second model's beam blocked); `web/tests/accept.test.mjs`. On Northbank in the browser, Muse Spark's
+  "Offset duct up 400 mm through girder opening" on #1 was re-checked at keep (50 mm, 21 elements) and patched in
+  place; tampered options on the same scene (tray up 100 mm, the cold water main not moved, the kept offset sent again,
+  no pair) were refused in 0.4-1.0 s with the scene unchanged. The girder root-cause plan (duct +400, tray +250, cold
+  water +280 mm and three trims) was kept through `plans.apply` in 7.4 s; the same plan sent again was refused. 559
+  server tests, 65 web tests.

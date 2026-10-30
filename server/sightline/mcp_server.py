@@ -442,7 +442,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         options = (proposal or {}).get("options") or []
         if not 1 <= option <= len(options):
             raise LookupError(f"no verified option {option} for {c.label}: run propose_fixes first")
-        o = options[option - 1]
+        # Tried again before it is kept (plans.apply), against the clash it was proposed for.
+        o = {**options[option - 1], "pair": [proposal["element_a"], proposal["element_b"]]}
         with W().lock:   # one request's edits between `before` and the patch
             before = W().scene(link.ctx.scene_id).revision
             out = plans.apply(W(), link.ctx.scene_id, [o])
@@ -471,7 +472,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             raise LookupError("this plan has no verified fix to apply")
         with W().lock:   # one request's edits between `before` and the patch
             before = W().scene(link.ctx.scene_id).revision
-            out = plans.apply(W(), link.ctx.scene_id, [it["option"] for it in items])
+            out = plans.apply(W(), link.ctx.scene_id, [{**it["option"], "pair": [it["element_a"], it["element_b"]],
+                                                        "others": it.get("others") or []} for it in items])
             out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
         requested = {n["index"] for n in out["not_cut"]}   # penetrations only requested: their clashes stay open
         cut = [it for k, it in enumerate(items) if k not in requested]

@@ -18,6 +18,9 @@ export interface Option {
   review?: string | null;
   /** Who proposed it, as people read it ("Muse Spark", "Muse Wonder"). */
   model?: string;
+  /** The clash it was verified for (A, B) and what else it had to clear: keeping it tries it again against these. */
+  pair?: string[] | null;
+  others?: string[];
 }
 export interface FixEdit { summary?: string; key?: string; [param: string]: unknown }
 export interface Attempt {
@@ -650,17 +653,13 @@ export const api = {
   },
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
-  /** Keep a fix in the server's model; returns the indexes of the files that changed. */
-  accept: (id: string, o: Option) => (o.kind === "trim" && o.trim
-    ? call<Kept>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
-    : o.kind === "offset"
-    ? call<Kept>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
-    : o.kind === "move"
-    ? call<Kept>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
-    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there).
-    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there). A penetration
-    // whose host the requirements lock comes back `cut: false`: only its provision for void was written.
-    : call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
+  /** Keep a fix in the server's model; returns the indexes of the files that changed. One endpoint keeps every kind
+   *  from the option itself (its meshes are not needed there): the server tries it again against the clash it names
+   *  (`pair`: the option's own, else the clash on screen) and answers 409 with why when it no longer passes. A
+   *  penetration whose host the requirements lock comes back `cut: false`: only its provision for void was written. */
+  accept: (id: string, o: Option, pair: string[] | null) =>
+    call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST",
+      body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null } }) }),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). */
