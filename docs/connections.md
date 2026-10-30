@@ -144,11 +144,14 @@ segment's own axis.
 
 **Keeping it:**
 
-- `plans.KEEP["move"]` → `Workspace.apply(moved, delta, expect=edit)` plans it again on the server. If the key differs,
-  it refuses: "the model changed since this move was checked".
+- Every keep goes through `plans.apply`, which tries the move again first (`plans.recheck`, as for every kind). An
+  option whose `edit.key` differs from the fresh trial's is refused (409): the move would now take other parts along
+  or stretch them differently from the one that was checked and shown.
+- `plans.KEEP["move"]` → `Workspace.apply(moved, delta, expect=edit)` plans it again on the server and refuses a
+  changed key too: "the model changed since this move was checked".
 - `changed` lists the stretched segments, so accept in place patches them.
 - **The page:**
-  - a move with an `edit` is accepted through `/fix/apply`, a plain one through `/apply`;
+  - every fix is accepted through `/fix/apply` with its clash pair;
   - the viewer translates `moved` and draws the stretched pieces;
   - the manual move previews what it takes along.
 

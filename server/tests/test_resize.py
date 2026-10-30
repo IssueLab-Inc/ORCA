@@ -120,7 +120,7 @@ def test_the_endpoint_and_a_plan_keep_a_resize(tmp_path, monkeypatch):
     o = plans.asdict(option)
     assert plans.verify_together(ws, sid, [plans.Item(f"{duct}|{beam}", duct, beam, "pair", [], option=o)])["passed"]
     monkeypatch.setattr(app_module, "ws", ws)
-    r = TestClient(app_module.app).post(f"/api/scenes/{sid}/fix/apply", json={"option": {**o, "preview": None}})
+    r = TestClient(app_module.app).post(f"/api/scenes/{sid}/fix/apply", json={"option": {**o, "preview": None, "pair": [duct, beam]}})
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["pieces"][0] == duct and len(out["pieces"]) == 5 and {m["global_id"] for m in out["meshes"]} == set(out["pieces"])

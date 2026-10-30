@@ -49,7 +49,8 @@ TOOLS = [
         "needed: every pair of models and each model against itself (hard clashes deeper than the tolerance, 1 mm by "
         "default) and duplicates. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and touches "
         "are counted, not reported. Takes about 10 s and opens the result as the user's clash report, replacing the open "
-        "one; running it again after fixes says which clashes were resolved.",
+        "one; running it again after fixes says which clashes were resolved. Each run counts against the demo's "
+        "detection runs.",
         {"tolerance_mm": {"type": "number", "description": "hard clash tolerance in mm (default 1)"}}),
     _fn("report_summary", "Counts for the open clash report: clashes per test and per element class pair, how many "
         "are found in the open model, how many are fixed. Start here for questions about the whole report."),
@@ -114,7 +115,8 @@ TOOLS = [
         "'what is the real problem'."),
     _fn("find_patterns", "Patterns: the same kind of clash many times over (every column through every slab, members "
         "all overlapping by the same 30 mm), each judged as by design, a modelling error or a real problem, with the "
-        "clash rule or action to take. Use it for 'what is all this noise' or before triaging a big report."),
+        "clash rule or action to take. Use it for 'what is all this noise' or before triaging a big report. The first "
+        "reading of a report's patterns costs one proposal; asking again is free."),
     _fn("plan_root_cause", "For one element from find_root_causes: work out the cause and build one coordinated plan "
         "that fixes all its clashes, checked together. Shows the plan in the user's Plan tab to preview and accept. "
         "About a minute; costs one proposal per clashing element.", {"hub": {"type": "string", "description": "GlobalId"}},
@@ -161,6 +163,7 @@ class Chat:
         self.propose_allowed = propose_allowed or (lambda: None)
         self.propose_allowed_many: Callable[[int], str | None] = lambda n: None
         self.escalate_allowed: Callable[[], str | None] = lambda: None
+        self.detect_allowed: Callable[[], str | None] = lambda: None
 
     @property
     def model(self) -> ToolModel:
@@ -183,6 +186,7 @@ class Chat:
              propose_allowed: Callable[[], str | None] | None = None,
              propose_allowed_many: Callable[[int], str | None] | None = None,
              escalate_allowed: Callable[[], str | None] | None = None,
+             detect_allowed: Callable[[], str | None] | None = None,
              before_publish: Callable[[], None] | None = None) -> str:
         cancel = cancel or threading.Event()
         # Defaults preserve constructor/direct-tool callers; each turn captures its
@@ -190,6 +194,7 @@ class Chat:
         allowed = self.propose_allowed if propose_allowed is None else propose_allowed
         allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
         escalate_ok = self.escalate_allowed if escalate_allowed is None else escalate_allowed
+        detect_ok = self.detect_allowed if detect_allowed is None else detect_allowed
         target = session
         with target._history_lock:
             target._next_turn += 1
@@ -233,7 +238,7 @@ class Chat:
                 try:
                     result, summary, pics = self._run(name, args, ctx, emit, cancel=cancel,
                                                      propose_allowed=allowed, propose_allowed_many=allowed_many,
-                                                     escalate_allowed=escalate_ok)
+                                                     escalate_allowed=escalate_ok, detect_allowed=detect_ok)
                 except Exception as e:  # a bad id, a shape that cannot be edited: tell the model, keep going
                     result, summary, pics = {"error": f"{type(e).__name__}: {e}"}, f"failed: {e}", []
                 if cancel.is_set():
@@ -312,12 +317,13 @@ class Chat:
                 "level": c.a.level or c.b.level, "distance_mm": round(c.distance_m * 1000) if c.distance_m is not None else None,
                 "in_model": bool(m.get("a") and m.get("b")), "fixed": c.id in ctx.fixed}
 
-    def _run(self, name: str, args: dict, ctx: Context, emit, *, cancel=None,
-             propose_allowed=None, propose_allowed_many=None, escalate_allowed=None) -> tuple[dict, str, list[Path]]:
+    def _run(self, name: str, args: dict, ctx: Context, emit, *, cancel=None, propose_allowed=None,
+             propose_allowed_many=None, escalate_allowed=None, detect_allowed=None) -> tuple[dict, str, list[Path]]:
         ws = self.ws
         allowed = self.propose_allowed if propose_allowed is None else propose_allowed
         allowed_many = self.propose_allowed_many if propose_allowed_many is None else propose_allowed_many
         escalate_ok = self.escalate_allowed if escalate_allowed is None else escalate_allowed
+        detect_ok = self.detect_allowed if detect_allowed is None else detect_allowed
         if name == 'explore_wider_fix':
             report, sid = self._report(ctx), self._scene(ctx)
             c = report.clash(args['clash_id'])
@@ -342,6 +348,9 @@ class Chat:
                 tol = max(0.0, float(args["tolerance_mm"])) / 1000
                 tests = [{**t, "tolerance_m": tol if t["kind"] == "hard" else t["tolerance_m"]}
                          for t in ws.detect_tests(sid)["tests"] if t["enabled"]]
+            refused = detect_ok()   # one detection run, as POST /detect/stream takes
+            if refused:
+                return {"error": refused}, "refused: detection runs used", []
             out = ws.detect(sid, tests, on_event=lambda e: emit({"type": "detect_event", "event": e}))
             rid = out["report"]["id"]
             ctx.report_id = rid  # the rest of this answer works on the new report
@@ -507,7 +516,10 @@ class Chat:
         if name == "find_patterns":
             r, sid = self._report(ctx), self._scene(ctx)
             pats = plans.patterns(ws, sid, r.id, ctx.fixed)
-            verdicts = plans.triage_patterns(ws, pats) if pats else {}
+            # The route's reading: one proposal the first time, then shared (a reading the page made is free here).
+            verdicts, refused = plans.read_patterns(ws, sid, r.id, pats, allowed)
+            if refused:
+                return {"error": refused}, "refused: allowance used", []
             rows = [{"pattern": f"{p['clashes']} x {p['classes'][0]} vs {p['classes'][1]}", "files": p["files"],
                      "levels": p["levels"], "overlap_mm": [p["min_mm"], p["max_mm"]], "clash_ids": p["clash_ids"][:12],
                      **verdicts.get(p["id"], {})} for p in pats]
@@ -526,11 +538,16 @@ class Chat:
                     else plans.build_batch(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]), forward))
             data = json.loads(plans.to_json(plan))
             emit({"type": "plan", **data})
-            summary = {"root_cause": plan.root_cause, "strategy": plan.strategy, "verified_together": plan.check.get("passed"),
+            summary = {"title": plan.title, "root_cause": plan.root_cause, "strategy": plan.strategy,
+                       "verified_together": plan.check.get("passed"),
                        "fixes": [{"pair": it.label, "fix": it.option["title"] if it.option else None, "error": it.error,
                                   "in_report": it.in_report} for it in plan.items],
                        "note": "The plan is in the user's Plan tab to preview and accept; you cannot accept it."}
-            return summary, f"{sum(1 for it in plan.items if it.option)} of {len(plan.items)} fixed, "                             f"{'verified together' if plan.check.get('passed') else 'not all verified'}", []
+            # Counted in clashes, as the plan's title is: one fix can clear several (plans.merge_shared).
+            n = plans.clashes_covered(plan.items)
+            return summary, (f"{plans.clashes_covered([it for it in plan.items if it.option])} of {n} "
+                             f"clash{'es' if n != 1 else ''} fixed, "
+                             f"{'verified together' if plan.check.get('passed') else 'not all verified'}"), []
         if name == "show_clash":
             c = self._report(ctx).clash(args["clash_id"])
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})

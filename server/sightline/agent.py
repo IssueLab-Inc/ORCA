@@ -55,6 +55,10 @@ class Option:
     review: str | None = None           # who must review it before it is built ("structure", "services"), when
                                         # geometry alone cannot say it works
     model: str = ""                     # who proposed it, as people read it ("Muse Spark", "Muse Wonder")
+    # The clash it was verified for (A, B) and what else it had to clear (a plan's merged item): keeping it tries it
+    # again against these (plans.recheck).
+    pair: list[str] | None = None
+    others: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         self.also_needs = plain_needs(self.also_needs)
@@ -505,6 +509,7 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     options = options[:want]
     for o in options:
         o.model = label
+        o.pair, o.others = [clash.element_a, clash.element_b], list(clash.others)
     for o in options:  # what each option changes, as it is now, so the UI can show before and after together
         try:
             with lock:   # a move's stretched segments change too

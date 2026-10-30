@@ -7,6 +7,7 @@ import io
 import json
 import os
 import queue
+import re
 import shutil
 import tempfile
 import threading
@@ -31,11 +32,11 @@ from starlette.routing import Route
 
 from . import (agents, built, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
                requirements, settings, spend, step, titles, triage, voice_live)
-from .meta_client import escalation_info, load_env, transcribe, triage_model, triage_model_info
-from .limits import ProposeLimit, client_id
-from .service import MODEL_SUFFIXES, MODELS, Workspace
+from .meta_client import escalation_info, transcribe, triage_model, triage_model_info
+from .limits import ProposeLimit, client_id, env_float, env_int
+from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
 
-load_env()  # the repo's .env, before anything reads a setting (caps, owner token); real environment variables win
+# The repo's .env was read on the package's first import (sightline/__init__.py), before any module read a setting.
 app = FastAPI(title="ORCA")
 
 
@@ -168,31 +169,31 @@ escalate_limit = ProposeLimit.escalate_from_env()
 chat_limit = ProposeLimit.chat_from_env()
 # Show it built (docs/show-it-built.md): pictures checked by Muse Wonder, a few cents each (SIGHTLINE_BUILT_PER_HOUR per
 # visitor, _PER_DAY for everyone); a request costs up to two rounds of two pictures and two judges each.
-built_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_BUILT_PER_HOUR", "0")),
-                           int(os.environ.get("SIGHTLINE_BUILT_PER_DAY", "0")), noun="built views")
+built_limit = ProposeLimit(env_int("SIGHTLINE_BUILT_PER_HOUR", 0),
+                           env_int("SIGHTLINE_BUILT_PER_DAY", 0), noun="built views")
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
 # Clash titles: one titling run per report (a few model calls for a whole report): SIGHTLINE_TITLES_PER_HOUR per visitor.
-title_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_TITLES_PER_HOUR", "0")),
-                           int(os.environ.get("SIGHTLINE_TITLES_PER_DAY", "0")), noun="titling runs")
+title_limit = ProposeLimit(env_int("SIGHTLINE_TITLES_PER_HOUR", 0),
+                           env_int("SIGHTLINE_TITLES_PER_DAY", 0), noun="titling runs")
 # Detection runs cost no model call but take the server's CPU for seconds: SIGHTLINE_DETECT_PER_HOUR per visitor.
-detect_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_DETECT_PER_HOUR", "0")),
-                            int(os.environ.get("SIGHTLINE_DETECT_PER_DAY", "0")), noun="detection runs")
-voice_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_VOICE_PER_HOUR", "0")),
-                           int(os.environ.get("SIGHTLINE_VOICE_PER_DAY", "0")), noun="voice messages")
+detect_limit = ProposeLimit(env_int("SIGHTLINE_DETECT_PER_HOUR", 0),
+                            env_int("SIGHTLINE_DETECT_PER_DAY", 0), noun="detection runs")
+voice_limit = ProposeLimit(env_int("SIGHTLINE_VOICE_PER_HOUR", 0),
+                           env_int("SIGHTLINE_VOICE_PER_DAY", 0), noun="voice messages")
 # Model uploads (IFC or STEP): each takes disk, memory and, for STEP, a conversion and one model call to name its parts.
-model_upload_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_HOUR", "0")),
-                                  int(os.environ.get("SIGHTLINE_MODEL_UPLOADS_PER_DAY", "0")), noun="model uploads")
+model_upload_limit = ProposeLimit(env_int("SIGHTLINE_MODEL_UPLOADS_PER_HOUR", 0),
+                                  env_int("SIGHTLINE_MODEL_UPLOADS_PER_DAY", 0), noun="model uploads")
 
 # Coordination requirements (requirements.py): registering a file is cheap, a preview runs a detection.
-requirements_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_REQUIREMENTS_PER_HOUR", "120")),
-                                  int(os.environ.get("SIGHTLINE_REQUIREMENTS_PER_DAY", "0")), noun="requirements files")
-preview_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_PREVIEW_PER_HOUR", "60")),
-                             int(os.environ.get("SIGHTLINE_PREVIEW_PER_DAY", "0")), noun="requirement previews")
+requirements_limit = ProposeLimit(env_int("SIGHTLINE_REQUIREMENTS_PER_HOUR", 120),
+                                  env_int("SIGHTLINE_REQUIREMENTS_PER_DAY", 0), noun="requirements files")
+preview_limit = ProposeLimit(env_int("SIGHTLINE_PREVIEW_PER_HOUR", 60),
+                             env_int("SIGHTLINE_PREVIEW_PER_DAY", 0), noun="requirement previews")
 
 MAX_VOICE_BYTES = 3_000_000  # a minute of 16 kHz mono 16-bit PCM is 1.9 MB; the browser stops recording at 60 s
 # Live voice (voice_live.py): hold to talk runs as long as a recording may; hands-free keeps the mic open longer.
 VOICE_HOLD_MAX_S = 60
-VOICE_HANDS_FREE_MAX_S = float(os.environ.get("SIGHTLINE_VOICE_LIVE_MAX_S", "120"))
+VOICE_HANDS_FREE_MAX_S = env_float("SIGHTLINE_VOICE_LIVE_MAX_S", 120)
 # Words Muse Voice Transcribe should lean toward: what people say to ORCA about a building model.
 VOICE_WORDS = ["ORCA", "Orca", "Northbank", "clash", "clashes", "duct", "ductwork", "supply air", "cable tray", "pipe",
                "transfer girder", "girder", "beam", "column", "slab", "mullion", "transom", "curtain wall", "web opening",
@@ -290,10 +291,10 @@ class DetectRequest(BaseModel):
 
 # Uploaded clash reports: XML plus the images it links to, kept in a temp folder while the report is open.
 UPLOADS = Path(tempfile.gettempdir()) / "sightline-reports"
-UPLOAD_MAX_MB = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_MB", "200"))
-UPLOAD_MAX_FILES = int(os.environ.get("SIGHTLINE_UPLOAD_MAX_FILES", "5000"))
+UPLOAD_MAX_MB = env_int("SIGHTLINE_UPLOAD_MAX_MB", 200)
+UPLOAD_MAX_FILES = env_int("SIGHTLINE_UPLOAD_MAX_FILES", 5000)
 UPLOAD_TYPES = {".xml", ".png", ".jpg", ".jpeg"}
-MODEL_UPLOAD_MAX_MB = int(os.environ.get("SIGHTLINE_MODEL_UPLOAD_MAX_MB", str(UPLOAD_MAX_MB)))
+MODEL_UPLOAD_MAX_MB = env_int("SIGHTLINE_MODEL_UPLOAD_MAX_MB", UPLOAD_MAX_MB)
 MODEL_UPLOAD_MAX_FILES = 8
 
 
@@ -738,12 +739,39 @@ def _with_patch(scene_id: str, kept) -> dict:
         return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
 
 
+def _keep(scene_id: str, options: list[dict], what: str) -> dict:
+    """Keep fixes through `plans.apply`, which tries each again first (as its proposal did, with the clearance and
+    requirements of its clash) and keeps all or none, plus what the page needs to patch its model. A fix that no longer
+    passes is a 409 with why; one that cannot be made a 422; one that is not a fix ORCA knows a 400."""
+    try:
+        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, options))
+    except plans.NotVerified as e:
+        raise HTTPException(409, str(e))
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot apply {what}: {e}")
+    except (ValueError, KeyError, TypeError, IndexError) as e:
+        raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
+
+
+def _one(r: dict) -> dict:
+    """One fix's reply: `pieces`, the first run's, as one fix of one run has always replied; `groups`, every run's (a
+    combined fix)."""
+    out = {**r, "pieces": r["pieces"][0], "groups": r["groups"][0]}
+    if r.get("not_cut"):   # a penetration requested, not cut: the clash stays open until the host's team cuts it
+        out.update(cut=False, blocked_by=r["not_cut"][0]["blocked_by"])
+    return out
+
+
 @app.post("/api/scenes/{scene_id}/apply")
 def apply(scene_id: str, body: Move):
-    try:
-        return _with_patch(_scene(scene_id), lambda: ws.apply(scene_id, body.moved, body.delta_m))
-    except edits.Unsupported as e:   # it would pull a joint apart
-        raise HTTPException(422, f"Cannot apply this move: {e}")
+    """Keep a move of `moved` (its whole run) by `delta_m`, tried again first against `obstacles` (the clash's other
+    element first). The clearance is the requirements' (25 mm without any), not the body's."""
+    if not body.moved or not body.obstacles:
+        raise HTTPException(422, "Say what moves (moved) and what it must clear (obstacles): a move is checked "
+                                 "against its clash again before it is kept.")
+    return _one(_keep(scene_id, [{"kind": "move", "title": "Move", "moved": body.moved, "delta_m": body.delta_m,
+                                  "pair": [body.moved[0], body.obstacles[0]], "others": body.obstacles[1:]}],
+                      "this move"))
 
 
 class ContextObjective(BaseModel):
@@ -807,22 +835,25 @@ class TrimBody(BaseModel):
     element: str
     end: str
     by_m: float
+    other: str | None = None   # the element it butts against: the trim is checked against it again before it is kept
 
 
 @app.post("/api/scenes/{scene_id}/trim/apply")
 def apply_trim(scene_id: str, body: TrimBody):
-    try:
-        return _with_patch(_scene(scene_id), lambda: ws.apply_trim(scene_id, body.element, body.end, body.by_m))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot trim this element: {e}")
+    if not body.other:
+        raise HTTPException(422, "Say which element the trim butts against (other).")
+    return _one(_keep(scene_id, [{"kind": "trim", "title": "Trim", "moved": [body.element], "delta_m": [0, 0, 0],
+                                  "trim": {"end": body.end, "by_m": body.by_m}, "pair": [body.element, body.other]}],
+                      "this trim"))
 
 
 @app.post("/api/scenes/{scene_id}/offset/apply")
 def apply_offset(scene_id: str, body: Offset):
-    try:
-        return _with_patch(_scene(scene_id), lambda: ws.apply_offset(scene_id, body.element, body.split_m, body.dz_m))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot offset this element: {e}")
+    if not body.other:
+        raise HTTPException(422, "Say which element the offset goes around (other).")
+    return _one(_keep(scene_id, [{"kind": "offset", "title": "Offset", "moved": [body.element],
+                                  "delta_m": [0, 0, body.dz_m], "split_m": body.split_m,
+                                  "pair": [body.element, body.other]}], "this offset"))
 
 
 class FixApply(BaseModel):
@@ -832,27 +863,20 @@ class FixApply(BaseModel):
 @app.post("/api/scenes/{scene_id}/fix/apply")
 def fix_apply(scene_id: str, body: FixApply):
     """Keep one verified option of any kind (`plans.apply`, which every kind is registered with). The page's preview
-    and before meshes are dropped: the fix is rebuilt on the server from its kind and parameters. A kind whose keeping
-    depends on the requirements decides that in its `plans.KEEP` entry, never from what the page sends."""
+    and before meshes are dropped: the fix is tried again on the server from its kind, its parameters and the clash it
+    names (`pair`, and `others` for a plan's merged item), with the clearance and requirements of that clash, and what
+    that trial makes is kept; one that no longer passes is a 409. A kind whose keeping depends on the requirements
+    decides that in its `plans.KEEP` entry, never from what the page sends."""
     o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
     if not isinstance(o.get("moved"), list) or not o["moved"]:
         raise HTTPException(400, "The fix names no element.")
-    try:
-        r = _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, [o]))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot apply this fix: {e}")
-    except (ValueError, KeyError, TypeError, IndexError) as e:
-        raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
-    # `pieces`: the first run's, as one fix of one run has always replied; `groups`: every run's (a combined fix).
-    out = {**r, "pieces": r["pieces"][0], "groups": r["groups"][0]}
-    if r.get("not_cut"):   # a penetration requested, not cut: the clash stays open until the host's team cuts it
-        out.update(cut=False, blocked_by=r["not_cut"][0]["blocked_by"])
-    return out
+    return _one(_keep(scene_id, [o], "this fix"))
 
 
 @app.get("/api/scenes/{scene_id}/export")
 def export(scene_id: str):
-    """The edited file. With edits in several discipline files, they come back as one zip."""
+    """The edited file. With edits in several discipline files (or a STEP model's STEP and IFC), they come back as one
+    zip named for the project, `<project>-orca.zip` ("Northbank-orca.zip"), else `orca-export.zip`."""
     _tidy_exports()
     out = EXPORTS / scene_id
     out.mkdir(exist_ok=True)
@@ -861,8 +885,14 @@ def export(scene_id: str):
         raise HTTPException(409, "Nothing has been changed yet. Accept a fix first.")
     if len(paths) == 1:
         return FileResponse(paths[0], filename=paths[0].name, media_type="application/octet-stream")
-    archive = shutil.make_archive(str(EXPORTS / f"{scene_id}-sightline"), "zip", out)
-    return FileResponse(archive, filename=Path(archive).name, media_type="application/zip")
+    archive = shutil.make_archive(str(EXPORTS / f"{scene_id}-orca"), "zip", out)
+    return FileResponse(archive, filename=export_zip_name(ws.names.get(scene_id, [])), media_type="application/zip")
+
+
+def export_zip_name(files: list[str]) -> str:
+    """The download name of a multi-file export: the project's name (`service.project_name`), safe in a file name."""
+    project = re.sub(r"[^A-Za-z0-9._ -]+", "-", project_name(files) or "").strip(" .-")
+    return f"{project}-orca.zip" if project else "orca-export.zip"
 
 
 def _report(report_id: str):
@@ -1132,19 +1162,15 @@ def patterns(report_id: str, scene_id: str, fixed: str = ""):
 
 @app.post("/api/reports/{report_id}/patterns/{scene_id}/triage")
 def triage_patterns(report_id: str, scene_id: str, body: PatternTriage, request: Request):
-    """Ask Muse Spark what each pattern is (one call for all). Counts as one proposal."""
+    """Ask Muse Spark what each pattern is (one call for all). Counts as one proposal, once: the reading is shared with
+    the chat and MCP (`plans.read_patterns`)."""
     pats = plans.patterns(ws, _scene(scene_id), _report(report_id), body.fixed)
-    doc = requirements.current()
-    key = (report_id, scene_id, tuple(p["id"] for p in pats), requirements.model_key(doc) if doc else None)
-    if key not in _pattern_triage:
-        refused = _take(propose_limit, request)
-        if refused:
-            raise HTTPException(429, refused)
-        _pattern_triage[key] = plans.triage_patterns(ws, pats)
-    return _pattern_triage[key]
+    verdicts, refused = plans.read_patterns(ws, scene_id, report_id, pats, lambda: _take(propose_limit, request))
+    if refused:
+        raise HTTPException(429, refused)
+    return verdicts
 
 
-_pattern_triage: dict[tuple, dict] = {}
 _triage_jobs: dict[str, triage.Job] = {}
 _triage_lock = threading.Lock()
 
@@ -1265,7 +1291,7 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False) -> 
             model, info = triage_model()
             if doc is not None:
                 info = {**info, "requirements": ws.requirements_info(doc)}
-            job = triage.Job(report, model, info, int(os.environ.get("SIGHTLINE_TRIAGE_WORKERS", "8")),
+            job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", 8),
                              requirements=doc, seed=donor.results if donor is not None else None)
             job.learn(facts)
             _triage_jobs[key] = job.start()
@@ -1364,12 +1390,8 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
 
 @app.post("/api/scenes/{scene_id}/plan/apply")
 def plan_apply(scene_id: str, body: PlanApply):
-    try:
-        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, body.options))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot apply the plan: {e}")
-    except ValueError as e:
-        raise HTTPException(400, f"Cannot apply the plan: {e}")
+    """Keep a plan's fixes, all or none: each tried again alone and all together first (plans.apply)."""
+    return _keep(scene_id, body.options, "the plan")
 
 
 _chat: chat.Chat | None = None
@@ -1398,6 +1420,7 @@ def chat_turn(body: ChatTurn, request: Request):
     allowed = lambda: None if no_caps else propose_limit.take(who)
     allowed_many = lambda n: None if no_caps else propose_limit.take_many(who, n)
     escalate_allowed = _escalation_check(request)
+    detect_allowed = lambda: None if no_caps else detect_limit.take(who)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
     events = _RequestEvents(request)
@@ -1411,7 +1434,7 @@ def chat_turn(body: ChatTurn, request: Request):
         try:
             c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel,
                    propose_allowed=allowed, propose_allowed_many=allowed_many, escalate_allowed=escalate_allowed,
-                   before_publish=finish)
+                   detect_allowed=detect_allowed, before_publish=finish)
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         finish()  # idempotent after successful completion; also close failed/cancelled turns
@@ -1466,7 +1489,8 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
     def work():
         try:
             doc = _build_document(report, verdicts, body.scene_id if scene is not None else None, body.scope, teams=body.teams, evidence=body.evidence,
-                                  reviews=body.reviews, marks=body.marks, bcf=body.bcf, emit=events.put)
+                                  reviews=body.reviews, marks=body.marks, bcf=body.bcf, emit=events.put,
+                                  triage_info=job.info if job is not None else None)
             events.put({"type": "ready", "url": doc["path"], "name": doc["name"], "bytes": doc["bytes"]})
         except Exception as e:
             events.put({"type": "error", "message": f"Could not build the report: {type(e).__name__}: {e}"})
@@ -1483,13 +1507,15 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
 
 def _build_document(report, verdicts: dict, scene_id: str | None, scope: str, *, teams: dict | None = None,
                     evidence: dict | None = None, reviews: dict | None = None, marks: dict | None = None,
-                    bcf: bool = True, emit=None) -> dict:
-    """Build a report and keep it for download: {path (the download route), name, bytes, file (a local copy)}."""
+                    bcf: bool = True, emit=None, triage_info: dict | None = None) -> dict:
+    """Build a report and keep it for download: {path (the download route), name, bytes, file (a local copy)}.
+    `triage_info`: the triage run's model, which the PDF names (none: the one triage would run on now)."""
     scene = ws.scene(scene_id) if scene_id and scene_id in ws.scenes else None
     matches = ws.match(report.id, scene_id) if scene is not None else None
     data, name, media = document.generate(
         report, verdicts, ws.model, scope=scope, model_teams=teams or {}, matches=matches, scene=scene,
-        evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None))
+        evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None),
+        triage_info=triage_info)
     doc_id = uuid.uuid4().hex
     _documents[doc_id] = (data, name, media)
     while len(_documents) > 24:
@@ -1572,9 +1598,9 @@ async def voice_live_socket(socket: WebSocket):
 
 links = agents.Links()
 ws.keep = links.kept  # what live links point at is evicted last
-link_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_LINKS_PER_HOUR", "0")),
-                          int(os.environ.get("SIGHTLINE_LINKS_PER_DAY", "0")), noun="agent links")
-agent_call_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_AGENT_CALLS_PER_HOUR", "0")), 0, noun="agent calls")
+link_limit = ProposeLimit(env_int("SIGHTLINE_LINKS_PER_HOUR", 0),
+                          env_int("SIGHTLINE_LINKS_PER_DAY", 0), noun="agent links")
+agent_call_limit = ProposeLimit(env_int("SIGHTLINE_AGENT_CALLS_PER_HOUR", 0), 0, noun="agent calls")
 MAX_CAPTURE_BYTES = 6_000_000
 
 
@@ -1680,13 +1706,17 @@ def revoke_link(token: str):
 
 
 def mcp_hooks() -> mcp_server.Hooks:
-    """What the MCP tools borrow from this server: links, the demo caps, triage and reports."""
+    """What the MCP tools borrow from this server: links, the demo caps (proposals, second tries, detection runs, all
+    charged to the link's creator), triage and reports."""
     def charge(link: agents.Link, n: int) -> str | None:
         return None if link.owner else propose_limit.take_many(link.visitor, n)
 
     def escalate(link: agents.Link) -> str | None:
         r = escalation_refused(link.visitor, link.owner)
         return r[1] if r else None
+
+    def detect_run(link: agents.Link) -> str | None:
+        return None if link.owner else detect_limit.take(link.visitor)
 
     def start_triage(report_id: str, scene_id: str | None, link: agents.Link):
         return _start_triage(ws.report(report_id), scene_id, lambda: charge(link, 1))
@@ -1697,10 +1727,11 @@ def mcp_hooks() -> mcp_server.Hooks:
         verdicts = dict(job.results) if job is not None and job.done else {}
         if len(verdicts) < len(report.clashes) // 2:
             raise RuntimeError("Triage the report first (the triage tool): the report sorts clashes by its verdicts.")
-        return _build_document(report, verdicts, scene_id, scope)
+        return _build_document(report, verdicts, scene_id, scope, triage_info=job.info if job is not None else None)
 
     return mcp_server.Hooks(
-        links=links, charge=charge, escalate=escalate, allow_call=lambda link: agent_call_limit.take(link.id),
+        links=links, charge=charge, escalate=escalate, detect=detect_run,
+        allow_call=lambda link: agent_call_limit.take(link.id),
         start_triage=start_triage, triage_state=lambda rid, sid: triage_state(rid, sid),
         build_document=build_document, spawn=owner.spawn)
 

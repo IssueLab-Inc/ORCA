@@ -872,7 +872,7 @@ export function App() {
       sceneRevision.current = revision ?? null;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
-      setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
+      setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
       setStepFiles(Object.values(step ?? {})); setSceneFiles(files); setResumable(null);
       return id;
@@ -917,7 +917,7 @@ export function App() {
     setBusy(`Reading ${what}…`); setError(null);
     try {
       const r = await get(); if (workspaceEpoch.current !== workspace) return;
-      setReport(r); setChatReport(r.id); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({}); setVerdicts(null);
+      setReport(r); setChatReport(r.id); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({}); setVerdicts(null);
       setDetection(null); setViews({}); captures.current.clear();
       return r;
     }
@@ -994,7 +994,7 @@ export function App() {
     try {
       const r = await api.report(reportId);
       if (workspaceEpoch.current !== workspace) return;
-      setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({});
+      setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({});
       setVerdicts(null); setViews({}); captures.current.clear(); setDetection(found);
     } catch (e) { setError((e as Error).message); }
     finally { setDetecting(null); }
@@ -1390,7 +1390,8 @@ export function App() {
         ? builtPasses(builtFix(i.option!, false), [i.element_a, i.element_b]) : null;
     });
     try {
-      const kept = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      // Each fix names its clash: the server tries them again, alone and together, before keeping any.
+      const kept = await api.applyPlan(sceneId, items.map((i) => ({ ...i.option!, pair: [i.element_a, i.element_b], others: i.others ?? [] })));
       const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
@@ -1829,7 +1830,7 @@ export function App() {
     const built = pair && canBuild(o) && builtDone.current[builtKey(pair, o)]?.status !== "done"
       && !builtPending.current.has(builtKey(pair, o)) ? builtPasses(builtFix(o, false), pair) : null;
     try {
-      const kept = await api.accept(sceneId, o);
+      const kept = await api.accept(sceneId, o, pair);
       // Each split run's pieces, the original first (a combined fix can split several runs).
       const groups = kept.groups ?? (kept.pieces?.length ? [kept.pieces] : []);
       if (!live()) return;
@@ -1976,7 +1977,8 @@ export function App() {
     filter: triageFilter, clashId: clash?.id ?? null, tab, fixHidden: hideFix,
     triageOpen: triageRun?.model ? !!triageRun.open_weights : !!triageModel?.open_weights,
     proposing, proposingFor: progress && proposing ? (now - progress.started) / 1000 : 0,
-    options: proposal?.options.length ?? 0, proposalDone: progress?.phase === "done", error, replaying,
+    options: proposal?.options.length ?? 0, optionKinds: proposal?.options.map((o) => o.kind) ?? [],
+    proposalDone: progress?.phase === "done", error, replaying,
     compare, fixed: Object.keys(fixes),
     planRunning: planning, planFor: planRun ? (now - planRun.started) / 1000 : 0, planReady: !!plan, planError,
     patternsRead: !!verdicts, reviewedCount: Object.keys(reviewed).length, signoffs: tourDuct ? signoffs[tourDuct.id]?.length ?? 0 : 0,

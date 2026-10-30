@@ -9,7 +9,6 @@ from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 import json
-import os
 from pathlib import Path
 import threading
 import time
@@ -19,6 +18,7 @@ import ifcopenshell.util.system as system
 import numpy as np
 
 from . import context_eval, edits, verify
+from .limits import env_float, env_int
 
 PROMPT = Path(__file__).parent / 'domain_packs' / 'context.md'
 MAX_STORED_SCENES = 16
@@ -35,11 +35,11 @@ class Limits:
 
     @classmethod
     def from_env(cls):
-        return cls(model_calls=int(os.getenv('SIGHTLINE_CONTEXT_MODEL_CALLS', '6')),
-                   trials=int(os.getenv('SIGHTLINE_CONTEXT_TRIALS', '12')),
-                   seconds=float(os.getenv('SIGHTLINE_CONTEXT_SECONDS', '120')),
-                   alternatives=int(os.getenv('SIGHTLINE_CONTEXT_ALTERNATIVES', '3')),
-                   radius_m=float(os.getenv('SIGHTLINE_CONTEXT_RADIUS_M', '2.5')))
+        return cls(model_calls=env_int('SIGHTLINE_CONTEXT_MODEL_CALLS', 6),
+                   trials=env_int('SIGHTLINE_CONTEXT_TRIALS', 12),
+                   seconds=env_float('SIGHTLINE_CONTEXT_SECONDS', 120),
+                   alternatives=env_int('SIGHTLINE_CONTEXT_ALTERNATIVES', 3),
+                   radius_m=env_float('SIGHTLINE_CONTEXT_RADIUS_M', 2.5))
 
     def __post_init__(self):
         for value, maximum in ((self.model_calls, 6), (self.trials, 12), (self.seconds, 120),
@@ -80,7 +80,7 @@ class ContextError(ValueError):
 
 
 # A wider fix copies the open models two or three times (snapshots); past this size it is not offered (docs/uploads.md).
-WIDER_MAX_MB = int(os.environ.get('SIGHTLINE_WIDER_FIX_MAX_MB', '100'))
+WIDER_MAX_MB = env_int('SIGHTLINE_WIDER_FIX_MAX_MB', 100)
 
 
 def validate_objective(ws, scene_id, objective):

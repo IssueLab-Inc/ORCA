@@ -1,0 +1,285 @@
+# 20 · Decisions, limits and roadmap
+
+> **Covers:** `CLAUDE.md` ("Rules", "Stack and why", "Status and next steps"), `AGENTS.md`, `BUILT_DURING_HACKATHON.md`,
+> the "Not yet" sections of the feature designs, and the code that enforces each limit (`server/sightline/edits.py`,
+> `context_eval.py`, `hosts.py`, `document.py`, `service.py`, `deploy/modal_app.py`) · **Checked against code:**
+> 2026-10-30 (`104fda9`) · **Deeper design:** [docs/edits.md](../edits.md), [docs/escalation.md](../escalation.md),
+> [docs/show-it-built.md](../show-it-built.md), [docs/uploads.md](../uploads.md), [docs/mcp.md](../mcp.md)
+
+ORCA was built in nine days for a hackathon, so many choices were made fast and on purpose: some by the owner,
+some forced by what a model or a library could not do. This doc keeps those choices in one place, with what was tried
+and dropped and why, so nobody re-opens a settled question by accident; then it lists what ORCA does not do yet (the
+limits a person can hit, each checked in the code), and what comes next. The dated history of how each part was built
+is [22 · Build log](22-build-log.md); this doc is the current state.
+
+## The hackathon frame
+
+- **Event:** the Meta Global AI Developer Hackathon, Startup track. ORCA is a standalone web app by IssueLab.
+- **Building period:** Oct 27 – Nov 4, 2026, 9:00 PM ET. A submission needs this public repo, a 3-minute demo video,
+  and only work built during the event.
+- **Plan to the end:** freeze Nov 3, record the video, submit Nov 4 before noon ET (CLAUDE.md, "Next, in order", item
+  7; not done at `104fda9`).
+
+```mermaid
+flowchart LR
+    opens["Oct 27: building period opens, first commit"] --> building["Oct 27 to 30: built and measured, see the build log"]
+    building --> freeze["Nov 3: freeze"]
+    freeze --> video["Record the 3-minute demo video"]
+    video --> submit["Nov 4, before noon ET: submit"]
+    submit --> ends["Nov 4, 9:00 PM ET: building period ends"]
+```
+
+- **The anti-project list.** The hackathon lists "simple image analyzers", dashboards as the main feature and
+  Streamlit apps as projects to avoid. So the headline is **verified model edits**: Muse Spark proposes a change to
+  real IFC elements and the geometry check passes it before anyone sees it. Explaining a clash from its pictures is a
+  fallback (the understanding and advice shown when nothing verifies, or a recommendation where the requirements let
+  nothing be edited), never the pitch. Insights and the Triage card serve the fixes; they are not the product.
+- **Only new work.** `BUILT_DURING_HACKATHON.md` lists what was built during the event (the web app, the server, the
+  Meta model integration, the domain packs, spikes, tests, evals, the synthetic test models, and the PC-03 cell's
+  models, generated during the event by IssueLab's own scripts) and what was not (the Northbank demo models, generated
+  before the event, used as data; the open-source libraries). The rule (CLAUDE.md): code adapted from earlier IssueLab
+  work is listed there **before** it is committed; none is. No customer data, ever. Even the landing's demo pictures
+  are captured in ORCA's own viewer (`web/scripts/capture-demos.cjs`), not taken from the demo-models repo's renders,
+  which predate the event.
+- **Names.** The product is ORCA, by IssueLab, with no association with any other IssueLab product (none is named in
+  the app, docs or commits). No "Meta" or "Muse" in the product name. Internal identifiers that still say `sightline`
+  stay on purpose ([21](21-glossary-and-naming.md)).
+- **Working rules** (`AGENTS.md`, CLAUDE.md): commits authored by Dodzi Agbenorku with the GitHub noreply address and
+  no trailers; secrets only from `.env` or the environment, never in git, chat or the browser; a branch per slice
+  named for its kind and a PR, never work on `main` or merge without authorisation; specs and plans in `docs/`, never
+  `docs/superpowers/` (its files are history); keep `docs/architecture/` current in the same PR (checked by
+  `server/tests/test_docs_map.py`, being added with this map).
+
+## Owner decisions
+
+From the build log ("owner decision", "owner feedback", "owner request") and the feature designs. "Where" names what
+carries the decision today.
+
+| Date | Decision | Where it shows |
+|---|---|---|
+| Oct 27 | Deploy on Modal, public, with proposal caps (each proposal is a paid model call) | `deploy/modal_app.py` (one container), `limits.ProposeLimit`, `SIGHTLINE_PROPOSE_PER_HOUR` 20 / `_PER_DAY` 300 on Modal; [16](16-security-caps-and-cost.md), [17](17-deployment-and-operations.md) |
+| Oct 28 | A site model is context: its tests are listed but off by default, and duplicates cover the building models only | `detect.default_tests`; [docs/detection.md](../detection.md) |
+| Oct 28 | Coordination first: ORCA's own check is the golden path, a Navisworks report the second way in; the job is "design coordination", one item a "clash" | `openDemo` → `runDetect` in `App.tsx`; the header's **Coordinate** menu; [01](01-product-and-journeys.md), [21](21-glossary-and-naming.md) |
+| Oct 28 | The open-weights model (Muse Spark Open on Baseten) costs per hour, so it is off unless switched on; settings for everyone beside the owner's own | `settings.py` (`SIGHTLINE_OPEN_WEIGHTS` default `0`), the Owner menu "For me" / "For everyone"; [15](15-requirements-settings-and-config.md) |
+| Oct 28 | STEP models: converted to IFC on open, written back as STEP on export | `step.py`; [docs/step.md](../step.md), [14](14-files-in-and-out.md) |
+| Oct 28 (feedback) | Insights must not jump, copy follows the model in use, a filter to one pattern or root cause, a compact Triage card, patterns read automatically, no flashing thumbnails | `keepPlaces`, `listFocus` in `App.tsx`; `meta_client.triage_model_info`; `Viewer.posed`; [12](12-web-app.md) |
+| Oct 28 (feedback on Fix together for #61/#68) | One problem, one agent; never trim guarding to make room for a service; failures in plain words | `plans.merge_shared`, `agent._try_trim`, `plans.failure_summary`; [09](09-agent-workflows.md) |
+| Oct 29 | The landing keeps "Watch ORCA fix a clash", with two equal demo cards; the README's "Two demos" table shares their pictures and numbers | `DemoCard` in `About.tsx`, `web/public/demos/*.webp` |
+| Oct 29 | Agents over MCP, tied to the visitor's session by a pairing link | `agents.py`, `mcp_server.py`, `web/src/Agent.tsx`; [docs/mcp.md](../mcp.md), [11](11-mcp-and-agent-links.md) |
+| Oct 29 (feedback) | A link shows time left on the server's clock; a closed tab can be resumed; the dialog leads with the token alone | `clock_offset`, `timeLeft`, `resumeSession` in `App.tsx`, `CopyField` in `Agent.tsx` |
+| Oct 29 | Coordination requirements: one strictness scale for flagging and fixing, five levels, the Muse draft only on a button, a hackathon-sized slice | `requirements.py`, `Requirements.tsx`, `reqFile.ts`; [docs/requirements.md](../requirements.md) |
+| Oct 29 (feedback) | Small models frame as well as buildings; a blank project for your own files | `Viewer.reach`, `ProjectStart.tsx`; [13](13-3d-viewer.md) |
+| Oct 29 | Phones and tablets: the model stays on screen with a bottom sheet over it, and every feature stays reachable | `layout.ts`, `Sheet.tsx`, `AppMenu.tsx`; [docs/mobile.md](../mobile.md) |
+| Oct 29 (feedback) | Insights patterns as cards; Clashes and Insights tabs so the list has room | `.pattern-head` / `.pattern-foot` in `index.css`, `leftView` in `App.tsx` |
+| Oct 29 | Renamed from Sightline to ORCA; internal names kept so deployed config and saved state still work | the `sightline` package, `SIGHTLINE_*`, `X-Sightline-Settings`, `sightline.*` storage keys; `scene.step_source` still reads `Sightline_STEP`; [21](21-glossary-and-naming.md) |
+| Oct 29 | Specs and plans in `docs/`, never `docs/superpowers/`; no superpowers skills | `AGENTS.md`, CLAUDE.md |
+| Oct 29 | Fix kinds in one registry (groundwork for reroute, resize and penetration) | `agent.TRIES` / `PARAMS`, `plans.IN_TRIAL` / `EXTRA_FILES` / `KEEP`, `requirements.SIZED`, `web/src/fixKinds.ts`; [07](07-fixes-and-edits.md) |
+| Oct 29 | Reroute, penetration and resize as new kinds of fix | `edits.apply_route`, `edits.penetration` / `apply_penetration`, `edits.resize_size` / `apply_resize`; [docs/edits.md](../edits.md) |
+| Oct 29 | Accept in place: a kept fix patches the page's model instead of reloading the file | `Workspace.patch`, `applyToViewer` in `App.tsx`, `web/src/viewer/patch.ts` |
+| Oct 29 | Which hosts take an opening: hard rules, then the requirements, then Muse's reading of each kind of host, then walls and slabs only | `hosts.py`, `domain_packs/penetrations.md` |
+| Oct 29 | Bigger uploads, aiming at 500 MB; the demo cap stays 150 MB because that is what opens in about two minutes | `web/src/uploads.ts`, `app._receive_models`, `SIGHTLINE_MODEL_UPLOAD_MAX_MB`; [docs/uploads.md](../uploads.md) |
+| Oct 29 | Escalation to Muse Wonder: a button by default; also "Look for a better fix" after a successful run | `escalation.py`, the `escalation` setting (`SIGHTLINE_ESCALATION` default `button`); [docs/escalation.md](../escalation.md) |
+| Oct 29 | Show it built: the fix after only; a clean presentation render, not a site photo; a switch in the owner menu; two Muse Wonder judges per picture; the open tray bend to be fixed in the model, not the prompt; the PDF gets a built view for each accepted fix | `built.py`, `BuiltView.tsx`, `built_views` (`SIGHTLINE_BUILT_VIEWS` default `0`); [docs/show-it-built.md](../show-it-built.md) |
+| Oct 30 (request) | A move keeps what it stands on: a post slid along its slab is not a new clash, a lift off it is refused | `verify.supports`, `verify.keep_supports`; [docs/edits.md](../edits.md) |
+
+## Tried and dropped
+
+| Tried or considered | What happened | Instead | Where now |
+|---|---|---|---|
+| Blazor for the web app | Telerik is commercial with a private feed (a public repo must build for anyone), JS↔.NET interop on every viewer event, a slow WASM start for judges | Vite + TypeScript + React | `web/`; [02](02-system-architecture.md) |
+| That Open's viewer components | Not used. CLAUDE.md records the choice, not the reason | An own viewer on three.js + web-ifc: one `BatchedMesh` per IFC file, so a preview is one matrix update | `web/src/viewer/`; [13](13-3d-viewer.md) |
+| IfcOpenShell's default `opencascade.brep` tree | Has no `*_many` clash queries | `ifcopenshell.geom.tree(backend="opencascade.trianglebvh")` | `verify.check`, `detect._tree` |
+| Collision queries for hard clashes | Collision misses an element wholly inside another | Intersection first; collision without touching as a second pass (intersection misses flush faces: Clash7's transom read as a 0 mm gap); an exact separating-axis depth for rectangular solids | `verify.check`, `detect._Solids`; [06](06-geometry-and-detection.md) |
+| The intersection figure as a clash's depth | Wrong both ways: a 0.5 mm touch read 200 mm, a 40 mm rail 20 mm; #057 and #061 read −400 mm | How far one must move to clear the other: exact for rectangular solids, else the smaller of the figure and the box separation. #057 is −100 mm, #061 −77 mm | `detect._measure`; [docs/detection.md](../detection.md) |
+| Re-triangulating everything for each check | 7.2 s a check (spike 3) | Boxes cached at open, only the neighbourhood triangulated: 0.4–0.6 s | `IfcScene.bounds`, `IfcScene.near` |
+| Whole-element moves only | Fail for #057 and #061: long runs meet walls and services along their length | Local offsets with bends (Rev04's fix), then routes, resize and openings | `edits.py`; [07](07-fixes-and-edits.md) |
+| Proposals from text alone | Spike 4: Muse guessed where openings were and every move hit something | A/B/C pictures for the direction, and the openings measured on the run's line as text for the millimetres | `edits.passages`; [spikes/README.md](../../spikes/README.md) |
+| Square corners on offsets by default | Rev04 turns with radiused bends | Radiused 90° bend fittings; `SIGHTLINE_OFFSET_CORNERS=square` keeps the old corners | `edits.default_corners`, `edits.bend_radius` |
+| SAM 3.1 to read Navisworks clash pictures | Found nothing from text prompts; from points it outlined 52–91% of each element and never the overlap | Read by colour in the browser (red A, green B, the blend where they meet) | `web/src/clashImage.ts` |
+| Muse Image designing a fix, drawing a redline, or a site photo | Redrew the girder, ignored "change nothing", drew a different building, wrote wrong numbers | Muse Image only restyles ORCA's own view of a verified fix, checked against the model by a pixel gate and two judges | `built.py`; [docs/show-it-built.md](../show-it-built.md) |
+| Navisworks pictures as Show it built's input | 3 of 3 fixes drawn wrong | ORCA's own captures (`Viewer.captureBuilt`) | [docs/show-it-built.md](../show-it-built.md) |
+| A prompt line to keep the tray's bends closed in pictures | 0 of 2 pictures kept them closed | Fix the model's bends to follow the profile (open, below) | [docs/show-it-built.md](../show-it-built.md) |
+| Spoken replies | Muse has no text-to-speech | Real-time recognition in, text out | `voice_live.py`; [docs/voice.md](../voice.md) |
+| `Cache-Control: no-transform` on streams | Modal's edge ignored it, compressed NDJSON and held it back (first triage verdicts after 77–170 s) | `Content-Encoding: identity` on every stream | `app._ndjson`, `NDJSON_HEADERS`; [10](10-http-api-and-streams.md) |
+| Long-held MCP sessions over SSE | Modal cuts requests at 10 minutes and its edge buffers streams | `/mcp` stateless with one JSON response per call; long work as jobs | `mcp_server.py`; [11](11-mcp-and-agent-links.md) |
+| `muse mcp add` for Muse Code | Not a subcommand (owner, Oct 29) | The settings JSON, with `"mode": "optional"` (`required` aborts a run when a link expires) | `web/src/Agent.tsx`; [docs/mcp.md](../mcp.md) |
+| CSS `::after` tooltips | Cut off by panel and window edges | One fixed `Tooltips` layer that flips and clamps | `web/src/ui.tsx` |
+| An effect that returns `scrollIntoView(...)` | Chromium returns a Promise; React's cleanup broke and the panel blanked | Effects use braces | `web/src/App.tsx`, `Chat.tsx` |
+| Thumbnails drawn into the visible canvas after the frame's render | The shot showed in the viewer until the next frame | `Viewer.posed` renders the restored view before returning; one thumbnail per 60 ms | `web/src/viewer/Viewer.ts` |
+| Trims on any member | A verified "trim the pad footing 900 mm", half its bearing | A trim needs a slender member (`edits.SLENDER = 3`); a trim inside one model is marked model cleanup | `edits.butt_trim`, `agent._try_trim`; `evals/not_a_clash.py` |
+| Counting a moved element's own footing as a clash | Muse Wonder lifted fence posts 100–200 mm off their slab to pass (E0) | `verify.keep_supports` | `agent._try_move`, `plans.verify_together`, `Workspace.verify_move` |
+| Boxes in one iterator; OpenCASCADE for meshes; a sweep with no lower bound | 4.8 GB peak on 150 MB; 20–30 ms a mesh; 500 MB detection 482 s | Batches of 2,000 (`BOUNDS_BATCH`); CGAL for mesh-only bodies (`MESH_KERNEL`); the sweep bounded (18 s) | `scene.py`, `detect._candidates`; [docs/uploads.md](../uploads.md) |
+| `.Moved()` to place STEP shapes | Names and colours lost on write | `BRepBuilderAPI_Transform` | `step.py` |
+| "Every hard clash matters" in the L3 triage line | Muse Spark's 12 model errors became 80 on Northbank | Prompts say only what differs from the defaults (L3 Balanced adds nothing) | `requirements.py` prompt lines |
+| "Modelled twice" in any test | Muse called Northbank's X-brace diagonals (same name, same box) duplicates | Said only in a duplicates test | `domain_packs/titles.md` |
+| Reloading the whole file on accept | The server wrote the whole IFC and the browser re-parsed it | Accept in place (falls back to reloading when the page missed an edit or the meshes pass 500,000 vertices: `Workspace.PATCH_MAX_VERTS`) | `service.py`, `viewer/patch.ts` |
+| A tight `max_completion_tokens` on Muse Wonder | Reasoning tokens count against it: a 20-token cap came back `content: null` | Never a tight cap | [docs/escalation.md](../escalation.md) |
+
+## Known limits and open issues
+
+Each limit below is enforced or visible in the code at `104fda9` unless it says otherwise. A grep for `TODO`, `FIXME`,
+`XXX` and `HACK` across `server/sightline`, `server/tests`, `web/src`, `web/tests`, `web/scripts`, `evals`, `spikes`
+and `deploy` finds none: open work is tracked in the feature docs and here, not in code comments.
+
+### What a fix can change
+
+- **Engineering is the designer's call.** ORCA checks geometry and model integrity: the clash is gone, the clearance is
+  kept, nothing new is hit, ports still chain. Structural adequacy and service performance are not judged; options say
+  who must review (`review`, `also_needs`). "These are geometry and model checks with designer review conditions, not
+  a claim of engineering adequacy or full IFC conformance" (README).
+- **Offsets and routes** (`edits.py`, raising `Unsupported` with the reason): the body must be one straight extrusion
+  along its own axis, centred, with a rectangle, circle, U, C, I or L profile; a branched segment (more than two ports)
+  cannot be split; an offset needs a horizontal segment, vertical or lateral but not both at once; a route takes at most
+  `ROUTE_STEPS` = 3 steps, one axis per change (a round pipe may roll); runs sloping more than 15° and vertical runs
+  cannot be rerouted; falling drainage is refused and level drainage only steps
+  sideways; pieces shorter than `MIN_PIECE_M` (50 mm) are refused. Not yet: 45° pieces, falling drainage, splitting at
+  fittings.
+- **Bends are closed sections.** `edits._bend_mesh` sweeps a closed rectangle or circle for every bend, so an offset
+  cable tray (Northbank's `LV-TRAY-L02-1` is an `IfcUShapeProfileDef` channel) gets closed boxes between open channels.
+  Bends that follow the segment's own profile are an open ask ([docs/escalation.md](../escalation.md), "Asks of the
+  Advanced IFC edits work").
+- **Resize** (`edits._resizable`, `resize_size`): rectangular ducts and cable trays only, a plain
+  `IfcRectangleProfileDef`, level and upright; no flatter than 4:1 (`MAX_ASPECT`), trays at least 50 mm deep; never
+  pipes, round ducts, hollow, rounded or channel sections, or STEP parts (Northbank's U-channel tray cannot be resized).
+  Not yet: round ducts (flat oval), resizing at fittings, keeping a pressure drop rather than an equivalent diameter.
+  There is no planted demo case.
+- **Penetrations** (`edits.penetration`, `hosts.py`): a straight service through a host with an extruded body; the
+  opening must be surrounded by 50 mm of host; hard rules refuse columns, doors, windows, curtain walls, piles,
+  footings, stairs, railings, lifts, services and equipment, glazing, see-through zones and transfer elements (the
+  Northbank girder). Not yet: sleeves and fire-stopping as elements, one opening for several services.
+- **Trims:** slender members only (`SLENDER`), and a trim inside one model is model cleanup, not a coordination fix.
+- **Moves of a structural element carry no review.** E0's B1 fix moves a pad footing and is verified, but a move gets
+  no `review` (in `agent.py` only a penetration and a resize set one): the "structure review" chip is a follow-up
+  ([docs/escalation.md](../escalation.md)).
+- **STEP parts:** plain boxes and cylinders become exact extrusions and take offsets and trims; other parts only move.
+  Depth comes from the mesh, within the deflection. A STEP machine cannot be placed inside a building model (STEP has
+  no world position) ([docs/step.md](../step.md)).
+
+### Wider fixes (the context planner)
+
+- Offsets in a wider fix take only an exact `IfcRectangleProfileDef` or `IfcCircleProfileDef` on a horizontal straight
+  service, vertical or lateral but not both, with radiused fittings (a square fallback is not verified):
+  `context_eval.check_offset_profile` and `_validate`. Hollow, rounded and U profiles are rejected, so Northbank's tray
+  (#057) offsets in a single proposal but not in a wider fix.
+- Routes and penetrations are not in the wider-fix planner yet ([docs/edits.md](../edits.md)).
+- The search is bounded (model calls, trials, time), so an empty result does not prove there is no fix (README).
+- Offered only up to `SIGHTLINE_WIDER_FIX_MAX_MB` (100 MB by default): it copies the open models two or three times.
+
+### Models, files and size
+
+- **Uploads:** 150 MB together on the demo (`SIGHTLINE_MODEL_UPLOAD_MAX_MB` on Modal), up to eight files. The cap is
+  the largest size that opens in about two minutes (150 MB in 123 s locally, Oct 29). 250 and 500 MB open in about 3
+  and 8 minutes; what blocks 500 MB is the server's box measuring (one triangulation per element, about 1 ms each on 4
+  CPUs) and web-ifc drawing on the page's main thread (about 3 minutes with the page frozen). See
+  [docs/uploads.md](../uploads.md).
+- **Detection:** no saved tests or run history beyond the last run; very large federations are not split into local
+  cells ([docs/detection.md](../detection.md)).
+- **Requirements:** no rules per element (by GlobalId), no import of Navisworks clash-test definitions, no STEP part
+  groups as selectors, no requirements from the chat's own words ([docs/requirements.md](../requirements.md)).
+- **iOS cannot pick a folder**, so "Upload an export folder" is left out there; XML files still upload
+  ([docs/mobile.md](../mobile.md)).
+- **IfcOpenShell drift:** the server runs IfcOpenShell 0.9 (`pyproject.toml`), the demo models pin 0.8.5; CLAUDE.md
+  says to keep an eye on it.
+
+### State, accounts and deploy
+
+- **Everything lives in one process's memory:** open scenes and their edits, reports, chat sessions, triage and title
+  jobs, the last try per pair, and agent links. A container restart, or opening the models again, starts clean; a
+  restart ends every link. That is why Modal runs exactly one container ([17](17-deployment-and-operations.md)). On
+  Modal only the settings for everyone (the Modal Dict `sightline-settings`) and what ships in the image (the demo's
+  `samples/step-cache`) outlive a restart; built-view pictures (`SIGHTLINE_BUILT_CACHE`), uploads and new STEP
+  conversions sit on the container's temporary disk.
+- **Held models are capped:** 8 model sets on the demo (`SIGHTLINE_MAX_SCENES`), within `SIGHTLINE_SCENE_BUDGET_MB`
+  (300); the oldest are evicted first, linked ones last. Exports older than an hour are deleted.
+- **No accounts.** The owner is a token and a signed cookie (`owner.cookie_ok`); review sign-offs and the reviewer's
+  name are kept in the browser's `localStorage` per report; resume is the browser's saved session while the server
+  still holds it.
+- **Requests are cut at 10 minutes** on Modal (`timeout=10 * 60` in `deploy/modal_app.py`); long MCP work runs as
+  jobs.
+- **Server-only clearance.** Only server geometry supplies clearance numbers (`AGENTS.md`); the browser's preview is a
+  picture until the server checks it.
+
+### AI readings
+
+- Triage is scored against a reference built from metadata, not a human review (`evals/navisworks_triage.py`).
+- Muse Spark Open called the B1 pad footing vs the lift-pit wall (−471 mm, real) by design, where Muse Spark said real
+  ([evals/README.md](../../evals/README.md)).
+- Insights' early "duplicate braces → modelling error" pattern is likely the same misreading as the duplicate titles
+  above (build log, Oct 28).
+- The cell's C5 (the HMI vs the panel's working space) has no fix: every direction hits a conveyor, tray or filter.
+  That is a real result, not a bug.
+- Muse Image takes no `mask` or `input_fidelity` (400), so there is no strength setting: keeping to the model comes
+  from the inputs, the prompt and the check.
+
+### Not yet checked
+
+- A human voice on a real microphone, and recognition of real speech on a phone (checked only with espeak-ng speech
+  and a fake microphone: [docs/voice.md](../voice.md), [docs/mobile.md](../mobile.md)).
+- Frame rate on a real GPU (spike 1 ran on software GL).
+- Show it built's S0 did not try radii of 2 and 5 m or Muse Wonder judges at high effort.
+
+### Known, not fixed
+
+Recorded after the final review of Show it built (Oct 30) and still true in the code:
+
+- **A combined step that moves another team's service doesn't add that team as a reviewer** in the PDF and BCF.
+  `document.teams_for` lists only the teams of A and B as reviewers.
+- **A second try's options aren't de-duplicated against the first's.** `Workspace._escalate` sorts both tries' options
+  into one list with no check for the same fix found twice.
+
+### Open questions
+
+- Muse Wonder's cap defaults and day budget: 3 an hour per visitor, 30 a day, $25 a day "for now"
+  ([docs/escalation.md](../escalation.md), `deploy/modal_app.py`).
+
+## Roadmap
+
+### Next, in order (CLAUDE.md)
+
+| | Item | Status at `104fda9` |
+|---|---|---|
+| 1 | Spike 4 with images; opening heights fed as text (`edits.passages`) | Done |
+| 2 | Local-offset edit verified on #042/#057/#061 at Rev04's heights; bends | Done. Of its "later": sideways offsets are done (lateral offsets, and route steps sideways); splitting at fittings is not |
+| 3 | Viewer: context and X-ray modes, section box, measure; A/B/C capture in the browser | Done. "Still to do: plan view" (the viewer has a Top preset, nothing named a plan view) |
+| 4 | Agent loop end to end in the UI, streamed; chat with tools | Done. Its "later", the report tools on the MCP server, is done: `report_summary`, `list_clashes`, `get_clash`, `get_clash_images`, `measure_clash`, `find_root_causes`, `find_patterns`, `triage` |
+| 5 | Bulk triage on Muse Spark Open; voice; IFC export; PDF and BCF; ORCA detection; numbers and titles; demo, tour and landing on detection; STEP and the cell | Done |
+| 6 | Escalation to Muse Wonder; Show it built | Done. Muse Image cannot design a fix; it only restyles one |
+| 7 | Freeze Nov 3, record the video, submit Nov 4 before noon ET | To do |
+
+### Later (not in the hackathon build)
+
+From CLAUDE.md and [docs/mcp.md](../mcp.md):
+
+- **User accounts and saved projects:** GitHub sign-in on top of links, so projects and links survive a restart
+  (`owner.cookie_ok` then becomes "signed in as an allowed login"); persistence on Modal.
+- **OAuth on `/mcp`,** so clients sign in instead of pasting a token (Muse Code supports OAuth 2.1 with
+  `muse mcp login`; claude.ai's custom connectors expect it).
+- **STEP machines placed inside building models.**
+- **Offsets and trims on meshed STEP parts** (tubes, bends, castings).
+
+### Planned per feature
+
+| Area | Planned | Source |
+|---|---|---|
+| Routes | 45° pieces, falling drainage, routes in the wider-fix planner | [docs/edits.md](../edits.md) |
+| Penetrations | Sleeves and fire-stopping as elements, openings for several services at once, penetrations in the wider-fix planner | [docs/edits.md](../edits.md) |
+| Resize | Round ducts (flat oval), resizing at fittings, keeping a pressure drop rather than an equivalent diameter | [docs/edits.md](../edits.md) |
+| Bends | Sweep the segment's own profile (open trays, C, I and L sections) | [docs/escalation.md](../escalation.md), [docs/show-it-built.md](../show-it-built.md) |
+| Review | A "structure review" chip when a fix moves structure (E0's B1 footing) | [docs/escalation.md](../escalation.md) |
+| Escalation | Give the brief to Muse Spark's own second round (it lifted Spark from 0 to 3 of 6), and keep Muse Wonder for what is left | [docs/escalation.md](../escalation.md) |
+| Show it built | On the MCP server (chat has `show_it_built`; MCP has no such tool yet) | [docs/show-it-built.md](../show-it-built.md) |
+| Big models | Parse in a Web Worker; measure boxes without triangulating | [docs/uploads.md](../uploads.md) |
+| Detection | Tests saved with a project and run history (with saved state); splitting very large federations into local cells | [docs/detection.md](../detection.md) |
+| Requirements | Rules per element, Navisworks test import, STEP groups as selectors, requirements from the chat's words | [docs/requirements.md](../requirements.md) |
+| STEP | Exact B-rep for depth | [docs/step.md](../step.md) |
+
+## When to update this doc
+
+- The owner makes a decision, or gives feedback that changes how something works (add a dated row; the build log gets
+  its entry too).
+- An approach is tried and dropped, or a dropped one comes back.
+- A limit is lifted or a new one is enforced in the code (`Unsupported` reasons in `edits.py`, `context_eval`,
+  `hosts.hard_rule`, caps in `deploy/modal_app.py`).
+- A "Known, not fixed" item is fixed, an item is checked for the first time, or an open question is decided.
+- A roadmap item is done or added (CLAUDE.md's "Next, in order" and "Later", or a feature doc's "Not yet").
+- The hackathon dates or rules change, or `BUILT_DURING_HACKATHON.md` gains an entry.

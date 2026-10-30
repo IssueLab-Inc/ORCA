@@ -28,8 +28,10 @@ its `delta_m`):
 - **A plan's joint check:** `plans.IN_TRIAL[kind]` applies it inside the plan's trial and says what to check;
   `plans.EXTRA_FILES[kind]` names files it changes beyond its moved elements'.
 - **Keeping it:** `plans.KEEP[kind]`, behind `plans.apply`, which the plan, the MCP `apply_fix` and the page's
-  `POST /api/scenes/{sid}/fix/apply` all use. That endpoint drops the page's meshes and works out anything that
-  depends on the requirements again on the server.
+  `POST /api/scenes/{sid}/fix/apply` all use. That endpoint drops the page's meshes; `plans.apply` tries the fix again
+  first (`plans.CANDIDATE[kind]` turns the option back into Muse's parameters for `agent.TRIES`, with the clearance and
+  requirements of the clash it names in `pair`), refuses it with a 409 when it no longer passes, and keeps every
+  option or none (Oct 30).
 - **Sizing it against the requirements:** `requirements.SIZED` and `change_size` (how far any part goes; a lateral
   offset used to measure 0 mm).
 - **The page:** `fixKinds.ts`: the name, the edit in a few words, the clearance line, which pieces to frame, who must

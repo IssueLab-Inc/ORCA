@@ -295,7 +295,7 @@ def test_workspace_offset_trim_batch_and_trials_revisions(tmp_path):
     assert scene.revision == 0
     ws.apply_offset('s',main,[2,4],.4)
     assert scene.revision == 1
-    plans.apply(ws,'s',[dict(kind='move',moved=[beam],delta_m=[0,0,1])])
+    plans.apply(ws,'s',[dict(kind='move',moved=[beam],delta_m=[0,0,-1],pair=[beam,main])])  # tried again: clear
     assert scene.revision == 2
     joint = IfcScene(build_joint_fixture(tmp_path/'j.ifc')); ws.scenes['j'] = joint
     transom = next(e.GlobalId for e in joint.model.by_type('IfcMember') if e.Name.startswith('Transom'))

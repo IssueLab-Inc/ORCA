@@ -40,7 +40,7 @@ from . import owner, spend
 from .meta_client import MetaChatModel, load_env
 
 PROMPT_VERSION = "1"
-CACHE = Path(os.environ.get("SIGHTLINE_BUILT_CACHE", Path(tempfile.gettempdir()) / "sightline-built"))
+CACHE = Path(os.environ.get("SIGHTLINE_BUILT_CACHE") or Path(tempfile.gettempdir()) / "sightline-built")  # empty: unset
 SIDE = 1024
 F_MIN = 0.55        # edge F-score against ORCA's render; S0: faithful 0.65-0.95, other scenes 0.12-0.37
 TILE_MAX = 0.45     # the worst of 8 x 8 tiles' share of new edges; S0: faithful at most 0.34

@@ -100,11 +100,15 @@ def test_api_applies_an_offset_and_serves_the_edited_file(tmp_path, monkeypatch)
 
     assert c.post(f"/api/scenes/{sid}/offset/check",
                   json={"element": main, "other": beam, "split_m": [2, 4], "dz_m": 0.4}).json()["passed"]
-    r = c.post(f"/api/scenes/{sid}/offset/apply", json={"element": main, "split_m": [2, 4], "dz_m": 0.4}).json()
+    r = c.post(f"/api/scenes/{sid}/offset/apply",
+               json={"element": main, "other": beam, "split_m": [2, 4], "dz_m": 0.4}).json()
     assert len(r["pieces"]) == 9 and r["files"] == [0]
     assert b"SA-1-SL2" in c.get(f"/api/scenes/{sid}/files/0").content
+    # A beam is not a run to split: tried again, the offset cannot be made, so nothing is kept.
+    refused = c.post(f"/api/scenes/{sid}/offset/apply", json={"element": beam, "other": main, "split_m": [1, 2], "dz_m": 0.4})
+    assert refused.status_code == 409 and "cannot offset this element" in refused.json()["detail"]
     assert c.post(f"/api/scenes/{sid}/offset/apply",
-                  json={"element": beam, "split_m": [1, 2], "dz_m": 0.4}).status_code == 422
+                  json={"element": main, "split_m": [2, 4], "dz_m": 0.4}).status_code == 422   # no obstacle named
     assert c.get(f"/api/scenes/{sid}/export").status_code == 200
 
 
