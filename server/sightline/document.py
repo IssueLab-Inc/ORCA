@@ -35,7 +35,7 @@ from typing import Callable
 import numpy as np
 
 from . import owner, triage as triage_mod
-from .meta_client import ChatModel
+from .meta_client import ChatModel, model_label, triage_model_info
 from .reports import Report, ReportClash
 
 PACKS = Path(__file__).parent / "domain_packs"
@@ -472,7 +472,17 @@ def requirements_html(doc) -> str:
 </section>"""
 
 
-def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, context: dict, requirements_doc=None) -> str:
+def triage_by(info: dict | None) -> str:
+    """The triage model as the report names it: "an open-weights model (Muse Spark Open)" or "Muse Spark (Meta)"."""
+    info = info or triage_model_info()
+    name = model_label(str(info.get("model") or ""))
+    return f"an open-weights model ({name})" if info.get("open_weights") else f"{name} (Meta)"
+
+
+def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, context: dict, requirements_doc=None,
+                triage_info: dict | None = None) -> str:
+    """`triage_info`: the model the triage ran on (`meta_client.triage_model_info`'s shape), named in "How this report
+    was made"; by default the one triage would run on now."""
     pages = [r for r in rows if r.section == "page"]
     author = [r for r in rows if r.section == "author"]
     noise = [r for r in rows if r.section == "noise"]
@@ -560,7 +570,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
   {grouped(noise, 'By design, not physical, or only touching, grouped by clash test. No action; most can be hidden with a clash rule.') if noise else '<p>None.</p>'}
   <h2 style='margin-top:14pt'>How this report was made</h2>
   <p>Verdicts come from ORCA's triage: sure cases by rule (spaces, ports and openings are not physical; results
-  within 1 mm only touch), the rest by an open-weights model (Muse Spark Open). Fixes come from ORCA's agent: Muse
+  within 1 mm only touch), the rest by {_e(triage_by(triage_info))}. Fixes come from ORCA's agent: Muse
   Spark proposes edits to real IFC elements and a geometry engine (IfcOpenShell) checks each against the whole model.
   Who acts: the team whose element a fix changes, else the discipline triage named, else the coordination rule
   (structure stays, then architecture, then site; services move). Every team with an element in a clash reviews it.</p>
@@ -663,9 +673,11 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", 
 
 def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, scope: str, model_teams: dict[str, str],
              matches: dict | None, scene, evidence: dict, reviews: dict, marks: dict, include_bcf: bool,
-             emit: Callable[[dict], None] = lambda e: None) -> tuple[bytes, str, str]:
+             emit: Callable[[dict], None] = lambda e: None, triage_info: dict | None = None) -> tuple[bytes, str, str]:
     """Build the report(s). Returns (bytes, file name, media type): one PDF for a combined report without BCF, else a zip
-    of the PDFs (one per team or per model) and the BCF."""
+    of the PDFs (one per team or per model) and the BCF. `triage_info`: the model the verdicts came from (a triage
+    run's `info`), else the one triage would run on now."""
+    triage_info = triage_info or triage_model_info()
     rows = build_rows(report, verdicts, model_teams, matches, scene, evidence, reviews, marks)
     emit({"type": "progress", "step": "explaining", "done": 0, "total": sum(r.section == "page" for r in rows)})
     explain(model, rows, emit)
@@ -696,19 +708,20 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
     for i, (key, items) in enumerate(groups.items()):
         title = "Design coordination report" + (f": {key}" if key else "")
         sub = f"{report.title} · {len(items)} results" + (f" involving {label.lower()} {key}" if key else "")
-        html_text = render_html(title, sub, items, summary, {**base_ctx, **({label: key} if key else {})}, req_doc)
-        files.append((f"sightline-report{('-' + _slug(key)) if key else ''}.pdf", to_pdf(html_text)))
+        html_text = render_html(title, sub, items, summary, {**base_ctx, **({label: key} if key else {})}, req_doc,
+                                triage_info)
+        files.append((f"orca-report{('-' + _slug(key)) if key else ''}.pdf", to_pdf(html_text)))
         emit({"type": "progress", "step": "rendering", "done": i + 1, "total": len(groups)})
     if include_bcf:
         emit({"type": "progress", "step": "bcf"})
-        files.append(("sightline-issues.bcfzip", bcf_zip(rows, matches, scene, checked_against=checked)))
+        files.append(("orca-issues.bcfzip", bcf_zip(rows, matches, scene, checked_against=checked)))
     if len(files) == 1:
         return files[0][1], files[0][0], "application/pdf"
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for name, data in files:
             z.writestr(name, data)
-    return out.getvalue(), "sightline-report.zip", "application/zip"
+    return out.getvalue(), "orca-report.zip", "application/zip"
 
 
 def _slug(s: str) -> str:

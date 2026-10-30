@@ -126,6 +126,27 @@ def test_keeping_it_plans_it_again_and_refuses_a_stale_plan(tmp_path):
     assert edits.run_of(scene, gid(scene, "S2")).length_m == pytest.approx(0.45) and scene.revision == 1
 
 
+def test_the_page_keeps_only_the_move_it_was_shown(tmp_path, monkeypatch):
+    """/fix/apply tries the move again (plans.recheck): when it would now take other parts along or stretch them
+    differently (its edit's key changed), it is refused, not kept as it is now."""
+    from fastapi.testclient import TestClient
+    from sightline import app as app_module
+    path = build_joints_fixture(tmp_path / "samples" / "joints.ifc")
+    ws = Workspace(path.parent)
+    sid = ws.open([path.name])
+    scene = ws.scene(sid)
+    monkeypatch.setattr(app_module, "ws", ws)
+    s3a, column = gid(scene, "S3A"), gid(scene, "Column C3")
+    _, option = agent._try_move(scene, {"title": "Shift north", "delta_m": [0, 0.5, 0]}, s3a, 0.025, partners={column})
+    o = {**plans.asdict(option), "preview": None, "before": None, "pair": [s3a, column]}
+    c = TestClient(app_module.app)
+    stale = c.post(f"/api/scenes/{sid}/fix/apply", json={"option": {**o, "edit": {**o["edit"], "key": "something else"}}})
+    assert stale.status_code == 409 and "differently from the fix that was checked" in stale.json()["detail"]
+    assert scene.revision == 0
+    kept = c.post(f"/api/scenes/{sid}/fix/apply", json={"option": o})
+    assert kept.status_code == 200 and scene.revision == 1 and ports_meet(scene)
+
+
 def test_a_plan_checks_a_connected_move_with_its_joints(tmp_path):
     path = build_joints_fixture(tmp_path / "samples" / "joints.ifc")
     ws = Workspace(path.parent)

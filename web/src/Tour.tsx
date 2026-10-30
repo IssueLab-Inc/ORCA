@@ -31,6 +31,8 @@ export interface TourState {
   triageOpen: boolean;
   fixHidden: boolean;  // the clash panel says "not a clash" and offers "Propose a fix anyway" instead
   proposing: boolean; proposingFor: number; options: number; proposalDone: boolean; error: string | null; replaying: boolean;
+  /** The kinds of the options shown, best first ("offset", "move"…): a live run and a recorded one can differ. */
+  optionKinds: string[];
   compare: string; fixed: string[];
   planRunning: boolean; planFor: number; planReady: boolean; planError: string | null;
   patternsRead: boolean; reviewedCount: number; signoffs: number; docOpen: boolean; docReady: boolean;
@@ -75,7 +77,10 @@ const press = (selector: string, text: string) => () => {
 const row = (which: "duct" | "joint" | "ladder") => (s: TourState) => `[data-clash="${s[which]?.id ?? "none"}"] .clash-main`;
 const no = (c: TourState["duct"]) => (c ? <b>#{c.number}</b> : null);
 const ran = (s: TourState) => s.proposing || s.proposalDone;
-const slowProposal = (s: TourState) => !s.proposalDone && !s.replaying && (!!s.error || s.proposingFor > 45 || !s.proposing);
+// Offer the recorded run when the live one is slow or was never started, or ended without an option: a failed run also
+// ends "done" (with the error shown), so done alone does not mean it worked.
+const liveMissed = (s: TourState) => s.proposalDone && !s.options;
+const slowProposal = (s: TourState) => !s.replaying && (liveMissed(s) || (!s.proposalDone && (!!s.error || s.proposingFor > 45 || !s.proposing)));
 
 export const BUILDING_STEPS: Step[] = [
   // 1. The problem
@@ -186,12 +191,12 @@ export const BUILDING_STEPS: Step[] = [
       (document.querySelector("[data-tour=fix-anyway]") as HTMLElement | null)?.click();
       window.setTimeout(() => (document.querySelector("[data-tour=propose]") as HTMLElement | null)?.click(), 300);
     } },
-    fallback: { what: "joint", when: (s) => !s.proposalDone && !s.replaying && (!!s.error || s.proposingFor > 45) },
+    fallback: { what: "joint", when: (s) => !s.replaying && (liveMissed(s) || (!s.proposalDone && (!!s.error || s.proposingFor > 45))) },
   },
   {
     act: "A joint, not a move", title: "Accept it",
-    body: () => <>Click <b>Accept this cleanup</b>. The server edits the IFC model, the viewer reloads it, and the clash
-      is marked fixed.</>,
+    body: () => <>Click <b>Accept this cleanup</b>. The server edits the IFC model, the viewer swaps in the changed
+      element without reloading the file, and the clash is marked fixed.</>,
     target: "[data-tour=accept]", reveal: true, done: (s) => !!s.joint && s.fixed.includes(s.joint.id), show: { label: "Accept for me" },
   },
   // 5. Root cause
@@ -205,7 +210,8 @@ export const BUILDING_STEPS: Step[] = [
     act: "The root cause", title: "Why so many on Level 02?",
     body: () => <>Ask: <i>"{TOUR_QUESTION}"</i> ORCA finds the element at the centre of the clashes (the girder),
       works out why, and plans fixes for everything that hits it, checked together.</>,
-    target: "[data-tour=chat-send]", done: (s) => s.planRunning || s.planReady,
+    // A plan that failed moves on too: the next step offers its recorded run.
+    target: "[data-tour=chat-send]", done: (s) => s.planRunning || s.planReady || !!s.planError,
     show: { label: "Ask for me", run: (a) => a.ask(true) }, enter: (a) => a.ask(false),
   },
   {
@@ -337,11 +343,23 @@ function visible(el: Element) {
   return check ? check.call(el, { checkVisibilityCSS: true, visibilityProperty: true }) : true;
 }
 
+// What the best verified option does to the cable ladder, by its kind (Muse's ideas vary from run to run).
+const LADDER_FIX: Record<string, string> = {
+  offset: "a local offset lifts the tray over the post, with bends either side",
+  move: "the ladder moves with its bends, and a straight piece the move runs along gets longer or shorter",
+  route: "a detour takes the tray round the post",
+};
+// When a move is on offer, it keeps the ladder's joints: say so for the option it is.
+const ladderMove = (s: TourState) => !s.optionKinds.includes("move") ? ""
+  : ` ${s.optionKinds[0] === "move" ? "The move keeps" : "Another option moves the tray and keeps"} the ladder's joints:`
+    + " the bends beyond it go along, and a straight piece the move runs along gets longer or shorter (the option says"
+    + " which).";
+
 /** The machine cell's tour: a robot palletising cell opened from its STEP file, checked, fixed and handed back as STEP. */
 export const CELL_STEPS: Step[] = [
   {
     act: "From STEP", title: "A robot cell, as its designers sent it",
-    body: () => <>PC-03 is a robot palletising cell: 144 parts from mechanical CAD, in one STEP file. ORCA converts it to
+    body: () => <>PC-03 is a robot palletising cell: 161 parts from mechanical CAD, in one STEP file. ORCA converts it to
       check it. Every part keeps its name and colour, straight bars and pipes stay exact, and Muse names what each part is.
       At the end you get your STEP back with the fixes.</>,
     target: "[data-tour=cell]", done: (s) => s.cellOpen && s.reportOpen && !s.busy,
@@ -350,8 +368,8 @@ export const CELL_STEPS: Step[] = [
   {
     act: "From STEP", title: "What ORCA found",
     body: (s) => <>The cell checked against itself: {s.triageTotal || "about a hundred"} clashes. Most are how a cell is built:
-      anchors in their plates, the conveyor's drums in its rails, the robot working over the conveyor. Five problems were
-      planted in this revision; the check finds all of them.</>,
+      anchors in their plates, the conveyor's drums in its rails, the robot working over the conveyor. Eight problems were
+      planted in this revision, 17 pairs of parts; the check finds all of them.</>,
     target: "[data-tour=detected]",
   },
   {
@@ -371,18 +389,17 @@ export const CELL_STEPS: Step[] = [
     show: { label: "Filter for me", run: (a) => a.filterReal() },
   },
   {
-    act: "A move", title: "A cable tray through a fence post",
+    act: "One fix", title: "A cable tray through a fence post",
     body: (s) => <>Open {s.ladder ? <b>#{s.ladder.number}</b> : "the cable tray"}: the CT-301 cable ladder runs into fence post
       W5 of the safety guarding.</>,
     target: row("ladder"), reveal: true, done: (s) => !!s.ladder && s.clashId === s.ladder.id,
     show: { label: "Open it for me", run: (a) => a.selectClash("ladder") },
   },
   {
-    act: "A move", title: "Ask for a fix",
+    act: "One fix", title: "Ask for a fix",
     body: (s) => s.proposalDone && s.options
-      ? <>Verified: the tray clears the post, and nothing else is hit. The post is guarding, so it stays; the tray moves.
-        A move keeps the ladder's joints: the bends beyond it go along, and a straight piece the move runs along gets
-        longer or shorter (the option says which).</>
+      ? <>Verified: {LADDER_FIX[s.optionKinds[0]] ?? "the tray clears the post"}, and nothing else is hit. The post is
+        guarding, so it stays; the tray moves.{ladderMove(s)}</>
       : <>Click <b>Propose fixes</b>. ORCA tries ideas from Muse Spark and checks each against the whole cell.</>,
     target: "[data-tour=propose], [data-tour=fix-anyway]", done: (s) => s.proposalDone && s.options > 0,
     show: { label: "Ask for me", hidden: ran, run: () => {
@@ -392,8 +409,9 @@ export const CELL_STEPS: Step[] = [
     fallback: { what: "ladder", when: slowProposal },
   },
   {
-    act: "A move", title: "Accept it",
-    body: () => <>Click <b>Accept this fix</b>. The server edits the model and the viewer updates it in place.</>,
+    act: "One fix", title: "Accept it",
+    body: () => <>Click <b>Accept this fix</b>. The server edits the model, the viewer swaps in the changed parts without
+      reloading the file, and the clash is marked fixed.</>,
     target: "[data-tour=accept]", reveal: true, done: (s) => !!s.ladder && s.fixed.includes(s.ladder.id), show: { label: "Accept for me" },
   },
   {
@@ -401,14 +419,16 @@ export const CELL_STEPS: Step[] = [
     body: (s) => <>{s.pipes.length ? <>{s.pipes.map((p, k) => <b key={p.id}>{k ? " and " : ""}#{p.number}</b>)}: </> : null}the
       compressed-air pipe runs through both of the conveyor's side rails. Fixed one at a time, each fix would ignore the
       other rail. <b>Fix them together</b>: ORCA sees one pipe and two rails, and makes it one job.</>,
-    target: "main.stage", done: (s) => s.planRunning || s.planReady,
+    // A plan that failed moves on too: the next step offers its recorded run.
+    target: "main.stage", done: (s) => s.planRunning || s.planReady || !!s.planError,
     show: { label: "Fix them together", run: (a) => a.fixPipe() },
   },
   {
     act: "Together", title: "One fix for both rails",
     body: (s) => s.planReady
       ? <>The plan is ready: one fix for the pipe that clears both rails, checked against the whole cell.</>
-      : <>Muse Spark proposes, ORCA checks: an offset under the rails, or a move, whichever clears both.</>,
+      : <>Muse Spark proposes, ORCA checks: a dip under the rails, a detour round them or a move, whichever clears
+        both.</>,
     target: "main.stage", done: (s) => s.planReady,
     fallback: { what: "pipe", when: (s) => !s.planReady && !s.replaying && (!!s.planError || s.planFor > 75 || !s.planRunning) },
   },
@@ -420,17 +440,17 @@ export const CELL_STEPS: Step[] = [
   },
   {
     act: "Hand-off", title: "Your STEP back",
-    body: () => <><b>Export STEP + IFC</b> gives the cell back as STEP: the moved and offset parts written into the original
-      file, names and colours kept, the new pieces in their assemblies. The IFC comes with it for coordination tools.</>,
+    body: () => <><b>Export STEP + IFC</b> gives the cell back as STEP: the changed parts written into the original file,
+      names and colours kept, the new pieces in their assemblies. The IFC comes with it for coordination tools.</>,
     target: "[data-tour=export]",
   },
   {
     act: "ORCA", title: "A machine, coordinated", enter: (a) => a.overview(),
     body: () => <>
       <span className="tour-stats">
-        <span><b>13 of 13</b> planted clashes found</span>
+        <span><b>17 of 17</b> planted clashes found</span>
         <span><b>0</b> unexpected</span>
-        <span><b>144</b> parts typed by Muse</span>
+        <span><b>161</b> parts typed by Muse</span>
         <span><b>STEP</b> in, STEP out</span>
       </span>
       The same agent as on buildings: Muse Spark proposes, geometry proves, and the edit goes back into the designer's own
@@ -532,7 +552,9 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
         {offer && (
           <p className="tour-fallback">{state.error || state.planError
             ? `The live run failed: ${state.error || state.planError}`
-            : "The live run is taking a while, or didn't start."} You can watch a recorded run of the same step instead.
+            : step.fallback!.what !== "plan" && step.fallback!.what !== "pipe" && liveMissed(state)
+              ? "The live run found no fix this time."
+              : "The live run is taking a while, or didn't start."} You can watch a recorded run of the same step instead.
             <button className="btn small" onClick={() => actions.replay(step.fallback!.what)}><PlayCircle size={13} aria-hidden /> Watch a recorded run</button></p>)}
         <div className="tour-nav">
           <button className="btn small ghost" disabled={index === 0} onClick={() => setIndex(index - 1)}><ArrowLeft size={13} aria-hidden /> Back</button>

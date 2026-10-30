@@ -249,3 +249,20 @@ def test_the_endpoint_and_describe_give_the_links(tmp_path, monkeypatch):
     r = TestClient(app_module.app).get(f"/api/scenes/{sid}/connections").json()
     assert r["revision"] == 0 and len(r["edges"]) >= 11 and set(r["kinds"]) >= {"joint", "rests_on", "contact"}
     assert r["names"][gid(scene, "Tee T1")] == "Tee T1" and set(r["names"]) == {g for e in r["edges"] for g in e[:2]}
+
+
+def test_keeping_a_move_that_would_pull_a_joint_apart_is_refused(tmp_path, monkeypatch):
+    """/apply tries the move again before it keeps it (plans.apply): one that would pull a joint apart is a 409 with
+    why, and nothing changes."""
+    from fastapi.testclient import TestClient
+    from sightline import app as app_module
+    monkeypatch.setenv("SIGHTLINE_CONNECTED_MOVES", "refuse")
+    path = build_joints_fixture(tmp_path / "samples" / "joints.ifc")
+    ws = Workspace(path.parent)
+    sid = ws.open([path.name])
+    scene = ws.scene(sid)
+    monkeypatch.setattr(app_module, "ws", ws)
+    r = TestClient(app_module.app).post(f"/api/scenes/{sid}/apply", json={
+        "moved": [gid(scene, "S3A")], "delta_m": [0, 0.5, 0], "obstacles": [gid(scene, "Column C3")]})
+    assert r.status_code == 409 and "cannot keep its joints" in r.json()["detail"]
+    assert scene.revision == 0
