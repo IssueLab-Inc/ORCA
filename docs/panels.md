@@ -32,7 +32,7 @@ It is new work, written for ORCA during the event. No code from other products.
 
 - **Side bars** (dockview's edge groups) hold their tabs along the top while open, as the classic panes did. The
   button at the end of the tabs collapses a bar to a strip of its tabs down its outer edge (the bottom one to a strip
-  along the bottom); a click on a tab in the strip opens it again. A click on an open bar's active tab never closes it
+  along the bottom; the strip's tabs are spaced along it and the active one is marked on its inner side); a click on a tab in the strip opens it again. A click on an open bar's active tab never closes it
   (dockview would): the tour clicks tabs, and a tab should never hide the panel it names.
 - **An empty side bar gives its room to the model.** When the last panel leaves a bar (floated, opened in a window,
   closed, or docked beside the model), the bar goes and the model takes the space; float every panel and the model has

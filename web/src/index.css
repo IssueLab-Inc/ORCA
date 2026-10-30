@@ -106,6 +106,12 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .dockview-theme-orca .dv-tabs-and-actions-container { border-bottom: 1px solid var(--line); }
 .dockview-theme-orca .dv-tab { padding: 0; }  /* the padding is the tab part's (.dock-tab), so every click reaches it */
 .dockview-theme-orca .dv-tab.dv-active-tab { box-shadow: inset 0 -2px var(--accent); }
+/* A collapsed side bar's strip: the tabs run down its outer edge, so they are spaced along it and the active one is
+   marked on its inner side (an underline would cross the turned text). */
+.dockview-theme-orca .dv-groupview-header-vertical .dock-tab { padding: 12px 0; }
+.dockview-theme-orca .dv-groupview-header-vertical .dv-tab + .dv-tab { margin-top: 4px; }
+.dockview-theme-orca .dv-groupview-header-right .dv-tab.dv-active-tab { box-shadow: inset 2px 0 var(--accent); }
+.dockview-theme-orca .dv-groupview-header-left .dv-tab.dv-active-tab { box-shadow: inset -2px 0 var(--accent); }
 .bar { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--surface); min-height: 50px; }
 .bar-side { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .bar-side.end { justify-content: flex-end; }

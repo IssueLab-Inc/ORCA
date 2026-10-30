@@ -1307,3 +1307,8 @@ Workings (Oct 30, owner decision; code `web/src/runlog.ts`, `workingsGraph.ts`, 
   which a plan's `item` events pass on with the failure's `reason`; Workings shows them. 607 server tests, 136 web
   tests.
 
+
+Collapsed side bars' strips (Oct 30; owner report; `web/src/index.css`): the active tab's underline crossed the turned
+text and the tabs touched (their padding was horizontal only). In a vertical header the tabs now have 12 px above and
+below with 4 px between, and the active one is marked on the strip's inner side. Checked in Chromium on Northbank: the
+left, right and bottom bars collapsed; web tests and build clean.
