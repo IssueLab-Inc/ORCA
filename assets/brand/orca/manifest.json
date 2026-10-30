@@ -1,0 +1,816 @@
+{
+  "name": "ORCA asset pack",
+  "version": "1.0",
+  "date": "2026-10-30",
+  "files": [
+    {
+      "file": ".gitattributes",
+      "bytes": 84,
+      "sha256": "8e5b00b285ccd84515685392b183cb897e06734d455d5245f3ebcd28996e6b38"
+    },
+    {
+      "file": ".gitignore",
+      "bytes": 76,
+      "sha256": "f49afa7bc636db8b3497f4a30a8212659dcaded59f260e801d2e80d81a64c9b6"
+    },
+    {
+      "file": "README.md",
+      "bytes": 4642,
+      "sha256": "a80a5928f91608e31204bcdf0713ade0b2421014627d103f41d94e3daab0951b"
+    },
+    {
+      "file": "START-HERE.txt",
+      "bytes": 5901,
+      "sha256": "c377b5d1336fa71e131be9fb5da7c92bf5cba309d1a480b5552cf661c710c33c"
+    },
+    {
+      "file": "package-lock.json",
+      "bytes": 32185,
+      "sha256": "a1b225ecbd348c054199059e365d9d2c56b56cc313e762968f99340468149e23"
+    },
+    {
+      "file": "package.json",
+      "bytes": 701,
+      "sha256": "a32043e0791b41f3d6e7d9be962228bd76aaacb9e66a11fd704e1a80ebed669f"
+    },
+    {
+      "file": "requirements.txt",
+      "bytes": 46,
+      "sha256": "71085db0ee325c2bc2ea2a7aaa8272b4a7a3c06170c50b76aa19ea6c259a124e"
+    },
+    {
+      "file": "docs/orca-brand-guide.pdf",
+      "bytes": 9349,
+      "sha256": "78909f105a7e0a5c52c8405bb44475cfdcd4cf09fc85e48c6b49303e826205d4",
+      "pages": 4
+    },
+    {
+      "file": "icons/android-chrome-192.png",
+      "bytes": 3680,
+      "sha256": "c4b4db0fef32ef3a72a929475fecc265b1bf66ef226877437c3d6d59319d7dc8",
+      "width": 192,
+      "height": 192,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/android-chrome-512.png",
+      "bytes": 10904,
+      "sha256": "950af9bb4c9136de29344d12c3fbcdaca3b1c7a1dc76178a6f39bedf23f330c0",
+      "width": 512,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/apple-store-icon-1024.png",
+      "bytes": 24674,
+      "sha256": "7c7187106f1e0fa8c409f2dd181219d7a4386894ef0d89cd0c62682de5ed5e94",
+      "width": 1024,
+      "height": 1024,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/apple-touch-icon.png",
+      "bytes": 3378,
+      "sha256": "4e5efc35e6161105f6f244788cfcb4afeb42e284012b54c11698a356dc72f9a0",
+      "width": 180,
+      "height": 180,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/browserconfig.xml",
+      "bytes": 188,
+      "sha256": "5eee0e164344d2d4232cadbe9cf4dc25980ce67b0e03b886bc3d9ca7ba4cb171"
+    },
+    {
+      "file": "icons/favicon-16.png",
+      "bytes": 706,
+      "sha256": "db5a6549e51db84e8a24c6d10be9b40655c596d7d2e0eb032ac0b597bc313556",
+      "width": 16,
+      "height": 16,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-256.png",
+      "bytes": 5786,
+      "sha256": "69c75532eb7e24e492f7444788be64cb27d5420ad706c58c2038f6775ca1d8b8",
+      "width": 256,
+      "height": 256,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-32.png",
+      "bytes": 1040,
+      "sha256": "ba24239f521c7fa2158686c8233846276f3674a5dd931703b1d154fd0da3ec7f",
+      "width": 32,
+      "height": 32,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-48.png",
+      "bytes": 1270,
+      "sha256": "17f8e45a9a107818b316beee13f65fb211715baa9bcf6e91f4de2e1e64425239",
+      "width": 48,
+      "height": 48,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-64.png",
+      "bytes": 1572,
+      "sha256": "3e5f481e751e6eb7bc9bacd96ab71e8f6318fa70ae774224e04beb0c47c29593",
+      "width": 64,
+      "height": 64,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-tile-16.png",
+      "bytes": 699,
+      "sha256": "86e1009ca36fd59a7678e038a21fa873b2ff451f60fa77be9cbbf7fe99465585",
+      "width": 16,
+      "height": 16,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-tile-256.png",
+      "bytes": 5630,
+      "sha256": "7de1ccd2c0b16d3fc03550f16db6e96ff282c681ab4e08ee4edcb774d7ea6b85",
+      "width": 256,
+      "height": 256,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-tile-32.png",
+      "bytes": 988,
+      "sha256": "4476842010cd878a8ef939fd0c9a3886cdfe5fb26c3ba4660743b6ff67b5df01",
+      "width": 32,
+      "height": 32,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-tile-48.png",
+      "bytes": 1282,
+      "sha256": "013d8f93f19d6c649a768993813ea318e0ce5503eac039e3ace0b61fe71af6f4",
+      "width": 48,
+      "height": 48,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon-tile-64.png",
+      "bytes": 1548,
+      "sha256": "f52bbf13d9c666bef5ae8af6129f1b0f0662c1a78e44ee96ac6ddc9236e04f0d",
+      "width": 64,
+      "height": 64,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/favicon.ico",
+      "bytes": 25235,
+      "sha256": "640cee09fa28ab8b749bc8623c58930b49ee8f8a617af1588c4698ba945086f7"
+    },
+    {
+      "file": "icons/favicon.svg",
+      "bytes": 1007,
+      "sha256": "efcefd905d200b54df609158cf40a0fda5b87275130cc4588585394e26e43acf"
+    },
+    {
+      "file": "icons/maskable-icon-192.png",
+      "bytes": 3444,
+      "sha256": "3a5d10f9c382a30a6d75a3038c5baeafd51a11e154149f55d6d87df0d3570e0b",
+      "width": 192,
+      "height": 192,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/maskable-icon-512.png",
+      "bytes": 10075,
+      "sha256": "33abea58675411cbd2c2670d72c85942087df913fb32325ebca63fb9ffbcb8e3",
+      "width": 512,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/mstile-150x150.png",
+      "bytes": 2864,
+      "sha256": "ef70b85b8a6b9938228b789ecdbbafdc0521402be73e7c143ff2f71da0bda8c8",
+      "width": 150,
+      "height": 150,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/orca-app-icon-1024.png",
+      "bytes": 31665,
+      "sha256": "659d33093578ec7cd14848f3ad139a29b31ab25d001ba7b5f435ac4e40defff5",
+      "width": 1024,
+      "height": 1024,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/orca-app-icon-128.png",
+      "bytes": 3167,
+      "sha256": "df3299e375818de323882044b0bb377bfb96461381c29ce51a049f9a8a4ff32d",
+      "width": 128,
+      "height": 128,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/orca-app-icon-256.png",
+      "bytes": 6279,
+      "sha256": "f9c7a5065324bd099096049ed177f9907f505d398c1a29d698b11462ccc075b4",
+      "width": 256,
+      "height": 256,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/orca-app-icon-512.png",
+      "bytes": 14052,
+      "sha256": "031abf76ba139ee321e658560c8ca51bf513c9c702b6f8a1b054f2ceeb2ba83c",
+      "width": 512,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/orca-app-icon-64.png",
+      "bytes": 1735,
+      "sha256": "04e2dacd1e2e37d54a449f7c5add8703a01260a10a3a0375ecb1c6768a9214f5",
+      "width": 64,
+      "height": 64,
+      "mode": "RGBA"
+    },
+    {
+      "file": "icons/orca-app-icon-maskable.svg",
+      "bytes": 995,
+      "sha256": "c7352a643524f292a027ba3060e58a6fcedfa941632368028170e559c5be4194"
+    },
+    {
+      "file": "icons/orca-app-icon-square.svg",
+      "bytes": 971,
+      "sha256": "83a82167be4c0f0689e7c36148d4be9c7e4208633858b55902518abc375dc0c6"
+    },
+    {
+      "file": "icons/orca-app-icon.svg",
+      "bytes": 976,
+      "sha256": "5274d7cabba2ad9bb939b5b02951c63497ac22f0dbf7d8a4531db8fbb8fe3fff"
+    },
+    {
+      "file": "icons/orca-symbol-micro.svg",
+      "bytes": 912,
+      "sha256": "ca61ca73fc916b38a745486ea564847595a8c73e66069378d5fcb3b67a8a1c55"
+    },
+    {
+      "file": "icons/safari-pinned-tab.svg",
+      "bytes": 912,
+      "sha256": "ca61ca73fc916b38a745486ea564847595a8c73e66069378d5fcb3b67a8a1c55"
+    },
+    {
+      "file": "icons/site.webmanifest",
+      "bytes": 706,
+      "sha256": "ff703d46ed3630439cb7858e2f1b5b3b58a6c7ec8f564eb3d583531ed215c76e"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-black-1024w.png",
+      "bytes": 22959,
+      "sha256": "201145995dc7817029fa0d8a8ddc8d14dbab35c1ba883c3a1cc0367bd162b2a7",
+      "width": 1024,
+      "height": 403,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-black-2048w.png",
+      "bytes": 76728,
+      "sha256": "a21fc03e02397c0d1d520ff9681f82f11aed790e0cfad8feda78bf3161d407f7",
+      "width": 2048,
+      "height": 806,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-black-4096w.png",
+      "bytes": 127737,
+      "sha256": "d6389a89210fd1b865557826c7de4d05b9d67b9fd8fcfd9d61d7eda6ad1fb499",
+      "width": 4096,
+      "height": 1611,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-navy-1024w.png",
+      "bytes": 22895,
+      "sha256": "1c6e5f914a5fd969bd27758a19e823c143bb0c5f192b6e0db995ecb2802bbb0a",
+      "width": 1024,
+      "height": 403,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-navy-2048w.png",
+      "bytes": 79712,
+      "sha256": "d4aaa69c15bd55e265c6c87771a8b96ae769df533fa048e652fc5a717ca45d28",
+      "width": 2048,
+      "height": 806,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-navy-4096w.png",
+      "bytes": 127577,
+      "sha256": "cb6d55394b12ddd53146bcce6161e2f7c7b0a03ef38fd7d9b82092a50d9b0986",
+      "width": 4096,
+      "height": 1611,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-white-1024w.png",
+      "bytes": 18689,
+      "sha256": "2a17b40fe69ad2013745809abcc32b75ae7ff53d5678821dbf32204d62b2cbf5",
+      "width": 1024,
+      "height": 403,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-white-2048w.png",
+      "bytes": 56819,
+      "sha256": "fc7d76e6a701234080f160e4f6a684f311621fef2da9d5b94cd7cf67cac8f05a",
+      "width": 2048,
+      "height": 806,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/lockups/orca-by-issuelab-white-4096w.png",
+      "bytes": 99224,
+      "sha256": "fc2d84668129240e5edfdddaa2e629db6626e2814b182431b74bb8a56b50cac2",
+      "width": 4096,
+      "height": 1611,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-black-1024.png",
+      "bytes": 23952,
+      "sha256": "bcf8d6137ef671603b4a1d06b8d949d746db7b168f7a91a2ea6294147522ee19",
+      "width": 1024,
+      "height": 1024,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-black-128.png",
+      "bytes": 2396,
+      "sha256": "0315f6ed3e33c147ca1b85f6af3050b9bb65bd7d3d68e6c848cffd072b0b719c",
+      "width": 128,
+      "height": 128,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-black-256.png",
+      "bytes": 4842,
+      "sha256": "b411acf052ddcac021c8927192c7653e865979d3da7b5367055ad83196c480c4",
+      "width": 256,
+      "height": 256,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-black-512.png",
+      "bytes": 10489,
+      "sha256": "4fd9c71efd605b4420c64944119116445fab36432add4934a3bbaf5df6fb8aaf",
+      "width": 512,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-black-64.png",
+      "bytes": 1383,
+      "sha256": "0429d97854013f8cd3910b08445efa973376b0ea6b9994c05a1446c3aa3afc08",
+      "width": 64,
+      "height": 64,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-navy-1024.png",
+      "bytes": 23916,
+      "sha256": "711fdda4f98bbeb145d5c949126493b6584956ad6f784a54b1199b20f2fde726",
+      "width": 1024,
+      "height": 1024,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-navy-128.png",
+      "bytes": 2406,
+      "sha256": "0d3811b86b477f9329e4d4d3f66d475eca164c3f3c91822c3486e4424421be51",
+      "width": 128,
+      "height": 128,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-navy-256.png",
+      "bytes": 4874,
+      "sha256": "5a4e31f0828c4f0303cd950897063cec8b90ff785def63b6b57fe3b852660c68",
+      "width": 256,
+      "height": 256,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-navy-512.png",
+      "bytes": 10487,
+      "sha256": "53de9c57a3e6c532df08fad571f78dcdfcee2534892b9be2a2a0a33f4d6bfcd5",
+      "width": 512,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-navy-64.png",
+      "bytes": 1389,
+      "sha256": "621f1c6248f626f49aca1b0253c693de3597f5b38c145eb5e3df8708d6cafdc9",
+      "width": 64,
+      "height": 64,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-white-1024.png",
+      "bytes": 18461,
+      "sha256": "28290677e7074533dae6271fe9e945189511efd41b3f10303c30fbdfe47aeb43",
+      "width": 1024,
+      "height": 1024,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-white-128.png",
+      "bytes": 2003,
+      "sha256": "33e1db011966f25de054425a3da85fdd83ab2b34d0bed5ec2a6d48edb9544247",
+      "width": 128,
+      "height": 128,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-white-256.png",
+      "bytes": 3973,
+      "sha256": "b023bd947b4ea8489d3b9f26bd29eee29eb46474ac316ea8552a39503705ca1a",
+      "width": 256,
+      "height": 256,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-white-512.png",
+      "bytes": 8185,
+      "sha256": "7ac734407ca0a9ea72f343ae4adc497f2da5af60a9095be5ed50858ca80ce30f",
+      "width": 512,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/symbols/orca-symbol-white-64.png",
+      "bytes": 1164,
+      "sha256": "8e8ff330ab0a3efd11427c99c952897fb59abff48543a75ccb52ce8c3779de70",
+      "width": 64,
+      "height": 64,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-black-1024w.png",
+      "bytes": 19617,
+      "sha256": "ef61aa72f9977082105e1fcb82ba2a3fd299a1f98a40b3d72e286faaeeefe0d0",
+      "width": 1024,
+      "height": 326,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-black-2048w.png",
+      "bytes": 66407,
+      "sha256": "618d92eee54ce1d1fd5c5c67aacccc949ad08305483a3749ae6492d61ae5d70c",
+      "width": 2048,
+      "height": 653,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-black-4096w.png",
+      "bytes": 110311,
+      "sha256": "052d5bfc00952e7a50e80139ff4d06d65008ac86c45d863b343c527d261806a2",
+      "width": 4096,
+      "height": 1305,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-black-512w.png",
+      "bytes": 8748,
+      "sha256": "2775c972d7cc90bc7891b9dca1062aa41522b055fd89416c1e7e66180ea79677",
+      "width": 512,
+      "height": 163,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-navy-1024w.png",
+      "bytes": 19606,
+      "sha256": "2412bbae32467d5f16f45baa8279f01a6de20cef14610ae3bfd6aa61e54ad826",
+      "width": 1024,
+      "height": 326,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-navy-2048w.png",
+      "bytes": 69194,
+      "sha256": "70ec39361ca76bdb686bc27475e69628a8857c9c682293baf7e63fb85d1e3cb9",
+      "width": 2048,
+      "height": 653,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-navy-4096w.png",
+      "bytes": 110471,
+      "sha256": "14de537b8ceb6d076852011e64c52049d4ea6beee68ef19e6bbf64a5d99611e6",
+      "width": 4096,
+      "height": 1305,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-navy-512w.png",
+      "bytes": 8706,
+      "sha256": "d421faea333127328ced33bb3390b9e0613ade5111fc72fa36c22f7c0a8611d3",
+      "width": 512,
+      "height": 163,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-white-1024w.png",
+      "bytes": 16004,
+      "sha256": "d60c7e23286a66f30154e78d62b8bbf57d7a7e79b49fe071e122515e7c7aa94d",
+      "width": 1024,
+      "height": 326,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-white-2048w.png",
+      "bytes": 48952,
+      "sha256": "5e19ac728c7b910f380aef0d5f866facd062a5f959519cc081758389ee0958e3",
+      "width": 2048,
+      "height": 653,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-white-4096w.png",
+      "bytes": 84968,
+      "sha256": "bc13cdb51c818a53a5a8cb4e8bb1ed5fc9191d74b0600e4140b2089221557b2d",
+      "width": 4096,
+      "height": 1305,
+      "mode": "RGBA"
+    },
+    {
+      "file": "png/wordmarks/orca-wordmark-white-512w.png",
+      "bytes": 7360,
+      "sha256": "c91f8b8305705ded30e2e60758352d390cda38e473325e6c3d9184bac5f53d76",
+      "width": 512,
+      "height": 163,
+      "mode": "RGBA"
+    },
+    {
+      "file": "preview/asset-pack-overview.png",
+      "bytes": 124782,
+      "sha256": "75b66ab4521c811707a4aee1f9e15b8ee0df2780a3af6dc0be43ce0d642330a3",
+      "width": 1800,
+      "height": 1500,
+      "mode": "RGBA"
+    },
+    {
+      "file": "preview/asset-pack-overview.svg",
+      "bytes": 224842,
+      "sha256": "96fec1b6505be4fde6d6f0c9720115c2962ba3035df0717e712a5163a2295b29"
+    },
+    {
+      "file": "preview/index.html",
+      "bytes": 855,
+      "sha256": "6b2f28d8062510c11deef8d639648978124f9184059b698bf6f71660de01cf68"
+    },
+    {
+      "file": "print/orca-print-masters.pdf",
+      "bytes": 8700,
+      "sha256": "9fee568c1c5c5a8a055afcc9ed47932d18ccaa133a611de0da4328e81a379abe",
+      "pages": 6
+    },
+    {
+      "file": "print/orca-symbol-black.eps",
+      "bytes": 902,
+      "sha256": "dc2db69a3adde2256bbf2092bea01ba21e5f0330a7c29f590b6b81e3a1f029d4"
+    },
+    {
+      "file": "print/orca-symbol-navy.eps",
+      "bytes": 903,
+      "sha256": "f94a6023af1206d89bcde956e19196f6d5b81c7a53da60299780b0fefb7efef8"
+    },
+    {
+      "file": "print/orca-wordmark-black.eps",
+      "bytes": 1966,
+      "sha256": "05994f932dc6ac5dc0dcc3cac757d16d40c918dfb8ba1bb3e14d9898ec1fc430"
+    },
+    {
+      "file": "print/orca-wordmark-navy.eps",
+      "bytes": 1967,
+      "sha256": "ed9c04a4fb915f90578c959a2cbc94b91cb28907ecb8932758ae78fc1cf8cfeb"
+    },
+    {
+      "file": "reference/approved-direction-05.png",
+      "bytes": 1183956,
+      "sha256": "b8eaa9aebeed418e31c314f30a23fe2fa9dceb6ce8a434b6f3f4c06af5729cfd",
+      "width": 1536,
+      "height": 1024,
+      "mode": "RGB"
+    },
+    {
+      "file": "social/og-dark.png",
+      "bytes": 33368,
+      "sha256": "5c01b59dc9d3683b0c2b21b22ee7c27ce56f366d60c0e7b2689881739c14f2b8",
+      "width": 1200,
+      "height": 630,
+      "mode": "RGBA"
+    },
+    {
+      "file": "social/og-dark.svg",
+      "bytes": 41120,
+      "sha256": "7cbbef8517e16e06cd5821122353c5c2a54656f1809bacc0698b508b452491b4"
+    },
+    {
+      "file": "social/og-light.png",
+      "bytes": 33191,
+      "sha256": "f6d5fd96cdb31fc1b3e0d9ebc576e4cea1fa1176843f463f36e7aff3e355e05c",
+      "width": 1200,
+      "height": 630,
+      "mode": "RGBA"
+    },
+    {
+      "file": "social/og-light.svg",
+      "bytes": 41178,
+      "sha256": "dc8ba841208ada089437b10a2e361d1a25ccd1926ae9b219b6ca1d40954783fd"
+    },
+    {
+      "file": "social/profile-banner.png",
+      "bytes": 25651,
+      "sha256": "72534fd8f9f48796b74a42a567648075e94cd86c59645a872420467f7bfab675",
+      "width": 1584,
+      "height": 396,
+      "mode": "RGBA"
+    },
+    {
+      "file": "social/profile-banner.svg",
+      "bytes": 41037,
+      "sha256": "d96dd41a5fe1db7fdd8f9fd0658e054285849f5bd39d8304c9af90e551d06fb3"
+    },
+    {
+      "file": "social/square-dark.png",
+      "bytes": 35352,
+      "sha256": "a32cbf8fd874c72b220a6504fa0fda5ae5be13db63fe7a390096ec663b742111",
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA"
+    },
+    {
+      "file": "social/square-dark.svg",
+      "bytes": 40649,
+      "sha256": "94dfa51455a4890f97148f12a108dfe49aa10b164698486db9c6a1257dfdbe87"
+    },
+    {
+      "file": "social/square-light.png",
+      "bytes": 35266,
+      "sha256": "5af0fbb263d7a43b213104201431508bf30987426156bdf713b3e768cdf1fdac",
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA"
+    },
+    {
+      "file": "social/square-light.svg",
+      "bytes": 40707,
+      "sha256": "0f9a4f8926313927905856f4f3463386a9cc654eb86cf1f7df0e34262d93bdd9"
+    },
+    {
+      "file": "source/build-assets.cjs",
+      "bytes": 16546,
+      "sha256": "28b17bcfc3085e57c8cd9b0ae3667759041b3839cadb21e14fc1ea23fb17c1bb"
+    },
+    {
+      "file": "source/build-print.py",
+      "bytes": 16538,
+      "sha256": "855c6ed656ccf43f9b658c00c322bafacba8fba1e4a95371c38bc3add1138437"
+    },
+    {
+      "file": "source/export-list.json",
+      "bytes": 3739,
+      "sha256": "8d49d358613e033f7a5c4bdb1d1ac2de81f4bb7157a3ce00932384f6ff47f8a4"
+    },
+    {
+      "file": "source/master.json",
+      "bytes": 9191,
+      "sha256": "10e567fce41763b0b0203df09c69ff67e1abfe50bbf63e34ebe9fbb7faa0efc1"
+    },
+    {
+      "file": "source/qa-notes.txt",
+      "bytes": 1831,
+      "sha256": "5a503678706d45551d1d3cd8ba3e7e129f111962573445acddaf5361a5065b05"
+    },
+    {
+      "file": "svg/lockups/orca-by-issuelab-black.svg",
+      "bytes": 9093,
+      "sha256": "d3d66896980d2c4cc23c2ef64e7a0021116b4728408fba00243e7d080d67aee6"
+    },
+    {
+      "file": "svg/lockups/orca-by-issuelab-navy.svg",
+      "bytes": 9093,
+      "sha256": "c5bdaf955c288a7cddda5d676ab50561e9177971e338a9249c77dee154417321"
+    },
+    {
+      "file": "svg/lockups/orca-by-issuelab-white.svg",
+      "bytes": 9057,
+      "sha256": "9e203c58db0e5ce0b5f488ed2a739b1aaa83dcc073ee5ae82af249d2f3302c8e"
+    },
+    {
+      "file": "svg/symbols/orca-symbol-black.svg",
+      "bytes": 894,
+      "sha256": "f1216165d37cf4cc1a589d5956b611967ef585c24fc65219337f15b11b954360"
+    },
+    {
+      "file": "svg/symbols/orca-symbol-currentcolor.svg",
+      "bytes": 899,
+      "sha256": "bc394c73f606d8b3c7b7f440d11b9c02e0f159e26265b5da197b3a035d231742"
+    },
+    {
+      "file": "svg/symbols/orca-symbol-navy.svg",
+      "bytes": 894,
+      "sha256": "59bb738d07a3a0156e57af67477b238de5abe82a67ecd0dfe80cabc8315a6b4d"
+    },
+    {
+      "file": "svg/symbols/orca-symbol-white.svg",
+      "bytes": 894,
+      "sha256": "3b77ed4d3491fde10fca4a0b9ca8a4553cf9b964410626ceaa0714027a525657"
+    },
+    {
+      "file": "svg/wordmarks/orca-wordmark-black.svg",
+      "bytes": 1719,
+      "sha256": "0a811425ad29803c6aaa465135f9839b4cf52a6d448d1013c55080b5dcd56196"
+    },
+    {
+      "file": "svg/wordmarks/orca-wordmark-currentcolor.svg",
+      "bytes": 1724,
+      "sha256": "d019bb477e0dfc379137dd7af50bd9d8bc6147dbefd5a7848fd88d3518503dec"
+    },
+    {
+      "file": "svg/wordmarks/orca-wordmark-navy.svg",
+      "bytes": 1719,
+      "sha256": "207faad3905072c1da27b87857366abcdaf276d9714cd654e8dd2281eb726fc7"
+    },
+    {
+      "file": "svg/wordmarks/orca-wordmark-white.svg",
+      "bytes": 1719,
+      "sha256": "a2dab55dd103d047fe713dc846b2089decd0b228ca0d224b5b7b7293c966f681"
+    },
+    {
+      "file": "tokens/orca-colours.json",
+      "bytes": 364,
+      "sha256": "13408dfe15097fbac56a3ab1ebec426ecc4c8c214bbf57bd533aa7fe5c9c9868"
+    },
+    {
+      "file": "tokens/orca-tokens.css",
+      "bytes": 243,
+      "sha256": "a6184451c7a385f371b17df97b9df70369ec9e49861c55b290f876409341f5a6"
+    },
+    {
+      "file": "video/corner-bug-black.png",
+      "bytes": 16057,
+      "sha256": "0639e1fb8b9a564bef818722b16b216406f1e5aa9f910e25264ab8970d00622f",
+      "width": 1920,
+      "height": 1080,
+      "mode": "RGBA"
+    },
+    {
+      "file": "video/corner-bug-black.svg",
+      "bytes": 1760,
+      "sha256": "7c04c43827309c17d07f0be37967a8e8d0b3ad381a1782799b4ed4eecbe7e642"
+    },
+    {
+      "file": "video/corner-bug-white.png",
+      "bytes": 14226,
+      "sha256": "67fc2d4c48af8d74ab00722a4747ccaa2794349edf20d634e779a97bdecf4f3d",
+      "width": 1920,
+      "height": 1080,
+      "mode": "RGBA"
+    },
+    {
+      "file": "video/corner-bug-white.svg",
+      "bytes": 1760,
+      "sha256": "747f55d4de2e55320b16ebe228cd46596a34e58be74cb690dcdc0854d1df1f25"
+    },
+    {
+      "file": "video/title-dark.png",
+      "bytes": 58918,
+      "sha256": "40a08a34cb820e828a25aa9ace59c86380111e1c788b7e5f702947369958c604",
+      "width": 1920,
+      "height": 1080,
+      "mode": "RGBA"
+    },
+    {
+      "file": "video/title-dark.svg",
+      "bytes": 39969,
+      "sha256": "e076fa321d39e94fa2c32734e1c500542dff492488b9d29538950865b450018e"
+    },
+    {
+      "file": "video/title-light.png",
+      "bytes": 58315,
+      "sha256": "8e57e3fcbf801c395053fb36572323592554c8018e03f9b324ca9a5316e06983",
+      "width": 1920,
+      "height": 1080,
+      "mode": "RGBA"
+    },
+    {
+      "file": "video/title-light.svg",
+      "bytes": 40027,
+      "sha256": "4bfcb68fa73967f1227938c45b9e6d883dd51a8f30e4657c0926320c69b0c0f7"
+    }
+  ]
+}

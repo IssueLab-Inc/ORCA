@@ -17,6 +17,8 @@ the record.
   - the web API, the MCP server, owner settings and demo caps.
 - The Meta model integration (Muse Spark, Muse Spark Open, Muse Voice Transcribe).
 - The domain packs, spikes, tests, evals and the synthetic test models.
+- The approved direction-05 ORCA identity and motion kit (`assets/brand/orca/`): generated concept reference,
+  manually authored vector masters, static and animated exports, native elements, React wrappers and build/check scripts.
 - The PC-03 palletising cell demo models (generated during the event by IssueLab's own scripts, in a private repo).
 
 ## Pre-existing, not built during the event

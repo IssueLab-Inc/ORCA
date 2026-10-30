@@ -1,0 +1,15 @@
+{
+  "status": "pass",
+  "files": 60,
+  "svgs": 18,
+  "animated_pngs": 12,
+  "gifs": 13,
+  "checks": [
+    "SVG parsing and vector paths",
+    "SVG reduced-motion media queries",
+    "Animation frame decoding and changing content",
+    "APNG transparency",
+    "One-shot and looping APNG playback metadata",
+    "SHA-256 and dimensions"
+  ]
+}

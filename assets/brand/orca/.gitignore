@@ -1,0 +1,7 @@
+node_modules/
+.build/
+dist/
+__pycache__/
+.venv/
+motion/.build/
+motion/dist/
