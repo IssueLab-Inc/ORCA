@@ -185,7 +185,7 @@ plus combined fixes, joints (a move takes its fittings along and stretches what 
 viewer lights what an element is linked to: `docs/connections.md`), Fix together and root causes, Insights patterns,
 chat and live voice, the MCP server with pairing links, coordination requirements, STEP models (the palletising cell),
 PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder, Show it built, phones and tablets,
-guided tours. Latest validation (Oct 30): 594 server tests, 75 web tests; answer key 3/3 first try at Rev04 heights;
+guided tours. Latest validation (Oct 30): 595 server tests, 80 web tests; answer key 3/3 first try at Rev04 heights;
 `evals/step_cell.py` passes (C1, C2, C3, C6, C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was
 built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
 

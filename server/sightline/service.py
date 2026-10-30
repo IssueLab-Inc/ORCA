@@ -686,6 +686,7 @@ class Workspace:
         r = self.report(report_id)
         return {
             "id": r.id, "title": r.title, "sources": r.sources, "origin": r.origin,
+            "requirements_id": r.requirements_id,
             "clashes": [{**{k: v for k, v in asdict(c).items() if k != "images"},
                          "images": [label for label, _ in c.images]} for c in r.clashes],
         }
@@ -733,6 +734,7 @@ class Workspace:
         self._runs[scene_id] = {**run.state, "requirements": rid}
         self._carry(self.reports.get(self._run_reports.get(scene_id, "")), run.report)
         self._run_reports[scene_id] = run.report.id
+        run.report.requirements_id = rid
         report = self._keep(run.report)
         out = {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
                "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset,

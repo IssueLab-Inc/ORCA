@@ -206,7 +206,7 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
 | `GET` | `/api/reports/samples` | Sample report folders in `samples/reports/` | none | `[name]` | free |
-| `POST` | `/api/reports` | Opens a sample Navisworks report (`Workspace.open_report_sample`) | `OpenReport {sample}` | the report (`id, title, sources, clashes, origin`) | free; 404 |
+| `POST` | `/api/reports` | Opens a sample Navisworks report (`Workspace.open_report_sample`) | `OpenReport {sample}` | the report (`id, title, sources, clashes, origin, requirements_id`; the last is a detected run's requirements id, else null) | free; 404 |
 | `POST` | `/api/reports/upload` | Opens uploaded Navisworks XML with its pictures; folder paths kept (`_safe_relpath`), only `.xml`, `.png`, `.jpg`, `.jpeg` written | multipart `files` | the report | free; 413 over `SIGHTLINE_UPLOAD_MAX_FILES` (5000) or `SIGHTLINE_UPLOAD_MAX_MB` (200), 400 no XML or unreadable |
 | `GET` | `/api/reports/{report_id}` | The report as the page reads it (`Workspace.report_summary`) | none | the report | free; 404 |
 | `GET` | `/api/reports/{report_id}/clashes/{clash_id}/images/{index}` | One of a clash's pictures (Navisworks or captured) | none | the image | free; 404 |

@@ -989,3 +989,22 @@ See connections (Oct 30, slice 3 of connections; `docs/connections.md`, code `co
   - The layer is hidden in A/B/C pictures, thumbnails and built views.
 - **Phone popovers** now render into the body: inside the rail they sat under the bottom sheet.
 - **Web tests:** App imports `./links` (both harnesses compile it); `tests/links.test.mjs`, `tests/viewer-links.test.mjs`.
+
+Sign-offs kept per report (Oct 30; code `web/src/signoffs.ts`, `Report.requirements_id`):
+- **Why:** review sign-offs were kept in `localStorage` under the report's title, and every detection run is titled
+  "Coordination · N models", so one project's or run's reviews showed on another with the same model count. The PDF
+  stays DRAFT until each page has a review from every team involved, so those reviews could lift it wrongly.
+- **Key:** a detection run's per clash, under its id (`sightline.signoffs:clash:<id>`). The id hashes the test and the
+  GlobalId pair, so a rerun, a requirements change (Add to requirements makes a new requirements id) or opening fewer
+  of the same models keeps a clash's reviews, and another project's clashes never share them. An imported report's
+  under its title and sorted files (`sightline.signoffs:import:<title>:<files>`), since a Navisworks id is a place in
+  its file; opening the same report again (a new report id each time) finds them. The server names a run's
+  requirements on the report (`requirements_id` in the summary), for the record.
+- **Old entries:** a title-keyed one moves over when a report with that title opens, for the clashes that report has
+  (a detection run's ids name their elements, so another project's never match), never over a newer review; the rest
+  wait for their own report, and the old key goes when it is empty (`migrateTitleKeyed`).
+- **Review fixes before merging:** the first version keyed a run by its requirements and files and deleted every
+  title-keyed entry on load, so a rule change or a deploy lost sign-offs, and an imported report lost them on reopening.
+- **Checked:** `tests/test_detect.py` (a run names its requirements), `web/tests/signoffs.test.mjs` (5: keys, a rerun
+  under new rules and with fewer models, junk and no storage, the migration with an imported report and two projects of
+  one title, the page); 80 web tests.

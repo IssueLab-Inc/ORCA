@@ -13,6 +13,7 @@ import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
 import { localFile, uploadRefusal, uploadStatus } from "./uploads";
 import { countsText, highlightGroups, indexGraph, LINK_COLOURS, LINK_ORDER, LINK_WORDS, type LinkIndex, type LinkKind } from "./links";
+import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
@@ -480,15 +481,18 @@ export function App() {
     }).catch(() => {});
     return () => { live = false; };
   }, [report, sceneId]);
-  const signoffKey = report ? `sightline.signoffs.${report.title}` : null;
+  const signoffKey = signoffScope(report);
+  useEffect(() => { setEvidence({}); }, [signoffKey]);
+  // Each report sees its own sign-offs (signoffs.ts): a detection run's by clash id, so a rerun or a rule change keeps
+  // them; the old title-keyed ones move over for the clashes this report has.
   useEffect(() => {
-    setEvidence({});
-    try { setSignoffs(signoffKey ? JSON.parse(localStorage.getItem(signoffKey) ?? "{}") : {}); } catch { setSignoffs({}); }
-  }, [signoffKey]);
+    migrateTitleKeyed(report);
+    setSignoffs(loadSignoffs(signoffKey, report?.clashes?.map((c) => c.id) ?? []));
+  }, [signoffKey, report?.id]);
   function changeSignoffs(id: string, f: (s: Signoff[]) => Signoff[]) {
     setSignoffs((all) => {
       const next = { ...all, [id]: f(all[id] ?? []) };
-      try { if (signoffKey) localStorage.setItem(signoffKey, JSON.stringify(next)); } catch { /* private window */ }
+      saveSignoffs(signoffKey, next);
       return next;
     });
   }

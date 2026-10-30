@@ -7,9 +7,10 @@
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
 almost all of the page's state and every call that changes it; the other components draw what `App` hands them and
 report back through callbacks. A handful of plain modules hold logic that the tests exercise on their own (layout,
-fix wording, requirements files, uploads, the chat's turn ownership). The page talks to the server only through
-`api.ts`, mostly as NDJSON streams, and draws the models through the `Viewer` class ([13](13-3d-viewer.md)). There is
-no router, no state library and no CSS framework: `useState`/`useRef`/`useMemo`/`useEffect` and one global stylesheet.
+fix wording, requirements files, uploads, review sign-offs, the chat's turn ownership). The page talks to the server
+only through `api.ts`, mostly as NDJSON streams, and draws the models through the `Viewer` class
+([13](13-3d-viewer.md)). There is no router, no state library and no CSS framework: `useState`/`useRef`/`useMemo`/
+`useEffect` and one global stylesheet.
 
 ## Every file in `web/src/`
 
@@ -47,6 +48,7 @@ no router, no state library and no CSS framework: `useState`/`useRef`/`useMemo`/
 | `noClash.ts` | Why a reported clash needs no fix (same element, not physical, a touch, no overlap, by design) | `noClash`, `oneElement`, `sameWhy`, `NoClash` | `App`, `ReportList.tsx`, `ClashPanel.tsx` |
 | `pilot.ts` | Lets the fix agent drive the viewer while it works | `Pilot`, `PilotStatus` | `App` |
 | `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
+| `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
 | `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (on a phone its sheet renders into the body, above the bottom sheet), and the page's one tooltip layer | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
 | `uploads.ts` | The size check before an upload and the words for each upload stage | `uploadRefusal`, `uploadStatus`, `localFile` | `App` |
 | `voice.ts` | Live voice over a socket, and the record-then-upload fallback | `LiveVoice`, `VoiceRecorder`, `LiveVoiceError`, `MAX_SECONDS`, `VoiceMode` | `Chat.tsx` |
@@ -210,6 +212,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 | `report`, `reqId` | `api.triage`; a run still going is followed with `runTriage()` | triage state |
 | `triageDone` with matches | `api.triage` again (the server settles one-element pairs from the open model) | `triage` |
 | `report`, `sceneId` | `api.teams` | `modelTeams` |
+| `signoffKey` (`signoffScope`: a run's files, or an import's title and files), and the report | `migrateTitleKeyed`, then `loadSignoffs` for the report's clash ids | `signoffs`; a new `signoffKey` also clears `evidence` |
 | `report.id` | `api.titles` (stream) | `titles`, `naming` |
 | `sceneId`, `reqId` | `api.detectTests` | `detectSetup` |
 | `clash`, `matches`, `remeasure` | `api.measure` | `a`, `b`, `standIns`, `measure` |
@@ -436,6 +439,16 @@ with a getter for the viewer, a framing function (`frameFix` on the trial's piec
 - **`reqFile.ts`:** the requirements file (`orca-requirements/1`) in the browser: `load`/`save` (key
   `sightline.requirements`, `{ doc, enabled }`), `serialise`, `parseUpload`, `download`, cell, mover and penetration
   edits, `addByDesign` / `addPenetration` and their `has…` checks. Pure functions, shared by `App` and the dialog.
+- **`signoffs.ts`:** where a report's sign-offs (clash id → reviews) are kept. A detection run's, per clash under its
+  id (`sightline.signoffs:clash:<id>`): the id hashes the test and the GlobalId pair, so a rerun, a requirements change
+  or a different set of open models finds the same clash's reviews, and another project never does. An imported
+  report's, under its title and sorted files (`sightline.signoffs:import:…`): a Navisworks id is the clash's place in
+  its file, and opening the same report again finds them. `signoffScope(report)` says which (and when the page moved
+  to other models, which clears `evidence`); `loadSignoffs(scope, ids)` reads the report's own clashes;
+  `saveSignoffs` writes inside `try` (a clash with no review left is dropped). `migrateTitleKeyed(report)` moves the
+  pre-Oct 30 `sightline.signoffs.<report title>` entries over for the clashes this report has, never over newer ones,
+  and leaves the rest for their own reports. Every detection run was titled "Coordination · N models", so those were
+  shared between projects and runs, and the PDF's DRAFT depends on them.
 - **`uploads.ts`:** `uploadRefusal` (at most 8 files, `.ifc`/`.step`/`.stp`, the server's cap from `api.models`
   counted before packing), `uploadStatus` (the busy line per upload event), `localFile` (an uploaded IFC is drawn from
   the visitor's own file, a STEP comes back converted). Design: [docs/uploads.md](../uploads.md).
@@ -473,7 +486,7 @@ Everything is `localStorage`, read and written inside `try` (a private window ju
 |---|---|---|
 | `sightline.session` | `App` (`SESSION_KEY`) | `SavedSession`: scene id, report id, files, fixes, agent link, time; read on load for "Pick up where you left off" |
 | `sightline.left-w`, `sightline.right-w` | `App` (`stored`, `remember`) | Dragged pane widths (clamped by `PANE`) |
-| `sightline.signoffs.<report title>` | `App` (`signoffKey`) | Team reviews per clash for that report |
+| `sightline.signoffs:clash:<clash id>` (a detection run) / `sightline.signoffs:import:<title>:<files>` (an imported report) | `signoffs.ts`, for `App` (`signoffKey`, `changeSignoffs`) | Team reviews per detected clash, or per imported report. The old `sightline.signoffs.<report title>` keys move over as their reports open (`migrateTitleKeyed`) |
 | `sightline.reviewer` | `ReportDoc.tsx` (read by `App`'s tour sign-off) | The reviewer's name |
 | `sightline.requirements` | `reqFile.ts` | The requirements file and whether it is in use |
 | `sightline.owner` | `Owner.tsx` | The owner's own settings (the token is never stored: the server sets an HttpOnly cookie) |
@@ -508,10 +521,10 @@ No `sessionStorage` or IndexedDB is used.
   TypeScript transpiler into a data URL, replacing named imports, and `appHost()` runs the real `App` render and its
   effects with React hooks, the API and the viewer replaced. **A new import in `App.tsx` must be added to both stub
   lists, in `web/tests/app-host.mjs` and in `web/tests/app-replacement.test.mjs`**, or `npm test` cannot resolve it;
-  `fixKinds`, `chatRequest`, `uploads` and `ContextPlan` are compiled for real, the rest are stubbed. The transform
-  cannot read `for (const [a, b] of …)` in `App`: iterate keys. Other tests cover `layout.ts`, `uploads.ts`,
-  `reqFile.ts`, `fixKinds.ts`, and `Viewer.load` / `viewer/patch.ts` with real three.js batches. More in
-  [18](18-testing-and-evals.md).
+  `fixKinds`, `chatRequest`, `uploads`, `signoffs` and `ContextPlan` are compiled for real, the rest are stubbed.
+  The transform cannot read `for (const [a, b] of …)` in `App`: iterate keys. Other tests cover `layout.ts`,
+  `uploads.ts`, `signoffs.ts`, `reqFile.ts`, `fixKinds.ts`, and `Viewer.load` / `viewer/patch.ts` with real three.js
+  batches. More in [18](18-testing-and-evals.md).
 
 ## When to update this doc
 
