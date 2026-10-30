@@ -165,6 +165,9 @@ Results on Oct 28 (`runs/2026-10-28-northbank-detection/`, `runs/2026-10-28-cell
 | Answer key | 3/3, including #061, which Navisworks stored no result for |
 | Cell Rev A / Rev B | 13/13 planted pairs and 0 unexpected / 0 planted and 0 unexpected |
 
+Oct 30, the cell after C6-C8 were added (`runs/2026-10-30-cell-detection/`): Rev A 112 clashes over 161 parts in 0.8 s,
+17/17 planted pairs, 95 by design, 0 unexpected; Rev B 185 parts, 0 planted, 93 by design, 0 unexpected.
+
 The per-discipline counts in `summary.md` are context, not a score. Navisworks stores ports, spaces, sub-objects of one
 element and repeated pairs, and 3,100 of its 7,668 stored results are tests of a space, port or opening.
 
