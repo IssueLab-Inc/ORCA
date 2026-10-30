@@ -20,7 +20,9 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `App.tsx` | The whole page: state, handlers, effects, header, panes, sheet, dialogs. Also small local components `ProofStrip`, `Recommended`, `NoFix`, `Thinking` and helpers `keepPlaces`, `movedPairs`, `clampPane`, `shortName` | `App` | `main.tsx` |
 | `index.css` | The one stylesheet: tokens, layout grid, every feature's styles, then the "Responsive" block | (CSS) | `main.tsx` |
 | `api.ts` | Every server call, the NDJSON reader, the wire types, the two request headers | `api`, `ApiError`, `setOwnerSettings`, `setRequirements`, `requirementsInUse`, ~100 types | everything |
-| `About.tsx` | Landing page in the empty viewer (hero, demo cards, resume card, before/after picture) and the "How it works" dialog | `About`, `Resume`, `projectName` | `App` |
+| `About.tsx` | Landing page in the empty viewer (hero, demo cards, resume card, before/after picture, the "Go deeper" card that opens About ORCA) | `About`, `Resume`, `projectName` | `App` |
+| `AboutOrca.tsx` | About ORCA: a full page over the app in six tabs (Overview, How it works, The fixes, The AI, Under the hood, Proof and limits), with animated SVG pictures (the ORCA loop, the girder clash before and after, each fix kind, the propose-check loop), count-up numbers and sections that fade up as they scroll in; reduced motion shows it all still. Its numbers are the landing's measured ones | `AboutOrca` | `App` |
+| `aboutRoute.ts` | The About page's tabs and address: `#about` and `#about/<tab>`, pushed when it opens (Back closes it), replaced on a tab change | `ABOUT_TABS`, `AboutTab`, `aboutTabFromHash`, `aboutHash`, `nextTab`, `currentHash`, `showAboutHash` | `App`, `AboutOrca.tsx` |
 | `Activity.tsx` | The agent activity table (ideas tried, why each failed) and the one-line status | `Activity`, `statusLine`, `Progress` (re-exports `editText`, `KIND_LABEL`) | `App` |
 | `Agent.tsx` | "Connect an agent" dialog: token and server fields, client set-up snippets, time left, the agent's log | `AgentDialog`, `timeLeft`, `secondsLeft`, `AgentLogEntry` | `App` |
 | `AppMenu.tsx` | The header's menu on phones and tablets: a panel from the right with every header action | `MenuSheet` | `App` |
@@ -78,7 +80,7 @@ flowchart TD
   app --> dialogs["Dialogs"]
   header --> pops["Popover: Models, Coordinate"]
   header --> owner["OwnerSettingsMenu"]
-  dialogs --> about["About as How it works"]
+  dialogs --> about["AboutOrca, About ORCA in tabs"]
   dialogs --> agent["AgentDialog"]
   dialogs --> tour["Tour"]
   dialogs --> req["RequirementsDialog"]
@@ -114,8 +116,11 @@ flowchart LR
   opened itself (`adoptChatReport`) does not change `chatReport`, so the turn that opened it keeps answering.
 - The Plan tab holds either `PlanPanel` (a batch or root-cause plan) or `ContextPlan` (a wider fix), switched by
   `planKind`; a segmented control appears when both exist.
-- `About` is the landing when nothing is open (`landing = !stats && !report && !blank`), and the same component is
-  the "How it works" dialog (`about` state).
+- `About` is the landing when nothing is open (`landing = !stats && !report && !blank`). **About ORCA**
+  (`AboutOrca`) is a separate full page over everything, open while `aboutTab` is set: the header's About ORCA
+  button, the phone menu and the landing's "Go deeper" card call `openAbout`, and `#about` / `#about/<tab>` in the
+  address opens it on load or on Back and Forward (`hashchange` / `popstate`). `aboutPushed` remembers that the page
+  added the history entry, so closing goes Back over it.
 
 ## `App.tsx`: state by concern
 
@@ -435,7 +440,7 @@ with a getter for the viewer, a framing function (`frameFix` on the trial's piec
   it calls `actions.reveal(selector, el)` once: `App` switches the left pane's tab (`[data-left-view]`), and on phone
   and tablet opens the drawer, the sheet's tab or the header menu that hides it.
 - **Card:** beside the target, else below or above; on a phone it spans the width at the top or bottom. On a touch
-  screen its copy says tap instead of click. Escape ends the tour unless a dialog (`.about-dialog`) is open.
+  screen its copy says tap instead of click. Escape ends the tour unless a dialog (`.about-dialog`) or About ORCA (`.orca-about`) is open.
 
 ### Smaller modules
 
@@ -488,7 +493,7 @@ toast and pop-sheet base, touch targets (`@media (pointer: coarse)`: 44 px, 36 f
 `.app.tablet` (drawer), `.app.phone` (the sheet: `--sheet-h` per `snap-*`, `--peek-h`, `--sheet-drag`, `.list-open`
 choosing which pane shows), what floats over the model, popovers as sheets, full-screen dialogs, the requirements
 matrix as a list, the left pane's tabs, and the blank project. Near the top, one rule hides the header buttons'
-`.lbl` text below 1280 px (How it works, Tour, Requirements, the agent button), leaving their icons.
+`.lbl` text below 1280 px (About ORCA, Tour, Requirements, the agent button), leaving their icons.
 
 ## Browser storage
 
@@ -537,7 +542,7 @@ No `sessionStorage` or IndexedDB is used.
   TypeScript transpiler into a data URL, replacing named imports, and `appHost()` runs the real `App` render and its
   effects with React hooks, the API and the viewer replaced. **A new import in `App.tsx` must be added to both stub
   lists, in `web/tests/app-host.mjs` and in `web/tests/app-replacement.test.mjs`**, or `npm test` cannot resolve it;
-  `fixKinds`, `chatRequest`, `uploads`, `signoffs` and `ContextPlan` are compiled for real, the rest are stubbed.
+  `fixKinds`, `chatRequest`, `uploads`, `signoffs`, `aboutRoute` and `ContextPlan` are compiled for real, the rest are stubbed.
   The transform cannot read `for (const [a, b] of …)` in `App`: iterate keys. Other tests cover `layout.ts`,
   `uploads.ts`, `signoffs.ts`, `reqFile.ts`, `fixKinds.ts`, and `Viewer.load` / `viewer/patch.ts` with real three.js
   batches. More in [18](18-testing-and-evals.md).

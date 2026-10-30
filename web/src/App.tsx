@@ -18,6 +18,8 @@ import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadR
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About, projectName } from "./About";
+import { AboutOrca } from "./AboutOrca";
+import { aboutTabFromHash, currentHash, showAboutHash, type AboutTab } from "./aboutRoute";
 import { AgentDialog, timeLeft, type AgentLogEntry } from "./Agent";
 import { ClashPanel, Lightbox } from "./ClashPanel";
 import { PlanPanel, type PlanRun } from "./PlanPanel";
@@ -138,7 +140,9 @@ export function App() {
   // The chat starts over when the user opens another report, not when the chat itself opened one (Detect from chat).
   const [chatReport, setChatReport] = useState<string | null>(null);
   // The image dialog: a clash's Navisworks views, opened from the clash panel or a row's thumbnail.
-  const [about, setAbout] = useState(false);
+  // About ORCA (AboutOrca.tsx): open on a tab, or null. The address carries it (#about, #about/fixes), so it can be shared.
+  const [aboutTab, setAboutTab] = useState<AboutTab | null>(aboutTabFromHash(currentHash()));
+  const aboutPushed = useRef(false);   // this page added the #about history entry, so closing goes Back over it
   // Muse Spark's reasoning summaries for the current proposal, as they stream in.
   const [thoughts, setThoughts] = useState<{ round: number; text: string }[]>([]);
   const [lightbox, setLightbox] = useState<{ clash: ReportClash; index: number } | null>(null);
@@ -188,6 +192,19 @@ export function App() {
   const [touring, setTouring] = useState(false);
   const [tourWhich, setTourWhich] = useState<"northbank" | "cell">("northbank");
   const startTour = (which: "northbank" | "cell") => { setTourWhich(which); setTouring(true); };
+  const openAbout = (tab: AboutTab = "overview") => { aboutPushed.current = true; showAboutHash(tab, true); setAboutTab(tab); };
+  const switchAbout = (tab: AboutTab) => { showAboutHash(tab, false); setAboutTab(tab); };
+  const closeAbout = () => {
+    if (aboutPushed.current && typeof window !== "undefined" && window.history) { aboutPushed.current = false; window.history.back(); }
+    else showAboutHash(null, false);
+    setAboutTab(null);
+  };
+  useEffect(() => {   // Back, Forward or an edited address opens, switches or closes the About page
+    const read = () => { const t = aboutTabFromHash(currentHash()); if (!t) aboutPushed.current = false; setAboutTab(t); };
+    window.addEventListener("hashchange", read);
+    window.addEventListener("popstate", read);
+    return () => { window.removeEventListener("hashchange", read); window.removeEventListener("popstate", read); };
+  }, []);
   // An agent connected over MCP (Agent.tsx; server: agents.py, mcp_server.py). It is part of the saved session below.
   const [agentLink, setAgentLinkState] = useState<AgentLink | null>(null);
   /** Keep a link, measuring how far this browser's clock is from the server's when the server just sent its time. */
@@ -1380,6 +1397,9 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
+      // A modal over the page (About ORCA, the report, the agent link, requirements) has its own keys: Esc closes it,
+      // and must not also leave the clash underneath.
+      if (document.querySelector('[aria-modal="true"]')) return;
       const views: Record<string, Preset> = { "1": "top", "2": "front", "3": "right", "4": "iso" };
       const modes: Record<string, ViewMode> = { x: "xray", c: "context", i: "isolate", v: "shaded" };
       const k = e.key.toLowerCase();
@@ -2428,7 +2448,7 @@ export function App() {
           aria-label="Coordination requirements" data-tip-side="bottom"
           data-tip={reqLabel ? `Checking, triage and fixes follow "${reqSaved!.doc.name}" (${reqLabel})` : "Optional: set the design level, how strict to be and who moves. Off: ORCA's defaults"}>
           <ClipboardCheck size={15} aria-hidden />{reqLabel ? <span className="req-pill-label"> {reqLabel}</span> : <span className="lbl"> Requirements</span>}</button>}
-        {!landing && <button className="btn ghost" onClick={() => setAbout(true)} aria-label="How it works" title="How it works"><Info size={15} aria-hidden /><span className="lbl"> How it works</span></button>}
+        <button className="btn ghost" onClick={() => openAbout()} aria-label="About ORCA" title="About ORCA: how it works, the fixes, the AI, the proof"><Info size={15} aria-hidden /><span className="lbl"> About ORCA</span></button>
         {!landing && !touring && (stats || report) && <button className="btn ghost" onClick={() => startTour(cellOpen ? "cell" : "northbank")} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
         </div>
         <span className="brand"><span className="logo" aria-hidden>◎</span><b>ORCA</b></span>
@@ -2520,7 +2540,7 @@ export function App() {
             onReportFolder={() => folderInput.current?.click()} onBack={() => setBlank(false)} />
         )}
         {!stats && !busy && !blank && (
-          <About triageOpen={!!triageModel?.open_weights} start={{
+          <About triageOpen={!!triageModel?.open_weights} onAbout={() => openAbout()} start={{
             label: startLabel,
             disabled: !picked.length,
             onStart: () => void openDemo(),
@@ -2844,14 +2864,14 @@ export function App() {
             {agentLink ? <><Bot size={16} aria-hidden /> Agent connected · {timeLeft(agentLink, now)} left</> : <><Plug size={16} aria-hidden /> Connect an agent</>}</button>
         </section>}
         <section className="menu-section"><h3>Help</h3>
-          {!landing && <button className="pop-item" onClick={() => { setMenuOpen(false); setAbout(true); }}><Info size={16} aria-hidden /> How it works</button>}
+          <button className="pop-item" onClick={() => { setMenuOpen(false); openAbout(); }}><Info size={16} aria-hidden /> About ORCA</button>
           {!touring && <button className="pop-item" onClick={() => { setMenuOpen(false); startTour(cellOpen ? "cell" : "northbank"); }}>
             <Compass size={16} aria-hidden /> Take the guided tour</button>}
         </section>
       </MenuSheet>}
 
       <Tooltips />
-      {about && <About triageOpen={!!triageModel?.open_weights} onClose={() => setAbout(false)} />}
+      {aboutTab && <AboutOrca tab={aboutTab} onTab={switchAbout} onClose={closeAbout} triageOpen={!!triageModel?.open_weights} />}
       {agentOpen && <AgentDialog link={agentLink} log={agentLog} now={now} creating={agentBusy} error={agentError}
         canCreate={!!sceneId} onCreate={() => void connectAgent()} onRevoke={() => void disconnectAgent()} onClose={() => setAgentOpen(false)} />}
       {touring && <Tour key={tourWhich} which={tourWhich} state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}

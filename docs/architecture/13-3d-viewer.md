@@ -451,8 +451,9 @@ sequenceDiagram
 
 ## Keyboard, mouse and touch
 
-Keyboard shortcuts live in `App` (a `keydown` listener, ignored with Ctrl, Cmd or Alt or while typing in an input,
-textarea or select). The toolbar shows each key in its tooltip.
+Keyboard shortcuts live in `App` (a `keydown` listener, ignored with Ctrl, Cmd or Alt, while typing in an input,
+textarea or select, and while a modal dialog is open (`aria-modal`: About ORCA, the report, the agent link,
+requirements), whose own Esc must not also leave the clash). The toolbar shows each key in its tooltip.
 
 | Key | Action | Key | Action |
 |---|---|---|---|
