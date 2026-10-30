@@ -41,10 +41,27 @@ memory, disk and time any one request can take. Environment variables are listed
 
 ### Visitors
 
-ORCA has no accounts. A visitor is an address: `limits.client_id(headers, peer)` returns the first entry of
-`X-Forwarded-For` when `SIGHTLINE_TRUST_FORWARDED` is `1` (Modal sets it: its proxy sets the header), else the
-socket's peer address, else "unknown". Everything per visitor (caps, a link's creator) keys on it. Visitors behind
-one address share their caps; without the flag behind a proxy, every visitor would share one.
+ORCA has no accounts. A visitor is an address: `limits.client_id(headers, peer)` returns the socket's peer address,
+else "unknown". Everything per visitor (caps, a link's creator) keys on it. Visitors behind one address share their
+caps.
+
+- **On Modal the peer is the visitor.** Measured on Oct 30 with a throwaway app on the same `@modal.asgi_app()`
+  setup: Modal's edge strips any `X-Forwarded-For` a client sends (one value, a list, junk, two header lines), adds
+  none of its own, and hands the app the caller's own address as the peer, for HTTP and WebSocket alike. Checked from
+  inside Modal too, because the cloud session's outbound proxy strips the header itself. So the deploy trusts no
+  forwarded header (`SIGHTLINE_TRUST_FORWARDED` `0`). `X-Real-IP` and `Forwarded` reach the app exactly as the client
+  wrote them, so nothing reads those.
+- **Behind other proxies.** `SIGHTLINE_TRUST_FORWARDED=N` says N proxies in front each append the address they saw.
+  The visitor is then the N-th entry from the right, the one the outermost proxy wrote. It is never the left end,
+  which a client chooses and an appending proxy keeps. Header lines are joined into one list; a header with fewer
+  entries than N was not written by those proxies, so the peer stands. Anything but a whole number is 0.
+- **Running uvicorn yourself.** uvicorn already rewrites the peer from `X-Forwarded-For` for connections from the
+  hosts it trusts (`--forwarded-allow-ips`, default `127.0.0.1`), taking the right-most untrusted entry. So a
+  reverse proxy on the same machine works with the flag at 0. It also means a request made from that machine can set
+  its own peer, which only matters to someone testing caps locally: send no `X-Forwarded-For` then.
+- **Before Oct 30** the code took the first entry with the flag at `1`, on the belief that Modal set the header. On
+  Modal that was harmless, because the edge strips the header and the peer was used. Behind an appending proxy it
+  would have let a visitor choose their own identity and with it a fresh set of caps.
 
 ### Same origin
 
@@ -100,9 +117,9 @@ What the owner gets that visitors do not:
 |---|---|---|
 | Read and change settings for everyone | Yes; visitors get 403 | `GET` / `PUT /api/settings` |
 | Their own effort, open weights, second tries, Show it built | Yes, per request | `owner.settings`, `owner.enter` |
-| Demo caps | Skipped, unless the owner sends `no_caps: false` | `app._take`, plan and wider-fix streams, chat's closures |
+| Demo caps | Skipped, unless the owner sends `no_caps: false` | `app._take`, plan and wider-fix streams, chat's closures (proposals, second tries, detection runs) |
 | Muse Wonder day budget | Never refused (still counted) | `spend.claim(exempt=True)` in `escalation_refused`, `built_stream` |
-| Agent links they make | Proposals and second tries not capped (`Link.owner`) | `mcp_hooks.charge`, `escalate` |
+| Agent links they make | Proposals, second tries and detection runs not capped (`Link.owner`) | `mcp_hooks.charge`, `escalate`, `detect_run` |
 | MCP tool-call cap on their links | **Still applies** (`agent_call_limit.take(link.id)`) | `mcp_hooks` `allow_call` |
 | Settings switched off (second tries off, Show it built off) | Still off unless their own setting turns it on | `settings.escalation`, `settings.built_views` |
 
@@ -119,9 +136,9 @@ What the owner gets that visitors do not:
   live in memory: a restart ends them.
 - **`_McpGate`** answers 401 with `WWW-Authenticate: Bearer realm="orca"` unless the request carries a live token,
   as `Authorization: Bearer …` or `?key=…` (moved into the header for the tools to read).
-- **Who pays.** A link's proposals and second tries are charged to the visitor who made it (`link.visitor`), never
-  when the owner made it; each tool call takes one use of `SIGHTLINE_AGENT_CALLS_PER_HOUR` for that link. Making a
-  link takes one use of `SIGHTLINE_LINKS_PER_HOUR` / `_PER_DAY`.
+- **Who pays.** A link's proposals, second tries and detection runs are charged to the visitor who made it
+  (`link.visitor`), never when the owner made it; each tool call takes one use of `SIGHTLINE_AGENT_CALLS_PER_HOUR` for
+  that link. Making a link takes one use of `SIGHTLINE_LINKS_PER_HOUR` / `_PER_DAY`.
 - **The stdio server** (`python -m sightline.mcp_server`, `mcp_server.main`) runs as a local link marked owner,
   with the web server's hooks: no proposal caps, and a second try only counted against the budget, still refused
   when second tries are switched off (`escalation_refused` with the owner's exemption; `mcp_server._local_escalate`
@@ -142,12 +159,12 @@ counted. The state is per process, which is why the deploy pins one container ([
 
 | Cap | Env (per visitor per hour / everyone per day) | Default | Modal | What takes it, and how many |
 |---|---|---|---|---|
-| Proposals | `SIGHTLINE_PROPOSE_PER_HOUR` / `SIGHTLINE_PROPOSE_PER_DAY` | 0 / 0 | 20 / 300 | 1 per proposal (`/propose`, `/propose/stream`, chat and MCP `propose_fixes`); a plan `take_many` one per clash pair (the plan stream counts at most `plans.MAX_ITEMS`, 8); a root cause 1 for the cause, then one per fix only if it needs edits; a wider fix 3 (`take_many`); 1 to start a report's triage (following a run, or carrying readings to new rules, is free); 1 for a pattern reading (once per report, scene, set of patterns and triage prompt); 1 for a requirements draft; 1 for a PDF report |
+| Proposals | `SIGHTLINE_PROPOSE_PER_HOUR` / `SIGHTLINE_PROPOSE_PER_DAY` | 0 / 0 | 20 / 300 | 1 per proposal (`/propose`, `/propose/stream`, chat and MCP `propose_fixes`); a plan `take_many` one per clash pair (the plan stream counts at most `plans.MAX_ITEMS`, 8); a root cause 1 for the cause, then one per fix only if it needs edits; a wider fix 3 (`take_many`); 1 to start a report's triage (following a run, or carrying readings to new rules, is free); 1 for a pattern reading (once per report, scene, set of patterns and triage prompt, shared by the route, chat and MCP `find_patterns`: `plans.read_patterns`); 1 for a requirements draft; 1 for a PDF report |
 | Second tries | `SIGHTLINE_ESCALATE_PER_HOUR` / `SIGHTLINE_ESCALATE_PER_DAY` | 0 / 0 | 3 / 30 | 1 per second try on Muse Wonder, with 1 proposal (`take_all`), after the budget claim |
-| Chat messages | `SIGHTLINE_CHAT_PER_HOUR` / `SIGHTLINE_CHAT_PER_DAY` | 0 / 0 | 40 / 1500 | 1 per message; its tool calls charge their own proposals |
+| Chat messages | `SIGHTLINE_CHAT_PER_HOUR` / `SIGHTLINE_CHAT_PER_DAY` | 0 / 0 | 40 / 1500 | 1 per message; its tool calls take their own caps, as their routes do |
 | Built views | `SIGHTLINE_BUILT_PER_HOUR` / `SIGHTLINE_BUILT_PER_DAY` | 0 / 0 | 6 / 60 | 1 per Show it built request that is neither cached nor being drawn already |
 | Titling runs | `SIGHTLINE_TITLES_PER_HOUR` / `SIGHTLINE_TITLES_PER_DAY` | 0 / 0 | off | 1 per titling run started (one shared run per report) |
-| Detection runs | `SIGHTLINE_DETECT_PER_HOUR` / `SIGHTLINE_DETECT_PER_DAY` | 0 / 0 | off | 1 per `/detect/stream` (chat and MCP detection take only their message or tool call) |
+| Detection runs | `SIGHTLINE_DETECT_PER_HOUR` / `SIGHTLINE_DETECT_PER_DAY` | 0 / 0 | off | 1 per `/detect/stream`, chat or MCP `detect_clashes`, and MCP `open_models` when it checks on the server (no page following the link: the page's check is its own request) |
 | Voice | `SIGHTLINE_VOICE_PER_HOUR` / `SIGHTLINE_VOICE_PER_DAY` | 0 / 0 | 60 / 2000 | 1 per clip (`/api/transcribe`) or live session, hands-free included |
 | Model uploads | `SIGHTLINE_MODEL_UPLOADS_PER_HOUR` / `SIGHTLINE_MODEL_UPLOADS_PER_DAY` | 0 / 0 | 10 / 200 | 1 per upload, after the size and type checks |
 | Requirements files | `SIGHTLINE_REQUIREMENTS_PER_HOUR` / `SIGHTLINE_REQUIREMENTS_PER_DAY` | **120** / 0 | default | 1 per file the server does not know yet |
@@ -164,8 +181,8 @@ counted. The state is per process, which is why the deploy pins one container ([
 | Per-day cap | "The demo has used today's {noun}. Try again tomorrow, or run ORCA locally with your own key." (`take_many`: "The demo has too few {noun} left today for n more. Try fewer, or run ORCA locally.") |
 | Per-hour cap | "You've used n {noun} this hour. Try again later." (`take_many`: "That needs n {noun}; you have k left this hour. Pick fewer clashes or try later.") |
 | A root cause's fixes | The plan comes back with each item's `error` set to the refusal and no fixes run (`plans.build_root_cause`) |
-| Chat tools | The tool result `{"error": …}`, so Muse Spark tells the visitor ("refused: allowance used") |
-| MCP tools | A `ToolError` with the same words |
+| Chat tools | The tool result `{"error": …}`, so Muse Spark tells the visitor ("refused: allowance used", "refused: detection runs used") |
+| MCP tools | The chat's tools (`propose_fixes`, `detect_clashes`, `find_patterns`, plans) return the same `{"error": …}` result; MCP's own (`triage`, `generate_report`) raise a `ToolError` with the words; `open_models` opens and adds "Opened, not checked: …" |
 | Live voice | An `error` event with the words, then the socket closes |
 | Muse Wonder budget | 429 "Today's budget for Muse Wonder ($25) is used up; it resets at midnight UTC. Muse Spark's own proposals still work." |
 | Second tries switched off | 403 "Second tries with Muse Wonder are switched off." (409 first when the requirements allow no edit: there is nothing to try) |
@@ -262,7 +279,7 @@ through the caps above, not by money. Voice is bounded by its cap and the clip a
 | Pictures in | Captured clash views 4 MB, PNG only; link captures 6 MB; built passes 12,000,000 characters each, square, 256 to 2,048 px | `app.save_view`, `app.link_capture`, `app.BuiltBody`, `built._decode` |
 | Requirements | 64 KB a file, 500 kept | `requirements.MAX_BYTES`, `REGISTRY_MAX` |
 | Streams | 64 unread events per request; progress dropped first | `app._RequestEvents` ([10](10-http-api-and-streams.md)) |
-| Kept in memory | 16 triage jobs, 32 title jobs, 24 documents, 64 previews, 200 last tries, 200 links, 16 jobs per link | `app.py`, `service.LAST_KEPT`, `agents.py` |
+| Kept in memory | 16 triage jobs, 32 title jobs, 24 documents, 64 previews, 200 last tries, 64 pattern readings, 200 links, 16 jobs per link | `app.py`, `service.LAST_KEPT`, `service.PATTERNS_KEPT`, `agents.py` |
 
 ### Other protections
 
@@ -276,7 +293,10 @@ through the caps above, not by money. Voice is bounded by its cap and the clip a
 ## When to update this doc
 
 - A new cap, a changed default or Modal value, or a new place that takes one (and the cap env vars in
-  [15](15-requirements-settings-and-config.md)).
+  [15](15-requirements-settings-and-config.md)). A chat or MCP tool that does what a capped route does takes that
+  route's cap.
+- A change to how a visitor is identified (`limits.client_id`, `SIGHTLINE_TRUST_FORWARDED`), or to what Modal's edge
+  sends.
 - A new per-token model or price in `meta_client.PRICES`, a new estimate, or a change to `spend.claim` / `held`.
 - A change to the owner: token rules, the cookie (name, flags, signature), what the owner skips.
 - A change to link tokens (format, lifetime, what renews them, `_McpGate`).

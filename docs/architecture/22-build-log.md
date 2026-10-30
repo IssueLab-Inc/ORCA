@@ -855,3 +855,21 @@ A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `ve
   every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
   tests, 64 web tests.
 
+Chat and MCP take their routes' caps; a visitor is the peer (Oct 30, owner request; code `plans.read_patterns`,
+`chat.Chat._run`, `mcp_server` `caps` / `Hooks.detect`, `limits.client_id`; docs 09 and 16):
+- **Pattern readings:** chat and MCP `find_patterns` made a fresh Muse Spark call every time, uncharged; the route
+  charged one proposal and cached per report. Now all three go through `plans.read_patterns`: one proposal for a
+  reading not made yet, kept on the Workspace (64), a caller who comes while it is being made waits for it, and
+  no patterns cost nothing (the route used to charge one for an empty reading).
+- **Detection:** chat and MCP `detect_clashes`, and MCP `open_models` checking on the server, now take one detection
+  run (`SIGHTLINE_DETECT_PER_HOUR` / `_PER_DAY`) like `/detect/stream`, charged to the visitor or the link's creator,
+  never the owner. Off on Modal, as before.
+- **Who a visitor is:** measured with a throwaway Modal app, from outside and from inside Modal: the edge strips any
+  client `X-Forwarded-For` (one value, a list, junk, two header lines), sets none, and gives the app the caller's own
+  address as the peer, HTTP and WebSocket. `X-Real-IP` and `Forwarded` pass through as the client wrote them. So
+  the old "first entry" rule was harmless on Modal (no header ever arrived) but would let a visitor pick their own
+  identity behind a proxy that appends. The deploy now sets `SIGHTLINE_TRUST_FORWARDED` 0; any N > 0 takes the N-th
+  entry from the right. The live app needs nothing now; its next deploy picks up the setting.
+- **Checked:** 559 server tests (9 new: `test_limits.py` 3, `test_chat.py` 3, `test_mcp.py` 2, `test_plans.py` 1;
+  the 5 chat and MCP ones fail on the old code, as do the spoofing ones); locally with Muse Spark, a chat asked to check
+  the models after the visitor's one detection run got "refused: detection runs used" and said so.

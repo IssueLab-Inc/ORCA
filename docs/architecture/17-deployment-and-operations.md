@@ -72,7 +72,7 @@ secret. `load_env()` finds no `/app/.env` and does nothing.
 |---|---|---|
 | `SIGHTLINE_PROPOSE_PER_HOUR` | 20 | proposals per visitor per hour (a plan costs one per pair) |
 | `SIGHTLINE_PROPOSE_PER_DAY` | 300 | proposals for everyone per day |
-| `SIGHTLINE_TRUST_FORWARDED` | 1 | Modal's proxy sets `X-Forwarded-For`: a visitor is its first hop (`limits.client_id`) |
+| `SIGHTLINE_TRUST_FORWARDED` | 0 | Modal's edge strips a client's `X-Forwarded-For` and sets none; the peer is the visitor (`limits.client_id`; measured Oct 30, [16](16-security-caps-and-cost.md)) |
 | `SIGHTLINE_MAX_SCENES` | 8 | open model sets kept in memory |
 | `SIGHTLINE_MAX_REPORTS` | 8 | open clash reports (an uploaded one's folder is deleted when it is dropped) |
 | `SIGHTLINE_UPLOAD_MAX_MB` | 150 | a Navisworks report upload, all files |
@@ -89,8 +89,8 @@ secret. `load_env()` finds no `/app/.env` and does nothing.
 | `SIGHTLINE_AGENT_CALLS_PER_HOUR` | 600 | MCP tool calls per link (fixes are also charged as proposals) |
 | `SIGHTLINE_OPEN_WEIGHTS` | 0 | titles and triage on Muse Spark unless the owner switches the open-weights model on |
 
-Not set, so the code's defaults apply on Modal: no cap on detection runs or titling runs (`SIGHTLINE_DETECT_PER_HOUR`,
-`SIGHTLINE_TITLES_PER_HOUR` default 0), 120 requirements files and 60 previews per visitor per hour,
+Not set, so the code's defaults apply on Modal: no cap on detection runs (page, chat or MCP) or titling runs
+(`SIGHTLINE_DETECT_PER_HOUR`, `SIGHTLINE_TITLES_PER_HOUR` default 0), 120 requirements files and 60 previews per visitor per hour,
 `SIGHTLINE_ESCALATION` `button`, `SIGHTLINE_TRIAGE_WORKERS` 8, the default models and efforts. A changed value takes
 effect only in a new container, so it means a redeploy; the settings for everyone ([15](15-requirements-settings-and-config.md))
 change live from the owner menu instead.

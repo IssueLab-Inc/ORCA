@@ -186,8 +186,8 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
   bounded 64-event queue per streamed request that never makes a worker wait for a reader); the caps
   (`propose_limit`, `escalate_limit`, `chat_limit`, `built_limit`, `unlock_limit`, `title_limit`, `detect_limit`,
   `voice_limit`, `model_upload_limit`, `requirements_limit`, `preview_limit`, `link_limit`, `agent_call_limit`) and
-  `_take`; the shared jobs and caches `_triage_jobs`, `_title_jobs`, `_documents`, `_previews`, `_pattern_triage`,
-  `_chat`; `links` (`agents.Links`), `mcp_hooks`, `_McpGate`, `_mcp_transport`, `_lifespan`; folders `EXPORTS`,
+  `_take`; the shared jobs and caches `_triage_jobs`, `_title_jobs`, `_documents`, `_previews`, `_chat` (pattern
+  readings live on the Workspace: `plans.read_patterns`); `links` (`agents.Links`), `mcp_hooks`, `_McpGate`, `_mcp_transport`, `_lifespan`; folders `EXPORTS`,
   `UPLOADS`; `_receive_models` / `_unpack` (gzipped uploads).
 - **Imports:** `agents.py`, `built.py`, `chat.py`, `context_planner.py`, `detect.py`, `document.py`, `edits.py`,
   `escalation.py`, `limits.py`, `mcp_server.py`, `meta_client.py`, `owner.py`, `plans.py`, `requirements.py`,
@@ -205,7 +205,7 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
 (session, pictures, jobs, `apply_fix` / `apply_plan`, triage, report, export) are MCP's own. Deeper design:
 [docs/mcp.md](../mcp.md).
 
-- **Main symbols:** `build`, `Hooks` (what the web server lends: `links`, `charge`, `escalate`, `allow_call`,
+- **Main symbols:** `build`, `Hooks` (what the web server lends: `links`, `charge`, `escalate`, `detect`, `allow_call`,
   `start_triage`, `triage_state`, `build_document`, `spawn`), `INSTRUCTIONS`, `main` (stdio: a local link, the web
   server's `ws` and hooks with `links=None`).
 - **Imports:** `agents.py`, `chat.py`, `edits.py`, `escalation.py`, `plans.py`, `requirements.py`, `service.py`,
@@ -213,7 +213,7 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
 - **Rules:** every tool runs inside `requirements.using(link.requirements)`, so an agent works under the page's
   requirements; expected failures become `ToolError` with the reason (bad id, refused allowance, expired link,
   `edits.Unsupported`); read-only tools carry `read_only_hint`; each call counts against the link's own cap
-  (`Hooks.allow_call`) and fixes are charged to the link's creator (`Hooks.charge`).
+  (`Hooks.allow_call`); fixes and detection runs are charged to the link's creator (`Hooks.charge`, `Hooks.detect`).
 
 ### `voice_live.py`: the live voice relay
 
@@ -267,8 +267,8 @@ Muse Spark answers a message in at most `MAX_STEPS` (8) model calls, calling too
   **Imported by:** `agents.py`, `app.py`, `mcp_server.py`.
 - **Rules:** a turn works on a copy of the session's messages and publishes it only if no newer turn already did;
   cancelled turns publish nothing; tool results are text only, so pictures go back as the next user message; caps
-  are passed per turn (`propose_allowed`, `propose_allowed_many`, `escalate_allowed`), never stored on the shared
-  `Chat`.
+  are passed per turn (`propose_allowed`, `propose_allowed_many`, `escalate_allowed`, `detect_allowed`), never stored
+  on the shared `Chat`; a tool that does what a capped route does takes that route's cap.
 
 ### `context_planner.py`: the wider-fix search
 
@@ -662,7 +662,8 @@ owner's settings from `X-Sightline-Settings` in context variables. Imports nothi
 Rolling caps per visitor per hour and for everyone per day, in memory. Imports nothing from the package.
 
 - **Main symbols:** `ProposeLimit` (`from_env`, `escalate_from_env`, `chat_from_env`, `take`, `take_many`,
-  `take_all`, `refusal`), `client_id` (`X-Forwarded-For` only with `SIGHTLINE_TRUST_FORWARDED=1`).
+  `take_all`, `refusal`), `client_id` (the peer, or with `SIGHTLINE_TRUST_FORWARDED=N` the N-th `X-Forwarded-For`
+  entry from the right), `trusted_hops`.
 - **Imported by:** `app.py`.
 - **Rules:** `take_many` and `take_all` count all or nothing; correct only with one server process (the Modal app
   runs one container). Every cap and its meaning: [16](16-security-caps-and-cost.md).

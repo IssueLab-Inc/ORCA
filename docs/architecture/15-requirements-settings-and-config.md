@@ -322,7 +322,7 @@ its default, so a bad value fails the wider-fix run with a `ValueError` rather t
 | Variable | Default | Modal | Read in | What it does |
 |---|---|---|---|---|
 | `MODAL_TASK_ID` | unset | set by Modal | `settings._modal_dict` | Its presence switches the settings store to the Modal Dict |
-| `SIGHTLINE_TRUST_FORWARDED` | unset | `1` | `limits.client_id` | `1` keys visitors by the first `X-Forwarded-For` address (behind Modal's proxy) instead of the peer address |
+| `SIGHTLINE_TRUST_FORWARDED` | unset | `0` | `limits.client_id` | N proxies in front that each append to `X-Forwarded-For`: visitors are keyed by the N-th entry from the right instead of the peer. 0 on Modal, whose edge strips the header and gives the visitor as the peer |
 
 ### `.env.example`
 
