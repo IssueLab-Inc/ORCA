@@ -331,9 +331,12 @@ cause, action, rule}}`. The route caches that per report, scene, pattern set and
 - **`failure_summary(scene, result)`**: why nothing passed, one line per idea (at most 4) in plain words, "up 150 mm:
   hits Cable tray LV-TRAY-1" by name, then the agent's advice. The Plan panel shows it; a second try can follow.
 - **`plans.apply(ws, scene_id, options)`**: keeps every fix of an accepted plan (or one accepted option, which is
-  how `POST .../fix/apply` and MCP `apply_fix` work) through `plans.KEEP`, under the lock. It returns the files
-  changed, the pieces per run with the original first, `groups` per fix, `changed`, and `not_cut` for penetrations
-  only requested. Keeping is [07](07-fixes-and-edits.md)'s.
+  how `POST .../fix/apply` and MCP `apply_fix` work), all or nothing, under the lock: each option is tried again as
+  its proposal tried it (`plans.recheck`, against its `pair` and `others`), several are checked together
+  (`verify_together`), and only then does `plans.KEEP` make them in one `edits.kept_files`. A fix that no longer
+  passes raises `plans.NotVerified` (409). It returns the files changed, the pieces per run with the original first,
+  `groups` per fix, `changed`, `not_cut` for penetrations only requested and `verified`. Keeping is
+  [07](07-fixes-and-edits.md)'s.
 
 ### Events
 

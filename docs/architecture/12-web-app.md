@@ -178,7 +178,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 | `onClick`, `pickSide`, `pressStart` / `pressMove` / `pressEnd` | Mouse and touch picking (see [13](13-3d-viewer.md), "Keyboard, mouse and touch"). |
 | `propose()`, `escalate()`, `escalateItem(it)`, `runProposal(second, pick?)` | Start a proposal (or a second try on Muse Wonder) through `api.proposeStream`; for a detected clash without views, `captureViews` first (waits up to 4 s). |
 | `trackAgent(first?)` | Returns `{ onEvent, finish, live, retire }` for one proposal run (below). |
-| `accept(o)` | Captures before/after (`captureFix`) and Show it built's passes, `api.accept`, then `applyToViewer`, `edits`, `markFixed`, `evidence`, `buildAccepted`. A penetration returned `cut: false` is recorded as requested, not fixed. |
+| `accept(o)` | Captures before/after (`captureFix`) and Show it built's passes, `api.accept` with the clash pair, then `applyToViewer`, `edits`, `markFixed`, `evidence`, `buildAccepted`. A penetration returned `cut: false` is recorded as requested, not fixed; a fix the server's re-check refuses (409) shows its reason and changes nothing. |
 | `runPlan(body)`, `trackPlan(kind)`, `acceptPlan()` | Fix together (`clash_ids`) or root cause (`hub`) through `api.planStream`; accept keeps every passing item through `api.applyPlan`. |
 | `exploreContext(objective?)`, `trackContext`, `acceptContext()`, `staleContext()` | The wider-fix search (`api.contextStream`) and its accept (`api.applyContext`, all review conditions acknowledged). |
 | `applyToViewer(sid, kept, pieces, live)` | Patch the kept fix into the viewer in place, or reload the changed and missed files ([13](13-3d-viewer.md)). |
@@ -341,7 +341,7 @@ built-picture events into `builtRuns[key].step`. Event types are listed in [10](
 | Group | Functions | Notes |
 |---|---|---|
 | Models and scenes | `samples`, `open`, `uploadModelsStream`, `uploadModels`, `file`, `sceneInfo`, `element`, `exportUrl`, `classes` | `uploadModels` (no progress) is not called by the app at HEAD |
-| Fixes | `proposeStream`, `propose`, `verify`, `accept` | `accept` picks the route by kind: trim, offset, move, else `/fix/apply` with `preview`/`before` dropped. `propose` (not streamed) is unused at HEAD |
+| Fixes | `proposeStream`, `propose`, `verify`, `accept` | `accept(id, o, pair)` sends every kind to `/fix/apply` with `preview`/`before` dropped and the option's `pair` (else the clash on screen: recorded tour runs carry none); a 409 is the server's re-check refusing it, shown with its reason. `propose` (not streamed) is unused at HEAD |
 | Plans | `planStream`, `applyPlan` | resolves with the `plan` event |
 | Wider fix | `contextStream`, `applyContext` | throws if the stream ends without `context_result` or `error` |
 | Detection | `detectTests`, `detect` | resolves with the `done` event |
