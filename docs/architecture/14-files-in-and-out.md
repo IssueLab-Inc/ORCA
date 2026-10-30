@@ -323,8 +323,8 @@ flowchart TB
   file name only breaks ties. The dialog shows the guess for the user to confirm.
 - **Who acts and who reviews** (`document.teams_for`): every team with an element in the clash reviews. The acting
   team is the one whose element the fix changed, else the discipline triage named (`responsible`), else one team when
-  both sides are the same team, else the one that ranks lowest in `STAYS_FIRST` (Structure stays, then
-  Architecture, then Site; MEP moves).
+  both sides are the same team, else the one later in `STAYS_FIRST` (Structure, Architecture, Site, MEP: structure
+  stays, services move).
 - **Sections** (`build_rows`): a clash with evidence, or a real clash, gets a **page**; a model error or "for the
   author" mark goes in the authors' table; everything else (by design, not physical, touching) is **noise**,
   grouped by test.
@@ -337,7 +337,8 @@ flowchart TB
   "Recommended for the designer · not edited" under requirements that allow no edit); and the review table.
 - **The DRAFT rule** (`render_html`): a page counts as reviewed when every reviewing team has at least one review on
   it. Only when every page is reviewed (and there is at least one page) does the cover say "REVIEWED · n of n";
-  otherwise "DRAFT · AI-assisted · k of n reviewed" on the cover and in every page header.
+  otherwise the cover's stamp says "DRAFT · AI-assisted · k of n reviewed" and every page's header "DRAFT · requires
+  review".
 - **Also in the PDF:** cover with counts and the clearance sentence (the requirements' fix clearance, else 25 mm);
   summary and actions by team (AI-drafted); the authors' table; noise by test; "How this report was made"; and, under
   requirements, an appendix of the whole file (`requirements_html`) with "Requirements: name vN, label (id)" in the

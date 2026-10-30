@@ -95,7 +95,7 @@ Findings (Oct 27, details in spikes/README.md):
   tool prefix like `codex/` or `claude/`) and a PR; do not implement on `main` or merge without authorization. Run
   the relevant server tests, web build (`npm run build`, `npm test`) and product runtime checks before delivery.
 - Demo models: add the private repo `IssueLab-Inc/ClashWiseDemoModels` (its name is a legacy identifier; don't repeat it
-  elsewhere), clone it to `../demo-models` (or set `DEMO_MODELS`, which the evals read) and copy `northbank/*.ifc`
+  elsewhere), clone it to `../demo-models` (or set `DEMO_MODELS`, which the evals read) and copy `northbank/IFC/*.ifc`
   into `samples/`.
 - Deploy: Modal, public, with proposal caps (owner decision Oct 27). `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` come
   from the environment, never chat. Once: `modal secret create sightline-meta META_API_KEY="$META_API_KEY"
