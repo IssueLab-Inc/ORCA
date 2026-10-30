@@ -855,3 +855,22 @@ A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `ve
   every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
   tests, 64 web tests.
 
+ORCA in every download, and the cell tour on the current cell (Oct 30, owner request; `docs/architecture/14`, `19`, `21`):
+- **Downloads:** the report is `orca-report.pdf` (`orca-report-<team or model>.pdf`, zipped as `orca-report.zip`) with
+  `orca-issues.bcfzip`; a multi-file export is `<project>-orca.zip` (`app.export_zip_name`; `service.project_name`, the
+  page's `projectName` rule: "Northbank-orca.zip", one STEP model "PC-03-Palletising-Cell-RevA-orca.zip", else
+  `orca-export.zip`). Temp folders keep `sightline-*`.
+- **The PDF names the triage model that ran** (`document.triage_by`): the triage run's `info`, else
+  `meta_client.triage_model_info()` (a restart); was always "Muse Spark Open".
+- **Cell tour:** 161 parts, eight problems / 17 pairs, "17 of 17"; Accept steps (both tours) say the viewer swaps in the
+  changed parts without reloading. The Oct 28 recordings named parts of the 144-part STEP (STEP GlobalIds follow its
+  bytes), so they could not be drawn or accepted; re-recorded live on the current STEP (ladder: 120 mm offset first,
+  100 mm whole-ladder raise second; pipe plan: a 900 mm route west). Muse ranks a comfortable offset over the
+  designers' 150 mm raise, so the ladder copy names the option on screen (`TourState.optionKinds`); act "A move" is
+  now "One fix".
+- **Recorded-run offer:** a failed or empty live proposal also ends "done", so the offer never showed on an error;
+  now it does (`liveMissed`), and a plan that fails to start moves the tour on to the step that offers its recording.
+- **Checked:** 552 server tests, 69 web tests (`tour.test.mjs` new); `evals/detection_cell.py` Rev A 17/17, 0
+  unexpected (`evals/runs/2026-10-30-cell-detection/`); in headless Chromium the cell tour live (recording) and again
+  with the live streams refused: both recordings offered, replayed and accepted in place (one model download, at open),
+  all 12 steps; the live export and report downloads carry the new names.

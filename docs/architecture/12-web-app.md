@@ -400,12 +400,15 @@ with a getter for the viewer, a framing function (`frameFix` on the trial's piec
   (when the app reaches the state, the tour moves on after 1.1 s), `show` ("Show me": runs an action or clicks the
   target), `enter` (set the page up), `reveal` (open the target's `<details>`) and `fallback` (offer a recorded run).
 - **`TourState`** is built by `App` each render (`tourState`): what is open, triage counts, the tab, the proposal's
-  progress and seconds, the plan's, reviews and sign-offs, the report dialog, requirements, and the tour's clashes
+  progress and seconds and its options' kinds (`optionKinds`, best first, so copy can name the option on screen), the
+  plan's, reviews and sign-offs, the report dialog, requirements, and the tour's clashes
   found by element pair (`clashOfPair(TOUR.duct)`, `TOUR.joint`) or, for the cell, by part names
   (`clashOfNames(CELL.…)`). **`TourActions`** (`tourActions`) are what "Show me" can do beyond a click: filter real
   clashes, select a tour clash, open the cell, fix the pipe, compare, replay, ask the tour question in chat, add a
   sign-off, and `reveal`.
-- **Recordings:** a live Muse step offers "Watch a recorded run" after 45 s (a plan after 75 s) or on an error. The
+- **Recordings:** a live Muse step offers "Watch a recorded run" after 45 s (a plan after 75 s), on an error, or when
+  the proposal ended with no option (`liveMissed`: a failed run also ends "done"); a plan-starting step counts a plan
+  error as done, so the tour moves to the step that offers the plan's recording. The
   runs are `web/public/tour/c0053.json` (duct), `c0051.json` (joint), `girder-plan.json`, `cell-ladder.json` and
   `cell-pipe-plan.json`: `{ events: [{ t, event }] }`, replayed by `replayPropose` / `replayPlan` through the same
   trackers at their recorded times. `replayPlan` re-points the recording's clash ids at this report's clashes of the

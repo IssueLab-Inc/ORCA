@@ -533,7 +533,7 @@ Paths under "temp" are in the system temporary folder (`tempfile.gettempdir()`).
 | STEP conversion cache (when `samples/step-cache` is absent) | temp `sightline-models/step-cache/` (`Workspace.step_cache`) | Not cleaned |
 | Uploaded Navisworks reports | temp `sightline-reports/<folder>/` (`app.UPLOADS`) | The report is dropped (it is `temporary`) |
 | Detected report folders, with captured A/B/C views | temp `sightline-run-*/`, `views/<clash id>-<label>.png` | The report is dropped |
-| Edited models served to the page, exports, document copies | temp `sightline-exports/` (`app.EXPORTS`): `<scene>-<index>-<file>`, `<scene>/`, `<scene>-sightline.zip`, `<doc id>-<name>` | An hour (`EXPORTS_KEEP_S`), cleaned when a model file or an export is next requested |
+| Edited models served to the page, exports, document copies | temp `sightline-exports/` (`app.EXPORTS`): `<scene>-<index>-<file>`, `<scene>/`, `<scene>-orca.zip`, `<doc id>-<name>` | An hour (`EXPORTS_KEEP_S`), cleaned when a model file or an export is next requested |
 | Exports made over the local (stdio) MCP server | temp `orca-export-*/` (`mcp_server` `export_models`) | Not cleaned |
 | Show it built pictures | `SIGHTLINE_BUILT_CACHE`, default temp `sightline-built/` | Not cleaned |
 | Settings for everyone, off Modal | `SIGHTLINE_SETTINGS_FILE`, default `server/.sightline-settings.json` (gitignored) | Kept |

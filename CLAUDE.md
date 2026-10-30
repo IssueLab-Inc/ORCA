@@ -179,8 +179,8 @@ Built Oct 27–30, all verified by geometry before anyone sees a fix: ORCA's own
 `#N` numbers and Muse titles, bulk triage, six fix kinds (move, offset with bends, trim, route, penetration, resize)
 plus combined fixes, Fix together and root causes, Insights patterns, chat and live voice, the MCP server with pairing
 links, coordination requirements, STEP models (the palletising cell), PDF reports and BCF, IFC/STEP export, accept in
-place, escalation to Muse Wonder, Show it built, phones and tablets, guided tours. Latest validation (Oct 30): 550
-server tests (541 plus the 9 docs-map tests), 64 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1, C2, C3, C6,
+place, escalation to Muse Wonder, Show it built, phones and tablets, guided tours. Latest validation (Oct 30): 552
+server tests (543 plus the 9 docs-map tests), 69 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1, C2, C3, C6,
 C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was built when, with the numbers measured at the
 time: `docs/architecture/22-build-log.md`.
 

@@ -196,7 +196,7 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `GET` | `/api/scenes/{scene_id}/export` | Writes the edited files (`Workspace.export`: IFC, plus `<name>.orca.step` for STEP models); one file as is, several as a zip | none | the file, or `<scene_id>-sightline.zip` | free; 409 when nothing was kept |
+| `GET` | `/api/scenes/{scene_id}/export` | Writes the edited files (`Workspace.export`: IFC, plus `<name>.orca.step` for STEP models); one file as is, several as a zip | none | the file, or `<project>-orca.zip` (`orca-export.zip` when the files share no name) | free; 409 when nothing was kept |
 
 ### Reports
 

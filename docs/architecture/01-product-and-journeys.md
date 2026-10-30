@@ -249,8 +249,9 @@ flowchart TD
 
 `Tour.tsx` tells the story on the real app. Each step points at a real control (`data-tour` attributes, or a selector
 built from `TourState`), moves on when the app reaches the state it describes, and has **Show me** buttons that do the
-click. Live Muse steps offer **Watch a recorded run** when the live run errors or is slow (45 s for a proposal, 75 s for a
-plan): real runs from `web/public/tour/`, replayed through the same pilot and plan code (`replayPropose`,
+click. Live Muse steps offer **Watch a recorded run** when the live run errors, finds no fix or is slow (45 s for a
+proposal, 75 s for a plan; a plan that fails to start moves the tour on to the step that offers it): real runs from
+`web/public/tour/`, replayed through the same pilot and plan code (`replayPropose`,
 `replayPlan`) and labelled as recorded; accepting a replayed fix edits the model for real
 ([19](19-demo-data.md)). The tour's clashes are found by element pair (`TOUR`, `clashOfPair`) or, for the cell, by
 part names (`CELL`, `clashOfNames`), so they work on a fresh check or an imported report. On phones and tablets
@@ -259,7 +260,7 @@ part names (`CELL`, `clashOfNames`), so they work on a fresh check or an importe
 | Tour | Acts (steps) |
 |---|---|
 | **Building** (`BUILDING_STEPS`, 30 steps) | Design coordination (2) · Triage (2) · One fix, live (6: the duct through the girder, propose, the pilot, before/after, "it isn't only this duct") · A joint, not a move (3: the curtain-wall transom trim, accepted as a cleanup) · The root cause (4: Chat, "Why are there so many clashes on Level 02? Fix the root cause.", the girder plan, accept) · Not everything needs a fix (2: patterns, by design) · Your standard (6: Add to requirements, L4, Strict, the grid, Use them) · People decide (3: a review, Report, build) · Hand-off (1: PDF, BCF, Export IFC) · ORCA (1: the numbers) |
-| **Cell** (`CELL_STEPS`, 12 steps) | From STEP (2) · Triage (2) · A move (3: the cable ladder through fence post W5) · Together (3: the air pipe through both conveyor rails, one plan) · Hand-off (1: Export STEP + IFC) · ORCA (1) |
+| **Cell** (`CELL_STEPS`, 12 steps) | From STEP (2) · Triage (2) · One fix (3: the cable ladder through fence post W5; the copy names the shown option's kind) · Together (3: the air pipe through both conveyor rails, one plan) · Hand-off (1: Export STEP + IFC) · ORCA (1) |
 
 ## The main screen
 

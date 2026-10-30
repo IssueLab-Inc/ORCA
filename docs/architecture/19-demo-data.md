@@ -144,8 +144,8 @@ record.
 
 | | Problem (Rev A) | Rev B fix | ORCA's fix kind | Recorded by |
 |---|---|---|---|---|
-| **C1** | Air line `PL-301 compressed air DN25 segment 2` through both conveyor rails (`CV-301 side rail north` / `south`) | Local offset 250 mm down under the frame | **Fix together**: the two clashes become one job (`plans.merge_shared`) and one verified fix clears both. Which kind varies by run: an offset (CLAUDE.md, Oct 28), a route 900 mm west (`evals/runs/2026-10-30-cell-supports`), a move west (the tour recording). | `evals/step_cell.py` |
-| **C2** | Cable ladder `CT-301 run 2 along the west fence` into `Fence post W5` (62 mm) | Whole ladder 150 mm higher | **Move** +150 mm: the ladder's five touching parts move as one; written back to the STEP | `evals/step_cell.py` |
+| **C1** | Air line `PL-301 compressed air DN25 segment 2` through both conveyor rails (`CV-301 side rail north` / `south`) | Local offset 250 mm down under the frame | **Fix together**: the two clashes become one job (`plans.merge_shared`) and one verified fix clears both. Which kind varies by run: an offset (CLAUDE.md, Oct 28), a route 900 mm west (`evals/runs/2026-10-30-cell-supports`, and the Oct 30 tour recording), a move west (the Oct 28 tour recording). | `evals/step_cell.py` |
+| **C2** | Cable ladder `CT-301 run 2 along the west fence` into `Fence post W5` (62 mm) | Whole ladder 150 mm higher | **Move** +150 mm: the ladder's five touching parts move as one; written back to the STEP. Muse's own proposals vary: on Oct 30 a 120 mm local offset ranked first and a 100 mm whole-ladder raise second (the tour recording) | `evals/step_cell.py` |
 | **C3** | `Fence top rail S5-SE` 40 mm into `Fence post SE` | Rail trimmed 40 mm | **Trim** to the post's face | `evals/step_cell.py` |
 | **C4** | North fence line inside the robot's restricted space (posts N3, N4, their plates, two panels, a light curtain) | Fence line moved to Y 2.8 | **Move**: posts N3 / N4 350 mm north, first try, since a move keeps what it stands on (`verify.supports`) | CLAUDE.md, Oct 30 |
 | **C5** | `Operator HMI stand OP-301` in `EP-301 working space` | HMI moved by the infeed | **None verified**: every direction hits a conveyor, tray or filter (a real limit, not a bug) | CLAUDE.md, Oct 30 |
@@ -257,15 +257,23 @@ recorded. Accepting a replayed fix edits the model for real.
 | `c0053.json` | Oct 27, on the imported report (`c0053`, the duct × girder) | A single proposal, 18 s: "Offset duct up 400mm through beam opening" and a whole-run raise | Building tour, "One fix, live" (`replay("duct")`) |
 | `c0051.json` | Oct 27 (`c0051`, the curtain-wall transom 30 mm into a mullion) | A single proposal, 9 s: "Trim transom end to mullion face" | Building tour, "A joint, not a move" (`replay("joint")`) |
 | `girder-plan.json` | Oct 27, hub `1eVHoPtl1IhAbbhivqVqb0` | The root cause plan, 35 s: offsets up 400 / 250 / 280 mm through the web openings for the duct, tray and pipe | Building tour, "The root cause" (`replayPlan("girder")`) |
-| `cell-ladder.json` | Oct 28 | A single proposal on the ladder × post W5, 28 s: "Local offset tray up 120 mm over post W5" | Cell tour, "A move" (`replay("ladder")`) |
-| `cell-pipe-plan.json` | Oct 28 | Fix together on the pipe × both rails, 59 s: one merged item, "Shift pipe west minimal" (a move) | Cell tour, "Together" (`replayPlan("pipe")`) |
+| `cell-ladder.json` | Oct 30, the 161-part Rev A STEP | A single proposal on the ladder × post W5 (#61), 39 s: "Local offset tray up 120 mm over post" (50 mm clear, ranked first) and "Raise tray 100 mm over post" (the ladder's five parts as one move, 38 mm) | Cell tour, "One fix" (`replay("ladder")`) |
+| `cell-pipe-plan.json` | Oct 30, the same STEP | Fix together on the pipe × both rails (#66, #67), 73 s: one merged item, "Side-step pipe 900 mm west past both rail ends" (a route, 83 mm clear), alternative "Dip pipe down 150 mm under each rail" | Cell tour, "Together" (`replayPlan("pipe")`) |
 
 - The building recordings were made on the imported Navisworks report, so they name `c0053` / `c0051`. The tour finds
   its clashes in whatever report is open by element pair (`TOUR.duct`, `TOUR.joint`, `clashOfPair`), and
   `replayPlan` re-points a recorded plan's clash ids to the open report's clashes of the same pairs, so "not in the
   report" reflects this report.
-- The cell recordings carry the part GlobalIds of the Oct 28 STEP. The STEP changed on Oct 29, and STEP GlobalIds
-  follow its bytes (above): re-record them after any change to the cell's STEP.
+- The cell recordings carry the part GlobalIds of the STEP they were recorded on (the ladder `0PKSyDjLDRt8iXC1mscRPM`,
+  post W5 `23HNLt2prKbAyvOqzfkEeZ`), and STEP GlobalIds follow the file's bytes (above). The Oct 28 recordings named
+  parts of the 144-part STEP, so their fixes could not be drawn or accepted on the Oct 29 cell; they were re-recorded on
+  Oct 30. Re-record them after any change to the cell's STEP: run the cell tour in a browser on a local server and save
+  the propose and plan streams with their times (`{t, event}` from the request's start). Checked Oct 30 in headless
+  Chromium with the live streams refused: both recordings offered, replayed and accepted in place (one model download,
+  at open), all 12 steps.
+- Muse's ideas vary by run, and ORCA ranks comfortable clearance before the smallest change, so the ladder's best option
+  is often a local offset rather than the designers' 150 mm whole-ladder raise: the cell tour's copy describes the
+  option on screen (`optionKinds`) rather than assuming a move.
 
 ## Demo pictures (`web/public/demos/`)
 
