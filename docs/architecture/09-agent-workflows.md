@@ -234,7 +234,7 @@ All carry `model` (the label) when the model has an id, except in recommend mode
 | `thinking` | `round` | A round starts |
 | `note` | `text` | A host reading failed (also used by `Workspace.propose` for "No second try: ..." and a failed automatic second try) |
 | `reasoning` | `round`, `text` | A reasoning summary, while Muse thinks (watched, on a host that streams them) |
-| `ideas` | `round`, `seconds`, `understanding`, `count` | The model replied |
+| `ideas` | `round`, `seconds`, `understanding`, `count`, `candidates` (each idea's `title` and `kind`, before any is checked; not in recommend mode) | The model replied |
 | `checking` | `index`, `title`, `kind` | Before each candidate |
 | `trial` | `index`, `kind`, `moved`, `delta_m`, `pieces` (world triangles; null for a move), `summary` (route, resize, penetration, combined) | The candidate is in place, before its check (`trials=True` only) |
 | `attempt` | `index` and every `Attempt` field | After each candidate |

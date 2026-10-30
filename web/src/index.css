@@ -406,9 +406,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .dock.working .activity-head > span:not(.seg):not(.spacer) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: block; }
 .dock.working { container-type: inline-size; }
 @container (max-width: 560px) { .dock.working .activity-head > span:not(.seg):not(.spacer) { display: none; } }
-.activity-head .seg { align-self: center; }
+.activity-head .seg { align-self: center; flex: none; }
 .activity-head .seg button { display: inline-flex; align-items: center; gap: 6px; }
-.activity-head > .ibtn { width: 28px; height: 28px; align-self: center; }
+.activity-head > .ibtn { width: 28px; height: 28px; align-self: center; flex: none; }
 .workings { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .workings.empty { justify-content: center; align-items: center; border: 1px dashed var(--line); border-radius: 9px; padding: 14px; text-align: center; }
 .wk-canvas { position: relative; flex: 1 1 auto; min-height: 160px; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; touch-action: none;

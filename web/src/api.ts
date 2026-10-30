@@ -131,7 +131,7 @@ export interface Patch {
 export type AgentEvent = (
   | { type: "thinking"; round: number }
   | { type: "reasoning"; round: number; text: string }  // a summary of what Muse Spark is working out, as it thinks
-  | { type: "ideas"; round: number; seconds: number; understanding: string; count: number }
+  | { type: "ideas"; round: number; seconds: number; understanding: string; count: number; candidates?: { title: string; kind: string }[] }
   | { type: "checking"; index: number; title: string; kind: string }
   | ({ type: "trial" } & Trial)
   | ({ type: "attempt"; index: number } & Attempt)

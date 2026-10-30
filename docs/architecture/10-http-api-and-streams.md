@@ -371,7 +371,7 @@ model that ran it ("Muse Spark", "Muse Wonder").
 |---|---|---|
 | `thinking` | `round` | A model call starts |
 | `reasoning` | `round`, `text` | A reasoning summary as Muse thinks (only when someone watches and the model streams them) |
-| `ideas` | `round`, `seconds`, `understanding`, `count` | The model's candidates are in |
+| `ideas` | `round`, `seconds`, `understanding`, `count`, `candidates` (`[{title, kind}]`) | The model's candidates are in |
 | `checking` | `index`, `title`, `kind` | One candidate is about to be tried |
 | `trial` | `index`, `kind`, `moved`, `delta_m`, `pieces`, `summary?` | The candidate in place before its check (a move's delta, or new pieces as triangles) |
 | `attempt` | `index`, `title`, `delta_m`, `passed`, `reason`, `kind`, `split_m`, `trim`, `hit_ids`, `edit`, `where`, `model` | Its verdict |

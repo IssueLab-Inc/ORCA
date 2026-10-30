@@ -222,3 +222,21 @@ test("ORCA's check draws each phase and test with its clashes, then what it foun
   assert.equal(step(g, "found").title, "3 clashes in 1,732 elements");
   assert.match(texts(step(g, "found").body), /first check/);
 });
+
+test("ideas the server names with `ideas` appear at once, then each is checked in its own column", () => {
+  const events = [
+    { type: "thinking", round: 1 },
+    { type: "ideas", round: 1, seconds: 12, understanding: "", count: 2, candidates: [{ title: "Offset up", kind: "offset" }, { title: "Drop under", kind: "move" }] },
+    { type: "checking", index: 0, title: "Offset up", kind: "offset" },
+    { type: "attempt", index: 0, title: "Offset up", passed: true, reason: "", kind: "offset", delta_m: [0, 0, 0.4], split_m: [1, 2] },
+    { type: "checking", index: 1, title: "Drop under", kind: "move" },
+  ];
+  const g = workings.graphOf(runOf("propose", events, { end: false }), 2.5);
+  assert.deepEqual(["i0-0", "i0-1"].map((id) => step(g, id)?.title), ["Offset up", "Drop under"]);
+  assert.match(texts(step(g, "i0-1").body), /waiting its turn/);
+  assert.equal(step(g, "k0-0"), undefined);
+  const later = workings.graphOf(runOf("propose", events, { end: false }), 5.5);
+  assert.equal(step(later, "k0-1").col, step(later, "i0-1").col);
+  assert.equal(later.edges.filter((e) => e.to === "i0-1").length, 1, "one edge from the round to each idea");
+  assert.equal(step(later, "k0-1").status, "run");
+});

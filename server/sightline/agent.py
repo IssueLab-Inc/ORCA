@@ -407,7 +407,8 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
-    {"type": "ideas", "round", "seconds", "understanding", "count"}, {"type": "checking", "index", "title", "kind"},
+    {"type": "ideas", "round", "seconds", "understanding", "count", "candidates": [{"title", "kind"}]},
+    {"type": "checking", "index", "title", "kind"},
     with `trials`, {"type": "reasoning", "round", "text"} (a summary of what Muse Spark is working out, as it thinks;
     when the model streams them) and {"type": "trial", "index", "kind", "moved", "delta_m", "pieces"} (the candidate in place, before it is checked:
     a move's elements and delta, or an offset's new pieces as world triangles, so the browser can show what is being
@@ -468,8 +469,10 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         understanding = understanding or reply.get("understanding", "")
         advice = reply.get("advice") or advice  # the latest round knows the most
         candidates = reply.get("candidates", [])
+        # Each idea's title and kind as soon as they are in, so a page can show them all before the first is checked.
         emit({"type": "ideas", "round": round_no, "seconds": round(time.perf_counter() - started, 1),
-              "understanding": understanding, "count": len(candidates)})
+              "understanding": understanding, "count": len(candidates),
+              "candidates": [{"title": c.get("title", ""), "kind": c.get("kind") or "move"} for c in candidates]})
         for cand in candidates:
             emit({"type": "checking", "index": len(attempts), "title": cand.get("title", ""),
                   "kind": cand.get("kind", "move")})

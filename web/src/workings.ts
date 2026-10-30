@@ -137,7 +137,9 @@ function proposal(run: Run, at: number): Graph {
   const steps: Step[] = [], edges: Edge[] = [], bars: Bar[] = [], ticks: Tick[] = [{ lane: "you", at: 0, tone: "you" }];
   const add = (s: Step) => { steps.push(s); return s; };
   add(startStep(run, "propose fixes", run.origin === "replay" ? "the tour's recording" : "POST /propose/stream", cols.next()));
-  let prev = "start", tryNo = 0, model = "Muse Spark", offset = 0, seen = 0, firstIdea = true;
+  let prev = "start", tryNo = 0, model = "Muse Spark", offset = 0, seen = 0, inTry = 0, firstIdea = true;
+  // Ideas named before they are checked (the server sends their titles with `ideas`), by their index in the try.
+  const named = new Map<string, Step>();
   let round = null as Round | null;
   const rounds: Round[] = [];
   const checks = new Map<string, Check>();
@@ -159,7 +161,7 @@ function proposal(run: Run, at: number): Graph {
         body: [text(first?.attempts?.length ? `Starts from the first try: ${first.attempts.length} ideas, ${passed} passed` : "Starts with nothing to read")],
         detail: first?.advice ? [{ kind: "quote", text: first.advice }] : [] });
       edges.push({ from: prev, to: id, kind: seen ? "feedback" : undefined, label: seen ? "what the first try learned" : undefined });
-      prev = id; round = null;
+      prev = id; round = null; inTry = 0;
     } else if (e.type === "thinking") {
       const r = Number(e.round ?? 1), key = `${tryNo}-${r}`;
       const brief = add({ id: `b${key}`, lane: "orca", col: cols.next(), actor: "orca", status: "done", t0: t, newEv: "new event: brief", ev: "",
@@ -179,15 +181,24 @@ function proposal(run: Run, at: number): Graph {
     } else if (e.type === "ideas" && round) {
       round.ideas = { t, seconds: Number(e.seconds ?? t - round.step.t0), understanding: String(e.understanding ?? ""), count: Number(e.count ?? 0) };
       bars.push({ lane: "muse", a: round.step.t0, b: t, tone: actorOf(model) });
+      const from = round.step.id;
+      (e.candidates as { title: string; kind: string }[] | undefined)?.forEach((c, k) => {
+        const index = inTry + k, key = `${tryNo}-${index}`;
+        const idea = add({ id: `i${key}`, lane: "muse", col: cols.next(252), dy: 62, actor: actorOf(model), model, status: "done", t0: t,
+          title: c.title, fix: c.kind, time: `idea ${offset + index + 1}`, body: [text("waiting its turn", { tone: "muted" })], detail: [], ev: "ideas" });
+        edges.push(k === 0 ? { from, to: idea.id, win: true } : { from, to: idea.id, fa: "tr", ta: "t" });
+        named.set(key, idea);
+      });
     } else if (e.type === "checking") {
-      const index = Number(e.index ?? 0), key = `${tryNo}-${index}`, col = cols.next(252), n = offset + index;
-      const idea = add({ id: `i${key}`, lane: "muse", col, dy: 62, actor: actorOf(model), model, status: "done", t0: t,
-        title: String(e.title ?? ""), fix: String(e.kind ?? ""), time: `idea ${n + 1}`, body: [], detail: [],
-        ev: "checking", newEv: firstIdea ? "titles in ideas" : undefined });
+      const index = Number(e.index ?? 0), key = `${tryNo}-${index}`, n = offset + index, early = named.get(key);
+      const col = early ? early.col : cols.next(252);
+      const idea = early ?? add({ id: `i${key}`, lane: "muse", col, dy: 62, actor: actorOf(model), model, status: "done", t0: t,
+        title: String(e.title ?? ""), fix: String(e.kind ?? ""), time: `idea ${n + 1}`, body: [], detail: [], ev: "checking" });
+      inTry = Math.max(inTry, index + 1);
       const check = add({ id: `k${key}`, lane: "orca", col, actor: "orca", status: "run", t0: t, title: "Geometry check", seq: n,
         body: [], detail: [], ev: "checking · trial · attempt" });
       const from = round?.step.id ?? prev;
-      edges.push(firstIdea ? { from, to: idea.id, win: true } : { from, to: idea.id, fa: "tr", ta: "t" });
+      if (!early) edges.push(firstIdea ? { from, to: idea.id, win: true } : { from, to: idea.id, fa: "tr", ta: "t" });
       edges.push({ from: idea.id, to: check.id, win: true });
       if (ofRound.length) edges.push({ from: ofRound[ofRound.length - 1], to: check.id, kind: "seq" });
       checks.set(key, { idea, check, checking: t });
