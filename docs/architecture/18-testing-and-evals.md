@@ -126,11 +126,11 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_api.py` | 6 | Open → verify → apply → export, sample names cannot escape `samples/`, a federated export writes only the edited file, export carries kept fixes and no tried ones, reopening a held scene, eviction spares linked scenes |
+| `test_api.py` | 7 | Open → verify → apply → export, sample names cannot escape `samples/`, a federated export writes only the edited file, export carries kept fixes and no tried ones (as `orca-export.zip`), a multi-file export named for its project (`<project>-orca.zip`), reopening a held scene, eviction spares linked scenes |
 | `test_reports.py` | 8 | `reports.py`: Navisworks grouped tags and three views, upload/match/measure/images, no-XML uploads refused, sample report folders, report clashes send their images and distance, a port's owner, `SAMPLE_EXCLUDE` renumbering, `/api/transcribe` biased to clash names |
 | `test_step.py` | 8 | `step.py`: names, groups, colours and metres survive conversion, detection finds the ladder through the post, group runs move together, export writes moves back, classes from the model, upload accepts STEP and IFC only, caps, older conversions still read |
 | `test_uploads.py` | 10 | Bigger uploads: gzipped parts unpacked, the cap on the unpacked size, 411/413 before reading, broken or repeated archives refused, the streamed open's events and errors, the scene byte budget, wider fixes refused on big models, bounded gunzip steps, room made first |
-| `test_document.py` | 8 | `document.py`: team guess from content, who acts and who reviews, PDFs per team plus BCF, one combined PDF stays DRAFT, screenshot facts, a kept fix page's built view or why not |
+| `test_document.py` | 9 | `document.py`: team guess from content, who acts and who reviews, PDFs per team plus BCF (`orca-report.zip`, `orca-issues.bcfzip`), one combined PDF stays DRAFT (`orca-report.pdf`), the triage model the PDF names, screenshot facts, a kept fix page's built view or why not |
 
 **Requirements, settings, owner and caps** ([15](15-requirements-settings-and-config.md), [16](16-security-caps-and-cost.md))
 
@@ -164,7 +164,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 cd web
 npm install            # once; postinstall copies web-ifc's wasm into public/wasm
 npm run build          # tsc --noEmit (type-check src/ and vite.config.ts), then vite build
-npm test               # node --test tests/*.test.mjs (64 tests at 104fda9)
+npm test               # node --test tests/*.test.mjs (69 tests on Oct 30)
 ```
 
 There is no test framework beyond Node's own runner: the tests use `node:test` and `node:assert`, and the
@@ -225,6 +225,7 @@ flowchart LR
 | `requirements.test.mjs` | 7 | `compiled` | `reqFile.ts`: round trip, refusing other files, cell edits, who moves, by-design rules, browser storage, opening rules |
 | `uploads.test.mjs` | 3 | `compiled` | `uploads.ts`: the cap checked before sending, stage progress words, an uploaded IFC read from the visitor's own file |
 | `upload-retry.test.mjs` | 1 | `compiled` | `api.ts`: a 409 `requirements_unknown` re-registers the file and resends once |
+| `tour.test.mjs` | 5 | `compiled` (React and icons stubbed) | `Tour.tsx`: the cell tour's numbers, the ladder's copy per option kind, accepting without a reload, the recorded-run offer when a live proposal fails or finds nothing, a failed plan moving on |
 
 ## Evals
 
@@ -248,7 +249,7 @@ Where results go:
 | `not_a_clash.py` | Joints built that way (pad/ground beam, transom/mullion, beam/column): triage verdict, whether any option touches what must stay, whether every option is marked cleanup | `samples/` Northbank + the Navisworks sample report | no arguments | rows in `not_a_clash.csv` | Oct 28: 3/3 by design, 0/3 touch what must stay, 3/3 cleanup only |
 | `penetration_hosts.py` | `hosts.decide` on 25 labelled hosts (16 Northbank, 9 cell): verdict, reviewer, fit | `samples/` Northbank IFCs and `PC-03-Palletising-Cell-RevA.ifc` | no arguments | rows in `penetration_hosts.csv` | Oct 29: 25/25, 18 kinds in one call, 34–41 s |
 | `detection_navisworks.py` | ORCA's detection against the Navisworks package: timing, coverage of sampled results (and why not), the answer key, per-discipline counts | `samples/` four Northbank models incl. Site, `samples/reports/northbank-navisworks` | `--out ../evals/runs/<date>-northbank-detection` | `summary.md`, `pairs.csv`, `coverage.json` | Oct 28: 633 clashes in 1,961 elements, 117/117 real overlaps, answer key 3/3 (#057 −100 mm, #061 −77 mm) |
-| `detection_cell.py` | Detection on the cell: every planted pair in Rev A, none in Rev B, nothing unexpected | `$DEMO_MODELS/palletising-cell` | `--cell ... --out ...` | `summary.md` | Oct 28: Rev A 13/13 planted, 0 unexpected; Rev B 0 |
+| `detection_cell.py` | Detection on the cell: every planted pair in Rev A, none in Rev B, nothing unexpected | `$DEMO_MODELS/palletising-cell` | `--cell ... --out ...` | `summary.md` | Oct 30 (`runs/2026-10-30-cell-detection/`): Rev A 112 clashes over 161 parts, 17/17 planted, 95 by design, 0 unexpected; Rev B 0 planted, 93 by design |
 | `step_cell.py` | The cell from STEP end to end: conversion and classes, detection, C1 (Fix together), C2 (+150 mm and export), C3 (trim), C6 (route), C7 (wall opening), C8 (gland hole), export back to STEP, Rev B | `$DEMO_MODELS/palletising-cell` STEP files | `--cell ... --out ...`, `--no-classes` | `README.md` in the run folder | Oct 30 (`runs/2026-10-30-cell-supports/`): pass; Rev A 161/161 parts, 17/17 planted, 95 by design, 0 unexpected; Rev B 0 planted |
 | `escalation.py` | E0: does Muse Wonder fix what Muse Spark cannot, and is it the model or the brief? Three arms on the unfixed cases | Cell Rev A (from STEP) and Northbank IFC | `--cell ... --northbank ... --out ...`, `--reuse`, `--workers` | `results.json`, `summary.md`, `sweep.json`, rows in `results.csv` | Oct 29: 6 of 21 unfixed; Spark again 0/6, Spark + brief 3/6, Wonder + brief 5/6, $2.01 |
 | `big_models.py` | How big a model the server takes: `make --mb N --out F` writes a synthetic IFC4 of a realistic mix; `server F` times open, boxes and detection with peak RSS | none (generated) | see the script's docstring | numbers in `evals/README.md` | Oct 29: 150 MB 5/37/5 s, 1.4 GB; 500 MB 17/174/18 s, 2.8 GB |

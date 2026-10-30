@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -789,6 +790,22 @@ class Workspace:
             v = verify.check(scene, [m["a"]], clearance_m=0.0)
             hit = next((h for h in v.hits if h.other == m["b"]), None)
             return {"matched": True, "physical": True, "distance_m": hit.distance_m if hit else None}
+
+
+def project_name(files: list[str]) -> str | None:
+    """The project a set of model files belongs to: their shared prefix ("Northbank-MEP.ifc", "Northbank-Site.ifc" →
+    "Northbank"), or the one file's own name; None when they share none. The page's `projectName` (About.tsx), less its
+    "first file + n more" fallback, which is no name for a download."""
+    names = [re.sub(r"\.(ifc|step|stp)$", "", f, flags=re.IGNORECASE) for f in files]
+    if len(names) <= 1:
+        return names[0] if names and names[0] else None
+    prefix = names[0]
+    for n in names[1:]:
+        while not n.startswith(prefix):
+            prefix = prefix[:-1]
+    m = re.match(r"^(.*[A-Za-z0-9])[\s_.-]", prefix)
+    cut = m.group(1) if m else prefix if all(n == prefix for n in names) else ""
+    return cut if len(cut) >= 3 else None
 
 
 def _spec(scene: IfcScene, element) -> dict:
