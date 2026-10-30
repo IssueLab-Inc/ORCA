@@ -113,7 +113,7 @@ export type AgentEvent = (
   | ({ type: "attempt"; index: number } & Attempt)
   | ({ type: "result" } & Proposal)
   // A second try starts, on this model; with the first try as it stands (null: none to read).
-  | { type: "escalating"; model: string; first: boolean; first_try?: { understanding: string; advice?: string; attempts: Attempt[] } | null }
+  | { type: "escalating"; model: string; first: boolean; first_try?: { understanding: string; advice?: string; attempts: Attempt[]; options?: Option[] } | null }
   | { type: "note"; text: string }
   | { type: "error"; detail: string }) & { model?: string };   // a second try names its model on every event
 

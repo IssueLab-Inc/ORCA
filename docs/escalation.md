@@ -155,9 +155,10 @@ Branch `feature/wonder-escalation`, one PR.
   the difference over that run (`Usage.snapshot`), reported only for a model billed per token (Muse Spark's one client
   is shared by every visitor).
 - **Budget:** `spend.py`, one day's limit for every Muse Wonder call (`SIGHTLINE_WONDER_MAX_USD_DAY`, default $25;
-  in memory, UTC day). Work asks `spend.refused(estimate)` first and holds its estimate while it runs
-  (`spend.held`, $1 a second try: `escalation.ESTIMATE_USD`), so tries started together cannot all pass on a nearly
-  spent day. The owner is exempt from the limit, not from the count.
+  in memory, UTC day). A request claims its estimate when it is let through (`spend.claim`, $1 a second try:
+  `escalation.ESTIMATE_USD`; checked and held in one step) and the second try takes the claim over while it runs
+  (`spend.held`), so tries started together cannot all pass on a nearly spent day. The owner is exempt from the
+  limit, not from the count.
 - **Setting:** `settings.escalation()` off / button / auto (`SIGHTLINE_ESCALATION`, default button) and
   `escalation_effort`, for me and for everyone in the owner menu.
 - **The brief:** `escalation.brief` = the first try (understanding, advice, each idea with why it failed and what it
@@ -187,8 +188,10 @@ Branch `feature/wonder-escalation`, one PR.
   Fix-together item's **Ask Muse Wonder** (it reads the plan's try at that pair); model chips on options and
   ideas; the pilot names the model and numbers the second try's ideas after the first's; the owner sees tokens and
   cost. A second try that fails or is refused puts the first try's options back.
-- **Chat and MCP:** `propose_fixes(escalate=true)`; chat suggests it only when there is no fix and no
-  recommendation.
+- **Chat and MCP:** `propose_fixes(escalate=true)`; chat suggests it when there is no fix, or only a resize or an
+  opening, and no recommendation. The `escalating` event carries the first try (understanding, ideas, verified
+  options), so a page that did not watch it keeps those options if the second try fails. A plan whose model changed
+  since it was checked (a failed item's second try was kept) cannot be accepted until it is built again.
 - **Tests:** `tests/test_escalation.py` (combined fixes, guards, atomic keep, the second try, staleness, caps, budget,
   usage, chat, API) and `tests/test_plans.py` (a combined fix in a plan; a plan item remembered).
 

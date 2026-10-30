@@ -25,8 +25,16 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
 from mcp_types import ToolAnnotations
 
-from . import agents, chat, edits, plans, requirements
+from . import agents, chat, edits, escalation, plans, requirements, settings, spend
 from .service import Workspace
+
+
+def _local_escalate() -> str | None:
+    """A second try for the person running ORCA themselves (stdio): never when switched off; no caps, and the day's
+    budget only counted, as for the owner."""
+    if settings.escalation() == "off":
+        return "Second tries with Muse Wonder are switched off."
+    return spend.claim(escalation.ESTIMATE_USD, exempt=True)
 
 INSTRUCTIONS = """ORCA is an AI design coordinator for 3D models (buildings from IFC, machines from STEP). It finds
 clashes between models, proposes fixes that edit real model elements, and checks every fix with geometry before
@@ -42,7 +50,7 @@ class Hooks:
     """What the hosting web server lends the tools (`app.py`); `None` parts are not available there."""
     links: agents.Links | None = None                                # remote: links by token
     charge: Callable[[agents.Link, int], str | None] = lambda link, n: None   # proposals; why not, or None
-    escalate: Callable[[agents.Link], str | None] = lambda link: None       # a second try (docs/escalation.md)
+    escalate: Callable[[agents.Link], str | None] = lambda link: _local_escalate()   # a second try (docs/escalation.md)
     allow_call: Callable[[agents.Link], str | None] = lambda link: None     # per-link call cap
     start_triage: Callable[[str, str | None, agents.Link], Any] | None = None
     triage_state: Callable[[str, str | None], dict] | None = None

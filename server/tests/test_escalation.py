@@ -59,7 +59,8 @@ def test_a_combined_fix_moves_the_neighbour_and_the_duct_together(tmp_path):
     assert o.kind == "combined" and set(o.moved) == {duct, pipe}
     assert o.edit["pair"] == [duct, beam] and len(o.edit["steps"]) == 2
     assert "LTHW pipe DN50: move [0, 0, -500] mm" in o.edit["summary"]
-    assert o.preview   # both elements' new places, for the page
+    assert o.preview   # both elements' new places, for the page, each with its run's element and part
+    assert {m["origin"] for m in o.preview} == {duct, pipe} and {m["part"] for m in o.preview} == {"moved"}
     assert s.placement(duct)[2, 3] == pytest.approx(2.65) and s.placement(pipe)[2, 3] == pytest.approx(2.25)  # undone
 
 
@@ -427,3 +428,33 @@ def test_a_spark_run_reports_no_usage_of_its_shared_client(tmp_path):
     wonder.complete_json = reply
     u = agent.resolve(s, agent.Clash(duct, beam), wonder, max_rounds=1).usage
     assert (u["calls"], u["input_tokens"], u["output_tokens"]) == (1, 1000, 200)
+
+
+def test_a_request_claims_its_estimate_at_once_and_its_work_takes_the_claim_over(monkeypatch):
+    import contextvars
+    monkeypatch.setenv("SIGHTLINE_WONDER_MAX_USD_DAY", "2")
+    spend.charge(0.5)
+
+    def request(amount, then=None):
+        """One request in its own context, as each HTTP request has: a claim, then (maybe) its work."""
+        def run():
+            why = spend.claim(amount)
+            if why is None and then:
+                then(amount)
+            return why
+        return contextvars.copy_context().run(run)
+
+    assert request(1.0) is None                  # claimed and still held: its work hasn't run yet
+    assert request(1.0)                          # 0.5 spent + 1.0 claimed + 1.0 > 2: refused at once
+    spend.reset(); spend.charge(0.5)
+    inside = []
+
+    def work(amount):
+        with spend.held(amount):                 # takes the claim over: not counted twice
+            inside.append(spend.refused(0.4))
+    assert request(1.0, work) is None and inside == [None]
+    assert spend.refused(1.4) is None            # the claim ended with its work
+    ctx = contextvars.copy_context()
+    assert ctx.run(spend.claim, 1.0) is None
+    ctx.run(spend.unclaim, 1.0)                  # a cap refused it after the budget let it through
+    assert spend.refused(1.4) is None

@@ -1059,6 +1059,14 @@ def check_combined(scene: IfcScene, made: list[tuple[dict, list[str]]], a: str, 
     return sorted(worst.values(), key=lambda h: h.distance_m), least, checked
 
 
+def _tagged(meshes: list[dict], made: list[tuple[dict, list[str]]]) -> list[dict]:
+    """A combined fix's preview meshes (in `made`'s order), each with the element its run came from (`origin`, for its
+    colour) and its part: "moved" (a moved run), "end" (a split run's shortened first and last pieces) or "middle"."""
+    parts = [(st["target"], "moved" if st["kind"] == "move" else "end" if i in (0, len(els) - 1) else "middle")
+             for st, els in made for i in range(len(els))]
+    return [{**m, "origin": origin, "part": part} for m, (origin, part) in zip(meshes, parts)]
+
+
 def _try_combined(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                   on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
     """Make every step of a combined fix in one trial, check them together, undo them all. `target` and `other` are
@@ -1078,12 +1086,12 @@ def _try_combined(scene: IfcScene, cand: dict, target: str, other: str, clearanc
         with edits.trial_files(scene, files):
             made = apply_combined(scene, steps)
             now = [g for _, els in made for g in els]
-            shape = edits.meshes(scene, now) if on_trial else None
+            shape = _tagged(edits.meshes(scene, now), made) if on_trial else None
             if on_trial:
                 on_trial({"kind": "combined", "moved": moved, "delta_m": big, "pieces": shape,
                           "summary": edit["summary"]})
             hits, least, checked = check_combined(scene, made, target, other, clearance_m, others)
-            preview = (shape or edits.meshes(scene, now)) if not hits else None
+            preview = (shape or _tagged(edits.meshes(scene, now), made)) if not hits else None
     except edits.Unsupported as e:
         return Attempt(title, big, False, f"cannot combine these: {e}", "combined", edit=edit), None
     attempt = Attempt(title, big, not hits, _reason(hits), "combined", None, _hit_ids(hits), edit=edit,

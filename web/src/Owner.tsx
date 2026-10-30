@@ -19,7 +19,9 @@ function stored(): OwnerSettings {
  * unlocked, or on a page opened with #owner. The token is sent once; the server answers with a cookie this page's
  * scripts cannot read, so the token is never kept in the browser.
  */
-export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | null) => void }) {
+export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: OwnerSettings | null) => void;
+  /** A setting for everyone changed: this page asks again what it gets (second tries, Show it built). */
+  onEveryone?: () => void }) {
   const [state, setState] = useState<{ available: boolean; owner: boolean } | null>(null);
   const [settings, setSettings] = useState<OwnerSettings>(stored);
   const [token, setToken] = useState("");
@@ -48,7 +50,7 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
   };
   const saveEveryone = async (changes: Partial<EveryoneSettings>) => {
     setError(null); setSaved(null);
-    try { setEveryone(await api.saveSettings(changes)); setSaved("Saved for everyone"); }
+    try { setEveryone(await api.saveSettings(changes)); setSaved("Saved for everyone"); onEveryone?.(); }
     catch (e) { setError((e as Error).message); }
   };
   const ow = (v: boolean) => (v ? "on" : "off");

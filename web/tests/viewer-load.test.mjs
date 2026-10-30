@@ -9,6 +9,7 @@ async function stage({ glass = false, realAdopt = false } = {}) {
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   const { Viewer } = await import(await compiled("../src/viewer/Viewer.ts", {
     three: import.meta.resolve("three"), "three/examples/jsm/controls/OrbitControls.js": import.meta.resolve("three/examples/jsm/controls/OrbitControls.js"),
+    "three/examples/jsm/utils/BufferGeometryUtils.js": import.meta.resolve("three/examples/jsm/utils/BufferGeometryUtils.js"),
     "./ifcLoader": url("export const loadIfc=(...a)=>globalThis.__sightlineLoadIfc(...a);"),
     "./patch": await compiled("../src/viewer/patch.ts", { three: import.meta.resolve("three") }) }));
   const batch = () => ({ dispose() { this.disposed = true; } });
