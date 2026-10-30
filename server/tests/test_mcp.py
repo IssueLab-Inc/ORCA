@@ -8,10 +8,12 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from sightline import agents, mcp_server
+from sightline import agents, mcp_server, plans
 from sightline import app as app_module
 from sightline.fixtures import build_clash_fixture
 from sightline.service import Workspace
+
+from test_chat import PatternReader, _pattern
 
 HEADERS = {"accept": "application/json, text/event-stream", "content-type": "application/json",
            "mcp-protocol-version": "2025-06-18"}
@@ -221,3 +223,35 @@ def test_a_page_that_closes_stops_counting_at_once(server):
     server.post(f"/api/links/{token}/leave/{second.stream_id}")
     assert not link.browser
     assert server.post(f"/api/links/{token}/leave/nothing").json() == {"left": False}
+
+
+def test_an_agents_detection_runs_are_charged_to_whoever_made_the_link(server, monkeypatch):
+    monkeypatch.setattr(app_module, "detect_limit", app_module.ProposeLimit(2, 0, noun="detection runs"))
+    token, link = _link(server)
+    assert rpc(server, token, "open_models", {"names": ["fixture-clash.ifc"]})["clashes"] >= 1   # no browser: run 1
+    assert rpc(server, token, "detect_clashes")["clashes"] >= 1                                     # run 2
+    assert "detection runs this hour" in rpc(server, token, "detect_clashes")["error"]
+    opened = rpc(server, token, "open_models", {"names": ["fixture-clash.ifc"]})
+    assert opened["status"] == "open" and opened["clashes"] is None and opened["note"].startswith("Opened, not checked")
+    # The page of the visitor who made the link shares the cap.
+    assert server.post(f"/api/scenes/{link.ctx.scene_id}/detect/stream", json={}).status_code == 429
+    link.owner = True   # the owner's links have no caps
+    assert rpc(server, token, "detect_clashes")["clashes"] >= 1
+
+
+def test_an_agents_pattern_reading_costs_one_proposal_once(server, monkeypatch):
+    monkeypatch.setattr(app_module, "propose_limit", app_module.ProposeLimit(1, 0))
+    token, link = _link(server)
+    rpc(server, token, "open_models", {"names": ["fixture-clash.ifc"]})
+    app_module.ws._model = reader = PatternReader()
+    pats = [_pattern()]
+    monkeypatch.setattr(plans, "patterns", lambda *a, **k: pats)
+    first = rpc(server, token, "find_patterns")
+    assert first["patterns"][0]["verdict"] == "by_design"
+    assert rpc(server, token, "find_patterns") == first and reader.calls == 1   # kept: no second call or charge
+    # The page asks for the same reading: it has it, free.
+    r = server.post(f"/api/reports/{link.ctx.report_id}/patterns/{link.ctx.scene_id}/triage", json={})
+    assert r.status_code == 200 and r.json() == {pats[0]["id"]: {k: first["patterns"][0][k]
+                                                                for k in ("verdict", "cause", "action", "rule")}}
+    pats[:] = [_pattern(2)]   # a new reading: the hour's one proposal is spent
+    assert "this hour" in rpc(server, token, "find_patterns")["error"] and reader.calls == 1

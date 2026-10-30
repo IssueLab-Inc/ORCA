@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from sightline import app as app_module
 from sightline import plans
-from sightline.fixtures import build_run_fixture
+from sightline.fixtures import build_route_fixture, build_run_fixture
 from sightline.limits import ProposeLimit
 from sightline.service import Workspace
 
@@ -54,6 +54,25 @@ def test_batch_dedupes_pairs_and_checks_the_plan_as_a_whole(tmp_path):
     assert len(list(ws.scene(sid).model.by_type("IfcDuctSegment"))) == 2      # trials were all undone
     assert ws.last_try(sid, main, beam)["attempts"]   # what a second try on this item reads (docs/escalation.md)
     assert not item.recommended
+
+
+def test_a_merged_item_is_titled_by_the_clashes_it_covers(tmp_path):
+    # One duct through two columns (the route fixture's RT-2): two clashes, one element that can move, so one item.
+    build_route_fixture(tmp_path / "route.ifc")
+    ws = Workspace(samples=tmp_path, model=Model())
+    sid = ws.open(["route.ifc"])
+    m = ws.scene(sid).model
+    duct = next(e for e in m.by_type("IfcDuctSegment") if e.Tag == "RT-2").GlobalId
+    b2, b4 = (next(e for e in m.by_type("IfcColumn") if e.Name == n).GlobalId for n in ("Column B2", "Column B4"))
+    (tmp_path / "reports" / "r").mkdir(parents=True)
+    (tmp_path / "reports" / "r" / "report.xml").write_text(_report_xml([(duct, b2, -0.3), (duct, b4, -0.3)]))
+    rid = ws.open_report_sample("r").id
+    plan = plans.build_batch(ws, sid, rid, ["c0001", "c0002"])
+    [item] = plan.items
+    assert item.element_a == duct and item.others and item.clash_ids == ["c0001", "c0002"]
+    assert plan.title == "Fix 2 clashes together"
+    # Distinct clashes, and one for an item that stands for none (a hub's partner not in the report).
+    assert plans.clashes_covered([item, plans.Item("k1", duct, b2, "", ["c0001"]), plans.Item("k2", duct, b4, "", [])]) == 3
 
 
 def test_verify_together_finds_fixes_that_collide(tmp_path):
@@ -108,6 +127,41 @@ def test_patterns_group_same_kind_clashes_and_triage_maps_back(tmp_path):
     ws._model = Triage()
     assert plans.triage_patterns(ws, pats)[p["id"]]["verdict"] == "by_design"
     assert plans.patterns(ws, sid, rid, fixed=["c0001", "c0002"], min_pairs=1) == []   # resolved clashes drop out
+
+
+def test_a_pattern_reading_is_made_and_paid_for_once(tmp_path):
+    import threading
+    import time
+
+    ws, sid, rid, main, beam = _setup(tmp_path)
+    pats = plans.patterns(ws, sid, rid, min_pairs=1)
+    started, go = threading.Event(), threading.Event()
+
+    class Slow:
+        calls = 0
+
+        def complete_json(self, system, text, images=None):
+            Slow.calls += 1
+            started.set()
+            go.wait(5)
+            return {"patterns": [{"id": "P1", "verdict": "modelling_error"}]}
+    ws._model = Slow()
+    charged, out = [], []
+    read = lambda: out.append(plans.read_patterns(ws, sid, rid, pats, lambda: charged.append(1)))
+    first = threading.Thread(target=read)
+    first.start()
+    started.wait(5)
+    second = threading.Thread(target=read)   # comes while the first is being made: waits for it
+    second.start()
+    time.sleep(0.2)
+    go.set()
+    first.join(5), second.join(5)
+    assert Slow.calls == 1 and charged == [1]
+    assert out[0] == out[1] == ({p["id"]: {"verdict": "modelling_error", "cause": "", "action": "", "rule": ""}
+                                 for p in pats}, None)
+    assert plans.read_patterns(ws, sid, rid, pats, lambda: "spent") == out[0]   # kept: no charge asked
+    assert plans.read_patterns(ws, sid, "other", pats, lambda: "spent") == (None, "spent")
+    assert plans.read_patterns(ws, sid, rid, [], lambda: "spent") == ({}, None)   # nothing to read
 
 
 def test_root_cause_charges_fixes_only_when_edits_are_needed(tmp_path):

@@ -201,3 +201,20 @@ def test_a_moved_part_is_joined_where_it_is_now(air):
     air.translate([by["Air pipe 4"]], (0, 0.003, 0))   # now against the bend's face
     air.refresh_bounds([by["Air pipe 4"]])
     assert [air.entity(j.b).Name for j in cx.joints_of(air, by["Air pipe 4"])] == ["Air bend 1"]
+
+
+def test_keeping_a_move_that_would_pull_a_joint_apart_is_refused(tmp_path, monkeypatch):
+    """/apply tries the move again before it keeps it (plans.apply): one that would pull a joint apart is a 409 with
+    why, and nothing changes."""
+    from fastapi.testclient import TestClient
+    from sightline import app as app_module
+    monkeypatch.setenv("SIGHTLINE_CONNECTED_MOVES", "refuse")
+    path = build_joints_fixture(tmp_path / "samples" / "joints.ifc")
+    ws = Workspace(path.parent)
+    sid = ws.open([path.name])
+    scene = ws.scene(sid)
+    monkeypatch.setattr(app_module, "ws", ws)
+    r = TestClient(app_module.app).post(f"/api/scenes/{sid}/apply", json={
+        "moved": [gid(scene, "S3A")], "delta_m": [0, 0.5, 0], "obstacles": [gid(scene, "Column C3")]})
+    assert r.status_code == 409 and "cannot keep its joints" in r.json()["detail"]
+    assert scene.revision == 0

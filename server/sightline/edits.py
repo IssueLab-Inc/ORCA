@@ -1276,9 +1276,12 @@ def trial(scene: IfcScene, global_id: str):
 @contextmanager
 def kept_files(scene: IfcScene, indexes: set[int]):
     """Edit several files of a scene for good, all or nothing: an error part way undoes every edit made so far (cached
-    boxes included) and is raised again. Never nest it inside `trial` or `trial_files`."""
+    boxes, the files marked edited and the scene's revision included) and is raised again. Inside another
+    `kept_files`, a file the outer one holds is left to it (the outer one undoes it). Never nest it inside `trial` or
+    `trial_files`."""
     before = dict(scene.bounds())
-    models = [scene.models[i] for i in sorted(indexes)]
+    marks = (set(scene._edited), scene.revision, list(scene.history))
+    models = [scene.models[i] for i in sorted(indexes) if scene.models[i].transaction is None]
     for m in models:
         m.begin_transaction()
     try:
@@ -1288,6 +1291,7 @@ def kept_files(scene: IfcScene, indexes: set[int]):
             m.end_transaction()
             m.undo()
         scene._bounds = before
+        scene._edited, scene.revision, scene.history = marks
         raise
     for m in models:
         m.end_transaction()
