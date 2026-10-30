@@ -62,15 +62,18 @@ export function ReviewBlock({ clash, teams, signoffs, onAdd, onRemove }: {
 }
 
 const STEP: Record<string, string> = {
+  drawing: "Drawing the accepted fixes as they could look built (Muse Image, checked against the model)",
   explaining: "Muse Spark is writing each clash's explanation", summarising: "Writing the summary",
   rendering: "Laying out the PDF", bcf: "Writing the BCF issues",
 };
 
 /** Build a coordination report: scope, which team owns each model, BCF, then progress and the download. */
-export function ReportDialog({ report, sceneId, triage, triageDone, triageRunning, teams, onTeams, evidence, signoffs, reviewed, onRunTriage, onClose, onReady }: {
+export function ReportDialog({ report, sceneId, triage, triageDone, triageRunning, teams, onTeams, evidence, signoffs, reviewed, onRunTriage, onClose, onReady, prepare }: {
   report: Report; sceneId: string | null; triage: Record<string, TriageVerdict>; triageDone: boolean; triageRunning: boolean;
   teams: Record<string, Team>; onTeams: (t: Record<string, Team>) => void;
   evidence: Record<string, Evidence>; signoffs: Record<string, Signoff[]>; reviewed: Record<string, Review>;
+  /** Before the PDF: the built views still missing or being drawn (Show it built), and the evidence with them. */
+  prepare?: (onStep: (done: number, total: number) => void) => Promise<Record<string, Evidence>>;
   onRunTriage: () => void; onClose: () => void; onReady?: () => void;
 }) {
   const [models, setModels] = useState<ModelTeam[] | null>(null);
@@ -95,8 +98,10 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
   async function build() {
     setError(null); setReady(null); setStep({ type: "progress", step: "explaining", done: 0, total: pages });
     try {
+      const shown = prepare ? await prepare((done, total) => setStep({ type: "progress", step: "drawing", done, total })) : evidence;
+      setStep({ type: "progress", step: "explaining", done: 0, total: pages });
       await api.document(report.id, {
-        scene_id: sceneId, scope, teams, bcf, evidence, reviews: signoffs,
+        scene_id: sceneId, scope, teams, bcf, evidence: shown, reviews: signoffs,
         marks: Object.fromEntries(Object.entries(reviewed).map(([id, r]) => [id, r.kind])),
         // The verdicts on screen, without the model's reasoning (kept in the browser; not needed for the report).
         triage: Object.fromEntries(Object.entries(triage).map(([id, { reasoning: _r, ...v }]) => [id, v])),

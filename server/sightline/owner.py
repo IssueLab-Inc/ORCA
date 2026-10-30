@@ -33,6 +33,7 @@ _no_caps: contextvars.ContextVar[bool] = contextvars.ContextVar("no_caps", defau
 _open_weights: contextvars.ContextVar[bool | None] = contextvars.ContextVar("open_weights", default=None)
 _escalation: contextvars.ContextVar[str | None] = contextvars.ContextVar("escalation", default=None)
 _escalation_effort: contextvars.ContextVar[str | None] = contextvars.ContextVar("escalation_effort", default=None)
+_built_views: contextvars.ContextVar[bool | None] = contextvars.ContextVar("built_views", default=None)
 ESCALATION = ("off", "button", "auto")
 
 
@@ -83,6 +84,8 @@ def settings(header: str | None) -> dict:
             out[k] = raw[k]
     if raw.get("escalation") in ESCALATION:   # absent: follow the setting for everyone
         out["escalation"] = raw["escalation"]
+    if isinstance(raw.get("built_views"), bool):
+        out["built_views"] = raw["built_views"]
     out["no_caps"] = raw.get("no_caps", True) is not False
     if isinstance(raw.get("open_weights"), bool):  # absent: follow the setting for everyone (settings.py)
         out["open_weights"] = raw["open_weights"]
@@ -94,12 +97,13 @@ def enter(is_owner: bool, header: str | None) -> list:
     s = settings(header) if is_owner else {}
     return [_owner.set(is_owner), _effort.set(s.get("effort")), _triage_effort.set(s.get("triage_effort")),
             _no_caps.set(is_owner and s.get("no_caps", True)), _open_weights.set(s.get("open_weights")),
-            _escalation.set(s.get("escalation")), _escalation_effort.set(s.get("escalation_effort"))]
+            _escalation.set(s.get("escalation")), _escalation_effort.set(s.get("escalation_effort")),
+            _built_views.set(s.get("built_views"))]
 
 
 def leave(tokens: list) -> None:
-    for var, tok in zip((_owner, _effort, _triage_effort, _no_caps, _open_weights, _escalation, _escalation_effort),
-                        tokens):
+    for var, tok in zip((_owner, _effort, _triage_effort, _no_caps, _open_weights, _escalation, _escalation_effort,
+                         _built_views), tokens):
         var.reset(tok)
 
 
@@ -114,6 +118,11 @@ def no_caps() -> bool:
 def open_weights() -> bool | None:
     """The owner's own choice of the open-weights model for this request, else None (settings.open_weights decides)."""
     return _open_weights.get()
+
+
+def built_views() -> bool | None:
+    """The owner's own choice of Show it built for this request, else None (settings)."""
+    return _built_views.get()
 
 
 def escalation() -> str | None:

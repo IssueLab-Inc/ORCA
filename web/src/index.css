@@ -464,6 +464,24 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   background: var(--panel, #fff); border: 1px solid var(--accent-soft); }
 .escalate-card .hint { flex: 1 1 220px; }
 .link.better-fix { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 2px 0 6px; font-size: 12.5px; }
+/* Show it built (BuiltView.tsx): the picture over ORCA's view, a wipe between them, the model's lines on top. */
+.built { margin: 8px 0 4px; font-size: 12.5px; }
+.built.working, .built.failed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--raised); border: 1px solid var(--line); }
+.built.working p, .built.failed p { margin: 0; }
+.built-look { width: 100%; max-width: 360px; border-radius: 6px; opacity: .55; filter: saturate(.6); }
+.built-stage { position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--line-soft);
+  border: 1px solid var(--line); }
+.built-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.built-lines { mix-blend-mode: multiply; opacity: .9; pointer-events: none; }
+.built-wipe { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff;
+  box-shadow: 0 0 0 1px rgba(16, 24, 40, .35); pointer-events: none; }
+.built-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.built-slider { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 200px; color: var(--muted); font-size: 12px; }
+.built-slider input { flex: 1; }
+.built-tools .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.built figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.built figcaption .hint { width: 100%; }
 .chip.model { background: var(--bg); color: var(--muted); }
 .chip.model.wonder { background: #efe8fb; color: #5b3c99; }
 .steps .chip.model { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; }

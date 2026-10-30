@@ -668,13 +668,8 @@ Next, in order.
 5. ✅ Bulk triage, live on Muse Spark Open (Baseten). ✅ Voice. ✅ Export IFC. ✅ PDF reports + BCF. ✅ ORCA
    detection (no Navisworks needed). ✅ #N numbers and Muse titles. ✅ Demo, tour and landing on detection. ✅ STEP
    models and the palletising cell (from STEP) as the second demo.
-6. ✅ Escalating to Muse Wonder (`docs/escalation.md`, below). Next after it, a draft: Show it built, Muse Image restyling ORCA's view
-   of a verified fix, checked against the model (`docs/show-it-built.md`). Muse Image cannot design a fix (Oct 29:
-   it redraws the geometry and invents numbers); it only restyles one. S0 passed on ORCA's own views (Oct 29,
-   `spikes/built/`): a cutaway chosen by the page, look + outline drawing (5 of 6 faithful through Responses), and a
-   pixel gate plus two Muse Wonder judges (medium) given the ids pass in flat colours to read the model view by: 17/19
-   bad rejected, 10/12 faithful passed; Muse Spark passed five shape changes Wonder caught (`spikes/built/judges.py`).
-   An owner-menu switch (For me / For everyone) decides who gets it.
+6. ✅ Escalating to Muse Wonder (`docs/escalation.md`) and ✅ Show it built (`docs/show-it-built.md`), both below.
+   Muse Image cannot design a fix (Oct 29: it redraws the geometry and invents numbers); it only restyles one.
 7. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
@@ -896,4 +891,33 @@ look for a better fix.
   B1 moves a pad footing (structure; no review chip yet). Answer key 3/3 first try at Rev04 heights.
 - **Checked:** 520 server tests, 64 web tests; in the browser Northbank #1 got Spark's offset and, on Look for a better
   fix, Wonder's "Shorter offset up 400 mm through girder opening", both verified and chipped.
+
+Show it built (Oct 29, owner decision; `docs/show-it-built.md`, code `server/sightline/built.py`, `web/src/BuiltView.tsx`,
+`Viewer.captureBuilt`): Muse Image restyles ORCA's own view of a verified fix as a clean presentation render, checked
+against the model before anyone sees it.
+- **Capture:** `Viewer.captureBuilt(fix, pair, classOf)` in one task: a cutaway of 12 directions chosen by class costs
+  (`GET /api/scenes/{sid}/classes`; slabs/roofs/coverings become the section, zones never drawn), then look, ids and
+  normals from one camera. The ids pass swaps the batches' materials (an override material would draw pieces white).
+- **Check:** outline from ids + normals; two restyles at once (Responses, reasoning high); pixel gate (coarse edges
+  F ≥ 0.55, worst tile ≤ 0.45); two Muse Wonder judges per picture with the ids picture to read the model view by,
+  either unfaithful fails it; one more pair told the differences; else "Muse Image couldn't keep to the model here".
+  Cached by a hash of the passes and the prompt version (`SIGHTLINE_BUILT_CACHE`, `/api/built/<key>.jpg`).
+- **Money and who:** `built_views` (owner menu, For me / For everyone; `SIGHTLINE_BUILT_VIEWS`, default off). $0.62
+  held per request against the day's Wonder budget; over it, three Muse Spark judges (the lighter check, named in the
+  tooltip) while the pictures still fit. Caps `SIGHTLINE_BUILT_PER_HOUR` / `_PER_DAY`. Never a trim or a cleanup.
+- **Page:** **Show it built** on the chosen option and per verified fix in the Plan panel: the stage in words, then
+  the picture over ORCA's view with a wipe, **Lines from the model**, the check in a tooltip, the label "Illustration
+  by Muse Image from ORCA's model view. The model is the record." and what the cutaway took away. Accept (single,
+  plan, replayed) captures the fix as proposed and draws it in the background; the clash panel shows "As it could
+  look built". The report dialog waits for those and draws missing ones (at most 10); the PDF's fix page gets the
+  third picture or "No built view: …"; the BCF keeps the true capture. Chat `show_it_built`; MCP later.
+- **Once, keyed on the fix:** page keys are pair + kind + numbers + edit (titles repeat); a picture being drawn is
+  shared (page and server: `built.make` once per key); cache files written whole; a lighter-checked picture is checked
+  again by Wonder when it can be; judges keep their own effort (`meta_client.FIXED_EFFORT`); passes refused from their
+  header when oversized.
+- **Checked:** `tests/test_built.py` (11), `test_document.py`; in the browser Northbank #1's offset drew in ~70 s
+  (outline 0.94, both judges faithful), the cell's C6 route in ~80 s (0.88), wipe and lines work, Accept carried the
+  picture to the kept fix, and accept → triage → Report put it on the PDF's fix page as the fourth picture.
+- **Web tests:** App imports `./BuiltView` (`BuiltView`, `builtStep`, `cutText`) and the icon `Building2`: both stub
+  lists updated. The harness's transform cannot read `for (const [a, b] of …)` in App: use keys instead.
 

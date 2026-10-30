@@ -100,6 +100,14 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
                 {EFFORTS.map((x) => <option key={x}>{x}</option>)}
               </select>
             </label>
+            <label>Show it built (Muse Image pictures of fixes)
+              <select value={settings.built_views == null ? "" : ow(settings.built_views)}
+                onChange={(e) => change({ ...settings, built_views: e.target.value === "" ? undefined : e.target.value === "on" })}>
+                <option value="">Same as everyone</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
             <label className="check"><input type="checkbox" checked={settings.no_caps !== false}
               onChange={(e) => change({ ...settings, no_caps: e.target.checked })} /> Skip the demo caps</label>
             <p className="hint">Only your requests use these, and they win over the settings for everyone. A triage run you
@@ -141,6 +149,16 @@ export function OwnerSettingsMenu({ onChange }: { onChange: (s: OwnerSettings | 
             </label>
             <p className="hint">Muse Wonder bills every token (about $0.3 to $1 a second try), within the day's budget and
               each visitor's caps.</p>
+            <label>Show it built (Muse Image pictures of fixes)
+              <select value={everyone.everyone.built_views == null ? "" : ow(everyone.everyone.built_views)}
+                onChange={(e) => void saveEveryone({ built_views: e.target.value === "" ? null : e.target.value === "on" })}>
+                <option value="">Default ({everyone.defaults.built_views ? "on" : "off"})</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <p className="hint">A picture costs about $0.3 (two drawings, four Muse Wonder judgements; up to $0.6 with a
+              second pair), and every accepted fix gets one for the PDF while it is on.</p>
             <p className="hint">Every visitor's requests use these, kept on the server across restarts. Runs already going
               keep their model.</p>
             {saved && <p className="ok small" role="status">{saved}</p>}

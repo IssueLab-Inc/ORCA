@@ -6,6 +6,9 @@
 - `escalation`: whether a clash Muse Spark could not fix (or fixed with a resize or an opening) may be handed to Muse
   Wonder for a second try: "off", "button" (offered, the default) or "auto" (a failed proposal goes on to Muse Wonder
   at once). `escalation_effort`: Muse Wonder's reasoning effort (medium by default). Docs: docs/escalation.md.
+- `built_views`: whether "Show it built" is offered (Muse Image restyling ORCA's view of a fix, checked by Muse Wonder;
+  docs/show-it-built.md) and drawn for every accepted fix's report page. It costs per picture, so it is off unless
+  switched on.
 
 None means "the environment's default" (`defaults()`). The owner's own settings, sent with their requests, win over
 these for the owner (owner.py); these win over the environment for everyone else.
@@ -37,6 +40,7 @@ class Settings:
     triage_effort: str | None = None
     escalation: str | None = None
     escalation_effort: str | None = None
+    built_views: bool | None = None
 
 
 _lock = threading.Lock()
@@ -62,7 +66,8 @@ def _clean(raw: object) -> Settings:
                     effort=raw.get("effort") if raw.get("effort") in EFFORTS else None,
                     triage_effort=raw.get("triage_effort") if raw.get("triage_effort") in EFFORTS else None,
                     escalation=raw.get("escalation") if raw.get("escalation") in ESCALATION else None,
-                    escalation_effort=raw.get("escalation_effort") if raw.get("escalation_effort") in EFFORTS else None)
+                    escalation_effort=raw.get("escalation_effort") if raw.get("escalation_effort") in EFFORTS else None,
+                    built_views=raw.get("built_views") if isinstance(raw.get("built_views"), bool) else None)
 
 
 def _load() -> Settings:
@@ -100,13 +105,13 @@ def update(changes: dict) -> Settings:
     """Change some settings (a key set to None goes back to the default). Raises ValueError on an unknown value."""
     global _current
     for k, v in changes.items():
-        if k not in ("open_weights", "effort", "triage_effort", "escalation", "escalation_effort"):
+        if k not in ("open_weights", "effort", "triage_effort", "escalation", "escalation_effort", "built_views"):
             raise ValueError(f"unknown setting {k!r}")
-        if k == "open_weights" and v is not None and not isinstance(v, bool):
-            raise ValueError("open_weights is true, false or null")
+        if k in ("open_weights", "built_views") and v is not None and not isinstance(v, bool):
+            raise ValueError(f"{k} is true, false or null")
         if k == "escalation" and v is not None and v not in ESCALATION:
             raise ValueError(f"escalation is one of {', '.join(ESCALATION)}, or null")
-        if k not in ("open_weights", "escalation") and v is not None and v not in EFFORTS:
+        if k not in ("open_weights", "escalation", "built_views") and v is not None and v not in EFFORTS:
             raise ValueError(f"{k} is one of {', '.join(EFFORTS)}, or null")
     s = current()
     with _lock:
@@ -129,13 +134,24 @@ def defaults() -> dict:
             "effort": os.environ.get("META_REASONING_EFFORT", "low") or None,
             "triage_effort": os.environ.get("TRIAGE_REASONING_EFFORT") or None,
             "escalation": mode if mode in ESCALATION else "button",
-            "escalation_effort": os.environ.get("META_ESCALATION_EFFORT", "medium") or None}
+            "escalation_effort": os.environ.get("META_ESCALATION_EFFORT", "medium") or None,
+            "built_views": os.environ.get("SIGHTLINE_BUILT_VIEWS", "0") == "1"}
 
 
 def effort_for(role: str) -> str | None:
     """The effort set for everyone for a model role ("triage", "escalation" or anything else), else None."""
     s = current()
     return {"triage": s.triage_effort, "escalation": s.escalation_effort}.get(role, s.effort)
+
+
+def built_views() -> bool:
+    """Whether this request gets Show it built: the owner's own choice, else everyone's, else the default (off)."""
+    from . import owner
+    mine = owner.built_views()
+    if mine is not None:
+        return mine
+    s = current()
+    return s.built_views if s.built_views is not None else defaults()["built_views"]
 
 
 def escalation() -> str:

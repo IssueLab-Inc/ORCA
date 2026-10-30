@@ -25,11 +25,11 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
-from . import (agents, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
+from . import (agents, built, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
                requirements, settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
@@ -166,6 +166,10 @@ class _RequestEvents:
 propose_limit = ProposeLimit.from_env()
 escalate_limit = ProposeLimit.escalate_from_env()
 chat_limit = ProposeLimit.chat_from_env()
+# Show it built (docs/show-it-built.md): pictures checked by Muse Wonder, a few cents each (SIGHTLINE_BUILT_PER_HOUR per
+# visitor, _PER_DAY for everyone); a request costs up to two rounds of two pictures and two judges each.
+built_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_BUILT_PER_HOUR", "0")),
+                           int(os.environ.get("SIGHTLINE_BUILT_PER_DAY", "0")), noun="built views")
 unlock_limit = ProposeLimit(5, 50, noun="unlock attempts")  # wrong owner tokens, per visitor and for everyone
 # Clash titles: one titling run per report (a few model calls for a whole report): SIGHTLINE_TITLES_PER_HOUR per visitor.
 title_limit = ProposeLimit(int(os.environ.get("SIGHTLINE_TITLES_PER_HOUR", "0")),
@@ -339,8 +343,8 @@ def _settings_state() -> dict:
 def models():
     """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy, and
     how much a visitor may upload (the page checks before sending, and says so)."""
-    return {"triage": triage_model_info(), "escalation": escalation_info(), "model_upload_max_mb": MODEL_UPLOAD_MAX_MB,
-            "model_upload_max_files": MODEL_UPLOAD_MAX_FILES}
+    return {"triage": triage_model_info(), "escalation": escalation_info(), "built_views": settings.built_views(),
+            "model_upload_max_mb": MODEL_UPLOAD_MAX_MB, "model_upload_max_files": MODEL_UPLOAD_MAX_FILES}
 
 
 @app.get("/api/settings")
@@ -569,6 +573,78 @@ def scene_file(scene_id: str, index: int):
 @app.get("/api/scenes/{scene_id}/elements/{global_id}")
 def element(scene_id: str, global_id: str):
     return ws.describe(_scene(scene_id), global_id)
+
+
+@app.get("/api/scenes/{scene_id}/classes")
+def element_classes(scene_id: str):
+    """Every physical element's IFC class and name (GlobalId → [class, name]): what a built view's cutaway may take
+    away costs by class (Viewer.captureBuilt), and its caption says what was taken away by name."""
+    return ws.classes(_scene(scene_id))
+
+
+BUILT_PASS_MAX = 12_000_000   # characters per pass: a 2048 px PNG as a data URL, with room
+
+
+class BuiltBody(BaseModel):
+    look: str = Field(max_length=BUILT_PASS_MAX)      # PNG data URLs of one camera (Viewer.captureBuilt): true colours,
+    ids: str = Field(max_length=BUILT_PASS_MAX)       # one flat colour per element (index + 1, 24 bits),
+    normals: str = Field(max_length=BUILT_PASS_MAX)   # and view-space normals
+    fix_kind: str = ""       # what kind of fix it shows (a trim is not drawn: too small at this scale)
+    title: str = ""
+
+
+@app.post("/api/scenes/{scene_id}/built/stream")
+def built_stream(scene_id: str, body: BuiltBody, request: Request):
+    """Show it built (docs/show-it-built.md): Muse Image restyles the page's view of a fix and the picture is checked
+    against the model (built.make). NDJSON: drawing, gate, judging, judged, retry, then {"type": "result",
+    status: "done" | "failed", ...} or {"type": "error"}. A picture already made for the same view costs nothing."""
+    _scene(scene_id)
+    if not settings.built_views():
+        raise HTTPException(403, "Show it built is switched off.")
+    if body.fix_kind in ("trim",):
+        raise HTTPException(422, "A trim is too small to show at this scale: the model's own view shows it.")
+    try:
+        p = built.passes(body.look, body.ids, body.normals)
+    except built.Refused as e:
+        raise HTTPException(422, str(e))
+    events = _RequestEvents(request)
+    exempt = owner.no_caps()
+    # Wonder's judges when the day's budget covers them; else the pictures with Muse Spark's lighter check.
+    lighter = bool(spend.refused(built.ESTIMATE_USD, exempt))
+    hit = built.cached(p.key)
+    if hit is not None and hit.get("judge") == "Muse Spark" and not lighter:
+        hit = None   # checked the lighter way when Wonder couldn't be paid for: check it properly now
+    if hit is None and not built.running(p.key):   # one being made now is shared, at no cost
+        why = (spend.refused(built.PICTURES_USD, exempt) if lighter else None) or _take(built_limit, request)
+        if why:
+            raise HTTPException(429, why)
+
+    def work():
+        try:
+            if hit:
+                events.put({"type": "result", **hit})
+                return
+            with spend.held(built.PICTURES_USD if lighter else built.ESTIMATE_USD):
+                out = (built.make(p, events.put, judge_model_fn=built.spark_judge_model, judges=built.SPARK_JUDGES,
+                                  judged_by="Muse Spark") if lighter else built.make(p, events.put))
+            events.put({"type": "result", **out})
+        except Exception as e:  # the models or the check failed: tell the page rather than cut the stream
+            events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        finally:
+            events.put(None)
+
+    owner.spawn(work)
+    return _ndjson(events.stream())
+
+
+@app.get("/api/built/{name}")
+def built_file(name: str):
+    """A checked picture (`<key>.jpg`) or its outline (`<key>-lines.png`), by the name a result gave."""
+    path = built.path_of(name)
+    if path is None:
+        raise HTTPException(404, "No such picture.")
+    return FileResponse(path, media_type="image/jpeg" if name.endswith(".jpg") else "image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.post("/api/scenes/{scene_id}/verify")

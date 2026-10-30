@@ -1,11 +1,12 @@
-import { Bot, Boxes, Brain, Check, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Building2, Check, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
+import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
 import { changeText, clearanceText, editText, framePieces, hostRows, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, BuiltResult, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -26,7 +27,7 @@ import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
 import { Popover, Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
-import { Viewer, serverPointToViewer, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
+import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode } from "./viewer/Viewer";
 import { ViewerToolbar, type ToolbarState } from "./ViewerToolbar";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
@@ -35,6 +36,8 @@ import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
 type Tab = "clash" | "plan" | "chat";
+/** A fix as Show it built's capture takes it (Viewer.captureBuilt). */
+type BuiltFix = Parameters<Viewer["captureBuilt"]>[0];
 
 export function App() {
   const host = useRef<HTMLDivElement>(null);
@@ -179,9 +182,12 @@ export function App() {
   useEffect(() => {
     api.models().then((m) => {
       setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); setEscalation(m.escalation ?? null);
+      setBuiltOn(!!m.built_views);
     }).catch(() => undefined);
   }, [ownerSettings]);
   const canEscalate = !!escalation?.available && escalation.mode !== "off";
+  // Show it built (docs/show-it-built.md): pictures of fixes, only while the switch is on for this visitor.
+  const [builtOn, setBuiltOn] = useState(false);
   const wonder = escalation?.label ?? "Muse Wonder";
   // How much a visitor may upload, from the server (checked here before anything is sent).
   const [uploadMax, setUploadMax] = useState<number | null>(null);
@@ -517,6 +523,154 @@ export function App() {
     return { status, title: o.title, kind: o.kind, edit: editText(o), moved: o.moved,
       clearance: clearanceText(o), clearance_m: o.min_clearance_m ?? null, ...(o.review ? { review: o.review } : {}),
       rationale: o.rationale, also_needs: o.also_needs, ...(o.meets?.length ? { meets: o.meets } : {}), ...pics };
+  }
+
+  // ------------------------------------------------------------------ Show it built (docs/show-it-built.md)
+  // A fix's picture, drawn by Muse Image from ORCA's view and checked against the model. Runs are keyed by the pair and
+  // the fix's title, so an option's picture is still there once it is accepted.
+  const [builtRuns, setBuiltRuns] = useState<Record<string, BuiltRun>>({});
+  // What is on screen now, for work that lands after the render it started in (chat's show_it_built).
+  const latest = useRef({ proposal, chosen, a, b });
+  latest.current = { proposal, chosen, a, b };
+  const sceneClasses = useRef<{ scene: string; map: Record<string, [string, string]> } | null>(null);
+  // Accepted fixes as the viewer can frame them again (a report's missing pictures), by clash id; finished results by
+  // key; pictures still being drawn.
+  const builtFixes = useRef<Record<string, { key: string; title: string; fix: BuiltFix; pair: [string, string] }>>({});
+  const builtDone = useRef<Record<string, BuiltResult>>({});
+  const builtPending = useRef(new Map<string, Promise<BuiltResult | null>>());
+  useEffect(() => {
+    if (!builtOn || !sceneId || sceneClasses.current?.scene === sceneId) return;
+    api.classes(sceneId).then((map) => { sceneClasses.current = { scene: sceneId, map }; }).catch(() => undefined);
+  }, [builtOn, sceneId]);
+  useEffect(() => {
+    builtFixes.current = {}; builtDone.current = {}; builtPending.current = new Map(); setBuiltRuns({});
+  }, [sceneId]);
+  /** A picture's key: the pair and the fix itself (kind, numbers, its edit), never just its title, which two
+   * different fixes can share. */
+  const builtKey = (pair: readonly [string | null, string | null], o: Option) => [[pair[0], pair[1]].sort().join("|"), o.kind, o.title,
+    JSON.stringify([o.delta_m, o.split_m ?? null, o.trim ?? null, o.edit?.key ?? o.edit?.summary ?? null])].join("|");
+  /** Show it built is for fixes big enough to see at the view's scale: not a trim or a cleanup. */
+  const buildable = (o: Option) => o.kind !== "trim" && !o.cleanup;
+  const canBuild = (o: Option) => builtOn && buildable(o);
+  /** A fix as the viewer frames it; `ids`: an applied fix's pieces (the original first), in its preview's order. */
+  const builtFix = (o: Option, applied: boolean, ids?: string[]): BuiltFix => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m,
+    pieces: o.preview?.map((m, i) => (ids?.[i] ? { ...m, global_id: ids[i] } : m)) ?? null, applied });
+
+  /** ORCA's view of a fix in the passes the picture and its check need (Viewer.captureBuilt: one task, view put back). */
+  function builtPasses(fix: BuiltFix, pair: [string, string]): BuiltPasses | null {
+    const v = viewer.current, map = sceneClasses.current?.scene === sceneId ? sceneClasses.current.map : {};
+    if (!v) return null;
+    try { return v.captureBuilt(fix, pair, (g) => map[g]?.[0]); } catch { return null; }
+  }
+
+  /** Draw a fix's picture from its passes; the run shows under `key`. Resolves with the result, null when the request
+   * failed (switched off, capped: a report can try again). */
+  function drawBuilt(key: string, passes: BuiltPasses | null, kind: string): Promise<BuiltResult | null> {
+    const sid = sceneId, map = sceneClasses.current?.map ?? {}, epoch = sceneEpoch.current;
+    const already = builtPending.current.get(key);
+    if (already) return already;   // being drawn: one request, one charge
+    if (!sid || !passes) {
+      setBuiltRuns((r) => ({ ...r, [key]: { status: "failed", step: "", look: "", cut: "", error: "Nothing of the fix is in view to draw." } }));
+      return Promise.resolve(null);
+    }
+    const cut = cutText(passes.cut, passes.sectioned, (g) => map[g]?.[0]);
+    const set = (patch: Partial<BuiltRun>) => {
+      if (sceneEpoch.current !== epoch) return;   // another scene now: this picture belongs to none of it
+      setBuiltRuns((r) => ({ ...r, [key]: { ...(r[key] ?? { status: "working", step: "", look: passes.look, cut }), ...patch } }));
+    };
+    set({ status: "working", step: "Muse Image is drawing two pictures from ORCA's view…", look: passes.look, cut, result: undefined, error: undefined });
+    const work = api.built(sid, { look: passes.look, ids: passes.ids, normals: passes.normals }, kind, (e) => set({ step: builtStep(e) }))
+      .then((res) => {
+        if (sceneEpoch.current !== epoch) return null;
+        builtDone.current[key] = res; set({ status: res.status === "done" ? "done" : "failed", result: res }); return res;
+      })
+      .catch((e) => { set({ status: "failed", error: (e as Error).message }); return null; })
+      .finally(() => { if (builtPending.current.get(key) === work) builtPending.current.delete(key); });
+    builtPending.current.set(key, work);
+    return work;
+  }
+
+  /** A kept fix's picture again (or for the first time), framed on the model as it now is. */
+  function redrawKept(clashId: string) {
+    const f = builtFixes.current[clashId];
+    if (!f) return;
+    const ids = Object.entries(builtFixes.current).filter(([, g]) => g.key === f.key).map(([id]) => id);
+    void drawBuilt(f.key, builtPasses(f.fix, f.pair), f.fix.kind).then((res) => noteBuilt(ids, f.title, res));
+  }
+
+  /** Chat's show_it_built: the chosen option of the clash on screen, else its kept fix. */
+  function builtFromChat(clashId: string) {
+    const { proposal: p, chosen: k, a: x, b: y } = latest.current;
+    const o = p && k != null ? p.options[k] : null;
+    const m = matches?.[clashId];
+    const same = !!m && !!x && !!y && [m.a, m.b].sort().join("|") === [x, y].sort().join("|");   // the option is this clash's
+    if (o && same && canBuild(o)) { void drawBuilt(builtKey([x!, y!], o), builtPasses(builtFix(o, false), [x!, y!]), o.kind); return; }
+    if (builtFixes.current[clashId]) { redrawKept(clashId); return; }
+    setError("Nothing to draw for that clash yet: propose fixes and pick one, or accept one, then ask again.");
+  }
+
+  /** The chosen option's picture (the button on its card). */
+  function showBuilt(o: Option) {
+    if (!a || !b || !canBuild(o)) return;
+    void drawBuilt(builtKey([a, b], o), builtPasses(builtFix(o, false), [a, b]), o.kind);
+  }
+
+  /** A kept fix's picture (or why there is none) on its clashes' evidence: the PDF's third picture. */
+  function builtEvidence(ev: Evidence, res: BuiltResult | null | undefined): Evidence {
+    if (!res) return ev;
+    return res.status === "done" && res.image_url ? { ...ev, built_img: res.image_url, built_note: undefined }
+      : { ...ev, built_note: res.why ?? "Muse Image couldn't keep to the model here." };
+  }
+  function noteBuilt(ids: string[], title: string, res: BuiltResult | null) {
+    if (res) setEvidence((ev) => ({ ...ev, ...Object.fromEntries(ids.filter((id) => ev[id]?.title === title).map((id) => [id, builtEvidence(ev[id], res)])) }));
+  }
+
+  /** At accept: the fix's picture in the background, from the passes taken before it was applied (or the option's own
+   * picture, if one was drawn), and the fix kept so a report can frame it again. */
+  function buildAccepted(o: Option, pair: [string, string], ids: string[], passes: BuiltPasses | null, pieces?: string[]) {
+    if (!buildable(o)) return;
+    const key = builtKey(pair, o);
+    const runs = o.kind === "offset" || o.kind === "route" || o.kind === "resize";
+    // Kept whether or not the switch is on, so a report drawn after it goes on can frame this fix again.
+    for (const id of ids) builtFixes.current[id] = { key, title: o.title, fix: builtFix(o, true, runs ? pieces : undefined), pair };
+    if (!builtOn) return;
+    const made = builtDone.current[key], drawing = builtPending.current.get(key);
+    if (made?.status === "done") noteBuilt(ids, o.title, made);
+    else if (drawing) void drawing.then((res) => noteBuilt(ids, o.title, res));
+    else if (passes) void drawBuilt(key, passes, o.kind).then((res) => noteBuilt(ids, o.title, res));
+  }
+
+  /** Before a report: the pictures still drawing, and those of accepted fixes that have none (switched on later, or
+   * capped then), at most 10 at once. Returns the evidence with every picture that came. */
+  async function prepareReport(onStep: (done: number, total: number) => void): Promise<Record<string, Evidence>> {
+    if (!builtOn) return evidence;
+    const keys = new Map<string, string[]>();
+    for (const id of Object.keys(evidence)) {
+      const ev = evidence[id], f = builtFixes.current[id];
+      if (ev.status === "accepted" && f && !ev.built_img && !ev.built_note && !builtDone.current[f.key])
+        keys.set(f.key, [...(keys.get(f.key) ?? []), id]);
+    }
+    const todo = [...keys].filter(([key]) => !builtPending.current.has(key)).slice(0, 10);
+    const pending = [...builtPending.current.values()];
+    const total = todo.length + pending.length;
+    if (!total) return withBuilt(evidence);
+    let done = 0;
+    onStep(0, total);
+    await Promise.all([
+      ...pending.map((w) => w.then(() => onStep(++done, total))),
+      ...todo.map(([key, ids]) => {
+        const f = builtFixes.current[ids[0]];
+        return drawBuilt(key, builtPasses(f.fix, f.pair), f.fix.kind).then((res) => { noteBuilt(ids, f.title, res); onStep(++done, total); });
+      }),
+    ]);
+    return withBuilt(evidence);
+  }
+  /** Evidence with every finished picture of its kept fix (state may not have caught up with the last ones yet). */
+  function withBuilt(all: Record<string, Evidence>): Record<string, Evidence> {
+    return Object.fromEntries(Object.entries(all).map(([id, ev]) => {
+      const f = builtFixes.current[id];
+      return [id, f && ev.status === "accepted" && ev.title === f.title ? builtEvidence(ev, builtDone.current[f.key]) : ev];
+    }));
   }
 
   function captureContext(p: ContextProposal): { before_img?: string; after_img?: string } {
@@ -1210,6 +1364,7 @@ export function App() {
     const items = plan.items.filter((i) => i.option && (plan.check.passed || plan.check.items[i.key]?.passed));
     setBusy(`Applying ${items.length} fix${items.length > 1 ? "es" : ""}…`);
     const pics = captureFix(items.map((i) => i.option!), "#1f9d3a");
+    const built = items.map((i) => canBuild(i.option!) ? builtPasses(builtFix(i.option!, false), [i.element_a, i.element_b]) : null);
     try {
       const kept = await api.applyPlan(sceneId, items.map((i) => i.option!));
       const pieces = kept.pieces;
@@ -1240,6 +1395,8 @@ export function App() {
         });
         return next;
       });
+      items.forEach((it, k) => { if (!requested.has(k)) buildAccepted(it.option!, [it.element_a, it.element_b],
+        [...new Set([...groups[k], ...it.clash_ids])], built[k], kept.groups?.[k]?.[0]); });
       setPlan(null); setPlanRun(null); setChecked(new Set()); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
   }
@@ -1412,6 +1569,8 @@ export function App() {
     if (e.type === "detect_event") onDetectEvent(e.event);
     if (e.type === "tool_result" && e.name === "detect_clashes") setDetecting(null);
     if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
+    // After select_clash has had a render to land (the chat names a clash, then asks for its picture).
+    if (e.type === "ui" && e.action === "show_it_built") { const id = e.clash_id; setTimeout(() => builtFromChat(id), 80); }
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
     }
@@ -1641,6 +1800,10 @@ export function App() {
     const pics = ids.some((id) => evidence[id]?.after_img && evidence[id]?.title === o.title)
       ? { before_img: evidence[ids[0]]?.before_img, after_img: evidence[ids[0]]?.after_img }
       : captureFix([o], o.moved.includes(a ?? "") ? "#d0342c" : "#1f9d3a");
+    // Show it built: the view of the fix as proposed, taken now (once applied, the preview is gone).
+    const pair: [string, string] | null = a && b ? [a, b] : null;
+    const built = pair && canBuild(o) && builtDone.current[builtKey(pair, o)]?.status !== "done"
+      && !builtPending.current.has(builtKey(pair, o)) ? builtPasses(builtFix(o, false), pair) : null;
     try {
       const kept = await api.accept(sceneId, o);
       // Each split run's pieces, the original first (a combined fix can split several runs).
@@ -1660,6 +1823,7 @@ export function App() {
         return next;
       });
       if (!requested) markFixed([[a, b]], [o.title]);
+      if (!requested && pair) buildAccepted(o, pair, ids, built, groups[0]);
       resetWork(); setRemeasure((n) => n + 1);
     } catch (e) { if (live()) setError((e as Error).message); } finally { if (live()) setBusy(null); }
   }
@@ -2135,6 +2299,9 @@ export function App() {
             onDiscard={() => { directContext.current?.retire(); ++contextRequest.current; clearManual(); setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
             onEscalate={canEscalate ? escalateItem : undefined} wonder={wonder}
+            built={(it) => it.option ? builtRuns[builtKey([it.element_a, it.element_b], it.option)] : undefined}
+            onBuild={builtOn ? (it) => { if (it.option && canBuild(it.option)) void drawBuilt(builtKey([it.element_a, it.element_b], it.option),
+              builtPasses(builtFix(it.option, false), [it.element_a, it.element_b]), it.option.kind); } : undefined}
             onDiscard={() => { setPlan(null); setPlanRun(null); }} onFocus={focusItem}
             onAsDesigned={(ids, note) => { review(ids, "by_design", note); setPlan(null); setPlanRun(null); setViewPlan(false); setTab("clash"); }} />}
         </>}
@@ -2149,6 +2316,16 @@ export function App() {
                   <p className="hint">The provision for void is in the model; the opening is not cut yet: {evidence[clash.id].blocked_by}.
                     This clash stays open until it is.</p>
                 </div>}
+              {builtOn && evidence[clash.id]?.status === "accepted" && builtFixes.current[clash.id] && (() => {
+                const f = builtFixes.current[clash.id], run = builtRuns[f.key];
+                return <div className="built-kept">
+                  <h3>As it could look built</h3>
+                  {run ? <BuiltView run={run} onRetry={() => redrawKept(clash.id)} />
+                    : <button className="btn small" disabled={!!busy} onClick={() => redrawKept(clash.id)}
+                      data-tip="Muse Image draws ORCA's view of the kept fix as a presentation render, checked against the model. About a minute.">
+                      <Building2 size={13} aria-hidden /> Show it built</button>}
+                </div>;
+              })()}
               {(evidence[clash.id] || triage[clash.id]?.verdict === "real_clash" || (signoffs[clash.id]?.length ?? 0) > 0) &&
                 <ReviewBlock clash={clash} teams={modelTeams} signoffs={signoffs[clash.id] ?? []}
                   onAdd={(so) => addSignoff(clash.id, so)} onRemove={(i) => removeSignoff(clash.id, i)} />}
@@ -2223,6 +2400,13 @@ export function App() {
                 <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} need={proposal!.clearance_m} />
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
+              {chosen === i && canBuild(o) && a && b && (() => {
+                const run = builtRuns[builtKey([a, b], o)];
+                return run ? <BuiltView run={run} onRetry={() => showBuilt(o)} />
+                  : <button className="btn small" data-tour="show-built" disabled={!!busy} onClick={() => showBuilt(o)}
+                    data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model before you see it. About a minute.">
+                    <Building2 size={13} aria-hidden /> Show it built</button>;
+              })()}
               {chosen === i && o.kind === "penetration" && o.edit?.reading_source === "muse" && sceneId && (
                 hasPenetration(reqSaved?.enabled ? reqSaved.doc : null, o.edit.host_group, o.edit.host_kind)
                   ? <span className="chip ok"><Check size={11} aria-hidden /> in the requirements</span>
@@ -2339,6 +2523,7 @@ export function App() {
       {reqOpen && <RequirementsDialog sceneId={sceneId} initial={reqSaved?.doc ?? null} enabled={!!reqSaved?.enabled}
         audit={triageAudit} canDetectAgain={!!sceneId} onApply={applyRequirements} onClose={() => setReqOpen(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
+        prepare={builtOn ? prepareReport : undefined}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
         triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} onReady={() => setDocReady(true)} />}
       {lightbox && report && lightbox.clash.images[lightbox.index] &&

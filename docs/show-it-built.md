@@ -1,8 +1,7 @@
-# Show it built (draft plan)
+# Show it built
 
-**Status (Oct 29):** draft, not built. S0 (below) passed on ORCA's own captures. The new kinds' previews come from the
-Advanced IFC edits (a penetration must be drawn with its opening before it can be pictured); the rest doesn't depend
-on that work.
+**Status (Oct 29):** built (below: "What was built"). S0 passed on ORCA's own captures; the design that follows is the
+plan it was built from, and where the two differ, "What was built" says what the code does.
 
 A button on a fix that turns ORCA's own view of it into a realistic picture of what will be built, for people who
 don't read BIM views: clients, site teams, the demo video. Muse Image (`muse-image-1.0`) draws it. The picture must
@@ -222,6 +221,52 @@ Branch `feature/show-it-built`, one PR.
    parallel), the true views alone when a fix's pictures fail.
 5. Chat tool; a tour step only as a recorded run.
 6. Runtime check in the browser on Northbank and the cell, then on Modal. README picture only from a real run.
+
+## What was built (Oct 29)
+
+- **Capture** (`Viewer.captureBuilt`, one task, the view put back): the cutaway of S0 (12 directions, costs by class
+  from `GET /api/scenes/{sid}/classes`, slabs/roofs/coverings above or below become the section, zones never drawn),
+  then three square passes from one camera: the look, ids (index + 1 in 24 bits, unlit, the batches' materials swapped,
+  a proposed fix's pieces their own ids) and view-space normals. A proposed option draws its pieces in their elements'
+  colours with the originals hidden; a kept fix is the model itself.
+- **Server** (`server/sightline/built.py`): the outline from ids and normals, two restyles at once on Muse Image
+  through Responses (`PROMPT`, reasoning high), the pixel gate (coarse edges F ≥ 0.55, no 8 × 8 tile over 0.45 new
+  edges), two Muse Wonder judges per picture that passes (look, picture, ids picture; either unfaithful fails it),
+  one more pair told what the judges found, then "Muse Image couldn't keep to the model here". Kept in a cache by a
+  hash of the passes and the prompt's version (`SIGHTLINE_BUILT_CACHE`), served at `/api/built/<key>.jpg` and
+  `<key>-lines.png`.
+- **Money:** `built.ESTIMATE_USD` ($0.62, two rounds) is held against the day's Muse Wonder budget while a picture is
+  made (`spend.held`). When the budget can't cover Wonder's judges but can cover the pictures, three Muse Spark judges
+  check it instead (the lighter check; the picture's tooltip names the judge). Caps `SIGHTLINE_BUILT_PER_HOUR` /
+  `_PER_DAY`; a cached picture costs nothing; the owner is exempt.
+- **Who gets it:** `built_views` in the owner menu, For me and For everyone (`SIGHTLINE_BUILT_VIEWS`, default off);
+  `GET /api/models` tells the page. Off, nothing is shown and nothing is drawn. Never for a trim or a cleanup.
+- **API:** `POST /api/scenes/{sid}/built/stream` `{look, ids, normals, fix_kind}` → NDJSON drawing, gate, judging,
+  judged, retry, then the result (`status` done with `image_url`, `lines_url`, `gate`, `verdicts`, `judge`; or failed
+  with `why`). 403 when off, 422 for a trim or a bad picture, 429 for the caps or the budget.
+- **Page** (`web/src/BuiltView.tsx`): **Show it built** on the chosen option and on each verified fix in the Plan
+  panel; while it works the stage in words; then the picture over ORCA's view with a wipe slider, **Lines from the
+  model** drawn over it, the check in a tooltip, the label "Illustration by Muse Image from ORCA's model view. The
+  model is the record." and what the cutaway took away. A failed picture says so and keeps ORCA's views.
+- **Accept, automatically:** a single fix, a plan's fixes and a replayed tour fix are captured as proposed before they
+  are kept, and drawn in the background (an option's picture already made is reused). The clash panel shows the kept
+  fix's picture under "As it could look built", or a button to draw it.
+- **PDF:** the report dialog first waits for the pictures still drawing and draws those of kept fixes that have none
+  (at most 10 at once: switched on later, or capped then); the fix page shows a third picture "As it could look built
+  (illustration by Muse Image from ORCA's view; the model is the record)", or "No built view: …". The BCF keeps the true
+  capture.
+- **Chat:** `show_it_built(clash_id)`: the page draws the chosen option of that clash, else its kept fix (else it
+  says there is nothing to draw yet). MCP: later.
+- **Once, and keyed on the fix:** the page keys a picture on the pair and the fix itself (kind, numbers, edit), never
+  its title alone, and shares one being drawn (Show it built, then Accept within the minute, is one request); the server
+  makes a picture once per key at a time (a second ask waits and costs nothing) and writes its cache files whole. A
+  picture checked the lighter way is checked again by Wonder when a later request can pay for it. Kept fixes are
+  recorded even while the switch is off, so a report after it goes on can draw them.
+- **Limits:** each pass at most 12 M characters, refused from its header when not square 256-2048 px (before any pixel
+  is decoded); the judges' effort is their own (medium), whatever the effort settings say.
+- **Tests:** `tests/test_built.py` (passes and key, the gate against restyles and invented objects, two judges and the
+  cache, a judge's finding sent back then failing, the gate stopping a picture before the judges, the API's switch,
+  kinds, caps and the lighter check, the PDF reading a picture only by its URL).
 
 ## Open questions
 
