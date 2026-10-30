@@ -9,7 +9,7 @@ before anyone sees it. This page is the design of the kinds of fix and how a new
 
 | Kind | What it does | Since |
 |---|---|---|
-| `move` | Moves a straight run (the element and the straight segments joined to it) by a vector; refused when it would pull a joint apart (`docs/connections.md`) | Oct 27 |
+| `move` | Moves a straight run by a vector, keeping its joints: fittings and valves beyond it go along, a segment the move runs along gets longer or shorter; refused when a joint can't be kept (`docs/connections.md`) | Oct 27 |
 | `offset` | Splits a straight segment either side of an obstacle and takes the middle up or down (or sideways), with bends | Oct 27 |
 | `trim` | Cuts a slender member's end back to butt another's face | Oct 27 |
 | `route` | Holds stretches of a straight segment at offsets (up and/or sideways) in up to 3 steps, with bends | Oct 29 |

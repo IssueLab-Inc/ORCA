@@ -72,7 +72,9 @@ TOOLS = [
     _fn("find_openings", "Openings through `obstacle` on the line of the straight segment `element`, with the "
         "offset heights (dz, metres) that pass the segment through each with 25 mm clearance.",
         {"element": {"type": "string"}, "obstacle": {"type": "string"}}, ["element", "obstacle"]),
-    _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it.",
+    _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it. "
+        "The move keeps their joints (fittings beyond go along, a segment it runs along gets longer or shorter) or "
+        "fails with the reason.",
         {"global_ids": {"type": "array", "items": {"type": "string"}},
          "delta_m": {"type": "array", "items": {"type": "number"}}}, ["global_ids", "delta_m"]),
     _fn("check_offset", "Check a local offset without keeping it: split the straight segment `element` at two points "

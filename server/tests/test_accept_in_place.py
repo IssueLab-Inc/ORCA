@@ -98,9 +98,13 @@ def test_an_unstyled_element_keeps_no_colour_when_a_fix_is_kept(client):
     assert kept["meshes"][0]["color"] is None   # the page keeps the colour it drew, not IfcOpenShell's class default
 
 
-def test_a_move_that_would_pull_a_joint_apart_is_not_kept(client):
+def test_a_move_keeps_its_joints_or_is_not_kept(client, monkeypatch):
     c, ws = client
     r, scene, main = open_run(c)
-    refused = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]})
+    end = next(g for g in whole(scene, main) if g != main)
+    kept = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, -0.2]}).json()
+    assert kept["changed"] == [main, end] and [m["global_id"] for m in kept["meshes"]] == [main, end]  # taken along
+    monkeypatch.setenv("SIGHTLINE_CONNECTED_MOVES", "refuse")
+    refused = c.post(f"/api/scenes/{r['id']}/apply", json={"moved": [main], "delta_m": [0, 0, 0.2]})
     assert refused.status_code == 422 and "would pull it apart from" in refused.json()["detail"]
-    assert scene.revision == 0
+    assert scene.revision == 1

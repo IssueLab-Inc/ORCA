@@ -4,6 +4,10 @@ export interface Verdict {
   passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number;
   /** Why a move was not tried: it would pull a joint apart (server connections.plan_move). */
   reason?: string | null;
+  /** A move's new placements: what was asked to move and what it takes along. */
+  placements?: Record<string, number[]>;
+  /** The segments a move stretches so its joints hold, as they would be. */
+  preview?: Piece[] | null;
 }
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
@@ -658,11 +662,11 @@ export const api = {
     ? call<Kept>(`/scenes/${id}/trim/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], end: o.trim.end, by_m: o.trim.by_m }) })
     : o.kind === "offset"
     ? call<Kept>(`/scenes/${id}/offset/apply`, { method: "POST", body: JSON.stringify({ element: o.moved[0], split_m: o.split_m, dz_m: o.delta_m[2] }) })
-    : o.kind === "move"
+    : o.kind === "move" && !o.edit
     ? call<Kept>(`/scenes/${id}/apply`, { method: "POST", body: JSON.stringify({ moved: o.moved, delta_m: o.delta_m }) })
-    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there).
-    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there). A penetration
-    // whose host the requirements lock comes back `cut: false`: only its provision for void was written.
+    // Every other kind: one endpoint keeps it from the option itself (its meshes are not needed there). A move that
+    // takes parts along or stretches segments goes there too, so the server refuses it if its plan has changed. A
+    // penetration whose host the requirements lock comes back `cut: false`: only its provision for void was written.
     : call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST", body: JSON.stringify({ option: { ...o, preview: null, before: null } }) })),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),

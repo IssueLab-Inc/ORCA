@@ -6,7 +6,7 @@ import { changeText, clearanceText, editText, framePieces, hostRows, recEditText
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, BuiltResult, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, BuiltResult, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -83,7 +83,7 @@ export function App() {
   const [chosen, setChosen] = useState<number | null>(null);
   const [manualDz, setManualDz] = useState(-0.25);
   const [manual, setManual] = useState<Verdict | null>(null);
-  const [manualPreview, setManualPreview] = useState<{ element: string; delta: number[] } | null>(null);
+  const [manualPreview, setManualPreview] = useState<{ element: string; delta: number[]; moved: string[]; pieces: Piece[] | null } | null>(null);
   const previewRequest = useRef(0);
   // Clash reports (Navisworks XML).
   const [reportSamples, setReportSamples] = useState<string[]>([]);
@@ -774,7 +774,12 @@ export function App() {
     } else if (plan && viewPlan) {
       v.showOptions(planOptions.map((o) => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m, pieces: o.preview, before: o.before, color: "#1f9d3a" })), compare);
     } else if (manualPreview) {
-      v.preview([{ globalIds: [manualPreview.element], deltaM: manualPreview.delta }]);
+      if (manualPreview.pieces?.length) {   // it takes parts along and stretches segments to keep its joints
+        v.showOption({ kind: "move", moved: manualPreview.moved, deltaM: manualPreview.delta, pieces: manualPreview.pieces,
+          before: null }, "after", "#1f9d3a");
+      } else {
+        v.preview([{ globalIds: manualPreview.moved, deltaM: manualPreview.delta }]);
+      }
     } else v.preview([]);
   }, [option, plan, planOptions, compare, a, viewPlan, activeContext, contextProposal, manualPreview]);
 
@@ -1858,7 +1863,8 @@ export function App() {
       const v = await api.verify(sceneId, [element], delta);
       if (!live()) return;
       setViewContext(false); setViewPlan(false); setChosen(null);
-      setManual(v); setManualPreview({ element, delta });
+      const moved = Object.keys(v.placements ?? {});
+      setManual(v); setManualPreview({ element, delta, moved: moved.length ? moved : [element], pieces: v.preview ?? null });
     } catch (e) { if (live()) setError((e as Error).message); }
   }
 

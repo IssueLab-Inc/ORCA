@@ -69,8 +69,16 @@ def _in_trial_move(scene, it: Item, o: dict):
     if not plan.ok:   # never tried: it would pull a joint apart (the check reports which)
         broken = [verify.Hit(g, scene.entity(g).is_a(), "joint", 0.0) for g in plan.refused_at]
         return list(o["moved"]), set(o["moved"]), lambda clearance_m, owner: (broken, None)
-    scene.translate(o["moved"], tuple(o["delta_m"]))
-    return list(o["moved"]), set(o["moved"]), None
+    if plan.plain:
+        scene.translate(o["moved"], tuple(o["delta_m"]))
+        return list(o["moved"]), set(o["moved"]), None
+    base = connections.baseline(scene, plan)   # what its stretched segments touch now, before the edit
+    connections.apply_move(scene, plan)
+
+    def check(clearance_m, owner):   # fittings taken along, segments stretched: their own check, joints included
+        hits, least, _ = connections.check_applied(scene, plan, clearance_m, base)
+        return hits, least
+    return plan.changed(), set(plan.changed()), check
 
 
 def _in_trial_offset(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
@@ -160,6 +168,12 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
             for it in live:
                 changed[it.key] = IN_TRIAL[it.option["kind"]](scene, it, it.option)
             owner = {g: key for key, (_, own, _) in changed.items() for g in own}
+            keys = list(changed)   # two fixes changing the same element (a move taking another's pieces along)
+            for n, k1 in enumerate(keys):
+                for k2 in keys[n + 1:]:
+                    both = changed[k1][1] & changed[k2][1]
+                    if both:
+                        out["conflicts"].append({"a": k1, "b": k2, "detail": f"both change {len(both)} element(s)"})
             for it in live:
                 clearance_m = need[it.key]
                 check_ids, own, obstacles = changed[it.key]
@@ -522,7 +536,7 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
 
 
 def _keep_move(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
-    return ws.apply(scene_id, o["moved"], o["delta_m"]), []
+    return ws.apply(scene_id, o["moved"], o["delta_m"], expect=o.get("edit")), []
 
 
 def _keep_offset(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:

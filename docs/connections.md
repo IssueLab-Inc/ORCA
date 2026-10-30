@@ -83,7 +83,7 @@ Every path that moves something plans first:
 **What Muse reads:** for each side, what its run is joined to, and that a whole move would pull those joints apart,
 so an offset or a route (which keep its ends) is the way. `construction.md` says joints stay joined.
 
-**The switch:** `SIGHTLINE_CONNECTED_MOVES` is `refuse` (the default), `carry` (slice 2) or `off`, which gives moves as
+**The switch:** `SIGHTLINE_CONNECTED_MOVES` is `carry` (slice 2's default), `refuse`, or `off`, which gives moves as
 before joints were known.
 
 **Measured:**
@@ -93,24 +93,93 @@ before joints were known.
 - The cell's #22 gets only routes (both keep the pipe's ends on its bends).
 - Joints for all 40 flow parts of the cell take 3.8 s, mostly the first triangulation of each part.
 
-## Slice 2: moves that carry fittings and stretch segments (planned)
+## Slice 2: moves that carry fittings and stretch segments (Oct 30)
 
-The walk: each element is translated, stretched at one face, or unchanged, and both sides of every joint move the same
-amount. Going out from the moved run:
+`SIGHTLINE_CONNECTED_MOVES` is now `carry` by default.
 
-- **Equipment, terminals or structure:** refuse, naming it.
-- **A fitting or in-line valve:** carry it along and keep walking.
-- **A straight segment joined by a cap, or end-on by a side:**
-  - if the move runs along it (under 0.5 mm across), stretch it by that much; refuse when it would get shorter than
-    50 mm;
-  - otherwise carry it.
-- **A branch:** refuse.
-- **More than 12 carried:** refuse.
+**The walk** (`plan_move`): each element ends up translated, stretched at one face, or where it is, and both sides of
+every joint must move alike. It goes out from what was asked to move, one joint at a time:
 
-`edits.stretch` changes a segment's extrusion depth, or a box's side, and moves the port at that face without turning
-it. The option stays a "move", with `edit` listing what it carries and stretches and a mesh preview of the stretched
-segments. Keeping it re-plans on the server and refuses a changed plan. The cell's C2 ladder then lifts 150 mm with
-its riser 150 mm longer, foot still on the panel.
+| What is beyond the joint | What happens |
+|---|---|
+| equipment, a terminal, a filter, structure, or anything kept fixed (`Pset_SightlineConstraints.KeepFixed`, or a group the requirements may not edit) | refused, naming it |
+| a fitting or an in-line valve | taken along, and the walk continues from it |
+| a straight segment joined by a cap, when the move runs along it (less than 0.5 mm across, absolute: 1° would leave 4 mm at 250 mm) | stretched at that end by the along part; refused when it would be shorter than 50 mm ("it can lose at most …") |
+| a rectangular segment joined end-on by its side (80% of the face covered: a ladder bend sitting on its riser), when the move runs along the side's normal | grows to that side |
+| anything joined to a segment's side that does not cover it | a branch, refused ("it branches off") |
+| any other straight segment | taken along |
+| a segment reached at a second face | moves whole |
+| more than `SIGHTLINE_CARRY_MAX` (12) parts taken along | refused |
+
+No extra slope, gravity or cycle rules are needed: taking along only translates, and stretching moves a face along the
+segment's own axis.
+
+**`edits.stretch(scene, gid, face, by_m, normal)`:**
+
+- **Cap:** changes the extrusion's depth (and its start, with a new placement, when the start moves).
+- **Side:** for a centred rectangular profile, writes a new profile and placement.
+- **Ports** at that face shift by the same amount, keeping their rotation.
+- **Refused:** a body shared with other elements, or a piece left under 50 mm.
+
+`apply_move` translates, then stretches.
+
+**Checking** (`trial_move` / `check_applied`):
+
+- What moves is checked against everything except what the move changes and what that is joined to (those joints
+  hold).
+- A stretched segment's contacts count only when new or worse than before (`baseline`, out to 100 mm), so the riser
+  keeps its gland plate.
+- `check_joints` proves every joint still meets: ports within 2 mm, STEP parts still face to face. A broken joint is a
+  `joint` hit; on keep it raises, which undoes the edit.
+
+**The fix stays a "move"**, so requirements, ranking, the PDF and the BCF need nothing new. What it carries:
+
+- `moved`: what is translated.
+- `preview`: the stretched segments as they would be.
+- `before`: everything it changes.
+- `edit`:
+  - `summary`: "move north 250 mm; takes 'bend 2' and 'bend 3' along; 'segment 2' and 'segment 4' 250 mm shorter";
+  - `key`;
+  - `run`, `carried`, `stretched`, `joints`.
+
+**Keeping it:**
+
+- `plans.KEEP["move"]` → `Workspace.apply(moved, delta, expect=edit)` plans it again on the server. If the key differs,
+  it refuses: "the model changed since this move was checked".
+- `changed` lists the stretched segments, so accept in place patches them.
+- **The page:**
+  - a move with an `edit` is accepted through `/fix/apply`, a plain one through `/apply`;
+  - the viewer translates `moved` and draws the stretched pieces;
+  - the manual move previews what it takes along.
+
+**Elsewhere:**
+
+- Combined steps plan each move and store their stretches. A step that would change what another step changes is
+  refused.
+- `verify_together` reports two plan items that change the same element as a conflict.
+- Muse reads, per joined side, which of the six directions keep the joints, what goes along, how far a shortening
+  can go, and why the others can't (`describe`, dry plans at 100 mm).
+
+**Measured:**
+
+- **Cell (`evals/step_cell.py` passes):**
+  - C2's ladder lifted 150 mm moves 4 parts. The riser from EP-301 is 150 mm taller with its foot still on the
+    gland plate, and the STEP export matches.
+  - C6 as a move (segment 3 north 250 mm) keeps its joints (2 bends along, 2 segments shorter) but hits the ES-2
+    emergency stop, so the route stays the fix.
+- **In the browser on #61** (ladder through post W5): Muse offered "move up 100 mm; takes … flat bend 2, run 1,
+  vertical bend 1 along; riser 100 mm longer", verified, and it was accepted in place with no file download.
+- **Northbank (`evals/joints.py`):** of 1,992 dry plans (332 straight runs × 6 directions), 195 keep their joints.
+  The rest are refused at equipment or terminals (988), for taking more than 12 parts along (476), for leaving a
+  segment too short (309), or at a branch (24). The median plan takes 16 ms. #042 raised 400 mm is refused (more than
+  12 parts along).
+- **Answer key:** 3/3 first try at Rev04 heights.
+
+**Known limits:**
+
+- A STEP prototype used by several components would change for all of them when one is stretched. The same is already
+  true of offsets and trims; the cell's STEP has none.
+- Joints across files (a service on structure) are not modelled.
 
 ## Slice 3: see connections (planned)
 

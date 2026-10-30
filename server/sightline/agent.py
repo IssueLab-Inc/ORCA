@@ -494,8 +494,8 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         o.model = label
     for o in options:  # what each option changes, as it is now, so the UI can show before and after together
         try:
-            with lock:
-                o.before = edits.meshes(base, o.moved)
+            with lock:   # a move's stretched segments change too
+                o.before = edits.meshes(base, o.moved + [st["global_id"] for st in (o.edit or {}).get("stretched", [])])
         except RuntimeError:
             o.before = None
         if policy and doc is not None:
@@ -588,9 +588,11 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
 
 
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
-              on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
-    """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds. A move
-    that would pull a joint apart is refused before it is tried (connections.plan_move)."""
+              on_trial: Callable[[dict], None] | None = None, *, meant=()) -> tuple[Attempt, Option | None]:
+    """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds. The move
+    keeps its joints (connections.plan_move): the fittings beyond the run go along and a segment the move runs along
+    gets longer or shorter; one that can't is refused before it is tried, and so is one that would take an element
+    it is meant to clear (`meant`) along."""
     run = connections.run(scene, target)
     delta = [float(v) for v in cand.get("delta_m", [0, 0, 0])]
     plan = connections.plan_move(scene, run, delta)
@@ -599,6 +601,21 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
             on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
         return Attempt(cand.get("title", "move"), delta, False, f"cannot keep its joints: {plan.refused}",
                        hit_ids=plan.refused_at[:8]), None
+    taken = [m for m in meant if m in plan.changed() and m != target]
+    if taken:
+        names = ", ".join(f"'{scene.element(m).name}'" for m in taken)
+        return Attempt(cand.get("title", "move"), delta, False, f"cannot keep its joints: the move would take {names} "
+                       f"along, which it has to clear", hit_ids=taken[:8]), None
+    if not plan.plain:   # fittings taken along, segments stretched: tried in a trial
+        t = connections.trial_move(scene, plan, clearance_m, on_trial=on_trial, preview=True)
+        edit = plan.edit(scene, run)
+        attempt = Attempt(cand.get("title", "move"), delta, not t.hits, _reason(t.hits), hit_ids=_hit_ids(t.hits),
+                          edit={"summary": edit["summary"]}, where=_where(t.hits))
+        if t.hits:
+            return attempt, None
+        return attempt, Option(cand.get("title", "move"), plan.moved, delta, cand.get("rationale", ""),
+                               cand.get("also_needs", ""), t.least, t.placements, preview=t.preview,
+                               checked_against=t.checked, edit=edit)
     # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
     neighbours = {c for g in run for c in scene.element(g).connected} - set(run)
     if on_trial:
@@ -914,7 +931,7 @@ def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_
 
 def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                   on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
-    return _try_move(scene, cand, target, clearance_m, on_trial)
+    return _try_move(scene, cand, target, clearance_m, on_trial, meant=(other, *others))
 
 
 # A combined fix changes up to three elements together, in one trial (docs/escalation.md): the room a duct needs may
@@ -964,10 +981,13 @@ def combined_steps(scene: IfcScene, cand: dict, a: str, b: str) -> list[dict]:
                 delta = [float(v) for v in st.get("delta_m", [])]
                 if len(delta) != 3 or not all(np.isfinite(delta)) or not any(delta):
                     raise Refused(f"step {i}: a move needs delta_m [dx, dy, dz] in metres, not all zero")
-                step = {"kind": "move", "moved": connections.run(scene, gid), "delta_m": delta}
-                plan = connections.plan_move(scene, step["moved"], delta)
+                plan = connections.plan_move(scene, connections.run(scene, gid), delta)
                 if not plan.ok:
                     raise Refused(f"step {i}: cannot keep its joints: {plan.refused}")
+                step = {"kind": "move", "moved": plan.moved, "delta_m": delta}
+                if not plan.plain:
+                    step["stretched"] = [asdict(st) for st in plan.stretched]
+                    step["edit"] = plan.edit(scene)
             elif kind == "offset":
                 split = [float(v) for v in st.get("split_m", [])]
                 dz = float(st.get("dz_m", 0.0))
@@ -988,7 +1008,11 @@ def combined_steps(scene: IfcScene, cand: dict, a: str, b: str) -> list[dict]:
             raise Refused(f"step {i}: {err}") from err
         except (edits.Unsupported, KeyError) as err:
             raise Refused(f"step {i}: cannot {kind} {e.name}: {err}") from err
-        for g in step["moved"]:   # a move takes its whole run: none of it may be structure, nor anything else
+        changes = list(step["moved"]) + [st["global_id"] for st in step.get("stretched", [])]
+        clash = next((g for s_ in out for g in s_["changes"] if g in changes), None)
+        if clash is not None:
+            raise Refused(f"step {i}: it would change {scene.element(clash).name}, which another step changes")
+        for g in changes:         # a move takes its whole run: none of it may be structure, nor anything else
             if g == gid:          # beside a service unless the target is A or B
                 continue
             if stays(scene, g) or (gid not in (a, b) and not is_service(scene, g)):
@@ -996,12 +1020,12 @@ def combined_steps(scene: IfcScene, cand: dict, a: str, b: str) -> list[dict]:
                 raise Refused(f"step {i}: moving {e.name} would take {other.ifc_class} '{other.name}' with it, "
                               "which stays where it is")
         if matcher is not None:
-            for g in step["moved"]:
+            for g in changes:
                 pol = requirements.policy(doc, matcher, g)
                 why = requirements.blocked(pol, None, kind, step["delta_m"], True)
                 if why:
                     raise Refused(f"step {i} ({scene.element(g).name}): {why}")
-        out.append({**step, "target": gid})
+        out.append({**step, "target": gid, "changes": changes})
     if not any(st["target"] in (a, b) for st in out):
         raise Refused("one step must change A or B: moving only what is around them leaves the clash")
     return out
@@ -1030,9 +1054,11 @@ def apply_combined(scene: IfcScene, steps: list[dict]) -> list[tuple[dict, list[
     run's pieces with the original first)]."""
     made = []
     for st in steps:
-        if st["kind"] == "move":
-            scene.translate(st["moved"], tuple(st["delta_m"]))
-            made.append((st, list(st["moved"])))
+        if st["kind"] == "move":   # what it takes along moves too; the segments it stretches change
+            plan = connections.MovePlan(list(st["moved"]), list(st["delta_m"]),
+                                        stretched=[connections.Stretch(**x) for x in st.get("stretched", [])])
+            connections.apply_move(scene, plan)
+            made.append((st, plan.changed()))
         elif st["kind"] == "offset":
             made.append((st, edits.apply_offset(scene, st["target"], st["split_m"][0], st["split_m"][1],
                                                 st["delta_m"][2]).pieces))
@@ -1053,8 +1079,9 @@ def check_combined(scene: IfcScene, made: list[tuple[dict, list[str]]], a: str, 
     for st, els in made:
         own = set(els)
         ignore = own | ({c for g in els for c in scene.element(g).connected} - mine)
-        if st["kind"] == "move":
-            v = verify.check(scene, els, clearance_m=clearance_m, ignore=ignore)
+        if st["kind"] == "move":   # what its parts are joined to touches them by design (its joints hold)
+            joined = {j.b for g in els for j in connections.joints_of(scene, g)} - mine
+            v = verify.check(scene, els, clearance_m=clearance_m, ignore=ignore | joined)
             hits += v.hits
         else:
             v = verify.check(scene, els[1:-1], clearance_m=clearance_m, ignore=ignore)

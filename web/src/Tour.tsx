@@ -381,7 +381,8 @@ export const CELL_STEPS: Step[] = [
     act: "A move", title: "Ask for a fix",
     body: (s) => s.proposalDone && s.options
       ? <>Verified: the tray clears the post, and nothing else is hit. The post is guarding, so it stays; the tray moves.
-        The ladder's pieces move as one, because in the STEP they belong to one group and touch.</>
+        A move keeps the ladder's joints: the bends beyond it go along, and a straight piece the move runs along gets
+        longer or shorter (the option says which).</>
       : <>Click <b>Propose fixes</b>. ORCA tries ideas from Muse Spark and checks each against the whole cell.</>,
     target: "[data-tour=propose], [data-tour=fix-anyway]", done: (s) => s.proposalDone && s.options > 0,
     show: { label: "Ask for me", hidden: ran, run: () => {
@@ -392,7 +393,7 @@ export const CELL_STEPS: Step[] = [
   },
   {
     act: "A move", title: "Accept it",
-    body: () => <>Click <b>Accept this fix</b>. The server edits the model and the viewer reloads it.</>,
+    body: () => <>Click <b>Accept this fix</b>. The server edits the model and the viewer updates it in place.</>,
     target: "[data-tour=accept]", reveal: true, done: (s) => !!s.ladder && s.fixed.includes(s.ladder.id), show: { label: "Accept for me" },
   },
   {

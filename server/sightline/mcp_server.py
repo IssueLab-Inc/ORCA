@@ -340,7 +340,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     @tool(read_only=True)
     def check_move(global_ids: list[str], delta_m: list[float], ctx: Context) -> dict:
         """Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it: passes,
-        or what it would hit and how deep."""
+        or what it would hit and how deep. The move keeps their joints (fittings beyond go along, a segment it runs
+        along gets longer or shorter) or fails with `reason`."""
         return run(ctx, "check_move", {"global_ids": global_ids, "delta_m": delta_m})
 
     @tool(read_only=True)

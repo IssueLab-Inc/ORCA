@@ -1310,6 +1310,84 @@ def trial_files(scene: IfcScene, indexes: set[int]):
         scene._bounds = before
 
 
+@dataclass
+class Stretched:
+    element: str
+    face: str             # "start" / "end" (a cap) or "side" (a rectangular segment's side, taken end-on)
+    by_m: float           # how much longer (+) or shorter (-) it got across that face
+    size_m: float         # its length (a cap) or its size across that side, after
+
+
+def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None) -> Stretched:
+    """Make a straight segment longer (+) or shorter (-) by moving one face outward by `by_m` metres: its "start" or
+    "end" cap (the extrusion's depth, and its start when the start moves), or, for a rectangular one, a "side" whose
+    outward world `normal` is given (the profile grows to that side: a ladder riser a bend sits on). Ports at that face
+    move with it without turning. Edits the model in place; wrap in a trial to undo."""
+    element = scene.entity(global_id)
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    model, s = scene.models[i], scene.unit_scales[i]
+    by_m = float(by_m)
+    if not np.isfinite(by_m):
+        raise Unsupported("a stretch must be a finite length")
+    body, _ = _body(element)
+    users = (len([x for x in model.get_inverse(item) if x.is_a("IfcShapeRepresentation")]),
+             len([x for x in model.get_inverse(body) if x.is_a("IfcProductRepresentation") or x.is_a("IfcRepresentationMap")]),
+             len([x for x in model.get_inverse(element.Representation) if x.is_a("IfcProduct")]))
+    if max(users) > 1:   # another element's shape would change too
+        raise Unsupported("its body is shared with other elements")
+    inv = np.linalg.inv(place)
+    if face in ("start", "end"):
+        size = item.Depth * s + by_m
+        if size < MIN_PIECE_M - 1e-9:
+            raise Unsupported(f"it would be {size * 1000:.0f} mm long (at least {MIN_PIECE_M * 1000:.0f} mm stays)")
+        out = -d if face == "start" else d
+        old_centre = (origin if face == "start" else origin + d * item.Depth) * s
+        if face == "start":   # the start moves out: a new place for the extrusion (placements can be shared)
+            local = ifcopenshell.util.placement.get_axis2placement(item.Position)
+            local[:3, 3] = (inv @ np.append(origin - d * (by_m / s), 1.0))[:3]
+            item.Position = model.createIfcAxis2Placement3D(
+                _point(model, local[:3, 3]), _dir(model, local[:3, 2]), _dir(model, local[:3, 0]))
+        item.Depth = float(item.Depth + by_m / s)
+    elif face == "side":
+        prof = item.SweptArea
+        if prof.is_a() != "IfcRectangleProfileDef" or (prof.Position is not None and (
+                np.linalg.norm(np.asarray(prof.Position.Location.Coordinates)) > 1e-9
+                or (prof.Position.RefDirection is not None
+                    and abs(abs(prof.Position.RefDirection.DirectionRatios[0]) - 1) > 1e-9))):
+            raise Unsupported("only a centred rectangular segment grows sideways")
+        out = np.asarray(normal, float)
+        out /= np.linalg.norm(out)
+        if abs(out @ px) > 0.999:
+            attr, across = "XDim", prof.XDim
+        elif abs(out @ py) > 0.999:
+            attr, across = "YDim", prof.YDim
+        else:
+            raise Unsupported("that side is not square to the segment's profile")
+        size = across * s + by_m
+        if size < MIN_PIECE_M - 1e-9:
+            raise Unsupported(f"it would be {size * 1000:.0f} mm across (at least {MIN_PIECE_M * 1000:.0f} mm stays)")
+        mid = origin * s + d * (item.Depth * s / 2)
+        old_centre = mid + out * (across * s / 2)
+        dims = {"XDim": prof.XDim, "YDim": prof.YDim, attr: float(size / s)}
+        item.SweptArea = model.createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+                                                            dims["XDim"], dims["YDim"])
+        local = ifcopenshell.util.placement.get_axis2placement(item.Position)
+        local[:3, 3] = (inv @ np.append(origin + out * (by_m / s / 2), 1.0))[:3]
+        item.Position = model.createIfcAxis2Placement3D(
+            _point(model, local[:3, 3]), _dir(model, local[:3, 2]), _dir(model, local[:3, 0]))
+    else:
+        raise Unsupported(f"no face called {face!r}")
+    for port in ifcopenshell.util.system.get_ports(element):   # ports at that face go with it, turned as they were
+        if port.ObjectPlacement is None:
+            continue
+        m = scene.placement(port.GlobalId)
+        if np.linalg.norm(m[:3, 3] - old_centre) <= 0.002:
+            m[:3, 3] += out * by_m
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+    scene.refresh_bounds([global_id])
+    return Stretched(global_id, face, by_m, float(size))
+
+
 def meshes(scene: IfcScene, global_ids: list[str], render: bool = False) -> list[dict]:
     """World-space triangles (metres, Z up) for previewing new or changed elements in the browser.
 

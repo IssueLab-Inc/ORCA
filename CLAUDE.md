@@ -947,3 +947,25 @@ carry and stretch → hover highlight).
   proposing whole moves of joined runs); cell #22 gets only routes; the cell's 40 flow parts' joints in 3.8 s.
 - **Tests:** `tests/test_connections.py` (`fixtures.build_joints_fixture`: a PL-302 with ports, a tee, a valve, a
   filter; a STEP air line written with OCP and classified by a stand-in); `test_accept_in_place` moves whole runs.
+
+Moves that keep their joints (Oct 30, slice 2 of connections; `docs/connections.md`): `SIGHTLINE_CONNECTED_MOVES` is
+`carry` by default.
+- **The walk** (`connections.plan_move`): fittings and in-line valves beyond a run go along; a straight segment the move
+  runs along (< 0.5 mm across) gets longer or shorter at that end; a rectangular segment covered end-on at its side (a
+  ladder riser under its bend) grows that way; any other segment goes along; equipment, terminals, filters,
+  structure, KeepFixed, a branch off a segment's side, a piece < 50 mm or > 12 parts along: refused, named.
+- **`edits.stretch`** (cap: extrusion depth and start; side: new rectangle profile and position; ports at that face
+  shifted without turning; shared bodies refused). `apply_move`, `check_joints` (ports ≤ 2 mm, STEP faces still meet),
+  `trial_move` / `check_applied` (moved parts ignore what they're joined to; stretched segments count only contacts new
+  or worse than `baseline`).
+- **Still kind "move":** `edit` {summary, key, run, carried, stretched, joints}, `preview` = stretched meshes;
+  `Workspace.apply(expect=edit)` plans again and refuses a changed key; the page accepts a move with `edit` through
+  `/fix/apply`, draws stretched pieces (`Viewer.showOptions`, `captureBuilt`), the manual move previews them. Combined
+  steps carry and refuse overlapping steps; `verify_together` reports two items changing one element as a conflict;
+  Muse reads per direction what keeps the joints (`describe`).
+- **Measured:** cell C2 lifts 4 parts and the riser 150 mm taller on its plate (STEP export too); C6 as a move keeps
+  its joints but hits ES-2; #61 in the browser: "move up 100 mm; takes … along; riser 100 mm longer", accepted in place;
+  Northbank census `evals/joints.py` (195 of 1,992 dry plans keep their joints, median 16 ms); answer key 3/3. Cell
+  tour: ladder copy updated, `web/public/tour/cell-ladder.json` recorded again (its move option carries).
+- **Tests:** `tests/test_connected_moves.py` (walk, refusals, tolerance, promotion, tee, stretch, agent, keep with a
+  stale key, plans, STEP ladder export), `test_accept_in_place` (a lone move takes its joined end segment along).
