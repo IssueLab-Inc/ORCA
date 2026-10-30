@@ -30,7 +30,8 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
       const t = e.target as Node;
       if (!ref.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
     };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // Esc closes the menu and nothing else (not the viewer's selection or clash, which listen on the window).
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     document.addEventListener("pointerdown", off);
     document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", esc); };

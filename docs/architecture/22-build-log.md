@@ -1106,3 +1106,5 @@ Drawing views after the live smoke test (Oct 30; owner's smoke test of the deplo
   A/B/C, thumbnails, `capture()` and Show it built's passes still byte-identical in Single and Quad; the rail menus at
   1600×1000, 1440×800 and 1366×700 leave the page its height; drawings at rest match the merged build in the section,
   elevation and 3D panes (no multisampling aside) and in the plan apart from the camera mark; 102 web tests.
+- **Esc closed a menu and left the clash** (found in the live check after the deploy): with a rail or pane menu open,
+  Esc now closes only the menu (`Popover` stops the key there, before `App`'s window listener).
