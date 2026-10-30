@@ -2,7 +2,7 @@
 
 > **Covers:** `web/src/` (all but `viewer/`, which is [13](13-3d-viewer.md)), `web/index.html`, `web/vite.config.ts`,
 > `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/`, `assets/brand/orca/` · **Checked against code:**
-> 2026-10-30 (`feature/dockable-panels`, with `main` at `69fe0a3` merged) · **Deeper design:** [docs/mobile.md](../mobile.md),
+> 2026-10-30 (`main` at `b74d70b`; the dock again on `fix/dock-empty-bars-tooltips`) · **Deeper design:** [docs/mobile.md](../mobile.md),
 > [docs/views.md](../views.md), [docs/panels.md](../panels.md), [docs/brand-assets.md](../brand-assets.md)
 
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
@@ -462,8 +462,13 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
   user choosing the panel (`onTab`, which `App` maps to its classic tab handlers); in a side bar it opens the bar and
   never closes it.
 - **Buttons** (`Actions`, at the end of a group's tabs): collapse the side bar (`collapseEdge`: the tabs go down the
-  outer edge first, so the strip is narrow), float (`floatPanel`), open in a window, put it back (`moveHome`). The
-  right-click menu has Float, Open in New Window, Put it back and Close.
+  outer edge first, so the strip is narrow), float (`floatPanel`, each one a step down and left of the last), open in a
+  window (`popOut`: a bar's only panel floats first, dockview won't pop it out of the bar, and `returnToBars` puts it back
+  when the window closes), put it back (`moveHome`). The right-click menu has Float, Open in New Window, Put it back and
+  Close.
+- **Empty side bars** (`fitEdges`): a bar with no panel is hidden (dockview's `setEdgeGroupVisible`) and the model takes
+  its room; it shows again, at its width, when a panel docks there. Fitted after every panel added, removed or moved,
+  a layout change, a loaded layout and a pop-out window opening or closing.
 - **Saving:** `toJSON` into `sightline.dock.v1` a moment after a layout change or a collapse (`writeLayout`, which
   puts pop-out panels back in their bars first); on load `readLayout` and `fromJSON`, else the default.
 - **`DockHandle`** for `App`: `show(id, { dock })` (`showSteps`: reopen at home, open the bar, focus the window or bring
@@ -476,6 +481,9 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
   finds its targets and `reveal` shows their panel.
 - Pop-out windows load `web/public/popout.html`; `App` adds its keys to each window and mounts a `Tooltips` there
   (`onWindows`).
+- **Stacking:** `.dock-area` is a layer of its own (`isolation: isolate`): dockview's floating panels (z-index 999 and
+  up) stay under the page's tooltips and dialogs. A `.rail` or `.pane-head` holding an open `Popover` rises to 5000, over
+  the floating panels, while it is open.
 
 ### `Tour.tsx`
 

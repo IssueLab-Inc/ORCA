@@ -87,6 +87,7 @@ export function withoutPopouts(layout: SavedLayout): SavedLayout {
     if (home === "float") { delete panels[id]; continue; }
     if (home === "centre") continue;
     const entry = edgeGroups[home] ??= { size: EDGE_SIZE[home][2], visible: true };
+    entry.visible = true;   // a bar left empty by the pop-out was hidden (an empty bar gives its room to the model)
     entry.group ??= { id: EDGE_GROUP[home], views: [] };
     entry.group.views = [...(entry.group.views ?? []), id];
     entry.group.activeView ??= id;

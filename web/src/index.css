@@ -48,7 +48,12 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 /* Clipped, never scrolled: dockview parks a hidden panel's layer (renderer "always") below the dock, and a focus or
    scrollIntoView then scrolled the page, or the dock area under overflow: hidden, by 203 px. */
 .app.docked { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: clip; }
-.dock-area { min-width: 0; min-height: 0; position: relative; overflow: clip; }
+/* Its own stacking layer: dockview raises floating panels to z-index 997, which would cover the page's tooltips (200)
+   and dialogs; inside the dock they still float over the model. */
+.dock-area { min-width: 0; min-height: 0; position: relative; overflow: clip; isolation: isolate; }
+/* A menu opened in the model (the rail's, a view's) is above the floating panels while it is open: dockview stacks
+   them from 999 up, two a window. */
+.dock-area :is(.rail, .pane-head):has(.pop.open) { z-index: 5000; }
 .dock-host { height: 100%; }
 .dock-tab { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 10px; font-weight: 600; font-size: 13px; white-space: nowrap; }
 .dock-actions { display: flex; align-items: center; gap: 2px; height: 100%; padding: 0 6px; }
