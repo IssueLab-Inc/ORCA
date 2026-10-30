@@ -83,6 +83,7 @@ def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypat
 
     r = c.get(f"/api/scenes/{sid}/export")
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    assert r.headers["content-disposition"].endswith('filename="orca-export.zip"')  # the files share no project name
     files = zipfile.ZipFile(io.BytesIO(r.content))
     assert sorted(files.namelist()) == ["services.orca.ifc", "structure.orca.ifc"]
     out = ifcopenshell.file.from_string(files.read("services.orca.ifc").decode())
@@ -93,6 +94,15 @@ def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypat
     moved = ifcopenshell.file.from_string(files.read("structure.orca.ifc").decode())
     x = ifcopenshell.util.placement.get_local_placement(moved.by_guid(other_beam).ObjectPlacement)[0, 3]
     assert x == pytest.approx(0.5)                                                # the kept move, not the tried one
+
+
+def test_a_multi_file_export_is_named_for_its_project():
+    northbank = ["Northbank-Structure.ifc", "Northbank-MEP.ifc", "Northbank-Architecture.ifc", "Northbank-Site.ifc"]
+    assert app_module.export_zip_name(northbank) == "Northbank-orca.zip"
+    assert app_module.export_zip_name(["PC-03-Palletising-Cell-RevA.step"]) == "PC-03-Palletising-Cell-RevA-orca.zip"
+    assert app_module.export_zip_name(["services.ifc", "structure.ifc"]) == "orca-export.zip"
+    assert app_module.export_zip_name(['Block "A"/1-MEP.ifc', 'Block "A"/1-Structure.ifc']) == "Block -A-1-orca.zip"
+    assert app_module.export_zip_name([]) == "orca-export.zip"
 
 
 def test_a_page_can_reopen_a_scene_the_server_still_holds(tmp_path, monkeypatch):

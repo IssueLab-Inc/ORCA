@@ -7,6 +7,7 @@ import io
 import json
 import os
 import queue
+import re
 import shutil
 import tempfile
 import threading
@@ -33,7 +34,7 @@ from . import (agents, built, chat, context_planner, detect, document, edits, es
                requirements, settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, load_env, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id
-from .service import MODEL_SUFFIXES, MODELS, Workspace
+from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
 
 load_env()  # the repo's .env, before anything reads a setting (caps, owner token); real environment variables win
 app = FastAPI(title="ORCA")
@@ -849,7 +850,8 @@ def fix_apply(scene_id: str, body: FixApply):
 
 @app.get("/api/scenes/{scene_id}/export")
 def export(scene_id: str):
-    """The edited file. With edits in several discipline files, they come back as one zip."""
+    """The edited file. With edits in several discipline files (or a STEP model's STEP and IFC), they come back as one
+    zip named for the project, `<project>-orca.zip` ("Northbank-orca.zip"), else `orca-export.zip`."""
     _tidy_exports()
     out = EXPORTS / scene_id
     out.mkdir(exist_ok=True)
@@ -858,8 +860,14 @@ def export(scene_id: str):
         raise HTTPException(409, "Nothing has been changed yet. Accept a fix first.")
     if len(paths) == 1:
         return FileResponse(paths[0], filename=paths[0].name, media_type="application/octet-stream")
-    archive = shutil.make_archive(str(EXPORTS / f"{scene_id}-sightline"), "zip", out)
-    return FileResponse(archive, filename=Path(archive).name, media_type="application/zip")
+    archive = shutil.make_archive(str(EXPORTS / f"{scene_id}-orca"), "zip", out)
+    return FileResponse(archive, filename=export_zip_name(ws.names.get(scene_id, [])), media_type="application/zip")
+
+
+def export_zip_name(files: list[str]) -> str:
+    """The download name of a multi-file export: the project's name (`service.project_name`), safe in a file name."""
+    project = re.sub(r"[^A-Za-z0-9._ -]+", "-", project_name(files) or "").strip(" .-")
+    return f"{project}-orca.zip" if project else "orca-export.zip"
 
 
 def _report(report_id: str):
@@ -1463,7 +1471,8 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
     def work():
         try:
             doc = _build_document(report, verdicts, body.scene_id if scene is not None else None, body.scope, teams=body.teams, evidence=body.evidence,
-                                  reviews=body.reviews, marks=body.marks, bcf=body.bcf, emit=events.put)
+                                  reviews=body.reviews, marks=body.marks, bcf=body.bcf, emit=events.put,
+                                  triage_info=job.info if job is not None else None)
             events.put({"type": "ready", "url": doc["path"], "name": doc["name"], "bytes": doc["bytes"]})
         except Exception as e:
             events.put({"type": "error", "message": f"Could not build the report: {type(e).__name__}: {e}"})
@@ -1480,13 +1489,15 @@ def document_stream(report_id: str, body: DocumentRequest, request: Request):
 
 def _build_document(report, verdicts: dict, scene_id: str | None, scope: str, *, teams: dict | None = None,
                     evidence: dict | None = None, reviews: dict | None = None, marks: dict | None = None,
-                    bcf: bool = True, emit=None) -> dict:
-    """Build a report and keep it for download: {path (the download route), name, bytes, file (a local copy)}."""
+                    bcf: bool = True, emit=None, triage_info: dict | None = None) -> dict:
+    """Build a report and keep it for download: {path (the download route), name, bytes, file (a local copy)}.
+    `triage_info`: the triage run's model, which the PDF names (none: the one triage would run on now)."""
     scene = ws.scene(scene_id) if scene_id and scene_id in ws.scenes else None
     matches = ws.match(report.id, scene_id) if scene is not None else None
     data, name, media = document.generate(
         report, verdicts, ws.model, scope=scope, model_teams=teams or {}, matches=matches, scene=scene,
-        evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None))
+        evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None),
+        triage_info=triage_info)
     doc_id = uuid.uuid4().hex
     _documents[doc_id] = (data, name, media)
     while len(_documents) > 24:
@@ -1694,7 +1705,7 @@ def mcp_hooks() -> mcp_server.Hooks:
         verdicts = dict(job.results) if job is not None and job.done else {}
         if len(verdicts) < len(report.clashes) // 2:
             raise RuntimeError("Triage the report first (the triage tool): the report sorts clashes by its verdicts.")
-        return _build_document(report, verdicts, scene_id, scope)
+        return _build_document(report, verdicts, scene_id, scope, triage_info=job.info if job is not None else None)
 
     return mcp_server.Hooks(
         links=links, charge=charge, escalate=escalate, allow_call=lambda link: agent_call_limit.take(link.id),
