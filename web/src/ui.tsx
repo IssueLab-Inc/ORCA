@@ -35,13 +35,18 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
     document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", esc); };
   }, [open]);
-  // Kept inside the window: a menu that would run off the right edge opens to the left of its trigger's edge instead.
+  // Kept inside the window: a menu that would run off the right edge opens to the left of its trigger's edge instead, and
+  // one that would run off the bottom moves up (scrolling inside when taller than the window). Nothing on the page
+  // clips it, so past the bottom it would make the whole page scroll.
   useLayoutEffect(() => {
     const m = menu.current;
     if (!open || !m || getComputedStyle(m).position === "fixed") return;
-    m.style.translate = "";
-    const over = m.getBoundingClientRect().right - (window.innerWidth - 8);
-    if (over > 0) m.style.translate = `${-Math.round(over)}px 0`;
+    m.style.translate = ""; m.style.maxHeight = ""; m.style.overflowY = "";
+    const r = m.getBoundingClientRect();
+    const overX = r.right - (window.innerWidth - 8), overY = r.bottom - (window.innerHeight - 8);
+    const up = overY > 0 ? Math.min(overY, Math.max(r.top - 8, 0)) : 0;
+    if (overX > 0 || up > 0) m.style.translate = `${overX > 0 ? -Math.round(overX) : 0}px ${-Math.round(up)}px`;
+    if (r.height > window.innerHeight - 16) { m.style.maxHeight = `${window.innerHeight - 16}px`; m.style.overflowY = "auto"; }
   }, [open]);
   const close = () => setOpen(false);
   // On a phone the menu is a sheet over the whole page, so it goes to the body: inside the viewer's rail it would sit

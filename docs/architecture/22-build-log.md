@@ -1082,3 +1082,27 @@ Review of the drawing views (Oct 30; PR review on `feature/drawing-views`; code 
   squeezed to nothing, maximise outside the header). It now folds (range words, then pin / go / fit into the range
   menu) and the picker shrinks last; the title block and scale bar stack when they would meet. Checked in Chromium in
   Quad at 1600, 1366 and 1180 px: no control outside its header in any pane.
+
+Drawing views after the live smoke test (Oct 30; owner's smoke test of the deploy; code `web/src/viewer/drawing.ts`,
+`Viewer.ts`, `annotate.ts`, `web/src/ui.tsx`, `App.tsx`):
+- **The viewer went blank** (a lost WebGL context, the owner's screenshot: every WebGL picture gone, the 2D layers
+  left): each drawing pane's targets were 4× multisampled, about 90 MB a pane at 2× pixels on a large screen. Drawings
+  now have no multisampling (they differ from before by a pixel at some edges), a pane hidden by a maximised one gives
+  its targets back, and the edge styles' targets go when the style does. A lost context is announced on the stage and
+  every pane is drawn again when it comes back (a reload offered after 5 s); captures return nothing meanwhile and the
+  thumbnail queue waits, so no black pictures reach the list or the server.
+- **Panning a drawing stuttered:** every pointer move redrew it. A pan or zoom now moves the last picture and draws once
+  it rests; a view that cuts starts its camera at the cut (nothing above a plan's cut, nothing behind a section line is
+  drawn) and the passes that clip at a bottom or far clip stop there; a pane composites only when its picture changes.
+- **Blinking:** a resize cleared the canvas after the frame's drawing; the canvas is now resized only when its size
+  changes, and drawn again at once.
+- **The plan's 3D camera mark changed size** as the orbit point moved to what was under the pointer: it is now a fixed
+  size.
+- **The page scrolled** with a rail menu open (the Visibility list, the Camera and Views menus on shorter windows):
+  menus now stay inside the window, moving up and scrolling inside when taller.
+- **Checked** in Chromium on Northbank (software GL): panning a plan, 60 moves, no redraws while it goes on and one at
+  rest; ten wheel steps, one redraw after; orbiting the 3D, no drawing redraws or composites; a context lost and
+  restored with `WEBGL_lose_context`: the notice, then every pane back with the same content, no black thumbnails;
+  A/B/C, thumbnails, `capture()` and Show it built's passes still byte-identical in Single and Quad; the rail menus at
+  1600×1000, 1440×800 and 1366×700 leave the page its height; drawings at rest match the merged build in the section,
+  elevation and 3D panes (no multisampling aside) and in the plan apart from the camera mark; 102 web tests.

@@ -2258,6 +2258,7 @@ export function App() {
     thumbTimer.current = window.setTimeout(() => {
       thumbTimer.current = null;
       if (thumbPaused.current || !viewer.current) return;
+      if (viewer.current.lost) { thumbTimer.current = window.setTimeout(() => { thumbTimer.current = null; pumpThumbs(); }, 1000); return; }   // no context: wait for it
       const next = thumbQueue.current.pop();
       if (!next) return;
       const { report: r, matches: ms } = thumbSource.current;

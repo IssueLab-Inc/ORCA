@@ -80,7 +80,9 @@ export function annotate(g: CanvasRenderingContext2D, dpr: number, a: AnnotateIn
       const c = a.camera3d, P = px(c.position), T = px(c.target);
       const d = T.clone().sub(P);
       if (d.length() > 2) {
-        const len = Math.min(Math.max(d.length(), 40), 160), ang = Math.atan2(d.y, d.x), half = THREE.MathUtils.degToRad(c.fov) * 0.6;
+        // A fixed size: the 3D view's orbit point moves to what is under the pointer at each press, and a mark as long as
+        // the distance to it jumped about while the camera itself barely moved.
+        const len = 48, ang = Math.atan2(d.y, d.x), half = THREE.MathUtils.degToRad(c.fov) * 0.6;
         g.save(); g.strokeStyle = "#2f8fdf"; g.fillStyle = "rgba(47,143,223,.12)"; g.lineWidth = 1.2;
         g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(P.x + Math.cos(ang - half) * len, P.y + Math.sin(ang - half) * len);
         g.lineTo(P.x + Math.cos(ang + half) * len, P.y + Math.sin(ang + half) * len); g.closePath(); g.fill(); g.stroke();

@@ -77,7 +77,7 @@ export interface Pick { globalId: string; point: THREE.Vector3 }
  * clash may move it. A drawing pane has its DrawingView. */
 export interface Pane { spec: ViewSpec; el: HTMLDivElement; rect: Rect; pinned: boolean; view: DrawingView | null;
   /** What its annotation layer was last drawn for, and the marks on it a user can drag. */
-  annotated?: string; handles?: Handle[] }
+  annotated?: string; handles?: Handle[]; composed?: string }
 
 /** Classes that stay where they are (the server's FIXED_CLASSES): a clash's section runs along the other side. */
 const FIXED = /^Ifc(Beam|Column|Slab|Wall|WallStandardCase|Footing|Member|Plate)$/;
@@ -197,6 +197,10 @@ export class Viewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.localClippingEnabled = true;
     host.appendChild(this.renderer.domElement);
+    // The graphics card can take the context away (short of memory, a driver reset). three.js takes it back when the
+    // browser restores it; every pane is then drawn again, and meanwhile the stage says what happened.
+    this.renderer.domElement.addEventListener("webglcontextlost", () => this.contextLost(true));
+    this.renderer.domElement.addEventListener("webglcontextrestored", () => this.contextLost(false));
     this.pane3d = document.createElement("div");
     this.pane3d.className = "view-pane view-3d";
     this.pane3d.hidden = true;   // until models are open: the start page and the project's own page sit there
@@ -861,6 +865,7 @@ export class Viewer {
    * crops Navisworks pictures works on these too. The view is put back as it was. Null when either element has no
    * geometry here. */
   captureClash(a: string, b: string, side = 768): { A: string; B: string; C: string } | null {
+    if (this.lost) return null;   // asked again later: never black pictures on the server
     return this.posed(a, b, (shot, turn) => {
       const A = shot("isolate", true, side), B = shot("context", false, side);
       turn();
@@ -870,6 +875,7 @@ export class Viewer {
 
   /** A small picture of a clash for the list (view A's recipe, as a JPEG), taken off screen like `captureClash`. */
   thumbClash(a: string, b: string, side = 192): string | null {
+    if (this.lost) return null;
     return this.posed(a, b, (shot) => shot("isolate", true, side, "image/jpeg"));
   }
 
@@ -885,6 +891,7 @@ export class Viewer {
    *   antialiasing) and view-space normals. Null when there is nothing to frame. */
   captureBuilt(fix: { kind: string; moved: string[]; deltaM: number[]; pieces: BuiltPiece[] | null; applied: boolean },
     pair: [string, string], classOf: (gid: string) => string | undefined, radius = 3, side = 1024): BuiltPasses | null {
+    if (this.lost) return null;
     const version = this.version;   // everything is put back: the drawings need not redraw
     try { return this.fullCanvas(() => this.builtPasses(fix, pair, classOf, radius, side)); } finally { this.version = version; this.drawFrame(); }
   }
@@ -1525,13 +1532,14 @@ export class Viewer {
   /** Place the panes for the layout and the split, and give the 3D camera its pane's shape. */
   private layoutPanes() {
     const W = this.host.clientWidth || 1, H = this.host.clientHeight || 1;
+    this.canvasStamp++;   // panes move (a maximised one covered the rest): each composites again
     const shown = new Set(this.visiblePanes());
     const rects = paneRects(this.maximised != null ? "single" : this.layout, W, H, this.split);
     let k = 0;
     for (const pane of this.panes) {
       const on = shown.has(pane);
       pane.el.style.display = on ? "" : "none";
-      if (!on) continue;
+      if (!on) { pane.view?.dispose(); continue; }
       const before = pane.rect;
       pane.rect = rects[k++] ?? { x: 0, y: 0, w: W, h: H };
       Object.assign(pane.el.style, { inset: "auto", left: `${pane.rect.x}px`, top: `${pane.rect.y}px`, width: `${pane.rect.w}px`, height: `${pane.rect.h}px` });
@@ -1585,6 +1593,7 @@ export class Viewer {
       }
       if (e.button === 2) right = { x: e.clientX, y: e.clientY };
       down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      view.held = true;
       el.setPointerCapture(e.pointerId);
       if (down.size === 2) { const [a, b] = [...down.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); }
     });
@@ -1614,6 +1623,7 @@ export class Viewer {
       if (e.button === 2 && right && Math.hypot(e.clientX - right.x, e.clientY - right.y) < 4) this.lookHere(pane, e);
       if (e.button === 2) right = null;
       down.delete(e.pointerId); if (down.size < 2) pinch = 0;
+      view.held = down.size > 0;
     };
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
@@ -1630,6 +1640,7 @@ export class Viewer {
   private dragHandle(pane: Pane, h: Handle, at: THREE.Vector2, snap: boolean) {
     const view = pane.view!, target = this.panes[h.pane];
     if (!target?.view) return;
+    target.view.lastMove = performance.now(); target.view.moved = true;   // a drag: the view it reshapes draws a few times a second, then once at rest
     const w = view.fromPane(at.x, at.y, pane.rect), [x, y, z] = toIfc(w);
     const spec = target.spec as DrawingSpec;
     if (spec.kind === "section") {
@@ -1673,22 +1684,41 @@ export class Viewer {
     const view = pane.view!, r = this.renderer, dpr = r.getPixelRatio();
     view.updateCamera(pane.rect, this.sceneDiag() * 2 + 10);
     const [rt, nrt] = view.target(Math.max(1, Math.round(g.w * dpr)), Math.max(1, Math.round(g.h * dpr)));
-    const key = `${this.version}|${view.cameraKey(pane.rect)}|${this.drawingsFollow}|${this.hiddenModels.size}`;
-    if (view.drawn !== key) {
+    // Draw again when what it shows changed. A pan or zoom alone only moves the last picture (the composite's shift)
+    // while it goes on, and draws once it rests: a drawing is several passes over the model, too slow for every pointer
+    // move. A drag that reshapes the view (a cut, a section line) draws at most five times a second while it goes on.
+    const content = `${this.version}|${view.contentKey(pane.rect)}|${this.drawingsFollow}|${this.hiddenModels.size}`;
+    if (view.moved) { view.moved = false; view.quiet = 0; } else view.quiet++;
+    // A gesture goes on while a pointer holds the pane or the view moved in the last few frames (frames, not only time:
+    // on a slow machine one frame outlasts any delay).
+    const now = performance.now(), busy = view.held || view.quiet < 3 || now - view.lastMove < 150;
+    const moved = !view.shown || !view.shown.center.equals(view.center) || view.shown.scale !== view.scale;
+    const due = view.drawn !== content ? !busy || now - view.lastDraw > 200 : moved && !busy;
+    if (due) {
       this.drawInto(view, rt, nrt);
-      view.drawn = key;
+      view.drawn = content;
+      view.shown = { center: view.center.clone(), scale: view.scale };
+      view.lastDraw = now;
       r.setViewport(g.x, g.y, g.w, g.h);
       r.setScissor(g.x, g.y, g.w, g.h);
       r.setScissorTest(true);
     }
+    const shift = view.shift(pane.rect);
+    // The canvas keeps what each pane last showed (preserveDrawingBuffer): composite again only when that changes.
+    const crop = view.crop ? view.crop.map((c) => view.toPane(c, pane.rect)) : null;
+    const composed = [view.drawn, view.lastDraw, shift.scale, shift.x, shift.y, g.x, g.y, g.w, g.h, this.canvasStamp,
+      crop?.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(";")].join("|");
+    if (pane.composed === composed) return;
+    pane.composed = composed;
     const u = this.drawStyle.composite.uniforms;
+    u.shiftScale.value = shift.scale; u.shiftAt.value.set(shift.x, shift.y);
     u.color.value = rt.texture; u.normals.value = nrt.texture; u.depth.value = nrt.depthTexture;
     u.texel.value.set(1 / rt.width, 1 / rt.height);
     u.near.value = view.camera.near; u.far.value = view.camera.far; u.ortho.value = 1;
     u.tol.value = view.scale * 3; u.cutWidth.value = 1.5 * dpr; u.edges.value = 1;
     // The crop, as a share of the pane (texture coordinates: y up).
-    if (view.crop) {
-      const px = view.crop.map((c) => view.toPane(c, pane.rect));
+    if (crop) {
+      const px = crop;
       u.cropMin.value.set(Math.min(...px.map((q) => q.x)) / pane.rect.w, 1 - Math.max(...px.map((q) => q.y)) / pane.rect.h);
       u.cropMax.value.set(Math.max(...px.map((q) => q.x)) / pane.rect.w, 1 - Math.min(...px.map((q) => q.y)) / pane.rect.h);
     } else { u.cropMin.value.set(0, 0); u.cropMax.value.set(1, 1); }
@@ -1726,6 +1756,7 @@ export class Viewer {
         r.autoClear = false;
         scene.background = null;
         r.clippingPlanes = [view.cut];
+        view.reach(true);   // every solid the cut passes through, whole, past a bottom or a far clip
         cam.layers.set(CAP_LAYER.rest);
         for (const m of st.counting) { scene.overrideMaterial = m; r.render(scene, cam); }
         scene.overrideMaterial = null;
@@ -1739,6 +1770,7 @@ export class Viewer {
         cam.layers.set(0);
         const preview = this.overlay.children.find((o) => (o as THREE.Mesh).isMesh && !((o as THREE.Mesh).material as THREE.Material).transparent) as THREE.Mesh | undefined;
         st.drawCaps(r, preview ? ((preview.material as THREE.MeshStandardMaterial).color ?? null) : null);
+        view.reach(false);
         r.autoClear = auto;
       }
       // The pair where something hides it: faint, over what is in front (the colour pass's depth is still there).
@@ -1768,6 +1800,7 @@ export class Viewer {
     } finally {
       scene.overrideMaterial = null;
       cam.layers.set(0);
+      view.reach(false);
       for (const o of hiddenForNormals) o.visible = true;
       r.autoClear = auto;
       r.setRenderTarget(null);
@@ -1785,7 +1818,11 @@ export class Viewer {
    * viewport, already set. */
   private render3d(cam: THREE.Camera, g: Rect) {
     const r = this.renderer;
-    if ((this.style !== "edges" && this.style !== "hidden") || this.lifted) { r.render(this.scene, cam); return; }
+    if ((this.style !== "edges" && this.style !== "hidden") || this.lifted) {
+      if (this.styled && !this.lifted) { for (const t of this.styled) t.dispose(); this.styled = null; }   // their memory back
+      r.render(this.scene, cam);
+      return;
+    }
     const st = this.drawStyle, scene = this.scene, dpr = r.getPixelRatio();
     const w = Math.max(1, Math.round(g.w * dpr)), h = Math.max(1, Math.round(g.h * dpr));
     if (!this.styled || this.styled[0].width !== w || this.styled[0].height !== h) this.styled = targets(w, h, ...(this.styled ?? []));
@@ -1840,6 +1877,7 @@ export class Viewer {
     u.tol.value = persp ? 0.015 : ((this.ortho.top - this.ortho.bottom) / g.h) * 3;
     u.cutWidth.value = 0; u.edges.value = 1;
     u.cropMin.value.set(0, 0); u.cropMax.value.set(1, 1);
+    u.shiftScale.value = 1; u.shiftAt.value.set(0, 0);
     st.drawComposite(r);
     // The 3D view's helpers (marker, outlines through walls, grips, measure) over the drawing.
     const auto = r.autoClear, layers = cam.layers.mask;
@@ -2262,6 +2300,7 @@ export class Viewer {
     this.renderer.setScissorTest(false);
     this.renderer.setViewport(0, 0, W, H);
     this.renderer.clippingPlanes = [];
+    this.canvasStamp++;   // the shot covers every pane: each composites again when the view is drawn back
     if (Math.abs(aspect - W / H) > 1e-9) { this.camera.aspect = W / H; this.camera.updateProjectionMatrix(); }
     try { return take(); } finally {
       if (this.camera.aspect !== aspect) { this.camera.aspect = aspect; this.camera.updateProjectionMatrix(); }
@@ -2282,6 +2321,7 @@ export class Viewer {
   /** A small JPEG of the 3D view (for reports): the centre square, `side` pixels across, without the user's style,
    * filters, hides or selection. */
   capture(side = 640): string {
+    if (this.lost) return "";   // a black picture otherwise
     const lifted = this.lifted, grips = this.grips.visible, version = this.version;
     this.lifted = true; this.grips.visible = false;
     this.applyMode();
@@ -2319,11 +2359,52 @@ export class Viewer {
     this.measureLabel.remove();
   }
 
+  /** The stage changed size. Resizing the canvas clears it, so only when its size really changed, and then everything
+   * is drawn again at once: this runs after the frame's own drawing and before the browser paints, and a cleared
+   * canvas would show as a blank frame (the viewer blinking off and on). */
   private fit() {
     const w = this.host.clientWidth || 1;
     const h = this.host.clientHeight || 1;
-    this.renderer.setSize(w, h, false);
+    const now = this.renderer.getSize(new THREE.Vector2());
+    if (now.x !== w || now.y !== h) { this.renderer.setSize(w, h, false); this.canvasStamp++; }
     this.layoutPanes();
+    this.drawFrame();
+  }
+  /** Bumped whenever something draws over the whole canvas or clears it: panes composite again. */
+  private canvasStamp = 0;
+
+  /** No WebGL context (the graphics card took it away): captures return nothing rather than a black picture. */
+  get lost(): boolean { return this.renderer.getContext().isContextLost(); }
+
+  private lostNote: HTMLDivElement | null = null;
+  private lostTimer = 0;
+  /** The WebGL context went (`lost`) or came back. Back, everything on the graphics card is new: draw every pane again.
+   * Not back within a few seconds: offer a reload (the page picks up the session where it was). */
+  private contextLost(lost: boolean) {
+    clearTimeout(this.lostTimer);
+    this.lostNote?.remove();
+    this.lostNote = null;
+    if (!lost) {
+      this.version++;
+      this.canvasStamp++;
+      this.styled = null;
+      for (const p of this.panes) { p.composed = undefined; if (p.view) { p.view.drawn = ""; p.view.shown = null; } }
+      return;
+    }
+    const note = document.createElement("div");
+    note.className = "view-lost";
+    note.setAttribute("role", "status");
+    note.textContent = "The graphics card dropped the 3D view. Bringing it back…";
+    this.host.appendChild(note);
+    this.lostNote = note;
+    this.lostTimer = window.setTimeout(() => {
+      note.textContent = "The graphics card has not given the 3D view back. Fewer views use less of its memory.";
+      const reload = document.createElement("button");
+      reload.className = "btn small";
+      reload.textContent = "Reload";
+      reload.addEventListener("click", () => location.reload());
+      note.appendChild(reload);
+    }, 5000);
   }
 }
 
