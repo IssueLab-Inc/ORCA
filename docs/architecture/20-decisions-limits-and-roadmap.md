@@ -3,7 +3,7 @@
 > **Covers:** `CLAUDE.md` ("Rules", "Stack and why", "Status and next steps"), `AGENTS.md`, `BUILT_DURING_HACKATHON.md`,
 > the "Not yet" sections of the feature designs, and the code that enforces each limit (`server/sightline/edits.py`,
 > `context_eval.py`, `hosts.py`, `document.py`, `service.py`, `deploy/modal_app.py`) · **Checked against code:**
-> 2026-10-30 (`104fda9`) · **Deeper design:** [docs/edits.md](../edits.md), [docs/escalation.md](../escalation.md),
+> 2026-10-30 (`feature/brand-assets`, based on `0390a12`) · **Deeper design:** [docs/edits.md](../edits.md), [docs/escalation.md](../escalation.md),
 > [docs/show-it-built.md](../show-it-built.md), [docs/uploads.md](../uploads.md), [docs/mcp.md](../mcp.md)
 
 ORCA was built in nine days for a hackathon, so many choices were made fast and on purpose: some by the owner,
@@ -84,6 +84,12 @@ carries the decision today.
 | Oct 29–30 | Drawing views beside 3D: up to four panes (Single, Two, Quad), plans, a section and elevations drawn like CAD; a toggle for whether drawings follow the 3D view's Context / Isolate or show the whole model; clip planes the user sets (a plan's cut and bottom, a section's line, far clip and crop) | `ViewPanes.tsx`, `viewer/drawing.ts`, `viewer/annotate.ts`, `Viewer.setLayout` / `setDrawingsFollow`; [docs/views.md](../views.md), [13](13-3d-viewer.md) |
 | Oct 30 (request) | Measure in every view (3D and each drawing, on the drawing's plane), with snapping to ends, midpoints and edges (a toggle), several measurements to delete or clear, copied to the clipboard; the rail's 3D-only tools in the 3D pane when there are several panes | `viewer/measure.ts`, `Viewer.measureClick` / `snapAt`, `MeasurePanel.tsx`, `ViewerToolbar` (`Rail3d`); [docs/measure.md](../measure.md) |
 | Oct 30 | Navigate the model with or without a clash: leave a clash (Esc, the chip's ✕), CAD-style 3D (view cube, orthographic, styles, visibility by model, class and level, hide and isolate); a picked clash shows in every open view, and clicking a clash takes every view to it by default (Fly to clash) | `leaveClash`, `views.escStep`, `viewer/cube.ts`, `Viewer.setStyle` / `setFilters` / `setTemporary`, `Viewer.clashViews`; [docs/views.md](../views.md) |
+
+**Oct 30, owner decision:** approved direction **05 / ORCA Type** (custom wordmark and split-O symbol), then the full
+asset and motion pack, and requested its repository PR and merge for the upcoming application redesign. The approved
+library is [`assets/brand/orca/`](../../assets/brand/orca/README.md), documented in [docs/brand-assets.md](../brand-assets.md).
+This slice stores the library for that redesign; it does not integrate or deploy a new interface. Decision inventory
+checked 2026-10-30 against `0390a12` plus this slice.
 
 ## Tried and dropped
 

@@ -1109,6 +1109,21 @@ Drawing views after the live smoke test (Oct 30; owner's smoke test of the deplo
 - **Esc closed a menu and left the clash** (found in the live check after the deploy): with a rail or pane menu open,
   Esc now closes only the menu (`Popover` stops the key there, before `App`'s window listener).
 
+Approved identity and motion library (Oct 30, owner request; `assets/brand/orca/`, design in
+`docs/brand-assets.md`):
+- **Identity:** owner selected direction 05 / ORCA Type: custom geometric wordmark and split-O symbol. Added the
+  shared vector master, outlined SVGs, transparent PNGs, icon/favicons, maskable variants, print PDF/EPS, social/video
+  graphics, palette tokens, approved concept reference and usage guide for the upcoming redesign.
+- **Motion:** Orbit, Breathe and Resolve loading loops, a demonstrative four-phase cycle, Settle and Reveal;
+  animated SVG, transparent APNG and GIF previews; dependency-free native elements and React TypeScript wrappers.
+  Production phases follow real events, one-shot effects settle, and web motion honours reduced-motion preferences.
+- **Repository handoff:** kept outside the served application; locked generator dependencies, one geometry source,
+  portable browser selection, ignored intermediate/archive directories, and reproducible build/check commands.
+- **Checked:** production web build; 102 web tests; 9 architecture-map tests; strict React wrapper type check;
+  actual gallery/native-element/standalone-SVG browser checks (motion, pause, size/speed/theme, accessible labels,
+  safe dynamic text, real phase control, one-shot final states, reduced motion, 320/390/768 px and desktop layouts);
+  static and motion export validation. The pack is ready for integration in a subsequent application redesign.
+
 Measure in every view, and the rail split (Oct 30; owner request; design [docs/measure.md](../measure.md); code
 `web/src/viewer/measure.ts`, `Viewer.ts`, `web/src/MeasurePanel.tsx`, `ViewerToolbar.tsx`, `App.tsx`):
 - **Measure everywhere:** M works in the 3D view and in every drawing. In a drawing both points lie on its plane (a

@@ -1,0 +1,10 @@
+:root {
+  --orca-ink: #11161B;
+  --orca-navy: #052640;
+  --orca-white: #FFFFFF;
+  --orca-paper: #F5F7F8;
+  --orca-line: #DDE3E7;
+  --orca-muted: #52636E;
+  --orca-font-support: "Segoe UI", Arial, sans-serif;
+  --orca-clearspace-ratio: 0.25;
+}
