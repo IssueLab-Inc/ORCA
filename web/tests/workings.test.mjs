@@ -17,7 +17,7 @@ function runOf(kind, events, { origin = "you", end = true, error = null, meta = 
 }
 const recording = async (name) => JSON.parse(await readFile(new URL(`../public/tour/${name}`, import.meta.url), "utf8")).events;
 const step = (g, id) => g.steps.find((s) => s.id === id);
-const texts = (parts) => parts.map((p) => p.text ?? p.items?.map((i) => i.text).join(" | ") ?? "").join(" / ");
+const texts = (parts) => parts.map((p) => p.text ?? p.items?.map((i) => [i.text, i.note].filter(Boolean).join(" ")).join(" | ") ?? "").join(" / ");
 
 test("the run log keeps each run's events with when they arrived, ends a run once, and keeps the last few", () => {
   let now = 1000;
@@ -134,4 +134,91 @@ test("a later round reads why the first failed; a stopped run and a recommendati
     { type: "result", options: [], attempts: [], recommendation: { title: "Lower the duct 200 mm", rationale: "Structure may not move" } }]));
   assert.equal(step(rec, "options").title, "A recommendation");
   assert.equal(step(rec, "stop"), undefined); assert.equal(step(rec, "better"), undefined);
+});
+
+test("a recorded root cause (the girder) draws the cause, a row per service with its checks, and the plan checked as a whole", async () => {
+  const g = workings.graphOf(runOf("plan", await recording("girder-plan.json"), { origin: "replay", meta: { kind: "root_cause" } }));
+  assert.deepEqual(g.lanes.map((l) => l.id), ["you", "muse", "orca", "it0", "it1", "it2"]);
+  assert.deepEqual(g.lanes.slice(3).map((l) => l.label), ["Supply air main L02", "Cable tray L02", "Cold water main L02 DN54"]);
+  assert.match(texts(step(g, "cause").body), /routed in a Level 02 service zone/);
+  assert.equal(step(g, "cause").time, "6.8 s");
+  assert.match(texts(step(g, "jobs").body), /not in the report/);
+  assert.deepEqual(["it0-c0", "it0-c1", "it0-c2"].map((id) => step(g, id).status), ["ok", "fail", "ok"]);
+  assert.equal(step(g, "it1-c2"), undefined, "the tray tried two ideas");
+  assert.equal(step(g, "it2-d").title, "Kept for the plan");
+  assert.match(texts(step(g, "it2-d").detail), /53 mm clear in the plan/);
+  assert.equal(step(g, "check").status, "ok");
+  assert.equal(step(g, "plan").title, "Plan: 3 verified fixes");
+  assert.ok(["it0-d", "it1-d", "it2-d"].every((id) => g.edges.some((e) => e.from === id && e.to === "check" && e.win)));
+  const cols = new Set(["it0-d", "it1-d", "it2-d"].map((id) => step(g, id).col));
+  assert.equal(cols.size, 1, "the rows end in one column");
+  const mid = workings.graphOf(runOf("plan", await recording("girder-plan.json"), { meta: { kind: "root_cause" } }), 20);
+  assert.equal(step(mid, "it0-t").status, "run"); assert.equal(step(mid, "it1-t").status, "done");
+  assert.equal(step(mid, "check"), undefined);
+});
+
+test("triage counts what rules settled, the model's calls and the verdicts, and carries clashes along while it runs", () => {
+  const events = [
+    { type: "start", total: 6, model: "meta-models/muse-spark-open", open_weights: true },
+    { type: "clash", id: "c1", verdict: "by_design", source: "rule", basis: "touch" },
+    { type: "clash", id: "c2", verdict: "non_physical", source: "rule", basis: "non_physical" },
+    { type: "reasoning", id: "c3", text: "The duct runs through " }, { type: "reasoning", id: "c4", text: "Bolt in its plate" },
+    { type: "reasoning", id: "c3", text: "the girder's web." },
+    { type: "clash", id: "c3", verdict: "real_clash", source: "model", seconds: 3 },
+    { type: "clash", id: "c4", verdict: "by_design", source: "model", alike: 3, seconds: 2 },
+    { type: "clash", id: "c5", verdict: "by_design", source: "model", alike_of: "c4", alike: 3 },
+    { type: "clash", id: "c6", verdict: "by_design", source: "model", alike_of: "c4", alike: 3 },
+    { type: "done", summary: {}, seconds: 11 },
+  ];
+  const mid = workings.graphOf(runOf("triage", events, { end: false, meta: { names: { c3: "#3 Supply air main × girder" } } }), 6.5);
+  assert.equal(step(mid, "pool").status, "run");
+  assert.deepEqual(step(mid, "pool").detail[0].rows.map((r) => r.title), ["#3 Supply air main × girder", "c4"]);
+  assert.match(step(mid, "pool").detail[0].rows[0].note, /through the girder's web/);
+  assert.ok(mid.flows.length >= 3, "clashes on their way while it runs");
+  const g = workings.graphOf(runOf("triage", events));
+  assert.equal(step(g, "start").title, "Triage all 6 clashes");
+  assert.match(texts(step(g, "rules").body), /2 clashes/);
+  assert.match(texts(step(g, "rules").detail), /a touch within 1 mm 1 · not physical 1/);
+  assert.match(texts(step(g, "alike").body), /3 clashes in 1 group/);
+  assert.equal(step(g, "pool").title, "2 calls read");
+  const bars = step(g, "verdicts").body[0].rows;
+  assert.deepEqual(bars.map((r) => [r.label, r.n]), [["Real", 1], ["By design", 4], ["Not physical", 1], ["Modelling error", 0]]);
+  assert.match(texts(step(g, "done").body), /1 real clash of 6/);
+  assert.equal(g.rows[2].subs, 2, "two calls overlapped");
+});
+
+test("Show it built draws each round, the gate's numbers, the judges and the retry, then the picture kept", () => {
+  const g = workings.graphOf(runOf("built", [
+    { type: "drawing", round: 1, pictures: 2 },
+    { type: "gate", round: 1, picture: 0, f: 0.71, tile: 0.24, passed: true }, { type: "gate", round: 1, picture: 1, f: 0.49, tile: 0.3, passed: false },
+    { type: "judging", round: 1, picture: 0 }, { type: "judged", round: 1, picture: 0, verdicts: ["faithful", "unfaithful"] },
+    { type: "retry", why: "a second web opening" },
+    { type: "drawing", round: 2, pictures: 2 }, { type: "gate", round: 2, picture: 0, f: 0.74, tile: 0.21, passed: true },
+    { type: "judging", round: 2, picture: 0 }, { type: "judged", round: 2, picture: 0, verdicts: ["faithful", "faithful"] },
+    { type: "result", status: "done", image_url: "/api/built/x.jpg", gate: { f: 0.74, tile: 0.21 }, judge: "Muse Wonder", seconds: 68, tried: 3 },
+  ], { meta: { look: "data:image/png;base64,AA" } }));
+  assert.deepEqual(g.lanes.map((l) => l.id), ["you", "orca", "image", "judges"]);
+  assert.match(texts(step(g, "gate1").body), /✓ F 0\.71 · worst tile 0\.24 \| ✗ F 0\.49/);
+  assert.equal(step(g, "judge1").status, "fail"); assert.equal(step(g, "judge2").status, "ok");
+  assert.ok(g.edges.some((e) => e.to === "draw2" && e.kind === "feedback"));
+  assert.match(texts(step(g, "retry1").body), /a second web opening/);
+  assert.equal(step(g, "ready").body[0].src, "/api/built/x.jpg");
+  assert.equal(step(g, "capture").detail[0].src, "data:image/png;base64,AA");
+});
+
+test("ORCA's check draws each phase and test with its clashes, then what it found", () => {
+  const g = workings.graphOf(runOf("detect", [
+    { type: "phase", text: "Reading the models" }, { type: "phase", text: "Building geometry for 1732 elements" },
+    { type: "start", elements: 1732, tests: [{ id: "a", name: "MEP vs Structure", kind: "hard" }, { id: "b", name: "Architecture (within)", kind: "hard" }] },
+    { type: "test", index: 0, id: "a", name: "MEP vs Structure", candidates: 40 },
+    { type: "test_done", index: 0, coverage: { clashes: 3, seconds: 1.2, touching: 4 } },
+    { type: "test", index: 1, id: "b", name: "Architecture (within)", candidates: 90 },
+    { type: "test_done", index: 1, coverage: { clashes: 0, seconds: 0.8, touching: 0 } },
+    { type: "done", coverage: [{ clashes: 3 }, { clashes: 0 }], diff: { new: [], resolved: [], first: true }, elements: 1732, seconds: 4.1 },
+  ]));
+  assert.equal(step(g, "phase0").title, "Reading the models");
+  assert.equal(step(g, "test0").status, "fail"); assert.match(texts(step(g, "test0").body), /3 clashes/);
+  assert.equal(step(g, "test1").status, "ok");
+  assert.equal(step(g, "found").title, "3 clashes in 1,732 elements");
+  assert.match(texts(step(g, "found").body), /first check/);
 });

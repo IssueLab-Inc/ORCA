@@ -154,7 +154,8 @@ export function Workings({ inView = null }: { inView?: number | null }) {
   // Follow is read by handlers between renders: a ref beside the state the button shows.
   const following = useRef(true);
   const setFollowing = (on: boolean) => { following.current = on; setFollow(on); };
-  const rects = useRef(new Map<string, Rect>()), size = useRef({ w: 0, h: 0 });
+  const rects = useRef(new Map<string, Rect>()), size = useRef({ w: 0, h: 0 }), curves = useRef(new Map<string, number[][]>());
+  const dots = useRef<SVGGElement>(null);
   const live = !!run && run.ended === null;
   const at = !run ? 0 : replay ? replay.at : run.ended ?? Math.max(0, (now - run.started) / 1000);
   const graph = useMemo(() => (run ? graphOf(run, at) : null), [run, run?.version, at]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -243,7 +244,7 @@ export function Workings({ inView = null }: { inView?: number | null }) {
     for (const p of L.querySelectorAll<SVGPathElement>("path[data-edge]")) {
       const e = g.edges[Number(p.dataset.edge)], a = map.get(e.from), b = map.get(e.to);
       if (!a || !b) continue;
-      const c = curve(a, b, e.fa, e.ta); p.setAttribute("d", pathOf(c));
+      const c = curve(a, b, e.fa, e.ta); p.setAttribute("d", pathOf(c)); curves.current.set(`${e.from}>${e.to}`, c);
       const label = L.querySelector<SVGTextElement>(`text[data-edge="${p.dataset.edge}"]`);
       if (label) { const m = bez(c, 0.5); label.setAttribute("x", m[0].toFixed(1)); label.setAttribute("y", (m[1] - 6).toFixed(1)); }
     }
@@ -286,6 +287,28 @@ export function Workings({ inView = null }: { inView?: number | null }) {
     check();
     return () => { stop = true; w.clearTimeout(timer); };
   });
+
+  // Dots carried along the busy edges (triage's clashes on their way to a verdict), while the run is live or replaying.
+  const flowing = !!graph && graph.flows.some((f) => at >= f.a && at < f.b) && (live || !!replay?.playing);
+  useEffect(() => {
+    const g = dots.current;
+    if (!g) return;
+    if (!flowing || !graph) { g.innerHTML = ""; return; }
+    let stop = false, frame = 0, w = winOf(host.current);
+    const draw = (ms: number) => {
+      if (stop) return;
+      let o = "";
+      for (const f of graph.flows) {
+        const c = curves.current.get(`${f.from}>${f.to}`);
+        if (!c || at < f.a || at >= f.b) continue;
+        for (let i = 0; i < f.n; i++) { const p = bez(c, (ms / 1800 + i / f.n) % 1); o += `<circle class="${f.tone ?? ""}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.4"/>`; }
+      }
+      g.innerHTML = o;
+      w = winOf(host.current); frame = w.requestAnimationFrame(draw);
+    };
+    frame = w.requestAnimationFrame(draw);
+    return () => { stop = true; w.cancelAnimationFrame(frame); };
+  }, [flowing, graph, at]);
 
   // Zooming with the wheel takes the page's scroll there: a listener that may prevent it (React's is passive).
   useEffect(() => {
@@ -361,6 +384,7 @@ export function Workings({ inView = null }: { inView?: number | null }) {
             })}
             {graph.edges.map((e, i) => e.label && byId.has(e.from) && byId.has(e.to)
               ? <text key={`l${e.from}>${e.to}`} data-edge={i} textAnchor="middle">{e.label}</text> : null)}
+            <g ref={dots} />
           </svg>
           {graph.steps.map((s) => <StepView key={s.id} s={s} x={colX[s.col]} y={laneTop[s.lane] + (s.dy ?? 14)} w={graph.cols[s.col] - 40}
             inView={inViewId === s.id} pinned={pinned === s.id} you={you} />)}
