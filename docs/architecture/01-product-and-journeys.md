@@ -111,7 +111,7 @@ verified fix".
 | 4. List | The **Clashes** tab: report title "Coordination · n models", tests as groups, rows `#N` with a plain name, then Muse's title as it lands ("Muse is naming n…"), thumbnails drawn as rows scroll into view. | `api.titles` streams titles; `LazyThumb` queues `Viewer.thumbClash`. |
 | 5. Pick | The supply-air main through the Level 02 transfer girder (MEP vs Structure; #1 on a fresh check, per CLAUDE.md) selected; the camera flies to where the two meet; the clash panel shows the pair, "Found by ORCA" and "Now" depths, and "Taking the A/B/C views of this clash…". | The golden effect finds the pair with `clashOfPair(TOUR.duct)` (else the deepest clash) and calls `selectClash` → `goToClash`. A detected clash's views are captured by `captureViews` (`Viewer.captureClash`, saved to the server). |
 | 6. Propose | **Propose fixes** runs by itself: "Understanding", Muse Spark's live reasoning notes, the status line. | `propose()` → `runProposal`: waits up to 4 s for the views, then `api.proposeStream`. |
-| 7. Pilot | The glowing border: ORCA is driving. Each idea appears in place, amber while checked, teal when clear, what it hit in magenta; the camera follows and turns slowly while Muse thinks. **Take the view** / **Let ORCA drive**. The dock's "Agent activity" table fills. | `trackAgent` feeds every event to `Pilot` (`web/src/pilot.ts`); any user camera move is a takeover (`Viewer.onUserCamera`). |
+| 7. Pilot | The glowing border: ORCA is driving. Each idea appears in place, amber while checked, teal when clear, what it hit in magenta; the camera follows and turns slowly while Muse thinks. **Take the view** / **Let ORCA drive**. The Activity panel draws the run in Workings (each round, idea and check, "in view" on the one the pilot shows), or fills the Steps table. | `trackAgent` feeds every event to `Pilot` (`web/src/pilot.ts`); any user camera move is a takeover (`Viewer.onUserCamera`). |
 | 8. Options | "Verified options": rank, kind chip (Move, Offset, Trim, Reroute, Resize, Opening, Combined), title, Edit / Clearance / Review facts, what it meets, the rationale and a proof strip. The bar over the stage switches **Before / After / Both**, with a before/after summary. On Northbank the first idea is the offset up 400 mm through the girder's web opening, Rev04's height. | The first option is chosen; the viewer frames what changed (`frameFix`) and, 1.4 s later, captures the proposed fix for the report. |
 | 9. Accept | **Accept this fix**: "Applying the fix…", the edited pieces appear without a reload, the row and panel get "✓ fixed", the header counts "1 fixed". | `accept` → `api.accept` (`/fix/apply` with the clash's pair; the server tries the fix again and refuses it with why if it no longer passes) → `applyToViewer`, which patches the viewer when the page is at the server's `revision_before`, else reloads the changed files; `markFixed` marks every report clash of that pair; the clash is measured again. |
 | 10. Re-check | **Detect again** (the icon on the Insights tab's run summary): the chips say how many clashes the fixes resolved and how many are new. | `runDetect(lastTests)`. Clash ids are stable across runs, so the page keeps its "not a clash" marks and the server carries titles and views over (`Workspace._carry`). |
@@ -286,7 +286,7 @@ remembered in `sightline.left-w` / `sightline.right-w`; defaults 310 px and 380 
 | **Left pane** (`.pane.left`) | Over a report, `ReportList` with two tabs: **Clashes** (title and test count, Triage folded to one line, search with filters, the list grouped by test, ticks and the Fix together bar) and **Insights** (impact line, the run's summary with Detect again, root causes, patterns). Models open with no report: the Detect setup card. Nothing open: "Nothing to coordinate yet". |
 | **Stage** (`main.stage`) | The viewer canvas; the rail (`ViewerToolbar`: Shaded, X-ray, Context, Isolate; section box, outlines, measure; Go to the clash, Fit, standard views, models shown, screenshot); the properties card on single click; the busy and status overlays; the pilot pill and glow; the Before / After / Both bar; the landing (`About`) or the blank project (`ProjectStart`) when nothing is open. |
 | **Right pane** (`.pane.right`) | Tabs **Clash** (the clash panel, Propose fixes, Explore wider fix, Go to the clash, Understanding, reasoning, options, Try a move yourself), **Plan** (Fix together, root cause plan, wider fix) and **Chat**. |
-| **Dock** (`footer.dock`) | "Agent activity": every attempt of the running or last proposal. |
+| **Dock** (`footer.dock`) | "Agent activity": Workings, every run drawn as it happens (proposals, plans, triage, Show it built, ORCA's check; [docs/workings.md](../workings.md)), or Steps, every attempt of the running or last proposal. |
 
 ```mermaid
 flowchart TB
@@ -312,7 +312,7 @@ flowchart TB
       rt3["Chat tab: messages, mic"]
     end
   end
-  dock["Dock: Agent activity table"]
+  dock["Dock: Agent activity, Workings or Steps"]
   header --> body
   body --> dock
 ```

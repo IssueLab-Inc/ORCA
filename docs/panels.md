@@ -27,7 +27,7 @@ It is new work, written for ORCA during the event. No code from other products.
 | Clash | The Clash tab's body | right side bar |
 | Plan | `PlanPanel` or `ContextPlan` | right side bar (tab) |
 | Chat | `ChatPanel` | right side bar (tab) |
-| Activity | The agent's activity table | bottom side bar |
+| Activity | The agent's activity: Workings, the run drawn as it happens ([workings.md](workings.md)), or Steps, the table | bottom side bar; it grows to 380 px for a run while Workings shows (`DockHandle.fitBar`) |
 | Properties | The selected element's card and everything its model says about it (below) | floating at the model's top right, opened by the first selection |
 
 - **Side bars** (dockview's edge groups) hold their tabs along the top while open, as the classic panes did. The

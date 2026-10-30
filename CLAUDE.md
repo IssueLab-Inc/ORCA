@@ -189,7 +189,8 @@ PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder
 guided tours, free navigation and drawing views (plans, sections, elevations beside 3D, up to four), measuring in
 every view with snapping (`docs/measure.md`), desktop panels that dock, collapse, float and pop out (`docs/panels.md`,
 dockview's free core), properties of any element (a Properties panel: type, material, size, property sets,
-quantities). Latest validation (Oct 30): 606 server tests, 121 web tests; answer key 3/3 first try at
+quantities), Workings (the Activity panel draws each run as it happens: `docs/workings.md`). Latest validation
+(Oct 30): 607 server tests, 135 web tests; answer key 3/3 first try at
 Rev04 heights; `evals/step_cell.py` passes (C1, C2, C3, C6, C7, C8, Rev B 0). How each part works now:
 `docs/architecture/`. What was built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
 
