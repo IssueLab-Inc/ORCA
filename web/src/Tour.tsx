@@ -511,7 +511,7 @@ export function Tour({ state, actions, onClose, which = "northbank" }: {
 
   useEffect(() => {
     // Escape closes an open dialog (requirements, report) first, not the tour that is pointing into it.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".about-dialog")) onClose(); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".about-dialog, .orca-about")) onClose(); };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
