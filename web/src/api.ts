@@ -2,12 +2,16 @@ import type { ElementMesh } from "./viewer/patch";
 export interface Hit { other: string; other_class: string; kind: string; distance_m: number }
 export interface Verdict {
   passed: boolean; hits: Hit[]; min_clearance_m: number | null; checked_against: number;
-  /** Why a move was not tried: it would pull a joint apart (server connections.plan_move). */
+  /** Why a move fails without a hit: it would pull a joint apart (connections.plan_move) or leave what stood on
+   *  something standing on nothing (verify.keep_supports). */
   reason?: string | null;
   /** A move's new placements: what was asked to move and what it takes along. */
   placements?: Record<string, number[]>;
   /** The segments a move stretches so its joints hold, as they would be. */
   preview?: Piece[] | null;
+  /** What a move carried and stretched (`summary`), or, when it was refused before it was tried, the joints it would
+   *  pull apart (`refused_at`). */
+  joints?: { refused_at?: string[]; summary?: string };
 }
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {
@@ -624,8 +628,9 @@ export const api = {
     if (!r.ok) throw new ApiError(`Model download failed (${r.status})`, r.status);
     return new Uint8Array(await r.arrayBuffer());
   },
-  verify: (id: string, moved: string[], delta_m: number[]) =>
-    call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m }) }),
+  /** A move checked without keeping it; `obstacles` (what it must clear): what it stands on is kept, as a proposal's. */
+  verify: (id: string, moved: string[], delta_m: number[], obstacles: string[] = []) =>
+    call<Verdict>(`/scenes/${id}/verify`, { method: "POST", body: JSON.stringify({ moved, delta_m, obstacles }) }),
   propose: (id: string, element_a: string, element_b: string, from?: { report_id: string; clash_id: string }) =>
     call<Proposal>(`/scenes/${id}/propose`, { method: "POST", body: JSON.stringify({ element_a, element_b, ...from }) }),
   /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. `escalate`: a second, longer try

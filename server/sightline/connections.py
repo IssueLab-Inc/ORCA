@@ -318,11 +318,10 @@ def run(scene: IfcScene, gid: str) -> list[str]:
 # ---------------------------------------------------------------------------------------------------- moves
 
 def move_words(delta_m) -> str:
-    """"north 250 mm", "up 400 mm", "east 100 mm and up 50 mm": a move in words (+y is north, +z up)."""
+    """A move in words, on the model's axes (+X east, +Y north, +Z up): "north 250 mm", "east 100 mm, up 400 mm"."""
     names = (("east", "west"), ("north", "south"), ("up", "down"))
-    parts = [f"{names[k][0] if v > 0 else names[k][1]} {abs(v) * 1000:.0f} mm"
-             for k, v in enumerate(delta_m) if abs(v) >= 0.0005]
-    return " and ".join(parts) or "nowhere"
+    out = [f"{names[k][0 if v > 0 else 1]} {abs(round(v * 1000))} mm" for k, v in enumerate(delta_m) if abs(v) >= 0.0005]
+    return ", ".join(out) or "0 mm"
 
 
 def _names(scene: IfcScene, gids) -> str:

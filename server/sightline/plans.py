@@ -162,6 +162,11 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
         before = {it.key: {h.other: h.distance_m for h in verify.check(
                       scene, KEEPS_CONTACTS[it.option["kind"]](it.option), clearance_m=need[it.key]).hits}
                   for it in live if it.option["kind"] in KEEPS_CONTACTS}
+        # What a moved element stands on (a post's anchors in its slab) stays a contact, not a new clash.
+        footing = {it.key: verify.supports(scene, it.option["moved"],
+                                           {it.element_a, it.element_b, *it.others} - set(it.option["moved"]),
+                                           need[it.key])
+                   for it in live if it.option.get("kind", "move") == "move"}
         with _trial(scene, files):
             # key → (check these, own elements, obstacles of the shortened ends)
             changed: dict[str, tuple] = {}
@@ -200,11 +205,17 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                     meant = {partner, *it.others}
                     hits = [h for h in hits if ((h.distance_m < -0.002 or not touch) if h.other in meant
                                                 else h.other not in was or h.distance_m < was[h.other] - 0.002)]
+                why = None
+                if it.key in footing:
+                    hits, held, why = verify.keep_supports(scene, footing[it.key], hits)
+                    if held and not hits and not why:   # its clearance is to what is near it, not what carries it
+                        v = verify.check(scene, check_ids, clearance_m=clearance_m, ignore=ignore | held)
+                        hits = v.hits
                 for h in hits:
                     if h.other in owner and owner[h.other] != it.key:
                         out["conflicts"].append({"a": it.key, "b": owner[h.other],
                                                  "detail": f"{h.kind} {h.distance_m * 1000:+.0f} mm"})
-                out["items"][it.key] = {"passed": not hits, "reason": agent._reason(hits),
+                out["items"][it.key] = {"passed": not hits and not why, "reason": why or agent._reason(hits),
                                         "min_clearance_m": v.min_clearance_m if v is not None else least}
     out["passed"] = all(r["passed"] for r in out["items"].values()) and len(live) == len(items)
     return out

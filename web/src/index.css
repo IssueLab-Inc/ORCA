@@ -2,6 +2,7 @@
   --bg: #f2f4f7; --surface: #fff; --raised: #fbfcfd; --ink: #16202b; --muted: #5d6a7a; --line: #d7dde5; --line-soft: #e9edf2;
   --accent: #2f5d8a; --accent-ink: #234a6f; --accent-soft: #e4edf6; --red: #d0342c; --green: #1f9d3a;
   --ok: #1d7f47; --ok-soft: #e6f4ec; --fail: #b8352a; --fail-soft: #fbeceb; --warn: #9a6100; --warn-soft: #fbf1df;
+  --wonder: #5b3c99; --wonder-ink: #432a78; --wonder-soft: #efe8fb; --wonder-line: #d8cbef;
   --body: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
   --radius: 8px; --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 2px 8px rgba(16, 24, 40, .06);
   font-family: var(--body); color: var(--ink); background: var(--bg); font-size: 14px;
@@ -182,6 +183,19 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
 .card.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .card-body { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+/* A verified option: rank and kind with the chips on one line, the title across the card, the facts on a grid */
+.card-body.option { gap: 6px; }
+.opt-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.opt-rank { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 11.5px; font-weight: 700; }
+.card.pick .opt-rank { background: var(--accent); color: #fff; }
+.opt-kind { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.opt-head .chips { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.opt-title { font-size: 13.5px; line-height: 1.35; }
+.opt-facts { display: flex; flex-direction: column; gap: 3px; padding: 7px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.fact { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; line-height: 1.4; }
+.fact > span:first-child { color: var(--muted); }
+.fact > span:last-child { overflow-wrap: anywhere; }
+.opt-why { color: var(--muted); line-height: 1.45; }
 .try summary { cursor: pointer; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .try[open] { display: flex; flex-direction: column; gap: 8px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
@@ -463,7 +477,20 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .escalate-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--radius);
   background: var(--panel, #fff); border: 1px solid var(--accent-soft); }
 .escalate-card .hint { flex: 1 1 220px; }
-.link.better-fix { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 2px 0 6px; font-size: 12.5px; }
+/* Look for a better fix: a second opinion from the larger model, in its colour, under the verified options */
+.better-fix { display: flex; align-items: center; gap: 10px; width: 100%; margin: 2px 0 4px; padding: 9px 12px; border: 1px solid var(--wonder-line); border-radius: var(--radius); background: linear-gradient(180deg, #faf7fe, var(--wonder-soft)); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.better-fix:hover:not(:disabled) { border-color: #b8a2e3; box-shadow: 0 1px 2px rgba(67, 42, 120, .08), 0 2px 8px rgba(67, 42, 120, .1); }
+.better-fix:focus-visible { outline: 2px solid var(--wonder); outline-offset: 2px; }
+.better-fix:disabled { opacity: .5; cursor: default; }
+.bf-icon { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 8px; background: var(--wonder); color: #fff; }
+.bf-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.bf-text b { font-size: 13px; color: var(--wonder-ink); }
+.bf-text span { font-size: 12px; color: var(--muted); }
+.bf-go { margin-left: auto; flex: none; color: var(--wonder); transition: transform .12s; }
+.better-fix:hover:not(:disabled) .bf-go { transform: translateX(2px); }
+.btn.wonder { background: var(--wonder-soft); border-color: var(--wonder-line); color: var(--wonder-ink); }
+.btn.wonder:hover:not(:disabled) { background: #e6dcf8; border-color: #b8a2e3; }
+.pi-body > .btn { align-self: flex-start; margin-top: 4px; }
 /* Show it built (BuiltView.tsx): the picture over ORCA's view, a wipe between them, the model's lines on top. */
 .built { margin: 8px 0 4px; font-size: 12.5px; }
 .built.working, .built.failed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius);
@@ -483,10 +510,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .built figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 12px; }
 .built figcaption .hint { width: 100%; }
 .chip.model { background: var(--bg); color: var(--muted); }
-.chip.model.wonder { background: #efe8fb; color: #5b3c99; }
+.chip.model.wonder { background: var(--wonder-soft); color: var(--wonder); }
 .steps .chip.model { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; }
 .proof-strip { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--ok-soft); font-size: 12px; font-weight: 600; }
-.proof-strip .why { font-weight: 500; }
+.proof-strip .why { font-weight: 500; flex-basis: 100%; }
 .impact-bar { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); font-size: 12.5px; }
 
 /* A glow round the viewer while ORCA drives it (pilot.ts): fades in and out, and pulses while on */

@@ -39,6 +39,22 @@ def step_source(entity) -> dict:
 
 # Things a coordinator normally keeps where they are. The agent may still propose moving them,
 # but the domain pack tells it why it usually shouldn't; this flag only drives defaults in the UI.
+def opacity(element) -> float:
+    """An element's style opacity (1 when it has none). See-through volumes are zones (a robot's restricted space, a
+    panel's working space), not things."""
+    rep = element.Representation
+    for r in (rep.Representations if rep else []):
+        for item in r.Items:
+            for styled in item.StyledByItem or []:
+                for st in styled.Styles:
+                    for s in (st.Styles if st.is_a("IfcPresentationStyleAssignment") else [st]):
+                        for x in getattr(s, "Styles", None) or []:
+                            t = getattr(x, "Transparency", None)
+                            if t is not None:
+                                return 1.0 - float(t)
+    return 1.0
+
+
 FIXED_CLASSES = ("IfcBeam", "IfcColumn", "IfcSlab", "IfcWall", "IfcFooting", "IfcMember", "IfcPlate")
 
 # Not physical: openings are voids already cut from their host, virtual elements have no material.

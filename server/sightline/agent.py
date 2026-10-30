@@ -56,6 +56,19 @@ class Option:
                                         # geometry alone cannot say it works
     model: str = ""                     # who proposed it, as people read it ("Muse Spark", "Muse Wonder")
 
+    def __post_init__(self):
+        self.also_needs = plain_needs(self.also_needs)
+
+
+def plain_needs(text: str | None) -> str:
+    """What else a fix needs, without the "none" the prompt's examples invite ("re-fix anchors; none" → "re-fix
+    anchors"; "none" → "")."""
+    parts = [p.strip() for p in (text or "").split(";")]
+    return "; ".join(p for p in parts if p and p.rstrip(".").lower() not in ("none", "nothing", "n/a", "-"))
+
+
+move_words = connections.move_words   # one way to say a move, here and in the joints' refusals
+
 
 @dataclass
 class Attempt:
@@ -581,18 +594,22 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
         rec = {"title": best.get("title", ""), "kind": kind, "element": target, "delta_m": delta,
                "split_m": best.get("split_m"), "edit": {k: best[k] for k in PARAMS.get(kind, ()) if k in best},
                "rationale": best.get("rationale", ""),
-               "also_needs": best.get("also_needs", ""), "blocked_by": why,
+               "also_needs": plain_needs(best.get("also_needs", "")), "blocked_by": why,
                "others": [c.get("title", "") for c in candidates[1:3]]}
     return Result(reply.get("understanding", ""), [], [], reply.get("advice", ""), recommendation=rec,
                   requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
 
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
-              on_trial: Callable[[dict], None] | None = None, *, meant=()) -> tuple[Attempt, Option | None]:
+              on_trial: Callable[[dict], None] | None = None, partners: set[str] = frozenset()) -> tuple[Attempt, Option | None]:
     """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds. The move
     keeps its joints (connections.plan_move): the fittings beyond the run go along and a segment the move runs along
     gets longer or shorter; one that can't is refused before it is tried, and so is one that would take an element
-    it is meant to clear (`meant`) along."""
+    it is meant to clear (`partners`) along.
+
+    What the run stands on (a post's anchors in its slab, a stand on the floor: `verify.supports`) is not a new
+    clash when it keeps standing on it as it was; lifted off it, or sunk deeper, the move fails. `partners`: what the
+    move must clear, which never counts as what it stands on."""
     run = connections.run(scene, target)
     delta = [float(v) for v in cand.get("delta_m", [0, 0, 0])]
     plan = connections.plan_move(scene, run, delta)
@@ -601,7 +618,7 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
             on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
         return Attempt(cand.get("title", "move"), delta, False, f"cannot keep its joints: {plan.refused}",
                        hit_ids=plan.refused_at[:8]), None
-    taken = [m for m in meant if m in plan.changed() and m != target]
+    taken = [m for m in partners if m in plan.changed() and m != target]
     if taken:
         names = ", ".join(f"'{scene.element(m).name}'" for m in taken)
         return Attempt(cand.get("title", "move"), delta, False, f"cannot keep its joints: the move would take {names} "
@@ -618,16 +635,22 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
                                checked_against=t.checked, edit=edit)
     # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
     neighbours = {c for g in run for c in scene.element(g).connected} - set(run)
+    sup = verify.supports(scene, run, set(partners), clearance_m, ignore=neighbours) if partners else None
     if on_trial:
         on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
     placements = scene.translate(run, tuple(delta))
     try:
         v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
+        hits, held, why = verify.keep_supports(scene, sup, v.hits) if sup else (v.hits, set(), None)
+        if held and not why and not hits:   # its clearance is to what is near it, not to what it stands on
+            v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours | held)
+            hits = v.hits
     finally:
         scene.translate(run, tuple(-d for d in delta))
-    attempt = Attempt(cand.get("title", "move"), delta, v.passed, _reason(v.hits), hit_ids=_hit_ids(v.hits),
-                      where=_where(v.hits))
-    if not v.passed:
+    passed = not hits and not why
+    attempt = Attempt(cand.get("title", "move"), delta, passed, why or _reason(hits), hit_ids=_hit_ids(hits),
+                      where=_where(hits))
+    if not passed:
         return attempt, None
     return attempt, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""), cand.get("also_needs", ""),
                            v.min_clearance_m, placements, checked_against=v.checked_against)
@@ -931,7 +954,7 @@ def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_
 
 def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                   on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
-    return _try_move(scene, cand, target, clearance_m, on_trial, meant=(other, *others))
+    return _try_move(scene, cand, target, clearance_m, on_trial, {other, *others})
 
 
 # A combined fix changes up to three elements together, in one trial (docs/escalation.md): the room a duct needs may
@@ -1046,7 +1069,7 @@ def _step_summary(scene: IfcScene, st: dict) -> str:
         return f"{name}: offset {st['delta_m'][2] * 1000:+.0f} mm at {st['split_m'][0]:.2f}-{st['split_m'][1]:.2f} m"
     if st["kind"] == "route":
         return f"{name}: {st['edit']['summary']}"
-    return f"{name}: move {[round(d * 1000) for d in st['delta_m']]} mm"
+    return f"{name}: move {move_words(st['delta_m'])}"
 
 
 def apply_combined(scene: IfcScene, steps: list[dict]) -> list[tuple[dict, list[str]]]:

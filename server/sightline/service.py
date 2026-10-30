@@ -189,10 +189,14 @@ class Workspace:
     def describe(self, scene_id: str, global_id: str) -> dict:
         return asdict(self.scene(scene_id).element(global_id))
 
-    def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025) -> dict:
+    def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025,
+                    obstacles: list[str] = ()) -> dict:
         """Check a move without keeping it. It keeps its joints (connections.plan_move): what it takes along is moved
         too (`placements`), the segments it stretches come back as `preview` meshes, and `joints` says what it carried
-        and stretched. A move that can't keep them fails without being tried, with the `reason`."""
+        and stretched. A move that can't keep them fails without being tried, with the `reason` (and `joints`: what it
+        would pull apart from). With `obstacles` (what the move must clear), what the moved elements stand on is kept
+        as a proposal keeps it (`verify.supports`): slid along a slab is not a clash, lifted off it is refused
+        (`reason`). Without them, every contact counts."""
         s = self.scene(scene_id)
         with self.lock:
             plan = connections.plan_move(s, moved, delta_m)
@@ -204,12 +208,18 @@ class Workspace:
                 return {"passed": not t.hits, "hits": [asdict(h) for h in t.hits], "min_clearance_m": t.least,
                         "checked_against": t.checked, "placements": t.placements, "preview": t.preview,
                         "reason": None, "joints": plan.edit(s, moved)}
+            sup = verify.supports(s, moved, set(obstacles), clearance_m) if obstacles else None
             placements = s.translate(moved, tuple(delta_m))
             try:
                 v = verify.check(s, moved, clearance_m=clearance_m)
+                hits, held, why = verify.keep_supports(s, sup, v.hits) if sup else (v.hits, set(), None)
+                if held and not hits and not why:
+                    v = verify.check(s, moved, clearance_m=clearance_m, ignore=held)
+                    hits = v.hits
             finally:
                 s.translate(moved, tuple(-d for d in delta_m))
-        return {**asdict(v), "placements": placements, "reason": None}
+        return {**asdict(v), "passed": not hits and not why, "hits": [asdict(h) for h in hits], "reason": why,
+                "placements": placements}
 
     def propose(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None = None,
                 images: list[str] | None = None, notes: str = "", report_id: str | None = None,

@@ -338,11 +338,13 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     # ------------------------------------------------------------------ fixes
 
     @tool(read_only=True)
-    def check_move(global_ids: list[str], delta_m: list[float], ctx: Context) -> dict:
+    def check_move(global_ids: list[str], delta_m: list[float], ctx: Context, obstacle: str | None = None) -> dict:
         """Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it: passes,
         or what it would hit and how deep. The move keeps their joints (fittings beyond go along, a segment it runs
-        along gets longer or shorter) or fails with `reason`."""
-        return run(ctx, "check_move", {"global_ids": global_ids, "delta_m": delta_m})
+        along gets longer or shorter) or fails with `reason`. With `obstacle` (what the move must clear) it is checked
+        as a proposal is: what the moved elements stand on may stay as it was, and lifting them off it fails."""
+        return run(ctx, "check_move", {"global_ids": global_ids, "delta_m": delta_m,
+                                       **({"obstacle": obstacle} if obstacle else {})})
 
     @tool(read_only=True)
     def check_offset(element: str, obstacle: str, split_m: list[float], dz_m: float, ctx: Context) -> dict:
