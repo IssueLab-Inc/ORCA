@@ -21,7 +21,9 @@ type Found = { model: LoadedModel; el: LoadedElement };
 const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.glass] : [m.mesh]);
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
-export type Mesh = { verts: number[]; faces: number[] };
+export type Mesh = { verts: number[]; faces: number[]; global_id?: string };
+/** The connection highlight draws at most this many elements, outlining the first LINK_EDGES of each kind. */
+const LINK_MAX = 150, LINK_EDGES = 40;
 /** A fix's piece as Show it built frames it: its element (a kept piece), the element its run came from and its part
  * (a combined fix's: "moved", "end" or "middle"). */
 export type BuiltPiece = Mesh & { global_id?: string; origin?: string; part?: string };
@@ -95,6 +97,9 @@ export class Viewer {
   showEdges = true;
   /** Elements a candidate fix ran into, while the agent shows its work. */
   private hitLayer = new THREE.Group();
+  /** The connection highlight: linked elements lit by kind (setLinks), over the model, never in captured pictures. */
+  private linkLayer = new THREE.Group();
+  private linkMaterials = new Map<string, { mesh: THREE.MeshStandardMaterial; edges: THREE.LineBasicMaterial }>();
   private hitMaterial = new THREE.MeshStandardMaterial({ color: "#e040fb", emissive: "#5c0a6b", roughness: 0.5,
     side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
   private hitEdges = new THREE.LineBasicMaterial({ color: "#f48fff", depthTest: false, transparent: true, opacity: 0.95 });
@@ -129,7 +134,7 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
-    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.marker, this.measureLayer);
+    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.marker, this.measureLayer);
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial]) m.clippingPlanes = this.clipping;
     this.markerLabel = this.label("marker-label");
     this.measureLabel = this.label("measure-label");
@@ -403,6 +408,42 @@ export class Viewer {
     }
   }
 
+  /** Light elements by group, each group in its colour (an element's connections by kind). At most LINK_MAX are
+   *  drawn, and outlines only for the first LINK_EDGES of each group: a slab can support hundreds of things. */
+  setLinks(groups: { color: string; ids: string[] }[]) {
+    this.linkLayer.clear();
+    for (const group of groups) {
+      const mats = this.linkMats(group.color);
+      group.ids.slice(0, LINK_MAX).forEach((gid, k) => {
+        const f = this.find(gid);
+        if (!f || this.hidden.has(gid) || this.hiddenModels.has(this.models.indexOf(f.model))) return;
+        const parts: THREE.Object3D[] = [new THREE.Mesh(this.geometryOf(f), mats.mesh)];
+        if (k < LINK_EDGES) parts.push(new THREE.LineSegments(this.edgeGeometryOf(gid, f), mats.edges));
+        for (const o of parts) {
+          o.matrixAutoUpdate = false;
+          o.matrix.copy(this.matrixOf(f.el));
+          o.frustumCulled = false;
+          o.renderOrder = 7;
+        }
+        this.linkLayer.add(...parts);
+      });
+    }
+  }
+
+  private linkMats(color: string) {
+    let mats = this.linkMaterials.get(color);
+    if (!mats) {
+      mats = {
+        mesh: new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color).multiplyScalar(0.35), roughness: 0.5,
+          transparent: true, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+          clippingPlanes: this.clipping }),
+        edges: new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9 }),
+      };
+      this.linkMaterials.set(color, mats);
+    }
+    return mats;
+  }
+
   /** A slow turn around the current target, while the agent thinks. */
   orbit(on: boolean) { this.controls.autoRotate = on; }
 
@@ -410,6 +451,7 @@ export class Viewer {
 
   private clearFocusCache() {
     this.setHits([]);
+    this.linkLayer.clear();   // its meshes share the batches' buffers too
     for (const g of this.edgeGeometry.values()) g.dispose();
     this.edgeGeometry.clear();
     this.edges.clear();
@@ -494,6 +536,11 @@ export class Viewer {
         } else {
           const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(opt.deltaM));
           for (const gid of opt.moved) this.moved.set(gid, t);
+          if (opt.pieces?.length) {   // a move that keeps its joints: the segments it stretches, as they would be
+            for (const p of opt.pieces) if (p.global_id) this.hidden.add(p.global_id);
+            this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6,
+              side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          }
         }
         if (mode === "both" && opt.before) {
           this.addMeshes(opt.before, new THREE.MeshBasicMaterial({ color: "#e67e22", transparent: true, opacity: 0.35,
@@ -628,6 +675,7 @@ export class Viewer {
     const saved = { position: camera.position.clone(), target: this.controls.target.clone(), mode: this.mode, focus: this.focus,
       flight: this.flight, marker: this.marker.visible, overlay: this.overlay.visible, hidden: new Set(this.hidden),
       moved: new Map(this.moved), section: this.sectionBox?.clone() ?? null, background: scene.background, hits: this.hitLayer.visible,
+      links: this.linkLayer.visible,
       measure: this.measureLayer.visible, clear: renderer.getClearColor(new THREE.Color()), clearAlpha: renderer.getClearAlpha() };
     const temp = new THREE.Group();
     const trash: { dispose(): void }[] = [];   // render targets and materials made here, freed however it ends
@@ -644,47 +692,50 @@ export class Viewer {
     const shaded = () => { this.mode = "shaded"; this.applyMode(); zonesAndCut(); };
     try {
       this.flight = null; this.marker.visible = false; this.overlay.visible = false; this.hitLayer.visible = false;
-      this.measureLayer.visible = false;
+      this.measureLayer.visible = false; this.linkLayer.visible = false;
       this.focus = { a: null, b: null, group: {} };
       // The fix in place: a proposed option's pieces as their own meshes in their elements' colours (a move translates
       // its run), the originals hidden; an applied fix is the model itself.
       const pieceMeshes: THREE.Mesh[] = [];
       this.hidden = new Set(); this.moved = new Map();   // the model as it is, whatever preview is on screen
       if (!fix.applied) {
+        const first = this.find(fix.moved[0]);
+        const draw = (p: BuiltPiece, i: number) => {
+          // Its own element's colour, else its run's (a combined fix's new pieces), else the first moved element's.
+          const own = p.global_id ? this.find(p.global_id) : null;
+          const origin = p.origin ? this.find(p.origin) : null;
+          const colour = (own ?? origin ?? first)?.el.baseColor ?? GREY;
+          const pos = new Float32Array(p.verts.length);
+          for (let i = 0; i < p.verts.length; i += 3) { pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; }
+          const welded = new THREE.BufferGeometry();
+          welded.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+          welded.setIndex(p.faces);
+          // Sharp edges stay sharp (a wall with a hole, a box): normals averaged across them shade a flat face in
+          // streaks, which Muse Image draws as facets and the judges rightly reject.
+          const g = toCreasedNormals(welded, Math.PI / 6);
+          welded.dispose();
+          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, metalness: 0, roughness: 0.85,
+            side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          mesh.userData.piece = true;
+          // A penetration's provision for void frames the view but is not drawn: it would fill the opening.
+          if (fix.kind === "penetration" && i === 0) mesh.visible = false;
+          pieceMeshes.push(mesh); temp.add(mesh);
+        };
         if (fix.pieces && fix.kind !== "move") {
           for (const g of fix.moved) this.hidden.add(g);
-          const first = this.find(fix.moved[0]);
-          fix.pieces.forEach((p, i) => {
-            // Its own element's colour, else its run's (a combined fix's new pieces), else the first moved element's.
-            const own = p.global_id ? this.find(p.global_id) : null;
-            const origin = p.origin ? this.find(p.origin) : null;
-            const colour = (own ?? origin ?? first)?.el.baseColor ?? GREY;
-            const pos = new Float32Array(p.verts.length);
-            for (let i = 0; i < p.verts.length; i += 3) { pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; }
-            const welded = new THREE.BufferGeometry();
-            welded.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-            welded.setIndex(p.faces);
-            // Sharp edges stay sharp (a wall with a hole, a box): normals averaged across them shade a flat face in
-            // streaks, which Muse Image draws as facets and the judges rightly reject.
-            const g = toCreasedNormals(welded, Math.PI / 6);
-            welded.dispose();
-            const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, metalness: 0, roughness: 0.85,
-              side: THREE.DoubleSide, clippingPlanes: this.clipping }));
-            mesh.userData.piece = true;
-            // A penetration's provision for void frames the view but is not drawn: it would fill the opening.
-            if (fix.kind === "penetration" && i === 0) mesh.visible = false;
-            pieceMeshes.push(mesh); temp.add(mesh);
-          });
+          fix.pieces.forEach(draw);
         } else if (fix.kind === "move") {
           const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(fix.deltaM));
           for (const g of fix.moved) this.moved.set(g, t);
+          for (const p of fix.pieces ?? []) if (p.global_id) this.hidden.add(p.global_id);   // its stretched segments
+          (fix.pieces ?? []).forEach(draw);
         }
       }
       scene.add(temp);
       shaded();
       // What the fix is, to frame and to see: its changed pieces, or (a move, an applied fix) its elements as they are.
       const fixObjects = (): THREE.Object3D[] => {
-        if (!fix.applied && pieceMeshes.length) {
+        if (!fix.applied && pieceMeshes.length && fix.kind !== "move") {
           const keep = new Set(changed);
           return pieceMeshes.filter((_, i) => keep.has(fix.pieces![i]));
         }
@@ -692,11 +743,12 @@ export class Viewer {
         let found = ids.map((g) => this.find(g)).filter((f): f is Found => !!f);
         // Kept pieces whose ids the page doesn't know (a trial's): the elements the fix changed, as they now are.
         if (!found.length) found = fix.moved.map((g) => this.find(g)).filter((f): f is Found => !!f);
-        return found.map((f) => {
+        const els = found.map((f) => {
           const m = new THREE.Mesh(this.geometryOf(f));
           m.matrixAutoUpdate = false; m.matrix.copy(this.matrixOf(f.el)); m.frustumCulled = false;
           return m;
         });
+        return fix.applied ? els : [...els, ...pieceMeshes];   // a move: what it takes along and what it stretches
       };
       const zone = changed.length ? meshBox(changed) : this.boxOf(fix.moved);
       if (!pa.isEmpty() && !pb.isEmpty()) zone.union(meetingZone(pa, pb));
@@ -857,7 +909,7 @@ export class Viewer {
       scene.overrideMaterial = null;
       scene.background = saved.background;
       this.hidden = saved.hidden; this.moved = saved.moved;
-      this.overlay.visible = saved.overlay; this.hitLayer.visible = saved.hits;
+      this.overlay.visible = saved.overlay; this.hitLayer.visible = saved.hits; this.linkLayer.visible = saved.links;
       this.focus = saved.focus;
       if (saved.section) { this.setSection(true, 0, saved.section); } else this.setSection(false);
       this.mode = saved.mode; this.applyMode();
@@ -890,7 +942,7 @@ export class Viewer {
     const zone = meetingZone(boxA, boxB);
     if (zone.isEmpty()) return null;
     const saved = { position: this.camera.position.clone(), target: this.controls.target.clone(), mode: this.mode,
-      focus: this.focus, flight: this.flight, marker: this.marker.visible };
+      focus: this.focus, flight: this.flight, marker: this.marker.visible, links: this.linkLayer.visible };
     const pair = Object.values(this.focusMaterials);
     const shot = (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => {
       for (const m of pair) { m.transparent = seeThrough; m.opacity = seeThrough ? 0.6 : 1; m.depthWrite = !seeThrough; m.needsUpdate = true; }
@@ -902,6 +954,7 @@ export class Viewer {
     try {
       this.flight = null;
       this.marker.visible = false;
+      this.linkLayer.visible = false;   // the connection highlight is the viewer's, never the pictures'
       this.setFocus({ a, b });
       const [position, target] = this.zoneCamera(zone, boxA.clone().union(boxB));
       this.camera.position.copy(position);
@@ -916,6 +969,7 @@ export class Viewer {
       this.controls.target.copy(saved.target);
       this.flight = saved.flight;
       this.marker.visible = saved.marker;
+      this.linkLayer.visible = saved.links;
       this.controls.update();
       this.adjustClipRange();
       // Draw the user's view again before the browser paints: the canvas keeps its last frame (preserveDrawingBuffer),
@@ -1001,7 +1055,7 @@ export class Viewer {
       this.scene.add(this.sectionHelper);
     }
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, ...Object.values(this.focusMaterials),
-      ...Object.values(this.focusGlass)]) m.needsUpdate = true;
+      ...Object.values(this.focusGlass), ...[...this.linkMaterials.values()].map((x) => x.mesh)]) m.needsUpdate = true;
     return true;
   }
 
@@ -1034,13 +1088,13 @@ export class Viewer {
   // ---------------------------------------------------------------- picking and measuring
 
   /** The element (and point on it) under the pointer, including elements in focus. */
-  pickAt(ev: MouseEvent): Pick | null {
+  pickAt(ev: MouseEvent, opts: { ghosts?: boolean } = {}): Pick | null {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     const targets: THREE.Object3D[] = [...this.focusLayer.children,
       ...this.models.filter((_, i) => !this.hiddenModels.has(i)).flatMap(batches)];
-    const ghostly = this.focusIds().length > 0 && this.mode !== "shaded";
+    const ghostly = !opts.ghosts && this.focusIds().length > 0 && this.mode !== "shaded";
     // A see-through element (a safety zone round a robot) is picked only where nothing solid is under the pointer,
     // or it would swallow every click on what stands inside it.
     let behindGlass: Pick | null = null;

@@ -601,3 +601,95 @@ def build_resize_fixture(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path
+
+
+def build_joints_fixture(path: Path) -> Path:
+    """Pipework joined through ports (connections.py), metres, one storey; DN25 pipe (r 17 mm) at z 0.9.
+
+    - Branch like the cell's PL-302: pipe S1 (y 2.0 → 1.1) into valve V1 (y 1.0-1.1), pipe S2 (y 1.0 → 0.05, so its
+      south end is its end), bend B2 (a 100 mm box round (0, 0)), pipes S3A (x 0.05 → 3.0) and S3B (x 3.0 → 5.95)
+      joined end to end, bend B3 (round (6, 0)), pipe S4 (y 0.05 → 1.0, so its south end is its start) into filter
+      FRL1 (y 1.0-1.2). Column C3 (x 2.8-3.2, y -0.4 to 0.1) stands across S3A/S3B.
+    - A main on a tee: M1 (x 0 → 2.0 at y 5) into tee T1 (x 2.0-2.1), M2 (x 2.1 → 4.0) and branch BR (y 5.05 → 6.0).
+    - A free pipe FP (x 0 → 3 at y 8), joined to nothing.
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA joints fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 01")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+    z = 0.9
+
+    def element(ifc_class, name, tag=None):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        e.Tag = tag
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        return e
+
+    def port(e, point, direction, flow):
+        p = ifcopenshell.api.run("system.add_port", model, element=e)
+        p.FlowDirection = flow
+        d = np.asarray(direction, float)
+        x = np.cross(UP_, d) if abs(d @ UP_) < 0.9 else np.array([1.0, 0.0, 0.0])
+        x /= np.linalg.norm(x)
+        m = np.eye(4)
+        m[:3, :3] = np.column_stack([x, np.cross(d, x), d])
+        m[:3, 3] = point
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=p, matrix=m, is_si=True)
+        return p
+
+    def pipe(name, tag, start, end):
+        e = element("IfcPipeSegment", name, tag)
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+        start, end = np.asarray(start, float), np.asarray(end, float)
+        d = (end - start) / np.linalg.norm(end - start)
+        x = np.cross(UP_, d) if abs(d @ UP_) < 0.9 else np.array([1.0, 0.0, 0.0])
+        x /= np.linalg.norm(x)
+        position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(map(float, start))),
+                                                   model.createIfcDirection(tuple(map(float, d))),
+                                                   model.createIfcDirection(tuple(map(float, x))))
+        solid = model.createIfcExtrudedAreaSolid(model.createIfcCircleProfileDef("AREA", None, None, 0.017), position,
+                                                 model.createIfcDirection((0.0, 0.0, 1.0)), float(np.linalg.norm(end - start)))
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+        return e, port(e, start, -d, "SINK"), port(e, end, d, "SOURCE")
+
+    def part(ifc_class, name, lo, hi, *ports):
+        e = element(ifc_class, name)
+        _box(model, body, e, tuple(np.subtract(hi, lo)), tuple(lo))
+        return (e, *[port(e, p, d, f) for p, d, f in ports])
+
+    def join(p, q):
+        ifcopenshell.api.run("system.connect_port", model, port1=p, port2=q, direction="SOURCE")
+
+    _, s1a, s1b = pipe("Pipe S1", "S1", (0, 2.0, z), (0, 1.1, z))
+    _, v_in, v_out = part("IfcValve", "Valve V1", (-0.03, 1.0, z - 0.03), (0.03, 1.1, z + 0.03),
+                          ((0, 1.1, z), (0, 1, 0), "SINK"), ((0, 1.0, z), (0, -1, 0), "SOURCE"))
+    _, s2a, s2b = pipe("Pipe S2", "S2", (0, 1.0, z), (0, 0.05, z))
+    _, b2a, b2b = part("IfcPipeFitting", "Bend B2", (-0.05, -0.05, z - 0.05), (0.05, 0.05, z + 0.05),
+                       ((0, 0.05, z), (0, 1, 0), "SINK"), ((0.05, 0, z), (1, 0, 0), "SOURCE"))
+    _, s3a, s3b = pipe("Pipe S3A", "S3A", (0.05, 0, z), (3.0, 0, z))
+    _, s3c, s3d = pipe("Pipe S3B", "S3B", (3.0, 0, z), (5.95, 0, z))
+    _, b3a, b3b = part("IfcPipeFitting", "Bend B3", (5.95, -0.05, z - 0.05), (6.05, 0.05, z + 0.05),
+                       ((5.95, 0, z), (-1, 0, 0), "SINK"), ((6, 0.05, z), (0, 1, 0), "SOURCE"))
+    _, s4a, s4b = pipe("Pipe S4", "S4", (6, 0.05, z), (6, 1.0, z))
+    _, f_in = part("IfcFilter", "Filter FRL1", (5.9, 1.0, z - 0.1), (6.1, 1.2, z + 0.1), ((6, 1.0, z), (0, -1, 0), "SINK"))
+    for p, q in ((s1b, v_in), (v_out, s2a), (s2b, b2a), (b2b, s3a), (s3b, s3c), (s3d, b3a), (b3b, s4a), (s4b, f_in)):
+        join(p, q)
+    part("IfcColumn", "Column C3", (2.8, -0.4, 0.0), (3.2, 0.1, 3.0))
+    # A main on a tee, and its branch
+    _, m1a, m1b = pipe("Main M1", "M1", (0, 5, z), (2.0, 5, z))
+    _, t_in, t_out, t_br = part("IfcPipeFitting", "Tee T1", (2.0, 4.95, z - 0.05), (2.1, 5.05, z + 0.05),
+                                ((2.0, 5, z), (-1, 0, 0), "SINK"), ((2.1, 5, z), (1, 0, 0), "SOURCE"),
+                                ((2.05, 5.05, z), (0, 1, 0), "SOURCE"))
+    _, m2a, m2b = pipe("Main M2", "M2", (2.1, 5, z), (4.0, 5, z))
+    _, bra, brb = pipe("Branch BR", "BR", (2.05, 5.05, z), (2.05, 6.0, z))
+    for p, q in ((m1b, t_in), (t_out, m2a), (t_br, bra)):
+        join(p, q)
+    pipe("Free pipe FP", "FP", (0, 8, z), (3, 8, z))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path

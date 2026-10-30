@@ -111,7 +111,7 @@ def test_a_combined_fix_is_kept_with_its_steps_checked_again(tmp_path):
     # a step that would now move structure is refused when kept, whatever the page sends
     bad = json.loads(json.dumps(agent.asdict(o)))
     bad["edit"]["steps"][0]["target"] = beam
-    with pytest.raises(agent.Refused):
+    with pytest.raises(plans.NotVerified, match="structure and stays where it is"):
         plans.apply(ws, sid, [bad])
 
 
@@ -349,15 +349,22 @@ def test_a_combined_fix_kept_part_way_is_undone(tmp_path, monkeypatch):
     option = {"kind": "combined", "moved": [pipe, duct], "delta_m": [0, 0, -0.5], "title": "t",
               "edit": {"pair": [duct, beam], "steps": [
                   {"kind": "move", "target": pipe, "delta_m": [0, 0, -0.5]},
-                  {"kind": "offset", "target": duct, "split_m": [2.0, 4.0], "delta_m": [0, 0, -0.4]}]}}
+                  {"kind": "move", "target": duct, "delta_m": [0, 0, -0.4]}]}}
+    real, calls = agent.apply_combined, []
 
-    def fails(*a, **k):
-        raise edits.Unsupported("not here")
-    monkeypatch.setattr(edits, "apply_offset", fails)
+    def fails_when_kept(scene, steps):   # the check tries it (call 1); keeping it makes both moves, then fails
+        calls.append(1)
+        made = real(scene, steps)
+        if len(calls) > 1:
+            raise edits.Unsupported("not here")
+        return made
+    monkeypatch.setattr(agent, "apply_combined", fails_when_kept)
     revision = s.revision
     with pytest.raises(edits.Unsupported):
         plans.apply(ws, sid, [option])
-    assert s.placement(pipe)[2, 3] == pytest.approx(2.25) and s.revision == revision   # the pipe's move undone
+    assert len(calls) == 2
+    assert s.placement(pipe)[2, 3] == pytest.approx(2.25) and s.placement(duct)[2, 3] == pytest.approx(2.65)
+    assert s.revision == revision and not s._edited   # both moves undone
 
 
 def test_the_apply_endpoint_returns_every_run_of_a_combined_fix(tmp_path, monkeypatch):

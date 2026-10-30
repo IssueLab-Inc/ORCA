@@ -279,8 +279,8 @@ Navisworks reports and ORCA's own detection produce the same objects, so everyth
 - **`Report`:** `id`, `title`, `root` (the folder its files and views live in), `sources` (XML paths, or the model
   file names for a detected run), `clashes`, `temporary` (the folder is deleted when the report is dropped), `origin`
   (`"navisworks"` or `"sightline"` for a detected run), `requirements_id` (a detected run: the id of the requirements
-  it ran under, set by `Workspace.detect`; `None` for the defaults and for imports; in the report summary, where the page
-  keys sign-offs by it). `clash(id)` also accepts "#39" and "39".
+  it ran under, set by `Workspace.detect`; `None` for the defaults and for imports; in the report summary). `clash(id)`
+  also accepts "#39" and "39".
 - **`ReportClash`:** `id`, `name` (`plain_name`: "A × B"), `guid`, `test`, `test_type`, `tolerance_m`, `status`
   (from the XML for Navisworks; `"new"` or `"active"` for detected), `distance_m` (signed, negative is overlap),
   `point`, `grid`, `a`, `b`, `images` (label and server path: "A"/"B"/"C" or "Navisworks"), `source`, `number`,
@@ -369,7 +369,7 @@ Navisworks reports and ORCA's own detection produce the same objects, so everyth
 | GlobalId | IFC's 22-character id | The authoring tool; STEP parts: uuid5 of the file hash and label path (`step.write_ifc`); new pieces of an edit: IfcOpenShell (`root.copy_class`) | The file. An offset, route or resize keeps the original GlobalId on its first piece; a STEP file always converts to the same ids |
 | Scene `revision` | Integer from 0, plus `history` | `IfcScene.bump` on every kept fix | Only grows. Apply replies carry `revision_before` and `revision`; wider-fix proposals are pinned to it |
 | Requirements id | 16 hex of sha256 of the canonical file | `requirements.doc_id` (content-addressed) | Any server: the same file has the same id. The registry keeps 500 |
-| Sign-off key (browser) | `sightline.signoffs:report:<report id>` for an imported report; `sightline.signoffs:run:<requirements id or "defaults">:<the run's sorted file names as JSON>` for a detection run | `signoffs.signoffKeyOf` (`web/src/signoffs.ts`) | Imported: that opening of the report, and a resume of it (re-importing gives a new report id and no sign-offs). Detected: reruns of the same files under the same requirements, since their clash ids stay the same; other files, or the same files under other requirements, start with none |
+| Sign-off key (browser) | `sightline.signoffs:clash:<clash id>` for each clash of a detection run; `sightline.signoffs:import:<title>:<sorted file names as JSON>` for an imported report | `signoffs.signoffScope`, `loadSignoffs` (`web/src/signoffs.ts`) | Detected: every run of the same elements, whatever the requirements or the other models open (the id hashes the test and the GlobalId pair), and never another project. Imported: every opening of the same report (its title and files), since a Navisworks id is a place in its file |
 | `model_key`, `rules_key` | 12 hex each | `requirements.model_key`, `rules_key` | The parts of the file that change the triage prompt, and the by-design rules |
 | Triage job key | `report.id` (uploaded or detected report) or `sample:<root>`, plus `\|model_key\|rules_key` under requirements | `app._triage_key` | A sample report's run is shared by every visitor |
 | Title job key | As the triage key, without requirements | `app._triage_key` | As above |
@@ -514,7 +514,7 @@ stateDiagram-v2
 | Title runs | `app._title_jobs` | 32 |
 | Built documents (PDF or zip bytes) | `app._documents` | 24 |
 | Requirements previews | `app._previews` | 64 |
-| Pattern readings | `app._pattern_triage` | Not bounded |
+| Pattern readings | `Workspace._patterns` (`plans.read_patterns`; route, chat and MCP share them) | 64 (`service.PATTERNS_KEPT`), oldest first |
 | Chat sessions | `app._chat.sessions` | 200 sessions, 40 messages each |
 | Agent links, their proposals, plans and jobs | `app.links` (`agents.Links`) | 200 links, 12 h idle, 24 h total; 16 jobs per link; 200 queued events per following page |
 | Registered requirements files | `requirements._registry` | 500, least recently used dropped |
@@ -537,7 +537,7 @@ Paths under "temp" are in the system temporary folder (`tempfile.gettempdir()`).
 | STEP conversion cache (when `samples/step-cache` is absent) | temp `sightline-models/step-cache/` (`Workspace.step_cache`) | Not cleaned |
 | Uploaded Navisworks reports | temp `sightline-reports/<folder>/` (`app.UPLOADS`) | The report is dropped (it is `temporary`) |
 | Detected report folders, with captured A/B/C views | temp `sightline-run-*/`, `views/<clash id>-<label>.png` | The report is dropped |
-| Edited models served to the page, exports, document copies | temp `sightline-exports/` (`app.EXPORTS`): `<scene>-<index>-<file>`, `<scene>/`, `<scene>-sightline.zip`, `<doc id>-<name>` | An hour (`EXPORTS_KEEP_S`), cleaned when a model file or an export is next requested |
+| Edited models served to the page, exports, document copies | temp `sightline-exports/` (`app.EXPORTS`): `<scene>-<index>-<file>`, `<scene>/`, `<scene>-orca.zip`, `<doc id>-<name>` | An hour (`EXPORTS_KEEP_S`), cleaned when a model file or an export is next requested |
 | Exports made over the local (stdio) MCP server | temp `orca-export-*/` (`mcp_server` `export_models`) | Not cleaned |
 | Show it built pictures | `SIGHTLINE_BUILT_CACHE`, default temp `sightline-built/` | Not cleaned |
 | Settings for everyone, off Modal | `SIGHTLINE_SETTINGS_FILE`, default `server/.sightline-settings.json` (gitignored) | Kept |
@@ -556,7 +556,7 @@ does without.
 | Key | Written by | Holds |
 |---|---|---|
 | `sightline.session` | `App.tsx` | The session to resume: `scene_id`, `report_id`, `files`, `fixes` (clash id → fix title), `link` (the agent link, token included), `saved_at`. Removed by Start fresh, or when the server no longer has the scene |
-| `sightline.signoffs:report:<report id>`, `sightline.signoffs:run:<requirements>:<files>` | `signoffs.ts` (`saveSignoffs`, called by `App.tsx`) | Reviews per clash id (team, name, decision, note, time) for the PDF's sign-off, one entry per report or detection run (the sign-off key, under Identifiers). A clash with no review left is dropped, and the key when none has any. The old title-keyed `sightline.signoffs.<report title>` entries (every detection run shared "Coordination · N models") are removed on load (`dropTitleKeyed`), not carried over: they can't be told apart by report |
+| `sightline.signoffs:clash:<clash id>` (a detection run) / `sightline.signoffs:import:<title>:<files>` (an imported report) | `signoffs.ts` (`saveSignoffs`, called by `App.tsx`) | Reviews (team, name, decision, note, time) for the PDF's sign-off: one entry per detected clash, or one per imported report by clash id (the sign-off key, under Identifiers). A clash with no review left is dropped, and an import's key when none has any. The old title-keyed `sightline.signoffs.<report title>` entries (every detection run shared "Coordination · N models") move over when a report with that title opens, for the clashes it has (`migrateTitleKeyed`); what is left waits for its own report |
 | `sightline.reviewer` | `ReportDoc.tsx`, read by `App.tsx` | The reviewer's name |
 | `sightline.requirements` | `reqFile.ts` | The requirements file and whether it is in use (`{doc, enabled}`); the page registers it with the server and sends its id |
 | `sightline.owner` | `Owner.tsx` | The owner's "For me" settings, sent as `X-Sightline-Settings` (read by the server only with the owner cookie) |

@@ -458,7 +458,7 @@ All from recorded runs; the build log keeps the dates ([22](22-build-log.md)).
 | Northbank with Site on | 633 clashes in 1,961 elements, 7-12 s | `evals/runs/2026-10-28-northbank-detection/` |
 | Answer key | #042 −300 mm, #057 −100 mm, #061 −77 mm, all found (Navisworks stored no #061) | [docs/detection.md](../detection.md) |
 | Sampled Navisworks results ORCA also reports | 117 of 117 real overlaps (of the other 200: 129 not physical, 46 touches, 24 one element, 1 joined by ports) | `evals/README.md` |
-| Palletising cell, Rev A / Rev B | 13/13 planted pairs, 0 unexpected / 0 planted (Oct 28); 16/16 after C6 was added (Oct 29) | `evals/runs/2026-10-28-cell-detection/`, `evals/step_cell.py` via the build log |
+| Palletising cell, Rev A / Rev B | 17/17 planted pairs, 95 by design, 0 unexpected / 0 planted, 93 by design (Oct 30, 161 / 185 parts, 0.8 s each) | `evals/runs/2026-10-30-cell-detection/` |
 | Big synthetic models (4 CPUs) | 150 MB: boxes 37 s, detection 5 s; 500 MB: detection 18 s | `evals/README.md`, "Big models" |
 
 ## When to update this doc

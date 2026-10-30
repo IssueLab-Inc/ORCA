@@ -9,7 +9,7 @@ before anyone sees it. This page is the design of the kinds of fix and how a new
 
 | Kind | What it does | Since |
 |---|---|---|
-| `move` | Moves a straight run (the element and what it is joined to) by a vector | Oct 27 |
+| `move` | Moves a straight run by a vector, keeping its joints: fittings and valves beyond it go along, a segment the move runs along gets longer or shorter; refused when a joint can't be kept (`docs/connections.md`) | Oct 27 |
 | `offset` | Splits a straight segment either side of an obstacle and takes the middle up or down (or sideways), with bends | Oct 27 |
 | `trim` | Cuts a slender member's end back to butt another's face | Oct 27 |
 | `route` | Holds stretches of a straight segment at offsets (up and/or sideways) in up to 3 steps, with bends | Oct 29 |
@@ -28,8 +28,10 @@ its `delta_m`):
 - **A plan's joint check:** `plans.IN_TRIAL[kind]` applies it inside the plan's trial and says what to check;
   `plans.EXTRA_FILES[kind]` names files it changes beyond its moved elements'.
 - **Keeping it:** `plans.KEEP[kind]`, behind `plans.apply`, which the plan, the MCP `apply_fix` and the page's
-  `POST /api/scenes/{sid}/fix/apply` all use. That endpoint drops the page's meshes and works out anything that
-  depends on the requirements again on the server.
+  `POST /api/scenes/{sid}/fix/apply` all use. That endpoint drops the page's meshes; `plans.apply` tries the fix again
+  first (`plans.CANDIDATE[kind]` turns the option back into Muse's parameters for `agent.TRIES`, with the clearance and
+  requirements of the clash it names in `pair`), refuses it with a 409 when it no longer passes, and keeps every
+  option or none (Oct 30).
 - **Sizing it against the requirements:** `requirements.SIZED` and `change_size` (how far any part goes; a lateral
   offset used to measure 0 mm).
 - **The page:** `fixKinds.ts`: the name, the edit in a few words, the clearance line, which pieces to frame, who must

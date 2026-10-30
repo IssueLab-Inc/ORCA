@@ -43,12 +43,13 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `chatRequest.ts` | Who owns the chat's current turn, so a newer action can cut off an older stream | `ChatRequestOwner`, `ChatRequest` | `App`, `Chat.tsx` |
 | `clashImage.ts` | Reads a Navisworks clash picture by colour (red A, green B, where they meet) | `readClashImage`, `focusSquare`, `drawOverlay`, `ClashRead`, `Box` | `ClashPanel.tsx` |
 | `fixKinds.ts` | Every fix kind in words: label, edit text, clearance, framing, reviewer, host rows | `KIND_LABEL`, `kindLabel`, `editText`, `changeText`, `clearanceText`, `needsText`, `framePieces`, `hostRows`, `moveWords`, `reviewText`, `recEditText` | `App`, `Activity.tsx`, `PlanPanel.tsx` |
+| `links.ts` | The connection highlight's logic: index the graph, an element's direct links by kind, its run (Shift), the groups and colours to light, the hover label's counts | `indexGraph`, `linksOf`, `runOf`, `highlightGroups`, `countsText`, `LINK_COLOURS`, `LINK_WORDS`, `LINK_ORDER`, `Graph`, `LinkIndex`, `LinkKind` | `App`, `api.ts` (the `Graph` type) |
 | `layout.ts` | Desktop / tablet / phone by width, touch detection, sheet snapping, `follow()` | `useLayout`, `layoutFor`, `useCoarse`, `isCoarse`, `follow`, `nearestSnap`, `nextSnap`, `SNAPS`, `PHONE_MAX`, `TABLET_MAX` | `App`, `Sheet.tsx`, `About.tsx` |
 | `noClash.ts` | Why a reported clash needs no fix (same element, not physical, a touch, no overlap, by design) | `noClash`, `oneElement`, `sameWhy`, `NoClash` | `App`, `ReportList.tsx`, `ClashPanel.tsx` |
 | `pilot.ts` | Lets the fix agent drive the viewer while it works | `Pilot`, `PilotStatus` | `App` |
 | `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
-| `signoffs.ts` | Where each report's review sign-offs are kept in the browser, and dropping the old title-keyed ones | `signoffKeyOf`, `loadSignoffs`, `saveSignoffs`, `dropTitleKeyed`, `Signoffs` | `App` |
-| `ui.tsx` | Shared UI bits: `IconButton`, `Popover`, and the page's one tooltip layer | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
+| `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
+| `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (on a phone its sheet renders into the body, above the bottom sheet), and the page's one tooltip layer | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
 | `uploads.ts` | The size check before an upload and the words for each upload stage | `uploadRefusal`, `uploadStatus`, `localFile` | `App` |
 | `voice.ts` | Live voice over a socket, and the record-then-upload fallback | `LiveVoice`, `VoiceRecorder`, `LiveVoiceError`, `MAX_SECONDS`, `VoiceMode` | `Chat.tsx` |
 | `viewer/Viewer.ts`, `viewer/ifcLoader.ts`, `viewer/patch.ts` | The 3D viewer | see [13](13-3d-viewer.md) | `App`, `pilot.ts`, `api.ts` (the `ElementMesh` type) |
@@ -180,7 +181,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 | `onClick`, `pickSide`, `pressStart` / `pressMove` / `pressEnd` | Mouse and touch picking (see [13](13-3d-viewer.md), "Keyboard, mouse and touch"). |
 | `propose()`, `escalate()`, `escalateItem(it)`, `runProposal(second, pick?)` | Start a proposal (or a second try on Muse Wonder) through `api.proposeStream`; for a detected clash without views, `captureViews` first (waits up to 4 s). |
 | `trackAgent(first?)` | Returns `{ onEvent, finish, live, retire }` for one proposal run (below). |
-| `accept(o)` | Captures before/after (`captureFix`) and Show it built's passes, `api.accept`, then `applyToViewer`, `edits`, `markFixed`, `evidence`, `buildAccepted`. A penetration returned `cut: false` is recorded as requested, not fixed. |
+| `accept(o)` | Captures before/after (`captureFix`) and Show it built's passes, `api.accept` with the clash pair, then `applyToViewer`, `edits`, `markFixed`, `evidence`, `buildAccepted`. A penetration returned `cut: false` is recorded as requested, not fixed; a fix the server's re-check refuses (409) shows its reason and changes nothing. |
 | `runPlan(body)`, `trackPlan(kind)`, `acceptPlan()` | Fix together (`clash_ids`) or root cause (`hub`) through `api.planStream`; accept keeps every passing item through `api.applyPlan`. |
 | `exploreContext(objective?)`, `trackContext`, `acceptContext()`, `staleContext()` | The wider-fix search (`api.contextStream`) and its accept (`api.applyContext`, all review conditions acknowledged). |
 | `applyToViewer(sid, kept, pieces, live)` | Patch the kept fix into the viewer in place, or reload the changed and missed files ([13](13-3d-viewer.md)). |
@@ -211,7 +212,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 | `report`, `reqId` | `api.triage`; a run still going is followed with `runTriage()` | triage state |
 | `triageDone` with matches | `api.triage` again (the server settles one-element pairs from the open model) | `triage` |
 | `report`, `sceneId` | `api.teams` | `modelTeams` |
-| mount; then `signoffKey` (the report, or the run's files and requirements) | `dropTitleKeyed` once; `loadSignoffs` | `signoffs`, and clears `evidence` |
+| `signoffKey` (`signoffScope`: a run's files, or an import's title and files), and the report | `migrateTitleKeyed`, then `loadSignoffs` for the report's clash ids | `signoffs`; a new `signoffKey` also clears `evidence` |
 | `report.id` | `api.titles` (stream) | `titles`, `naming` |
 | `sceneId`, `reqId` | `api.detectTests` | `detectSetup` |
 | `clash`, `matches`, `remeasure` | `api.measure` | `a`, `b`, `standIns`, `measure` |
@@ -344,7 +345,7 @@ built-picture events into `builtRuns[key].step`. Event types are listed in [10](
 | Group | Functions | Notes |
 |---|---|---|
 | Models and scenes | `samples`, `open`, `uploadModelsStream`, `uploadModels`, `file`, `sceneInfo`, `element`, `exportUrl`, `classes` | `uploadModels` (no progress) is not called by the app at HEAD |
-| Fixes | `proposeStream`, `propose`, `verify`, `accept` | `accept` picks the route by kind: trim, offset, move, else `/fix/apply` with `preview`/`before` dropped. `propose` (not streamed) is unused at HEAD |
+| Fixes | `proposeStream`, `propose`, `verify`, `accept` | `accept(id, o, pair)` sends every kind to `/fix/apply` with `preview`/`before` dropped and the option's `pair` (else the clash on screen: recorded tour runs carry none); a 409 is the server's re-check refusing it, shown with its reason. `propose` (not streamed) is unused at HEAD |
 | Plans | `planStream`, `applyPlan` | resolves with the `plan` event |
 | Wider fix | `contextStream`, `applyContext` | throws if the stream ends without `context_result` or `error` |
 | Detection | `detectTests`, `detect` | resolves with the `done` event |
@@ -403,12 +404,15 @@ with a getter for the viewer, a framing function (`frameFix` on the trial's piec
   (when the app reaches the state, the tour moves on after 1.1 s), `show` ("Show me": runs an action or clicks the
   target), `enter` (set the page up), `reveal` (open the target's `<details>`) and `fallback` (offer a recorded run).
 - **`TourState`** is built by `App` each render (`tourState`): what is open, triage counts, the tab, the proposal's
-  progress and seconds, the plan's, reviews and sign-offs, the report dialog, requirements, and the tour's clashes
+  progress and seconds and its options' kinds (`optionKinds`, best first, so copy can name the option on screen), the
+  plan's, reviews and sign-offs, the report dialog, requirements, and the tour's clashes
   found by element pair (`clashOfPair(TOUR.duct)`, `TOUR.joint`) or, for the cell, by part names
   (`clashOfNames(CELL.…)`). **`TourActions`** (`tourActions`) are what "Show me" can do beyond a click: filter real
   clashes, select a tour clash, open the cell, fix the pipe, compare, replay, ask the tour question in chat, add a
   sign-off, and `reveal`.
-- **Recordings:** a live Muse step offers "Watch a recorded run" after 45 s (a plan after 75 s) or on an error. The
+- **Recordings:** a live Muse step offers "Watch a recorded run" after 45 s (a plan after 75 s), on an error, or when
+  the proposal ended with no option (`liveMissed`: a failed run also ends "done"); a plan-starting step counts a plan
+  error as done, so the tour moves to the step that offers the plan's recording. The
   runs are `web/public/tour/c0053.json` (duct), `c0051.json` (joint), `girder-plan.json`, `cell-ladder.json` and
   `cell-pipe-plan.json`: `{ events: [{ t, event }] }`, replayed by `replayPropose` / `replayPlan` through the same
   trackers at their recorded times. `replayPlan` re-points the recording's clash ids at this report's clashes of the
@@ -435,13 +439,16 @@ with a getter for the viewer, a framing function (`frameFix` on the trial's piec
 - **`reqFile.ts`:** the requirements file (`orca-requirements/1`) in the browser: `load`/`save` (key
   `sightline.requirements`, `{ doc, enabled }`), `serialise`, `parseUpload`, `download`, cell, mover and penetration
   edits, `addByDesign` / `addPenetration` and their `has…` checks. Pure functions, shared by `App` and the dialog.
-- **`signoffs.ts`:** `signoffKeyOf(report)` is the storage key for a report's sign-offs (clash id → reviews): an
-  imported report by its id (`sightline.signoffs:report:<id>`), a detection run by the requirements it ran under
-  (`report.requirements_id`, from the server) and its sorted file names (`report.sources`), so a rerun of the same
-  models under the same requirements keeps them and nothing else sees them. `loadSignoffs` / `saveSignoffs` read and
-  write inside `try` (a clash with no review left is dropped, and the key with it); `dropTitleKeyed` removes the
-  pre-Oct 30 `sightline.signoffs.<report title>` entries once on mount. Every detection run was titled "Coordination ·
-  N models", so those were shared between projects and runs, and the PDF's DRAFT depends on them.
+- **`signoffs.ts`:** where a report's sign-offs (clash id → reviews) are kept. A detection run's, per clash under its
+  id (`sightline.signoffs:clash:<id>`): the id hashes the test and the GlobalId pair, so a rerun, a requirements change
+  or a different set of open models finds the same clash's reviews, and another project never does. An imported
+  report's, under its title and sorted files (`sightline.signoffs:import:…`): a Navisworks id is the clash's place in
+  its file, and opening the same report again finds them. `signoffScope(report)` says which (and when the page moved
+  to other models, which clears `evidence`); `loadSignoffs(scope, ids)` reads the report's own clashes;
+  `saveSignoffs` writes inside `try` (a clash with no review left is dropped). `migrateTitleKeyed(report)` moves the
+  pre-Oct 30 `sightline.signoffs.<report title>` entries over for the clashes this report has, never over newer ones,
+  and leaves the rest for their own reports. Every detection run was titled "Coordination · N models", so those were
+  shared between projects and runs, and the PDF's DRAFT depends on them.
 - **`uploads.ts`:** `uploadRefusal` (at most 8 files, `.ifc`/`.step`/`.stp`, the server's cap from `api.models`
   counted before packing), `uploadStatus` (the busy line per upload event), `localFile` (an uploaded IFC is drawn from
   the visitor's own file, a STEP comes back converted). Design: [docs/uploads.md](../uploads.md).
@@ -479,7 +486,7 @@ Everything is `localStorage`, read and written inside `try` (a private window ju
 |---|---|---|
 | `sightline.session` | `App` (`SESSION_KEY`) | `SavedSession`: scene id, report id, files, fixes, agent link, time; read on load for "Pick up where you left off" |
 | `sightline.left-w`, `sightline.right-w` | `App` (`stored`, `remember`) | Dragged pane widths (clamped by `PANE`) |
-| `sightline.signoffs:report:<report id>`, `sightline.signoffs:run:<requirements>:<files>` | `signoffs.ts`, for `App` (`signoffKey`, `changeSignoffs`) | Team reviews per clash for that imported report or detection run (`signoffKeyOf`). The old `sightline.signoffs.<report title>` keys are removed on mount |
+| `sightline.signoffs:clash:<clash id>` (a detection run) / `sightline.signoffs:import:<title>:<files>` (an imported report) | `signoffs.ts`, for `App` (`signoffKey`, `changeSignoffs`) | Team reviews per detected clash, or per imported report. The old `sightline.signoffs.<report title>` keys move over as their reports open (`migrateTitleKeyed`) |
 | `sightline.reviewer` | `ReportDoc.tsx` (read by `App`'s tour sign-off) | The reviewer's name |
 | `sightline.requirements` | `reqFile.ts` | The requirements file and whether it is in use |
 | `sightline.owner` | `Owner.tsx` | The owner's own settings (the token is never stored: the server sets an HttpOnly cookie) |

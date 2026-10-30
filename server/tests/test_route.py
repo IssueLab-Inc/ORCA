@@ -195,7 +195,7 @@ def test_the_endpoint_and_a_plan_keep_a_route(tmp_path, monkeypatch):
     scene = ws.scene(sid)
     duct, column = by_tag(scene, "RT-2"), by_name(scene, "Column B2")
     option = {"title": "Round both columns", "kind": "route", "moved": [duct], "delta_m": [0, 0.45, 0],
-              "edit": {"steps": TWO, "summary": "reroute"}}
+              "edit": {"steps": TWO, "summary": "reroute"}, "pair": [duct, column], "others": [by_name(scene, "Column B4")]}
     item = plans.Item(f"{duct}|{column}", duct, column, "pair", [], option=option, others=[by_name(scene, "Column B4")])
     assert plans.verify_together(ws, sid, [item])["passed"]
     monkeypatch.setattr(app_module, "ws", ws)

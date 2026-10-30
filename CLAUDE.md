@@ -161,6 +161,10 @@ diagrams, checked against the code. Feature designs (the "why") stay in `docs/*.
 - **Trials don't mark files edited:** `IfcScene.translate` moves and moves back; only a kept fix (`Workspace.apply`,
   `apply_offset`, `apply_trim`, …) calls `mark_edited`. Edits live in memory: a restart or reopening the models
   starts clean.
+- **Keeping never trusts the page:** every keep route goes through `plans.apply`, which tries each option again
+  (`plans.recheck`: `agent.TRIES` with the clearance and requirements of the clash in its `pair`), checks several
+  together and keeps all or none (409 `NotVerified` with why). `Workspace.apply_*` are its primitives and do not check.
+  A new fix kind needs a `plans.CANDIDATE` entry.
 - **STEP export:** place shapes with `BRepBuilderAPI_Transform`, never `.Moved()` (names and colours are lost on
   write).
 - **Prompts say only what differs from the defaults:** "every hard clash matters" in the L3 triage line once turned
@@ -177,12 +181,13 @@ Live (Modal app `orca`): https://dodzikojo--orca-web.us-east.modal.run.
 
 Built Oct 27–30, all verified by geometry before anyone sees a fix: ORCA's own detection (and Navisworks reports),
 `#N` numbers and Muse titles, bulk triage, six fix kinds (move, offset with bends, trim, route, penetration, resize)
-plus combined fixes, Fix together and root causes, Insights patterns, chat and live voice, the MCP server with pairing
-links, coordination requirements, STEP models (the palletising cell), PDF reports and BCF, IFC/STEP export, accept in
-place, escalation to Muse Wonder, Show it built, phones and tablets, guided tours. Latest validation (Oct 30): 550
-server tests (541 plus the 9 docs-map tests), 64 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1, C2, C3, C6,
-C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was built when, with the numbers measured at the
-time: `docs/architecture/22-build-log.md`.
+plus combined fixes, joints (a move takes its fittings along and stretches what it runs along, or is refused; the
+viewer lights what an element is linked to: `docs/connections.md`), Fix together and root causes, Insights patterns,
+chat and live voice, the MCP server with pairing links, coordination requirements, STEP models (the palletising cell),
+PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder, Show it built, phones and tablets,
+guided tours. Latest validation (Oct 30): 595 server tests, 80 web tests; answer key 3/3 first try at Rev04 heights;
+`evals/step_cell.py` passes (C1, C2, C3, C6, C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was
+built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
 
 Next, in order.
 1. ✅ Spike 4 passed with images (spikes/README.md). ✅ Opening heights fed as text (`edits.passages`).

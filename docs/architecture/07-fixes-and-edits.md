@@ -3,10 +3,10 @@
 > **Covers:** `server/sightline/edits.py`, `server/sightline/hosts.py`, `server/sightline/context_eval.py`,
 > `server/sightline/context_planner.py`, the fix parts of `server/sightline/agent.py` (`_try_*`, `TRIES`, `PARAMS`,
 > `TIERS`, `tier`, `stays`, `combined_steps`), `server/sightline/plans.py` (`IN_TRIAL`, `EXTRA_FILES`,
-> `KEEPS_CONTACTS`, `KEEP`, `apply`), `server/sightline/service.py` (`Workspace.apply*`, `check_*`, `patch`, `export`),
+> `KEEPS_CONTACTS`, `KEEP`, `CANDIDATE`, `recheck`, `apply`), `server/sightline/service.py` (`Workspace.apply*`, `check_*`, `patch`, `export`),
 > `server/sightline/requirements.py` (`SIZED`, `change_size`, `blocked`, `can_cut`, `meets`), the prompts
 > `domain_packs/construction.md`, `escalation.md`, `penetrations.md`, `context.md`, and `web/src/fixKinds.ts`,
-> `web/src/ContextPlan.tsx`, `api.accept` in `web/src/api.ts` · **Checked against code:** 2026-10-30 (`104fda9`) ·
+> `web/src/ContextPlan.tsx`, `api.accept` in `web/src/api.ts` · **Checked against code:** 2026-10-30 (`4a19777`) ·
 > **Deeper design:** [docs/edits.md](../edits.md), [docs/escalation.md](../escalation.md) (combined fixes)
 
 Every fix ORCA offers is an edit to the real IFC elements. It is made inside an IfcOpenShell transaction, checked by
@@ -52,7 +52,8 @@ a move.
 | A plan's joint check | `plans.IN_TRIAL` | kind → apply inside the plan's trial; returns what to check, the fix's own elements, and the obstacles its shortened ends are checked against (or, for a combined fix, its own check) |
 | | `plans.EXTRA_FILES` | Files a fix changes beyond its moved elements' (penetration: the service's, for the provision for void) |
 | | `plans.KEEPS_CONTACTS` | Kinds whose element keeps the contacts it had (trim, penetration): only new or worse contacts count |
-| Keeping | `plans.KEEP`, behind `plans.apply` | kind → the `Workspace.apply_*` method that makes it for good |
+| Keeping | `plans.CANDIDATE`, behind `plans.recheck` | kind → a kept option back as Muse proposes it (its parameters) and the element of its clash it changes, so it is tried again through `agent.TRIES` before it is kept |
+| | `plans.KEEP`, behind `plans.apply` | kind → the `Workspace.apply_*` method that makes it for good |
 | The page | `web/src/fixKinds.ts`, `FixKind` in `web/src/api.ts` | Name (`KIND_LABEL`), the edit in words (`editText`, `changeText`, `recEditText`), the clearance line (`clearanceText`), what to frame (`framePieces`), who reviews (`reviewText`), an opening's host rows (`hostRows`) |
 | The prompt | `domain_packs/construction.md`, `escalation.md` | What Muse may propose, with a JSON example per kind |
 
@@ -67,23 +68,23 @@ flowchart LR
     rank --> page["page: fixKinds.ts describes and frames it"]
     rec["recommendation, never tried"] --> params["agent.PARAMS"]
     page --> fixApply["POST fix/apply"]
-    page --> legacy["POST apply, offset/apply, trim/apply"]
+    legacy["POST apply, offset/apply, trim/apply"] --> papply
     planApply["POST plan/apply"] --> papply["plans.apply"]
     mcpApply["MCP apply_fix, apply_plan"] --> papply
     fixApply --> papply
-    papply --> keep["plans.KEEP: Workspace.apply_kind"]
-    legacy --> wsApply["Workspace.apply, apply_offset, apply_trim"]
+    papply --> recheck["plans.recheck: CANDIDATE, then agent.TRIES again"]
+    recheck -->|fails| r409["409 NotVerified, nothing kept"]
+    recheck --> keep["plans.KEEP: Workspace.apply_kind, inside kept_files"]
     keep --> bump["mark_edited, bump revision"]
-    wsApply --> bump
     bump --> patch["_with_patch: Workspace.patch"]
     together["plans.verify_together"] --> inTrial["IN_TRIAL, EXTRA_FILES, KEEPS_CONTACTS"]
 ```
 
-The page keeps the three oldest kinds through their own routes (`api.accept`: `/apply`, `/offset/apply`,
-`/trim/apply`) and every other kind through `POST /api/scenes/{scene_id}/fix/apply`, which drops the page's meshes
-and rebuilds the fix on the server from its kind and parameters. A plan uses `POST /api/scenes/{scene_id}/plan/apply`;
-both go through `plans.apply`, as do the MCP tools `apply_fix` and `apply_plan` ([11](11-mcp-and-agent-links.md)).
-Routes in full: [10](10-http-api-and-streams.md).
+The page keeps every kind through `POST /api/scenes/{scene_id}/fix/apply` (`api.accept`), which drops the page's
+meshes and tries the fix again on the server from its kind, its parameters and the clash it names (`pair`). A plan
+uses `POST /api/scenes/{scene_id}/plan/apply`; both go through `plans.apply`, as do the MCP tools `apply_fix` and
+`apply_plan` ([11](11-mcp-and-agent-links.md)) and the three oldest routes (`/apply`, `/offset/apply`, `/trim/apply`),
+which the page no longer uses. Routes in full: [10](10-http-api-and-streams.md).
 
 ### Adding a new fix kind: a checklist
 
@@ -99,12 +100,13 @@ Routes in full: [10](10-http-api-and-streams.md).
 4. **Requirements**: add it to `requirements.SIZED` if the largest-move limit applies; check `blocked` (under "move
    only" just `move` and `penetration` pass) and `meets`.
 5. **Plans**: `plans.IN_TRIAL`, `EXTRA_FILES` if it changes another file, `KEEPS_CONTACTS` if its element keeps its
-   contacts, and `plans.KEEP` pointing at a new `Workspace.apply_<kind>` that holds `Workspace.lock`, calls
-   `mark_edited` and `bump`, and returns `files`, `changed` and (for a split run) `pieces`.
+   contacts, `plans.CANDIDATE` (its option's fields back as a candidate, and the element of the clash it changes, so
+   keeping tries it again), and `plans.KEEP` pointing at a new `Workspace.apply_<kind>` that holds `Workspace.lock`,
+   calls `mark_edited` and `bump`, and returns `files`, `changed` and (for a split run) `pieces`.
 6. **Tools**: a `Workspace.check_<kind>` and chat and MCP `check_<kind>` tools if people or agents should try it by
    hand ([09](09-agent-workflows.md), [11](11-mcp-and-agent-links.md)).
 7. **The page**: the `FixKind` union in `api.ts`, and `KIND_LABEL`, `framePieces`, `changeText` and `REVIEW` in
-   `fixKinds.ts`. Keeping needs nothing new: `api.accept` sends any other kind to `/fix/apply`.
+   `fixKinds.ts`. Keeping needs nothing new: `api.accept` sends every kind to `/fix/apply` with its `pair`.
 8. **Files out**: check STEP export (`service.step_changes` handles moved, replaced and new parts generically) and the
    PDF and BCF wording for its evidence ([14](14-files-in-and-out.md)).
 9. **Tests**: `server/tests/test_fix_kinds.py` (registry, ranking, the one endpoint), a `test_<kind>.py` on a fixture
@@ -121,14 +123,25 @@ Routes in full: [10](10-http-api-and-streams.md).
 
 - **Shape:** `{"kind": "move", "move": "A", "delta_m": [dx, dy, dz]}`, metres on the model's axes (+X east, +Y north,
   +Z up; `agent.move_words` says it in words).
-- **What moves:** `IfcScene.connected_run(target)`: the element and the segments joined to it through ports, up to
-  the fittings at each end (a STEP part: `step_run`). Nothing new is built; `Option.placements` carries the new
-  matrices for the page's preview.
+- **What moves:** `connections.run(target)`: the element and the straight segments joined to it cap to cap (ports,
+  or for STEP parts flow parts meeting face to face), the element first; a part that is not a flow element keeps
+  `IfcScene.connected_run` without flow parts. Nothing new is built; `Option.placements` carries the new matrices for
+  the page's preview. Design: [docs/connections.md](../connections.md).
+- **Joints first** (`connections.plan_move`, `SIGHTLINE_CONNECTED_MOVES` carry by default): fittings and in-line valves
+  beyond the run go along, a straight segment the move runs along gets longer or shorter at the joined end
+  (`edits.stretch`), a rectangular segment covered end-on at its side (a ladder riser under its bend) grows that way.
+  Equipment, terminals, structure, a branch, a piece left under 50 mm or more than 12 parts along refuse it before it
+  is tried, naming why ("cannot keep its joints: …"); the joints are the attempt's hits, so the pilot shows them.
+- **A move that carries** is tried in a trial (`connections.trial_move`): what moves is checked against everything
+  but what it changes and what that is joined to; a stretched segment counts only contacts new or worse than before;
+  `check_joints` proves every joint still meets. It stays kind `"move"`, with `edit` {summary, key, run, carried,
+  stretched, joints} and `preview` (the stretched segments). Keeping it (`plans.recheck`) refuses an option whose
+  `edit.key` no longer matches the fresh trial's: the move would now change the model differently.
 - **Checked** (`_try_move`): the run is translated, checked, and translated back in a `finally` (no transaction is
   needed). The fittings at the run's ends (connected but outside it) are ignored. The supports rule applies, with the
   clash's partner and a plan item's `others` as what the move must clear ([06](06-geometry-and-detection.md)): what a
   post or stand sits on stays a contact, a lift off it fails.
-- **Refused:** only by the requirements (`_refused`) or a failed check.
+- **Refused:** by the joints, by the requirements (`_refused`) or by a failed check.
 
 ### Offset
 
@@ -301,8 +314,9 @@ flowchart LR
   `check_combined`: a moved run's elements against everything; a split run's new pieces against everything and its
   shortened ends against A, B, the item's others and the other steps' elements; one hit per element, the worst.
   Preview meshes are tagged by run and part (`_tagged`: `origin`, `part`) so the page colours each run.
-- **Kept** (`Workspace.apply_combined`): the steps are checked again with `combined_steps`, then made all or nothing in
-  `edits.kept_files`; each split run's pieces come back on their own (`groups`).
+- **Kept** (`Workspace.apply_combined`, after `plans.recheck` tried the whole fix again through `_try_combined`): the
+  steps are checked again with `combined_steps`, then made all or nothing in `edits.kept_files`; each split run's
+  pieces come back on their own (`groups`).
 - **Tier** 0.5: after one element's fix, but it ends the search. No reviewer is set (a step that moves another team's
   service does not add that team: known, not fixed).
 
@@ -425,7 +439,7 @@ option card (`hostRows` in `fixKinds.ts`) and in `edit.numbers`.
 |---|---|---|---|
 | `edits.trial(scene, gid)` | The one file holding `gid` | `begin_transaction`, yield, `end_transaction` and `undo`; the box cache put back | `_try_offset`, `_try_trim`, `_try_route`, `_try_resize` |
 | `edits.trial_files(scene, indexes)` | Several files | The same over each file; never nested inside `trial` (a file holds one transaction at a time) | `_try_penetration`, `_try_combined`, `plans.verify_together` |
-| `edits.kept_files(scene, indexes)` | Several files, for good | All or nothing: an error part way undoes every file's edits and the boxes, then re-raises | `Workspace.apply_combined` |
+| `edits.kept_files(scene, indexes)` | Several files, for good | All or nothing: an error part way undoes every file's edits, the boxes, the files marked edited and the scene's revision and history, then re-raises. Nested in another `kept_files`, a file the outer one holds is left to it (IfcOpenShell keeps one transaction per file) | `plans.apply` (every keep), `Workspace.apply_combined` (inside it) |
 | `IfcScene.translate` there and back | Moves | No transaction; the `finally` moves the run back | `_try_move`, `Workspace.verify_move` |
 
 A trial edits the shared scene, so every `TRIES` call runs under `Workspace.lock` (`agent.resolve(lock=)`); plans
@@ -452,39 +466,69 @@ sequenceDiagram
     ed->>ifc: end_transaction and undo
     Note over ed: box cache put back
     tryFn-->>agentLoop: Attempt, and an Option with preview meshes when it passed
-    agentLoop-->>page: ranked options in the result event
-    page->>api: POST fix/apply with the option
+    agentLoop-->>page: ranked options in the result event, each with its pair
+    page->>api: POST fix/apply with the option and its pair
     api->>ws: _with_patch takes Workspace.lock, notes revision_before
-    ws->>ed: plans.KEEP kind makes the same edit for good
+    api->>tryFn: plans.recheck: CANDIDATE kind, fix_settings, the same TRIES call
+    tryFn-->>api: failed: 409 NotVerified, nothing kept
+    api->>ed: kept_files over the fixes' files
+    ws->>ed: plans.KEEP kind makes the rechecked edit for good
     ws->>ws: mark_edited and bump the revision
     api->>ws: patch(changed, revision_before)
-    api-->>page: files, changed, pieces, meshes, revision, history
+    api-->>page: files, changed, pieces, verified, meshes, revision, history
 ```
 
 ### Keeping a fix
 
-Each `Workspace.apply_*` takes `Workspace.lock`, makes the edit for good, calls `mark_edited` on what changed (so
-export writes the file) and `bump` with the files it changed, and returns `files` (indexes), `changed` (GlobalIds the
-page must redraw) and, for split runs, `pieces` (the original first).
+Nothing the page (or an agent) sends is kept as sent. `plans.apply(ws, scene_id, options)` is the one way in: every
+keep route, the plan route and the MCP tools call it ([10](10-http-api-and-streams.md), [11](11-mcp-and-agent-links.md)).
+Under `Workspace.lock` it:
+
+1. **Refuses an unknown kind** (`ValueError`, 400) before anything else.
+2. **Tries each option again** (`plans.recheck`), as its proposal tried it, on the model as it is now:
+   - the clash it is for comes from `option_pair`: a penetration's `edit.service` and `edit.host`, a combined fix's
+     `edit.pair`, any other kind's `pair` (`[A, B]`, which `agent.resolve` puts on every option, with `others` for a
+     plan's merged item). No pair, an element not in the model, or a changed element that is neither side: 400;
+   - `plans.CANDIDATE` turns the option back into Muse's parameters (`delta_m`; `split_m` and `dz_m`; `by_m`; route
+     `steps`; resize `split_m`, `depth_m`, `keep`; combined steps through `agent.step_candidate`) and names the side it
+     changes;
+   - `Workspace.fix_settings` for that pair gives the clearance, the policies and recommend-only, exactly as for the
+     proposal: recommend-only refuses ("nothing may be edited here"), `agent._refused` refuses what the requirements
+     forbid (largest move, edits, trims), then `agent.TRIES[kind]` runs the same trial and check with
+     `others=` (split ends checked against every obstacle);
+   - no option back, or a trim whose joint is at the other end from the one sent, raises `plans.NotVerified` with the
+     attempt's reason (409). A tampered `delta_m`, split or height fails here, and so does a fix proposed before
+     another edit or a rule change made it fail.
+3. **Checks several together** (`_check_together`): a plan's options also go through `verify_together` (each against
+   the others in place), as when the plan was built; the first that fails raises `NotVerified` ("with the other fixes
+   in place").
+4. **Keeps the rechecked options, not the sent ones**, in one `edits.kept_files` over every file they change
+   (`option_files`), each through `plans.KEEP`. What is kept is what the trial made: a move's whole run
+   (`connected_run`, even when the page named one segment), the trim's end at the joint, a one-step route kept as an
+   offset. A keep refused part way (`edits.Unsupported`, 422: a penetration whose host may no longer take it) undoes
+   every option before it, the files marked edited and the revision included.
+
+The reply adds `verified` (per option: `min_clearance_m`, `checked_against`). Each `Workspace.apply_*` takes
+`Workspace.lock`, makes the edit for good, calls `mark_edited` on what changed (so export writes the file) and `bump`
+with the files it changed, and returns `files` (indexes), `changed` (GlobalIds the page must redraw) and, for split
+runs, `pieces` (the original first). They are the primitives behind `plans.KEEP` and do not check: nothing outside
+`plans.apply` calls them for a request.
 
 | Kind | Kept by | Notes |
 |---|---|---|
-| move | `Workspace.apply(moved, delta_m)` | Also returns `placements` |
+| move | `Workspace.apply(moved, delta_m)` | Also returns `placements` (not passed on by `plans.apply`) |
 | offset | `Workspace.apply_offset` | `split_m`, `dz_m`; default corners |
 | route | `Workspace.apply_route` | |
 | trim | `Workspace.apply_trim` | `pieces` is the member |
 | resize | `Workspace.apply_resize` | |
 | penetration | `Workspace.apply_penetration` | Re-reads the requirements: `cut`, `blocked_by`; marks the host edited only when cut |
-| combined | `Workspace.apply_combined` | Re-checks the steps, then `kept_files` |
-| wider fix | `context_planner.accept` | Below |
+| combined | `Workspace.apply_combined` | Re-checks the steps, then `kept_files` (nested in `plans.apply`'s) |
+| wider fix | `context_planner.accept` | Below; its own fresh check, not `plans.apply` |
 
-Two things to know:
-- **Keeping trusts the option's parameters.** The edit is rebuilt from the kind and its fields, not from the page's
-  meshes, but the geometry check is not run again; only a penetration (host, hole, requirements) and a combined fix
-  (its steps) are re-validated. The wider-fix accept is the exception that re-checks everything.
-- **`plans.apply` is not one transaction across options.** It keeps each option in turn; if one is refused part way
-  (a penetration whose host may no longer take it), the ones before it stay kept and the request fails. A combined
-  fix on its own is all or nothing.
+What the recheck trusts: the pair the request names. It cannot know which clash the person was looking at, so a fix
+is verified against the clash it claims (cleared by that pair's clearance, nothing new hit anywhere), which is what the
+proposal verified. Re-checking costs one trial per option (0.4-0.6 s per check on Northbank) plus, for a plan, one
+joint check.
 
 ### Accept in place: `Workspace.patch`
 
@@ -604,14 +648,15 @@ memory: a restart means generating again.
 ## When to update this doc
 
 - A new, renamed or removed fix kind, or a change to any registry: `agent.TRIES`, `PARAMS`, `TIERS`,
-  `COMBINED_KINDS`, `plans.IN_TRIAL`, `EXTRA_FILES`, `KEEPS_CONTACTS`, `KEEP`, `requirements.SIZED`, or
+  `COMBINED_KINDS`, `plans.IN_TRIAL`, `EXTRA_FILES`, `KEEPS_CONTACTS`, `CANDIDATE`, `KEEP`, `requirements.SIZED`, or
   `fixKinds.ts` (follow the checklist above).
 - A change to what a kind builds or refuses in `edits.py` (`apply_offset`, `apply_route`, `apply_resize`,
   `apply_trim`, `butt_trim`, `penetration`, `apply_penetration`, `_build_chain`, `bend_radius`, the constants), or to
   how a `_try_*` checks it.
 - A change to `SIGHTLINE_OFFSET_CORNERS`, the bend rule or the fitting classes.
 - A change to the hosts layers, `hosts.NEVER`, the transfer-element rule, `check_hole` limits or the reading's schema.
-- A change to the transaction helpers, `Workspace.apply_*`, `Workspace.patch`, `_with_patch` or the keep routes.
+- A change to the transaction helpers, `Workspace.apply_*`, `Workspace.patch`, `_with_patch`, the keep routes, or
+  what `plans.recheck` / `plans.apply` check before keeping (`option_pair`, `NotVerified`, the together check).
 - A change to the wider-fix planner or evaluator: its tools, limits (`SIGHTLINE_CONTEXT_*`,
   `SIGHTLINE_WIDER_FIX_MAX_MB`), checks, ranking, review conditions or accept rules.
 - New measured results for a kind (the answer key, the cell's planted cases).

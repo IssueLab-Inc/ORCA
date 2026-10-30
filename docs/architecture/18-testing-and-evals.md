@@ -97,7 +97,8 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 | `test_penetration.py` | 18 | Penetrations (`edits.penetration`, `apply_penetration`): opening size, edge and off-line refusals, columns never, both files undone, provision for void never physical, structural review, ranking after plain fixes, cut only when the requirements allow, endpoint/plan/patch, IFC2X3, two walls, a service stopping inside the host |
 | `test_hosts.py` | 18 | `hosts.py`: hard rules need no model, Muse reads each kind once from standard facts only (a project pset never reaches it), the hole against the reading's limits, a gland plate's fitted hole, requirements win over Muse, the transfer beam never offered, a failed reading leaves walls and slabs only, limits sanitised |
 | `test_fix_kinds.py` | 7 | The registry: an unknown kind is refused, split ends checked against every obstacle, feedback names each kind and where it hit, `agent.TIERS` ranking, a lateral offset sized by how far it goes, plans refuse a kind they cannot apply, `POST /api/scenes/{scene_id}/fix/apply` keeps any kind |
-| `test_accept_in_place.py` | 6 | `Workspace.patch`: the revision a page starts from, an offset's pieces as triangles, moves/routes/plans as meshes, no meshes when one will not triangulate or there are too many vertices, which files each revision changed, unstyled elements keep no colour |
+| `test_accept_in_place.py` | 6 | `Workspace.patch`: the revision a page starts from, an offset's pieces as triangles, moves (the whole run)/routes/plans as meshes, no meshes when one will not triangulate or there are too many vertices, which files each revision changed, unstyled elements keep no colour |
+| `test_keep_verified.py` | 9 | Keeping tries the fix again (`plans.recheck`, `plans.apply`): options carry their pair; tampered moves and offsets (any split or height) refused with 409 and nothing kept; an option proposed before another edit refused; the requirements' clearance, largest move and report-only apply, not the page's; a plan all or nothing (together, a later failure, a keep refused part way); the server keeps the whole run and the joint's end; a fix must name its clash; `kept_files` restores marks and leaves a held file to the outer one |
 
 **AI workflows and the model client** ([08](08-ai-models-prompts-and-spend.md), [09](09-agent-workflows.md))
 
@@ -126,11 +127,11 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_api.py` | 6 | Open → verify → apply → export, sample names cannot escape `samples/`, a federated export writes only the edited file, export carries kept fixes and no tried ones, reopening a held scene, eviction spares linked scenes |
+| `test_api.py` | 7 | Open → verify → apply → export (a move still clashing is refused), sample names cannot escape `samples/`, a federated export writes only the edited file, export carries kept fixes and no tried ones (as `orca-export.zip`; an offset the other model's beam blocks is refused until that beam moves), a multi-file export named for its project (`<project>-orca.zip`), reopening a held scene, eviction spares linked scenes |
 | `test_reports.py` | 8 | `reports.py`: Navisworks grouped tags and three views, upload/match/measure/images, no-XML uploads refused, sample report folders, report clashes send their images and distance, a port's owner, `SAMPLE_EXCLUDE` renumbering, `/api/transcribe` biased to clash names |
 | `test_step.py` | 8 | `step.py`: names, groups, colours and metres survive conversion, detection finds the ladder through the post, group runs move together, export writes moves back, classes from the model, upload accepts STEP and IFC only, caps, older conversions still read |
 | `test_uploads.py` | 10 | Bigger uploads: gzipped parts unpacked, the cap on the unpacked size, 411/413 before reading, broken or repeated archives refused, the streamed open's events and errors, the scene byte budget, wider fixes refused on big models, bounded gunzip steps, room made first |
-| `test_document.py` | 8 | `document.py`: team guess from content, who acts and who reviews, PDFs per team plus BCF, one combined PDF stays DRAFT, screenshot facts, a kept fix page's built view or why not |
+| `test_document.py` | 9 | `document.py`: team guess from content, who acts and who reviews, PDFs per team plus BCF (`orca-report.zip`, `orca-issues.bcfzip`), one combined PDF stays DRAFT (`orca-report.pdf`), the triage model the PDF names, screenshot facts, a kept fix page's built view or why not |
 
 **Requirements, settings, owner and caps** ([15](15-requirements-settings-and-config.md), [16](16-security-caps-and-cost.md))
 
@@ -141,6 +142,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 | `test_settings.py` | 8 | `settings.py`: the store survives a restart, refuses unknown values, falls back when broken; effort precedence owner > everyone > environment; open weights off unless switched on; owner-only `/api/settings`; `/api/models` |
 | `test_owner.py` | 7 | `owner.py`: the HttpOnly cookie, a new token logs everyone out, no token no owner, wrong tokens capped, settings count only for the owner, unknown settings dropped, the owner skips the demo caps |
 | `test_limits.py` | 5 | `limits.ProposeLimit`: per-visitor hour, the daily cap for everyone (refusals not counted), no limits by default, 429 on propose, `Workspace` keeps only the newest scenes |
+| `test_env_file.py` | 3 | Configuration: a fresh interpreter on a copy of the package beside its own `.env` (the package's `__init__.py` loads it) reads `.env` for the settings read at import and the caps, a real environment variable wins, and empty numbers take their defaults (`limits.env_int` / `env_float`); a value that is not a number still raises |
 
 **Agents and voice** ([11](11-mcp-and-agent-links.md), [10](10-http-api-and-streams.md))
 
@@ -163,7 +165,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 cd web
 npm install            # once; postinstall copies web-ifc's wasm into public/wasm
 npm run build          # tsc --noEmit (type-check src/ and vite.config.ts), then vite build
-npm test               # node --test tests/*.test.mjs (64 tests at 104fda9)
+npm test               # node --test tests/*.test.mjs (69 tests on Oct 30)
 ```
 
 There is no test framework beyond Node's own runner: the tests use `node:test` and `node:assert`, and the
@@ -217,14 +219,16 @@ flowchart LR
 | `app-replacement.test.mjs` | 4 | its own minimal App host | Direct work retires a pending chat wider-fix search or batch plan, keeps a completed context proposal, and regenerating from the Plan tab is not retired by the old plan |
 | `review-fixes.test.mjs` | 20 | `appHost` | Manual previews and who owns the viewer, choosing and deselecting options, accepting single and wider fixes, aborting wider streams on chat takeover, model or report replacement, stale loads and parse failures that must not publish, `api.ts` NDJSON abort and truncation, model download HTTP failures |
 | `async-ownership.test.mjs` | 8 | own `source()` compile | `pilot.ts` cancellation between animation waits, camera takeover, `chatRequest.ts` ownership after workspace replacement, `ChatPanel` unmount aborting its stream, NDJSON events after abort |
-| `viewer-patch.test.mjs` | 4 | `compiled` + `appHost` | `viewer/patch.ts` on real three.js batches: swapping an element's geometry, growing past the batch's room, packing first; accepting patches in place at the page's revision and reloads what it missed; an opening the host's team must cut is recorded as requested |
+| `viewer-patch.test.mjs` | 4 | `compiled` + `appHost` | `viewer/patch.ts` on real three.js batches: swapping an element's geometry, growing past the batch's room, packing first; accepting patches in place at the page's revision and reloads what it missed; an opening the host's team must cut is recorded as requested (Accept sends the clash pair) |
+| `accept.test.mjs` | 1 | `compiled` | `api.accept`: every kind to `/fix/apply` with its pair (the option's own, else the clash on screen), meshes dropped, a 409 refusal's reason reaches the page |
 | `viewer-load.test.mjs` | 7 | `compiled` | `Viewer.load` stages every parse before replacing a usable federation, discards obsolete parses, disposes partial failures, adopts solid and glass batches together |
 | `fix-kinds.test.mjs` | 5 | `compiled` | `fixKinds.ts`: each kind's words, framing, clearance/change/recommendation lines, an opening's host reading and hole, a combined fix's steps |
 | `layout.test.mjs` | 5 | `compiled` (React stubbed) | `layout.ts`: breakpoints, sheet snapping, flicks, handle taps, `follow()` |
 | `requirements.test.mjs` | 7 | `compiled` | `reqFile.ts`: round trip, refusing other files, cell edits, who moves, by-design rules, browser storage, opening rules |
-| `signoffs.test.mjs` | 5 | `compiled` + `appHost` | `signoffs.ts`: an imported report's key is its id, never its title; a detection run's is its files and requirements (a rerun shares it, other models or requirements don't); empty entries dropped, junk read as none, no storage no throw; title-keyed entries removed and nothing else; the page shows each run its own sign-offs and writes under its key |
+| `signoffs.test.mjs` | 5 | `compiled` + `appHost` | `signoffs.ts`: an imported report's are kept by its title and files (opening it again finds them); a detection run's per clash id (a rerun, other requirements or fewer models open find them; another project's ids don't); empty entries dropped, junk read as none, no storage no throw; title-keyed entries move over for the report's clashes, never over newer ones, the rest stay for their reports; the page shows each run its own and writes per clash |
 | `uploads.test.mjs` | 3 | `compiled` | `uploads.ts`: the cap checked before sending, stage progress words, an uploaded IFC read from the visitor's own file |
 | `upload-retry.test.mjs` | 1 | `compiled` | `api.ts`: a 409 `requirements_unknown` re-registers the file and resends once |
+| `tour.test.mjs` | 5 | `compiled` (React and icons stubbed) | `Tour.tsx`: the cell tour's numbers, the ladder's copy per option kind, accepting without a reload, the recorded-run offer when a live proposal fails or finds nothing, a failed plan moving on |
 
 ## Evals
 
@@ -248,7 +252,7 @@ Where results go:
 | `not_a_clash.py` | Joints built that way (pad/ground beam, transom/mullion, beam/column): triage verdict, whether any option touches what must stay, whether every option is marked cleanup | `samples/` Northbank + the Navisworks sample report | no arguments | rows in `not_a_clash.csv` | Oct 28: 3/3 by design, 0/3 touch what must stay, 3/3 cleanup only |
 | `penetration_hosts.py` | `hosts.decide` on 25 labelled hosts (16 Northbank, 9 cell): verdict, reviewer, fit | `samples/` Northbank IFCs and `PC-03-Palletising-Cell-RevA.ifc` | no arguments | rows in `penetration_hosts.csv` | Oct 29: 25/25, 18 kinds in one call, 34–41 s |
 | `detection_navisworks.py` | ORCA's detection against the Navisworks package: timing, coverage of sampled results (and why not), the answer key, per-discipline counts | `samples/` four Northbank models incl. Site, `samples/reports/northbank-navisworks` | `--out ../evals/runs/<date>-northbank-detection` | `summary.md`, `pairs.csv`, `coverage.json` | Oct 28: 633 clashes in 1,961 elements, 117/117 real overlaps, answer key 3/3 (#057 −100 mm, #061 −77 mm) |
-| `detection_cell.py` | Detection on the cell: every planted pair in Rev A, none in Rev B, nothing unexpected | `$DEMO_MODELS/palletising-cell` | `--cell ... --out ...` | `summary.md` | Oct 28: Rev A 13/13 planted, 0 unexpected; Rev B 0 |
+| `detection_cell.py` | Detection on the cell: every planted pair in Rev A, none in Rev B, nothing unexpected | `$DEMO_MODELS/palletising-cell` | `--cell ... --out ...` | `summary.md` | Oct 30 (`runs/2026-10-30-cell-detection/`): Rev A 112 clashes over 161 parts, 17/17 planted, 95 by design, 0 unexpected; Rev B 0 planted, 93 by design |
 | `step_cell.py` | The cell from STEP end to end: conversion and classes, detection, C1 (Fix together), C2 (+150 mm and export), C3 (trim), C6 (route), C7 (wall opening), C8 (gland hole), export back to STEP, Rev B | `$DEMO_MODELS/palletising-cell` STEP files | `--cell ... --out ...`, `--no-classes` | `README.md` in the run folder | Oct 30 (`runs/2026-10-30-cell-supports/`): pass; Rev A 161/161 parts, 17/17 planted, 95 by design, 0 unexpected; Rev B 0 planted |
 | `escalation.py` | E0: does Muse Wonder fix what Muse Spark cannot, and is it the model or the brief? Three arms on the unfixed cases | Cell Rev A (from STEP) and Northbank IFC | `--cell ... --northbank ... --out ...`, `--reuse`, `--workers` | `results.json`, `summary.md`, `sweep.json`, rows in `results.csv` | Oct 29: 6 of 21 unfixed; Spark again 0/6, Spark + brief 3/6, Wonder + brief 5/6, $2.01 |
 | `big_models.py` | How big a model the server takes: `make --mb N --out F` writes a synthetic IFC4 of a realistic mix; `server F` times open, boxes and detection with peak RSS | none (generated) | see the script's docstring | numbers in `evals/README.md` | Oct 29: 150 MB 5/37/5 s, 1.4 GB; 500 MB 17/174/18 s, 2.8 GB |

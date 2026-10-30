@@ -11,7 +11,9 @@ FastAPI app and an MCP server over one shared `Workspace`, which holds the open 
 and offers every operation both front doors use. Under it sit the AI workflows (the fix agent, triage, titles,
 chat, plans, escalation, built views), the geometry engine on IfcOpenShell, the readers and writers for reports and
 documents, and a thin client for Meta's models. This doc lists every module: what it is for, its main symbols, what
-it imports from the package and who imports it, and the rules it enforces. [05](05-domain-model-and-state.md) covers
+it imports from the package and who imports it, and the rules it enforces. The package's `__init__.py` does one thing:
+it loads the repo's `.env` (`meta_client.load_env`) on the first import of any module, before any module reads a
+setting ([15](15-requirements-settings-and-config.md)). [05](05-domain-model-and-state.md) covers
 the objects these modules hold and where their state lives.
 
 ## The layers at a glance
@@ -97,6 +99,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `app.py` | Entry points | The FastAPI app: every `/api` route and stream, the owner and requirements middleware, the caps, `/mcp`, static files |
 | `built.py` | Report jobs | Show it built: outline, Muse Image restyles, pixel gate, judges, the picture cache |
 | `chat.py` | Workflows | Chat with Muse Spark through tools; `Chat._run` is also the MCP server's tool layer |
+| `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, `plan_move` (moves that keep their joints: carry fittings, stretch segments, or are refused) and the connection graph |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
 | `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
@@ -186,15 +189,16 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
   bounded 64-event queue per streamed request that never makes a worker wait for a reader); the caps
   (`propose_limit`, `escalate_limit`, `chat_limit`, `built_limit`, `unlock_limit`, `title_limit`, `detect_limit`,
   `voice_limit`, `model_upload_limit`, `requirements_limit`, `preview_limit`, `link_limit`, `agent_call_limit`) and
-  `_take`; the shared jobs and caches `_triage_jobs`, `_title_jobs`, `_documents`, `_previews`, `_pattern_triage`,
-  `_chat`; `links` (`agents.Links`), `mcp_hooks`, `_McpGate`, `_mcp_transport`, `_lifespan`; folders `EXPORTS`,
+  `_take`; the shared jobs and caches `_triage_jobs`, `_title_jobs`, `_documents`, `_previews`, `_chat` (pattern
+  readings live on the Workspace: `plans.read_patterns`); `links` (`agents.Links`), `mcp_hooks`, `_McpGate`, `_mcp_transport`, `_lifespan`; folders `EXPORTS`,
   `UPLOADS`; `_receive_models` / `_unpack` (gzipped uploads).
 - **Imports:** `agents.py`, `built.py`, `chat.py`, `context_planner.py`, `detect.py`, `document.py`, `edits.py`,
   `escalation.py`, `limits.py`, `mcp_server.py`, `meta_client.py`, `owner.py`, `plans.py`, `requirements.py`,
   `service.py`, `settings.py`, `spend.py`, `step.py`, `titles.py`, `triage.py`, `voice_live.py`.
   **Imported by:** `mcp_server.py` (lazily, for the stdio entry point).
-- **Rules:** `load_env()` runs before anything reads a setting; `ws.keep = links.kept` so live links' scenes and
-  reports are evicted last; a kept fix goes through `_with_patch`, which holds `ws.lock` from the revision read to the
+- **Rules:** `.env` is already loaded when it runs (the package's `__init__.py`), and its caps and sizes are read with
+  `limits.env_int` / `env_float`; `ws.keep = links.kept` so live links' scenes and reports are evicted last; a kept
+  fix goes through `_with_patch`, which holds `ws.lock` from the revision read to the
   patch so another tab's edit cannot land in between; blocking work runs in threads (`run_in_threadpool`,
   `owner.spawn`) so the event loop stays free.
 
@@ -205,7 +209,7 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
 (session, pictures, jobs, `apply_fix` / `apply_plan`, triage, report, export) are MCP's own. Deeper design:
 [docs/mcp.md](../mcp.md).
 
-- **Main symbols:** `build`, `Hooks` (what the web server lends: `links`, `charge`, `escalate`, `allow_call`,
+- **Main symbols:** `build`, `Hooks` (what the web server lends: `links`, `charge`, `escalate`, `detect`, `allow_call`,
   `start_triage`, `triage_state`, `build_document`, `spawn`), `INSTRUCTIONS`, `main` (stdio: a local link, the web
   server's `ws` and hooks with `links=None`).
 - **Imports:** `agents.py`, `chat.py`, `edits.py`, `escalation.py`, `plans.py`, `requirements.py`, `service.py`,
@@ -213,7 +217,7 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
 - **Rules:** every tool runs inside `requirements.using(link.requirements)`, so an agent works under the page's
   requirements; expected failures become `ToolError` with the reason (bad id, refused allowance, expired link,
   `edits.Unsupported`); read-only tools carry `read_only_hint`; each call counts against the link's own cap
-  (`Hooks.allow_call`) and fixes are charged to the link's creator (`Hooks.charge`).
+  (`Hooks.allow_call`); fixes and detection runs are charged to the link's creator (`Hooks.charge`, `Hooks.detect`).
 
 ### `voice_live.py`: the live voice relay
 
@@ -267,8 +271,8 @@ Muse Spark answers a message in at most `MAX_STEPS` (8) model calls, calling too
   **Imported by:** `agents.py`, `app.py`, `mcp_server.py`.
 - **Rules:** a turn works on a copy of the session's messages and publishes it only if no newer turn already did;
   cancelled turns publish nothing; tool results are text only, so pictures go back as the next user message; caps
-  are passed per turn (`propose_allowed`, `propose_allowed_many`, `escalate_allowed`), never stored on the shared
-  `Chat`.
+  are passed per turn (`propose_allowed`, `propose_allowed_many`, `escalate_allowed`, `detect_allowed`), never stored
+  on the shared `Chat`; a tool that does what a capped route does takes that route's cap.
 
 ### `context_planner.py`: the wider-fix search
 
@@ -277,7 +281,7 @@ lower by `SIGHTLINE_CONTEXT_*`) over complete arrangements of up to three edit g
 
 - **Main symbols:** `build`, `accept`, `validate_objective`, `Limits`, `Inspection`, `TOOLS`, `ContextError`,
   `WIDER_MAX_MB` (`SIGHTLINE_WIDER_FIX_MAX_MB`, 100).
-- **Imports:** `context_eval.py`, `edits.py`, `verify.py`. **Imported by:** `app.py`, `chat.py`.
+- **Imports:** `context_eval.py`, `edits.py`, `limits.py`, `verify.py`. **Imported by:** `app.py`, `chat.py`.
 - **Rules:** search runs on `IfcScene.snapshot()`; proposals are stored on the Workspace pinned to the scene's
   revision; `accept` holds `ws.lock`, refuses a changed revision (409) or missing acknowledgements (422), and re-runs
   `context_eval.commit_candidate` on a fresh private snapshot before swapping it in. Model output never grants
@@ -304,8 +308,8 @@ plus the STEP export helpers.
 
   Module level: `step_changes`, `_spec`, `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,
   `SCENE_BUDGET_MB`, `LAST_KEPT` (200), `SAMPLE_EXCLUDE`, `HOSTS_TIMEOUT_S`.
-- **Imports:** `agent.py`, `detect.py`, `edits.py`, `escalation.py`, `hosts.py`, `meta_client.py`, `reports.py`,
-  `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
+- **Imports:** `agent.py`, `detect.py`, `edits.py`, `escalation.py`, `hosts.py`, `limits.py`, `meta_client.py`,
+  `reports.py`, `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
   **Imported by:** `app.py`, `chat.py`, `mcp_server.py`, `plans.py`.
 - **Rules:** `Workspace.lock` (an RLock) is held by everything that touches a scene's geometry; every kept edit calls
   `IfcScene.mark_edited` and `IfcScene.bump`; trials never do; a second try's brief (`last_try`) is read only while
@@ -437,7 +441,8 @@ Detail on all of these: [06](06-geometry-and-detection.md) (scene, check, detect
 
 ### `scene.py`: the federated scene
 
-Elements are addressed by IFC GlobalId everywhere, never by express id. Imports nothing from the package.
+Elements are addressed by IFC GlobalId everywhere, never by express id. From the package it imports only `limits.py`
+(`env_int`).
 
 - **Main symbols:** `IfcScene` (`bounds`, `refresh_bounds`, `translate`, `placement`, `element`, `entity`,
   `index_of`, `products`, `near`, `connected_run`, `step_run`, `step_group`, `mark_edited`, `bump`, `snapshot`,
@@ -469,6 +474,7 @@ keep them. Deeper design: [docs/edits.md](../edits.md).
 - **Main symbols:** `Unsupported`; results `Run`, `Offset`, `Route`, `Resize`, `Trim`, `Penetration`; `run_of`,
   `apply_offset`, `bend_radius`, `apply_route`, `run_frame`, `route_steps`, `is_gravity`, `resize_size`,
   `apply_resize`, `face_move`, `butt_trim`, `apply_trim`, `member_axis`, `penetration`, `apply_penetration`,
+  `stretch` / `Stretched` (a segment's cap or rectangular side moved, ports with it: connected moves),
   `provision_for`, `not_penetrable`; transactions `trial`, `trial_files`, `kept_files`; `meshes` (with `render=True`
   for accept in place), `openings`, `passages`, `free_bands`, `_build_chain`, `_frames`; constants `PENETRABLE`,
   `SLENDER`, `ROUTE_STEPS`, `RESIZABLE`, `PFV_COLOUR`, `PFV_ALPHA`.
@@ -478,6 +484,22 @@ keep them. Deeper design: [docs/edits.md](../edits.md).
 - **Rules:** a shape that cannot take an edit raises `Unsupported` with the reason; the original keeps its GlobalId on
   the first piece; `trial` and `trial_files` always undo (cached boxes included); `kept_files` keeps all or nothing;
   never nest one transaction inside another on the same file.
+
+### `connections.py`: joints
+
+What is joined to what, so a fix that moves something never leaves a joint apart. Deeper design:
+[docs/connections.md](../connections.md).
+
+- **Main symbols:** `Joint`, `joints_of` (ports read live; for STEP parts, flow parts of one group meeting face to
+  face, `_geometry_joints`, triangles cached per part), `classify` (straight / rigid / stays), `run` (straight segments
+  joined cap to cap, the element first), `plan_move` → `MovePlan` (`moved`, `carried`, `stretched`, `refused`,
+  `refused_at`, `key`, `edit`), `summary`, `apply_move`, `check_joints`, `baseline` / `check_applied`, `trial_move`
+  (`MoveTrial`), `describe` (Muse's text), `graph` / `links_of` (every link by kind for the viewer and the properties
+  card, cached on the scene), `move_words`, `mode` (`SIGHTLINE_CONNECTED_MOVES`), `CARRY_MAX`,
+  `PARALLEL_M`, `COVER`, `TOUCH_M`, `FACING`, `INLINE`.
+- **Imports:** `edits.py`, `scene.py`. **Imported by:** `agent.py`, `plans.py`, `service.py`.
+- **Rules:** every path that moves something plans first (`agent._try_move`, combined steps, `plans` joint hits,
+  `Workspace.verify_move` / `apply`); `scene.connected_run` stays as it was, because the wider-fix planner uses it.
 
 ### `detect.py`: ORCA's own detection
 
@@ -498,8 +520,8 @@ STEP → IFC on open (cached by file hash) and the fixes written back to STEP on
 - **Main symbols:** `convert`, `export`, `parts`, `classify`, `write_ifc`, `file_hash`, `mesh`, `_prism`, `Part`,
   `StepError`, `SUFFIXES`, `CLASSES`, `MAX_PARTS` (`SIGHTLINE_STEP_MAX_PARTS`), `MAX_TRIANGLES`
   (`SIGHTLINE_STEP_MAX_TRIANGLES`), `NAMESPACE`.
-- **Imports:** `scene.py` (`STEP_PSET`); `cadquery-ocp` (OCP) inside functions. **Imported by:** `app.py`,
-  `service.py`.
+- **Imports:** `limits.py` (`env_int`), `scene.py` (`STEP_PSET`); `cadquery-ocp` (OCP) inside functions.
+  **Imported by:** `app.py`, `service.py`.
 - **Rules:** GlobalIds come from the file hash and the part's label path, so a file converts to the same ids every
   time; only a classified conversion is cached; shapes are placed with `BRepBuilderAPI_Transform`, never `.Moved()`.
 
@@ -659,13 +681,16 @@ owner's settings from `X-Sightline-Settings` in context variables. Imports nothi
 
 ### `limits.py`: demo caps
 
-Rolling caps per visitor per hour and for everyone per day, in memory. Imports nothing from the package.
+Rolling caps per visitor per hour and for everyone per day, in memory, and how every number setting is read.
+Imports nothing from the package.
 
 - **Main symbols:** `ProposeLimit` (`from_env`, `escalate_from_env`, `chat_from_env`, `take`, `take_many`,
-  `take_all`, `refusal`), `client_id` (`X-Forwarded-For` only with `SIGHTLINE_TRUST_FORWARDED=1`).
-- **Imported by:** `app.py`.
+  `take_all`, `refusal`), `client_id` (the peer, or with `SIGHTLINE_TRUST_FORWARDED=N` the N-th `X-Forwarded-For`
+  entry from the right), `trusted_hops`, `env_int`, `env_float`.
+- **Imported by:** `app.py`, `context_planner.py`, `scene.py`, `service.py`, `step.py`.
 - **Rules:** `take_many` and `take_all` count all or nothing; correct only with one server process (the Modal app
-  runs one container). Every cap and its meaning: [16](16-security-caps-and-cost.md).
+  runs one container); a number setting is read with `env_int` / `env_float`, so unset or empty is its default and
+  anything else that is not a number raises. Every cap and its meaning: [16](16-security-caps-and-cost.md).
 
 ### `spend.py`: the Muse Wonder budget
 
@@ -688,8 +713,8 @@ An OpenAI-style client for Meta's API, the open-weights host, and transcription.
   `effort`, `usage`, `on_cost`, `role`, `strict`, `streams_reasoning`), `ChatModel` and `ToolModel` (protocols tests
   script), `Usage`, `cost`, `PRICES`, `LABELS`, `model_label`, `FIXED_EFFORT`, `image_part`, `load_env`,
   `transcribe`, `triage_model`, `triage_model_info`, `escalation_model`, `escalation_info`.
-- **Imported by:** `agent.py`, `app.py`, `built.py`, `chat.py`, `document.py`, `service.py`, `titles.py`,
-  `triage.py`, `voice_live.py`.
+- **Imported by:** the package's `__init__.py` (`load_env`), `agent.py`, `app.py`, `built.py`, `chat.py`,
+  `document.py`, `service.py`, `titles.py`, `triage.py`, `voice_live.py`.
 - **Rules:** effort is the owner's, else everyone's, else the model's own, except for fixed roles; a host that
   refuses `json_schema` drops to JSON mode (`strict`); every priced call is charged through `on_cost`.
 

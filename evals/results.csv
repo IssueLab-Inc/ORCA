@@ -79,3 +79,9 @@ date,dataset,clash,model,images,run,latency_s,candidates,passing,top1_pass,top1_
 2026-10-29,northbank-rev03,northbank B1 pad footing x lift pit wall,muse-spark-1.3-contributor,none,escalation-spark_again,79.8,9,0,no,,,,no fix: 
 2026-10-29,northbank-rev03,northbank B1 pad footing x lift pit wall,muse-spark-1.3-contributor,none,escalation-spark_brief,34.1,1,0,no,,,,no fix: 
 2026-10-29,northbank-rev03,northbank B1 pad footing x lift pit wall,muse-wonder-1.0,none,escalation-wonder_brief,44.9,3,3,yes,"-1.3,0.0,0.0",175,,move: Shift pad footing 1.30 m west clear of pit and ground beam
+2026-10-30,northbank-rev03,#042,muse-spark-1.3-contributor,ABC,1,24.2,2,1,yes,"0,0,0.4",50,"0,0,0.4 (offset)","effort low; kinds offset; first: Offset duct up 400 mm through girder opening (offset [1.05, 2.35] +0.40)"
+2026-10-30,northbank-rev03,#057,muse-spark-1.3-contributor,ABC,1,22.8,3,1,yes,"0,0,0.25",50,"0,0,0.25 (offset)","effort low; kinds offset; first: Offset tray up 250 mm through girder opening (offset [10.9, 11.7] +0.25)"
+2026-10-30,northbank-rev03,#061,muse-spark-1.3-contributor,none,1,19.0,1,1,yes,"0,0,0.28",53,"0,0,0.28 (offset)","effort low; kinds offset; first: Offset water main up 280 mm through girder opening (offset [9.3, 10.0] +0.28)"
+2026-10-30,northbank-rev03,#042,muse-spark-1.3-contributor,ABC,1,16.1,2,1,yes,"0,0,0.4",50,"0,0,0.4 (offset)","effort low; kinds offset+penetration; first: Offset duct up 400 mm through girder opening (offset [1.0, 2.4] +0.40)"
+2026-10-30,northbank-rev03,#057,muse-spark-1.3-contributor,ABC,1,22.0,2,1,yes,"0,0,0.25",50,"0,0,0.25 (offset)","effort low; kinds move+offset; first: Offset tray up 250 mm through existing girder opening (offset [10.9, 11.7] +0.25)"
+2026-10-30,northbank-rev03,#061,muse-spark-1.3-contributor,none,1,34.1,3,1,yes,"0,0,0.28",53,"0,0,0.28 (offset)","effort low; kinds move+offset; first: Local offset of main up 280 mm through existing opening (offset [9.35, 9.95] +0.28)"

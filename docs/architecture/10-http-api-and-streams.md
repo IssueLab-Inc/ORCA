@@ -2,7 +2,7 @@
 
 > **Covers:** `server/sightline/app.py`, `server/sightline/voice_live.py`, the request side of
 > `server/sightline/owner.py` and `server/sightline/limits.py`, `web/src/api.ts`, `LiveVoice` in `web/src/voice.ts`,
-> `web/src/uploads.ts`, the ASGI entry in `deploy/modal_app.py` · **Checked against code:** 2026-10-30 (`104fda9`) ·
+> `web/src/uploads.ts`, the ASGI entry in `deploy/modal_app.py` · **Checked against code:** 2026-10-30 (`4a19777`) ·
 > **Deeper design:** [docs/voice.md](../voice.md), [docs/uploads.md](../uploads.md), [docs/mcp.md](../mcp.md)
 
 ORCA's server is one FastAPI app, `app` in `server/sightline/app.py`, that the page, the MCP server and anything
@@ -16,10 +16,12 @@ inside is in [09](09-agent-workflows.md) and [07](07-fixes-and-edits.md); the ca
 ## How the server is put together
 
 - **One app, one process.** `app = FastAPI(title="ORCA")`, with one `Workspace` (`ws`) holding scenes, reports and
-  jobs in memory ([05](05-domain-model-and-state.md)). `load_env()` runs right after the package imports, so the
-  repo's `.env` is read before the caps and the owner token are built (real environment variables win); settings
-  that modules read at import time (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB` and others, listed in
-  [15](15-requirements-settings-and-config.md)) are read before it and so come only from the real environment. Locally: `uv run uvicorn sightline.app:app --reload`. On
+  jobs in memory ([05](05-domain-model-and-state.md)). The repo's `.env` is loaded by the package's `__init__.py`
+  (`meta_client.load_env()`), which runs on the first import of any `sightline` module and so before `app.py` or
+  any module it imports reads a setting: the caps, the owner token and the settings modules read at import time
+  (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB` and the others marked "import" in
+  [15](15-requirements-settings-and-config.md)) all come from `.env` when the real environment does not set them
+  (real environment variables win). Locally: `uv run uvicorn sightline.app:app --reload`. On
   Modal, `deploy/modal_app.py` imports the same `app` under `@modal.asgi_app()`, one container, up to 64 requests at
   once (`@modal.concurrent(max_inputs=64)`: linked pages each hold an events stream), 10-minute request timeout
   ([17](17-deployment-and-operations.md)).
@@ -83,7 +85,7 @@ requirements together. `/mcp` passes through `_OwnerContext` too, but MCP tools 
 | `X-Sightline-Requirements` | request | `api.ts` `settingsHeader()` once `setRequirements(id, doc)` | `_OwnerContext` → `requirements.enter` | The id of a registered requirements file ([15](15-requirements-settings-and-config.md)). |
 | `sightline_owner` cookie | both | `POST /api/owner/unlock` | `_OwnerContext` | Signed `v1.<expiry>.<sig>`; HttpOnly, Secure, SameSite=Strict, Path=/api, 30 days (`owner.DAYS`). Path=/api: it never reaches `/mcp` or the static files. |
 | `Authorization: Bearer <token>` or `?key=<token>` | request | the MCP client | `_McpGate`, `agents.token_from` | An agent link token ([11](11-mcp-and-agent-links.md)). |
-| `X-Forwarded-For` | request | Modal's proxy | `limits.client_id` | The visitor's address for per-visitor caps, only when `SIGHTLINE_TRUST_FORWARDED=1` (else the socket peer). |
+| `X-Forwarded-For` | request | a proxy in front (Modal's edge strips it and sets none) | `limits.client_id` | The visitor's address for per-visitor caps only with `SIGHTLINE_TRUST_FORWARDED=N`: the N-th entry from the right. Else, and on Modal, the socket peer. |
 | `X-Forwarded-Host`, `X-Forwarded-Proto` | request | the proxy | `create_link`, `mcp_server.base_url` | The public `mcp_url` and download links. |
 | `Content-Length` | request | the browser | `_receive_models` | Required on model uploads (411 without it); checked against the cap before the body is read. |
 | `Origin`, `Host` | request | the browser | `voice_live.same_origin` | The live-voice socket opens only when they match (or no Origin is sent). |
@@ -101,15 +103,15 @@ is a 422 whose `detail` is a list, not a string.
 
 | Status | When | Examples of `detail` |
 |---|---|---|
-| 400 | A request the server cannot use | an upload that is not IFC/STEP, a file given twice, a truncated `.gz`, a model IfcOpenShell cannot read, a report upload with no XML, a fix with no element, a STEP conversion error, a bad setting value |
+| 400 | A request the server cannot use | an upload that is not IFC/STEP, a file given twice, a truncated `.gz`, a model IfcOpenShell cannot read, a report upload with no XML, a fix with no element, a fix that does not say which clash it is for ("Not a fix ORCA can apply: the fix does not say which clash it is for (pair: [A, B])"), or whose changed element is neither side of it, a STEP conversion error, a bad setting value |
 | 401 | `/mcp` without a live link token | `{"error": "An ORCA agent link token is required: …"}` (the gate's own body, not `detail`) |
 | 403 | Not allowed | owner-only settings; a wrong owner token (under the unlock cap); second tries switched off; Show it built switched off; a live-voice socket from another origin (closed before the handshake, which the server answers as HTTP 403) |
 | 404 | Gone or never there | "Model not loaded. Open it again." (`_scene`), "Clash report not loaded. Open it again." (`_report`), "This agent link has expired or was revoked." (`_link`), "That report has expired. Build it again.", "No such picture.", "No such image.", "No such clash.", "No owner is configured on this server.", "Proposal expired or unknown. Generate a new wider fix." |
-| 409 | The state does not allow it | `requirements_unknown` (middleware); "Nothing has been changed yet. Accept a fix first." (export); "Triage the report first: …" (document); "Nothing may be edited here (…), so there is no second try to make."; "Only clashes found by ORCA take captured views."; a wider fix whose scene changed or whose fresh check failed |
+| 409 | The state does not allow it | `requirements_unknown` (middleware); "Nothing has been changed yet. Accept a fix first." (export); "Triage the report first: …" (document); "Nothing may be edited here (…), so there is no second try to make."; "Only clashes found by ORCA take captured views."; a wider fix whose scene changed or whose fresh check failed; a fix that does not pass when tried again before it is kept (`plans.NotVerified`, every keep route): "'Offset up 400' does not pass ORCA's check on the model as it is now (collision with IfcSlab (-50 mm)), so nothing was kept. The model or the requirements may have changed since it was proposed: propose again.", or for a plan "Fix 2 of 3, '…', does not pass …" and "… with the other fixes in place (…)" |
 | 411 | Model upload without `Content-Length` | "Send the upload with its length (Content-Length)." |
 | 413 | Too big | model upload over `SIGHTLINE_MODEL_UPLOAD_MAX_MB` (checked on `Content-Length`, then on the unpacked size); report upload over `SIGHTLINE_UPLOAD_MAX_MB` or `SIGHTLINE_UPLOAD_MAX_FILES`; a requirements file over 64 KB (`requirements.MAX_BYTES`); a captured view over 4 MB; a capture reply over 6 MB; a voice clip over 3 MB; models too big for a wider fix (`SIGHTLINE_WIDER_FIX_MAX_MB`) |
 | 415 | A captured view that is not a PNG | "Send a PNG." |
-| 422 | Valid JSON, wrong content | "Say which element the offset goes around (other).", "Cannot trim this element: …" (`edits.Unsupported`), "Check the tests: …", "Pick the clashes to fix.", a requirements file that does not parse, a trim sent to Show it built, oversized or malformed built-view passes, a WAV that is not mono 16-bit at 16 or 24 kHz |
+| 422 | Valid JSON, wrong content | "Say which element the offset goes around (other).", "Say which element the trim butts against (other).", "Say what moves (moved) and what it must clear (obstacles): …", "Cannot apply this fix: …" (`edits.Unsupported` while keeping), "Check the tests: …", "Pick the clashes to fix.", a requirements file that does not parse, a trim sent to Show it built, oversized or malformed built-view passes, a WAV that is not mono 16-bit at 16 or 24 kHz |
 | 429 | A cap or budget is used up | the words from `ProposeLimit`: "You've used 20 proposals this hour. Try again later.", "The demo has used today's proposals. …", "That needs 3 proposals; you have 1 left this hour. …", or the Muse Wonder day budget's refusal (`spend.claim`) |
 | 502 | A model call behind the route failed | "Muse Spark could not draft requirements: …", "Transcription failed: …" |
 
@@ -170,8 +172,9 @@ classes in `app.py`.
 | `POST` | `/api/models/upload/stream` | The same, with the opening streamed (below) | as above | NDJSON | as above; refusals before the files are in are plain HTTP errors |
 | `GET` | `/api/scenes/{scene_id}` | A scene the page had open, to resume it (`Workspace.scene_info`) | none | `{id, files, step, detection, revision}` | free; 404 once evicted |
 | `GET` | `/api/scenes/{scene_id}/files/{index}` | One model file as it is now: the original, or the edited model written out (`Workspace.file`); tidies exports older than an hour | none | IFC bytes, `no-store` | free; 404 |
-| `GET` | `/api/scenes/{scene_id}/elements/{global_id}` | One element's class, name, level, file, connections (`Workspace.describe`) | none | element dict | free |
+| `GET` | `/api/scenes/{scene_id}/elements/{global_id}` | One element's class, name, level, file, and its links by kind with names, systems and assembly (`Workspace.describe`) | none | element dict | free |
 | `GET` | `/api/scenes/{scene_id}/classes` | Every physical element's class and name, for a built view's cutaway (`Workspace.classes`) | none | `{GlobalId: [class, name]}` | free |
+| `GET` | `/api/scenes/{scene_id}/connections` | What is linked to what, for the connection highlight (`Workspace.connections` → `connections.graph`; contacts from the scene's last check; cached until the scene changes) | none | `{revision, edges: [[a, b, kind, source]], stops, systems, assemblies, names, kinds}` | free |
 
 ### Fixes
 
@@ -180,13 +183,13 @@ classes in `app.py`.
 | `POST` | `/api/scenes/{scene_id}/verify` | Checks a move without keeping it (`Workspace.verify_move`); with `obstacles`, what the moved elements stand on is kept | `Move {moved, delta_m, clearance_m=0.025, obstacles=[]}` | verdict `{passed, hits, min_clearance_m, checked_against, reason?, placements}` | free |
 | `POST` | `/api/scenes/{scene_id}/propose` | Runs the fix agent (`Workspace.propose`), or a second try (`Workspace.escalate`), one JSON reply | `Propose {element_a, element_b, distance_m?, notes, report_id?, clash_id?, escalate=false}` | the proposal (`understanding, options, attempts, advice, recommendation, requirements, clearance_m, model, usage, escalated?`) | one proposal (`propose_limit`); a second try: 409 if nothing may be edited, 403 if switched off, then the Wonder budget and one escalation plus one proposal (`escalation_refused`) |
 | `POST` | `/api/scenes/{scene_id}/propose/stream` | The same, streamed (below); `api.proposeStream` | as above | NDJSON | as above |
-| `POST` | `/api/scenes/{scene_id}/apply` | Keeps a move (`Workspace.apply`) and returns the patch (`_with_patch`) | `Move` | `{placements, files, changed}` plus the patch | free |
+| `POST` | `/api/scenes/{scene_id}/apply` | Keeps a move through `plans.apply` (tried again first against `obstacles[0]`, the rest as `others`; the requirements' clearance, not the body's `clearance_m`) and returns the patch (`_with_patch`); the page no longer calls it | `Move` (`obstacles` required) | as `fix/apply` | free; 422 without `moved` or `obstacles`, 409 when it does not pass |
 | `POST` | `/api/scenes/{scene_id}/context/stream` | The wider-fix search over whole arrangements (`context_planner.build`) | `ContextObjective {element_a, element_b, report_id?, clash_id?}`, extra fields refused | NDJSON | three proposals at once (`take_many(who, 3)`); `context_planner.ContextError` statuses (422, 404, 413) before charging |
 | `POST` | `/api/scenes/{scene_id}/context/apply` | Accepts a wider-fix proposal by its server-held id, checked afresh (`context_planner.accept`) | `ContextApply {proposal_id, acknowledged_conditions}` | `{files, pieces, edits, resolved_pairs, checks}` plus the patch | free; 404 expired, 409 scene changed or check failed, 422 conditions |
 | `POST` | `/api/scenes/{scene_id}/offset/check` | Checks a local offset without keeping it (`Workspace.check_offset`) | `Offset {element, split_m, dz_m, other, clearance_m}` | `{passed, reason, min_clearance_m, preview}` | free; 422 without `other` |
-| `POST` | `/api/scenes/{scene_id}/trim/apply` | Keeps a trim (`Workspace.apply_trim`) | `TrimBody {element, end, by_m}` | the trim, `pieces`, `files`, `changed`, plus the patch | free; 422 `edits.Unsupported` |
-| `POST` | `/api/scenes/{scene_id}/offset/apply` | Keeps an offset (`Workspace.apply_offset`) | `Offset` | the offset's pieces, `files`, `changed`, plus the patch | free; 422 |
-| `POST` | `/api/scenes/{scene_id}/fix/apply` | Keeps one verified option of any kind (`plans.apply`, the `plans.KEEP` registry); `preview` and `before` are dropped and the fix is rebuilt from its kind and parameters | `FixApply {option}` | `{files, pieces (first run), groups (first fix), changed, not_cut, cut?, blocked_by?}` plus the patch | free; 400 no element or not a fix, 422 `Unsupported` |
+| `POST` | `/api/scenes/{scene_id}/trim/apply` | Keeps a trim through `plans.apply` (tried again first against `other`; an `end` that is not the joint's is refused); the page no longer calls it | `TrimBody {element, end, by_m, other}` | as `fix/apply` | free; 422 without `other`, 409 when it does not pass |
+| `POST` | `/api/scenes/{scene_id}/offset/apply` | Keeps an offset through `plans.apply` (tried again first against `other`); the page no longer calls it | `Offset` (`other` required) | as `fix/apply` | free; 422 without `other`, 409 when it does not pass |
+| `POST` | `/api/scenes/{scene_id}/fix/apply` | Keeps one option of any kind through `plans.apply`: `preview` and `before` are dropped, the fix is tried again on the server (`plans.recheck`: its kind's `agent.TRIES` with the clearance and requirements `Workspace.fix_settings` sets for the clash it names) and what that trial makes is kept ([07](07-fixes-and-edits.md)) | `FixApply {option}`; the option names its clash in `pair` (`[A, B]`, plus `others` for a plan's merged item; a penetration and a combined fix name theirs in `edit`) | `{files, pieces (first run), groups (first fix), changed, not_cut, verified, cut?, blocked_by?}` plus the patch | free; 400 no element, no `pair` or not a fix, 409 `NotVerified`, 422 `Unsupported` while keeping |
 
 "The patch" is `Workspace.patch`: `{scene_id, revision_before, revision, meshes, history}`, which lets the page
 update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13-3d-viewer.md)). `_with_patch` holds
@@ -196,7 +199,7 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `GET` | `/api/scenes/{scene_id}/export` | Writes the edited files (`Workspace.export`: IFC, plus `<name>.orca.step` for STEP models); one file as is, several as a zip | none | the file, or `<scene_id>-sightline.zip` | free; 409 when nothing was kept |
+| `GET` | `/api/scenes/{scene_id}/export` | Writes the edited files (`Workspace.export`: IFC, plus `<name>.orca.step` for STEP models); one file as is, several as a zip | none | the file, or `<project>-orca.zip` (`orca-export.zip` when the files share no name) | free; 409 when nothing was kept |
 
 ### Reports
 
@@ -234,7 +237,7 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 |---|---|---|---|---|---|
 | `GET` | `/api/reports/{report_id}/root_causes/{scene_id}` | Elements in several real clashes, plus geometry hits missing from the report (`plans.root_causes`) | `?fixed=` comma-separated clash ids | `[RootCause]` | free |
 | `GET` | `/api/reports/{report_id}/patterns/{scene_id}` | The same kind of clash many times over (`plans.patterns`), no model call | `?fixed=` | `[Pattern]` | free |
-| `POST` | `/api/reports/{report_id}/patterns/{scene_id}/triage` | One Muse Spark call judging every pattern (`plans.triage_patterns`), cached in `_pattern_triage` by report, scene, pattern ids and the requirements' `model_key` | `PatternTriage {fixed}` | `{pattern_id: {verdict, cause, action, rule}}` | one proposal, only when not cached |
+| `POST` | `/api/reports/{report_id}/patterns/{scene_id}/triage` | One Muse Spark call judging every pattern (`plans.read_patterns` → `triage_patterns`), kept on the Workspace by report, scene, pattern ids and the requirements' `model_key`, and shared with chat and MCP `find_patterns` | `PatternTriage {fixed}` | `{pattern_id: {verdict, cause, action, rule}}` | one proposal, only when not cached |
 
 ### Triage and titles
 
@@ -254,7 +257,7 @@ triage jobs (`_triage_jobs`) and 32 titling jobs (`_title_jobs`).
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
 | `POST` | `/api/scenes/{scene_id}/plan/stream` | Fix together (`plans.build_batch`) or the root cause around one element (`plans.build_root_cause`) | `PlanRequest {report_id, clash_ids=[], hub?, fixed=[]}` | NDJSON | Fix together: one proposal per distinct pair (at most `plans.MAX_ITEMS`, 8), all or nothing (`take_many`); a root cause: one, then its fixes only if it needs edits; 422 with no clashes |
-| `POST` | `/api/scenes/{scene_id}/plan/apply` | Keeps a plan's chosen options (`plans.apply`) | `PlanApply {options}` | `{files, pieces, groups, changed, not_cut}` plus the patch | free; 422, 400 |
+| `POST` | `/api/scenes/{scene_id}/plan/apply` | Keeps a plan's chosen options, all or none (`plans.apply`: each tried again alone, then all together with `verify_together`, then kept in one transaction) | `PlanApply {options}`, each with its `pair` and `others` | `{files, pieces, groups, changed, not_cut, verified}` plus the patch | free; 400, 409 `NotVerified` (which fix and why), 422 |
 
 ### Chat and voice
 

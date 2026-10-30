@@ -112,7 +112,7 @@ verified fix".
 | 6. Propose | **Propose fixes** runs by itself: "Understanding", Muse Spark's live reasoning notes, the status line. | `propose()` → `runProposal`: waits up to 4 s for the views, then `api.proposeStream`. |
 | 7. Pilot | The glowing border: ORCA is driving. Each idea appears in place, amber while checked, teal when clear, what it hit in magenta; the camera follows and turns slowly while Muse thinks. **Take the view** / **Let ORCA drive**. The dock's "Agent activity" table fills. | `trackAgent` feeds every event to `Pilot` (`web/src/pilot.ts`); any user camera move is a takeover (`Viewer.onUserCamera`). |
 | 8. Options | "Verified options": rank, kind chip (Move, Offset, Trim, Reroute, Resize, Opening, Combined), title, Edit / Clearance / Review facts, what it meets, the rationale and a proof strip. The bar over the stage switches **Before / After / Both**, with a before/after summary. On Northbank the first idea is the offset up 400 mm through the girder's web opening, Rev04's height. | The first option is chosen; the viewer frames what changed (`frameFix`) and, 1.4 s later, captures the proposed fix for the report. |
-| 9. Accept | **Accept this fix**: "Applying the fix…", the edited pieces appear without a reload, the row and panel get "✓ fixed", the header counts "1 fixed". | `accept` → `api.accept` (per kind) → `applyToViewer`, which patches the viewer when the page is at the server's `revision_before`, else reloads the changed files; `markFixed` marks every report clash of that pair; the clash is measured again. |
+| 9. Accept | **Accept this fix**: "Applying the fix…", the edited pieces appear without a reload, the row and panel get "✓ fixed", the header counts "1 fixed". | `accept` → `api.accept` (`/fix/apply` with the clash's pair; the server tries the fix again and refuses it with why if it no longer passes) → `applyToViewer`, which patches the viewer when the page is at the server's `revision_before`, else reloads the changed files; `markFixed` marks every report clash of that pair; the clash is measured again. |
 | 10. Re-check | **Detect again** (the icon on the Insights tab's run summary): the chips say how many clashes the fixes resolved and how many are new. | `runDetect(lastTests)`. Clash ids are stable across runs, so the page keeps its "not a clash" marks and the server carries titles and views over (`Workspace._carry`). |
 
 ## Every feature as a journey
@@ -249,8 +249,9 @@ flowchart TD
 
 `Tour.tsx` tells the story on the real app. Each step points at a real control (`data-tour` attributes, or a selector
 built from `TourState`), moves on when the app reaches the state it describes, and has **Show me** buttons that do the
-click. Live Muse steps offer **Watch a recorded run** when the live run errors or is slow (45 s for a proposal, 75 s for a
-plan): real runs from `web/public/tour/`, replayed through the same pilot and plan code (`replayPropose`,
+click. Live Muse steps offer **Watch a recorded run** when the live run errors, finds no fix or is slow (45 s for a
+proposal, 75 s for a plan; a plan that fails to start moves the tour on to the step that offers it): real runs from
+`web/public/tour/`, replayed through the same pilot and plan code (`replayPropose`,
 `replayPlan`) and labelled as recorded; accepting a replayed fix edits the model for real
 ([19](19-demo-data.md)). The tour's clashes are found by element pair (`TOUR`, `clashOfPair`) or, for the cell, by
 part names (`CELL`, `clashOfNames`), so they work on a fresh check or an imported report. On phones and tablets
@@ -259,7 +260,7 @@ part names (`CELL`, `clashOfNames`), so they work on a fresh check or an importe
 | Tour | Acts (steps) |
 |---|---|
 | **Building** (`BUILDING_STEPS`, 30 steps) | Design coordination (2) · Triage (2) · One fix, live (6: the duct through the girder, propose, the pilot, before/after, "it isn't only this duct") · A joint, not a move (3: the curtain-wall transom trim, accepted as a cleanup) · The root cause (4: Chat, "Why are there so many clashes on Level 02? Fix the root cause.", the girder plan, accept) · Not everything needs a fix (2: patterns, by design) · Your standard (6: Add to requirements, L4, Strict, the grid, Use them) · People decide (3: a review, Report, build) · Hand-off (1: PDF, BCF, Export IFC) · ORCA (1: the numbers) |
-| **Cell** (`CELL_STEPS`, 12 steps) | From STEP (2) · Triage (2) · A move (3: the cable ladder through fence post W5) · Together (3: the air pipe through both conveyor rails, one plan) · Hand-off (1: Export STEP + IFC) · ORCA (1) |
+| **Cell** (`CELL_STEPS`, 12 steps) | From STEP (2) · Triage (2) · One fix (3: the cable ladder through fence post W5; the copy names the shown option's kind) · Together (3: the air pipe through both conveyor rails, one plan) · Hand-off (1: Export STEP + IFC) · ORCA (1) |
 
 ## The main screen
 

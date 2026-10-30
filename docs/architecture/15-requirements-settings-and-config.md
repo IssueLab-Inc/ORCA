@@ -1,7 +1,8 @@
 # 15 · Requirements, settings and configuration
 
 > **Covers:** `server/sightline/requirements.py`, `server/sightline/settings.py`, the settings side of
-> `server/sightline/owner.py`, `meta_client.load_env`, every environment variable the server, deploy and evals read,
+> `server/sightline/owner.py`, `meta_client.load_env` and `server/sightline/__init__.py`, `limits.env_int` /
+> `env_float`, every environment variable the server, deploy and evals read,
 > `.env.example`, `web/src/reqFile.ts`, `web/src/Requirements.tsx`, the header plumbing in `web/src/api.ts` ·
 > **Checked against code:** 2026-10-30 (`104fda9`) · **Deeper design:** [docs/requirements.md](../requirements.md)
 
@@ -218,12 +219,22 @@ with). Details of the model side: [08](08-ai-models-prompts-and-spend.md).
 
 - **`.env` at the repo root** (gitignored; start from the checked-in `.env.example`). `meta_client.load_env` reads
   `KEY=value` lines, skips comments and lines without `=`, strips whitespace (not quotes: write values without
-  quotes) and sets each with `os.environ.setdefault`, so **a real environment variable always wins**. `app.py`
-  calls it once; `MetaChatModel`, `transcribe`, `voice_live` and `built` call it again before reading keys.
-- **Read at import.** `app.py` imports its modules before it calls `load_env()`. So the variables read at module
-  import in `service.py`, `step.py`, `scene.py`, `context_planner.py` and `built.py` (marked "import" below) take
-  effect only from the real environment, never from `.env`. The Modal deploy sets real variables, so it is not
-  affected. Everything else is read after `.env` is loaded or each time it is used.
+  quotes) and sets each with `os.environ.setdefault`, so **a real environment variable always wins**.
+- **Loaded before any setting is read.** The package's `__init__.py` calls `load_env()`, so it runs on the first
+  import of any `sightline` module, before that module's own code: the web server (`sightline.app`), the stdio MCP
+  server, tests, evals and spikes all see `.env`, and **every variable below can be set there**, including those
+  read at import. `MetaChatModel`, `transcribe`, `voice_live` and `built` call it again before reading keys
+  (harmless: a value already set is kept).
+- **Read once.** Variables marked "import" below, and what `app.py` reads at module level (the caps, the upload
+  sizes, `SIGHTLINE_VOICE_LIVE_MAX_S`, `SIGHTLINE_WEB_DIST`), are read once, when their module is imported: a change
+  to them needs a server restart. The rest are read each time they are used.
+- **Empty values.** Numbers are read with `limits.env_int` / `env_float`: unset or empty (`NAME=`) is the default,
+  so an empty cap is no limit, or its own default for requirements files (120 an hour) and previews (60 an hour).
+  A value that is not a number raises where it is read: the server stops at start, or, for
+  `SIGHTLINE_TRIAGE_WORKERS` and `SIGHTLINE_CONTEXT_*`, the triage or wider-fix run fails.
+  `spend.limit` reads an empty or unreadable `SIGHTLINE_WONDER_MAX_USD_DAY` as 25, and an empty
+  `SIGHTLINE_BUILT_CACHE` is its default. Elsewhere an empty string is a value: `SIGHTLINE_SAMPLE_EXCLUDE=` keeps
+  every class, `META_REASONING_EFFORT=` sends no effort, `SIGHTLINE_OWNER_TOKEN=` means no owner.
 - **Modal** sets the deploy's values in the image (`deploy/modal_app.py`, `.env(...)`) and the keys and owner token
   from the `sightline-meta` secret ([17](17-deployment-and-operations.md)). `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`
   are for the Modal CLI only; no code reads them.
@@ -232,7 +243,8 @@ with). Details of the model side: [08](08-ai-models-prompts-and-spend.md).
 ### Reference
 
 "Modal" is the value `deploy/modal_app.py` sets, where it sets one. Caps count per visitor per rolling hour and for
-everyone per rolling day; 0 means no limit ([16](16-security-caps-and-cost.md)).
+everyone per rolling day; 0 means no limit, and unset or empty is the default column
+([16](16-security-caps-and-cost.md)).
 
 **Models and keys**
 
@@ -306,6 +318,8 @@ its default, so a bad value fails the wider-fix run with a `ValueError` rather t
 | `SIGHTLINE_ESCALATION` | `button` | not set | `settings.defaults` | Default for `escalation` (off, button, auto) |
 | `SIGHTLINE_BUILT_VIEWS` | `0` | `0` | `settings.defaults` | Default for `built_views` |
 | `SIGHTLINE_OFFSET_CORNERS` | `bends` | not set | `edits.default_corners` | A value starting `sq` makes offsets turn with square corners instead of bend fittings |
+| `SIGHTLINE_CONNECTED_MOVES` | `carry` | not set | `connections.mode` (each call) | How a move treats joints: `carry` the fittings beyond the run and stretch the segments it runs along, `refuse` one that would pull a joint apart, or `off` (moves as before joints were known) ([docs/connections.md](../connections.md)) |
+| `SIGHTLINE_CARRY_MAX` | 12 | not set | `connections.CARRY_MAX` (import) | Most parts a move may take along before it is refused |
 | `SIGHTLINE_SAMPLE_EXCLUDE` | `IfcGeographicElement,IfcSpace,IfcBuildingElementProxy` | not set | `service.SAMPLE_EXCLUDE` (import) | Classes whose clash tests sample reports leave out; empty keeps everything |
 
 **Paths**
@@ -322,20 +336,23 @@ its default, so a bad value fails the wider-fix run with a `ValueError` rather t
 | Variable | Default | Modal | Read in | What it does |
 |---|---|---|---|---|
 | `MODAL_TASK_ID` | unset | set by Modal | `settings._modal_dict` | Its presence switches the settings store to the Modal Dict |
-| `SIGHTLINE_TRUST_FORWARDED` | unset | `1` | `limits.client_id` | `1` keys visitors by the first `X-Forwarded-For` address (behind Modal's proxy) instead of the peer address |
+| `SIGHTLINE_TRUST_FORWARDED` | unset | `0` | `limits.client_id` | N proxies in front that each append to `X-Forwarded-For`: visitors are keyed by the N-th entry from the right instead of the peer. 0 on Modal, whose edge strips the header and gives the visitor as the peer |
 
 ### `.env.example`
 
 The checked-in template lists what a local run usually needs: `META_API_BASE_URL`, `META_API_KEY`, `META_MODEL`,
 `META_REASONING_EFFORT`, `TRIAGE_API_KEY` (and, commented, the other `TRIAGE_*` and `SIGHTLINE_TRIAGE_WORKERS`),
-`SIGHTLINE_OWNER_TOKEN` (with how to make one), the demo caps (commented: off when empty or 0),
-`SIGHTLINE_VOICE_LIVE_MAX_S` and the `SIGHTLINE_CONTEXT_*` bounds. All of these are read after `.env` is loaded.
-Copy it to `.env` and fill in only what you need; it never holds a value.
+`SIGHTLINE_OWNER_TOKEN` (with how to make one), the demo caps (commented: 0 is no limit; unset or empty is the
+default, which is no limit except requirements files and previews), `SIGHTLINE_VOICE_LIVE_MAX_S` and the
+`SIGHTLINE_CONTEXT_*` bounds. Any other variable in the tables above can go there too. Copy it to `.env` and fill
+in only what you need; it never holds a value.
 
 ## When to update this doc
 
 - A new, renamed or removed environment variable, a changed default, or a variable moved between import time and
-  call time (and `.env.example` with it). `server/tests/test_docs_map.py` fails when one is missing here.
+  call time (and `.env.example` with it). `server/tests/test_docs_map.py` fails when one is missing here. A new
+  number is read with `limits.env_int` / `env_float`; `server/tests/test_env_file.py` checks that `.env` reaches the
+  settings read at import and that empty numbers take their defaults.
 - A new field, rule or limit in `requirements.parse`, a new table row in `LEVELS` / `STRICTNESS`, or a new place
   that reads `requirements.current()`.
 - A change to registration (`register`, `doc_id`, `REGISTRY_MAX`), the header or the 409 retry in `api.ts`.

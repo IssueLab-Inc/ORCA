@@ -855,16 +855,156 @@ A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `ve
   every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
   tests, 64 web tests.
 
+`.env` before every setting (Oct 30, owner request; code `server/sightline/__init__.py`, `limits.env_int` /
+`env_float`; docs [15](15-requirements-settings-and-config.md), [10](10-http-api-and-streams.md)):
+- **Why:** `app.py` imported its modules before it called `load_env()`, so the settings they read at import
+  (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB`, `SIGHTLINE_MAX_REPORTS`, `SIGHTLINE_SAMPLE_EXCLUDE`,
+  `SIGHTLINE_STEP_MAX_PARTS` / `_MAX_TRIANGLES`, `SIGHTLINE_BIG_MODEL_MB`, `SIGHTLINE_WIDER_FIX_MAX_MB`,
+  `SIGHTLINE_BUILT_CACHE`) ignored a value set only in `.env` on local runs. Modal sets real variables, so the deploy
+  was unaffected. An empty cap (`SIGHTLINE_PROPOSE_PER_HOUR=`) reached `int("")` and stopped the server at import,
+  although `.env.example` said "off when empty or 0"; it also implied every cap is off when unset, but requirements
+  files (120 an hour) and previews (60) have defaults of their own.
+- **Now:** the package's `__init__.py` calls `meta_client.load_env()`, so `.env` is read on the first import of any
+  module (web server, stdio MCP, tests, evals) and before any setting; real environment variables still win. Every
+  number setting is read with `limits.env_int` / `env_float`: unset or empty is the default, anything else that is not
+  a number still raises. An empty `SIGHTLINE_BUILT_CACHE` is its default (it would have been the working directory).
+  `.env.example` says what unset, empty and 0 mean and lists the two caps that default on.
+- **Checked:** `tests/test_env_file.py` (3; a fresh interpreter on a copy of the package beside its own `.env`): before
+  the change `.env`'s `SIGHTLINE_MAX_SCENES=7` read as 0 and an empty cap stopped the import with `ValueError`. 553
+  server tests. Locally, uvicorn started with a `.env` holding empty caps (`/api/models` answered, with the model
+  upload size set there); importing the app with the same file gave `SIGHTLINE_MAX_SCENES=1` as the Workspace's
+  limit, no proposal limit and requirements files at 120 an hour.
+
+Chat and MCP take their routes' caps; a visitor is the peer (Oct 30, owner request; code `plans.read_patterns`,
+`chat.Chat._run`, `mcp_server` `caps` / `Hooks.detect`, `limits.client_id`; docs 09 and 16):
+- **Pattern readings:** chat and MCP `find_patterns` made a fresh Muse Spark call every time, uncharged; the route
+  charged one proposal and cached per report. Now all three go through `plans.read_patterns`: one proposal for a
+  reading not made yet, kept on the Workspace (64), a caller who comes while it is being made waits for it, and
+  no patterns cost nothing (the route used to charge one for an empty reading).
+- **Detection:** chat and MCP `detect_clashes`, and MCP `open_models` checking on the server, now take one detection
+  run (`SIGHTLINE_DETECT_PER_HOUR` / `_PER_DAY`) like `/detect/stream`, charged to the visitor or the link's creator,
+  never the owner. Off on Modal, as before.
+- **Who a visitor is:** measured with a throwaway Modal app, from outside and from inside Modal: the edge strips any
+  client `X-Forwarded-For` (one value, a list, junk, two header lines), sets none, and gives the app the caller's own
+  address as the peer, HTTP and WebSocket. `X-Real-IP` and `Forwarded` pass through as the client wrote them. So
+  the old "first entry" rule was harmless on Modal (no header ever arrived) but would let a visitor pick their own
+  identity behind a proxy that appends. The deploy now sets `SIGHTLINE_TRUST_FORWARDED` 0; any N > 0 takes the N-th
+  entry from the right. The live app needs nothing now; its next deploy picks up the setting.
+- **Checked:** 559 server tests (9 new: `test_limits.py` 3, `test_chat.py` 3, `test_mcp.py` 2, `test_plans.py` 1;
+  the 5 chat and MCP ones fail on the old code, as do the spoofing ones); locally with Muse Spark, a chat asked to check
+  the models after the visitor's one detection run got "refused: detection runs used" and said so.
+
+ORCA in every download, and the cell tour on the current cell (Oct 30, owner request; `docs/architecture/14`, `19`, `21`):
+- **Downloads:** the report is `orca-report.pdf` (`orca-report-<team or model>.pdf`, zipped as `orca-report.zip`) with
+  `orca-issues.bcfzip`; a multi-file export is `<project>-orca.zip` (`app.export_zip_name`; `service.project_name`, the
+  page's `projectName` rule: "Northbank-orca.zip", one STEP model "PC-03-Palletising-Cell-RevA-orca.zip", else
+  `orca-export.zip`). Temp folders keep `sightline-*`.
+- **The PDF names the triage model that ran** (`document.triage_by`): the triage run's `info`, else
+  `meta_client.triage_model_info()` (a restart); was always "Muse Spark Open".
+- **Cell tour:** 161 parts, eight problems / 17 pairs, "17 of 17"; Accept steps (both tours) say the viewer swaps in the
+  changed parts without reloading. The Oct 28 recordings named parts of the 144-part STEP (STEP GlobalIds follow its
+  bytes), so they could not be drawn or accepted; re-recorded live on the current STEP (ladder: 120 mm offset first,
+  100 mm whole-ladder raise second; pipe plan: a 900 mm route west). Muse ranks a comfortable offset over the
+  designers' 150 mm raise, so the ladder copy names the option on screen (`TourState.optionKinds`); act "A move" is
+  now "One fix".
+- **Recorded-run offer:** a failed or empty live proposal also ends "done", so the offer never showed on an error;
+  now it does (`liveMissed`), and a plan that fails to start moves the tour on to the step that offers its recording.
+- **Checked:** 552 server tests, 69 web tests (`tour.test.mjs` new); `evals/detection_cell.py` Rev A 17/17, 0
+  unexpected (`evals/runs/2026-10-30-cell-detection/`); in headless Chromium the cell tour live (recording) and again
+  with the live streams refused: both recordings offered, replayed and accepted in place (one model download, at open),
+  all 12 steps; the live export and report downloads carry the new names.
+
+Keeping a fix tries it again (Oct 30, owner request; [07](07-fixes-and-edits.md) "Keeping a fix", code `plans.recheck` /
+`plans.apply`, `edits.kept_files`):
+- **Why:** `POST .../fix/apply`, `.../plan/apply` and the older `/apply`, `/offset/apply`, `/trim/apply` rebuilt a fix from
+  the page's kind and parameters without checking it again, so any client could keep an edit that was never verified
+  (an arbitrary move, an offset with any split or height), and a plan refused part way kept the fixes before it.
+- **Now:** every keep goes through `plans.apply`: each option is tried again as its proposal tried it (`plans.CANDIDATE`
+  back to Muse's parameters, `agent.TRIES` with the clearance, policies and recommend-only `Workspace.fix_settings` sets
+  for the clash it names), several are checked together (`verify_together`), then all are kept in one
+  `edits.kept_files` (now re-entrant, and restoring the edited marks, revision and history on failure) or none. What
+  the trial made is kept: a move's whole run, the trim's end at the joint. A fix that no longer passes is a 409
+  (`plans.NotVerified`) with why. Options carry `pair` and `others` (`agent.resolve`); the page sends every kind to
+  `/fix/apply` with the clash pair, plans send each item's; the old routes need their partner (`obstacles` / `other`).
+- **Checked:** `tests/test_keep_verified.py` (9); existing tests now keep honest fixes (one export test was keeping an
+  offset the second model's beam blocked); `web/tests/accept.test.mjs`. On Northbank in the browser, Muse Spark's
+  "Offset duct up 400 mm through girder opening" on #1 was re-checked at keep (50 mm, 21 elements) and patched in
+  place; tampered options on the same scene (tray up 100 mm, the cold water main not moved, the kept offset sent again,
+  no pair) were refused in 0.4-1.0 s with the scene unchanged. The girder root-cause plan (duct +400, tray +250, cold
+  water +280 mm and three trims) was kept through `plans.apply` in 7.4 s; the same plan sent again was refused. 559
+  server tests, 65 web tests.
+
+Joints (Oct 30, owner decision after a fix moved the cell's PL-302 segment 3 off column C3 and left it apart from its
+bend; design in `docs/connections.md`, code `server/sightline/connections.py`): slice 1 of 3 (joints → moves that
+carry and stretch → hover highlight).
+- **Joints:** connected ports (read live), and for STEP parts (no ports) flow parts of one group meeting face to face:
+  a straight segment offers its two caps, anything else its large planar faces; within 2 mm, normals opposed, the face
+  centre inside the other's triangle. Ends: "start"/"end" cap or "side" (a branch). Classes: straight / rigid
+  (fittings, in-line valves, dampers, meters) / stays (equipment, terminals, filters, structure, non-flow).
+- **Runs:** `connections.run` = straight segments joined cap to cap, the element first; a non-flow part keeps
+  `connected_run` without flow parts. `scene.connected_run` is unchanged (the wider-fix planner uses it).
+- **A move that would pull a joint apart is refused** (`plan_move`, `SIGHTLINE_CONNECTED_MOVES` refuse | carry | off):
+  `_try_move` ("cannot keep its joints: …", the joints as hits), combined steps, plans (`joint` hits),
+  `Workspace.verify_move` (`reason`) / `apply` (`/apply` 422), chat and MCP `check_move`, the page's manual move ("Not
+  tried: …"). Muse reads what each side is joined to (`connections.describe`); `construction.md` says joints stay joined.
+- **Measured:** every Northbank MEP segment is joined at an end; answer key 3/3 first try at Rev04 heights (Muse stopped
+  proposing whole moves of joined runs); cell #22 gets only routes; the cell's 40 flow parts' joints in 3.8 s.
+- **Tests:** `tests/test_connections.py` (`fixtures.build_joints_fixture`: a PL-302 with ports, a tee, a valve, a
+  filter; a STEP air line written with OCP and classified by a stand-in); `test_accept_in_place` moves whole runs.
+
+Moves that keep their joints (Oct 30, slice 2 of connections; `docs/connections.md`): `SIGHTLINE_CONNECTED_MOVES` is
+`carry` by default.
+- **The walk** (`connections.plan_move`): fittings and in-line valves beyond a run go along; a straight segment the move
+  runs along (< 0.5 mm across) gets longer or shorter at that end; a rectangular segment covered end-on at its side (a
+  ladder riser under its bend) grows that way; any other segment goes along; equipment, terminals, filters,
+  structure, KeepFixed, a branch off a segment's side, a piece < 50 mm or > 12 parts along: refused, named.
+- **`edits.stretch`** (cap: extrusion depth and start; side: new rectangle profile and position; ports at that face
+  shifted without turning; shared bodies refused). `apply_move`, `check_joints` (ports ≤ 2 mm, STEP faces still meet),
+  `trial_move` / `check_applied` (moved parts ignore what they're joined to; stretched segments count only contacts new
+  or worse than `baseline`).
+- **Still kind "move":** `edit` {summary, key, run, carried, stretched, joints}, `preview` = stretched meshes;
+  `Workspace.apply(expect=edit)` plans again and refuses a changed key; the page accepts a move with `edit` through
+  `/fix/apply`, draws stretched pieces (`Viewer.showOptions`, `captureBuilt`), the manual move previews them. Combined
+  steps carry and refuse overlapping steps; `verify_together` reports two items changing one element as a conflict;
+  Muse reads per direction what keeps the joints (`describe`).
+- **Measured:** cell C2 lifts 4 parts and the riser 150 mm taller on its plate (STEP export too); C6 as a move keeps
+  its joints but hits ES-2; #61 in the browser: "move up 100 mm; takes … along; riser 100 mm longer", accepted in place;
+  Northbank census `evals/joints.py` (195 of 1,992 dry plans keep their joints, median 16 ms); answer key 3/3. Cell
+  tour: ladder copy updated, `web/public/tour/cell-ladder.json` recorded again (its move option carries).
+- **Tests:** `tests/test_connected_moves.py` (walk, refusals, tolerance, promotion, tee, stretch, agent, keep with a
+  stale key, plans, STEP ladder export), `test_accept_in_place` (a lone move takes its joined end segment along).
+
+See connections (Oct 30, slice 3 of connections; `docs/connections.md`, code `connections.graph`, `web/src/links.ts`,
+`Viewer.setLinks`):
+- **Graph:** `GET /api/scenes/{sid}/connections`: edges `[a, b, kind, source]` (joint, assembly, hosted, rests_on,
+  contact), plus stops, systems, assemblies and names; cached by revision and contacts. Detection now keeps the pairs that only touch
+  (run state `contacts`). `Workspace.describe` (card, chat and MCP `describe_element`) gives `links` by kind with
+  names, `systems` and `part_of`. Northbank 0.38 s (875 rests on, 650 joints, 26 hosted, 6 contacts).
+- **Page:**
+  - Alt (Option) + point, or the **Connections** toggle (rail, key L; the phone's Tools sheet), lights what an element
+    is linked to, by kind: joined `#2563eb`, rests on / supports green, hosted brown, assembly slate, touches light
+    blue. A label names it with counts, and Shift lights the whole run (to equipment) and its assembly.
+  - A click or tap with the toggle on does the same and the card lists the links (a name selects and frames it).
+  - A carrying move's option shows what it takes along in blue.
+  - The layer is hidden in A/B/C pictures, thumbnails and built views.
+- **Phone popovers** now render into the body: inside the rail they sat under the bottom sheet.
+- **Web tests:** App imports `./links` (both harnesses compile it); `tests/links.test.mjs`, `tests/viewer-links.test.mjs`.
 
 Sign-offs kept per report (Oct 30; code `web/src/signoffs.ts`, `Report.requirements_id`):
 - **Why:** review sign-offs were kept in `localStorage` under the report's title, and every detection run is titled
   "Coordination · N models", so one project's or run's reviews showed on another with the same model count. The PDF
   stays DRAFT until each page has a review from every team involved, so those reviews could lift it wrongly.
-- **Key:** an imported report by its id (`sightline.signoffs:report:<id>`); a detection run, a new report each time,
-  by the requirements it ran under and its sorted file names (`sightline.signoffs:run:<requirements id or
-  "defaults">:<files>`), so a rerun keeps them. The server now names a run's requirements on the report
-  (`requirements_id` in the summary), so the key doesn't depend on the page's detection state (resume, chat, agent).
-- **Old entries:** title-keyed ones can't be told apart by report, so they are removed on load, not carried over.
-  Re-importing a Navisworks report starts with no sign-offs (a new report id).
-- **Checked:** `tests/test_detect.py` (a run names its requirements), `web/tests/signoffs.test.mjs` (5, incl. the page
-  with two runs of the same title); 69 web tests.
+- **Key:** a detection run's per clash, under its id (`sightline.signoffs:clash:<id>`). The id hashes the test and the
+  GlobalId pair, so a rerun, a requirements change (Add to requirements makes a new requirements id) or opening fewer
+  of the same models keeps a clash's reviews, and another project's clashes never share them. An imported report's
+  under its title and sorted files (`sightline.signoffs:import:<title>:<files>`), since a Navisworks id is a place in
+  its file; opening the same report again (a new report id each time) finds them. The server names a run's
+  requirements on the report (`requirements_id` in the summary), for the record.
+- **Old entries:** a title-keyed one moves over when a report with that title opens, for the clashes that report has
+  (a detection run's ids name their elements, so another project's never match), never over a newer review; the rest
+  wait for their own report, and the old key goes when it is empty (`migrateTitleKeyed`).
+- **Review fixes before merging:** the first version keyed a run by its requirements and files and deleted every
+  title-keyed entry on load, so a rule change or a deploy lost sign-offs, and an imported report lost them on reopening.
+- **Checked:** `tests/test_detect.py` (a run names its requirements), `web/tests/signoffs.test.mjs` (5: keys, a rerun
+  under new rules and with fewer models, junk and no storage, the migration with an imported report and two projects of
+  one title, the page); 80 web tests.

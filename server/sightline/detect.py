@@ -417,15 +417,15 @@ class _Hit:
 
 
 def _measure(ix: _Index, solids: _Solids, test: Test, pairs: list[tuple[str, str]], tree, offset: np.ndarray,
-             ) -> tuple[dict[frozenset, _Hit], int]:
-    """Measure candidate pairs. Returns the overlapping (or too close) pairs and how many only touch.
+             ) -> tuple[dict[frozenset, _Hit], list[tuple[str, str]]]:
+    """Measure candidate pairs. Returns the overlapping (or too close) pairs and the pairs that only touch.
 
     Depth is how far one must move to clear the other. For two rectangular solids it is exact (separating axes).
     Otherwise it is an estimate: the lesser of the intersection query's figure and how far the boxes must move apart.
     The query's figure alone can be far off either way: a pipe half a millimetre into a beam's underside reads 200 mm
     (the beam's width), and a top rail 40 mm into a post reads 20."""
     if not pairs:
-        return {}, 0
+        return {}, []
     allowed = {frozenset(p): p for p in pairs}
     left = sorted({a for a, _ in pairs})
     right = sorted({b for _, b in pairs})
@@ -433,7 +433,7 @@ def _measure(ix: _Index, solids: _Solids, test: Test, pairs: list[tuple[str, str
     eb = [ix.entity[g] for g in right]
     back = lambda p: [float(x) - float(o) for x, o in zip(p, offset)]
     hits: dict[frozenset, _Hit] = {}
-    touching = 0
+    touching: list[tuple[str, str]] = []
 
     def keep(a, b, distance, point):
         key = frozenset((a, b))
@@ -450,19 +450,19 @@ def _measure(ix: _Index, solids: _Solids, test: Test, pairs: list[tuple[str, str
                 continue
             if _same_shape(ix, a, b, test.tolerance_m):
                 keep(a, b, -_box_depth(ix, a, b), _box_point(ix, a, b))
-        return hits, 0
+        return hits, []
 
     tol = test.tolerance_m if test.kind == "hard" else 0.0
     seen: set[frozenset] = set()
 
     def judge(a, b, depth, point):
-        nonlocal touching
         key = frozenset((a, b))
         seen.add(key)
         exact = solids.depth(a, b)
         depth = exact if exact is not None else min(depth, _box_depth(ix, a, b))
         if depth <= tol:
-            touching += 1 if depth > 0 else 0
+            if depth > 0:
+                touching.append((a, b))
             return
         keep(a, b, -depth, point)
 
@@ -552,13 +552,16 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
     solids = _Solids(ix)
 
     clashes: list[ReportClash] = []
+    contacts: set[frozenset] = set()   # pairs that only touch: what rests on or meets what (connections.graph)
     tested: dict[str, Test] = {}
     coverage: list[Coverage] = []
     selections: dict[str, dict] = {}
     for n, (t, a, b, pairs) in enumerate(plans):
         t1 = time.perf_counter()
         emit({"type": "test", "index": n, "id": t.id, "name": t.name, "candidates": len(pairs)})
-        hits, touching = _measure(ix, solids, t, pairs, tree, offset) if tree is not None else ({}, 0)
+        hits, touches = _measure(ix, solids, t, pairs, tree, offset) if tree is not None else ({}, [])
+        contacts.update(frozenset(p) for p in touches)
+        touching = len(touches)
         excluded: Counter = Counter()
         found = []
         for h in hits.values():
@@ -606,7 +609,7 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
                     temporary=True, origin="sightline")
     state = {"clashes": {c.id: {"test": tested[c.id].id, "name": tested[c.id].name, "a": c.a.global_id,
                                 "b": c.b.global_id} for c in clashes},
-             "selections": selections, "numbers": numbers}
+             "selections": selections, "numbers": numbers, "contacts": [sorted(p) for p in contacts]}
     seconds = round(time.perf_counter() - t0, 2)
     return Run(report, coverage, {k: v for k, v in diff.items() if k != "new_ids"}, len(checked_ids), seconds,
                [float(x) for x in offset], state)

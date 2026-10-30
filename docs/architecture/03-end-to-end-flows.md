@@ -113,8 +113,10 @@ Owned by: [09](09-agent-workflows.md) (`agent.resolve`), [07](07-fixes-and-edits
 ## Accept a fix in place
 
 **Accept this fix** (`accept(o)`) takes before and after pictures for the report (`captureFix`), then `api.accept` posts
-to the route for its kind: `apply` (move), `offset/apply`, `trim/apply`, or `fix/apply` for every other kind, which
-rebuilds the fix from its kind and parameters (`plans.apply`, `plans.KEEP`). Each route goes through `_with_patch`:
+the option to `fix/apply` for every kind, with the clash it was verified for (`pair`). `plans.apply` tries it again
+first (`plans.recheck`: the kind's own trial and check, with the clearance and requirements of that pair) and answers
+409 with why when it no longer passes, so nothing the page sends is kept unchecked; then `plans.KEEP` makes what the
+trial made, all or nothing. The route goes through `_with_patch`:
 under `Workspace.lock` it notes the scene's `revision`, keeps the fix (`mark_edited`, `IfcScene.bump`) and adds
 `Workspace.patch` (revisions, `history`, the changed elements' meshes, none past 500,000 vertices). `applyToViewer`
 patches the viewer in place when `revision_before` is the page's `sceneRevision`, else reloads the changed and missed
@@ -458,7 +460,7 @@ Owned by: [14](14-files-in-and-out.md) (PDF and BCF), [09](09-agent-workflows.md
 hour; `Workspace.export` (under the lock) writes only the files with kept edits (`IfcScene.write_edited`:
 `<name>.orca.ifc`) and, for a model opened from STEP, writes `<stem>.orca.step` from the original STEP with what changed
 (`service.step_changes` → `step.export`: moved parts, rebuilt or cut parts, new pieces). One file comes back as it is,
-several as one zip (`{sid}-sightline.zip`), and nothing kept yet is 409. MCP's `export_models` hands an agent this URL
+several as one zip (`<project>-orca.zip`, `app.export_zip_name`), and nothing kept yet is 409. MCP's `export_models` hands an agent this URL
 (remote) or writes the files (stdio).
 
 ```mermaid
