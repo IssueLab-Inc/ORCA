@@ -2,7 +2,8 @@
 
 > **Covers:** `web/src/` (all but `viewer/`, which is [13](13-3d-viewer.md)), `web/index.html`, `web/vite.config.ts`,
 > `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/` · **Checked against code:** 2026-10-30
-> (`feature/drawing-views`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/views.md](../views.md)
+> (`feature/dockable-panels`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/views.md](../views.md),
+> [docs/panels.md](../panels.md)
 
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
 almost all of the page's state and every call that changes it; the other components draw what `App` hands them and
@@ -30,6 +31,8 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `Chat.tsx` | "Chat with ORCA": turns, tool steps, suggestions, the mic (hold to talk, hands-free, upload fallback) | `ChatPanel`, `Turn`, `Step` | `App` |
 | `ClashPanel.tsx` | The selected clash's card (both sides, how each matched, Navisworks or captured views, triage reading), the image dialog, thumbnails | `ClashPanel`, `Lightbox`, `ClashThumb` | `App`, `ReportList.tsx` |
 | `ContextPlan.tsx` | The "wider fix" (context proposal) review in the Plan tab: alternatives, checks, review conditions to acknowledge | `ContextPlan`, `contextStep`, `ContextRun` | `App` |
+| `dock.tsx` | The desktop's panels on dockview: a slot per panel that `App` draws into (`inSlot`), `SlotHost` (where a slot sits, in the dock or the classic grid), `DockHost` (the dock, its tabs, buttons, right-click menu, saving) and `DockHandle` (show, reset, gather) | `DockHost`, `SlotHost`, `inSlot`, `usePanelSlots`, `DockHandle`, `Slots` | `App` |
+| `dockLayout.ts` | The panels and their homes, which saved layouts load (`validLayout`), pop-outs back home on save (`withoutPopouts`), storage, what showing a panel takes (`showSteps`) | `PANELS`, `PANEL_IDS`, `homeOf`, `isPanel`, `validLayout`, `withoutPopouts`, `readLayout`, `writeLayout`, `showSteps`, `LAYOUT_KEY`, `CLASSIC_KEY` | `App`, `dock.tsx` |
 | `Detect.tsx` | ORCA's check: the set-up card (tests to run) and the run summary (coverage, new/resolved, Detect again) | `DetectSetupCard`, `DetectSummary`, `DetectProgress` | `App` |
 | `Insights.tsx` | Root causes and patterns, with their fix, filter, tick, mark and Add to requirements buttons | `Insights` | `App` (into `ReportList`'s `insights` slot) |
 | `Owner.tsx` | The owner's gear: unlock, "For me" and "For everyone" settings | `OwnerSettingsMenu` | `App` |
@@ -52,33 +55,44 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `pilot.ts` | Lets the fix agent drive the viewer while it works | `Pilot`, `PilotStatus` | `App` |
 | `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
 | `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
-| `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (on a phone its sheet renders into the body, above the bottom sheet), and the page's one tooltip layer | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
+| `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (on a phone its sheet renders into the body, above the bottom sheet; it listens on its own document, so it works in a pop-out window), and the tooltip layer (`Tooltips`, one per document: the page and each pop-out window) | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
 | `uploads.ts` | The size check before an upload and the words for each upload stage | `uploadRefusal`, `uploadStatus`, `localFile` | `App` |
 | `voice.ts` | Live voice over a socket, and the record-then-upload fallback | `LiveVoice`, `VoiceRecorder`, `LiveVoiceError`, `MAX_SECONDS`, `VoiceMode` | `Chat.tsx` |
 | `viewer/Viewer.ts`, `viewer/ifcLoader.ts`, `viewer/patch.ts`, `viewer/views.ts`, `viewer/cube.ts`, `viewer/drawing.ts`, `viewer/annotate.ts` | The viewer: 3D, the view cube and the drawing views | see [13](13-3d-viewer.md) | `App`, `pilot.ts`, `ViewPanes.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
 
 ## The component tree
 
-`App` renders one `div.app` whose classes carry the layout (`landing`, `starting`, `phone`/`tablet`, `snap-*`,
-`list-open`, `resizing`) and whose CSS variables `--left-w` / `--right-w` carry the dragged pane widths. Inside it, the
-same five regions exist on every layout; CSS re-places them (phone: the panes become the sheet's body), so nothing
-remounts when the layout changes.
+`App` renders one `div.app` whose classes carry the layout (`docked`, `landing`, `starting`, `phone`/`tablet`,
+`snap-*`, `list-open`, `resizing`) and whose CSS variables `--left-w` / `--right-w` carry the dragged pane widths.
+Each panel's content (the left pane, the stage, the Clash, Plan and Chat bodies, Activity) is drawn into a slot of its
+own (`dock.tsx`, [docs/panels.md](../panels.md)), and the slots are placed in one of two ways:
+
+- **The dock** (`docked`: a desktop, not the landing, Classic layout off): `DockHost` (dockview) with the model in the
+  middle and side bars that collapse, float and pop out.
+- **The classic layout** (phones, tablets, the landing, Classic layout on): the old grid, the slots placed with
+  `SlotHost` as `display: contents`, so the five regions are grid items as before and CSS re-places them (phone: the
+  panes become the sheet's body).
+
+Nothing remounts when a panel moves or the layout changes: only the slot elements move.
 
 ```mermaid
 flowchart TD
   main["main.tsx"] --> app["App"]
   app --> header["header.bar (desktop, or compact on phone and tablet)"]
-  app --> left["aside.pane.left"]
-  app --> stage["main.stage (the Viewer canvas lives here)"]
-  app --> right["aside.pane.right"]
-  app --> dock["footer.dock: Activity (desktop only)"]
-  app --> resizers["two resizer handles (desktop only, CSS hides them elsewhere)"]
+  app --> slots["inSlot: each panel's content into its slot"]
+  slots --> left["aside.pane.left (Coordination)"]
+  slots --> stage["main.stage (Model: the Viewer canvas lives here)"]
+  slots --> bodies["Clash, Plan and Chat bodies"]
+  slots --> dock["footer.dock: Activity (not on phone and tablet)"]
+  app --> place{"docked?"}
+  place -->|"yes"| dockhost["DockHost: dockview, side bars, floating and pop-out windows"]
+  place -->|"no"| classic["SlotHost per slot, aside.pane.right with its tabs, two resizers"]
   app --> sheet["SheetBar (phone)"]
   app --> drawer["drawer-scrim (tablet)"]
   app --> menu["MenuSheet (phone and tablet)"]
   app --> tips["Tooltips"]
   app --> dialogs["Dialogs"]
-  header --> pops["Popover: Models, Coordinate"]
+  header --> pops["Popover: Models, Coordinate, Panels and layout"]
   header --> owner["OwnerSettingsMenu"]
   dialogs --> about["AboutOrca, About ORCA in tabs"]
   dialogs --> agent["AgentDialog"]
@@ -111,6 +125,8 @@ flowchart LR
   end
 ```
 
+- In the dock every panel draws its content whatever `tab` says (Clash and Chat can both be on screen); in the classic
+  layout the Clash, Plan and Chat bodies are hidden by `tab` as before.
 - `ChatPanel` is always mounted (hidden when another tab is open) with `key={sceneId:chatReport}`, so it keeps its
   history across tabs and restarts only when the scene changes or the user opens another report. A report the chat
   opened itself (`adoptChatReport`) does not change `chatReport`, so the turn that opened it keeps answering.
@@ -148,6 +164,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 | Agent link and session | `agentLink`, `agentOpen`, `agentLog`, `agentBusy`, `agentError`, `resumable` | `agentStream`, `agentHandler` | |
 | Tour | `touring`, `tourWhich`, `replaying`, `about` | | `tourState`, `tourActions` |
 | Layout and sheet | `widths`, `resizing`, `listOpen`, `snap`, `menuOpen` | `followed` | `layout`, `compact`, `coarse`, `peekLine` |
+| Panels (docs/panels.md) | `tab` (set through `setTab`, which also shows the panel in the dock), `classic`, `popouts` (pop-out windows open now) | `dock` (`DockHandle`), `dockedNow`; `slots` (`usePanelSlots`) | `docked`, `dockTabs`, `showPanel`, `layoutMenu` |
 | Thumbnails queue | `thumbs` | `thumbQueue`, `thumbPaused`, `thumbTimer`, `thumbSource` | |
 | Status | `busy`, `error`, `now` | `sceneEpoch`, `workspaceEpoch` | `working`, `fixing` |
 
@@ -413,6 +430,30 @@ with a getter for the viewer, a framing function (`frameFix` on the trial's piec
   render functions the desktop popovers use (`modelsMenu`, `coordinateMenu`). Escape or the scrim closes it.
 - The tablet keeps the right pane and shows the list as a drawer (`listOpen`, header **Clashes**, `drawer-scrim`).
 
+### `dock.tsx`, `dockLayout.ts`
+
+The desktop's panels ([docs/panels.md](../panels.md)). `usePanelSlots` makes a slot per panel once; `App` draws each
+panel's content into its slot with `inSlot` (a portal), and `SlotHost` puts a slot into whatever element hosts it: a
+dock panel, or the classic grid (where slot and host are `display: contents`). `DockHost` wraps dockview's
+`DockviewReact` with ORCA's theme (`dockview-theme-orca` in `index.css`):
+
+- **Default layout** (`build`): the model locked in the middle (no tab, no drops into it); side bars (edge groups)
+  left (Coordination), right (Clash, Plan, Chat) and bottom (Activity), sized from `sightline.left-w` / `right-w`.
+- **Tabs** (`Tab`): icon, title and `App`'s `dockTabs` (a count, a spinner), `data-tour` for the tour. A click is the
+  user choosing the panel (`onTab`, which `App` maps to its classic tab handlers); in a side bar it opens the bar and
+  never closes it.
+- **Buttons** (`Actions`, at the end of a group's tabs): collapse the side bar (`collapseEdge`: the tabs go down the
+  outer edge first, so the strip is narrow), float (`floatPanel`), open in a window, put it back (`moveHome`). The
+  right-click menu has Float, Open in New Window, Put it back and Close.
+- **Saving:** `toJSON` into `sightline.dock.v1` a moment after a layout change or a collapse (`writeLayout`, which
+  puts pop-out panels back in their bars first); on load `readLayout` and `fromJSON`, else the default.
+- **`DockHandle`** for `App`: `show(id, { dock })` (`showSteps`: reopen at home, open the bar, focus the window or bring
+  it home), `reset()`, `gather()` (the tour: every panel back in this window, every bar open), `isOpen(id)`.
+- Side panels use dockview's `renderer: "always"`, so a panel behind another tab stays in the page, hidden: the tour
+  finds its targets and `reveal` shows their panel.
+- Pop-out windows load `web/public/popout.html`; `App` adds its keys to each window and mounts a `Tooltips` there
+  (`onWindows`).
+
 ### `Tour.tsx`
 
 - **Two tours:** `BUILDING_STEPS` (30 steps in 10 acts: design coordination, triage, one fix live, a joint, the root
@@ -503,7 +544,9 @@ Everything is `localStorage`, read and written inside `try` (a private window ju
 | Key | Written by | Holds |
 |---|---|---|
 | `sightline.session` | `App` (`SESSION_KEY`) | `SavedSession`: scene id, report id, files, fixes, agent link, time; read on load for "Pick up where you left off" |
-| `sightline.left-w`, `sightline.right-w` | `App` (`stored`, `remember`) | Dragged pane widths (clamped by `PANE`) |
+| `sightline.left-w`, `sightline.right-w` | `App` (`stored`, `remember`) | Dragged pane widths in the classic layout (clamped by `PANE`); the dock's default side bar widths |
+| `sightline.dock.v1` | `dockLayout.ts` (`writeLayout`), for `DockHost` | `{ v: 1, layout }`: the dock's layout (dockview's `toJSON`), pop-out panels put back in their bars |
+| `sightline.dock.classic` | `App` | `"1"`: the Classic layout switch is on (fixed panes on the desktop) |
 | `sightline.signoffs:clash:<clash id>` (a detection run) / `sightline.signoffs:import:<title>:<files>` (an imported report) | `signoffs.ts`, for `App` (`signoffKey`, `changeSignoffs`) | Team reviews per detected clash, or per imported report. The old `sightline.signoffs.<report title>` keys move over as their reports open (`migrateTitleKeyed`) |
 | `sightline.reviewer` | `ReportDoc.tsx` (read by `App`'s tour sign-off) | The reviewer's name |
 | `sightline.requirements` | `reqFile.ts` | The requirements file and whether it is in use |
@@ -521,8 +564,9 @@ No `sessionStorage` or IndexedDB is used.
 
 - **`package.json` scripts:** `dev` (Vite dev server), `build` (`tsc --noEmit && vite build` into `web/dist/`),
   `test` (`node --test tests/*.test.mjs`), `preview`, `copy-wasm`, and `postinstall` (runs `copy-wasm`).
-  Dependencies are pinned: `react` / `react-dom` 19.3.1, `three` 0.186.1, `web-ifc` 0.0.77, `lucide-react` 1.48.0, and
-  `three-mesh-bvh` 0.9.16, which nothing in `web/src` imports at HEAD.
+  Dependencies are pinned: `react` / `react-dom` 19.3.1, `three` 0.186.1, `web-ifc` 0.0.77, `lucide-react` 1.48.0,
+  `dockview-react` 8.5.1 (with `overrides` holding `dockview` and `dockview-core` at 8.5.1; the free MIT core only,
+  [docs/panels.md](../panels.md)), and `three-mesh-bvh` 0.9.16, which nothing in `web/src` imports at HEAD.
 - **`vite.config.ts`:** the React plugin, and a dev proxy sending `/api` (WebSockets included, for live voice) to
   `http://localhost:8000`, keeping the Host header so the server's same-origin check passes.
 - **`tsconfig.json`:** strict, `noUnusedLocals`/`noUnusedParameters`, includes `src` and `vite.config.ts` only, so
@@ -533,7 +577,8 @@ No `sessionStorage` or IndexedDB is used.
   `http://localhost:8765`), waits for the check, picks a view, saves the viewer's screenshot and writes
   `web/public/demos/northbank.webp` and `cell.webp` (cropped to 16:10 with Pillow). Recapture after visual changes;
   the landing's demo cards and the README use these pictures.
-- **`web/public/`:** `favicon.svg`, `demos/*.webp`, `tour/*.json` (the five recordings), and the generated `wasm/`.
+- **`web/public/`:** `favicon.svg`, `popout.html` (the page a panel's own window opens: dockview moves the panel in
+  and copies the styles), `demos/*.webp`, `tour/*.json` (the five recordings), and the generated `wasm/`.
 - **`web/index.html`:** the shell (`#root`, `viewport-fit=cover`, the IBM Plex fonts from Google Fonts, title "ORCA ·
   AI design coordination").
 - **Serving:** in production the server mounts `web/dist` at `/` when `index.html` exists (`app.WEB_DIST`, env
@@ -542,8 +587,9 @@ No `sessionStorage` or IndexedDB is used.
   TypeScript transpiler into a data URL, replacing named imports, and `appHost()` runs the real `App` render and its
   effects with React hooks, the API and the viewer replaced. **A new import in `App.tsx` must be added to both stub
   lists, in `web/tests/app-host.mjs` and in `web/tests/app-replacement.test.mjs`**, or `npm test` cannot resolve it;
-  `fixKinds`, `chatRequest`, `uploads`, `signoffs`, `aboutRoute` and `ContextPlan` are compiled for real, the rest are stubbed.
-  The transform cannot read `for (const [a, b] of …)` in `App`: iterate keys. Other tests cover `layout.ts`,
+  `fixKinds`, `chatRequest`, `uploads`, `signoffs`, `aboutRoute`, `dockLayout` and `ContextPlan` are compiled for real,
+  the rest are stubbed (`./dock`'s `inSlot` returns what it is given, so the tests see each panel's content in place).
+  The transform cannot read `for (const [a, b] of …)` in `App`: iterate keys. Other tests cover `dockLayout.ts`, `layout.ts`,
   `uploads.ts`, `signoffs.ts`, `reqFile.ts`, `fixKinds.ts`, and `Viewer.load` / `viewer/patch.ts` with real three.js
   batches. More in [18](18-testing-and-evals.md).
 
@@ -557,5 +603,7 @@ No `sessionStorage` or IndexedDB is used.
 - A new `api.ts` function group, request header, retry rule or transport.
 - A new `localStorage` key.
 - A change to the breakpoints, `follow()`, the sheet's snaps, or the Responsive CSS's structure.
+- A new or renamed panel, a change to the default layout, the side bars' buttons, what is saved, or how `setTab` and
+  the dock follow each other (also [docs/panels.md](../panels.md)).
 - A new tour, act, `TourState` field, `TourActions` action or recording in `web/public/tour/`.
 - A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `web/public/`.

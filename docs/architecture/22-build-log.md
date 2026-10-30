@@ -1082,3 +1082,23 @@ Review of the drawing views (Oct 30; PR review on `feature/drawing-views`; code 
   squeezed to nothing, maximise outside the header). It now folds (range words, then pin / go / fit into the range
   menu) and the picker shrinks last; the title block and scale bar stack when they would meet. Checked in Chromium in
   Quad at 1600, 1366 and 1180 px: no control outside its header in any pane.
+
+Panels that dock, collapse, float and pop out (Oct 30; `feature/dockable-panels`; design [docs/panels.md](../panels.md);
+code `web/src/dock.tsx`, `web/src/dockLayout.ts`, `web/src/App.tsx`, `web/src/ui.tsx`, `web/src/Tour.tsx`,
+`web/src/index.css`, `web/public/popout.html`):
+- **Owner decisions:** a real docking library (dockview 8.5.1, MIT, pinned with `overrides`; never its paid package),
+  before the freeze, the default layout the classic one, pop-out windows in the first version.
+- **How:** each panel's content is drawn into a slot that only moves, so nothing `App` draws remounts; the classic
+  layout (phones, tablets, the landing, the Classic switch) places the same slots as `display: contents`, so its CSS is
+  unchanged. Side bars keep their tabs on top while open and collapse to a strip; `setTab` shows the panel in the dock;
+  a dock tab runs the classic tab handler; the layout is saved per browser with pop-outs put back; the tour brings
+  panels home. Keys, tooltips and popovers work in a pop-out window.
+- **Found on the way:** a floating panel's opaque scroller culled the WebGL canvas under it (fixed: docked slots draw
+  no background); StrictMode disposed the dock's subscriptions (fixed: let go only on a real unmount); dockview's
+  `clear()` leaves side bars collapsed (Reset removes them). Recorded as a known limit, not fixed here: the viewer
+  doesn't survive a lost WebGL context (the owner's blank-views screenshot; [20](20-decisions-limits-and-roadmap.md)).
+- **Checked:** `web/tests/dock.test.mjs` (7); 109 web tests; `npm run build` and `tsc` clean; bundle +93 kB JS and
+  +11 kB CSS gzipped. In Playwright on Northbank (software GL): the default layout; float, collapse, reopen, tab
+  clicks; Chat popped out (styles, typing, a tooltip, M reaching the page), its window closed and popped out again;
+  reload with a popped-out, a floating and a collapsed panel; Reset; Classic; the tour gathering panels; #1 proposed
+  with the Clash panel floating, put back mid-run and accepted (1 fixed); tablet and phone unchanged.

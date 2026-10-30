@@ -15,7 +15,7 @@ what each level covers, how to run it, where its results go, and what to run bef
 | Level | What it proves | Needs | Costs | Where |
 |---|---|---|---|---|
 | Server tests | Geometry, every fix kind, the agent loop, triage, detection, API routes, streams, MCP tools, caps, settings | Python env only: no keys, no network, no demo models | Free, local | `server/tests/` |
-| Web tests | App's state handling and ownership rules, the viewer's load and patch, fix wording, layout, requirements file, uploads | `web/node_modules` (`npm install`) | Free, local | `web/tests/` |
+| Web tests | App's state handling and ownership rules, the viewer's load and patch, fix wording, layout, the dock's saved layouts and panel homes, requirements file, uploads | `web/node_modules` (`npm install`) | Free, local | `web/tests/` |
 | Evals | That real Muse models, on Northbank and the PC-03 cell, still give verified fixes and good readings | Demo models, `META_API_KEY` (and the triage key for Muse Spark Open) | Paid model calls (Muse Wonder is billed per token) | `evals/` |
 | Spikes | The day-one go/no-go questions, and Show it built's S0 | Northbank in `samples/`; a Meta key for spike 4 and S0 | Spike 4 and S0 paid | `spikes/`, `web/spikes/` |
 | Product checks | The running app does what the tests say: the golden path, the cell, phones, streams through Modal's edge | A running server and web app, Playwright's Chromium | Paid when a step proposes | ad hoc, plus two committed scripts |
@@ -184,7 +184,7 @@ flowchart LR
     tp --> lab["labels on: each useState and useRef call gets its variable name as a first argument"]
     lab --> rw["Each import specifier in the dependencies map is rewritten to its target"]
     stubs["mocks module: every leaf export returns null"] --> rw
-    real["compiled real modules: chatRequest, fixKinds, uploads, ContextPlan"] --> rw
+    real["compiled real modules: chatRequest, fixKinds, uploads, dockLayout, ContextPlan"] --> rw
     fakes["fake react hooks, api and Viewer from globalThis"] --> rw
     rw --> url["a base64 data URL, with a host counter so no module is reused"]
     url --> imp["dynamic import"]
@@ -231,6 +231,7 @@ flowchart LR
 | `uploads.test.mjs` | 3 | `compiled` | `uploads.ts`: the cap checked before sending, stage progress words, an uploaded IFC read from the visitor's own file |
 | `upload-retry.test.mjs` | 1 | `compiled` | `api.ts`: a 409 `requirements_unknown` re-registers the file and resends once |
 | `views.test.mjs` | 11 | `compiled` | `viewer/views.ts`: layouts tile the stage; a plan's view range, presets and clash default; sections look to the line's left and run along the moving run; which elevation and grid axes; the nearest standard scale and scale bar; the view cube's 26 directions; camera history; visibility (hidden, isolated, class and level filters); the Esc chain, never leaving a clash ORCA works on |
+| `dock.test.mjs` | 7 | `compiled` | `dockLayout.ts`: every panel's home (only the model in the middle); which saved layouts load (floating, closed, beside the model) and which give way to the default (the model elsewhere, a panel twice or nowhere, a stranger, another component); pop-outs back in their bars on save; storage and versions; what showing a panel takes; dockview pinned at 8.5.1 and its paid package or options never used |
 | `drawing.test.mjs` | 4 | `compiled` (real three.js) | `viewer/drawing.ts`: what a plan, a section (far clip, crop, flip) and an elevation keep; the section's far clip from the pair; framing, panning and zooming about the pointer |
 | `links.test.mjs` | 4 | `compiled` | `links.ts`: direct links by kind (rests on read the other way as supports), an element lit once in its first kind, Shift walking the run to equipment, a whole assembly |
 | `viewer-links.test.mjs` | 1 | `compiled` | The connection highlight never shows in a captured picture and is back on screen afterwards |

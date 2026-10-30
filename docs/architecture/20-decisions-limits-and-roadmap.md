@@ -82,6 +82,7 @@ carries the decision today.
 | Oct 29 | Show it built: the fix after only; a clean presentation render, not a site photo; a switch in the owner menu; two Muse Wonder judges per picture; the open tray bend to be fixed in the model, not the prompt; the PDF gets a built view for each accepted fix | `built.py`, `BuiltView.tsx`, `built_views` (`SIGHTLINE_BUILT_VIEWS` default `0`); [docs/show-it-built.md](../show-it-built.md) |
 | Oct 30 (request) | A move keeps what it stands on: a post slid along its slab is not a new clash, a lift off it is refused | `verify.supports`, `verify.keep_supports`; [docs/edits.md](../edits.md) |
 | Oct 29–30 | Drawing views beside 3D: up to four panes (Single, Two, Quad), plans, a section and elevations drawn like CAD; a toggle for whether drawings follow the 3D view's Context / Isolate or show the whole model; clip planes the user sets (a plan's cut and bottom, a section's line, far clip and crop) | `ViewPanes.tsx`, `viewer/drawing.ts`, `viewer/annotate.ts`, `Viewer.setLayout` / `setDrawingsFollow`; [docs/views.md](../views.md), [13](13-3d-viewer.md) |
+| Oct 30 | Panels that dock, collapse, float and pop out on the desktop, on a real docking library: dockview's free MIT core only (never its paid package: the public repo must build for anyone), the default layout the classic one, pop-out windows in the first version, phones and tablets unchanged, a Classic layout switch | `web/src/dock.tsx`, `dockLayout.ts`, `inSlot` / `SlotHost` in `App.tsx`; [docs/panels.md](../panels.md), [12](12-web-app.md) |
 | Oct 30 | Navigate the model with or without a clash: leave a clash (Esc, the chip's ✕), CAD-style 3D (view cube, orthographic, styles, visibility by model, class and level, hide and isolate); a picked clash shows in every open view, and clicking a clash takes every view to it by default (Fly to clash) | `leaveClash`, `views.escStep`, `viewer/cube.ts`, `Viewer.setStyle` / `setFilters` / `setTemporary`, `Viewer.clashViews`; [docs/views.md](../views.md) |
 
 ## Tried and dropped
@@ -232,6 +233,12 @@ Recorded after the final review of Show it built (Oct 30) and still true in the 
   `document.teams_for` lists only the teams of A and B as reviewers.
 - **A second try's options aren't de-duplicated against the first's.** `Workspace._escalate` sorts both tries' options
   into one list with no check for the same fix found twice.
+- **The viewer does not survive a lost WebGL context** (owner's screenshot, Oct 30: every view blank but the 2D
+  overlays). `Viewer.ts` has no `webglcontextlost` / `webglcontextrestored` handling. If the browser gives the context
+  back, three.js redraws the 3D pane but the drawing views keep their drawn key and stay black (reproduced with
+  `WEBGL_lose_context`); if it doesn't, everything stays blank until a reload (the session resumes). Each drawing view
+  keeps two device-pixel targets, one 4× MSAA with depth and stencil, so Quad on a large high-DPI screen asks a lot of
+  GPU memory, the likely trigger. Planned: redraw on restore, a recover button, smaller targets ([13](13-3d-viewer.md)).
 
 ### Open questions
 
@@ -262,6 +269,8 @@ From CLAUDE.md and [docs/mcp.md](../mcp.md):
   `muse mcp login`; claude.ai's custom connectors expect it).
 - **STEP machines placed inside building models.**
 - **Offsets and trims on meshed STEP parts** (tubes, bends, castings).
+- **Panels:** drawing views as dock panels of their own (they share one canvas), pop-out windows restored after a
+  reload, docking on tablets ([docs/panels.md](../panels.md)).
 
 ### Planned per feature
 

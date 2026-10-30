@@ -520,6 +520,12 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
   and a 1.4 GB JS heap (Oct 29, [docs/uploads.md](../uploads.md)); parsing in a Web Worker is the next step there.
 - `package.json` lists `three-mesh-bvh`, but nothing in the viewer imports it at HEAD: picking uses three.js's own
   raycast on the batches.
+- **The host's size:** on a desktop the stage lives in the dock's Model panel ([docs/panels.md](../panels.md)); the
+  viewer follows its host with a `ResizeObserver`, so collapsing a side bar grows the canvas with no viewer call.
+  Panels floating over the canvas paint no opaque scroller of their own: in Chromium one culled the canvas under it by
+  its whole content height and left a hole (Oct 30).
+- **No WebGL context-loss handling yet:** a lost context blanks every view until a reload, and drawing views stay
+  black even when the context comes back (their drawn key is unchanged). Known limit, [20](20-decisions-limits-and-roadmap.md).
 
 ## When to update this doc
 

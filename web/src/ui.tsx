@@ -31,16 +31,17 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
       if (!ref.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
     };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("pointerdown", off);
-    document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", esc); };
+    const doc = ref.current?.ownerDocument ?? document;  // a panel in its own window has its own document
+    doc.addEventListener("pointerdown", off);
+    doc.addEventListener("keydown", esc);
+    return () => { doc.removeEventListener("pointerdown", off); doc.removeEventListener("keydown", esc); };
   }, [open]);
   // Kept inside the window: a menu that would run off the right edge opens to the left of its trigger's edge instead.
   useLayoutEffect(() => {
     const m = menu.current;
     if (!open || !m || getComputedStyle(m).position === "fixed") return;
     m.style.translate = "";
-    const over = m.getBoundingClientRect().right - (window.innerWidth - 8);
+    const over = m.getBoundingClientRect().right - ((m.ownerDocument.defaultView ?? window).innerWidth - 8);
     if (over > 0) m.style.translate = `${-Math.round(over)}px 0`;
   }, [open]);
   const close = () => setOpen(false);
@@ -72,13 +73,15 @@ const OPPOSITE: Record<Side, Side> = { right: "left", left: "right", top: "botto
 /**
  * The page's one tooltip, for any element with `data-tip` (and `data-tip-side`, right by default). It sits in a layer
  * above everything, flips to the other side when there is no room, and is kept inside the window, so a tip on a
- * control near an edge or in a scrolled panel is never cut off.
+ * control near an edge or in a scrolled panel is never cut off. A panel in its own window (dock.tsx) gets one of its
+ * own, on that window's document.
  */
-export function Tooltips() {
+export function Tooltips({ doc = document }: { doc?: Document }) {
   const [tip, setTip] = useState<{ el: HTMLElement; text: string; side: Side } | null>(null);
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const document = doc, window = doc.defaultView ?? globalThis.window;  // the page, or a pop-out window's
     let current: HTMLElement | null = null;
     const show = (target: EventTarget | null) => {
       const el = (target as HTMLElement | null)?.closest?.("[data-tip]") as HTMLElement | null;
@@ -141,22 +144,23 @@ export function Tooltips() {
       window.removeEventListener("keydown", key);
       window.removeEventListener("blur", hide);
     };
-  }, []);
+  }, [doc]);
 
   // Leaving the element (or it being removed) hides the tip.
   useEffect(() => {
     if (!tip) return;
     const leave = (e: PointerEvent) => { if (e.pointerType !== "touch" && !tip.el.contains(e.relatedTarget as Node | null)) setTip(null); };
     tip.el.addEventListener("pointerleave", leave);
-    const gone = window.setInterval(() => { if (!tip.el.isConnected) setTip(null); }, 300);
-    return () => { tip.el.removeEventListener("pointerleave", leave); window.clearInterval(gone); };
+    const gone = globalThis.setInterval(() => { if (!tip.el.isConnected) setTip(null); }, 300);
+    return () => { tip.el.removeEventListener("pointerleave", leave); globalThis.clearInterval(gone); };
   }, [tip]);
 
   useLayoutEffect(() => {
     const b = box.current;
     if (!tip || !b) return;
     const r = tip.el.getBoundingClientRect();
-    const w = b.offsetWidth, h = b.offsetHeight, vw = window.innerWidth, vh = window.innerHeight, gap = 8, pad = 6;
+    const view = doc.defaultView ?? window;
+    const w = b.offsetWidth, h = b.offsetHeight, vw = view.innerWidth, vh = view.innerHeight, gap = 8, pad = 6;
     const at = (side: Side) => side === "right" ? { x: r.right + gap, y: r.top + r.height / 2 - h / 2 }
       : side === "left" ? { x: r.left - gap - w, y: r.top + r.height / 2 - h / 2 }
         : side === "top" ? { x: r.left + r.width / 2 - w / 2, y: r.top - gap - h }
@@ -173,5 +177,5 @@ export function Tooltips() {
     b.style.visibility = "visible";
   }, [tip]);
 
-  return tip ? createPortal(<div ref={box} className="tooltip" role="tooltip" style={{ visibility: "hidden" }}>{tip.text}</div>, document.body) : null;
+  return tip ? createPortal(<div ref={box} className="tooltip" role="tooltip" style={{ visibility: "hidden" }}>{tip.text}</div>, doc.body) : null;
 }

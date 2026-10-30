@@ -31,7 +31,8 @@ analyzers", dashboards-as-main-feature and Streamlit apps are on the hackathon's
 
 ## Stack and why
 
-- Web: Vite + TypeScript + React; viewer built on three.js + web-ifc, **no That Open** (three-mesh-bvh is declared
+- Web: Vite + TypeScript + React; desktop panels on dockview (free MIT core only, never `dockview-enterprise`);
+  viewer built on three.js + web-ifc, **no That Open** (three-mesh-bvh is declared
   in `package.json` but nothing imports it). Each IFC file is one `BatchedMesh` (per-element
   transform/colour/visibility, so a preview is one matrix update).
   `COORDINATE_TO_ORIGIN` is off: federated files share coordinates.
@@ -185,8 +186,9 @@ plus combined fixes, joints (a move takes its fittings along and stretches what 
 viewer lights what an element is linked to: `docs/connections.md`), Fix together and root causes, Insights patterns,
 chat and live voice, the MCP server with pairing links, coordination requirements, STEP models (the palletising cell),
 PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder, Show it built, phones and tablets,
-guided tours, free navigation and drawing views (plans, sections, elevations beside 3D, up to four). Latest validation
-(Oct 30): 601 server tests, 102 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1,
+guided tours, free navigation and drawing views (plans, sections, elevations beside 3D, up to four), desktop panels that
+dock, collapse, float and pop out (`docs/panels.md`, dockview's free core). Latest validation
+(Oct 30): 601 server tests, 109 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1,
 C2, C3, C6, C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was
 built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
 

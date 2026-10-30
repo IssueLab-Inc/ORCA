@@ -12,6 +12,7 @@
     "postinstall": "node scripts/copy-wasm.mjs"
   },
   "dependencies": {
+    "dockview-react": "8.5.1",
     "lucide-react": "1.48.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
@@ -26,5 +27,9 @@
     "@vitejs/plugin-react": "6.1.2",
     "typescript": "5.9.3",
     "vite": "8.3.5"
+  },
+  "overrides": {
+    "dockview": "8.5.1",
+    "dockview-core": "8.5.1"
   }
 }
