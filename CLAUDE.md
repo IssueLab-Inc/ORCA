@@ -31,8 +31,9 @@ analyzers", dashboards-as-main-feature and Streamlit apps are on the hackathon's
 
 ## Stack and why
 
-- Web: Vite + TypeScript + React; viewer built on three.js + web-ifc + three-mesh-bvh, **no That Open**. Each IFC
-  file is one `BatchedMesh` (per-element transform/colour/visibility, so a preview is one matrix update).
+- Web: Vite + TypeScript + React; viewer built on three.js + web-ifc, **no That Open** (three-mesh-bvh is declared
+  in `package.json` but nothing imports it). Each IFC file is one `BatchedMesh` (per-element
+  transform/colour/visibility, so a preview is one matrix update).
   `COORDINATE_TO_ORIGIN` is off: federated files share coordinates.
 - Server: Python 3.13 + FastAPI + IfcOpenShell 0.9 (the demo models pin 0.8.5; keep an eye on drift).
   MCP server over the same operations (`server/sightline/service.py` is shared by API and MCP).

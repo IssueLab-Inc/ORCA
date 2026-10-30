@@ -87,7 +87,7 @@ carries the decision today.
 | Tried or considered | What happened | Instead | Where now |
 |---|---|---|---|
 | Blazor for the web app | Telerik is commercial with a private feed (a public repo must build for anyone), JS↔.NET interop on every viewer event, a slow WASM start for judges | Vite + TypeScript + React | `web/`; [02](02-system-architecture.md) |
-| That Open's viewer components | Not used. CLAUDE.md records the choice, not the reason | An own viewer on three.js + web-ifc + three-mesh-bvh: one `BatchedMesh` per IFC file, so a preview is one matrix update | `web/src/viewer/`; [13](13-3d-viewer.md) |
+| That Open's viewer components | Not used. CLAUDE.md records the choice, not the reason | An own viewer on three.js + web-ifc: one `BatchedMesh` per IFC file, so a preview is one matrix update | `web/src/viewer/`; [13](13-3d-viewer.md) |
 | IfcOpenShell's default `opencascade.brep` tree | Has no `*_many` clash queries | `ifcopenshell.geom.tree(backend="opencascade.trianglebvh")` | `verify.check`, `detect._tree` |
 | Collision queries for hard clashes | Collision misses an element wholly inside another | Intersection first; collision without touching as a second pass (intersection misses flush faces: Clash7's transom read as a 0 mm gap); an exact separating-axis depth for rectangular solids | `verify.check`, `detect._Solids`; [06](06-geometry-and-detection.md) |
 | The intersection figure as a clash's depth | Wrong both ways: a 0.5 mm touch read 200 mm, a 40 mm rail 20 mm; #057 and #061 read −400 mm | How far one must move to clear the other: exact for rectangular solids, else the smaller of the figure and the box separation. #057 is −100 mm, #061 −77 mm | `detect._measure`; [docs/detection.md](../detection.md) |
