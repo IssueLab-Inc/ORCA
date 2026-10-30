@@ -346,6 +346,13 @@ cd server && uv run pytest -q      # geometry check, detection, agent loop, web 
 cd web && npm run build            # type-check + production build
 ```
 
+## How it is built
+
+[docs/architecture/](docs/architecture/README.md) maps the whole application: product and journeys, architecture,
+end-to-end flows, the server and web code, geometry, fixes, AI models and prompts, the API and MCP, files in and out,
+configuration, security and caps, deployment, tests and evals, demo data and decisions, with diagrams. Feature designs
+are in [docs/](docs/).
+
 ## Day-1 spikes
 
 See [spikes/README.md](spikes/README.md).
