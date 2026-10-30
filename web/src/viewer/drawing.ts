@@ -28,6 +28,19 @@ export class DrawingView {
   nrt: THREE.WebGLRenderTarget | null = null;
   /** What it was last drawn with, to draw again only when something changed. */
   drawn = "";
+  /** Metres kept beyond the cut (a plan's bottom, a section's far clip), or null: to the model's edge. */
+  beyond: number | null = null;
+  /** The camera its targets were last drawn with. While the user pans or zooms, the composite moves that picture, and
+   * the drawing is drawn again when the gesture rests. */
+  shown: { center: THREE.Vector3; scale: number } | null = null;
+  /** When it was last panned, zoomed or reshaped by a drag, and last drawn (performance.now()); whether a pointer holds
+   * it (a pan or pinch going on); whether it moved since the last frame, and for how many frames it has not. */
+  lastMove = 0;
+  lastDraw = 0;
+  held = false;
+  moved = false;
+  quiet = 0;
+  private depth = 100;
 
   constructor(public spec: DrawingSpec) {
     this.camera.layers.set(0);   // never the 3D view's own helpers (layer 1)
@@ -39,8 +52,10 @@ export class DrawingView {
     this.crop = null;
     this.cut = null;
     this.planes = [];
+    this.beyond = null;
     if (spec.kind === "plan") {
       const { cutZ, bottomZ } = planRange(levels, spec);
+      this.beyond = bottomZ == null ? null : cutZ - bottomZ;
       this.look.set(0, -1, 0);
       this.up.set(0, 0, -1);    // north up the screen
       this.cut = new THREE.Plane(new THREE.Vector3(0, -1, 0), cutZ);   // keeps what is below the cut
@@ -54,6 +69,7 @@ export class DrawingView {
       const o = toThree(spec.origin[0], spec.origin[1], 0);
       this.cut = new THREE.Plane().setFromNormalAndCoplanarPoint(this.look, o);   // keeps what lies ahead of the line
       this.planes.push(this.cut);
+      this.beyond = spec.far ?? null;
       if (spec.far != null) this.planes.push(new THREE.Plane().setFromNormalAndCoplanarPoint(this.look.clone().negate(),
         o.clone().addScaledVector(this.look, spec.far)));
       if (spec.crop) {
@@ -77,15 +93,25 @@ export class DrawingView {
     }
   }
 
-  /** The camera for a pane of `rect`: centred, `scale` metres per pixel, set back beyond the model. */
+  /** The camera for a pane of `rect`: centred, `scale` metres per pixel, set back `depth` beyond the model. A view that
+   * cuts starts at its cut (its centre is on the cut plane): what the cut removes is never drawn at all, not drawn and
+   * clipped, which is most of the model in a plan of a low level or a section through the middle. */
   updateCamera(rect: Rect, depth: number) {
     const w = (rect.w * this.scale) / 2, h = (rect.h * this.scale) / 2;
-    Object.assign(this.camera, { left: -w, right: w, top: h, bottom: -h, near: 0.01, far: depth * 2 });
+    this.depth = depth;
+    Object.assign(this.camera, { left: -w, right: w, top: h, bottom: -h, near: this.cut ? Math.max(depth - 0.005, 0.01) : 0.01 });
     this.camera.position.copy(this.center).addScaledVector(this.look, -depth);
     this.camera.up.copy(this.up);
     this.camera.lookAt(this.center);
-    this.camera.updateProjectionMatrix();
+    this.reach(false);
     this.camera.updateMatrixWorld();
+  }
+
+  /** The far plane: at the bottom or far clip for the passes that clip there anyway (`loose` false), or beyond the model
+   * for the cut faces' passes, which must see the whole of every solid the cut passes through. */
+  reach(loose: boolean) {
+    this.camera.far = this.cut && this.beyond != null && !loose ? this.depth + this.beyond + 0.005 : this.depth * 2;
+    this.camera.updateProjectionMatrix();
   }
 
   /** Frame a box (three.js world) with `margin` as a share round it. */
@@ -103,12 +129,14 @@ export class DrawingView {
 
   /** Pan by a drag of `dx`, `dy` CSS pixels. */
   pan(dx: number, dy: number) {
+    this.lastMove = performance.now(); this.moved = true;
     const right = new THREE.Vector3().crossVectors(this.look, this.up).normalize();
     this.center.addScaledVector(right, -dx * this.scale).addScaledVector(this.up, dy * this.scale);
   }
 
   /** Zoom by `k` (above 1 zooms out) keeping the point under (x, y) of the pane where it is. */
   zoomAt(k: number, x: number, y: number, rect: Rect) {
+    this.lastMove = performance.now(); this.moved = true;
     const right = new THREE.Vector3().crossVectors(this.look, this.up).normalize();
     const ox = (x - rect.w / 2) * this.scale, oy = (rect.h / 2 - y) * this.scale;
     const next = THREE.MathUtils.clamp(this.scale * k, 1e-5, 50);
@@ -139,6 +167,23 @@ export class DrawingView {
     return this.center.clone().addScaledVector(right, (x - rect.w / 2) * this.scale).addScaledVector(this.up, (rect.h / 2 - y) * this.scale);
   }
 
+  /** A key for what it shows apart from where it looks (centre and scale): to draw again when it changes, while a pan or
+   * zoom only moves the last picture. */
+  contentKey(rect: Rect): string {
+    return [this.look.toArray(), this.up.toArray(), rect.w, rect.h, this.planes.map((p) => [p.normal.toArray(), p.constant]),
+      this.crop?.map((c) => c.toArray())].flat(3).map((n) => (typeof n === "number" ? n.toFixed(5) : String(n))).join(",");
+  }
+
+  /** Where the last picture lands in the pane now: the texture coordinate of the pane's (0, 0) corner and how much of
+   * the picture one pane spans (1 when it was drawn from this very camera). */
+  shift(rect: Rect): { scale: number; x: number; y: number } {
+    const s = this.shown;
+    if (!s) return { scale: 1, x: 0, y: 0 };
+    const k = this.scale / s.scale, d = this.center.clone().sub(s.center);
+    const right = new THREE.Vector3().crossVectors(this.look, this.up).normalize();
+    return { scale: k, x: 0.5 - 0.5 * k + d.dot(right) / (Math.max(rect.w, 1) * s.scale), y: 0.5 - 0.5 * k + d.dot(this.up) / (Math.max(rect.h, 1) * s.scale) };
+  }
+
   /** A key for what the camera shows, to draw again only when it changes. */
   cameraKey(rect: Rect): string {
     return [this.center.toArray(), this.look.toArray(), this.up.toArray(), this.scale, rect.w, rect.h, this.planes.map((p) => [p.normal.toArray(), p.constant]),
@@ -161,7 +206,9 @@ export class DrawingView {
 /** A drawing's two targets, the old ones disposed. */
 export function targets(w: number, h: number, ...old: (THREE.WebGLRenderTarget | null)[]): [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] {
   for (const t of old) t?.dispose();
-  return [new THREE.WebGLRenderTarget(w, h, { samples: 4, depthBuffer: true, stencilBuffer: true }),
+  // No multisampling: a drawing is flat fills and the composite's own linework, and 4× samples took about two thirds of
+  // a drawing's graphics memory (90 MB a pane at 2× pixels on a large screen), enough in Quad to lose the context.
+  return [new THREE.WebGLRenderTarget(w, h, { samples: 0, depthBuffer: true, stencilBuffer: true }),
     new THREE.WebGLRenderTarget(w, h, { depthTexture: new THREE.DepthTexture(w, h), samples: 0 })];
 }
 
@@ -273,7 +320,7 @@ export class DrawingStyle {
         color: { value: null }, normals: { value: null }, depth: { value: null }, texel: { value: new THREE.Vector2() },
         near: { value: 0.01 }, far: { value: 100 }, ortho: { value: 1 }, tol: { value: 0.05 }, ink: { value: new THREE.Color("#1d2530") },
         cutWidth: { value: 2 }, edges: { value: 1 }, cropMin: { value: new THREE.Vector2(0, 0) }, cropMax: { value: new THREE.Vector2(1, 1) },
-        paper: { value: PAPER },
+        paper: { value: PAPER }, shiftScale: { value: 1 }, shiftAt: { value: new THREE.Vector2(0, 0) },
       },
       depthTest: false, depthWrite: false,
       vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
@@ -316,18 +363,22 @@ const COMPOSITE = `
 uniform sampler2D color; uniform sampler2D normals; uniform sampler2D depth;
 uniform vec2 texel; uniform float near; uniform float far; uniform float ortho; uniform float tol;
 uniform vec3 ink; uniform float cutWidth; uniform float edges; uniform vec2 cropMin; uniform vec2 cropMax; uniform vec3 paper;
+uniform float shiftScale; uniform vec2 shiftAt;
 varying vec2 vUv;
 float lin(float d) { return ortho > 0.5 ? near + d * (far - near) : (near * far) / (far - d * (far - near)); }
 float cls(float a) { return floor(a * 20.0 + 0.5); }
 void main() {
   if (any(lessThan(vUv, cropMin)) || any(greaterThan(vUv, cropMax))) { gl_FragColor = vec4(paper, 1.0); return; }
-  vec4 c = texture2D(color, vUv);
+  // The last picture where it lands now (moved and scaled while a pan or zoom goes on); paper where it does not reach.
+  vec2 at = vUv * shiftScale + shiftAt;
+  if (any(lessThan(at, vec2(0.0))) || any(greaterThan(at, vec2(1.0)))) { gl_FragColor = vec4(paper, 1.0); return; }
+  vec4 c = texture2D(color, at);
   float me = cls(c.a);
   float cut = 0.0;
   vec3 cutInk = ink;
   for (int i = -2; i <= 2; i++) for (int j = -2; j <= 2; j++) {
     if (float(i * i + j * j) > cutWidth * cutWidth + 0.5) continue;
-    vec4 o = texture2D(color, vUv + vec2(float(i), float(j)) * texel);
+    vec4 o = texture2D(color, at + vec2(float(i), float(j)) * texel);
     float them = cls(o.a);
     if (them != me && (me < 19.5 || them < 19.5)) {
       cut = 1.0;
@@ -340,12 +391,12 @@ void main() {
   }
   float edge = 0.0;
   if (edges > 0.5 && me > 19.5) {
-    vec3 n0 = texture2D(normals, vUv).xyz * 2.0 - 1.0;
-    float z0 = lin(texture2D(depth, vUv).x);
+    vec3 n0 = texture2D(normals, at).xyz * 2.0 - 1.0;
+    float z0 = lin(texture2D(depth, at).x);
     for (int k = 0; k < 4; k++) {
       vec2 off = k == 0 ? vec2(texel.x, 0.0) : k == 1 ? vec2(-texel.x, 0.0) : k == 2 ? vec2(0.0, texel.y) : vec2(0.0, -texel.y);
-      vec3 n = texture2D(normals, vUv + off).xyz * 2.0 - 1.0;
-      float z = lin(texture2D(depth, vUv + off).x);
+      vec3 n = texture2D(normals, at + off).xyz * 2.0 - 1.0;
+      float z = lin(texture2D(depth, at + off).x);
       float t = ortho > 0.5 ? tol : tol * z0;
       if (dot(n0, n) < 0.82 || abs(z - z0) > t) edge = 1.0;
     }
