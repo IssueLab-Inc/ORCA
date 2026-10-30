@@ -216,9 +216,10 @@ rounds each:
 - **The brief is most of the gain on Spark:** 0 → 3 of 6. Next: give it to Spark's own second round (free on the
   contributor tier) and keep Wonder for what is left.
 - **Read the C4 fixes with care.** Four of Wonder's five lift a fence post or base plate 120-200 mm off its slab:
-  the move check counts the post's embedment in the slab as a clash once the post moves (as the C5 HMI's floor
-  contact), so lifting dodges it. Geometrically verified, not buildable as drawn. The fix belongs in the check (a
-  move keeps the contacts the element already had, as a trim and a penetration do), not in the prompt.
+  the move check counted the post's embedment in the slab as a clash once the post moved (as the C5 HMI's floor
+  contact), so lifting dodged it. Geometrically verified, not buildable as drawn. Fixed in the check (Oct 30,
+  `docs/edits.md` "A move keeps what it stands on"): a post slid along its slab keeps its anchors' contact, and a
+  lift off it is refused.
 - **B1 moves a pad footing:** verified, but structure; `review` should say so (follow-up: the same "structure
   review" chip a penetration in structure gets).
 - **Better fix** on C7 and C8 (openings): Wonder found no plain fix either. Northbank's answer key stays 3/3 first

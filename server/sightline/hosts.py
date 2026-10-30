@@ -29,6 +29,7 @@ import ifcopenshell.util.element
 import numpy as np
 
 from . import edits
+from .scene import opacity
 from .scene import IfcScene, not_physical, step_source
 
 PROMPT = Path(__file__).parent / "domain_packs" / "penetrations.md"
@@ -91,19 +92,7 @@ _cache_lock = threading.Lock()
 
 # ------------------------------------------------------------------------------------------------- hard rules
 
-def _alpha(element) -> float:
-    """The element's style opacity (1 when it has none): see-through volumes are zones, not things."""
-    rep = element.Representation
-    for r in (rep.Representations if rep else []):
-        for item in r.Items:
-            for styled in item.StyledByItem or []:
-                for st in styled.Styles:
-                    for s in (st.Styles if st.is_a("IfcPresentationStyleAssignment") else [st]):
-                        for x in getattr(s, "Styles", None) or []:
-                            t = getattr(x, "Transparency", None)
-                            if t is not None:
-                                return 1.0 - float(t)
-    return 1.0
+_alpha = opacity   # see-through volumes are zones, not things (scene.opacity)
 
 
 def stands_on(scene: IfcScene, host_gid: str) -> str | None:

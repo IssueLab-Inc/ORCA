@@ -373,8 +373,8 @@ See-through elements (Oct 28): web-ifc's style alpha now reaches the viewer. Eac
 per-element alpha (`setColorAt` with a Vector4); in focus they get a tinted see-through material. A pick takes the first
 solid hit and falls back to glass, so a zone does not swallow clicks on what stands inside it. Demo set 2 is
 the demo-models repo's `palletising-cell/` (PC-03: STEP + IFC, Rev A with five planted problems, Rev B fixed). ORCA's
-offset (C1), move (C2) and trim (C3) pass on it; a move of something standing on the floor (the C5 HMI) fails, because
-the clearance check counts the floor contact.
+offset (C1), move (C2) and trim (C3) pass on it. (A move of something standing on the floor, the C5 HMI, used to fail
+because the check counted the floor contact: fixed Oct 30, "A move keeps what it stands on" below.)
 
 ORCA detection (Oct 28): design in `docs/detection.md`, code `server/sightline/detect.py`; no Navisworks report
 needed.
@@ -888,7 +888,8 @@ look for a better fix.
   back. Chat and MCP: `propose_fixes(escalate=true)`.
 - **E0** (`evals/escalation.py`): on the 6 of 21 real clashes Spark left unfixed, Spark again 0/6, Spark + brief 3/6,
   Wonder + brief 5/6 ($2.01 in all, ~2 min each). Four of Wonder's are C4 posts lifted off their slab, because a moved
-  element's existing embedment counts as a clash (the C5 HMI's floor contact): fix the move check, not the prompt.
+  element's existing embedment counted as a clash (the C5 HMI's floor contact): the move check now keeps what an
+  element stands on and refuses a lift off it (Oct 30, below).
   B1 moves a pad footing (structure; no review chip yet). Answer key 3/3 first try at Rev04 heights.
 - **Checked:** 520 server tests, 64 web tests; in the browser Northbank #1 got Spark's offset and, on Look for a better
   fix, Wonder's "Shorter offset up 400 mm through girder opening", both verified and chipped.
@@ -929,6 +930,22 @@ against the model before anyone sees it.
   page asks `/api/models` again after a change for everyone; a report draws at most 10 pictures and says so for the
   rest. Known, not fixed: a combined step that moves another team's service doesn't add that team as a reviewer in the
   PDF and BCF; a second try's options aren't de-duplicated against the first's.
+
+A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `verify.supports` / `keep_supports`):
+- **Why:** the cell's fence posts move as a run with their M10 anchors cast 70 mm into the slab, so every horizontal move
+  hit the slab; Muse Wonder lifted posts 100-200 mm off it to pass (E0). The C5 HMI's floor contact failed the same way.
+- **Rule:** for moved elements that are not runs (`IfcFlowSegment` / `IfcFlowFitting`) nor see-through zones
+  (`scene.opacity`), what they stand on or sit in (base at a host's top or ≤ 300 mm into it, `verify.stands_on`) is kept
+  when no deeper than before (a touch stays a touch); lifted off everything it stood on fails ("standing on nothing"),
+  sunk deeper fails, anything new it cuts into is a clash. Never the clash's partner. Clearance is to what is near it.
+- **Where:** `agent._try_move` (partners = B and a plan item's others), `plans.verify_together`, and
+  `Workspace.verify_move(obstacles=)` (the page's manual move sends B; chat / MCP `check_move(obstacle=)`); without an
+  obstacle every contact counts. Combined move steps keep the old rule. Runs are untouched, so the answer key and every
+  service move check as before.
+- **Checked:** `tests/test_supports.py` (8); `evals/step_cell.py` passes (C1, C2, C3, C6, C7, C8, Rev B 0); Muse Spark
+  single proposals now fix C4 first try with plain moves (post N3/N4 350 mm north, 21-25 s, no lifts), where before
+  every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
+  tests, 64 web tests.
 
 Joints (Oct 30, owner decision after a fix moved the cell's PL-302 segment 3 off column C3 and left it apart from its
 bend; design in `docs/connections.md`, code `server/sightline/connections.py`): slice 1 of 3 (joints → moves that
