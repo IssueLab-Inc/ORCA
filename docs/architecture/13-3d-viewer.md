@@ -494,7 +494,7 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 | E | Outlines | M | Measure |
 | G | Next visual style | L | Connections |
 | O | Perspective / orthographic | Q | Layout: Single, Two, Quad (Two at most on a tablet; none on a phone) |
-| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight |
+| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight. With a menu open it closes only the menu |
 
 - **Mouse:** a single click selects the element and shows its properties card (with Set as A / Set as B and its view
   actions) or, in measure mode, adds a point; a double click picks A, then B (a third pick starts over at A); a drag of
