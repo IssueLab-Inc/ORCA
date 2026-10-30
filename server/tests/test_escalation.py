@@ -58,7 +58,7 @@ def test_a_combined_fix_moves_the_neighbour_and_the_duct_together(tmp_path):
     o = result.options[0]
     assert o.kind == "combined" and set(o.moved) == {duct, pipe}
     assert o.edit["pair"] == [duct, beam] and len(o.edit["steps"]) == 2
-    assert "LTHW pipe DN50: move [0, 0, -500] mm" in o.edit["summary"]
+    assert "LTHW pipe DN50: move down 500 mm" in o.edit["summary"]
     assert o.preview   # both elements' new places, for the page, each with its run's element and part
     assert {m["origin"] for m in o.preview} == {duct, pipe} and {m["part"] for m in o.preview} == {"moved"}
     assert s.placement(duct)[2, 3] == pytest.approx(2.65) and s.placement(pipe)[2, 3] == pytest.approx(2.25)  # undone
@@ -458,3 +458,12 @@ def test_a_request_claims_its_estimate_at_once_and_its_work_takes_the_claim_over
     assert ctx.run(spend.claim, 1.0) is None
     ctx.run(spend.unclaim, 1.0)                  # a cap refused it after the budget let it through
     assert spend.refused(1.4) is None
+
+
+def test_a_fix_says_its_move_in_words_and_drops_the_prompts_none():
+    assert agent.move_words([0, 0.25, 0]) == "north 250 mm"
+    assert agent.move_words([-0.1, 0, 0.4]) == "west 100 mm, up 400 mm"
+    assert agent.plain_needs("move the N4-N5 run together, and re-fix anchors; none") == "move the N4-N5 run together, and re-fix anchors"
+    assert agent.plain_needs("None.") == "" and agent.plain_needs(None) == ""
+    o = agent.Option("t", ["a"], [0, 0, 0.4], "why", "4 bends; none", 0.05, {})
+    assert o.also_needs == "4 bends"

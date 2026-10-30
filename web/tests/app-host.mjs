@@ -91,7 +91,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     export const clashLabel=(c)=>"#"+c.number;
     export class Viewer {constructor(){return globalThis.${key}.viewer;}} export const serverPointToViewer=(v)=>v;
     export class Pilot { start(){} event(){} cancel(){globalThis.${key}.viewer.preview([]);} finish(fn){fn();} takeOver(){} }`);
-  const icons = url(["Bot", "Plug", "Boxes", "Brain", "Building2", "Check", "CircleCheck", "ClipboardCheck", "ClipboardPlus", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu"].map((name) => `export function ${name}(){return null;}`).join("\n"));
+  const icons = url(["Bot", "Plug", "Boxes", "Brain", "Building2", "Check", "ChevronRight", "CircleCheck", "ClipboardCheck", "ClipboardPlus", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu"].map((name) => `export function ${name}(){return null;}`).join("\n"));
   const ownership = await compiled("../src/chatRequest.ts");
   const kinds = await compiled("../src/fixKinds.ts", {});
   const uploads = await compiled("../src/uploads.ts", {});

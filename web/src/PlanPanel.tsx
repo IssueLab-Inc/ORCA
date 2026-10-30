@@ -1,6 +1,7 @@
 import { Building2, CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { Plan, PlanItem } from "./api";
 import { BuiltView, type BuiltRun } from "./BuiltView";
+import { moveWords } from "./fixKinds";
 import { mm } from "./ReportList";
 
 /** A plan while it is being built: what each pair is doing. */
@@ -20,7 +21,7 @@ const editText = (i: PlanItem) => {
   if (o.kind === "trim") return o.trim ? `trim one end ${Math.round(o.trim.by_m * 1000)} mm` : "trim at the joint";
   return o.kind === "offset" && o.split_m
     ? `offset ${(o.split_m[1] - o.split_m[0]).toFixed(2)} m of it ${o.delta_m[2] > 0 ? "up" : "down"} ${Math.abs(Math.round(o.delta_m[2] * 1000))} mm`
-    : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
+    : `move ${moveWords(o.delta_m)}`;
 };
 
 export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, built, onBuild, stale, error }: {
@@ -89,11 +90,11 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
                 {conflict && <div className="bad small">Collides with another fix in this plan ({conflict.detail})</div>}
                 {plan && it.option && res?.passed && onBuild && it.option.kind !== "trim" && !it.option.cleanup && (built?.(it)
                   ? <BuiltView run={built(it)!} onRetry={() => onBuild(it)} />
-                  : <button className="link better-fix" disabled={busy} onClick={() => onBuild(it)}
+                  : <button className="btn small" disabled={busy} onClick={() => onBuild(it)}
                     data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model. About a minute.">
                     <Building2 size={13} aria-hidden /> Show it built</button>)}
                 {plan && !it.option && !it.recommended && onEscalate && (
-                  <button className="link better-fix" disabled={busy} onClick={() => onEscalate(it)}
+                  <button className="btn small wonder" disabled={busy} onClick={() => onEscalate(it)}
                     data-tip={`A larger model takes a second, longer look at this clash with everything this try learned. About a minute.`}>
                     <Sparkles size={13} aria-hidden /> Ask {wonder ?? "Muse Wonder"}</button>)}
               </div>

@@ -12,7 +12,7 @@ const mocks = url(`${names.map((name) => `export function ${name}(){return null;
   export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
   export const clashLabel=(c)=>"#"+c.number;
   export class Viewer{} export const serverPointToViewer=(v)=>v; export class Pilot{};`);
-const icons = url(["Bot", "Plug", "Boxes", "Brain", "Building2", "Check", "CircleCheck", "ClipboardCheck", "ClipboardPlus", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu"].map((name) => `export function ${name}(){return null;}`).join("\n"));
+const icons = url(["Bot", "Plug", "Boxes", "Brain", "Building2", "Check", "ChevronRight", "CircleCheck", "ClipboardCheck", "ClipboardPlus", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu"].map((name) => `export function ${name}(){return null;}`).join("\n"));
 
 async function compiled(path, dependencies, labelState = false) {
   const input = await readFile(new URL(path, import.meta.url), "utf8");

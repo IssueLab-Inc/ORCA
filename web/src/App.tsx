@@ -1,8 +1,8 @@
-import { Bot, Boxes, Brain, Building2, Check, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
 import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
-import { changeText, clearanceText, editText, framePieces, hostRows, recEditText, reviewText } from "./fixKinds";
+import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, needsText, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
@@ -528,7 +528,7 @@ export function App() {
   function evidenceOf(o: Option, status: Evidence["status"], pics: { before_img?: string; after_img?: string }): Evidence {
     return { status, title: o.title, kind: o.kind, edit: editText(o), moved: o.moved,
       clearance: clearanceText(o), clearance_m: o.min_clearance_m ?? null, ...(o.review ? { review: o.review } : {}),
-      rationale: o.rationale, also_needs: o.also_needs, ...(o.meets?.length ? { meets: o.meets } : {}), ...pics };
+      rationale: o.rationale, also_needs: needsText(o.also_needs), ...(o.meets?.length ? { meets: o.meets } : {}), ...pics };
   }
 
   // ------------------------------------------------------------------ Show it built (docs/show-it-built.md)
@@ -1984,7 +1984,7 @@ export function App() {
     const element = a, delta = [0, 0, manualDz];
     const live = () => sceneEpoch.current === epoch && workspaceEpoch.current === workspace && previewRequest.current === request;
     try {
-      const v = await api.verify(sceneId, [element], delta);
+      const v = await api.verify(sceneId, [element], delta, b && b !== element ? [b] : []);
       if (!live()) return;
       setViewContext(false); setViewPlan(false); setChosen(null);
       const moved = Object.keys(v.placements ?? {});
@@ -2543,20 +2543,26 @@ export function App() {
             </div>)}
           {proposal?.options.map((o, i) => (
             <div key={i} className={`card ${chosen === i ? "pick" : ""}`}>
-              <button className="card-body" onClick={() => { clearManual(); setChosen(chosen === i ? null : i); }} aria-pressed={chosen === i}>
-                <span className="row"><b>{i + 1} · {o.title}</b><span className="chips">
-                  {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
-                  {o.review && <span className="chip warn" data-tip={reviewText(o.review)}>{o.review} review</span>}
-                  {proposal!.escalated && <span className={`chip model ${o.model === wonder ? "wonder" : ""}`}
-                    data-tip={o.model === wonder ? `Found on the second try, by ${wonder}` : "Found on the first try"}>{o.model || "Muse Spark"}</span>}
-                  <span className="chip ok"><Check size={11} aria-hidden /> verified</span></span></span>
-                <span className="row"><span>Edit</span><span className="mono">{editText(o)}</span></span>
-                <span className="row"><span>Clearance</span><span className="mono">{clearanceText(o)}</span></span>
-                {o.review && <span className="row"><span>Review</span><span>{reviewText(o.review)}</span></span>}
-                {hostRows(o).map(([k, v]) => <span key={k} className="row"><span>{k}</span><span>{v}</span></span>)}
-                <span className="row"><span>Also needs</span><span>{o.also_needs || "nothing"}</span></span>
+              <button className="card-body option" onClick={() => { clearManual(); setChosen(chosen === i ? null : i); }} aria-pressed={chosen === i}>
+                <span className="opt-head">
+                  <span className="opt-rank">{i + 1}</span><span className="opt-kind">{kindLabel(o.kind)}</span>
+                  <span className="chips">
+                    {o.cleanup && <span className="chip" title="Tidies a joint inside one model; optional">model cleanup</span>}
+                    {o.review && <span className="chip warn" data-tip={reviewText(o.review)}>{o.review} review</span>}
+                    {proposal!.escalated && <span className={`chip model ${o.model === wonder ? "wonder" : ""}`}
+                      data-tip={o.model === wonder ? `Found on the second try, by ${wonder}` : "Found on the first try"}>{o.model || "Muse Spark"}</span>}
+                  </span></span>
+                <b className="opt-title">{o.title}</b>
+                <span className="opt-facts">
+                  <span className="fact"><span>Edit</span><span>{editText(o)}</span></span>
+                  <span className="fact"><span>Clearance</span><span>{clearanceText(o)}{o.kind !== "trim" && o.min_clearance_m != null && o.edit?.fit !== "fitted"
+                    ? <span className="why"> · {Math.round((proposal!.clearance_m ?? 0.025) * 1000)} mm needed</span> : null}</span></span>
+                  {o.review && <span className="fact"><span>Review</span><span>{reviewText(o.review)}</span></span>}
+                  {hostRows(o).map(([k, v]) => <span key={k} className="fact"><span>{k}</span><span>{v}</span></span>)}
+                  {needsText(o.also_needs) && <span className="fact"><span>Also needs</span><span>{needsText(o.also_needs)}</span></span>}
+                </span>
                 {o.meets?.length ? <span className="meets">{o.meets.map((m) => <span key={m}><Check size={11} aria-hidden /> {m}</span>)}</span> : null}
-                <span className="why">{o.rationale}</span>
+                {o.rationale && <span className="opt-why">{o.rationale}</span>}
                 <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} need={proposal!.clearance_m} />
               </button>
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
@@ -2576,9 +2582,12 @@ export function App() {
           ))}
 
           {proposal && !proposing && proposal.options.length > 0 && canEscalate && !proposal.escalated && !hideFix && (
-            <button className="link better-fix" data-tour="better-fix" disabled={!!busy} onClick={() => void escalate()}
-              data-tip={`A larger model takes a second, longer look with everything this try learned. These options stay. About a minute.`}>
-              <Sparkles size={13} aria-hidden /> Look for a better fix with {wonder}</button>)}
+            <button className="better-fix" data-tour="better-fix" disabled={!!busy} onClick={() => void escalate()}
+              data-tip="It starts from everything this try learned: each idea, why it failed and what it hit.">
+              <span className="bf-icon" aria-hidden><Sparkles size={15} /></span>
+              <span className="bf-text"><b>Look for a better fix</b>
+                <span>{wonder} takes a second, longer look · about a minute · these options stay</span></span>
+              <ChevronRight size={16} className="bf-go" aria-hidden /></button>)}
           {proposal?.escalated && !proposing && proposal.usage && ownerSettings && (
             <p className="hint mono">{wonder}: {proposal.usage.calls} call{proposal.usage.calls === 1 ? "" : "s"},
               {" "}{Math.round(proposal.usage.input_tokens / 1000)}k in, {Math.round(proposal.usage.output_tokens / 1000)}k out
@@ -2593,7 +2602,7 @@ export function App() {
               <input id="manual-dz" type="number" step="0.05" value={manualDz} onChange={(e) => setManualDz(Number(e.target.value))} />
             </label>
             <button className="btn" disabled={!a || !sceneId || !!busy} onClick={checkManual}>Check this move</button>
-            {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.reason ? `Not tried: ${manual.reason}` : manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
+            {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.reason ? (manual.joints?.refused_at ? `Not tried: ${manual.reason}` : manual.reason) : manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
           </details>}
           {checked.size === 0 && report && matches && !proposal && !hideFix && (
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
@@ -2743,13 +2752,11 @@ function remember(side: "left" | "right", w: number) {
 function shortName(file: string) { return file.replace(/\.(ifc|step|stp)$/i, "").replace(/^Northbank-/, ""); }
 
 function ProofStrip({ o, rank, options, before, need = 0.025 }: { o: Option; rank: number; options: Option[]; before: number | null; need?: number }) {
-  const clear = o.kind === "trim" ? "butt joint, no overlap" : o.min_clearance_m == null ? "nothing within 500 mm" : `${mm(o.min_clearance_m)} clear`;
-  const margin = o.kind !== "trim" && o.min_clearance_m != null ? ` (${Math.round((o.min_clearance_m - need) * 1000)} mm over the ${Math.round(need * 1000)} mm needed)` : "";
   const change = options.map((x) => x.delta_m.reduce((s, v) => s + Math.abs(v), 0));
   const smallest = change[rank] === Math.min(...change);
   const comfy = o.min_clearance_m == null || o.min_clearance_m >= 2 * need;
   const why = rank === 0 ? (comfy && smallest ? "ranked first: comfortable clearance, smallest change" : comfy ? "ranked first: comfortable clearance" : smallest ? "ranked first: smallest change that clears" : "ranked first: best clearance of the verified fixes") : `option ${rank + 1} of ${options.length}`;
-  return <span className="proof-strip"><span className="ok">✓ Clash gone</span><span>{clear}{margin}</span>{before != null && <span>was {mm(before)} overlap</span>}<span>{o.checked_against ? `checked vs ${o.checked_against} elements` : "checked vs the model"}</span><span className="why">{why}</span></span>;
+  return <span className="proof-strip"><span className="ok">✓ Clash gone</span>{before != null && <span>{before < 0 ? `was ${Math.round(-before * 1000)} mm overlap` : `was ${Math.round(before * 1000)} mm apart`}</span>}<span>{o.checked_against ? `checked vs ${o.checked_against} elements` : "checked vs the model"}</span><span className="why">{why}</span></span>;
 }
 /** The requirements allow no edit here: Muse Spark's recommendation for the designer, never tried or applied. */
 function Recommended({ rec, advice, requirements, onRequirements }: { rec: Recommendation; advice?: string; requirements: string | null; onRequirements: () => void }) {

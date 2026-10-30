@@ -98,7 +98,7 @@ def test_the_agent_offers_it_with_what_it_takes_along(scene):
     s3a, column = gid(scene, "S3A"), gid(scene, "Column C3")
     trials = []
     attempt, option = agent._try_move(scene, {"title": "Shift north", "delta_m": [0, 0.5, 0]}, s3a, 0.025,
-                                      trials.append, meant=(column,))
+                                      trials.append, partners=(column,))
     assert attempt.passed and option.kind == "move" and tags(scene, option.moved) == ["Bend B2", "Bend B3", "S3A", "S3B"]
     assert option.edit["summary"].startswith("move north 500 mm; takes 'Bend B2' and 'Bend B3' along")
     assert sorted(m["global_id"] for m in option.preview) == sorted(st["global_id"] for st in option.edit["stretched"])
