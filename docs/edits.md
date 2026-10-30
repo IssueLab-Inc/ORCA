@@ -340,3 +340,27 @@ was to lift the post 100-200 mm off its slab: verified by geometry, not buildabl
   pushed into a cabinet fails; the clash partner is never a support; runs have none; a plan and a checked move agree).
   On the cell: post N3 slid 300 mm out of the robot's restricted space passes (74 mm clear); the same with a 150 mm lift
   fails as floating; the HMI 0.5 m out of the panel's working space passes.
+
+## Rejecting a fix (Oct 30)
+
+A verified option can be wrong for reasons the model doesn't hold (a void kept for sprinklers, a client's preference).
+Under the chosen option, beside **Accept this fix**, **Reject** sets it aside:
+
+- **In the panel:** the option folds to its rank, kind and title (struck through), with a box for why (optional,
+  200 characters) and **Undo**. The next option still open is chosen, or none; the report stops proposing it (its
+  "proposed" evidence goes). A line under the options says how many were rejected, with **Propose again**.
+- **To Muse:** the next proposal for the pair from the Clash panel (Propose fixes, Propose again, Look for a better
+  fix or Ask Muse Wonder) sends them as the request's `notes` (`rejectionNotes` in `web/src/fixKinds.ts`), which ends Muse's brief: "The reviewer rejected these fixes,
+  so propose different ones: offset "…" (offset 1.00–2.40 m by +400 mm), because …". No new field: `notes` was
+  already in `Propose` and reached the brief as "Notes:".
+- **Found again:** rejections are kept by kind and title (`optionKey`) until another clash is picked, so a fix found
+  again is still folded away and never the chosen one.
+- **Not a verdict on the clash:** nothing is sent to the server when rejecting and nothing is kept after a reload. The
+  chat's and a linked agent's proposals don't carry them.
+  Rejecting every option says so and offers Propose again; a clash with no fix is still flagged for the author as
+  before.
+
+Checked on Northbank (Oct 30): the duct's only option (offset up 400 mm through the web opening) rejected "because the
+ceiling void above is reserved for sprinklers"; the next proposal's request carried that, and Muse Spark's
+understanding repeated it ("using it needs +400 mm up which is blocked because the ceiling void above is reserved for
+sprinklers"). It found no other fix in 8 ideas (138 s) and said why.

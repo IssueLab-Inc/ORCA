@@ -1312,3 +1312,25 @@ Collapsed side bars' strips (Oct 30; owner report; `web/src/index.css`): the act
 text and the tabs touched (their padding was horizontal only). In a vertical header the tabs now have 12 px above and
 below with 4 px between, and the active one is marked on the strip's inner side. Checked in Chromium on Northbank: the
 left, right and bottom bars collapsed; web tests and build clean.
+
+Workings in the viewer, rejecting a fix, landing in view (Oct 30; owner requests; `web/src/App.tsx`, `Workings.tsx`,
+`workingsGraph.ts`, `runlog.ts`, `Activity.tsx`, `fixKinds.ts`, `api.ts`, `index.css`):
+- **A check in the viewer:** pointing at a geometry check (or its idea) in Workings shows that trial in place, teal when
+  it passed and amber with its hits lit when not; a click keeps it and takes the camera (and the view from the pilot).
+  Trials keep their pieces in the run log for the newest three proposals. [docs/workings.md](../workings.md).
+- **Reject:** beside Accept; the option folds away with an optional why and Undo, the next open option is chosen, the
+  report stops proposing it, and the next proposal (or second try) sends the rejections as `notes`.
+  [docs/edits.md](../edits.md), "Rejecting a fix".
+- **Landing in view:** when a proposal's result lands, the Clash panel (its own scroll box, never the page) scrolls to
+  Verified options, once per result.
+- **Workings is off · Turn it on** in the Activity panel's status line when Workings is switched off.
+- **Timeline alignment:** each lane's label is placed on its own bars, the clock sits on the bars' line, the first tick
+  starts at the track's edge, and the picker, Replay and speeds line up on the bars while they share its line.
+- **Docs:** the gaps found on review: `sightline.workings` and the dock's keys in 05's storage table, the run log in
+  03's proposal flow, Panels and layout's place (the Menu) in workings.md and panels.md.
+- **Checked:** 139 web tests (two new in `workings.test.mjs`, one in `fix-kinds.test.mjs`); build clean. In Chromium
+  on Northbank against a local server: the duct's offset shown on hover and kept; the cable tray's failed whole-run
+  raise kept from far out (camera to it, hits lit); the duct's only option rejected "because the ceiling void above is
+  reserved for sprinklers", the next request carrying it and Muse Spark's understanding repeating it (no other fix in
+  8 ideas, 138 s); the panel scrolled to the result; Workings off and on from the status line; the timeline on one line
+  (1,182 and 1,582 px) and wrapped (about 720 px). No page errors.

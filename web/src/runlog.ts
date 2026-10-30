@@ -39,9 +39,12 @@ export interface RunHandle {
  * going is never let go of: the oldest finished ones go first, and the log grows past this while more are live. */
 export const RUNS_KEPT = 12;
 
-/** What Workings never reads and a run would otherwise carry: meshes (a trial's pieces, an option's preview, before
- * and placements). Dropped from every event as it is logged, at any depth. */
+/** What Workings never reads and a run would otherwise carry: meshes (an option's preview, before and placements, a
+ * trial's pieces). Dropped from every event as it is logged, at any depth, except a trial's own pieces: those are the
+ * edit in place, which a check hovered in Workings shows in the viewer. They are kept for the newest few proposals
+ * (`TRIALS_KEPT`) and dropped from older ones. */
 const HEAVY = new Set(["pieces", "preview", "before", "placements"]);
+export const TRIALS_KEPT = 3;
 export function lean<T>(value: T, depth = 0): T {
   if (depth > 6 || value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map((v) => lean(v, depth + 1)) as T;
@@ -67,12 +70,17 @@ export class RunLog {
       kept.splice(finished, 1);
     }
     this.all = [...kept, run];
+    // Trial pieces stay with the newest proposals only.
+    const proposals = this.all.filter((r) => r.kind === "propose");
+    for (const old of proposals.slice(0, Math.max(0, proposals.length - TRIALS_KEPT)))
+      if (old.events.some((x) => x.e.type === "trial" && "pieces" in x.e)) old.events = old.events.map((x) => x.e.type === "trial" ? { ...x, e: lean(x.e) } : x);
     this.changed();
     return {
       id: run.id,
       add: (event) => {
         if (run.ended !== null) return;
-        run.events.push({ t: this.since(run), e: lean(event) as RunEvent["e"] });
+        const e = event.type === "trial" ? { ...lean(event), ...("pieces" in event ? { pieces: event.pieces } : {}) } : lean(event);
+        run.events.push({ t: this.since(run), e: e as RunEvent["e"] });
         run.version++;
         this.changed();
       },

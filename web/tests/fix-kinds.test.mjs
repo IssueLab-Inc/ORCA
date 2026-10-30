@@ -56,3 +56,14 @@ test("a combined fix (a second try's several elements at once) says each step an
   assert.equal(kinds.changeText(o), o.edit.summary);
   assert.deepEqual(kinds.framePieces(o), ["pipe", "duct"]);
 });
+
+test("rejected options are told to Muse in the next proposal's notes, with why when given", () => {
+  assert.equal(kinds.rejectionNotes({}), "");
+  const key = kinds.optionKey({ kind: "offset", title: "Offset duct up 400 mm" });
+  assert.equal(key, "offset|Offset duct up 400 mm");
+  assert.equal(kinds.rejectionNotes({
+    [key]: { title: "Offset duct up 400 mm", kind: "offset", edit: "offset 1.00–2.40 m by +400 mm", why: " The void is for sprinklers " },
+    "move|Lower": { title: "Lower", kind: "move", edit: "move down 150 mm", why: "" },
+  }), 'The reviewer rejected these fixes, so propose different ones: offset "Offset duct up 400 mm" (offset 1.00–2.40 m by +400 mm), '
+    + 'because The void is for sprinklers; move "Lower" (move down 150 mm).');
+});

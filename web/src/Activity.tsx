@@ -1,7 +1,8 @@
-import { EyeOff, ListChecks, Workflow } from "lucide-react";
+import { Eye, EyeOff, ListChecks, Workflow } from "lucide-react";
 import type { Attempt } from "./api";
 import { editText, kindLabel } from "./fixKinds";
 import { Workings } from "./Workings";
+import type { Peek } from "./workingsGraph";
 
 /** What the agent is doing now, while a proposal runs. */
 export interface Progress {
@@ -47,14 +48,17 @@ export function statusLine(p: Progress | null, now: number, attempts: Attempt[])
 export type ActivityView = "steps" | "work";
 
 /** Agent activity: the proposal's status line, then Steps or Workings (docs/workings.md). With `workings` off (phones,
- * tablets, or switched off) it is Steps alone, as before Workings. `inView`: the check the pilot shows in the viewer. */
-export function Activity({ attempts, progress, now, workings = false, view = "steps", onView, onHide, inView = null }: {
+ * tablets, or switched off) it is Steps alone, as before Workings; switched off on a desktop (`onTurnOn`), the header
+ * says so and turns it on again. `inView`: the check the pilot shows in the viewer; `onPeek`: a check hovered or pinned
+ * in Workings, for the viewer. */
+export function Activity({ attempts, progress, now, workings = false, view = "steps", onView, onHide, onTurnOn, inView = null, onPeek }: {
   attempts: Attempt[]; progress: Progress | null; now: number;
-  workings?: boolean; view?: ActivityView; onView?: (v: ActivityView) => void; onHide?: () => void; inView?: number | null;
+  workings?: boolean; view?: ActivityView; onView?: (v: ActivityView) => void; onHide?: () => void; onTurnOn?: () => void;
+  inView?: number | null; onPeek?: (peek: Peek | null, pin: boolean) => void;
 }) {
   const drawing = workings && view === "work";
   const running = progress && progress.phase !== "done";
-  const head = (progress || attempts.length || workings) && (
+  const head = (progress || attempts.length || workings || onTurnOn) && (
     <div className="activity-head">
       <b>Agent activity</b>
       {(progress || attempts.length > 0) && <span className={running ? "live" : "hint"}>{running && <i className="spinner" aria-hidden />}{statusLine(progress, now, attempts)}</span>}
@@ -68,12 +72,17 @@ export function Activity({ attempts, progress, now, workings = false, view = "st
           <button type="button" role="tab" aria-selected={drawing} className={drawing ? "on" : ""} onClick={() => onView?.("work")}
             data-tip="The run drawn as it happens (W)"><Workflow size={14} aria-hidden /> Workings</button>
         </span>
-        {onHide && <button type="button" className="ibtn" aria-label="Turn Workings off" data-tip="Turn Workings off (Panels and layout turns it on again)"
+        {onHide && <button type="button" className="ibtn" aria-label="Turn Workings off" data-tip="Turn Workings off (Menu, Panels and layout turns it on again)"
           onClick={onHide}><EyeOff size={15} aria-hidden /></button>}
+      </>}
+      {!workings && onTurnOn && <>
+        <span className="spacer" />
+        <span className="wk-off"><Workflow size={14} aria-hidden /> Workings is off
+          <button type="button" className="btn small" onClick={onTurnOn}><Eye size={13} aria-hidden /> Turn it on</button></span>
       </>}
     </div>
   );
-  if (drawing) return <div className="activity">{head}<Workings inView={inView} /></div>;
+  if (drawing) return <div className="activity">{head}<Workings inView={inView} onPeek={onPeek} /></div>;
   if (!progress && !attempts.length) {
     return <div className="activity">{head}<p className="hint">ORCA's steps appear here: each idea from Muse Spark, and what the geometry check found.</p></div>;
   }
