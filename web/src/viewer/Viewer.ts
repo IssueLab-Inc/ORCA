@@ -6,6 +6,8 @@ import { patchModel, ROOM, type ElementMesh } from "./patch";
 import { ViewCube } from "./cube";
 import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
 import { annotate, type Handle } from "./annotate";
+import { candidatesOf, clipSegment, cutSegments, measureText, mergeRuns, pickSnap, type Candidates, type Measurement, type Segment,
+  type SnapKind } from "./measure";
 import { CameraHistory, defaultKinds, facingFor, levelsOrModel, paneRects, planThrough, sectionFrame, sectionThrough, shownBy,
   viewTitle, type Datums, type DrawingSpec, type Filters, type Layout, type Level, type Pose, type Rect, type Temporary, type ViewSpec } from "./views";
 
@@ -76,6 +78,8 @@ export interface Pick { globalId: string; point: THREE.Vector3 }
 /** One pane of the layout: its view, its element over the canvas, where it sits (stage CSS pixels), and whether a
  * clash may move it. A drawing pane has its DrawingView. */
 export interface Pane { spec: ViewSpec; el: HTMLDivElement; rect: Rect; pinned: boolean; view: DrawingView | null;
+  /** Its own number, kept while it lives (a measurement taken in it refers to it). */
+  key: number;
   /** What its annotation layer was last drawn for, and the marks on it a user can drag. */
   annotated?: string; handles?: Handle[]; composed?: string }
 
@@ -146,8 +150,6 @@ export class Viewer {
   private moved = new Map<string, THREE.Matrix4>();  // previewed moves: GlobalId → offset matrix
   private marker = new THREE.Group();
   private markerLabel: HTMLDivElement;
-  private measureLayer = new THREE.Group();
-  private measureLabel: HTMLDivElement;
   private sectionBox: THREE.Box3 | null = null;
   private sectionHelper: THREE.Box3Helper | null = null;
   private flight: { from: [THREE.Vector3, THREE.Vector3]; to: [THREE.Vector3, THREE.Vector3]; t0: number; ms: number } | null = null;
@@ -217,13 +219,13 @@ export class Viewer {
     this.controls.autoRotateSpeed = 0.6;
     this.cube = new ViewCube((dir) => this.lookFrom(dir), (dx, dy) => this.turn(dx, dy), () => this.home());
     this.pane3d.appendChild(this.cube.el);
-    this.panes = [{ spec: { kind: "3d" }, el: this.pane3d, rect: { x: 0, y: 0, w: 1, h: 1 }, pinned: false, view: null }];
+    this.panes = [{ spec: { kind: "3d" }, el: this.pane3d, rect: { x: 0, y: 0, w: 1, h: 1 }, pinned: false, view: null, key: 0 }];
     this.scene.background = new THREE.Color("#dfe6ee");
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.6));
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
-    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.selectionLayer, this.marker, this.measureLayer, this.grips);
+    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.selectionLayer, this.marker, this.grips);
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, this.consistent, this.xrayAll, this.selectionMaterial]) m.clippingPlanes = this.clipping;
     // Shaded with edges and Hidden line draw through the drawings' materials: the section box cuts them too (a drawing
     // view empties `clipping` while it draws, so it never does there).
@@ -234,8 +236,9 @@ export class Viewer {
     this.ortho.layers.enable(1);
     this.marker.layers.set(1);
     this.markerLabel = this.label("marker-label");
-    this.measureLabel = this.label("measure-label");
-    this.measureLayer.layers.set(1);
+    this.measureCanvas = document.createElement("canvas");
+    this.measureCanvas.className = "measure-layer";
+    host.appendChild(this.measureCanvas);
     this.buildMarker();
     this.resize.observe(host);
     this.fit();
@@ -264,6 +267,7 @@ export class Viewer {
     this.names = names;
     this.hiddenModels.clear();
     this.lastClash = null;
+    this.measures = []; this.draft = null; this.hover = null; this.measureStamp++;   // they were on the other models
     this.configureViews(true);
     this.applyMode();
     this.fitAll(false);
@@ -321,7 +325,7 @@ export class Viewer {
   }
 
   /** The models changed (loaded, replaced, patched): what is measured over them is measured again. */
-  private sceneChanged() { this.sceneSize = 0; this.boxCache = null; this.countsCache = null; }
+  private sceneChanged() { this.sceneSize = 0; this.boxCache = null; this.countsCache = null; this.snapCache.clear(); }
   private boxCache: THREE.Box3 | null = null;
   private countsCache: ReturnType<Viewer["infoCounts"]> | null = null;
 
@@ -913,8 +917,7 @@ export class Viewer {
     const saved = { position: camera.position.clone(), target: this.controls.target.clone(), mode: this.mode, focus: this.focus,
       flight: this.flight, marker: this.marker.visible, overlay: this.overlay.visible, hidden: new Set(this.hidden),
       moved: new Map(this.moved), section: this.sectionBox?.clone() ?? null, background: scene.background, hits: this.hitLayer.visible,
-      links: this.linkLayer.visible,
-      measure: this.measureLayer.visible, clear: renderer.getClearColor(new THREE.Color()), clearAlpha: renderer.getClearAlpha() };
+      links: this.linkLayer.visible, clear: renderer.getClearColor(new THREE.Color()), clearAlpha: renderer.getClearAlpha() };
     const temp = new THREE.Group();
     const trash: { dispose(): void }[] = [];   // render targets and materials made here, freed however it ends
     const all = this.models.flatMap((m) => [...m.byGlobalId.values()]);
@@ -930,7 +933,7 @@ export class Viewer {
     const shaded = () => { this.mode = "shaded"; this.applyMode(); zonesAndCut(); };
     try {
       this.flight = null; this.marker.visible = false; this.overlay.visible = false; this.hitLayer.visible = false;
-      this.measureLayer.visible = false; this.linkLayer.visible = false; this.grips.visible = false; this.lifted = true;
+      this.linkLayer.visible = false; this.grips.visible = false; this.lifted = true;
       this.focus = { a: null, b: null, group: {} };
       // The fix in place: a proposed option's pieces as their own meshes in their elements' colours (a move translates
       // its run), the originals hidden; an applied fix is the model itself.
@@ -1143,7 +1146,6 @@ export class Viewer {
       renderer.setRenderTarget(null);
       for (const t of trash) t.dispose();
       renderer.setClearColor(saved.clear, saved.clearAlpha);
-      this.measureLayer.visible = saved.measure;
       scene.overrideMaterial = null;
       scene.background = saved.background;
       this.hidden = saved.hidden; this.moved = saved.moved;
@@ -1478,6 +1480,7 @@ export class Viewer {
   /** Drawing views follow the 3D view's Context / Isolate (true), or show the whole model. */
   setDrawingsFollow(on: boolean) { this.drawingsFollow = on; this.applyMode(); this.onChange?.(); }
 
+  private paneSeq = 0;
   private makePane(kind: DrawingSpec["kind"]): Pane {
     const el = document.createElement("div");
     el.className = `view-pane view-drawing view-${kind}`;
@@ -1487,7 +1490,7 @@ export class Viewer {
     el.appendChild(layer);
     this.host.appendChild(el);
     const view = new DrawingView(this.defaultSpec(kind));
-    const pane: Pane = { spec: view.spec, el, rect: { x: 0, y: 0, w: 1, h: 1 }, pinned: false, view };
+    const pane: Pane = { spec: view.spec, el, rect: { x: 0, y: 0, w: 1, h: 1 }, pinned: false, view, key: ++this.paneSeq };
     this.attachDrawingInput(pane);
     return pane;
   }
@@ -2161,30 +2164,201 @@ export class Viewer {
     } finally { restore(); }
   }
 
-  /** Draw a measured distance between two picked points; null clears it. Returns metres. */
-  setMeasure(p1: THREE.Vector3 | null, p2: THREE.Vector3 | null): number | null {
-    this.measureLayer.clear();
-    this.measureLabel.textContent = "";
-    if (!p1) return null;
-    const mat = new THREE.MeshBasicMaterial({ color: "#2f5d8a", depthTest: false });
-    for (const p of [p1, p2].filter((x): x is THREE.Vector3 => !!x)) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(this.reach(0.03, 0.01), 12, 8), mat);
-      s.layers.set(1);
-      s.position.copy(p);
-      s.renderOrder = 11;
-      this.measureLayer.add(s);
+  // ---------------------------------------------------------------- measuring (docs/measure.md)
+
+  private measures: Measurement[] = [];
+  private measureNext = 1;
+  private measuring = false;
+  private snapping = true;
+  /** The first point of a measurement under way, and the view it is taken in (null: 3D, else a pane's key). */
+  private draft: { point: THREE.Vector3; pane: number | null } | null = null;
+  /** What the pointer snaps to now. */
+  private hover: { point: THREE.Vector3; kind: SnapKind; pane: number | null } | null = null;
+  private measureStamp = 0;
+  private measureDrawn = "";
+  private measureCanvas: HTMLCanvasElement;
+  private snapCache = new Map<string, Candidates>();
+
+  get measurements(): readonly Measurement[] { return this.measures; }
+  /** A first point is set, waiting for the second. */
+  get measureOpen(): boolean { return !!this.draft; }
+  setMeasuring(on: boolean) { this.measuring = on; this.draft = null; this.hover = null; this.measureStamp++; }
+  setSnap(on: boolean) { this.snapping = on; this.hover = null; this.measureStamp++; }
+  removeMeasurement(id: number) { this.measures = this.measures.filter((m) => m.id !== id); this.measureStamp++; this.onChange?.(); }
+  clearMeasurements() { this.measures = []; this.draft = null; this.measureStamp++; this.onChange?.(); }
+
+  /** The pointer moved while measuring (null: it left the stage): what it snaps to, and the rubber band. */
+  measureHover(ev: MouseEvent | null) {
+    if (!this.measuring) return;
+    this.hover = ev ? this.snapAt(ev) : null;
+    this.measureStamp++;
+  }
+
+  /** A click while measuring: the first point, or the second, which keeps the measurement. A click in another view
+   * starts there. False when there was nothing to measure on (no model under the pointer in the 3D view). */
+  measureClick(ev: MouseEvent): boolean {
+    const s = this.snapAt(ev);
+    if (!s) return false;
+    if (this.draft && this.draft.pane === s.pane && this.draft.point.distanceToSquared(s.point) > 1e-10) {
+      const pane = s.pane == null ? null : this.panes.find((p) => p.key === s.pane);
+      const view = pane && pane.spec.kind !== "3d" ? viewTitle(this.levels, pane.spec) : "3D";
+      this.measures = [...this.measures, { id: this.measureNext++, a: this.draft.point.clone(), b: s.point.clone(), pane: s.pane, view }];
+      this.draft = null;
+      this.onChange?.();
+    } else this.draft = { point: s.point.clone(), pane: s.pane };
+    this.hover = s;
+    this.measureStamp++;
+    return true;
+  }
+
+  /** Esc while measuring: drop the first point of a measurement under way. False when there was none. */
+  measureCancel(): boolean {
+    if (!this.draft) return false;
+    this.draft = null;
+    this.measureStamp++;
+    return true;
+  }
+
+  /** What a measuring pointer lands on: in a drawing, on its plane; in 3D, on the model. Snapped to an end, a midpoint
+   * or an edge when snapping is on and one is near, else the point under the pointer. */
+  private snapAt(ev: MouseEvent): { point: THREE.Vector3; kind: SnapKind; pane: number | null } | null {
+    const pane = this.panes.length > 1 ? this.paneAt(ev.clientX, ev.clientY) : null;
+    return pane?.view ? this.snapDrawing(pane, ev) : this.snap3d(ev);
+  }
+
+  private snap3d(ev: MouseEvent): { point: THREE.Vector3; kind: SnapKind; pane: null } | null {
+    const r = this.pane3d.getBoundingClientRect();
+    const cursor = new THREE.Vector2(ev.clientX - r.left, ev.clientY - r.top);
+    const hit = this.pickAt(ev, { ghosts: true });
+    if (!hit) return null;
+    if (!this.snapping) return { point: hit.point.clone(), kind: "face", pane: null };
+    const ray = this.raycaster.ray.clone(), cam = this.activeCamera();
+    const project = (p: THREE.Vector3) => {
+      const v = p.clone().project(cam);
+      return v.z > 1 || v.z < -1 ? null : new THREE.Vector2(((v.x + 1) / 2) * r.width, ((1 - v.y) / 2) * r.height);
+    };
+    const s = pickSnap(cursor, this.edgesFor(hit.globalId), project, ray)
+      ?? this.snapNear(ev, cursor, hit.globalId, (g) => this.edgesFor(g), project, ray, (e) => this.pickAt(e, { ghosts: true }));
+    return s ? { point: s.point, kind: s.kind, pane: null } : { point: hit.point.clone(), kind: "face", pane: null };
+  }
+
+  private snapDrawing(pane: Pane, ev: MouseEvent): { point: THREE.Vector3; kind: SnapKind; pane: number } {
+    const view = pane.view!, r = pane.el.getBoundingClientRect();
+    const cursor = new THREE.Vector2(ev.clientX - r.left, ev.clientY - r.top);
+    const hit = this.pickDrawing(pane, ev);   // also sets the view's camera for this frame
+    const base = { point: hit ? onPlane(view, hit.point) : view.fromPane(cursor.x, cursor.y, pane.rect), kind: (hit ? "face" : "free") as SnapKind, pane: pane.key };
+    if (!this.snapping) return base;
+    const project = (p: THREE.Vector3) => view.toPane(p, pane.rect);
+    const cands = (g: string) => this.drawingCandidates(view, g);
+    const s = (hit ? pickSnap(cursor, cands(hit.globalId), project) : null)
+      ?? this.snapNear(ev, cursor, hit?.globalId ?? null, cands, project, null, (e) => this.pickDrawing(pane, e));
+    return s ? { point: s.point, kind: s.kind, pane: pane.key } : base;
+  }
+
+  /** When the element under the pointer gives no snap: the elements under four points 10 px round it. */
+  private snapNear(ev: MouseEvent, cursor: THREE.Vector2, first: string | null, cands: (g: string) => Candidates,
+    project: (p: THREE.Vector3) => THREE.Vector2 | null, ray: THREE.Ray | null, pick: (e: MouseEvent) => Pick | null) {
+    const seen = new Set(first ? [first] : []);
+    const all: Candidates = { ends: [], mids: [], segs: [] };
+    for (const [dx, dy] of [[10, 0], [-10, 0], [0, 10], [0, -10]]) {
+      const h = pick({ clientX: ev.clientX + dx, clientY: ev.clientY + dy } as MouseEvent);
+      if (!h || seen.has(h.globalId)) continue;
+      seen.add(h.globalId);
+      const c = cands(h.globalId);
+      all.ends.push(...c.ends); all.mids.push(...c.mids); all.segs.push(...c.segs);
     }
-    if (!p2) return null;
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p1, p2]),
-      new THREE.LineBasicMaterial({ color: "#2f5d8a", depthTest: false }));
-    line.renderOrder = 11;
-    line.layers.set(1);
-    this.measureLayer.add(line);
-    const d = p1.distanceTo(p2);
-    const dx = Math.abs(p2.x - p1.x), dy = Math.abs(p2.z - p1.z), dz = Math.abs(p2.y - p1.y);
-    this.measureLabel.textContent = `${(d * 1000).toFixed(0)} mm  (Δx ${(dx * 1000).toFixed(0)} · Δy ${(dy * 1000).toFixed(0)} · Δz ${(dz * 1000).toFixed(0)})`;
-    this.measureLayer.userData.mid = p1.clone().add(p2).multiplyScalar(0.5);
-    return d;
+    return all.segs.length ? pickSnap(cursor, all, project, ray) : null;
+  }
+
+  private cached(key: string, make: () => Candidates): Candidates {
+    let c = this.snapCache.get(key);
+    if (!c) {
+      if (this.snapCache.size > 400) this.snapCache.clear();
+      c = make();
+      this.snapCache.set(key, c);
+    }
+    return c;
+  }
+
+  /** An element's feature edges (the outlines' 25° edges) in world space: its corners, midpoints and edges. */
+  private edgesFor(gid: string): Candidates {
+    const f = this.find(gid);
+    if (!f) return { ends: [], mids: [], segs: [] };
+    const m = this.matrixOf(f.el);
+    return this.cached(`e|${gid}|${m.elements.join(",")}`, () => candidatesOf(this.worldEdges(gid, f, m)));
+  }
+
+  private worldEdges(gid: string, f: Found, m: THREE.Matrix4): Segment[] {
+    const pos = this.edgeGeometryOf(gid, f).getAttribute("position");
+    const out: Segment[] = [];
+    for (let i = 0; i + 1 < pos.count; i += 2) {
+      out.push([new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(m), new THREE.Vector3().fromBufferAttribute(pos, i + 1).applyMatrix4(m)]);
+    }
+    return out;
+  }
+
+  /** What a drawing shows of an element to snap to: its edges as the view keeps them, laid on the view's plane, and
+   * where it cuts, the cut outline (the element's triangles cut by the plane, joined into straight runs). */
+  private drawingCandidates(view: DrawingView, gid: string): Candidates {
+    const f = this.find(gid);
+    if (!f) return { ends: [], mids: [], segs: [] };
+    const m = this.matrixOf(f.el);
+    const key = `d|${gid}|${m.elements.join(",")}|${view.contentKey({ x: 0, y: 0, w: 1, h: 1 })}|${view.look.dot(view.center).toFixed(4)}`;
+    return this.cached(key, () => {
+      const segs: Segment[] = [];
+      for (const [a, b] of this.worldEdges(gid, f, m)) {
+        const kept = clipSegment(a, b, view.planes);
+        if (kept) segs.push([onPlane(view, kept[0]), onPlane(view, kept[1])]);
+      }
+      if (view.cut) {
+        const g = this.geometryOf(f), index = g.getIndex()!, pos = g.getAttribute("position");
+        const { start, count } = g.drawRange, tri = new Float32Array(count * 3), t = new THREE.Vector3();
+        for (let i = 0; i < count; i++) { t.fromBufferAttribute(pos, index.getX(start + i)).applyMatrix4(m); tri[i * 3] = t.x; tri[i * 3 + 1] = t.y; tri[i * 3 + 2] = t.z; }
+        segs.push(...mergeRuns(cutSegments(tri, view.cut)).map(([a, b]) => [onPlane(view, a), onPlane(view, b)] as Segment));
+      }
+      return candidatesOf(segs);
+    });
+  }
+
+  /** The measurements, the one under way and the snap glyph, on a 2D canvas over the stage. Drawn again only when
+   * something on it moved: the measurements, the pointer, a camera, a pane. */
+  private drawMeasures() {
+    const c = this.measureCanvas, W = this.host.clientWidth || 1, H = this.host.clientHeight || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), panes = this.visiblePanes(), cam = this.activeCamera();
+    const on = this.measuring && !!(this.measures.length || this.draft || this.hover);
+    const key = !on ? "off" : [this.measureStamp, W, H, ...panes.map((p) => `${p.rect.x},${p.rect.y},${p.rect.w},${p.rect.h}:${p.view
+      ? p.view.cameraKey(p.rect) : [...cam.matrixWorld.elements, ...(cam as THREE.PerspectiveCamera).projectionMatrix.elements].map((n) => n.toFixed(5)).join(",")}`)].join("|");
+    if (key === this.measureDrawn) return;
+    this.measureDrawn = key;
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    const g = c.getContext("2d");
+    if (!g) return;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    if (!on) return;
+    for (const pane of panes) {
+      const r = pane.rect, is3d = pane.spec.kind === "3d", here = is3d ? null : pane.key;
+      const project = is3d
+        ? (p: THREE.Vector3) => { const v = p.clone().project(cam); return v.z > 1 || v.z < -1 ? null : new THREE.Vector2(((v.x + 1) / 2) * r.w, ((1 - v.y) / 2) * r.h); }
+        : (p: THREE.Vector3) => pane.view!.toPane(p, r);
+      g.save();
+      g.beginPath(); g.rect(r.x, r.y, r.w, r.h); g.clip();
+      g.translate(r.x, r.y);
+      // The 3D view shows every measurement (each is two points in the model); a drawing, the ones taken in it. A label
+      // that would sit on another moves up until it is clear.
+      const labels: { x: number; y: number; w: number }[] = [];
+      for (const m of this.measures) {
+        if (!is3d && m.pane !== here) continue;
+        dimension(g, project(m.a), project(m.b), `M${m.id} · ${measureText(m).length}`, !is3d, false, labels);
+      }
+      const hover = this.hover && this.hover.pane === here ? this.hover : null;
+      if (this.draft && this.draft.pane === here) {
+        dimension(g, project(this.draft.point), hover ? project(hover.point) : null,
+          hover ? measureText({ a: this.draft.point, b: hover.point }).length : "", !is3d, true);
+      }
+      if (hover) snapGlyph(g, project(hover.point), hover.kind);
+      g.restore();
+    }
   }
 
   // ---------------------------------------------------------------- frame loop, labels, misc
@@ -2210,7 +2384,6 @@ export class Viewer {
     if (this.projection === "orthographic") this.syncOrtho(r3.w / Math.max(r3.h, 1));
     const cam = this.activeCamera();
     this.place(this.markerLabel, this.marker.visible ? this.marker.position : null);
-    this.place(this.measureLabel, this.measureLayer.userData.mid ?? null);
     // Constant sizes on screen, at any scale: a floor in metres made the marker swallow a 100 mm part.
     const perPx = (p: THREE.Vector3) => this.projection === "orthographic" ? (this.ortho.top - this.ortho.bottom) / r3.h
       : 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * Math.max(this.camera.position.distanceTo(p), 1e-4) / r3.h;
@@ -2243,6 +2416,7 @@ export class Viewer {
     }
     r.setScissorTest(false);
     r.setViewport(0, 0, W, H);
+    this.drawMeasures();
   }
 
   /** Near/far planes follow the distance to the target, so close-ups don't clip and far views don't z-fight. */
@@ -2277,18 +2451,20 @@ export class Viewer {
   snapshot(): string {
     this.drawFrame();
     const src = this.renderer.domElement;
-    if (this.visiblePanes().length === 1 && this.visiblePanes()[0].spec.kind === "3d") return src.toDataURL("image/png");
+    const single = this.visiblePanes().length === 1 && this.visiblePanes()[0].spec.kind === "3d";
+    if (single && !this.measuring) return src.toDataURL("image/png");
     const out = document.createElement("canvas");
     out.width = src.width; out.height = src.height;
     const g = out.getContext("2d")!;
     g.drawImage(src, 0, 0);
     const k = src.width / (this.host.clientWidth || 1);
-    for (const pane of this.visiblePanes()) {
+    for (const pane of single ? [] : this.visiblePanes()) {
       const layer = pane.el.querySelector("canvas");
       if (layer) g.drawImage(layer, pane.rect.x * k, pane.rect.y * k, pane.rect.w * k, pane.rect.h * k);
       g.strokeStyle = "#c9d1da"; g.lineWidth = k;
       g.strokeRect(pane.rect.x * k + 0.5, pane.rect.y * k + 0.5, pane.rect.w * k - 1, pane.rect.h * k - 1);
     }
+    if (this.measuring) g.drawImage(this.measureCanvas, 0, 0, out.width, out.height);   // the measurements on screen
     return out.toDataURL("image/png");
   }
 
@@ -2356,7 +2532,7 @@ export class Viewer {
     this.renderer.dispose();
     this.renderer.domElement.remove();
     this.markerLabel.remove();
-    this.measureLabel.remove();
+    this.measureCanvas.remove();
   }
 
   /** The stage changed size. Resizing the canvas clears it, so only when its size really changed, and then everything
@@ -2438,4 +2614,58 @@ function meshBox(meshes: Mesh[]): THREE.Box3 {
   const box = new THREE.Box3();
   for (const m of meshes) for (let i = 0; i < m.verts.length; i += 3) box.expandByPoint(new THREE.Vector3(m.verts[i], m.verts[i + 2], -m.verts[i + 1]));
   return box;
+}
+
+/** A point laid on a drawing's plane (a plan's cut, a section's line, an elevation's façade plane). */
+function onPlane(view: DrawingView, p: THREE.Vector3): THREE.Vector3 {
+  return p.clone().addScaledVector(view.look, -view.look.dot(p.clone().sub(view.center)));
+}
+
+const MEASURE_INK = "#2f5d8a", SNAP_INK = "#d9480f";
+
+/** A measurement on the overlay: a line, ends as a drawing's ticks or 3D dots, and its label at the middle. `open`: a
+ * measurement under way (dashed, from its first point to the pointer). */
+function dimension(g: CanvasRenderingContext2D, a: THREE.Vector2 | null, b: THREE.Vector2 | null, text: string, ticks: boolean, open: boolean,
+  placed: { x: number; y: number; w: number }[] = []) {
+  g.save();
+  g.strokeStyle = MEASURE_INK; g.fillStyle = MEASURE_INK; g.lineWidth = 1.6;
+  const end = (p: THREE.Vector2, dir: THREE.Vector2) => {
+    if (ticks) { g.beginPath(); g.moveTo(p.x - (dir.x - dir.y) * 6, p.y - (dir.y + dir.x) * 6); g.lineTo(p.x + (dir.x - dir.y) * 6, p.y + (dir.y + dir.x) * 6); g.stroke(); }
+    else { g.beginPath(); g.arc(p.x, p.y, 3.2, 0, Math.PI * 2); g.fill(); }
+  };
+  if (a && !b) { end(a, new THREE.Vector2(1, 0)); g.restore(); return; }
+  if (!a || !b) { g.restore(); return; }
+  const dir = b.clone().sub(a);
+  const len = dir.length();
+  if (len > 0) dir.divideScalar(len);
+  if (open) g.setLineDash([6, 4]);
+  g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+  g.setLineDash([]);
+  end(a, dir); end(b, dir);
+  if (!text) { g.restore(); return; }
+  g.font = `600 11.5px "IBM Plex Sans", system-ui, sans-serif`;
+  const w = g.measureText(text).width + 12, mx = (a.x + b.x) / 2;
+  let my = (a.y + b.y) / 2;
+  for (let k = 0; k < 6 && placed.some((q) => Math.abs(q.x - mx) < (q.w + w) / 2 && Math.abs(q.y - my) < 20); k++) my -= 20;
+  placed.push({ x: mx, y: my, w });
+  g.fillStyle = open ? "rgba(47,93,138,.85)" : MEASURE_INK;
+  g.beginPath(); g.roundRect(mx - w / 2, my - 22, w, 18, 9); g.fill();
+  g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, mx, my - 13);
+  g.restore();
+}
+
+/** What the pointer snaps to, as CAD shows it: a square at an end, a triangle at a midpoint, a cross on an edge, a dot
+ * on a surface, a small cross on empty paper. */
+function snapGlyph(g: CanvasRenderingContext2D, p: THREE.Vector2 | null, kind: SnapKind) {
+  if (!p) return;
+  g.save();
+  g.strokeStyle = SNAP_INK; g.fillStyle = SNAP_INK; g.lineWidth = 1.8;
+  g.beginPath();
+  if (kind === "end") g.rect(p.x - 5, p.y - 5, 10, 10);
+  else if (kind === "mid") { g.moveTo(p.x, p.y - 6); g.lineTo(p.x + 6, p.y + 4.5); g.lineTo(p.x - 6, p.y + 4.5); g.closePath(); }
+  else if (kind === "edge") { g.moveTo(p.x - 5, p.y - 5); g.lineTo(p.x + 5, p.y + 5); g.moveTo(p.x + 5, p.y - 5); g.lineTo(p.x - 5, p.y + 5); }
+  else if (kind === "face") { g.arc(p.x, p.y, 3, 0, Math.PI * 2); g.fill(); }
+  else { g.moveTo(p.x - 4, p.y); g.lineTo(p.x + 4, p.y); g.moveTo(p.x, p.y - 4); g.lineTo(p.x, p.y + 4); }
+  g.stroke();
+  g.restore();
 }

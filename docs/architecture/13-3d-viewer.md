@@ -26,6 +26,7 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 | `viewer/views.ts` | The views' pure rules: layouts, plan view ranges and presets, clash defaults, section frames, compass, scales, view cube regions, camera history, visibility filters, the Esc steps | `paneRects`, `planRange`, `planPreset`, `planThrough`, `sectionFrame`, `sectionThrough`, `nearestScale`, `scaleBar`, `cubeRegion`, `CameraHistory`, `shownBy`, `escStep`, types `ViewSpec`, `Datums`, `Filters`, `Temporary`, `Pose` | `viewer/Viewer.ts`, `viewer/cube.ts`, `App.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
 | `viewer/cube.ts` | The view cube: a labelled cube in the 3D view's corner, click a face, edge or corner (26 views), drag to orbit, Home | `ViewCube`, `CUBE_PX` | `viewer/Viewer.ts` |
 | `viewer/drawing.ts` | A drawing view's orthographic camera, clip planes and crop (`DrawingView`), and the drawing style: paper fills, stencil caps for cut faces, the hidden pair, the composite shader that draws linework and the heavy cut outline | `DrawingView`, `DrawingStyle`, `farBehind`, `toIfc`, `CUT`, `CAP_LAYER`, `PAPER` | `viewer/Viewer.ts`, `viewer/annotate.ts` (types) |
+| `viewer/measure.ts` | Measuring's pure parts ([docs/measure.md](../measure.md)): where a plane cuts triangles and the cut joined into straight runs, clipping an edge to a view's planes, choosing the snap (end, midpoint, edge), the words and the line to copy | `cutSegments`, `mergeRuns`, `clipSegment`, `candidatesOf`, `pickSnap`, `measureText`, `copyLine`, `copyText`, types `Measurement`, `Candidates`, `SnapKind` | `viewer/Viewer.ts`, `MeasurePanel.tsx` |
 | `viewer/annotate.ts` | A drawing pane's 2D layer: grids and bubbles, levels, the clash's revision cloud, other views' marks (section box, plan cuts, elevation markers, the 3D camera), title, scale bar, north; returns the handles a user can drag | `annotate`, `Handle`, `AnnotateInput` | `viewer/Viewer.ts` |
 | `viewer/patch.ts` | Swaps a kept fix's changed and new elements into the batches in place | `patchModel`, `makeRoom`, `toGeometry`, `ROOM`, `ElementMesh` | `viewer/Viewer.ts`, `viewer/ifcLoader.ts` (`ROOM`), `api.ts` (`ElementMesh`) |
 
@@ -91,7 +92,6 @@ flowchart TD
   scene --> hits["hitLayer"]
   scene --> links["linkLayer"]
   scene --> marker["marker"]
-  scene --> measure["measureLayer"]
   scene --> section["sectionHelper Box3Helper, grips"]
   scene --> selection["selectionLayer"]
   batches --> solidMat["solid or ghost material, per-instance colour and visibility"]
@@ -104,7 +104,7 @@ flowchart TD
   marker --> dot["amber dot and ring, constant screen size, renderOrder 10"]
   measure --> pts["points and line, renderOrder 11"]
   selection --> sel["the selected element, blue 2f8fdf, with its outline"]
-  labels["DOM labels over the canvas: marker-label, measure-label"]
+  labels["DOM label over the canvas: marker-label; the measure layer, a 2D canvas over the stage"]
   cube["ViewCube: its own scene and camera, drawn last in the 3D pane's corner"]
 ```
 
@@ -143,7 +143,7 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 | Navigation | `activeCamera()`, `setProjection(p)`, `pose()`, `applyPose(p)`, `back()`, `forward()`, getters `canBack`, `canForward`, `setHome(p)`, getter `homeView`, `home()`, `lookFrom(dir)`, callback `onChange` (history, Home, layout or hides changed); private `press` (pivot or grip), `turn` (cube drag), `syncOrtho` |
 | Panes and drawing views | `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)` (shares kept within 0.2–0.8), getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `defaultSpec(kind)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, getter `hasClash`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
 | Section box and marker | `setSection(on, margin, box)`, getter `section`, `setMarker(point, label)`; private `boxAroundFocus`, `boxInView`, `buildGrips`, `placeGrips`, `gripAt`, `dragGrip` |
-| Picking and measuring | `pickAt(event, { ghosts })`, `pick(event)`, `setMeasure(p1, p2)`, `has(gid)`, `boxOf(ids)` |
+| Picking and measuring | `pickAt(event, { ghosts })`, `pick(event)`, `has(gid)`, `boxOf(ids)`; measuring: getters `measurements`, `measureOpen`, `setMeasuring(on)`, `setSnap(on)`, `measureHover(event)`, `measureClick(event)`, `measureCancel()`, `removeMeasurement(id)`, `clearMeasurements()`; private `snapAt`, `snap3d`, `snapDrawing`, `snapNear`, `edgesFor`, `drawingCandidates`, `drawMeasures` |
 | Captures | `snapshot()`, `capture(side)`, `captureClash(a, b, side)`, `thumbClash(a, b, side)`, `captureBuilt(fix, pair, classOf, radius, side)`; private `posed`, `posedShots`, `builtPasses`, `fullCanvas`, `png` |
 | Module functions | `serverDeltaToViewer`, `serverPointToViewer`, `meetingZone(a, b)` (per axis the overlap, or the gap when apart) |
 
@@ -265,7 +265,6 @@ exactly what it had.
 | Least margin in `zoneCamera` / `zoneCameraFrom` | 0.5 m | 0.15 (and bounded by the pair) |
 | Least box in `flyToBox` | 1.5 m | 0.5 |
 | Least distance for `view(preset)` | 2 m | 0.8 |
-| Measure points' radius | 30 mm | 0.01 |
 | `captureBuilt`: area round the pair, framing margin, section radius | 1.5 m, 0.75 m, 3 m | 0.3, 0.2, 0.4 |
 
 The marker keeps a constant size on screen (scale = distance / 8, no floor in metres).
@@ -381,8 +380,29 @@ flowchart LR
 
 With `{ ghosts: true }` (the connection hover) ghosted context is picked too.
 
-`pick(event)` returns just the GlobalId. `setMeasure(p1, p2)` draws the picked points and the line and returns the
-distance in metres; its label reads "N mm (Δx · Δy · Δz)" in IFC axes.
+`pick(event)` returns just the GlobalId.
+
+**Measuring** ([docs/measure.md](../measure.md)) works in every pane. `measureClick` sets a first point and then a
+second, which keeps a `Measurement` (two points in the model and the view it was taken in); `measureHover` (once a frame
+from `App`) finds what the pointer snaps to; `measureCancel` drops a first point. `snapAt` routes by pane:
+
+- **3D** (`snap3d`): a pick (ghosts included); with snapping on, the element's feature edges (the outlines' `EdgesGeometry`
+  at 25°, in world space: `edgesFor`) give ends, midpoints and edges, and `measure.pickSnap` takes the nearest end within
+  12 px, else a midpoint, else an edge within 8 px, the edge point where the pointer's ray passes closest (exact in
+  perspective); else the surface point. Nothing under the pointer: no point.
+- **A drawing** (`snapDrawing`): every point is laid on the drawing's plane (a plan's cut, a section's line, an
+  elevation's façade plane), so a measurement reads as drawn; empty paper is a point too. Candidates
+  (`drawingCandidates`): the element's edges clipped to the view's planes and laid on the plane, and where the view cuts,
+  its triangles cut by the plane and joined into runs (`measure.cutSegments`, `mergeRuns`), so a cut wall snaps at its
+  cut corners and along its cut faces.
+- When the element under the pointer gives no snap, the elements under four points 10 px round it are tried
+  (`snapNear`). Candidates are cached per element, placement and view.
+
+The measure layer (`drawMeasures`) is one 2D canvas over the stage, drawn again only when the measurements, the
+pointer, a camera or a pane changed: in 3D every measurement (dots at the ends), in a drawing the ones taken there (a
+drawing's ticks at the ends), labels moved up off each other, the measurement under way as a dashed rubber band with
+its length, and the snap glyph (square end, triangle midpoint, cross edge, dot surface). It shows only while measuring,
+is never in a capture, and is in the Screenshot. Opening other models clears the measurements.
 
 ### Captures
 
@@ -491,7 +511,7 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 | H | Home (the saved Home, else fit the whole model) | X | X-ray |
 | F | Frame the selected element, else go to the clash (`focusNow`) | C | Context |
 | S | Section box | I | Isolate |
-| E | Outlines | M | Measure |
+| E | Outlines | M | Measure (N: snap on or off while measuring) |
 | G | Next visual style | L | Connections |
 | O | Perspective / orthographic | Q | Layout: Single, Two, Quad (Two at most on a tablet; none on a phone) |
 | [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight. With a menu open it closes only the menu |
@@ -504,11 +524,14 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
   says what to do next); a long press of 500 ms with the finger still (moving over 10 px cancels it) picks A then B,
   with a short vibration; a drag must move 10 px to count as one; the context menu is suppressed. Orbit, pinch and
   pan are `OrbitControls`' defaults.
-- **Toolbar** (`ViewerToolbar.tsx`): on desktop and tablet a vertical icon rail of `IconButton`s (modes; visual style, with
-  the greyed-context toggle; section box, outlines, measure, connections; go to clash, Home; a Camera popover with
-  standard views, projection, back and forward, Fly to clash and Set as Home; Views (layout, and whether drawings show
-  the whole model or what the 3D view shows); saved views; visibility by model, level and class, and what is hidden for
-  now; screenshot). Each pane's header (`ViewPanes.tsx`) has its view
+- **Toolbar** (`ViewerToolbar.tsx`): on desktop and tablet a vertical icon rail of `IconButton`s in two kinds of group
+  ([docs/measure.md](../measure.md), "The rail"). The 3D view's own: modes; visual style, with the greyed-context
+  toggle; section box, outlines, connections; Home; a Camera popover (standard views, projection, back and forward, Set
+  as Home); saved views. Every view's: go to clash, measure, Views (layout, what drawings show, Fly to clash),
+  visibility by model, level and class and what is hidden for now, screenshot. In Single (or the 3D pane maximised) one
+  rail holds both at the stage's left; in Two and Quad the 3D groups sit in the 3D pane under its header (`Rail3d`, from
+  `App.rail3d`), folded to its height (the modes into one Mode menu, then the tools and camera into menus too), and a
+  maximised drawing hides them. Each pane's header (`ViewPanes.tsx`) has its view
   picker, view range or depth and crop, pin, go to the clash, fit and maximise. A narrow pane's header folds rather
   than overflow: under 380 px the range button loses its words, under 300 px pin, go to the clash and fit move into
   the range menu; the view picker shrinks to a few letters and maximise always stays. Its title block and scale bar
