@@ -1,4 +1,4 @@
-import { Bot, Boxes, Brain, Building2, Check, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type Progress } from "./Activity";
 import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
@@ -2435,9 +2435,12 @@ export function App() {
           ))}
 
           {proposal && !proposing && proposal.options.length > 0 && canEscalate && !proposal.escalated && !hideFix && (
-            <button className="link better-fix" data-tour="better-fix" disabled={!!busy} onClick={() => void escalate()}
-              data-tip={`A larger model takes a second, longer look with everything this try learned. These options stay. About a minute.`}>
-              <Sparkles size={13} aria-hidden /> Look for a better fix with {wonder}</button>)}
+            <button className="better-fix" data-tour="better-fix" disabled={!!busy} onClick={() => void escalate()}
+              data-tip="It starts from everything this try learned: each idea, why it failed and what it hit.">
+              <span className="bf-icon" aria-hidden><Sparkles size={15} /></span>
+              <span className="bf-text"><b>Look for a better fix</b>
+                <span>{wonder} takes a second, longer look · about a minute · these options stay</span></span>
+              <ChevronRight size={16} className="bf-go" aria-hidden /></button>)}
           {proposal?.escalated && !proposing && proposal.usage && ownerSettings && (
             <p className="hint mono">{wonder}: {proposal.usage.calls} call{proposal.usage.calls === 1 ? "" : "s"},
               {" "}{Math.round(proposal.usage.input_tokens / 1000)}k in, {Math.round(proposal.usage.output_tokens / 1000)}k out

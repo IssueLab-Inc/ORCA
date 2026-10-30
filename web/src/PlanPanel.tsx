@@ -89,11 +89,11 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
                 {conflict && <div className="bad small">Collides with another fix in this plan ({conflict.detail})</div>}
                 {plan && it.option && res?.passed && onBuild && it.option.kind !== "trim" && !it.option.cleanup && (built?.(it)
                   ? <BuiltView run={built(it)!} onRetry={() => onBuild(it)} />
-                  : <button className="link better-fix" disabled={busy} onClick={() => onBuild(it)}
+                  : <button className="btn small" disabled={busy} onClick={() => onBuild(it)}
                     data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model. About a minute.">
                     <Building2 size={13} aria-hidden /> Show it built</button>)}
                 {plan && !it.option && !it.recommended && onEscalate && (
-                  <button className="link better-fix" disabled={busy} onClick={() => onEscalate(it)}
+                  <button className="btn small wonder" disabled={busy} onClick={() => onEscalate(it)}
                     data-tip={`A larger model takes a second, longer look at this clash with everything this try learned. About a minute.`}>
                     <Sparkles size={13} aria-hidden /> Ask {wonder ?? "Muse Wonder"}</button>)}
               </div>
