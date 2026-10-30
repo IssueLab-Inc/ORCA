@@ -17,14 +17,12 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Callable
 
-from . import owner, requirements as reqs
+from . import domains, owner, requirements as reqs
 from .meta_client import ChatModel
 from .reports import Report, ReportClash
 
-PROMPT = Path(__file__).parent / "domain_packs" / "triage.md"
 NON_PHYSICAL = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
 TOUCH_M = 0.001  # |distance| at or under this is a touch
 
@@ -113,13 +111,14 @@ def same_element(c: ReportClash) -> dict:
 
 
 def triage_one(model: ChatModel, c: ReportClash, images: bool = True,
-               on_reasoning: Callable[[str], None] | None = None, note: str = "", guidance: str = "") -> dict:
+               on_reasoning: Callable[[str], None] | None = None, note: str = "", guidance: str = "",
+               domain: str = domains.CONSTRUCTION) -> dict:
     """One verdict. With `on_reasoning`, and a model that streams its reasoning, each piece of it is passed on as the
     model writes it. `note` is added to the clash's facts (see `alike_groups`); `guidance` (the project's coordination
-    requirements, `requirements.prompt_text`) to the system prompt."""
+    requirements, `requirements.prompt_text`) to the system prompt. `domain` (`domains.of`) says who ORCA is."""
     pics = [p for _, p in c.images] if images else []
     text = describe(c) + (f"\n{note}" if note else "")
-    system = PROMPT.read_text() + guidance
+    system = domains.prompt("triage", domain) + guidance
     if on_reasoning and hasattr(model, "complete_json_streamed"):
         return model.complete_json_streamed(system, text, pics, SCHEMA, on_reasoning)  # type: ignore[attr-defined]
     return model.complete_json(system, text, pics, schema=SCHEMA)  # type: ignore[call-arg]
@@ -177,7 +176,7 @@ REASONING_EVERY_S = 0.6    # how often a clash's new reasoning goes to the brows
 def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
                   workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
                   settled: dict | None = None, reasoning: bool = False, alike: bool = True,
-                  requirements: "reqs.Doc | None" = None) -> dict[str, dict]:
+                  requirements: "reqs.Doc | None" = None, domain: str = domains.CONSTRUCTION) -> dict[str, dict]:
     """A verdict for every clash in `report`. `done` holds results already known (resumed or cached); they are kept.
     `settled` holds verdicts the open model already decides (`same_element`): no model call for those.
 
@@ -226,7 +225,7 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
                     sent[0] = time.perf_counter()
 
             try:
-                v = triage_one(model, c, images, heard if reasoning else None, _alike_note(group), guidance)
+                v = triage_one(model, c, images, heard if reasoning else None, _alike_note(group), guidance, domain)
                 out = {**v, "source": "model", "seconds": round(time.perf_counter() - started, 1)}
                 if doc is not None:
                     out = reqs.overlay(doc, out)
@@ -310,11 +309,14 @@ class Job:
     """One triage run over a report, shared by everyone who opens it: late subscribers replay what has landed."""
 
     def __init__(self, report: Report, model: ChatModel, info: dict, workers: int = 8,
-                 requirements: "reqs.Doc | None" = None, seed: dict[str, dict] | None = None):
+                 requirements: "reqs.Doc | None" = None, seed: dict[str, dict] | None = None,
+                 domain: str = domains.CONSTRUCTION):
         """`requirements`: the coordination requirements this run reads under. `seed`: model readings from an earlier
-        run under the same prompt (only the rules changed): kept, so only what they no longer settle is asked."""
+        run under the same prompt (only the rules changed): kept, so only what they no longer settle is asked.
+        `domain`: the scene's (`domains.of`), whose voice the triage prompt takes."""
         self.report, self.model, self.info, self.workers = report, model, info, workers
         self.requirements = requirements
+        self.domain = domain
         self.seed = {k: v for k, v in (seed or {}).items() if v.get("source") == "model"}
         self.audit: dict[int, dict] = {}
         self.results: dict[str, dict] = {}
@@ -371,7 +373,7 @@ class Job:
                     self._emit({"type": "clash", "id": cid, **v})
                 triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True),
                               done=dict(self.seed), settled=dict(self.facts), reasoning=True,
-                              requirements=self.requirements)
+                              requirements=self.requirements, domain=self.domain)
                 if self.requirements is not None and self.requirements.by_design:
                     self._audit()
             except Exception as e:

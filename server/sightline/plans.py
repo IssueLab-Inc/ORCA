@@ -17,13 +17,11 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Callable
 
-from . import agent, connections, edits, owner, requirements, verify
+from . import agent, connections, domains, edits, owner, requirements, verify
 from .service import PATTERNS_KEPT, Workspace
 
-PACKS = Path(__file__).parent / "domain_packs"
 MAX_ITEMS = 8
 NOT_PHYSICAL = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
 
@@ -347,7 +345,8 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
                 if e["type"] == "attempt":
                     emit({"type": "item", "key": it.key, "status": "checking", "attempt": e["title"], "passed": e["passed"]})
             stamp = ws._stamp(scene_id)
-            result = agent.resolve(ws.scene(scene_id), clash, ws.model, on_event=progress, lock=ws.lock, max_rounds=2,
+            result = agent.resolve(ws.scene(scene_id), clash, ws.model, pack=domains.of(ws, scene_id),
+                                   on_event=progress, lock=ws.lock, max_rounds=2,
                                    hosts_model=ws.hosts_model,
                                    **ws.fix_settings(scene_id, it.element_a, it.element_b))
             # What a second try on this pair reads (Ask Muse Wonder on a failed item: docs/escalation.md).
@@ -510,7 +509,7 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
     emit({"type": "thinking", "what": "root cause"})
     text = _describe_cluster(ws, scene_id, cluster)
     doc = requirements.current()
-    reply = ws.model.complete_json((PACKS / "root_cause.md").read_text()
+    reply = ws.model.complete_json(domains.prompt("root_cause", domains.of(ws, scene_id))
                                    + (requirements.prompt_text(doc, "fixes") if doc else ""), text)
     strategy = reply.get("strategy") if reply.get("strategy") in ("move_hub", "fix_partners", "as_designed") else "fix_partners"
     emit({"type": "root_cause", "root_cause": reply.get("root_cause", ""), "strategy": strategy,
@@ -810,7 +809,7 @@ def read_patterns(ws: Workspace, scene_id: str, report_id: str, pats: list[dict]
             refused = charge()
             if refused:
                 return None, refused
-            verdicts = triage_patterns(ws, pats)
+            verdicts = triage_patterns(ws, pats, scene_id)
             with ws._patterns_lock:
                 ws._patterns[key] = verdicts
                 while len(ws._patterns) > PATTERNS_KEPT:
@@ -821,8 +820,9 @@ def read_patterns(ws: Workspace, scene_id: str, report_id: str, pats: list[dict]
                 ws._pattern_locks.pop(key, None)
 
 
-def triage_patterns(ws: Workspace, pats: list[dict]) -> dict[str, dict]:
-    """One Muse Spark call over every pattern: by design, a modelling error, or a real problem, and what to do."""
+def triage_patterns(ws: Workspace, pats: list[dict], scene_id: str | None = None) -> dict[str, dict]:
+    """One Muse Spark call over every pattern: by design, a modelling error, or a real problem, and what to do (in the
+    voice of the scene's domain, `domains.of`)."""
     if not pats:
         return {}
     lines = []
@@ -832,7 +832,7 @@ def triage_patterns(ws: Workspace, pats: list[dict]) -> dict[str, dict]:
                      f"{p['max_mm']} mm{' (the same every time)' if p['constant'] else ''}. Examples: "
                      + "; ".join(p["examples"][:3]))
     doc = requirements.current()
-    reply = ws.model.complete_json((PACKS / "patterns.md").read_text()
+    reply = ws.model.complete_json(domains.prompt("patterns", domains.of(ws, scene_id))
                                    + (requirements.prompt_text(doc, "triage") if doc else ""), "\n".join(lines))
     out = {}
     for row in reply.get("patterns", []):

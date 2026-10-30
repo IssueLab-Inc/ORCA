@@ -24,11 +24,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import context_planner, edits, plans, settings
+from . import context_planner, domains, edits, plans, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 
-PROMPT = Path(__file__).parent / "domain_packs" / "chat.md"
 MAX_STEPS = 8          # model calls per user message
 MAX_SESSIONS = 200
 MAX_HISTORY = 40       # messages kept per session (oldest dropped first, the system prompt stays)
@@ -176,7 +175,7 @@ class Chat:
         if session_id and session_id in self.sessions:
             self.sessions.move_to_end(session_id)
             return self.sessions[session_id]
-        s = Session(uuid.uuid4().hex[:12], [{"role": "system", "content": PROMPT.read_text()}])
+        s = Session(uuid.uuid4().hex[:12], [{"role": "system", "content": domains.prompt("chat")}])
         self.sessions[s.id] = s
         while len(self.sessions) > MAX_SESSIONS:
             self.sessions.popitem(last=False)
@@ -202,6 +201,9 @@ class Chat:
             turn_number = target._next_turn
             # Active requests own their tool history; only completed turns become shared context.
             session = Session(target.id, deepcopy(target.messages))
+        if session.messages and session.messages[0].get("role") == "system":   # in the open scene's voice
+            voice = domains.prompt("chat", domains.of(self.ws, ctx.scene_id))
+            session.messages[0] = {"role": "system", "content": voice}
         session.messages.append({"role": "user", "content": f"{self._context_line(ctx)}\n\n{text}"})
         answer = ""
         for _ in range(MAX_STEPS):

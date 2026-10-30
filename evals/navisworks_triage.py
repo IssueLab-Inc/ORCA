@@ -31,11 +31,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
-from sightline import reports  # noqa: E402
+from sightline import domains, reports  # noqa: E402
 from sightline import triage  # noqa: E402
 from sightline.meta_client import MetaChatModel, triage_model  # noqa: E402
 
-PROMPT = Path(__file__).resolve().parents[1] / "server/sightline/domain_packs/triage.md"
 VIEWS = ["A-transparent.png", "B-context.png", "C-alternate.png"]
 
 NON_PHYSICAL = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
@@ -100,7 +99,7 @@ def run(clashes: list[dict], out: Path, model: MetaChatModel, workers: int, imag
     done = {json.loads(l)["id"] for l in replies.read_text().splitlines()} if replies.exists() else set()
     todo = [c for c in clashes if c["id"] not in done]
     print(f"{len(done)} already done, {len(todo)} to go")
-    system, lock = PROMPT.read_text(), threading.Lock()
+    system, lock = domains.prompt("triage"), threading.Lock()
 
     def one(c: dict) -> dict:
         pics = [c["folder"] / v for v in VIEWS] if images else []

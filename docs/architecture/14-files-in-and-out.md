@@ -345,7 +345,7 @@ flowchart TB
   it. Only when every page is reviewed (and there is at least one page) does the cover say "REVIEWED · n of n";
   otherwise the cover's stamp says "DRAFT · AI-assisted · k of n reviewed" and every page's header "DRAFT · requires
   review".
-- **Also in the PDF:** cover with counts and the clearance sentence (the requirements' fix clearance, else 25 mm);
+- **Also in the PDF:** cover with the ORCA by IssueLab lockup (`LOCKUP`), counts and the clearance sentence (the requirements' fix clearance, else 25 mm);
   summary and actions by team (AI-drafted); the authors' table; noise by test; "How this report was made" (fixed
   text naming the triage model that ran, `document.triage_by`: "an open-weights model (Muse Spark Open)" or "Muse
   Spark (Meta)", from the triage run's `info`, else `meta_client.triage_model_info()` when no run is held, as after a

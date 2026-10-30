@@ -30,8 +30,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
-from . import (agents, built, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
-               requirements, settings, spend, step, titles, triage, voice_live)
+from . import (agents, built, chat, context_planner, detect, document, domains, edits, escalation, mcp_server, owner,
+               plans, requirements, settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
@@ -1322,7 +1322,8 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False) -> 
             if doc is not None:
                 info = {**info, "requirements": ws.requirements_info(doc)}
             job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", 8),
-                             requirements=doc, seed=donor.results if donor is not None else None)
+                             requirements=doc, seed=donor.results if donor is not None else None,
+                             domain=domains.of(ws, scene_id))
             job.learn(facts)
             _triage_jobs[key] = job.start()
             while len(_triage_jobs) > 16:
@@ -1545,7 +1546,7 @@ def _build_document(report, verdicts: dict, scene_id: str | None, scope: str, *,
     data, name, media = document.generate(
         report, verdicts, ws.model, scope=scope, model_teams=teams or {}, matches=matches, scene=scene,
         evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None),
-        triage_info=triage_info)
+        triage_info=triage_info, domain=domains.of(ws, scene_id if scene is not None else None))
     doc_id = uuid.uuid4().hex
     _documents[doc_id] = (data, name, media)
     while len(_documents) > 24:

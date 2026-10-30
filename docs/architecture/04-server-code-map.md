@@ -1,7 +1,7 @@
 # 04 · Server code map
 
-> **Covers:** `server/sightline/*.py` (28 modules), `server/sightline/domain_packs/`, `server/pyproject.toml`,
-> `server/tests/` · **Checked against code:** 2026-10-30 (`104fda9`) · **Deeper design:** the feature docs linked
+> **Covers:** `server/sightline/*.py` (34 modules), `server/sightline/domain_packs/`, `server/pyproject.toml`,
+> `server/tests/` · **Checked against code:** 2026-10-30 (`a34b1e7` + `domains.py`) · **Deeper design:** the feature docs linked
 > from each module below ([detection](../detection.md), [edits](../edits.md), [escalation](../escalation.md),
 > [mcp](../mcp.md), [requirements](../requirements.md), [show-it-built](../show-it-built.md), [step](../step.md),
 > [uploads](../uploads.md), [voice](../voice.md))
@@ -30,7 +30,7 @@ imports made inside functions, which are drawn dotted below).
 | Report jobs | `triage.py`, `titles.py`, `built.py` | Bulk verdicts, Muse titles, Show it built pictures: work over a whole report or one picture, no scene edits |
 | Documents and inputs | `reports.py`, `document.py` | Navisworks XML in; PDF and BCF out |
 | Geometry | `scene.py`, `verify.py`, `edits.py`, `detect.py`, `step.py`, `context_eval.py` | The federated IFC scene, the geometric check, model edits, ORCA's own detection, STEP conversion, whole-arrangement checks |
-| Policy and request context | `requirements.py`, `settings.py`, `owner.py`, `limits.py`, `spend.py` | Coordination requirements, settings for everyone, the owner's context, demo caps, the Muse Wonder budget |
+| Policy and request context | `requirements.py`, `settings.py`, `owner.py`, `limits.py`, `spend.py`, `domains.py` | Coordination requirements, settings for everyone, the owner's context, demo caps, the Muse Wonder budget, which domain's prompts a scene gets |
 | Model client | `meta_client.py` | Chat completions, Responses, transcription; model choice, effort, usage and price |
 | Test support | `fixtures.py` | Small synthetic IFC models for tests and spikes |
 
@@ -43,7 +43,7 @@ flowchart TB
     jobs["Report jobs: triage, titles, built"]
     docio["Documents and inputs: reports, document"]
     geo["Geometry: scene, verify, edits, detect, step, context_eval"]
-    policy["Policy: requirements, settings, owner, limits, spend"]
+    policy["Policy: requirements, settings, owner, limits, spend, domains"]
     client["Model client: meta_client"]
     support["Test support: fixtures"]
     entry --> flows
@@ -105,6 +105,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
 | `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
+| `domains.py` | Policy | Which domain a scene is in (`of`: opened wholly from STEP is `machines`, else `construction`) and the shared prompts in that domain's voice (`prompt` fills `{role}`) |
 | `document.py` | Documents | Coordination reports: PDF (combined, per team, per model) and BCF 2.1, team guessing, who acts and reviews |
 | `edits.py` | Geometry | Model edits: offsets with bends, routes, resizes, trims, penetrations; trial and keep transactions; meshes |
 | `escalation.py` | Fix agent | The brief a second try on Muse Wonder reads (first try, neighbourhood, blockers) |
@@ -194,8 +195,8 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
   `_take`; the shared jobs and caches `_triage_jobs`, `_title_jobs`, `_documents`, `_previews`, `_chat` (pattern
   readings live on the Workspace: `plans.read_patterns`); `links` (`agents.Links`), `mcp_hooks`, `_McpGate`, `_mcp_transport`, `_lifespan`; folders `EXPORTS`,
   `UPLOADS`; `_receive_models` / `_unpack` (gzipped uploads).
-- **Imports:** `agents.py`, `built.py`, `chat.py`, `context_planner.py`, `detect.py`, `document.py`, `edits.py`,
-  `escalation.py`, `limits.py`, `mcp_server.py`, `meta_client.py`, `owner.py`, `plans.py`, `requirements.py`,
+- **Imports:** `agents.py`, `built.py`, `chat.py`, `context_planner.py`, `detect.py`, `document.py`, `domains.py`,
+  `edits.py`, `escalation.py`, `limits.py`, `mcp_server.py`, `meta_client.py`, `owner.py`, `plans.py`, `requirements.py`,
   `service.py`, `settings.py`, `spend.py`, `step.py`, `titles.py`, `triage.py`, `voice_live.py`.
   **Imported by:** `mcp_server.py` (lazily, for the stdio entry point).
 - **Rules:** `.env` is already loaded when it runs (the package's `__init__.py`), and its caps and sizes are read with
@@ -255,7 +256,7 @@ Fix together (`build_batch`), root causes (`root_causes`, `build_root_cause`), p
 - **Main symbols:** `Item`, `Plan`, `verify_together`, `pairs_for`, `merge_shared`, `failure_summary`,
   `build_batch`, `root_causes`, `build_root_cause`, `apply`, `patterns`, `triage_patterns`; registries `IN_TRIAL`,
   `EXTRA_FILES`, `KEEPS_CONTACTS`, `KEEP`; `MAX_ITEMS` (8).
-- **Imports:** `agent.py`, `edits.py`, `owner.py`, `requirements.py`, `service.py`, `verify.py`.
+- **Imports:** `agent.py`, `domains.py`, `edits.py`, `owner.py`, `requirements.py`, `service.py`, `verify.py`.
   **Imported by:** `app.py`, `chat.py`, `mcp_server.py`.
 - **Rules:** item agents run four at a time (`ThreadPoolExecutor(max_workers=4)` with `owner.submit`), each with
   `lock=ws.lock`, so model calls overlap and geometry trials take turns; `verify_together` holds `ws.lock` and makes
@@ -269,12 +270,14 @@ Muse Spark answers a message in at most `MAX_STEPS` (8) model calls, calling too
 
 - **Main symbols:** `Chat` (`session`, `turn`, `_run`), `Session`, `Context`, `TOOLS` (23 functions, including
   `explore_wider_fix`, `propose_fixes`, `plan_root_cause`, `show_it_built`), `MAX_SESSIONS` (200), `MAX_HISTORY` (40).
-- **Imports:** `context_planner.py`, `edits.py`, `meta_client.py`, `plans.py`, `service.py`, `settings.py`.
-  **Imported by:** `agents.py`, `app.py`, `mcp_server.py`.
+- **Imports:** `context_planner.py`, `domains.py`, `edits.py`, `meta_client.py`, `plans.py`, `service.py`,
+  `settings.py`. **Imported by:** `agents.py`, `app.py`, `mcp_server.py`.
 - **Rules:** a turn works on a copy of the session's messages and publishes it only if no newer turn already did;
   cancelled turns publish nothing; tool results are text only, so pictures go back as the next user message; caps
   are passed per turn (`propose_allowed`, `propose_allowed_many`, `escalate_allowed`, `detect_allowed`), never stored
-  on the shared `Chat`; a tool that does what a capped route does takes that route's cap.
+  on the shared `Chat`; a tool that does what a capped route does takes that route's cap; each turn sets the system
+  message to `chat.md` in the voice of the turn's scene (`domains.of`), so a session that moves from Northbank to the
+  cell changes voice with it.
 
 ### `context_planner.py`: the wider-fix search
 
@@ -310,13 +313,14 @@ plus the STEP export helpers.
 
   Module level: `step_changes`, `_spec`, `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,
   `SCENE_BUDGET_MB`, `LAST_KEPT` (200), `SAMPLE_EXCLUDE`, `HOSTS_TIMEOUT_S`.
-- **Imports:** `agent.py`, `detect.py`, `edits.py`, `escalation.py`, `hosts.py`, `limits.py`, `meta_client.py`,
-  `reports.py`, `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
+- **Imports:** `agent.py`, `detect.py`, `domains.py`, `edits.py`, `escalation.py`, `hosts.py`, `limits.py`,
+  `meta_client.py`, `reports.py`, `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
   **Imported by:** `app.py`, `chat.py`, `mcp_server.py`, `plans.py`.
 - **Rules:** `Workspace.lock` (an RLock) is held by everything that touches a scene's geometry; every kept edit calls
   `IfcScene.mark_edited` and `IfcScene.bump`; trials never do; a second try's brief (`last_try`) is read only while
   the scene revision and requirements id it was made under still hold; `escalate` holds its cost estimate
-  (`spend.held`) for the whole try; a sample path must resolve inside `samples/`.
+  (`spend.held`) for the whole try; a sample path must resolve inside `samples/`; `propose` and `escalate` (and
+  `plans.build_batch`) pass `agent.resolve` the scene's pack, `domains.of(ws, scene_id)`.
 
 ## The per-clash fix agent
 
@@ -587,10 +591,11 @@ A verdict on every clash: sure cases by rule (non-physical side, a touch within 
 the rest one strict-JSON call per clash or per group of alike clashes, many at a time.
 
 - **Main symbols:** `Job` (`start`, `learn`, `follow`, `state`, `_audit`), `triage_report`, `triage_one`, `by_rule`,
-  `same_element`, `not_a_clash`, `alike_groups`, `audit_rules`, `summary`, `describe`, `SCHEMA`, `PROMPT`,
+  `same_element`, `not_a_clash`, `alike_groups`, `audit_rules`, `summary`, `describe`, `SCHEMA`, `AUDIT`,
   `NON_PHYSICAL`, `TOUCH_M`, `ALIKE_MIN`, `REASONING_KEPT`, `REASONING_EVERY_S`.
-- **Imports:** `meta_client.py`, `owner.py`, `reports.py`, `requirements.py`. **Imported by:** `app.py`,
-  `document.py`, `requirements.py` (lazily).
+- **Imports:** `domains.py`, `meta_client.py`, `owner.py`, `reports.py`, `requirements.py`. **Imported by:**
+  `app.py`, `document.py`, `requirements.py` (lazily). `Job`, `triage_report` and `triage_one` take the scene's
+  `domain` (from `app._start_triage`), which picks the voice of `triage.md`.
 - **Rules:** the job's worker starts with `owner.spawn` and model calls go through `owner.submit`, so the starter's
   settings (effort, open weights) reach them; a call is tried up to three times, then the verdict is `"unknown"`
   with the error.
@@ -636,7 +641,8 @@ Coordination reports from a clash report, its triage and the page's evidence (pi
 - **Main symbols:** `generate`, `build_rows`, `Row`, `teams_for`, `guess_team`, `guess_teams`, `model_files`,
   `explain`, `summarise`, `render_html`, `requirements_html`, `to_pdf`, `bcf_zip`, `TEAMS`, `STAYS_FIRST`,
   `VERDICT_LABEL`.
-- **Imports:** `meta_client.py`, `owner.py`, `reports.py`, `triage.py`; lazily `built.py`, `requirements.py`.
+- **Imports:** `domains.py`, `meta_client.py`, `owner.py`, `reports.py`, `triage.py`; lazily `built.py`,
+  `requirements.py`. `generate`, `explain` and `summarise` take the scene's `domain` (from `app._build_document`).
   **Imported by:** `app.py`, `detect.py` (`guess_team`), `requirements.py` (lazily, `guess_team`, `_class_team`).
 
 ### `requirements.py`: coordination requirements
@@ -667,6 +673,19 @@ environment's default. Imports nothing at load; lazily `owner.py`.
 - **Imported by:** `app.py`, `chat.py`, `mcp_server.py`, `meta_client.py` (lazily), `service.py`.
 - **Rules:** precedence is the owner's own choice, then everyone's, then the environment; a store that cannot be read
   or written is logged and the value in memory is used, never a failed request.
+
+### `domains.py`: whose voice the prompts take
+
+ORCA works on buildings and on machine cells. A scene whose every model was opened from STEP (`Workspace.sources`) is
+`machines`; IFC, a mix of IFC and STEP, or no scene is `construction`. Deeper detail: the prompts in
+[08](08-ai-models-prompts-and-spend.md#how-the-domain-is-chosen).
+
+- **Main symbols:** `of(ws, scene_id)`, `prompt(name, domain)`, `ROLES`, `CONSTRUCTION`, `MACHINES`, `PACKS`.
+- **Imports:** nothing from the package. **Imported by:** `app.py`, `chat.py`, `document.py`, `plans.py`,
+  `service.py`, `triage.py`.
+- **Rules:** one helper decides the domain; callers never test for STEP themselves. `prompt` replaces `{role}` only
+  (plain replacement, the prompts' JSON keeps its braces), so a building's prompts are byte for byte what they were
+  before the placeholder (`tests/test_domains.py`).
 
 ### `owner.py`: the owner
 
@@ -733,12 +752,14 @@ Small IFC models built in code, so tests and spikes run anywhere in seconds with
 
 ## Prompts, package and tests
 
-**`server/sightline/domain_packs/`** holds the 13 prompts the modules send. They are read from disk when used, not
-at import (a chat session reads `chat.md` once, when it starts): `construction.md` (`agent.py`), `escalation.md`
+**`server/sightline/domain_packs/`** holds the 14 prompts the modules send. They are read from disk when used, not
+at import (the chat reads `chat.md` on each turn): `construction.md` and `machines.md` (`agent.py`, the pack
+`domains.of` picks), `escalation.md`
 (`escalation.py`, added by `Workspace.escalate`), `chat.md` (`chat.py`), `context.md` (`context_planner.py`),
 `triage.md` (`triage.py`), `titles.md` (`titles.py`), `root_cause.md` and `patterns.md` (`plans.py`),
 `penetrations.md` (`hosts.py`), `report.md` and `report_summary.md` (`document.py`), `requirements.md`
-(`requirements.py`), `step_classes.md` (`step.py`). `triage.py` also keeps its rule-audit prompt inline (`AUDIT`),
+(`requirements.py`), `step_classes.md` (`step.py`). The six shared ones (chat, triage, report, report summary,
+patterns, root cause) carry a `{role}` placeholder that `domains.prompt` fills. `triage.py` also keeps its rule-audit prompt inline (`AUDIT`),
 and `built.py` its restyle and judge prompts (`PROMPT`, `JUDGE_SYSTEM`). The inventory, with what each prompt asks
 for, is in [08](08-ai-models-prompts-and-spend.md).
 
@@ -783,8 +804,8 @@ reads the developer's `server/.sightline-settings.json` or a Modal Dict). Most b
 - **Lazy imports keep the graph acyclic.** `requirements.py`, `meta_client.py`, `settings.py`, `hosts.py`,
   `verify.py`, `document.py` and `detect.py` import some package modules inside functions. Do not hoist those imports
   to the top of the file.
-- **`scene.py`, `reports.py`, `limits.py`, `owner.py` and `spend.py` import nothing from the package.** Keep them
-  leaves.
+- **`scene.py`, `reports.py`, `limits.py`, `owner.py`, `spend.py` and `domains.py` import nothing from the
+  package.** Keep them leaves.
 
 ## When to update this doc
 

@@ -1251,3 +1251,15 @@ The ORCA notch, menu and brand in the app (Oct 30; code `web/src/Brand.tsx`, `Ap
   loading card (opened 4.7 s, 4 of 4 downloaded 5.1 MB, 1,961 elements drawn), working notch ("Checking the models")
   clear of Export, loaded model, the menu, a selected clash with its chip under the notch, and the PDF cover rendered
   with WeasyPrint.
+
+A machines pack and a persona per domain (Oct 30; code `server/sightline/domains.py`, `domain_packs/machines.md`, the six
+shared prompts, `service.py`, `plans.py`, `chat.py`, `triage.py`, `document.py`, `app.py`):
+- **Why:** every prompt said "senior BIM coordinator", so the palletising cell was triaged, fixed, chatted about and
+  reported on as a building.
+- **What:** `domains.of(ws, scene_id)` reads a scene opened wholly from STEP as `machines`, everything else as
+  `construction`. The fix agent reads `machines.md` (a mechanical integration engineer's rules for static coordination:
+  anchored frames and robot bases stay, guarding and safety zones stay intact, maintenance access, conveyor lines; never
+  a claim about robot motion), with construction's fix kinds and output contract word for word. Chat, triage, report,
+  report summary, patterns and root cause fill `{role}` per domain; construction's text is byte-identical.
+- **Checked:** `test_domains.py` (11); 618 server tests; `evals/step_cell.py` passes on the real models (17 of 17
+  planted pairs, C1, C2, C3, C6, C7, C8, Rev B 0 planted; `evals/runs/2026-10-30-cell-step-machines/`).

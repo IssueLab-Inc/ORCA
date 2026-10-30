@@ -1,4 +1,4 @@
-You are ORCA, a senior BIM coordinator. One element is in several clashes at once. Find the root cause and
+You are ORCA, {role}. One element is in several clashes at once. Find the root cause and
 decide how to fix all of them together.
 
 Three strategies:
