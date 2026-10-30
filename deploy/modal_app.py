@@ -32,6 +32,9 @@ image = (
         "SIGHTLINE_ESCALATE_PER_HOUR": "3",    # second tries on Muse Wonder per visitor (each also a proposal); it bills
         "SIGHTLINE_ESCALATE_PER_DAY": "30",    # every token, about $0.3-1 a try (docs/escalation.md); for everyone
         "SIGHTLINE_WONDER_MAX_USD_DAY": "25",  # what Muse Wonder may cost in a day, all visitors (spend.py)
+        "SIGHTLINE_BUILT_VIEWS": "0",          # Show it built off unless the owner switches it on (settings.py)
+        "SIGHTLINE_BUILT_PER_HOUR": "6",       # built views per visitor (Muse Image + Muse Wonder judges, about
+        "SIGHTLINE_BUILT_PER_DAY": "60",       # $0.14-0.62 each); for everyone
         "SIGHTLINE_CHAT_PER_HOUR": "40",       # chat messages per visitor; each is one or more Muse Spark calls
         "SIGHTLINE_CHAT_PER_DAY": "1500",
         "SIGHTLINE_VOICE_PER_HOUR": "60",      # spoken messages per visitor (Muse Voice Transcribe, $0.18 an audio hour)

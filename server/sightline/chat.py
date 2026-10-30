@@ -120,6 +120,10 @@ TOOLS = [
         {"clash_ids": {"type": "array", "items": {"type": "string"}}}, ["clash_ids"]),
     _fn("show_clash", "Select a clash in the user's view and fly the camera to it.", {"clash_id": {"type": "string"}},
         ["clash_id"]),
+    _fn("show_it_built", "Show how the fix chosen for a clash (or the fix kept for it) would look built: the page draws "
+        "ORCA's own view of it as a clean presentation render (Muse Image), checked against the model, beside the "
+        "model's view. Only when the user asks to see a fix built; it costs a few cents a picture and takes about a "
+        "minute. Not for a trim.", {"clash_id": {"type": "string"}}, ["clash_id"]),
     _fn("set_view", "Change the user's 3D view.", {
         "mode": {"type": "string", "enum": ["shaded", "xray", "context", "isolate"]},
         "section_box": {"type": "boolean"}}),
@@ -525,6 +529,15 @@ class Chat:
             c = self._report(ctx).clash(args["clash_id"])
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
             return {"shown": c.id}, f"showing {c.label}", []
+        if name == "show_it_built":
+            if not settings.built_views():
+                return {"error": "Show it built is switched off here."}, "switched off", []
+            c = self._report(ctx).clash(args["clash_id"])
+            emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
+            emit({"type": "ui", "action": "show_it_built", "clash_id": c.id})
+            return ({"note": "The page draws the chosen or kept fix of this clash and shows it beside ORCA's view when "
+                             "it passes the check (about a minute). If no fix is chosen or kept, there is nothing to "
+                             "draw: propose fixes first."}, f"drawing {c.label}", [])
         if name == "set_view":
             emit({"type": "ui", "action": "set_view", **{k: args[k] for k in ("mode", "section_box") if k in args}})
             return {"done": True}, "view changed", []

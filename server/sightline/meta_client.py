@@ -52,6 +52,7 @@ def load_env(path: Path = ENV_FILE) -> None:
 # Models billed per token on the Meta Model API, by id prefix (any Muse Wonder version): USD per input and per output
 # token (reasoning counts as output). Muse Spark's contributor tier and the open-weights host are not counted here.
 PRICES = {"muse-wonder": (4 / 1e6, 20 / 1e6)}
+FIXED_EFFORT = ("judge",)   # roles whose effort is their own, whatever the owner or everyone's settings say
 LABELS = {"muse-wonder": "Muse Wonder", "muse-spark": "Muse Spark", "meta-models/muse-spark-open": "Muse Spark Open"}
 
 
@@ -153,6 +154,8 @@ class MetaChatModel:
     def effort(self) -> str | None:
         """The owner's effort for this request (owner.py), else the one set for everyone (settings.py), else this model's."""
         from . import owner, settings
+        if self.role in FIXED_EFFORT:   # a check measured at its own effort (Show it built's judges): no setting moves it
+            return self.reasoning_effort
         return owner.effort(self.role) or settings.effort_for(self.role) or self.reasoning_effort
 
     def _count(self, raw: dict | None) -> None:

@@ -180,6 +180,12 @@ class Workspace:
     def scene(self, scene_id: str) -> IfcScene:
         return self.scenes[scene_id]
 
+    def classes(self, scene_id: str) -> dict[str, list[str]]:
+        """GlobalId → [IFC class, name] of every physical element (what has a box)."""
+        s = self.scene(scene_id)
+        with self.lock:
+            return {g: [s.element(g).ifc_class, s.element(g).name or s.element(g).ifc_class] for g in s.bounds()}
+
     def describe(self, scene_id: str, global_id: str) -> dict:
         return asdict(self.scene(scene_id).element(global_id))
 

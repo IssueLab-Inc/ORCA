@@ -53,6 +53,21 @@ export interface Proposal {
   escalated?: boolean;
 }
 export interface Usage { model: string; calls: number; input_tokens: number; output_tokens: number; reasoning_tokens: number; usd: number }
+/** Show it built (server: built.make): Muse Image's restyle of a fix's view, checked against the model. */
+export interface BuiltResult {
+  status: "done" | "failed"; key?: string; image_url?: string; lines_url?: string; why?: string;
+  gate?: { f: number; tile: number }; verdicts?: { verdict: string; differences: { kind: string; what: string; where: string; size: string }[] }[];
+  tried?: number; seconds?: number; cached?: boolean;
+  judge?: string;   // who checked it: "Muse Wonder", or "Muse Spark" (the lighter check, when Wonder's budget was spent)
+}
+export type BuiltEvent =
+  | { type: "drawing"; round: number; pictures: number; shared?: boolean }
+  | { type: "gate"; round: number; picture: number; f?: number; tile?: number; passed: boolean; error?: string }
+  | { type: "judging"; round: number; picture: number }
+  | { type: "judged"; round: number; picture: number; verdicts: string[] }
+  | { type: "retry"; why: string }
+  | ({ type: "result" } & BuiltResult)
+  | { type: "error"; detail: string };
 /** Whether a clash Muse Spark could not fix may go to a larger model for a second try (server: escalation_info). */
 export interface EscalationInfo { model: string; label: string; mode: "off" | "button" | "auto"; available: boolean }
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
@@ -259,17 +274,17 @@ async function pack(file: File): Promise<Blob> {
 export type EscalationMode = "off" | "button" | "auto";
 export interface OwnerSettings {
   effort?: Effort; triage_effort?: Effort; no_caps?: boolean; open_weights?: boolean;
-  escalation?: EscalationMode; escalation_effort?: Effort;
+  escalation?: EscalationMode; escalation_effort?: Effort; built_views?: boolean;
 }
 /** The settings for everyone (server: settings.py); null fields take the environment's default. */
 export interface EveryoneSettings {
   open_weights: boolean | null; effort: Effort | null; triage_effort: Effort | null;
-  escalation: EscalationMode | null; escalation_effort: Effort | null;
+  escalation: EscalationMode | null; escalation_effort: Effort | null; built_views: boolean | null;
 }
 export interface SettingsState {
   everyone: EveryoneSettings;
   defaults: { open_weights: boolean; effort: Effort | null; triage_effort: Effort | null; escalation: EscalationMode;
-    escalation_effort: Effort | null };
+    escalation_effort: Effort | null; built_views: boolean };
   host: boolean;  // an open-weights host key is configured
 }
 let ownerSettings: OwnerSettings | null = null;
@@ -361,6 +376,7 @@ export type ChatEvent =
   | { type: "tool"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; summary: string }
   | { type: "ui"; action: "select_clash"; clash_id: string }
+  | { type: "ui"; action: "show_it_built"; clash_id: string }   // draw the chosen or kept fix (docs/show-it-built.md)
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   | { type: "ui"; action: "open_report"; report_id: string; detection: Detection }
   | { type: "detect_event"; event: DetectEvent }
@@ -384,11 +400,13 @@ export interface Evidence {
   rationale: string; also_needs: string; advice?: string; moved: string[]; before_img?: string; after_img?: string;
   /** Who must review the fix before it is built ("structure", "services"). */
   review?: string;
+  /** Show it built: the fix's checked picture (`/api/built/<key>.jpg`), or why none kept to the model. */
+  built_img?: string; built_note?: string;
 }
 /** A team's review of one clash, recorded in the app. */
 export interface Signoff { team: Team; name: string; decision: "approve" | "reject"; note: string; at: string }
 export type DocEvent =
-  | { type: "progress"; step: "explaining" | "summarising" | "rendering" | "bcf"; done?: number; total?: number }
+  | { type: "progress"; step: "drawing" | "explaining" | "summarising" | "rendering" | "bcf"; done?: number; total?: number }
   | { type: "ready"; url: string; name: string; bytes: number }
   | { type: "error"; message: string };
 
@@ -476,7 +494,21 @@ export const api = {
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
   settings: () => call<SettingsState>("/settings"),
   /** Which model this browser's titles and triage would use now (the owner's choice, else the setting for everyone). */
-  models: () => call<{ triage: TriageModel; escalation?: EscalationInfo; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
+  models: () => call<{ triage: TriageModel; escalation?: EscalationInfo; built_views?: boolean; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
+  /** Every physical element's class and name (GlobalId → [class, name]): a built view's cutaway costs, its caption. */
+  classes: (sceneId: string) => call<Record<string, [string, string]>>(`/scenes/${sceneId}/classes`),
+  /** Show it built: the passes of one view (Viewer.captureBuilt) → a checked restyle, or why not. */
+  built: async (sceneId: string, passes: { look: string; ids: string; normals: string }, fixKind: string,
+                onEvent: (e: BuiltEvent) => void, signal?: AbortSignal): Promise<BuiltResult> => {
+    let out: BuiltResult | null = null;
+    await ndjson<BuiltEvent>(`/scenes/${sceneId}/built/stream`, { ...passes, fix_kind: fixKind }, (e) => {
+      if (e.type === "error") throw new ApiError(e.detail, 500);
+      if (e.type === "result") { out = e; return true; }
+      onEvent(e);
+    }, signal);
+    if (!out) throw new ApiError("The server stopped before the picture was checked. Try again.", 500);
+    return out;
+  },
   saveSettings: (changes: Partial<EveryoneSettings>) => call<SettingsState>("/settings", { method: "PUT", body: JSON.stringify(changes) }),
   teams: (reportId: string, sceneId: string | null) =>
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
@@ -510,7 +542,7 @@ export const api = {
     return plan;
   },
   applyPlan: (sceneId: string, options: Option[]) =>
-    call<{ files: number[]; pieces: string[][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
+    call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
                  clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),

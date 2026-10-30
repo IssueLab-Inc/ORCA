@@ -1,5 +1,6 @@
-import { CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { Building2, CircleCheck, CircleX, LoaderCircle, LocateFixed, Network, Sparkles, Trash2, Wand2 } from "lucide-react";
 import type { Plan, PlanItem } from "./api";
+import { BuiltView, type BuiltRun } from "./BuiltView";
 import { mm } from "./ReportList";
 
 /** A plan while it is being built: what each pair is doing. */
@@ -22,12 +23,14 @@ const editText = (i: PlanItem) => {
     : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
 };
 
-export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, error }: {
+export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, built, onBuild, error }: {
   run: PlanRun | null; plan: Plan | null; now: number; busy: boolean; error?: string | null;
   onAccept: () => void; onDiscard: () => void; onFocus: (item: PlanItem) => void;
   onAsDesigned: (clashIds: string[], note: string) => void;
   /** A second try on a larger model for one failed item (never automatic in a plan: the cost multiplies). */
   onEscalate?: (item: PlanItem) => void; wonder?: string;
+  /** Show it built per verified fix (docs/show-it-built.md): its picture so far, and drawing it; absent when off. */
+  built?: (item: PlanItem) => BuiltRun | undefined; onBuild?: (item: PlanItem) => void;
 }) {
   if (!run && !plan) {
     return (
@@ -82,6 +85,11 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
                     : <span className="why">{st?.note ?? "waiting"}</span>}</div>
                 {res && !res.passed && res.reason && <div className="bad small">{res.reason}</div>}
                 {conflict && <div className="bad small">Collides with another fix in this plan ({conflict.detail})</div>}
+                {plan && it.option && res?.passed && onBuild && it.option.kind !== "trim" && !it.option.cleanup && (built?.(it)
+                  ? <BuiltView run={built(it)!} onRetry={() => onBuild(it)} />
+                  : <button className="link better-fix" disabled={busy} onClick={() => onBuild(it)}
+                    data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model. About a minute.">
+                    <Building2 size={13} aria-hidden /> Show it built</button>)}
                 {plan && !it.option && !it.recommended && onEscalate && (
                   <button className="link better-fix" disabled={busy} onClick={() => onEscalate(it)}
                     data-tip={`A larger model takes a second, longer look at this clash with everything this try learned. About a minute.`}>
