@@ -15,8 +15,9 @@ all three, and ends with the reference table of every environment variable. Caps
 ## Coordination requirements
 
 Optional. Without a file, ORCA behaves exactly as before: the L3 Balanced default compiles to the same tests and
-the same clashes (464 = 464 on Northbank, 107 = 107 on the cell, measured Oct 29, [docs/requirements.md](../requirements.md)).
-With one, the numbers are fixed by the file and declared cases are settled without a model call.
+the same clashes (464 = 464 on Northbank, 107 = 107 on the cell, measured Oct 29,
+[docs/requirements.md](../requirements.md)). With one, the numbers are fixed by the file and declared cases are
+settled without a model call.
 
 ### The file: `orca-requirements/1`
 

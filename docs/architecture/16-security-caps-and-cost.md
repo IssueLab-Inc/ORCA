@@ -87,8 +87,9 @@ sequenceDiagram
   logs every browser out. `owner.cookie_ok` checks the version, the signature (constant time) and the expiry.
   `POST /api/owner/lock` deletes it.
 - **Per request.** `_OwnerContext` (ASGI middleware, HTTP and WebSocket) reads the cookie and calls `owner.enter`;
-  the `X-Sightline-Settings` header is read only when the cookie checks out ([15](15-requirements-settings-and-config.md)).
-  `owner.spawn` and `owner.submit` carry the context into stream workers and model-call pools.
+  the `X-Sightline-Settings` header is read only when the cookie checks out
+  ([15](15-requirements-settings-and-config.md)). `owner.spawn` and `owner.submit` carry the context into stream
+  workers and model-call pools.
 - **The page** shows the gear only once unlocked, or on a page opened with `#owner` (`Owner.tsx`). The owner's own
   settings are kept in `localStorage` (`sightline.owner`); the token is not.
 - **Later:** GitHub sign-in would replace `cookie_ok` with "signed in as an allowed login"; the rest stays.

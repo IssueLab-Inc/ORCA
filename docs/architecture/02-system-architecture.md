@@ -4,7 +4,7 @@
 > `server/sightline/meta_client.py`, `server/sightline/limits.py`, `server/sightline/agents.py`, `deploy/modal_app.py`,
 > `web/src/api.ts`, `web/src/App.tsx` (as the caller), `server/pyproject.toml`, `web/package.json` ·
 > **Checked against code:** 2026-10-30 (`104fda9`) ·
-> **Deeper design:** none of its own; each part links to its design doc in the table at the end.
+> **Deeper design:** none of its own; the docs in the last table link to the feature designs in `docs/*.md`.
 
 ORCA is one web app: a React page with a three.js viewer, and one Python process that holds the open models, checks
 geometry, edits IFC and calls Meta's models. The browser previews; the server is the only source of clearance numbers
@@ -17,7 +17,7 @@ many things at once, what happens to every request, and which stack it runs on a
 |---|---|---|
 | The visitor's browser | the ORCA server, same origin | HTTPS: JSON and NDJSON streams under `/api/`, one WebSocket (`/api/voice/live`), the built web app at `/` |
 | The ORCA server | Meta's API, `https://api.meta.ai/v1` (`META_API_BASE_URL`) | `POST /chat/completions` (plain, streamed, or with `tools`), `POST /responses` (streamed reasoning summaries; Muse Image's `image_generation` tool), `POST /asr/transcribe` (one WAV clip, multipart), `wss://api.meta.ai/v1/asr/realtime` (the live voice relay) |
-| The ORCA server | Baseten, `https://inference.baseten.co/v1` (`TRIAGE_API_BASE_URL`) | `POST /chat/completions`, streamed, for Muse Spark Open, only when a key is set (`TRIAGE_API_KEY` or `BASETEN_API_KEY`) and the open-weights setting is on |
+| The ORCA server | Baseten, `https://inference.baseten.co/v1` (`TRIAGE_API_BASE_URL`) | `POST /chat/completions` (streamed for triage) for Muse Spark Open, only when a key is set (`TRIAGE_API_KEY` or `BASETEN_API_KEY`) and the open-weights setting is on |
 | The ORCA server | Modal | hosting (app `orca`, one container), the Secret `sightline-meta` (env vars), the Dict `sightline-settings` (settings for everyone) |
 | A remote MCP client (Muse Code, Claude, an IDE) | the ORCA server's `/mcp` | streamable HTTP, stateless, one JSON reply per call, `Authorization: Bearer orca_…` (a pairing link token) |
 | A local MCP client | `python -m sightline.mcp_server` | stdio, a separate process with its own session and no browser |
@@ -176,7 +176,8 @@ Variants:
 - **Shared jobs** (`triage.Job`, `titles.Job`) keep every event in a list under a `threading.Condition`; `follow()`
   replays it to each subscriber, then waits, and yields `{"type": "ping"}` after 15 s of quiet.
 - **`_RequestEvents`** (Show it built, the wider-fix search, chat) keeps at most 64 events, drops progress first when the
-  reader is slow, and sets `cancel` when the client goes away.
+  reader is slow, and sets `cancel` when the client goes away (the chat's turn and the wider-fix search stop on it; a
+  built view's drawing runs on).
 - **The plain queues** (propose, detect, plan, document, upload) do not notice a disconnect: their worker runs to the
   end.
 

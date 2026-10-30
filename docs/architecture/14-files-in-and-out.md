@@ -51,7 +51,7 @@ flowchart LR
     report --> pdf
     scene --> pdf
     scene --> built
-    reqReg --> reqOut
+    reqIn -->|"the page downloads its own copy"| reqOut
 ```
 
 ## In: IFC models
@@ -82,7 +82,8 @@ flowchart LR
 - `POST /api/scenes` opens the named samples (`Workspace.open`). A name that resolves outside `samples/` is refused
   as not found. A STEP sample is converted first, with the triage model as classifier (`app._classifier`).
 - The page picks its defaults from the list: every `…structure|mep|architecture|site.ifc` (App.tsx), and the
-  palletising cell by `palletising-cell-reva.step` (`cellSample`). Where the demo files come from: [19](19-demo-data.md).
+  palletising cell by `palletising-cell-reva.step` (`cellSample`). Where the demo files come from:
+  [19](19-demo-data.md).
 
 ### Uploads
 
@@ -181,8 +182,9 @@ flowchart TB
 ## In: Navisworks clash reports
 
 `server/sightline/reports.py` reads Navisworks XML clash reports
-(`exchange/batchtest/clashtests/clashtest/clashresults/clashresult`) into a `reports.Report` of `ReportClash`es. ORCA's own detection makes the same objects
-with `origin: "sightline"` ([06](06-geometry-and-detection.md)); Navisworks is the secondary path.
+(`exchange/batchtest/clashtests/clashtest/clashresults/clashresult`) into a `reports.Report` of `ReportClash`es.
+ORCA's own detection makes the same objects with `origin: "sightline"` ([06](06-geometry-and-detection.md));
+Navisworks is the secondary path.
 
 - **Two tag formats** (`reports._element`):
   - **grouped smart tags**, "`<node> / <category> / <property>`" (the three-view export of IssueLab's demo package):

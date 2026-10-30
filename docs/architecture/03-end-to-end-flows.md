@@ -454,7 +454,7 @@ Owned by: [14](14-files-in-and-out.md) (PDF and BCF), [09](09-agent-workflows.md
 
 ## Export the edited IFC and STEP
 
-**Export IFC** is a plain link to `GET /api/scenes/{sid}/export`. `_tidy_exports` first deletes exports older than an
+**Export IFC** (**Export STEP + IFC** when a model came from STEP) is a plain link to `GET /api/scenes/{sid}/export`. `_tidy_exports` first deletes exports older than an
 hour; `Workspace.export` (under the lock) writes only the files with kept edits (`IfcScene.write_edited`:
 `<name>.orca.ifc`) and, for a model opened from STEP, writes `<stem>.orca.step` from the original STEP with what changed
 (`service.step_changes` → `step.export`: moved parts, rebuilt or cut parts, new pieces). One file comes back as it is,
