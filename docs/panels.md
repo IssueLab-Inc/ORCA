@@ -105,8 +105,9 @@ main window.
 
 ## Tests and checks
 
-- `web/tests/dock.test.mjs` (7): every panel has a home, which saved layouts load, what was popped out goes back to
-  its bar, storage and versions, what showing a panel takes, and the free-core-only rule.
+- `web/tests/dock.test.mjs` (9): every panel has a home, which saved layouts load (a window split in several groups
+  too), the widths the classic panes and the side bars share, what was popped out goes back to its bar, storage and
+  versions, what showing a panel takes, and the free-core-only rule.
 - Browser (Playwright, Northbank, 1440×900): the default layout; float, collapse, reopen, tab clicks; pop out Chat
   (styles, typing, a tooltip, M from the window reaching the page), close the window, pop out again; reload with a
   popped-out, a floating and a collapsed panel; Reset; Classic; the tour bringing panels home; #1 proposed with the
