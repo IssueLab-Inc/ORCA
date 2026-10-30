@@ -855,3 +855,16 @@ A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `ve
   every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
   tests, 64 web tests.
 
+
+Sign-offs kept per report (Oct 30; code `web/src/signoffs.ts`, `Report.requirements_id`):
+- **Why:** review sign-offs were kept in `localStorage` under the report's title, and every detection run is titled
+  "Coordination · N models", so one project's or run's reviews showed on another with the same model count. The PDF
+  stays DRAFT until each page has a review from every team involved, so those reviews could lift it wrongly.
+- **Key:** an imported report by its id (`sightline.signoffs:report:<id>`); a detection run, a new report each time,
+  by the requirements it ran under and its sorted file names (`sightline.signoffs:run:<requirements id or
+  "defaults">:<files>`), so a rerun keeps them. The server now names a run's requirements on the report
+  (`requirements_id` in the summary), so the key doesn't depend on the page's detection state (resume, chat, agent).
+- **Old entries:** title-keyed ones can't be told apart by report, so they are removed on load, not carried over.
+  Re-importing a Navisworks report starts with no sign-offs (a new report id).
+- **Checked:** `tests/test_detect.py` (a run names its requirements), `web/tests/signoffs.test.mjs` (5, incl. the page
+  with two runs of the same title); 69 web tests.

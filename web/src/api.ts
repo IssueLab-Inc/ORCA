@@ -136,7 +136,10 @@ export type TitleEvent =
   | { type: "batch_error"; detail: string }
   | { type: "ping" }
   | { type: "done"; titled: number; seconds: number; error?: string };
-export interface Report { id: string; title: string; sources: string[]; clashes: ReportClash[]; origin?: "navisworks" | "sightline" }
+export interface Report {
+  id: string; title: string; sources: string[]; clashes: ReportClash[]; origin?: "navisworks" | "sightline";
+  requirements_id?: string | null;  // a detected run: the requirements it ran under (null: the defaults)
+}
 
 /** ORCA detection (server: detect.py; design in docs/detection.md). */
 export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[] }

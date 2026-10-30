@@ -192,7 +192,8 @@ and `deploy` finds none: open work is tracked in the feature docs and here, not 
 - **Held models are capped:** 8 model sets on the demo (`SIGHTLINE_MAX_SCENES`), within `SIGHTLINE_SCENE_BUDGET_MB`
   (300); the oldest are evicted first, linked ones last. Exports older than an hour are deleted.
 - **No accounts.** The owner is a token and a signed cookie (`owner.cookie_ok`); review sign-offs and the reviewer's
-  name are kept in the browser's `localStorage` per report; resume is the browser's saved session while the server
+  name are kept in the browser's `localStorage` per report (an imported report by its id, a detection run by its
+  files and requirements); resume is the browser's saved session while the server
   still holds it.
 - **Requests are cut at 10 minutes** on Modal (`timeout=10 * 60` in `deploy/modal_app.py`); long MCP work runs as
   jobs.

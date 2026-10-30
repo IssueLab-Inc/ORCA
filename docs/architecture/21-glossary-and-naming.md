@@ -202,7 +202,7 @@ Each was checked at HEAD.
 | `X-Sightline-Settings` | The owner's per-request settings header | `owner.HEADER`, `api.ts` |
 | `X-Sightline-Requirements` | The header carrying the page's requirements id (not in CLAUDE.md's list, kept the same way) | `requirements.py`, `app.py`, `api.ts` |
 | `sightline_owner` | The owner cookie | `owner.COOKIE` |
-| `sightline.*` | Browser storage keys: `sightline.session`, `sightline.left-w`, `sightline.right-w`, `sightline.signoffs.<report title>`, `sightline.reviewer`, `sightline.triage.compact`, `sightline.voice.handsfree`, `sightline.agent.setup`, `sightline.owner`, `sightline.requirements` | `App.tsx`, `ReportDoc.tsx`, `Triage.tsx`, `Chat.tsx`, `Agent.tsx`, `Owner.tsx`, `reqFile.ts` |
+| `sightline.*` | Browser storage keys: `sightline.session`, `sightline.left-w`, `sightline.right-w`, `sightline.signoffs:report:<id>` / `sightline.signoffs:run:<requirements>:<files>`, `sightline.reviewer`, `sightline.triage.compact`, `sightline.voice.handsfree`, `sightline.agent.setup`, `sightline.owner`, `sightline.requirements` | `App.tsx`, `ReportDoc.tsx`, `Triage.tsx`, `Chat.tsx`, `Agent.tsx`, `Owner.tsx`, `reqFile.ts`, `signoffs.ts` |
 | `origin: "sightline"` | A report ORCA detected itself (else `"navisworks"`) | `reports.Report.origin`, `detect.py`; `ReportClash.source` |
 | `Pset_SightlineConstraints` | The model convention for per-element constraints (`KeepFixed`) | `context_eval.element_constraints`, `fixtures.py` |
 | `Sightline_STEP` | The old name of the STEP pset, still read so older caches open | `scene.STEP_PSETS`, `requirements.py` |

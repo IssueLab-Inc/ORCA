@@ -83,7 +83,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 |---|---|---|
 | `test_verify.py` | 7 | `verify.check` on the clash fixture: the duct collides; a 0.40 m drop lands on the pipe; 0.80 m passes with the true gap; moves survive write and reload; millimetre files measure in metres; federated files clash across disciplines; the neighbourhood check skips far elements |
 | `test_supports.py` | 8 | A move keeps what it stands on (`verify.supports`, `keep_supports`): a post slid along its slab keeps its footing; lifted, sunk or pushed into something is refused; the clash partner is never a support; runs stand on nothing and the plan check agrees; `verify_move` keeps footing only when told the obstacle |
-| `test_detect.py` | 21 | `detect.py` on the detection fixtures: default tests, a Site model's tests off, touches, exact flush depth, an element wholly inside another, pairs meant to meet counted not reported, duplicates vs crossing braces, clearance, far from the origin, stable ids and new/resolved on a rerun, the per-test cap (`partial`), selections, the detect stream API, detection from chat, `measure_pair` |
+| `test_detect.py` | 22 | `detect.py` on the detection fixtures: default tests, a Site model's tests off, touches, exact flush depth, an element wholly inside another, pairs meant to meet counted not reported, duplicates vs crossing braces, clearance, far from the origin, stable ids and new/resolved on a rerun, the per-test cap (`partial`), selections, a run's report naming the requirements it ran under (`requirements_id`), the detect stream API, detection from chat, `measure_pair` |
 | `test_port_frames.py` | 57 | Port frames read back from exported IFC, independently of the verifier: flow axes follow the cap normals, signed axes and profile roll, generated frames pass, unknown or two-way frames need review, offsets keep both external peers, the legacy external-frame exception stays strictly unchanged |
 | `test_foundation_review_fixes.py` | 35 | Review reproductions on real IFC shapes and port graphs: tight generated bends, the bend allowance, new clearance to unrelated services, offset axis noise, single-, zero- and two-port chains through offset and export, the exact separating-axis fallback only for plain rectangles |
 
@@ -196,8 +196,8 @@ flowchart LR
 - **Why App's imports are stubbed:** App imports the GPU viewer, the network and every pane. A data-URL module cannot
   resolve a relative import, so every `./X` App imports must be in the dependencies map: the leaf panes and helpers map
   to one `mocks` module (functions returning `null`, plus the few constants App reads: `TOUR`, `CELL`, `clashLabel`,
-  `noClash`, a `Pilot` and `Viewer` class), lucide icons to an `icons` module, and four modules are compiled for real
-  (`./chatRequest`, `./fixKinds`, `./uploads`, `./ContextPlan` with its own `./ReportList` mocked).
+  `noClash`, a `Pilot` and `Viewer` class), lucide icons to an `icons` module, and five modules are compiled for real
+  (`./chatRequest`, `./fixKinds`, `./uploads`, `./signoffs`, `./ContextPlan` with its own `./ReportList` mocked).
 - **The rule:** a new import in `web/src/App.tsx` (a new module, a new named export from a mocked module, or a new
   icon) must be added to **both** stub lists: the `names`, `icons` and module lists in `app-host.mjs` **and** the copies
   in `app-replacement.test.mjs`, which has its own minimal host and its own `compiled`. Otherwise `npm test` fails to
@@ -222,6 +222,7 @@ flowchart LR
 | `fix-kinds.test.mjs` | 5 | `compiled` | `fixKinds.ts`: each kind's words, framing, clearance/change/recommendation lines, an opening's host reading and hole, a combined fix's steps |
 | `layout.test.mjs` | 5 | `compiled` (React stubbed) | `layout.ts`: breakpoints, sheet snapping, flicks, handle taps, `follow()` |
 | `requirements.test.mjs` | 7 | `compiled` | `reqFile.ts`: round trip, refusing other files, cell edits, who moves, by-design rules, browser storage, opening rules |
+| `signoffs.test.mjs` | 5 | `compiled` + `appHost` | `signoffs.ts`: an imported report's key is its id, never its title; a detection run's is its files and requirements (a rerun shares it, other models or requirements don't); empty entries dropped, junk read as none, no storage no throw; title-keyed entries removed and nothing else; the page shows each run its own sign-offs and writes under its key |
 | `uploads.test.mjs` | 3 | `compiled` | `uploads.ts`: the cap checked before sending, stage progress words, an uploaded IFC read from the visitor's own file |
 | `upload-retry.test.mjs` | 1 | `compiled` | `api.ts`: a 409 `requirements_unknown` re-registers the file and resends once |
 

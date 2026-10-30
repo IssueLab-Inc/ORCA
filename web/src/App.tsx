@@ -12,6 +12,7 @@ import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } fro
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
 import { localFile, uploadRefusal, uploadStatus } from "./uploads";
+import { dropTitleKeyed, loadSignoffs, saveSignoffs, signoffKeyOf } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
@@ -479,15 +480,16 @@ export function App() {
     }).catch(() => {});
     return () => { live = false; };
   }, [report, sceneId]);
-  const signoffKey = report ? `sightline.signoffs.${report.title}` : null;
+  useEffect(() => { dropTitleKeyed(); }, []);
+  const signoffKey = signoffKeyOf(report);
   useEffect(() => {
     setEvidence({});
-    try { setSignoffs(signoffKey ? JSON.parse(localStorage.getItem(signoffKey) ?? "{}") : {}); } catch { setSignoffs({}); }
+    setSignoffs(loadSignoffs(signoffKey));
   }, [signoffKey]);
   function changeSignoffs(id: string, f: (s: Signoff[]) => Signoff[]) {
     setSignoffs((all) => {
       const next = { ...all, [id]: f(all[id] ?? []) };
-      try { if (signoffKey) localStorage.setItem(signoffKey, JSON.stringify(next)); } catch { /* private window */ }
+      saveSignoffs(signoffKey, next);
       return next;
     });
   }
