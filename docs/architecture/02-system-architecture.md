@@ -247,8 +247,9 @@ manager starts in the app's lifespan (`_lifespan`). Each tool call runs inside `
 - the work answers JSON, or streams NDJSON through `_ndjson`.
 
 **Who the caller is.** There are no accounts:
-- a visitor is an address: `limits.client_id` takes the first `X-Forwarded-For` hop when `SIGHTLINE_TRUST_FORWARDED=1`
-  (set on Modal), else the peer address;
+- a visitor is an address: `limits.client_id` takes the peer address (on Modal that is the visitor: its edge strips
+  `X-Forwarded-For`), or behind N trusted proxies (`SIGHTLINE_TRUST_FORWARDED=N`) the N-th `X-Forwarded-For` entry
+  from the right ([16](16-security-caps-and-cost.md));
 - the owner is a signed cookie;
 - an agent is a link token, charged to the visitor who made the link (`Link.visitor`; `Link.owner` skips caps).
 
@@ -257,7 +258,7 @@ manager starts in the app's lifespan (`_lifespan`). Each tool call runs inside `
 | `Cookie: sightline_owner` | `_OwnerContext` | the owner |
 | `X-Sightline-Settings` | `_OwnerContext` → `owner.settings`, owner only | effort, triage effort, escalation and its effort, built views, open weights, no caps |
 | `X-Sightline-Requirements` | `_OwnerContext` → `requirements.enter` | the requirements id the page registered; 409 when unknown |
-| `X-Forwarded-For` | `limits.client_id` | the visitor, only with `SIGHTLINE_TRUST_FORWARDED=1` |
+| `X-Forwarded-For` | `limits.client_id` | the visitor, only with `SIGHTLINE_TRUST_FORWARDED=N` (N-th from the right; 0 on Modal) |
 | `X-Forwarded-Host`, `X-Forwarded-Proto`, `Host` | `create_link`, `mcp_server` `base_url` | the `/mcp` URL and download links handed to agents |
 | `Authorization: Bearer orca_…`, or `?key=` | `_McpGate`, `mcp_server` `link_of` | the link token |
 | `Origin`, `Host` | `voice_live.same_origin` | a socket from another site is closed (1008) before it is accepted |
@@ -347,7 +348,7 @@ The full inventory, with limits and lifecycles, is [05](05-domain-model-and-stat
 
 | Where | What | Survives |
 |---|---|---|
-| Process memory, `app.ws` (`Workspace`) | open scenes (`IfcScene` with every kept edit), reports, matches, detection runs and their diffs, last tries per pair, STEP sources | until evicted or the process restarts |
+| Process memory, `app.ws` (`Workspace`) | open scenes (`IfcScene` with every kept edit), reports, matches, detection runs and their diffs, last tries per pair, pattern readings, STEP sources | until evicted or the process restarts |
 | Process memory, other modules | triage and title jobs, pattern verdicts, built documents, preview counts, chat sessions, links, cap counters, the requirements registry, the day's spend, host readings, wider-fix proposals (kept on the `Workspace` by `context_planner`) | until the process restarts |
 | Container disk, `tempfile.gettempdir()` | `sightline-models` (uploads, STEP conversions), `sightline-reports` (uploaded reports), `sightline-exports` (written models, exports, PDF copies; an hour), `sightline-built` (built views, `SIGHTLINE_BUILT_CACHE`) | until the container goes |
 | The image | `samples/` (models, sample reports, `step-cache`), `web/dist` | until the next deploy |

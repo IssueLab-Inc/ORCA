@@ -855,6 +855,64 @@ A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `ve
   every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
   tests, 64 web tests.
 
+`.env` before every setting (Oct 30, owner request; code `server/sightline/__init__.py`, `limits.env_int` /
+`env_float`; docs [15](15-requirements-settings-and-config.md), [10](10-http-api-and-streams.md)):
+- **Why:** `app.py` imported its modules before it called `load_env()`, so the settings they read at import
+  (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB`, `SIGHTLINE_MAX_REPORTS`, `SIGHTLINE_SAMPLE_EXCLUDE`,
+  `SIGHTLINE_STEP_MAX_PARTS` / `_MAX_TRIANGLES`, `SIGHTLINE_BIG_MODEL_MB`, `SIGHTLINE_WIDER_FIX_MAX_MB`,
+  `SIGHTLINE_BUILT_CACHE`) ignored a value set only in `.env` on local runs. Modal sets real variables, so the deploy
+  was unaffected. An empty cap (`SIGHTLINE_PROPOSE_PER_HOUR=`) reached `int("")` and stopped the server at import,
+  although `.env.example` said "off when empty or 0"; it also implied every cap is off when unset, but requirements
+  files (120 an hour) and previews (60) have defaults of their own.
+- **Now:** the package's `__init__.py` calls `meta_client.load_env()`, so `.env` is read on the first import of any
+  module (web server, stdio MCP, tests, evals) and before any setting; real environment variables still win. Every
+  number setting is read with `limits.env_int` / `env_float`: unset or empty is the default, anything else that is not
+  a number still raises. An empty `SIGHTLINE_BUILT_CACHE` is its default (it would have been the working directory).
+  `.env.example` says what unset, empty and 0 mean and lists the two caps that default on.
+- **Checked:** `tests/test_env_file.py` (3; a fresh interpreter on a copy of the package beside its own `.env`): before
+  the change `.env`'s `SIGHTLINE_MAX_SCENES=7` read as 0 and an empty cap stopped the import with `ValueError`. 553
+  server tests. Locally, uvicorn started with a `.env` holding empty caps (`/api/models` answered, with the model
+  upload size set there); importing the app with the same file gave `SIGHTLINE_MAX_SCENES=1` as the Workspace's
+  limit, no proposal limit and requirements files at 120 an hour.
+
+Chat and MCP take their routes' caps; a visitor is the peer (Oct 30, owner request; code `plans.read_patterns`,
+`chat.Chat._run`, `mcp_server` `caps` / `Hooks.detect`, `limits.client_id`; docs 09 and 16):
+- **Pattern readings:** chat and MCP `find_patterns` made a fresh Muse Spark call every time, uncharged; the route
+  charged one proposal and cached per report. Now all three go through `plans.read_patterns`: one proposal for a
+  reading not made yet, kept on the Workspace (64), a caller who comes while it is being made waits for it, and
+  no patterns cost nothing (the route used to charge one for an empty reading).
+- **Detection:** chat and MCP `detect_clashes`, and MCP `open_models` checking on the server, now take one detection
+  run (`SIGHTLINE_DETECT_PER_HOUR` / `_PER_DAY`) like `/detect/stream`, charged to the visitor or the link's creator,
+  never the owner. Off on Modal, as before.
+- **Who a visitor is:** measured with a throwaway Modal app, from outside and from inside Modal: the edge strips any
+  client `X-Forwarded-For` (one value, a list, junk, two header lines), sets none, and gives the app the caller's own
+  address as the peer, HTTP and WebSocket. `X-Real-IP` and `Forwarded` pass through as the client wrote them. So
+  the old "first entry" rule was harmless on Modal (no header ever arrived) but would let a visitor pick their own
+  identity behind a proxy that appends. The deploy now sets `SIGHTLINE_TRUST_FORWARDED` 0; any N > 0 takes the N-th
+  entry from the right. The live app needs nothing now; its next deploy picks up the setting.
+- **Checked:** 559 server tests (9 new: `test_limits.py` 3, `test_chat.py` 3, `test_mcp.py` 2, `test_plans.py` 1;
+  the 5 chat and MCP ones fail on the old code, as do the spoofing ones); locally with Muse Spark, a chat asked to check
+  the models after the visitor's one detection run got "refused: detection runs used" and said so.
+
+ORCA in every download, and the cell tour on the current cell (Oct 30, owner request; `docs/architecture/14`, `19`, `21`):
+- **Downloads:** the report is `orca-report.pdf` (`orca-report-<team or model>.pdf`, zipped as `orca-report.zip`) with
+  `orca-issues.bcfzip`; a multi-file export is `<project>-orca.zip` (`app.export_zip_name`; `service.project_name`, the
+  page's `projectName` rule: "Northbank-orca.zip", one STEP model "PC-03-Palletising-Cell-RevA-orca.zip", else
+  `orca-export.zip`). Temp folders keep `sightline-*`.
+- **The PDF names the triage model that ran** (`document.triage_by`): the triage run's `info`, else
+  `meta_client.triage_model_info()` (a restart); was always "Muse Spark Open".
+- **Cell tour:** 161 parts, eight problems / 17 pairs, "17 of 17"; Accept steps (both tours) say the viewer swaps in the
+  changed parts without reloading. The Oct 28 recordings named parts of the 144-part STEP (STEP GlobalIds follow its
+  bytes), so they could not be drawn or accepted; re-recorded live on the current STEP (ladder: 120 mm offset first,
+  100 mm whole-ladder raise second; pipe plan: a 900 mm route west). Muse ranks a comfortable offset over the
+  designers' 150 mm raise, so the ladder copy names the option on screen (`TourState.optionKinds`); act "A move" is
+  now "One fix".
+- **Recorded-run offer:** a failed or empty live proposal also ends "done", so the offer never showed on an error;
+  now it does (`liveMissed`), and a plan that fails to start moves the tour on to the step that offers its recording.
+- **Checked:** 552 server tests, 69 web tests (`tour.test.mjs` new); `evals/detection_cell.py` Rev A 17/17, 0
+  unexpected (`evals/runs/2026-10-30-cell-detection/`); in headless Chromium the cell tour live (recording) and again
+  with the live streams refused: both recordings offered, replayed and accepted in place (one model download, at open),
+  all 12 steps; the live export and report downloads carry the new names.
 
 Keeping a fix tries it again (Oct 30, owner request; [07](07-fixes-and-edits.md) "Keeping a fix", code `plans.recheck` /
 `plans.apply`, `edits.kept_files`):

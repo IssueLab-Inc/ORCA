@@ -176,16 +176,13 @@ each feature see [01](01-product-and-journeys.md).
 | The PDF | "Design coordination report"; footer "ORCA · AI-assisted design coordination report" | `document.py` |
 | BCF topics | author "ORCA" | `document.bcf_zip` |
 | The MCP server | `orca`, titled "ORCA" | `mcp_server.build` |
-| Exported models | `<name>.orca.ifc`, `<name>.orca.step` | `IfcScene.write_edited(suffix=".orca")`, `Workspace.export` |
+| Exported models | `<name>.orca.ifc`, `<name>.orca.step`; several in one zip, `<project>-orca.zip` (`orca-export.zip` when the files share no name) | `IfcScene.write_edited(suffix=".orca")`, `Workspace.export`, `app.export_zip_name` |
+| The coordination report | `orca-report.pdf` (`orca-report-<team or model>.pdf`, zipped as `orca-report.zip`) with `orca-issues.bcfzip` | `document.generate` |
 | A requirements file | `<name>.orca-requirements.json`, format `orca-requirements/1` | `reqFile.fileName`, `requirements.FORMAT` |
 | STEP parts' property set | `ORCA_STEP` (Group, Label, Source) | `scene.STEP_PSET`, `step.py` |
 | Agent link tokens | `orca_…` | `agents.Links` |
 | A screenshot | `orca-clash-<n>.png` / `orca-view.png` | `screenshot` in `App.tsx` |
 | The Modal app | `orca` | `deploy/modal_app.py` |
-
-Not yet renamed (at HEAD): the report download is `sightline-report.pdf` (or `sightline-report-<scope>.pdf`, zipped as
-`sightline-report.zip`) with `sightline-issues.bcfzip` (`document.py`), and a multi-file export is
-`<scene_id>-sightline.zip` (`app.export`). These are user-facing file names and break the "says ORCA" rule.
 
 ### Internal names kept on purpose
 
@@ -206,7 +203,7 @@ Each was checked at HEAD.
 | `origin: "sightline"` | A report ORCA detected itself (else `"navisworks"`) | `reports.Report.origin`, `detect.py`; `ReportClash.source` |
 | `Pset_SightlineConstraints` | The model convention for per-element constraints (`KeepFixed`) | `context_eval.element_constraints`, `fixtures.py` |
 | `Sightline_STEP` | The old name of the STEP pset, still read so older caches open | `scene.STEP_PSETS`, `requirements.py` |
-| `sightline-models` | The temp folder for uploads and STEP conversions | `service.MODELS` |
+| `sightline-models`, `sightline-reports`, `sightline-exports`, `sightline-built`, `sightline-run-*` | The temp folders (uploads and STEP conversions, uploaded reports, written models, exports and report copies, built views, detection runs); never a download's name | `service.MODELS`, `app.UPLOADS`, `app.EXPORTS`, `built.CACHE`, `detect.py` |
 
 ### Wording
 

@@ -276,7 +276,10 @@ what it compiles into and how pages send it: [15](15-requirements-settings-and-c
   - shapes are placed with `BRepBuilderAPI_Transform` (`step._placed`), never `.Moved()`: a located shape loses its
     name and colour when the STEP is written.
 - **One file or a zip.** One written file comes back as itself; several (two disciplines, or a STEP model's IFC and
-  STEP) come back as one zip, `<sid>-sightline.zip`, made from the scene's export folder.
+  STEP) come back as one zip made from the scene's export folder (`$TMP/sightline-exports/<sid>-orca.zip` on disk),
+  downloaded as `<project>-orca.zip` (`app.export_zip_name`): the project is the files' shared name
+  (`service.project_name`, the page's `projectName` rule: "Northbank-orca.zip"; one STEP model
+  "PC-03-Palletising-Cell-RevA-orca.zip"), and `orca-export.zip` when the files share none.
 - MCP's stdio server writes the same files to a new `$TMP/orca-export-*` folder and returns their paths
   ([11](11-mcp-and-agent-links.md)).
 
@@ -344,7 +347,9 @@ flowchart TB
   review".
 - **Also in the PDF:** cover with counts and the clearance sentence (the requirements' fix clearance, else 25 mm);
   summary and actions by team (AI-drafted); the authors' table; noise by test; "How this report was made" (fixed
-  text, which names Muse Spark Open as the triage model whichever model ran); and, under
+  text naming the triage model that ran, `document.triage_by`: "an open-weights model (Muse Spark Open)" or "Muse
+  Spark (Meta)", from the triage run's `info`, else `meta_client.triage_model_info()` when no run is held, as after a
+  restart); and, under
   requirements, an appendix of the whole file (`requirements_html`) with "Requirements: name vN, label (id)" in the
   cover's facts.
 - **HTML to PDF:** `document.to_pdf` renders with WeasyPrint (A4, DejaVu Sans). On Modal the image installs
@@ -356,12 +361,10 @@ flowchart TB
   `viewpoint.bcfv` (the pair selected and coloured, A `FFD0342C` red and B `FF1F9D3A` green, a perspective camera
   from `_bcf_camera` looking at where the two boxes meet, else at the clash point) and `snapshot.png` (the
   fix's true capture, else the cropped clash picture; none when there is neither).
-- **Names and keeping.** A combined report without BCF is one `sightline-report.pdf`; otherwise a
-  `sightline-report.zip` of `sightline-report[-<team or model>].pdf` files and `sightline-issues.bcfzip`.
-  `_build_document` keeps the bytes in `_documents` (the 24 newest) for `GET /api/documents/{doc_id}` (404 "That
-  report has expired. Build it again." after), and writes a copy to `$TMP/sightline-exports/<doc id>-<name>`.
-  These download names, and the export zip's, still carry the internal name `sightline`; the files' contents say
-  ORCA.
+- **Names and keeping.** A combined report without BCF is one `orca-report.pdf`; otherwise an `orca-report.zip` of
+  `orca-report[-<team or model>].pdf` files and `orca-issues.bcfzip`. `_build_document` keeps the bytes in
+  `_documents` (the 24 newest) for `GET /api/documents/{doc_id}` (404 "That report has expired. Build it again."
+  after), and writes a copy to `$TMP/sightline-exports/<doc id>-<name>` (the temp folder keeps the internal name).
 
 ## Out: built-view pictures
 
@@ -389,7 +392,7 @@ under `samples/`, the settings store and a built cache placed outside `$TMP`.
 | Uploaded report folders | `$TMP/sightline-reports/<tmp>/` | The report is dropped |
 | Detection runs and captured views | `$TMP/sightline-run-*/views/` | The report is dropped |
 | Edited models served to the viewer | `$TMP/sightline-exports/<sid>-<index>-<name>` | An hour |
-| Exports | `$TMP/sightline-exports/<sid>/`, `<sid>-sightline.zip` | An hour |
+| Exports | `$TMP/sightline-exports/<sid>/`, `<sid>-orca.zip` | An hour |
 | PDF / BCF | Memory `_documents`, copy in `$TMP/sightline-exports/` | The 24 newest in memory; the copy an hour |
 | Built-view pictures | `SIGHTLINE_BUILT_CACHE` (default `$TMP/sightline-built/`) | Never deleted by the server |
 | Requirements | Memory registry (500 newest), the browser's `localStorage`, the visitor's downloaded file | Registry: restart or eviction (the page re-registers) |

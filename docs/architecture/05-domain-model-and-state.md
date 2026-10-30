@@ -510,7 +510,7 @@ stateDiagram-v2
 | Title runs | `app._title_jobs` | 32 |
 | Built documents (PDF or zip bytes) | `app._documents` | 24 |
 | Requirements previews | `app._previews` | 64 |
-| Pattern readings | `app._pattern_triage` | Not bounded |
+| Pattern readings | `Workspace._patterns` (`plans.read_patterns`; route, chat and MCP share them) | 64 (`service.PATTERNS_KEPT`), oldest first |
 | Chat sessions | `app._chat.sessions` | 200 sessions, 40 messages each |
 | Agent links, their proposals, plans and jobs | `app.links` (`agents.Links`) | 200 links, 12 h idle, 24 h total; 16 jobs per link; 200 queued events per following page |
 | Registered requirements files | `requirements._registry` | 500, least recently used dropped |
@@ -533,7 +533,7 @@ Paths under "temp" are in the system temporary folder (`tempfile.gettempdir()`).
 | STEP conversion cache (when `samples/step-cache` is absent) | temp `sightline-models/step-cache/` (`Workspace.step_cache`) | Not cleaned |
 | Uploaded Navisworks reports | temp `sightline-reports/<folder>/` (`app.UPLOADS`) | The report is dropped (it is `temporary`) |
 | Detected report folders, with captured A/B/C views | temp `sightline-run-*/`, `views/<clash id>-<label>.png` | The report is dropped |
-| Edited models served to the page, exports, document copies | temp `sightline-exports/` (`app.EXPORTS`): `<scene>-<index>-<file>`, `<scene>/`, `<scene>-sightline.zip`, `<doc id>-<name>` | An hour (`EXPORTS_KEEP_S`), cleaned when a model file or an export is next requested |
+| Edited models served to the page, exports, document copies | temp `sightline-exports/` (`app.EXPORTS`): `<scene>-<index>-<file>`, `<scene>/`, `<scene>-orca.zip`, `<doc id>-<name>` | An hour (`EXPORTS_KEEP_S`), cleaned when a model file or an export is next requested |
 | Exports made over the local (stdio) MCP server | temp `orca-export-*/` (`mcp_server` `export_models`) | Not cleaned |
 | Show it built pictures | `SIGHTLINE_BUILT_CACHE`, default temp `sightline-built/` | Not cleaned |
 | Settings for everyone, off Modal | `SIGHTLINE_SETTINGS_FILE`, default `server/.sightline-settings.json` (gitignored) | Kept |
