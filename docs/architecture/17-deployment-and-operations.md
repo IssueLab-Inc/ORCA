@@ -142,10 +142,11 @@ def web():
     return fastapi_app
 ```
 
-Importing `sightline.app` does the whole start-up: `load_env()`, the one `Workspace`, the caps, the links, the MCP server
-(its session manager starts in the app's lifespan, `_lifespan`), and the static mount of `/app/web/dist` at `/` (because
-`WEB_DIST`, `parents[2] / "web" / "dist"`, has an `index.html`). `SAMPLES` resolves to `/app/samples` the same way. The app
-is `modal.App("orca")` and the function `web`, hence the URL `https://dodzikojo--orca-web.us-east.modal.run`.
+Importing `sightline.app` does the whole start-up: `load_env()` (in the package's `__init__.py`), the one `Workspace`,
+the caps, the links, the MCP server (its session manager starts in the app's lifespan, `_lifespan`), and the static
+mount of `/app/web/dist` at `/` (because `WEB_DIST`, `parents[2] / "web" / "dist"`, has an `index.html`). `SAMPLES`
+resolves to `/app/samples` the same way. The app is `modal.App("orca")` and the function `web`, hence the URL
+`https://dodzikojo--orca-web.us-east.modal.run`.
 
 ## How to deploy
 
@@ -234,13 +235,14 @@ npm run dev     # http://localhost:5173
 
 - **`.env` loading.** `meta_client.load_env()` reads `KEY=value` lines from the repo root's `.env` (`ENV_FILE`) into
   the environment with `os.environ.setdefault`, so real environment variables win. Lines starting with `#` are skipped;
-  values are taken as they are (no quotes, no inline comments). It runs when `app.py` is imported, and again wherever a
-  setting is read late (`MetaChatModel`, `transcribe`, `triage_model_info`, `escalation_model`, `voice_live`, `built`).
-- **Caps are off locally** unless set: the caps in `app.py` read `int(os.environ.get(…, "0"))`, and 0 means no limit
-  (except requirements files, 120 an hour, and previews, 60 an hour, which have their own defaults). Leave a cap's line
-  commented out (as `.env.example` has them) or set it to 0: an uncommented empty value
-  (`SIGHTLINE_PROPOSE_PER_HOUR=`) reaches `int("")` and stops the server at import, although `.env.example` says "off
-  when empty or 0".
+  values are taken as they are (no quotes, no inline comments). It runs on the first import of any `sightline` module
+  (the package's `__init__.py`), before any module reads a setting, so every setting can be set there, including those
+  read at import (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_STEP_MAX_PARTS`, …); it runs again wherever a key is read late
+  (`MetaChatModel`, `transcribe`, `triage_model_info`, `escalation_model`, `voice_live`, `built`). Restart the server
+  after changing `.env`.
+- **Caps are off locally** unless set: the caps read `limits.env_int(…, 0)`, where unset, empty
+  (`SIGHTLINE_PROPOSE_PER_HOUR=`) and 0 all mean no limit, except requirements files (120 an hour) and previews (60 an
+  hour), which take their own defaults when unset or empty; only 0 turns those two off.
 - **Settings for everyone** are kept in `server/.sightline-settings.json` (gitignored; `SIGHTLINE_SETTINGS_FILE`
   moves it) when not on Modal.
 - **The dev server** (`npm run dev`, port 5173) proxies `/api` to `localhost:8000` with `ws: true` (live voice) and keeps

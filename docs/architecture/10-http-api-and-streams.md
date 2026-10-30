@@ -16,10 +16,12 @@ inside is in [09](09-agent-workflows.md) and [07](07-fixes-and-edits.md); the ca
 ## How the server is put together
 
 - **One app, one process.** `app = FastAPI(title="ORCA")`, with one `Workspace` (`ws`) holding scenes, reports and
-  jobs in memory ([05](05-domain-model-and-state.md)). `load_env()` runs right after the package imports, so the
-  repo's `.env` is read before the caps and the owner token are built (real environment variables win); settings
-  that modules read at import time (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB` and others, listed in
-  [15](15-requirements-settings-and-config.md)) are read before it and so come only from the real environment. Locally: `uv run uvicorn sightline.app:app --reload`. On
+  jobs in memory ([05](05-domain-model-and-state.md)). The repo's `.env` is loaded by the package's `__init__.py`
+  (`meta_client.load_env()`), which runs on the first import of any `sightline` module and so before `app.py` or
+  any module it imports reads a setting: the caps, the owner token and the settings modules read at import time
+  (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB` and the others marked "import" in
+  [15](15-requirements-settings-and-config.md)) all come from `.env` when the real environment does not set them
+  (real environment variables win). Locally: `uv run uvicorn sightline.app:app --reload`. On
   Modal, `deploy/modal_app.py` imports the same `app` under `@modal.asgi_app()`, one container, up to 64 requests at
   once (`@modal.concurrent(max_inputs=64)`: linked pages each hold an events stream), 10-minute request timeout
   ([17](17-deployment-and-operations.md)).

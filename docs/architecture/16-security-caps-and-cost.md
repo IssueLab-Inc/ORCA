@@ -132,8 +132,10 @@ What the owner gets that visitors do not:
 
 `limits.ProposeLimit(per_client_hour, per_day, noun)` keeps timestamps in memory: one deque per visitor over a
 rolling hour, and one for everyone over a rolling 24 hours (`time.monotonic`). 0 turns either off, and every cap
-but three is 0 unless the environment sets it; the Modal deploy sets the demo's values. Refused requests are not
-counted. The state is per process, which is why the deploy pins one container ([17](17-deployment-and-operations.md)).
+but three is 0 unless the environment (or the repo's `.env`) sets it; unset and empty are the same
+(`limits.env_int`), so an empty cap takes its default. The Modal deploy sets the demo's values. Refused requests are
+not counted. The state is per process, which is why the deploy pins one container
+([17](17-deployment-and-operations.md)).
 
 - `take(client)` counts one, or returns why not.
 - `take_many(client, n)` counts `n` at once or none: a plan of several fixes is refused whole, not half-run.

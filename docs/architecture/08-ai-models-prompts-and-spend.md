@@ -87,10 +87,11 @@ actually run ([12](12-web-app.md)).
 ### Configuration and `.env`
 
 - `meta_client.load_env()` reads `KEY=value` lines from the repo's `.env` (`ENV_FILE`, two folders above the
-  package) into `os.environ` with `setdefault`, so real environment variables win. `app.py` calls it at import;
-  `MetaChatModel.__init__`, `transcribe`, `escalation_info`, `escalation_model`, `triage_model_info`, `built.restyle`,
-  `built.judge_model`, `built.spark_judge_model` and `voice_live.url` / `handshake` call it again, so a script or test
-  that never imports `app.py` still finds the key.
+  package) into `os.environ` with `setdefault`, so real environment variables win. The package's `__init__.py` calls
+  it, so it runs on the first import of any `sightline` module, before any setting is read
+  ([15](15-requirements-settings-and-config.md)); `MetaChatModel.__init__`, `transcribe`, `escalation_info`,
+  `escalation_model`, `triage_model_info`, `built.restyle`, `built.judge_model`, `built.spark_judge_model` and
+  `voice_live.url` / `handshake` call it again before reading a key (harmless: a value already set is kept).
 - `META_API_KEY` is read when a client is built (`os.environ["META_API_KEY"]`: a missing key raises `KeyError` at that
   point, which `Workspace.hosts_model` and `app._classifier` turn into "no model"). The browser never sees it; the
   live voice relay puts it in Meta's first socket frame (`voice_live.handshake`) and never logs it.
