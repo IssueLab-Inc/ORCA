@@ -23,7 +23,7 @@ const editText = (i: PlanItem) => {
     : `move ${o.delta_m.map((v) => mm(v)).join(" · ")}`;
 };
 
-export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, built, onBuild, error }: {
+export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, onAsDesigned, onEscalate, wonder, built, onBuild, stale, error }: {
   run: PlanRun | null; plan: Plan | null; now: number; busy: boolean; error?: string | null;
   onAccept: () => void; onDiscard: () => void; onFocus: (item: PlanItem) => void;
   onAsDesigned: (clashIds: string[], note: string) => void;
@@ -31,6 +31,8 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
   onEscalate?: (item: PlanItem) => void; wonder?: string;
   /** Show it built per verified fix (docs/show-it-built.md): its picture so far, and drawing it; absent when off. */
   built?: (item: PlanItem) => BuiltRun | undefined; onBuild?: (item: PlanItem) => void;
+  /** A fix was kept since the plan was checked (one item's own second try, say): its joint check no longer holds. */
+  stale?: boolean;
 }) {
   if (!run && !plan) {
     return (
@@ -104,7 +106,9 @@ export function PlanPanel({ run, plan, now, busy, onAccept, onDiscard, onFocus, 
 
       {plan && plan.strategy !== "as_designed" && (
         <div className="plan-actions">
-          <button className="btn primary" data-tour="accept-plan" disabled={busy || !items.some((i) => i.option)} onClick={onAccept}>
+          {stale && <p className="bad small">The model changed since this plan was checked (a fix was kept). Build the plan
+            again to check its fixes with that change.</p>}
+          <button className="btn primary" data-tour="accept-plan" disabled={busy || stale || !items.some((i) => i.option)} onClick={onAccept}>
             <CircleCheck size={15} aria-hidden /> {!ok ? "Nothing to accept yet" : plan.check.passed ? "Accept the plan" : `Accept the ${ok} verified`}</button>
           <button className="btn" onClick={onDiscard}><Trash2 size={15} aria-hidden /> Discard</button>
           <span className="hint">{plan.seconds.toFixed(0)} s · checked as one, so the fixes do not collide</span>

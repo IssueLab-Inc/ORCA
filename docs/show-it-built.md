@@ -260,8 +260,17 @@ Branch `feature/show-it-built`, one PR.
 - **Once, and keyed on the fix:** the page keys a picture on the pair and the fix itself (kind, numbers, edit), never
   its title alone, and shares one being drawn (Show it built, then Accept within the minute, is one request); the server
   makes a picture once per key at a time (a second ask waits and costs nothing) and writes its cache files whole. A
-  picture checked the lighter way is checked again by Wonder when a later request can pay for it. Kept fixes are
+  picture checked the lighter way is drawn again and checked by Wonder when a later request can pay for it. Kept fixes are
   recorded even while the switch is off, so a report after it goes on can draw them.
+- **What a picture shows:** a split run is framed on its new middle, a penetration on its opening (its provision for
+  void is not drawn, so the opening stays open), a combined fix on its new middles and the moved runs near the clash,
+  each piece in its own run's colour; anything the server lists as not physical (spaces, provisions) is left out.
+  When a report draws a kept fix again, pieces it cannot find by id are framed by the elements the fix changed.
+  Pieces are drawn with creased normals (sharp edges stay sharp): averaged normals shaded the cell's west wall, cut
+  for C7's opening, in streaks that Muse Image drew as facets and the judges rejected; with creases C7 passed (outline
+  0.90, faithful and minor differences), the pipe through a round opening.
+- **Money:** a request claims its estimate when it is let through (`spend.claim`: checked and held in one step) and
+  its work takes the claim over (`spend.held`), so two requests on a nearly spent day cannot both pass.
 - **Limits:** each pass at most 12 M characters, refused from its header when not square 256-2048 px (before any pixel
   is decoded); the judges' effort is their own (medium), whatever the effort settings say.
 - **Tests:** `tests/test_built.py` (passes and key, the gate against restyles and invented objects, two judges and the

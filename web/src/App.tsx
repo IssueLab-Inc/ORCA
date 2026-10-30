@@ -179,12 +179,13 @@ export function App() {
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
   // Whether a clash Muse Spark could not fix may go to Muse Wonder for a second try (docs/escalation.md).
   const [escalation, setEscalation] = useState<EscalationInfo | null>(null);
+  const [modelsAsked, setModelsAsked] = useState(0);   // ask again after the owner changes a setting for everyone
   useEffect(() => {
     api.models().then((m) => {
       setTriageModel(m.triage); setUploadMax(m.model_upload_max_mb ?? null); setEscalation(m.escalation ?? null);
       setBuiltOn(!!m.built_views);
     }).catch(() => undefined);
-  }, [ownerSettings]);
+  }, [ownerSettings, modelsAsked]);
   const canEscalate = !!escalation?.available && escalation.mode !== "off";
   // Show it built (docs/show-it-built.md): pictures of fixes, only while the switch is on for this visitor.
   const [builtOn, setBuiltOn] = useState(false);
@@ -216,6 +217,10 @@ export function App() {
   const sceneEpoch = useRef(0);
   // The server's revision of the open scene this page's model shows: a kept fix is patched in place only from here.
   const sceneRevision = useRef<number | null>(null);
+  const planRevision = useRef<number | null>(null);   // the scene's revision when the plan on screen was checked
+  // A fix kept since the plan was checked (say, one item's own second try): its joint check no longer holds.
+  const planStale = !!plan && planRevision.current != null && sceneRevision.current != null
+    && planRevision.current !== sceneRevision.current;
   const workspaceEpoch = useRef(0);
   const chatOwner = useRef(new ChatRequestOwner());
   const contextRequest = useRef(0);
@@ -558,9 +563,11 @@ export function App() {
 
   /** ORCA's view of a fix in the passes the picture and its check need (Viewer.captureBuilt: one task, view put back). */
   function builtPasses(fix: BuiltFix, pair: [string, string]): BuiltPasses | null {
-    const v = viewer.current, map = sceneClasses.current?.scene === sceneId ? sceneClasses.current.map : {};
+    const known = sceneClasses.current?.scene === sceneId ? sceneClasses.current.map : null;
+    const v = viewer.current;
     if (!v) return null;
-    try { return v.captureBuilt(fix, pair, (g) => map[g]?.[0]); } catch { return null; }
+    // "" for what the server lists as not physical (a space, a provision for void): not drawn in the picture.
+    try { return v.captureBuilt(fix, pair, (g) => known ? (known[g]?.[0] ?? "") : undefined); } catch { return null; }
   }
 
   /** Draw a fix's picture from its passes; the run shows under `key`. Resolves with the result, null when the request
@@ -650,10 +657,14 @@ export function App() {
       if (ev.status === "accepted" && f && !ev.built_img && !ev.built_note && !builtDone.current[f.key])
         keys.set(f.key, [...(keys.get(f.key) ?? []), id]);
     }
-    const todo = [...keys].filter(([key]) => !builtPending.current.has(key)).slice(0, 10);
+    const waiting = [...keys].filter(([key]) => !builtPending.current.has(key));
+    const todo = waiting.slice(0, 10);
+    const later = waiting.slice(10).flatMap((entry) => entry[1]);   // at most 10 drawn for one report: the rest say so
+    const withLater = (all: Record<string, Evidence>) => ({ ...all, ...Object.fromEntries(later.map((id) => [id,
+      { ...all[id], built_note: "Not drawn for this report (at most 10 at once); building the report again draws the next ones." }])) });
     const pending = [...builtPending.current.values()];
     const total = todo.length + pending.length;
-    if (!total) return withBuilt(evidence);
+    if (!total) return withLater(withBuilt(evidence));
     let done = 0;
     onStep(0, total);
     await Promise.all([
@@ -663,7 +674,7 @@ export function App() {
         return drawBuilt(key, builtPasses(f.fix, f.pair), f.fix.kind).then((res) => { noteBuilt(ids, f.title, res); onStep(++done, total); });
       }),
     ]);
-    return withBuilt(evidence);
+    return withLater(withBuilt(evidence));
   }
   /** Evidence with every finished picture of its kept fix (state may not have caught up with the last ones yet). */
   function withBuilt(all: Record<string, Evidence>): Record<string, Evidence> {
@@ -1328,7 +1339,11 @@ export function App() {
         state: e.status, ok: e.ok, note: e.status === "thinking" ? "Muse Spark is looking…" : e.status === "checking" ? `checked: ${e.attempt}` : e.title } } }));
       if (e.type === "checking_plan") update((r) => ({ ...r, phase: "checking" }));
     };
-    const finish = (p: Plan | null) => { if (!live()) return; if (p) setPlan(p); update((r) => ({ ...r, phase: "done" })); setNow(Date.now()); };
+    const finish = (p: Plan | null) => {
+      if (!live()) return;
+      if (p) { setPlan(p); planRevision.current = sceneRevision.current; }   // what its joint check was made on
+      update((r) => ({ ...r, phase: "done" })); setNow(Date.now());
+    };
     const retire = () => {
       if (!live()) return;
       const retiredRequest = ++planRequest.current, owned = run;
@@ -1357,14 +1372,18 @@ export function App() {
   }
 
   async function acceptPlan() {
-    if (!sceneId || !plan || busy) return;
+    if (!sceneId || !plan || busy || planStale) return;
     replaceChatWork(); retireDirectWork(); clearManual();
     const epoch = sceneEpoch.current;
     const live = () => sceneEpoch.current === epoch;
     const items = plan.items.filter((i) => i.option && (plan.check.passed || plan.check.items[i.key]?.passed));
     setBusy(`Applying ${items.length} fix${items.length > 1 ? "es" : ""}…`);
     const pics = captureFix(items.map((i) => i.option!), "#1f9d3a");
-    const built = items.map((i) => canBuild(i.option!) ? builtPasses(builtFix(i.option!, false), [i.element_a, i.element_b]) : null);
+    const built = items.map((i) => {
+      const key = builtKey([i.element_a, i.element_b], i.option!);
+      return canBuild(i.option!) && builtDone.current[key]?.status !== "done" && !builtPending.current.has(key)
+        ? builtPasses(builtFix(i.option!, false), [i.element_a, i.element_b]) : null;
+    });
     try {
       const kept = await api.applyPlan(sceneId, items.map((i) => i.option!));
       const pieces = kept.pieces;
@@ -1579,7 +1598,7 @@ export function App() {
       // Seeded from the server's own first try (the page's may be another clash's, or older than this turn).
       if (e.event.type === "escalating" && !chatAgent.current) {
         const f = e.event.first_try;
-        chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: [] }
+        chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: f.options ?? [] }
           : { understanding: "", attempts: [], options: [] });
         chatEscalating.current = true;
       } else if (e.event.type === "escalating") chatEscalating.current = true;
@@ -2112,7 +2131,7 @@ export function App() {
         {landing && layout === "tablet" && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {agentLink && <button className="btn agent-pill" onClick={() => setAgentOpen(true)} aria-label={`Agent connected · ${timeLeft(agentLink, now)} left`}><Bot size={16} aria-hidden /></button>}
-        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
+        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
         {layout === "tablet" && report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }}>
           <FileText size={15} aria-hidden /> Report</button>}
         {layout === "tablet" && sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)}>
@@ -2151,7 +2170,7 @@ export function App() {
           owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
           {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}
           {ownerSettings.escalation ? ` · second try ${ownerSettings.escalation}` : ""}</span>}
-        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} /></span>
+        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
         {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
         {sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
@@ -2298,7 +2317,7 @@ export function App() {
             onAccept={acceptContext} onRegenerate={() => { if (context.objective) void exploreContext(context.objective); }}
             onDiscard={() => { directContext.current?.retire(); ++contextRequest.current; clearManual(); setContext(null); setContextChosen(null); setAcknowledged([]); setViewContext(false); setPlanKind("batch"); }} /> :
           <PlanPanel run={planRun} plan={plan} now={now} busy={!!busy} onAccept={acceptPlan} error={planError}
-            onEscalate={canEscalate ? escalateItem : undefined} wonder={wonder}
+            onEscalate={canEscalate ? escalateItem : undefined} wonder={wonder} stale={planStale}
             built={(it) => it.option ? builtRuns[builtKey([it.element_a, it.element_b], it.option)] : undefined}
             onBuild={builtOn ? (it) => { if (it.option && canBuild(it.option)) void drawBuilt(builtKey([it.element_a, it.element_b], it.option),
               builtPasses(builtFix(it.option, false), [it.element_a, it.element_b]), it.option.kind); } : undefined}

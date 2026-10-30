@@ -11,6 +11,7 @@ they skip the demo caps (`refused(exempt=)`), and are still counted.
 """
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 import time
@@ -20,6 +21,9 @@ _lock = threading.Lock()
 _day = ""
 _spent = 0.0
 _held = 0.0      # what paid work still running may cost (its estimate), until it ends
+# Estimates a request claimed when it was let through (`claim`), for its work to take over (`held`): checking and
+# holding are one step, so two requests on a nearly spent day cannot both pass.
+_claims: contextvars.ContextVar[list[float] | None] = contextvars.ContextVar("spend_claims", default=None)
 
 
 def _today() -> str:
@@ -47,29 +51,69 @@ def spent() -> float:
         return _spent if _day == _today() else 0.0
 
 
+def claim(estimate: float, exempt: bool = False) -> str | None:
+    """`refused`, and when it lets the work through, hold `estimate` at once (in the same lock) for this request's
+    work to take over (`held`). A request that then does not start its work gives it back (`unclaim`)."""
+    global _held
+    estimate = max(0.0, estimate)
+    with _lock:
+        why = _refusal(estimate, exempt)
+        if why:
+            return why
+        _held += estimate
+    mine = _claims.get()
+    if mine is None:
+        mine = []
+        _claims.set(mine)
+    mine.append(estimate)
+    return None
+
+
+def unclaim(estimate: float) -> None:
+    """Give back a claim whose work will not run (a cap refused it after the budget let it through)."""
+    global _held
+    mine = _claims.get()
+    if mine and estimate in mine:
+        mine.remove(estimate)
+        with _lock:
+            _held = max(0.0, _held - estimate)
+
+
 @contextmanager
 def held(estimate: float):
-    """Count `estimate` against today's limit while paid work runs (its calls are charged as they land), so work
-    started at the same moment cannot all pass `refused` on a nearly spent day."""
+    """Count `estimate` against today's limit while paid work runs (its calls are charged as they land): this
+    request's claim of it when there is one (`claim`), else held now."""
     global _held
-    with _lock:
-        _held += max(0.0, estimate)
+    estimate = max(0.0, estimate)
+    mine = _claims.get()
+    if mine and estimate in mine:
+        mine.remove(estimate)          # the claim made when the request was let through becomes this hold
+    else:
+        with _lock:
+            _held += estimate
     try:
         yield
     finally:
         with _lock:
-            _held = max(0.0, _held - max(0.0, estimate))
+            _held = max(0.0, _held - estimate)
 
 
 def refused(estimate: float = 0.0, exempt: bool = False) -> str | None:
     """Why paid work may not start now (today's limit reached, counting what running work may still cost), or None.
-    `exempt`: the owner's own work."""
+    `exempt`: the owner's own work. Work that will run should `claim` instead, which also holds it."""
+    with _lock:
+        return _refusal(estimate, exempt)
+
+
+def _refusal(estimate: float, exempt: bool) -> str | None:
+    """`refused` with the lock held."""
+    global _day, _spent
     cap = limit()
     if exempt or cap <= 0:
         return None
-    with _lock:
-        pending = _held
-    if spent() + pending + estimate > cap:
+    if _day != _today():
+        _day, _spent = _today(), 0.0
+    if _spent + _held + estimate > cap:
         return (f"Today's budget for Muse Wonder (${cap:.0f}) is used up; it resets at midnight UTC. "
                 "Muse Spark's own proposals still work.")
     return None

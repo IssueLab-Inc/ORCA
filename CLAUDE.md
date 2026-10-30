@@ -871,9 +871,10 @@ Escalating to Muse Wonder (Oct 29, owner decision; `docs/escalation.md`, code `s
 look for a better fix.
 - **Model and money:** `meta_client.escalation_model()` (`META_ESCALATION_MODEL`, default `muse-wonder-1.0`, $4 / $20
   per M tokens, no contributor tier). `MetaChatModel.usage` counts tokens (both endpoints, every final event);
-  `PRICES` by id prefix. One day's budget for every Wonder call, `SIGHTLINE_WONDER_MAX_USD_DAY` ($25), with running work
-  holding its estimate (`spend.held`). Caps `SIGHTLINE_ESCALATE_PER_HOUR` / `_PER_DAY` plus one proposal, both or
-  neither (`ProposeLimit.take_all`). Setting `escalation` off / button / auto (+ `escalation_effort`), owner menu.
+  `PRICES` by id prefix. One day's budget for every Wonder call, `SIGHTLINE_WONDER_MAX_USD_DAY` ($25): a request
+  claims its estimate when let through (`spend.claim`, checked and held in one step) and its work takes the claim
+  over (`spend.held`). Caps `SIGHTLINE_ESCALATE_PER_HOUR` / `_PER_DAY` plus one proposal, both or neither
+  (`ProposeLimit.take_all`). Setting `escalation` off / button / auto (+ `escalation_effort`), owner menu.
 - **The brief:** the first try (ideas, why each failed, what it hit by name, fixes found), openings and room past
   the elements it ran into most, every element within 5 m, the kinds from the registry. The last try per scene and
   pair is kept (`Workspace.last_try`, plan items too) and read only while its scene revision and requirements id
@@ -912,12 +913,19 @@ against the model before anyone sees it.
   look built". The report dialog waits for those and draws missing ones (at most 10); the PDF's fix page gets the
   third picture or "No built view: …"; the BCF keeps the true capture. Chat `show_it_built`; MCP later.
 - **Once, keyed on the fix:** page keys are pair + kind + numbers + edit (titles repeat); a picture being drawn is
-  shared (page and server: `built.make` once per key); cache files written whole; a lighter-checked picture is checked
-  again by Wonder when it can be; judges keep their own effort (`meta_client.FIXED_EFFORT`); passes refused from their
+  shared (page and server: `built.make` once per key); cache files written whole; a lighter-checked picture is drawn
+  again and checked by Wonder when it can be; judges keep their own effort (`meta_client.FIXED_EFFORT`); passes refused from their
   header when oversized.
 - **Checked:** `tests/test_built.py` (11), `test_document.py`; in the browser Northbank #1's offset drew in ~70 s
   (outline 0.94, both judges faithful), the cell's C6 route in ~80 s (0.88), wipe and lines work, Accept carried the
   picture to the kept fix, and accept → triage → Report put it on the PDF's fix page as the fourth picture.
 - **Web tests:** App imports `./BuiltView` (`BuiltView`, `builtStep`, `cutText`) and the icon `Building2`: both stub
   lists updated. The harness's transform cannot read `for (const [a, b] of …)` in App: use keys instead.
-
+- **After the final review (Oct 30):** pictures frame a combined fix by run and colour each piece by its run
+  (`agent._tagged`: `origin`, `part`), leave a penetration's provision for void undrawn (the opening stays open) and
+  anything not physical out; a kept fix whose pieces the page can't find is framed by the elements it changed. The
+  `escalating` event carries the first try's options (chat keeps them if the second try fails); a plan whose model
+  changed since it was checked can't be accepted (`planStale`); the stdio MCP hook respects the off switch; the owner's
+  page asks `/api/models` again after a change for everyone; a report draws at most 10 pictures and says so for the
+  rest. Known, not fixed: a combined step that moves another team's service doesn't add that team as a reviewer in the
+  PDF and BCF; a second try's options aren't de-duplicated against the first's.

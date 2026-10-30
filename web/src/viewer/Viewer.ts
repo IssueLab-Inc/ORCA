@@ -1,3 +1,4 @@
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
@@ -21,6 +22,9 @@ const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.g
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
 export type Mesh = { verts: number[]; faces: number[] };
+/** A fix's piece as Show it built frames it: its element (a kept piece), the element its run came from and its part
+ * (a combined fix's: "moved", "end" or "middle"). */
+export type BuiltPiece = Mesh & { global_id?: string; origin?: string; part?: string };
 /** Show it built's passes (Viewer.captureBuilt): PNG data URLs of one square view, and what the cutaway took away. */
 export interface BuiltPasses {
   look: string; ids: string; normals: string; side: number;
@@ -607,10 +611,19 @@ export class Viewer {
    *   fix already in the model (its pieces only frame it).
    * - Passes, all the same square: the look (true colours), ids (index + 1 per element in 24 bits, no light, no
    *   antialiasing) and view-space normals. Null when there is nothing to frame. */
-  captureBuilt(fix: { kind: string; moved: string[]; deltaM: number[]; pieces: (Mesh & { global_id?: string })[] | null; applied: boolean },
+  captureBuilt(fix: { kind: string; moved: string[]; deltaM: number[]; pieces: BuiltPiece[] | null; applied: boolean },
     pair: [string, string], classOf: (gid: string) => string | undefined, radius = 3, side = 1024): BuiltPasses | null {
+    // What the fix changes, to frame: a split run's new middle (not its long shortened ends); a penetration's provision
+    // for void (the opening); a combined fix's new middles and the moved runs' parts near the clash.
+    const pa = this.boxOf([pair[0]]), pb = this.boxOf([pair[1]]);
+    const near = !pa.isEmpty() && !pb.isEmpty() ? meetingZone(pa, pb).expandByScalar(this.reach(1.5, 0.3)) : null;
+    const combinedChanged = (pieces: BuiltPiece[]) => {
+      const picked = pieces.filter((p) => p.part === "middle" || (p.part === "moved" && (!near || meshBox([p]).intersectsBox(near))));
+      return picked.length ? picked : pieces;
+    };
     const changed = (fix.kind === "offset" || fix.kind === "route" || fix.kind === "resize") && fix.pieces ? fix.pieces.slice(1, -1)
-      : fix.kind === "penetration" && fix.pieces ? fix.pieces.slice(0, 1) : fix.pieces ?? [];
+      : fix.kind === "penetration" && fix.pieces ? fix.pieces.slice(0, 1)
+      : fix.kind === "combined" && fix.pieces ? combinedChanged(fix.pieces) : fix.pieces ?? [];
     const renderer = this.renderer, scene = this.scene, camera = this.camera;
     const saved = { position: camera.position.clone(), target: this.controls.target.clone(), mode: this.mode, focus: this.focus,
       flight: this.flight, marker: this.marker.visible, overlay: this.overlay.visible, hidden: new Set(this.hidden),
@@ -623,7 +636,10 @@ export class Viewer {
     const idColor = (k: number) => new THREE.Vector4((k & 255) / 255, ((k >> 8) & 255) / 255, ((k >> 16) & 255) / 255, 1);
     let cut = new Set<string>();
     const zonesAndCut = () => {
-      for (const el of all) if (el.baseAlpha < 0.2 || cut.has(el.globalId)) el.mesh.setVisibleAt(el.instanceId, false);
+      // Zones, what the cutaway took, and what is not physical ("" from classOf: a space, a provision for void).
+      for (const el of all) {
+        if (el.baseAlpha < 0.2 || cut.has(el.globalId) || classOf(el.globalId) === "") el.mesh.setVisibleAt(el.instanceId, false);
+      }
     };
     const shaded = () => { this.mode = "shaded"; this.applyMode(); zonesAndCut(); };
     try {
@@ -638,18 +654,25 @@ export class Viewer {
         if (fix.pieces && fix.kind !== "move") {
           for (const g of fix.moved) this.hidden.add(g);
           const first = this.find(fix.moved[0]);
-          fix.pieces.forEach((p) => {
+          fix.pieces.forEach((p, i) => {
+            // Its own element's colour, else its run's (a combined fix's new pieces), else the first moved element's.
             const own = p.global_id ? this.find(p.global_id) : null;
-            const colour = (own ?? first)?.el.baseColor ?? GREY;
+            const origin = p.origin ? this.find(p.origin) : null;
+            const colour = (own ?? origin ?? first)?.el.baseColor ?? GREY;
             const pos = new Float32Array(p.verts.length);
             for (let i = 0; i < p.verts.length; i += 3) { pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; }
-            const g = new THREE.BufferGeometry();
-            g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-            g.setIndex(p.faces);
-            g.computeVertexNormals();
+            const welded = new THREE.BufferGeometry();
+            welded.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+            welded.setIndex(p.faces);
+            // Sharp edges stay sharp (a wall with a hole, a box): normals averaged across them shade a flat face in
+            // streaks, which Muse Image draws as facets and the judges rightly reject.
+            const g = toCreasedNormals(welded, Math.PI / 6);
+            welded.dispose();
             const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, metalness: 0, roughness: 0.85,
               side: THREE.DoubleSide, clippingPlanes: this.clipping }));
             mesh.userData.piece = true;
+            // A penetration's provision for void frames the view but is not drawn: it would fill the opening.
+            if (fix.kind === "penetration" && i === 0) mesh.visible = false;
             pieceMeshes.push(mesh); temp.add(mesh);
           });
         } else if (fix.kind === "move") {
@@ -666,15 +689,17 @@ export class Viewer {
           return pieceMeshes.filter((_, i) => keep.has(fix.pieces![i]));
         }
         const ids = fix.applied && changed.length ? changed.map((p) => p.global_id).filter((g): g is string => !!g) : fix.moved;
-        return ids.map((g) => this.find(g)).filter((f): f is Found => !!f).map((f) => {
+        let found = ids.map((g) => this.find(g)).filter((f): f is Found => !!f);
+        // Kept pieces whose ids the page doesn't know (a trial's): the elements the fix changed, as they now are.
+        if (!found.length) found = fix.moved.map((g) => this.find(g)).filter((f): f is Found => !!f);
+        return found.map((f) => {
           const m = new THREE.Mesh(this.geometryOf(f));
           m.matrixAutoUpdate = false; m.matrix.copy(this.matrixOf(f.el)); m.frustumCulled = false;
           return m;
         });
       };
       const zone = changed.length ? meshBox(changed) : this.boxOf(fix.moved);
-      const a = this.boxOf([pair[0]]), b = this.boxOf([pair[1]]);
-      if (!a.isEmpty() && !b.isEmpty()) zone.union(meetingZone(a, b));
+      if (!pa.isEmpty() && !pb.isEmpty()) zone.union(meetingZone(pa, pb));
       if (zone.isEmpty()) return null;
       const union = zone.clone().expandByScalar(this.reach(0.75, 0.2));
       const box = zone.clone().expandByScalar(this.reach(radius, 0.4));
@@ -725,7 +750,7 @@ export class Viewer {
       const measure = () => {
         const objects = fixObjects();
         const solo = new THREE.Group();
-        for (const o of objects) solo.add(o.parent ? o.clone() : o);
+        for (const o of objects) { const c = o.parent ? o.clone() : o; c.visible = true; solo.add(c); }
         solo.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = white; });
         scene.add(solo);
         const visibleModels = this.models.map((m) => [m.mesh.visible, m.glass?.visible ?? false] as const);

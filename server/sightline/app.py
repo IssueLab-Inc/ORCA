@@ -228,13 +228,16 @@ def escalation_refused(who: str, exempt: bool) -> tuple[int, str] | None:
     owner's own requests skip the caps and the budget."""
     if settings.escalation() == "off":
         return 403, "Second tries with Muse Wonder are switched off."
-    why = spend.refused(escalation.ESTIMATE_USD, exempt)
+    why = spend.claim(escalation.ESTIMATE_USD, exempt)   # checked and held at once; the second try takes it over
     if why:
         return 429, why
     if exempt:
         return None
     why = ProposeLimit.take_all(who, escalate_limit, propose_limit)
-    return (429, why) if why else None
+    if why:
+        spend.unclaim(escalation.ESTIMATE_USD)
+        return 429, why
+    return None
 
 
 def _escalation_check(request: HTTPConnection) -> Callable[[], str | None]:
@@ -614,9 +617,15 @@ def built_stream(scene_id: str, body: BuiltBody, request: Request):
     hit = built.cached(p.key)
     if hit is not None and hit.get("judge") == "Muse Spark" and not lighter:
         hit = None   # checked the lighter way when Wonder couldn't be paid for: check it properly now
+    hold = built.PICTURES_USD if lighter else built.ESTIMATE_USD
+    claimed = False
     if hit is None and not built.running(p.key):   # one being made now is shared, at no cost
-        why = (spend.refused(built.PICTURES_USD, exempt) if lighter else None) or _take(built_limit, request)
+        why = spend.claim(hold, exempt)           # checked and held at once; the work takes it over
+        claimed = why is None
+        why = why or _take(built_limit, request)
         if why:
+            if claimed:
+                spend.unclaim(hold)
             raise HTTPException(429, why)
 
     def work():
@@ -624,7 +633,7 @@ def built_stream(scene_id: str, body: BuiltBody, request: Request):
             if hit:
                 events.put({"type": "result", **hit})
                 return
-            with spend.held(built.PICTURES_USD if lighter else built.ESTIMATE_USD):
+            with spend.held(hold):
                 out = (built.make(p, events.put, judge_model_fn=built.spark_judge_model, judges=built.SPARK_JUDGES,
                                   judged_by="Muse Spark") if lighter else built.make(p, events.put))
             events.put({"type": "result", **out})

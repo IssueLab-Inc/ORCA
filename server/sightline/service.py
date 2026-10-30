@@ -265,6 +265,14 @@ class Workspace:
         rounds through the same check. The first try's fixes stay: the reply's options are both tries' fixes in one
         ranked list, each with the model that found it, and its attempts both tries'. Raises ValueError where the
         requirements allow no edit (a recommendation is all there is)."""
+        # What it may cost is held from the start: the request's claim of it (spend.claim) is taken over at once.
+        with spend.held(escalation.ESTIMATE_USD):
+            return self._escalate(scene_id, element_a, element_b, distance_m, images, notes, report_id, clash_id,
+                                  on_event)
+
+    def _escalate(self, scene_id: str, element_a: str, element_b: str, distance_m: float | None,
+                  images: list[str] | None, notes: str, report_id: str | None, clash_id: str | None,
+                  on_event) -> dict:
         clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id, scene_id)
         fix = self.fix_settings(scene_id, element_a, element_b)
         if fix.get("recommend"):
@@ -275,18 +283,19 @@ class Workspace:
         model = self._escalation_model or escalation_model()
         label = model_label(getattr(model, "model", "") or "") or "Muse Wonder"
         if on_event:
-            # The first try as it stands (its ideas and what it understood), so a page that didn't watch it (chat)
-            # shows the second's ideas after the right ones.
+            # The first try as it stands (what it understood, its ideas and its verified options), so a page that
+            # didn't watch it (chat) shows the second's ideas after the right ones, and keeps those options if the
+            # second try fails.
             on_event({"type": "escalating", "model": label, "first": bool(first),
-                      "first_try": {k: first.get(k) for k in ("understanding", "advice", "attempts")} if first else None})
+                      "first_try": {k: first.get(k) for k in ("understanding", "advice", "attempts", "options")}
+                      if first else None})
         clearance = fix.get("clearance_m", 0.025)
         with self.lock:
             brief = escalation.brief(scene, clash, first, clearance)
         fix["guidance"] = fix.get("guidance", "") + "\n" + escalation.PACK.read_text()
-        with spend.held(escalation.ESTIMATE_USD):
-            second = asdict(agent.resolve(scene, clash, model, on_event=on_event, lock=self.lock,
-                                          trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=2,
-                                          brief=brief, label=label, **fix))
+        second = asdict(agent.resolve(scene, clash, model, on_event=on_event, lock=self.lock,
+                                      trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=2,
+                                      brief=brief, label=label, **fix))
         out = {**second, "escalated": True}
         if first:
             def key(o: dict):
