@@ -470,8 +470,11 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
 - **Buttons** (`Actions`, at the end of a group's tabs): collapse the side bar (`collapseEdge`: the tabs go down the
   outer edge first, so the strip is narrow), float (`floatPanel`, each one a step down and left of the last), open in a
   window (`popOut`: a bar's only panel floats first, dockview won't pop it out of the bar, and `returnToBars` puts it back
-  when the window closes), put it back (`moveHome`). The right-click menu has Float, Open in New Window, Put it back and
-  Close.
+  when the window closes), put it back (`moveHome`), and for Properties outside the right bar, dock it on the right. The
+  right-click menu has Float, Open in New Window, Put it back and Close.
+- **Properties' place** (`propsHome`, `sightline.dock.properties`, read by `dockLayout.readPropsHome`): floating or the
+  right side bar, as last put there (its button, Float, or a drag, seen in `onDidMovePanel`); `addHome`, `moveHome` and
+  `atHome` use it. In a bar with more than three tabs, `Tab` shows the tabs behind the front one as icons with a tooltip.
 - **Empty side bars** (`fitEdges`): a bar with no panel is hidden (dockview's `setEdgeGroupVisible`) and the model takes
   its room; it shows again, at its width, when a panel docks there. Fitted after every panel added, removed or moved,
   a layout change, a loaded layout and a pop-out window opening or closing.
@@ -583,6 +586,7 @@ Everything is `localStorage`, read and written inside `try` (a private window ju
 | `sightline.session` | `App` (`SESSION_KEY`) | `SavedSession`: scene id, report id, files, fixes, agent link, time; read on load for "Pick up where you left off" |
 | `sightline.left-w`, `sightline.right-w` | `App` (`stored`, `remember`) | Dragged pane widths in the classic layout (clamped by `PANE`); the dock's default side bar widths |
 | `sightline.dock.v1` | `dockLayout.ts` (`writeLayout`), for `DockHost` | `{ v: 1, layout }`: the dock's layout (dockview's `toJSON`), pop-out panels put back in their bars |
+| `sightline.dock.properties` | `dock.tsx` (`setPropsHome`; read by `dockLayout.readPropsHome`) | `float` or `right`: where Properties opens |
 | `sightline.dock.classic` | `App` | `"1"`: the Classic layout switch is on (fixed panes on the desktop) |
 | `sightline.signoffs:clash:<clash id>` (a detection run) / `sightline.signoffs:import:<title>:<files>` (an imported report) | `signoffs.ts`, for `App` (`signoffKey`, `changeSignoffs`) | Team reviews per detected clash, or per imported report. The old `sightline.signoffs.<report title>` keys move over as their reports open (`migrateTitleKeyed`) |
 | `sightline.reviewer` | `ReportDoc.tsx` (read by `App`'s tour sign-off) | The reviewer's name |

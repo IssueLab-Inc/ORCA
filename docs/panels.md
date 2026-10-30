@@ -28,7 +28,7 @@ It is new work, written for ORCA during the event. No code from other products.
 | Plan | `PlanPanel` or `ContextPlan` | right side bar (tab) |
 | Chat | `ChatPanel` | right side bar (tab) |
 | Activity | The agent's activity: Workings, the run drawn as it happens ([workings.md](workings.md)), or Steps, the table | bottom side bar; it grows to 380 px for a run while Workings shows (`DockHandle.fitBar`) |
-| Properties | The selected element's card and everything its model says about it (below) | floating at the model's top right, opened by the first selection |
+| Properties | The selected element's card and everything its model says about it (below) | floating at the model's top right, opened by the first selection; or the right side bar, once docked there |
 
 - **Side bars** (dockview's edge groups) hold their tabs along the top while open, as the classic panes did. The
   button at the end of the tabs collapses a bar to a strip of its tabs down its outer edge (the bottom one to a strip
@@ -66,6 +66,14 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
 - **On a desktop** the selection opens the Properties panel, floating where the old card was; drag it, dock it in a
   side bar or beside the model, or open it in its own window, and later selections fill it wherever it is. Its ✕
   closes it; Esc clears the selection (the panel then says to click an element).
+- **Floating or on the right** (owner request, Oct 30): a floating Properties panel has a **Dock Properties on the right**
+  button that puts it in the right side bar as a tab after Chat; there its Float button floats it again. ORCA remembers
+  which of the two it was last put in (the button, Float, or a tab dragged into the right bar or out to float), in
+  `sightline.dock.properties`, and the next selection after a close or a reload opens it there. Docked, a selection
+  brings its tab to the front.
+- **Four tabs in a bar:** they and the bar's buttons don't fit its width (dockview would put some behind a menu), so
+  with more than three tabs the ones behind the front tab show their icon only, with their name as a tooltip. A
+  collapsed strip keeps the names.
 - **Classic layout, tablets and phones** keep the card over the model, with an **All properties** section.
 - **What it shows:** the card as before (class, name, GlobalId, tag, level, file, links, Set as A / B, Zoom, Hide,
   Isolate, Section box, Hide / Isolate the class), then the element's type, materials, size (mm, from the scene's
