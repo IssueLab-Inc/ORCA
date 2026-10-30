@@ -1366,3 +1366,8 @@ requirements of their own; code `requirements.py`, `domains.py`, `demos.py` and 
   requirements dialog on Northbank (Building, the eight classes), switched to Machine and a class removed.
 - **Merged with main after #61:** its Reject words name the model the server reports (`labels.proposal`), not
   "Muse"; 629 server tests, 142 web tests, build clean.
+
+Collapsed side bars' strips, centred (Oct 30; owner report; `web/src/index.css`): turned text stacks from the right, so a
+strip tab's content sat against the right edge of the 40 px strip (22–39 px): on the left bar the text touched the
+marker line and on the right bar it sat far from it. The tab's content now fills the strip and centres across it
+(11–28 px, the same gap on both sides). Checked in Chromium on Northbank at 3× scale, both bars collapsed.
