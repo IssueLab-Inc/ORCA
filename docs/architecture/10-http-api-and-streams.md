@@ -371,10 +371,10 @@ model that ran it ("Muse Spark", "Muse Wonder").
 |---|---|---|
 | `thinking` | `round` | A model call starts |
 | `reasoning` | `round`, `text` | A reasoning summary as Muse thinks (only when someone watches and the model streams them) |
-| `ideas` | `round`, `seconds`, `understanding`, `count` | The model's candidates are in |
+| `ideas` | `round`, `seconds`, `understanding`, `count`, `candidates` (`[{title, kind}]`) | The model's candidates are in |
 | `checking` | `index`, `title`, `kind` | One candidate is about to be tried |
 | `trial` | `index`, `kind`, `moved`, `delta_m`, `pieces`, `summary?` | The candidate in place before its check (a move's delta, or new pieces as triangles) |
-| `attempt` | `index`, `title`, `delta_m`, `passed`, `reason`, `kind`, `split_m`, `trim`, `hit_ids`, `edit`, `where`, `model` | Its verdict |
+| `attempt` | `index`, `title`, `delta_m`, `passed`, `reason`, `kind`, `split_m`, `trim`, `hit_ids`, `edit`, `where`, `model`, `seconds?`, `checked?` | Its verdict |
 | `note` | `text` | A host could not be read; no second try, and why; a second try failed and the first stands |
 | `escalating` | `model`, `first`, `first_try {understanding, advice, attempts, options}` | A second try starts (button or automatic) |
 | `result` | the whole proposal | Last |
@@ -416,7 +416,7 @@ model…}`, `titles {items: {id: title}}` per batch, `batch_error {detail}`, `do
 | `thinking` | `what` ("root cause") |
 | `root_cause` | `root_cause`, `strategy` (move_hub, fix_partners, as_designed), `reason` |
 | `plan_items` | `items`, `skipped` |
-| `item` | `key`, `status` (thinking, checking, done), `attempt?`, `passed?`, `ok?`, `title?` |
+| `item` | `key`, `status` (thinking, checking, done), `attempt?`, `passed?`, `seconds?`, `checked?`, `reason?`, `ok?`, `title?` |
 | `checking_plan` | `retry?` (the items given their next-best option) |
 | `plan` | the whole plan (`kind, title, root_cause, strategy, hub, items, check, seconds, advice`) |
 | `error` | `detail` |

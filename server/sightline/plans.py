@@ -345,7 +345,8 @@ def _resolve_items(ws: Workspace, scene_id: str, report_id: str | None, items: l
 
             def progress(e: dict) -> None:
                 if e["type"] == "attempt":
-                    emit({"type": "item", "key": it.key, "status": "checking", "attempt": e["title"], "passed": e["passed"]})
+                    emit({"type": "item", "key": it.key, "status": "checking", "attempt": e["title"], "passed": e["passed"],
+                          **{k: e[k] for k in ("seconds", "checked", "reason") if e.get(k) not in (None, "")}})
             stamp = ws._stamp(scene_id)
             result = agent.resolve(ws.scene(scene_id), clash, ws.model, on_event=progress, lock=ws.lock, max_rounds=2,
                                    hosts_model=ws.hosts_model,

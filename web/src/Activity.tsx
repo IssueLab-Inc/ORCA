@@ -1,5 +1,7 @@
+import { EyeOff, ListChecks, Workflow } from "lucide-react";
 import type { Attempt } from "./api";
 import { editText, kindLabel } from "./fixKinds";
+import { Workings } from "./Workings";
 
 /** What the agent is doing now, while a proposal runs. */
 export interface Progress {
@@ -41,22 +43,46 @@ export function statusLine(p: Progress | null, now: number, attempts: Attempt[])
   return `Done in ${total} s: ${ok} of ${attempts.length} ideas passed the geometry check`;
 }
 
-export function Activity({ attempts, progress, now }: { attempts: Attempt[]; progress: Progress | null; now: number }) {
-  if (!progress && !attempts.length) {
-    return <p className="hint">ORCA's steps appear here: each idea from Muse Spark, and what the geometry check found.</p>;
-  }
+/** The Activity panel's two views: the table of ideas tried (Steps) and the run drawn as it happens (Workings). */
+export type ActivityView = "steps" | "work";
+
+/** Agent activity: the proposal's status line, then Steps or Workings (docs/workings.md). With `workings` off (phones,
+ * tablets, or switched off) it is Steps alone, as before Workings. `inView`: the check the pilot shows in the viewer. */
+export function Activity({ attempts, progress, now, workings = false, view = "steps", onView, onHide, inView = null }: {
+  attempts: Attempt[]; progress: Progress | null; now: number;
+  workings?: boolean; view?: ActivityView; onView?: (v: ActivityView) => void; onHide?: () => void; inView?: number | null;
+}) {
+  const drawing = workings && view === "work";
   const running = progress && progress.phase !== "done";
+  const head = (progress || attempts.length || workings) && (
+    <div className="activity-head">
+      <b>Agent activity</b>
+      {(progress || attempts.length > 0) && <span className={running ? "live" : "hint"}>{running && <i className="spinner" aria-hidden />}{statusLine(progress, now, attempts)}</span>}
+      {progress && progress.modelSeconds.length > 0 &&
+        <span className="hint mono">model {progress.modelSeconds.map((s) => `${s.toFixed(0)} s`).join(" + ")}</span>}
+      {workings && <>
+        <span className="spacer" />
+        <span className="seg" role="tablist" aria-label="Activity view">
+          <button type="button" role="tab" aria-selected={!drawing} className={drawing ? "" : "on"} onClick={() => onView?.("steps")}
+            data-tip="The ideas tried, as a table"><ListChecks size={14} aria-hidden /> Steps</button>
+          <button type="button" role="tab" aria-selected={drawing} className={drawing ? "on" : ""} onClick={() => onView?.("work")}
+            data-tip="The run drawn as it happens (W)"><Workflow size={14} aria-hidden /> Workings</button>
+        </span>
+        {onHide && <button type="button" className="ibtn" aria-label="Turn Workings off" data-tip="Turn Workings off (Panels and layout turns it on again)"
+          onClick={onHide}><EyeOff size={15} aria-hidden /></button>}
+      </>}
+    </div>
+  );
+  if (drawing) return <div className="activity">{head}<Workings inView={inView} /></div>;
+  if (!progress && !attempts.length) {
+    return <div className="activity">{head}<p className="hint">ORCA's steps appear here: each idea from Muse Spark, and what the geometry check found.</p></div>;
+  }
   // Name the model on each idea only when two tried (a second try): one model needs no label.
   const models = new Set(attempts.map((t) => t.model || "Muse Spark"));
   const offset = progress?.offset ?? 0;
   return (
     <div className="activity">
-      <div className="activity-head">
-        <b>Agent activity</b>
-        <span className={running ? "live" : "hint"}>{running && <i className="spinner" aria-hidden />}{statusLine(progress, now, attempts)}</span>
-        {progress && progress.modelSeconds.length > 0 &&
-          <span className="hint mono">model {progress.modelSeconds.map((s) => `${s.toFixed(0)} s`).join(" + ")}</span>}
-      </div>
+      {head}
       <table className="steps">
         <thead><tr><th>#</th><th>Kind</th><th>Idea</th><th>Edit</th><th>Geometry check</th></tr></thead>
         <tbody>

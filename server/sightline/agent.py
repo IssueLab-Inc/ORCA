@@ -407,11 +407,13 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     """Rounds of propose → verify until a round yields a verified option (or `max_rounds` pass).
 
     `on_event` hears progress as it happens, for streaming to the UI: {"type": "thinking", "round"},
-    {"type": "ideas", "round", "seconds", "understanding", "count"}, {"type": "checking", "index", "title", "kind"},
+    {"type": "ideas", "round", "seconds", "understanding", "count", "candidates": [{"title", "kind"}]},
+    {"type": "checking", "index", "title", "kind"},
     with `trials`, {"type": "reasoning", "round", "text"} (a summary of what Muse Spark is working out, as it thinks;
     when the model streams them) and {"type": "trial", "index", "kind", "moved", "delta_m", "pieces"} (the candidate in place, before it is checked:
     a move's elements and delta, or an offset's new pieces as world triangles, so the browser can show what is being
-    tried) and {"type": "attempt", "index", **attempt}.
+    tried) and {"type": "attempt", "index", **attempt, "seconds"?, "checked"?} (a geometry check's seconds, and how many
+    elements it tested a passing fix against; neither for an idea refused before any geometry ran).
 
     `lock` serialises every use of the scene, so several clashes can be resolved at once: their model calls
     overlap, their geometry trials (which edit the model and undo) take turns.
@@ -442,9 +444,9 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     emit = ((lambda e: on_event({**e, "model": label})) if on_event and label else on_event) or (lambda e: None)
     memo: dict = {}   # what the geometry tells Muse, kept between rounds (every trial is undone)
 
-    def on_step(attempt: Attempt) -> None:
+    def on_step(attempt: Attempt, **measured) -> None:
         attempt.model = label
-        emit({"type": "attempt", "index": len(attempts) - 1, **asdict(attempt)})
+        emit({"type": "attempt", "index": len(attempts) - 1, **asdict(attempt), **measured})
 
     for round_no in range(1, max_rounds + 1):
         emit({"type": "thinking", "round": round_no})
@@ -468,12 +470,13 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         understanding = understanding or reply.get("understanding", "")
         advice = reply.get("advice") or advice  # the latest round knows the most
         candidates = reply.get("candidates", [])
+        # Each idea's title and kind as soon as they are in, so a page can show them all before the first is checked.
         emit({"type": "ideas", "round": round_no, "seconds": round(time.perf_counter() - started, 1),
-              "understanding": understanding, "count": len(candidates)})
+              "understanding": understanding, "count": len(candidates),
+              "candidates": [{"title": c.get("title", ""), "kind": c.get("kind") or "move"} for c in candidates]})
         for cand in candidates:
-            emit({"type": "checking", "index": len(attempts), "title": cand.get("title", ""),
-                  "kind": cand.get("kind", "move")})
             kind = cand.get("kind") or "move"
+            emit({"type": "checking", "index": len(attempts), "title": cand.get("title", ""), "kind": kind})
             target = clash.element_a if cand.get("move", "A") == "A" or kind == "combined" else clash.element_b
             other = clash.element_b if target == clash.element_a else clash.element_a
             trial = (lambda shape, i=len(attempts): emit({"type": "trial", "index": i, **shape})) if on_event and trials else None
@@ -488,10 +491,12 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
                 attempts.append(refused)
                 on_step(refused)
                 continue
-            with lock:
+            with lock:   # timed inside the lock: making the edit in a trial, checking it, undoing it
+                tried = time.perf_counter()
                 attempt, option = TRIES[kind](base, cand, target, other, clearance_m, trial, others=clash.others)
+                took = round(time.perf_counter() - tried, 2)
             attempts.append(attempt)
-            on_step(attempt)
+            on_step(attempt, seconds=took, **({"checked": option.checked_against} if option and option.checked_against else {}))
             if option:
                 _keep(options, option)
         # One round with a verified option is enough: another round costs a full model call (tens of seconds). Only
