@@ -1,0 +1,18 @@
+{
+  "status": "pass",
+  "files_checked": 120,
+  "pngs": 69,
+  "svgs": 27,
+  "pdfs": 2,
+  "checks": [
+    "PNG decoding, dimensions, transparent clearspace and alpha",
+    "SVG XML parses, text outlined, no embedded bitmaps",
+    "PDFs reopen, extract text and contain no raster images",
+    "Manifest icon paths and declared dimensions",
+    "ICO contains seven sizes",
+    "Shared O geometry across wordmark and symbol",
+    "Maskable icon foreground lies in the central 80 percent safe circle",
+    "Embedded sRGB profiles in exported PNGs",
+    "SHA-256 for every listed file"
+  ]
+}

@@ -4,7 +4,7 @@
 > `server/sightline/owner.py`, `meta_client.load_env` and `server/sightline/__init__.py`, `limits.env_int` /
 > `env_float`, every environment variable the server, deploy and evals read,
 > `.env.example`, `web/src/reqFile.ts`, `web/src/Requirements.tsx`, the header plumbing in `web/src/api.ts` ·
-> **Checked against code:** 2026-10-30 (`104fda9`) · **Deeper design:** [docs/requirements.md](../requirements.md)
+> **Checked against code:** 2026-10-30 (`feature/brand-assets`, based on `0390a12`) · **Deeper design:** [docs/requirements.md](../requirements.md)
 
 Three layers decide how ORCA behaves for a request. **Coordination requirements** are a project's own standard
 (what is checked, how strictly, who may move), sent by the page as a file id. **Settings** are the owner's switches
@@ -337,6 +337,14 @@ its default, so a bad value fails the wider-fix run with a `ValueError` rather t
 |---|---|---|---|---|
 | `MODAL_TASK_ID` | unset | set by Modal | `settings._modal_dict` | Its presence switches the settings store to the Modal Dict |
 | `SIGHTLINE_TRUST_FORWARDED` | unset | `0` | `limits.client_id` | N proxies in front that each append to `X-Forwarded-For`: visitors are keyed by the N-th entry from the right instead of the peer. 0 on Modal, whose edge strips the header and gives the visitor as the peer |
+
+### Standalone brand-tool overrides
+
+The approved [`assets/brand/orca/`](../../assets/brand/orca/README.md) library has two optional tooling-only overrides.
+`ORCA_SUPPORT_FONT` selects a local font file for outlining supporting text in static exports; Windows defaults to
+Segoe UI, and no font file is redistributed. `ORCA_BROWSER` selects the Chromium executable for the motion browser
+check; Windows uses installed Edge when available, otherwise Playwright's Chromium is used. These are not application
+or deployment settings and need no `.env` entries. Brand-tool inventory checked 2026-10-30 against `0390a12` plus this slice.
 
 ### `.env.example`
 

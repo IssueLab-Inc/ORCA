@@ -1,8 +1,8 @@
 # 12 · Web app: structure and state
 
 > **Covers:** `web/src/` (all but `viewer/`, which is [13](13-3d-viewer.md)), `web/index.html`, `web/vite.config.ts`,
-> `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/` · **Checked against code:** 2026-10-30
-> (`feature/drawing-views`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/views.md](../views.md)
+> `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/`, `assets/brand/orca/` · **Checked against code:** 2026-10-30
+> (`feature/brand-assets`, based on `0390a12`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/views.md](../views.md), [docs/brand-assets.md](../brand-assets.md)
 
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
 almost all of the page's state and every call that changes it; the other components draw what `App` hands them and
@@ -519,6 +519,12 @@ No `sessionStorage` or IndexedDB is used.
 
 ## Build, assets and tests
 
+- **Approved redesign assets:** [`assets/brand/orca/`](../../assets/brand/orca/README.md) holds direction-05 vector
+  masters, static exports, icons, motion and React/native integration examples. It is outside `web/public` and
+  `web/src`; the current app does not load it. Static and motion builders share `source/master.json`. The redesign
+  should copy/import only what it needs and drive phase/completion feedback from real events. Design and commands:
+  [docs/brand-assets.md](../brand-assets.md). Brand inventory checked 2026-10-30 against `0390a12` plus this slice.
+
 - **`package.json` scripts:** `dev` (Vite dev server), `build` (`tsc --noEmit && vite build` into `web/dist/`),
   `test` (`node --test tests/*.test.mjs`), `preview`, `copy-wasm`, and `postinstall` (runs `copy-wasm`).
   Dependencies are pinned: `react` / `react-dom` 19.3.1, `three` 0.186.1, `web-ifc` 0.0.77, `lucide-react` 1.48.0, and
@@ -559,3 +565,4 @@ No `sessionStorage` or IndexedDB is used.
 - A change to the breakpoints, `follow()`, the sheet's snaps, or the Responsive CSS's structure.
 - A new tour, act, `TourState` field, `TourActions` action or recording in `web/public/tour/`.
 - A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `web/public/`.
+- The identity or motion library in `assets/brand/orca/`, or its adoption by the app.

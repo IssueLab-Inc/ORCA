@@ -1,0 +1,21 @@
+{
+  "name": "orca-brand-assets",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Approved ORCA direction-05 identity and motion sources for the application redesign",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build:static": "node source/build-assets.cjs",
+    "build:motion": "node motion/source/build-motion.cjs && node motion/source/build-components.cjs",
+    "check:browser": "node motion/source/check-browser.cjs",
+    "check:types": "tsc --project motion/react/tsconfig.json"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "0.1.100",
+    "@types/react": "19.3.0",
+    "playwright": "1.62.1",
+    "react": "19.3.1",
+    "sharp": "0.35.5",
+    "typescript": "5.9.3"
+  }
+}

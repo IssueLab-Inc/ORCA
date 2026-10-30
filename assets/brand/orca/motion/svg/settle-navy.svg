@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="om-svg om-settle" width="320" height="320" viewBox="0 0 320 320" role="img" aria-label="ORCA completion flourish" style="color:#052640"><title>ORCA completion flourish</title><style>
+.om-spin,.om-phase,.om-settle,.om-letter{transform-box:view-box;transform-origin:128px 128px}
+.om-svg{overflow:visible}
+.om-letter{transform-origin:538.5px 128px}
+@keyframes om-orbit{to{transform:rotate(360deg)}}
+@keyframes om-breathe-a{0%,100%{transform:translate(0,0);opacity:1}50%{transform:translate(-6px,-6px);opacity:.5}}
+@keyframes om-breathe-b{0%,100%{transform:translate(0,0);opacity:1}50%{transform:translate(6px,6px);opacity:.5}}
+@keyframes om-resolve-a{0%,8%,100%{transform:translate(-14px,14px);opacity:.55}32%,78%{transform:translate(0,0);opacity:1}}
+@keyframes om-resolve-b{0%,8%,100%{transform:translate(14px,-14px);opacity:.55}32%,78%{transform:translate(0,0);opacity:1}}
+@keyframes om-phase{0%,20%{transform:rotate(0)}25%,45%{transform:rotate(90deg)}50%,70%{transform:rotate(180deg)}75%,95%{transform:rotate(270deg)}100%{transform:rotate(360deg)}}
+@keyframes om-settle{0%{transform:scale(.88);opacity:.2}60%{transform:scale(1.055);opacity:1}100%{transform:scale(1);opacity:1}}
+@keyframes om-letter-in{0%{transform:translateY(18px);opacity:0}100%{transform:translateY(0);opacity:1}}
+@media(prefers-reduced-motion:no-preference){
+.om-orbit .om-spin{animation:om-orbit 1.6s linear infinite}
+.om-breathe .om-half-a{animation:om-breathe-a 2s ease-in-out infinite}
+.om-breathe .om-half-b{animation:om-breathe-b 2s ease-in-out infinite}
+.om-resolve .om-half-a{animation:om-resolve-a 2.4s cubic-bezier(.4,0,.2,1) infinite}
+.om-resolve .om-half-b{animation:om-resolve-b 2.4s cubic-bezier(.4,0,.2,1) infinite}
+.om-phase-cycle .om-phase{animation:om-phase 4.8s cubic-bezier(.4,0,.2,1) infinite}
+.om-settle .om-settle{animation:om-settle .76s cubic-bezier(.2,.8,.2,1) both}
+.om-reveal .om-letter{animation:om-letter-in .7s cubic-bezier(.2,.8,.2,1) both}
+.om-reveal .om-letter-1{animation-delay:.16s}.om-reveal .om-letter-2{animation-delay:.32s}.om-reveal .om-letter-3{animation-delay:.48s}
+}
+</style><g fill="currentColor" transform="translate(32 32)"><g class="om-settle"><path data-path="0" d="M 31.35038 211.9217 C -12.70846 161.18071 -10.02719 85.00785 37.49033 37.49033 C 85.00785 -10.02719 161.18071 -12.70846 211.9217 31.35038 L 172.14842 71.12366 C 143.48543 48.87496 102.74539 51.43123 77.08831 77.08831 C 51.43123 102.74539 48.87496 143.48543 71.12366 172.14842 Z"/><path data-path="1" d="M 224.64962 44.0783 C 268.70846 94.81929 266.02719 170.99215 218.50967 218.50967 C 170.99215 266.02719 94.81929 268.70846 44.0783 224.64962 L 83.85158 184.87634 C 112.51457 207.12504 153.25461 204.56877 178.91169 178.91169 C 204.56877 153.25461 207.12504 112.51457 184.87634 83.85158 Z"/></g></g></svg>
