@@ -1,0 +1,167 @@
+{
+  "format": "orca-requirements/1",
+  "name": "PC-03 palletising cell coordination requirements",
+  "version": 1,
+  "level": 3,
+  "strictness": "balanced",
+  "groups": [
+    {
+      "id": "structure",
+      "name": "Frame and structure",
+      "role": "structure",
+      "teams": [],
+      "classes": [
+        "IfcColumn",
+        "IfcMechanicalFastener",
+        "IfcMember",
+        "IfcPlate",
+        "IfcSlab",
+        "IfcWall"
+      ],
+      "exclude_classes": [],
+      "systems": [],
+      "files": [],
+      "source": "level"
+    },
+    {
+      "id": "services",
+      "name": "Services",
+      "role": "services",
+      "teams": [],
+      "classes": [
+        "IfcCableCarrierFitting",
+        "IfcCableCarrierSegment",
+        "IfcElectricDistributionBoard",
+        "IfcElectricMotor",
+        "IfcPipeFitting",
+        "IfcPipeSegment",
+        "IfcSensor",
+        "IfcSwitchingDevice",
+        "IfcValve"
+      ],
+      "exclude_classes": [],
+      "systems": [],
+      "files": [],
+      "source": "level"
+    },
+    {
+      "id": "equipment",
+      "name": "Equipment and other",
+      "role": "equipment",
+      "teams": [],
+      "classes": [
+        "IfcBuildingElementPart",
+        "IfcBuildingElementProxy",
+        "IfcDoor",
+        "IfcFilter",
+        "IfcFurniture",
+        "IfcTransportElement",
+        "IfcUnitaryControlElement"
+      ],
+      "exclude_classes": [],
+      "systems": [],
+      "files": [],
+      "source": "level"
+    }
+  ],
+  "checks": [
+    {
+      "a": "structure",
+      "b": null,
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "structure",
+      "b": "services",
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "structure",
+      "b": "equipment",
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "services",
+      "b": null,
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "services",
+      "b": "equipment",
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "equipment",
+      "b": null,
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    }
+  ],
+  "duplicates": true,
+  "rules": {
+    "same_element": true,
+    "connected": true,
+    "assembly": true,
+    "host": true
+  },
+  "who_moves": [
+    {
+      "group": "structure",
+      "edits": "any",
+      "max_move_mm": null,
+      "trims": true
+    },
+    {
+      "group": "equipment",
+      "edits": "any",
+      "max_move_mm": null,
+      "trims": true
+    },
+    {
+      "group": "services",
+      "edits": "any",
+      "max_move_mm": null,
+      "trims": true
+    }
+  ],
+  "by_design": [],
+  "guidance": {
+    "triage": "",
+    "fixes": ""
+  },
+  "notes": "The PC-03 palletising cell demo's default requirements: what ORCA checks and fixes without a requirements file, written out so they can be read, changed and tested.",
+  "domain": "machines",
+  "stays": [
+    "IfcBeam",
+    "IfcColumn",
+    "IfcSlab",
+    "IfcWall",
+    "IfcFooting",
+    "IfcPile",
+    "IfcMember",
+    "IfcPlate"
+  ]
+}

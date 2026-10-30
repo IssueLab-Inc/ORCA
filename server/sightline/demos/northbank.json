@@ -1,0 +1,203 @@
+{
+  "format": "orca-requirements/1",
+  "name": "Northbank coordination requirements",
+  "version": 1,
+  "level": 3,
+  "strictness": "balanced",
+  "groups": [
+    {
+      "id": "structure",
+      "name": "Structure",
+      "role": "structure",
+      "teams": [
+        "Structure"
+      ],
+      "classes": [],
+      "exclude_classes": [],
+      "systems": [],
+      "files": [],
+      "source": "level"
+    },
+    {
+      "id": "architecture",
+      "name": "Architecture",
+      "role": "architecture",
+      "teams": [
+        "Architecture"
+      ],
+      "classes": [],
+      "exclude_classes": [],
+      "systems": [],
+      "files": [],
+      "source": "level"
+    },
+    {
+      "id": "mep",
+      "name": "MEP",
+      "role": "services",
+      "teams": [
+        "MEP"
+      ],
+      "classes": [],
+      "exclude_classes": [],
+      "systems": [],
+      "files": [],
+      "source": "level"
+    },
+    {
+      "id": "site",
+      "name": "Site",
+      "role": "site",
+      "teams": [
+        "Site"
+      ],
+      "classes": [],
+      "exclude_classes": [],
+      "systems": [],
+      "files": [],
+      "source": "level"
+    }
+  ],
+  "checks": [
+    {
+      "a": "structure",
+      "b": null,
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "structure",
+      "b": "architecture",
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "structure",
+      "b": "mep",
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "structure",
+      "b": "site",
+      "check": "off",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "Site is context: listed, not checked by default",
+      "source": "level"
+    },
+    {
+      "a": "architecture",
+      "b": null,
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "architecture",
+      "b": "mep",
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "architecture",
+      "b": "site",
+      "check": "off",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "Site is context: listed, not checked by default",
+      "source": "level"
+    },
+    {
+      "a": "mep",
+      "b": null,
+      "check": "hard",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "",
+      "source": "level"
+    },
+    {
+      "a": "mep",
+      "b": "site",
+      "check": "off",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "Site is context: listed, not checked by default",
+      "source": "level"
+    },
+    {
+      "a": "site",
+      "b": null,
+      "check": "off",
+      "clearance_mm": null,
+      "tolerance_mm": null,
+      "reason": "Site is context: listed, not checked by default",
+      "source": "level"
+    }
+  ],
+  "duplicates": true,
+  "rules": {
+    "same_element": true,
+    "connected": true,
+    "assembly": true,
+    "host": true
+  },
+  "who_moves": [
+    {
+      "group": "structure",
+      "edits": "any",
+      "max_move_mm": null,
+      "trims": true
+    },
+    {
+      "group": "architecture",
+      "edits": "any",
+      "max_move_mm": null,
+      "trims": true
+    },
+    {
+      "group": "site",
+      "edits": "any",
+      "max_move_mm": null,
+      "trims": true
+    },
+    {
+      "group": "mep",
+      "edits": "any",
+      "max_move_mm": null,
+      "trims": true
+    }
+  ],
+  "by_design": [],
+  "guidance": {
+    "triage": "",
+    "fixes": ""
+  },
+  "notes": "The Northbank demo's default requirements: what ORCA checks and fixes without a requirements file, written out so they can be read, changed and tested.",
+  "domain": "construction",
+  "stays": [
+    "IfcBeam",
+    "IfcColumn",
+    "IfcSlab",
+    "IfcWall",
+    "IfcFooting",
+    "IfcPile",
+    "IfcMember",
+    "IfcPlate"
+  ]
+}

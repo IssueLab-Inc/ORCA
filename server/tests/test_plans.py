@@ -202,7 +202,7 @@ def test_pairs_sharing_a_movable_element_become_one_fix():
                 "girder": NS(fixed=True, name="Girder", ifc_class="IfcBeam"),
                 "duct": NS(fixed=False, name="Duct", ifc_class="IfcDuctSegment"),
                 "tray": NS(fixed=False, name="Tray", ifc_class="IfcCableCarrierSegment")}
-    ws = NS(scene=lambda sid: NS(element=lambda g: elements[g]))
+    ws = NS(scene=lambda sid: NS(element=lambda g: elements[g], stays=lambda g: elements[g].fixed))
     items = [plans.Item("pipe|rail_n", "pipe", "rail_n", "", ["c1"], distance_m=-0.05),
              plans.Item("pipe|rail_s", "pipe", "rail_s", "", ["c2"], distance_m=-0.06),
              plans.Item("duct|girder", "duct", "girder", "", ["c3"]),

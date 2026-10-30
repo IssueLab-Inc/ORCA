@@ -44,6 +44,7 @@ image = (
         "SIGHTLINE_SCENE_BUDGET_MB": "300",       # open models' IFC bytes held: two of the biggest, about 2.5 GB
         "SIGHTLINE_MODEL_UPLOADS_PER_HOUR": "10",  # visitors' own models (IFC or STEP), per visitor; for everyone
         "SIGHTLINE_MODEL_UPLOADS_PER_DAY": "200",
+        "SIGHTLINE_PUBLIC_URL": "https://dodzikojo--orca-web.us-east.modal.run",   # what MCP clients show as ORCA's site
         "SIGHTLINE_LINKS_PER_HOUR": "10",      # agent links (MCP) a visitor can make; for everyone a day
         "SIGHTLINE_LINKS_PER_DAY": "500",
         "SIGHTLINE_AGENT_CALLS_PER_HOUR": "600",  # MCP tool calls per link (fixes are also charged as proposals)

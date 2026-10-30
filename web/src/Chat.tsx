@@ -63,14 +63,15 @@ const SUGGESTIONS = [
   "Which clashes in this report are real, and which are noise?",
   "Explain the selected clash.",
   "Fix the selected clash.",
-  "Why are there so many clashes on Level 02? Fix the root cause.",
+  "Which clashes share a cause? Fix the root cause.",
 ];
 
-export function ChatPanel({ context, onEvent, owner, ready, ask }: {
+export function ChatPanel({ context, onEvent, owner, ready, ask, voiceModel = "voice transcription" }: {
   context: () => { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] };
   onEvent: (e: ChatEvent) => void;
   owner: ChatRequestOwner;
   ready: boolean;
+  voiceModel?: string;   // the model that hears speech (server: /api/models labels.voice)
   ask?: { text: string; send: boolean; n: number };  // the tour: put this in the box, or send it
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -172,7 +173,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
           if (said) void send(said, true);
           else setVoice((v) => ({ ...v, note: v.note ?? "Didn't catch that. Try again, a little closer to the mic." }));
         },
-      });
+      }, context().scene_id);
     } catch (e) {
       if (!mine()) return;
       live.current = null;
@@ -244,7 +245,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
     const current = owner.capture(), reportId = context().report_id;
     setVoice({ state: "transcribing", since: 0, level: 0 });
     try {
-      const { transcript } = await api.transcribe(await r.stop(), reportId);
+      const { transcript } = await api.transcribe(await r.stop(), reportId, context().scene_id);
       if (!mounted.current) return;
       if (!current()) { idle(); return; }
       idle(transcript ? undefined : "Didn't catch that. Try again, a little closer to the mic.");
@@ -331,7 +332,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
         <div ref={end} />
       </div>
       {/* The voice status sits above the input so the mic stays where the finger is. */}
-      {voice.state === "connecting" && <p className="voice-note live"><i className="rec" aria-hidden /> Connecting to Muse Voice Transcribe… start talking.</p>}
+      {voice.state === "connecting" && <p className="voice-note live"><i className="rec" aria-hidden /> Connecting to {voiceModel}… start talking.</p>}
       {voice.state === "listening" && <p className="voice-note live"><i className="rec" aria-hidden /> {
         recorder.current ? "Recording… press the mic again to send."
           : handsFree ? "Hands-free: talk, and each sentence goes when you pause. Press the mic to stop."
@@ -358,8 +359,8 @@ export function ChatPanel({ context, onEvent, owner, ready, ask }: {
             aria-pressed={voiceOn} data-tip-side="top" style={{ "--level": voice.level } as React.CSSProperties}
             aria-label={voiceOn ? (handsFree ? "Stop listening" : "Stop and send") : handsFree ? "Start hands-free" : "Hold to talk to ORCA"}
             data-tip={voiceOn ? (handsFree ? "Stop listening" : "Release, or press again, to send")
-              : handsFree ? "Press once, then just talk: each sentence goes when you pause (Muse Voice Transcribe, live)"
-                : "Hold to talk, release to send (Muse Voice Transcribe, live). A quick tap keeps the mic open."}>
+              : handsFree ? `Press once, then just talk: each sentence goes when you pause (${voiceModel}, live)`
+                : `Hold to talk, release to send (${voiceModel}, live). A quick tap keeps the mic open.`}>
             {voice.state === "listening" ? <><Square size={13} aria-hidden /> {Math.floor((Date.now() - voice.since) / 1000)} s</>
               : voiceOn ? <i className="spinner" aria-hidden /> : <Mic size={15} aria-hidden />}</button>
           {LiveVoice.supported() && (

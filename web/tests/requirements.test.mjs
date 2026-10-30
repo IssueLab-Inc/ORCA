@@ -91,3 +91,15 @@ test("a group's rule for openings is set, cleared, and added from an opening's h
   assert.equal(req.setPenetration(both, "structure", null, "ab12").penetrations[0].rule, "never");
   assert.equal(req.addPenetration(doc(), { ...edit, host_group: "nowhere" }, null).penetrations, undefined);  // no such group
 });
+
+test("a requirements file says whether it is a building or a machine, and what stays in place", () => {
+  const d = doc();
+  const machine = req.setDomain(d, "machines");
+  assert.equal(machine.domain, "machines");
+  assert.equal(machine.version, d.version + 1);
+  const listed = req.setStays(machine, ["IfcColumn", "IfcSlab", "IfcColumn"]);
+  assert.deepEqual(listed.stays, ["IfcColumn", "IfcSlab"]);
+  // Back to the domain's defaults: the field goes, so a file without it keeps the id it had.
+  const back = req.setStays(listed, null);
+  assert.equal("stays" in back, false);
+});

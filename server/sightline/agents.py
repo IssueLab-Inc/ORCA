@@ -23,12 +23,13 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .chat import Context
+from .limits import env_int
 
-TTL = 12 * 3600          # a link lives this long after its last use...
-MAX_AGE = 24 * 3600      # ...but never longer than this
-MAX_LINKS = 200
+TTL = env_int("SIGHTLINE_AGENT_LINK_TTL_H", 12) * 3600          # a link lives this long after its last use...
+MAX_AGE = env_int("SIGHTLINE_AGENT_LINK_MAX_AGE_H", 24) * 3600  # ...but never longer than this
+MAX_LINKS = env_int("SIGHTLINE_AGENT_LINKS", 200)
 EVENTS_PER_SUBSCRIBER = 200
-JOBS_PER_LINK = 16
+JOBS_PER_LINK = env_int("SIGHTLINE_AGENT_LINK_JOBS", 16)
 
 
 def _hash(token: str) -> str:

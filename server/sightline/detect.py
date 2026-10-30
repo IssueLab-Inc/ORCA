@@ -32,15 +32,15 @@ import ifcopenshell.util.element
 import ifcopenshell.util.system
 import numpy as np
 
-from . import verify
-from .document import guess_team
+from . import requirements, verify
+from .limits import env_int
 from .reports import Report, ReportClash, ReportElement, plain_name
 from .scene import IfcScene
 
 TOLERANCE_M = 0.001        # an overlap must be deeper than this to be a hard clash; less is a touch
 DUPLICATE_M = 0.001        # two copies of one thing: boxes and vertices agree within this
 FAR_M = 200.0              # the triangle tree drops real overlaps this far from its origin: shift the models nearer
-CAP = 5000                 # clashes kept per test; a test that reaches it is partial
+CAP = env_int("SIGHTLINE_DETECT_CAP", 5000)   # clashes kept per test; a test that reaches it is partial
 RULES = ("same_element", "connected", "assembly", "host")
 RULE_LABEL = {"same_element": "same element", "connected": "joined by ports", "assembly": "one assembly",
               "host": "door or window in its wall"}
@@ -127,10 +127,8 @@ class _Index:
                     self.file[p.GlobalId] = i
                     self.entity[p.GlobalId] = p
         self.names = [p.name for p in scene.paths]
-        self.teams = []
-        for i, m in enumerate(scene.models):
-            classes = Counter(e.is_a() for e in m.by_type("IfcElement") if e.GlobalId in self.boxes)
-            self.teams.append(guess_team(classes, self.names[i]))
+        # Each file's team, guessed in the scene's domain: the same names requirements groups select by.
+        self.teams = list(requirements._file_teams(scene, requirements.domain_of(scene, requirements.current())))
         self._systems: dict[str, list[str]] = {}
         self.connected = self._connected()
         self.assembly = self._assemblies()
@@ -252,12 +250,15 @@ def default_tests(scene: IfcScene, index: _Index | None = None) -> list[Test]:
 
 
 def presets(scene: IfcScene, index: _Index | None = None) -> list[Test]:
-    """Tests offered but not run by default: MEP clearance to structure, 25 mm."""
+    """Tests offered but not run by default: a building's services clear of its structure, by the default clearance
+    (a machine's files are teams of their own names, so it gets none)."""
     ix = index or _Index(scene)
     teams = set(ix.teams)
     if {"MEP", "Structure"} <= teams:
-        return [Test(id="clearance:MEP|Structure", name="MEP vs Structure, 25 mm clearance", kind="clearance",
-                     a=Selection(teams=["MEP"]), b=Selection(teams=["Structure"]), clearance_m=0.025, enabled=False)]
+        mm = requirements.DEFAULT_CLEARANCE_MM
+        return [Test(id="clearance:MEP|Structure", name=f"MEP vs Structure, {mm} mm clearance", kind="clearance",
+                     a=Selection(teams=["MEP"]), b=Selection(teams=["Structure"]),
+                     clearance_m=requirements.DEFAULT_CLEARANCE_M, enabled=False)]
     return []
 
 

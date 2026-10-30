@@ -8,7 +8,7 @@ import { COMPASS_NAME, level3, planPreset, planRange, storeyHeight, type Compass
 const COMPASSES: Compass[] = ["north", "south", "east", "west"];
 const PRESETS: { id: PlanPreset; label: string; hint: string }[] = [
   { id: "floor", label: "Floor plan", hint: "cut +1.200, down to the floor" },
-  { id: "ceiling", label: "Ceiling void", hint: "beams, girders and the services between them, no floor" },
+  { id: "ceiling", label: "Ceiling void", hint: "the beams above and the services under them, no floor" },
   { id: "storey", label: "Whole storey", hint: "cut just under the next level" },
 ];
 

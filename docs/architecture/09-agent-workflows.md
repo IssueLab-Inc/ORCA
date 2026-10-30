@@ -56,7 +56,8 @@ reason → rank**. Nothing reaches `Result.options` without passing the geometry
 - **`Workspace.fix_settings`**: with coordination requirements in force, the `clearance_m` the pair must keep, a
   `policy` per element (`requirements.Policy`), the `guidance` lines (`requirements.prompt_text(doc, "fixes")`), the
   `doc`, and `recommend` (why nothing may be edited) when neither side may be edited. With none, `{}`: today's
-  defaults (25 mm clearance).
+  defaults (`requirements.DEFAULT_CLEARANCE_M`, 25 mm). `Workspace.clearance` is the same value for a check by hand,
+  by chat or over MCP, so it agrees with keeping the fix.
 - **`hosts_model`**: the triage model, for reading which hosts may take an opening (below).
 - **On a second try**: `brief` (what Wonder reads beyond the clash) and `label` ("Muse Wonder").
 

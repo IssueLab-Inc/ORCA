@@ -304,10 +304,11 @@ flowchart LR
 
 - **Shape** (offered by Muse Wonder's prompt, `escalation.md`, though `TRIES` accepts it in any round):
   `{"kind": "combined", "steps": [{"kind": "move", "move": "<GlobalId>", "delta_m": [...]}, {"kind": "offset", "move":
-  "A", "split_m": [...], "dz_m": 0.4}]}`.
+  "A", "split_m": [...], "dz_m": 0.3}]}`.
 - **Checked steps** (`agent.combined_steps`, raising `Refused`): 1 to `COMBINED_MAX` (3) steps of `COMBINED_KINDS`
-  (move, offset, route), each on its own physical element ("A", "B" or a GlobalId), never structure (`agent.stays`:
-  `FIXED_CLASSES` and `IfcPile` by inheritance, so IFC2X3's `IfcWallStandardCase` too), nothing but services besides A
+  (move, offset, route), each on its own physical element ("A", "B" or a GlobalId), never anything fixed in place
+  (`IfcScene.stays`: the requirements' list, else the domain's classes, by inheritance, so IFC2X3's
+  `IfcWallStandardCase` too), nothing but services besides A
   and B, a moved run that holds neither, every moved element allowed by the requirements, and at least one step on A
   or B.
 - **Tried** (`_try_combined`): all steps in one `trial_files` over every file they touch (`apply_combined`), then

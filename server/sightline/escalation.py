@@ -13,15 +13,18 @@ from collections import Counter
 
 import numpy as np
 
-from . import agent, edits
+from . import agent, edits, requirements
 from .scene import IfcScene
+from .limits import env_float, env_int
 
 PACK = agent.PACKS / "escalation.md"
-NEAR_M = 5.0        # the neighbourhood: elements whose boxes come this close to where A and B meet
-NEAR_MAX = 80       # at most this many of them, nearest first
+NEAR_M = env_float("SIGHTLINE_ESCALATION_NEAR_M", 5.0)   # the neighbourhood: elements this close to where A and B meet
+NEAR_MAX = env_int("SIGHTLINE_ESCALATION_NEAR_MAX", 80)   # at most this many of them, nearest first
 BLOCKERS = 3        # the elements the first try ran into most: openings and room past each are worked out
 MAX_CHARS = 60_000  # about 15k tokens of brief; the 1M context needs no trimming, but every token is billed
-ESTIMATE_USD = 1.0  # about what a second try may cost at most (two rounds of Muse Wonder): held against the day's
+ROUNDS = env_int("SIGHTLINE_ESCALATION_ROUNDS", 2)   # model rounds of a second try
+# About what a second try may cost at most (ROUNDS of Muse Wonder): held against the day's
+ESTIMATE_USD = env_float("SIGHTLINE_ESCALATION_ESTIMATE_USD", 1.0)
                     # budget while it runs (spend.held), so tries started together cannot all pass the check
 
 
@@ -126,7 +129,7 @@ def blockers(scene: IfcScene, clash: agent.Clash, first: dict | None, clearance_
         lines.append(f"The first try ran into {e.ifc_class} '{e.name}' ({g}) {n} time{'s' if n != 1 else ''}"
                      + (" (a service: it may move in a combined fix)." if movable else " (it stays where it is)."))
         for label, run in (("A", clash.element_a), ("B", clash.element_b)):
-            if scene.element(run).fixed:
+            if scene.stays(run):
                 continue
             try:
                 holes = edits.passages(scene, run, g, clearance_m=clearance_m)
@@ -143,7 +146,7 @@ def blockers(scene: IfcScene, clash: agent.Clash, first: dict | None, clearance_
     return lines
 
 
-def brief(scene: IfcScene, clash: agent.Clash, first: dict | None, clearance_m: float = 0.025) -> str:
+def brief(scene: IfcScene, clash: agent.Clash, first: dict | None, clearance_m: float = requirements.DEFAULT_CLEARANCE_M) -> str:
     """What the second try reads beyond `agent._describe`: the first try, the elements it ran into, the
     neighbourhood, and the kinds of fix there are (from the registry, so none is offered that is not)."""
     parts = ["", "", "## The first try", *first_try(first, scene)]

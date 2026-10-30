@@ -23,6 +23,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import ifcopenshell.util.unit
 
+from . import domains
 from .limits import env_int
 
 # The pset a part converted from STEP carries (step.py): its group, label and source file. Older conversions, and their
@@ -56,8 +57,6 @@ def opacity(element) -> float:
                                 return 1.0 - float(t)
     return 1.0
 
-
-FIXED_CLASSES = ("IfcBeam", "IfcColumn", "IfcSlab", "IfcWall", "IfcFooting", "IfcMember", "IfcPlate")
 
 # Not physical: openings are voids already cut from their host, virtual elements have no material.
 NOT_PHYSICAL = ("IfcFeatureElement", "IfcVirtualElement")
@@ -106,7 +105,7 @@ class Element:
     tag: str | None
     storey: str | None
     source: str               # file name the element lives in
-    fixed: bool
+    fixed: bool               # stays in place (`IfcScene.stays`)
     connected: list[str] = field(default_factory=list)  # GlobalIds joined through ports
 
 
@@ -120,6 +119,19 @@ class IfcScene:
         self._bounds: dict[str, np.ndarray] | None = None
         self.revision = 0
         self.history: list[tuple[int, list[int]]] = []   # (revision, files it changed), for pages that missed an edit
+        # Building or machine as opened (`domains.infer`); a requirements file may say otherwise (`requirements.domain_of`).
+        self.domain = domains.CONSTRUCTION
+        # What stays in place, as the effective requirements say (`Workspace` sets it: `requirements.stays_rule`).
+        self.stays_rule: Callable[[str], bool] | None = None
+
+    def stays(self, global_id: str) -> bool:
+        """The element stays in place: a fix never moves it to make room, nor a run that holds it (it may still be
+        trimmed against another that stays). The requirements decide (`stays_rule`); without them, the domain's
+        default classes (`domains.STAYS`)."""
+        if self.stays_rule is not None:
+            return self.stays_rule(global_id)
+        ent = self.entity(global_id)
+        return any(ent.is_a(c) for c in domains.STAYS.get(self.domain, domains.STAYS[domains.CONSTRUCTION]))
 
     def snapshot(self) -> IfcScene:
         """Clone current in-memory IFC state, including edits not yet exported."""
@@ -131,6 +143,7 @@ class IfcScene:
         clone._bounds = None if self._bounds is None else {g: b.copy() for g, b in self._bounds.items()}
         clone.revision = self.revision
         clone.history = list(self.history)
+        clone.domain, clone.stays_rule = self.domain, self.stays_rule
         return clone
 
     # Single-file conveniences (tests, spikes).
@@ -172,7 +185,7 @@ class IfcScene:
         return Element(
             global_id=e.GlobalId, ifc_class=e.is_a(), name=getattr(e, "Name", None),
             tag=getattr(e, "Tag", None), storey=getattr(container, "Name", None),
-            source=self.paths[i].name, fixed=e.is_a() in FIXED_CLASSES, connected=connected,
+            source=self.paths[i].name, fixed=self.stays(global_id), connected=connected,
         )
 
     def products(self):

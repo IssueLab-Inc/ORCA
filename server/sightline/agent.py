@@ -15,7 +15,13 @@ import numpy as np
 
 from . import connections, edits, hosts, meta_client, requirements, verify
 from .meta_client import ChatModel
-from .scene import FIXED_CLASSES, IfcScene
+from .requirements import DEFAULT_CLEARANCE_M
+from .limits import env_int
+
+# Model rounds per proposal (each round: ideas, every one checked, failures fed back) and the options it stops at.
+ROUNDS = env_int("SIGHTLINE_AGENT_ROUNDS", 3)
+OPTIONS = env_int("SIGHTLINE_AGENT_OPTIONS", 3)
+from .scene import IfcScene
 
 PACKS = Path(__file__).parent / "domain_packs"
 
@@ -99,14 +105,14 @@ class Result:
     # candidate, never tried or applied) and why ORCA could not make it.
     recommendation: dict | None = None
     requirements: str | None = None   # the requirements' label ("L3 Coordinated · Strict"), when there were some
-    clearance_m: float = 0.025        # the clearance every option had to keep
+    clearance_m: float = DEFAULT_CLEARANCE_M        # the clearance every option had to keep
     model: str = ""                   # the model that ran these rounds ("Muse Spark", "Muse Wonder")
     usage: dict | None = None         # its tokens and, for a model billed per token, what they cost (meta_client.Usage)
     escalated: bool = False           # a second try on a larger model (docs/escalation.md): Spark's options and tries
                                       # are carried in, Wonder's added
 
 
-def _describe(scene: IfcScene, clash: Clash, clearance_m: float = 0.025, memo: dict | None = None) -> str:
+def _describe(scene: IfcScene, clash: Clash, clearance_m: float = DEFAULT_CLEARANCE_M, memo: dict | None = None) -> str:
     """What Muse reads about the clash. `memo` keeps what the geometry said between rounds of one proposal (the room
     past an obstacle costs a ray scan; nothing changes between rounds: every trial is undone)."""
     a, b = scene.element(clash.element_a), scene.element(clash.element_b)
@@ -137,14 +143,10 @@ def is_service(scene: IfcScene, gid: str) -> bool:
     return scene.entity(gid).is_a("IfcDistributionElement")
 
 
-# Structure a combined fix never moves, by inheritance (IFC2X3's IfcWallStandardCase is a wall), piles included.
-STAYS = (*FIXED_CLASSES, "IfcPile")
-
-
 def stays(scene: IfcScene, gid: str) -> bool:
-    """Structure: a combined fix's steps never move it, nor a run that holds it."""
-    ent = scene.entity(gid)
-    return any(ent.is_a(c) for c in STAYS)
+    """Fixed in place (the requirements' list, else the domain's: `IfcScene.stays`): a combined fix's steps never move
+    it, nor a run that holds it."""
+    return scene.stays(gid)
 
 
 def penetration_pairs(scene: IfcScene, clash: Clash) -> list[tuple[str, str, str, str]]:
@@ -214,7 +216,7 @@ def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: 
     return lines
 
 
-def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = 0.025,
+def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = DEFAULT_CLEARANCE_M,
               others: list[str] = (), memo: dict | None = None) -> list[str]:
     """A straight segment's geometry, and where the other element (and any `others` it also runs into) sits along it:
     what a local offset needs."""
@@ -400,7 +402,7 @@ def tier(kind: str | None, edit: dict | None = None) -> float:
 
 
 def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = "construction",
-            max_rounds: int = 3, want: int = 3, clearance_m: float = 0.025,
+            max_rounds: int | None = None, want: int | None = None, clearance_m: float = DEFAULT_CLEARANCE_M,
             on_event: Callable[[dict], None] | None = None, lock=None, trials: bool = False,
             policy: dict | None = None, guidance: str = "", recommend: str | None = None, doc=None,
             hosts_model: ChatModel | None = None, brief: str = "", label: str = "") -> Result:
@@ -429,6 +431,8 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     A second try on a larger model (escalation.py) adds `brief` to what the model reads each round (the first try's
     ideas and why they failed, a wider neighbourhood) and `label` names the model on every event and option.
     """
+    max_rounds = ROUNDS if max_rounds is None else max_rounds
+    want = OPTIONS if want is None else want
     lock = lock or contextlib.nullcontext()
     usage_from = model.usage.snapshot() if isinstance(getattr(model, "usage", None), meta_client.Usage) else None
     system = (PACKS / f"{pack}.md").read_text() + guidance
@@ -749,7 +753,7 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
     tol = 0.002
     # A trim tidies a joint between two members that stay put (a transom into a mullion). When the other side is a
     # service that can move (a cable tray over a fence post), it moves: cutting the post would weaken the guarding.
-    if scene.element(target).fixed and not scene.element(other).fixed:
+    if scene.stays(target) and not scene.stays(other):
         return Attempt(title, [0.0, 0.0, 0.0], False,
                        f"cannot trim this element: {scene.element(other).name} can move instead; a trim only tidies a "
                        "joint between members that stay put", "trim"), None

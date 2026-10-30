@@ -21,7 +21,7 @@ import ifcopenshell.util.system as system
 import numpy as np
 
 from . import context_eval, edits, verify
-from .scene import FIXED_CLASSES, IfcScene, step_source
+from .scene import IfcScene, step_source
 
 TOUCH_M = 0.002       # two faces of a joint meet within this (as context_eval.TOL)
 FACING = 0.95         # and face each other: normals opposed within about 18°
@@ -111,7 +111,7 @@ def is_flow(scene: IfcScene, gid: str) -> bool:
 def classify(scene: IfcScene, gid: str) -> str:
     """"straight", "rigid" or "stays" (see the module's docstring)."""
     ent = scene.entity(gid)
-    if not ent.is_a(FLOW) or any(ent.is_a(c) for c in FIXED_CLASSES):
+    if not ent.is_a(FLOW) or scene.stays(gid):
         return "stays"
     if ent.is_a("IfcFlowSegment"):
         try:

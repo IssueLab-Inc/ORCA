@@ -2,6 +2,7 @@ import { EyeOff, ListChecks, Workflow } from "lucide-react";
 import type { Attempt } from "./api";
 import { editText, kindLabel } from "./fixKinds";
 import { Workings } from "./Workings";
+import { aiName } from "./aiNames";
 
 /** What the agent is doing now, while a proposal runs. */
 export interface Progress {
@@ -29,7 +30,7 @@ function firstReason(reason: string): [string, number] {
 export function statusLine(p: Progress | null, now: number, attempts: Attempt[]): string {
   if (!p) return "";
   const total = Math.round((now - p.started) / 1000);
-  const who = p.model || "Muse Spark";
+  const who = p.model || aiName("proposal");
   if (p.phase === "thinking") {
     return p.offset
       ? `${who}, round ${p.round}: reading the first try and the model around it… ${Math.round((now - p.thinkingSince) / 1000)} s`
@@ -75,10 +76,11 @@ export function Activity({ attempts, progress, now, workings = false, view = "st
   );
   if (drawing) return <div className="activity">{head}<Workings inView={inView} /></div>;
   if (!progress && !attempts.length) {
-    return <div className="activity">{head}<p className="hint">ORCA's steps appear here: each idea from Muse Spark, and what the geometry check found.</p></div>;
+    return <div className="activity">{head}<p className="hint">ORCA's steps appear here: each idea from {aiName("proposal")}, and what the geometry check found.</p></div>;
   }
   // Name the model on each idea only when two tried (a second try): one model needs no label.
-  const models = new Set(attempts.map((t) => t.model || "Muse Spark"));
+  const first = aiName("proposal");
+  const models = new Set(attempts.map((t) => t.model || first));
   const offset = progress?.offset ?? 0;
   return (
     <div className="activity">
@@ -92,7 +94,7 @@ export function Activity({ attempts, progress, now, workings = false, view = "st
               <tr key={i} className={t.passed ? "ok" : "fail"}>
                 <td className="mono" data-label="#">{i + 1}</td>
                 <td data-label="Kind"><span className={`badge ${t.kind}`}>{kindLabel(t.kind)}</span></td>
-                <td data-label="Idea">{t.title}{models.size > 1 && <span className={`chip model ${t.model && t.model !== "Muse Spark" ? "wonder" : ""}`}>{t.model || "Muse Spark"}</span>}</td>
+                <td data-label="Idea">{t.title}{models.size > 1 && <span className={`chip model ${t.model && t.model !== first ? "wonder" : ""}`}>{t.model || first}</span>}</td>
                 <td className="mono" data-label="Edit">{editText(t)}</td>
                 <td data-label="Check">{t.passed ? <span className="ok">✓ verified</span>
                   : <span className="bad" title={t.reason}>✗ {first}{more ? ` +${more} more` : ""}</span>}</td>

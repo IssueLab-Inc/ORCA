@@ -4,6 +4,7 @@ import { mm } from "./ReportList";
 import { oneElement, sameWhy } from "./noClash";
 import { drawOverlay, focusSquare, readClashImage, type Box, type ClashRead } from "./clashImage";
 import { TRIAGE } from "./Triage";
+import { aiName } from "./aiNames";
 
 const VIEW_NAMES: Record<string, string> = { A: "A · pair", B: "B · context", C: "C · second angle" };
 
@@ -47,7 +48,7 @@ export function ClashPanel({ reportId, clash, match, measure, onImage, fix, tria
           {triage.understanding && <p>{triage.understanding}</p>}
           {triage.fix_hint && <p className="why">{triage.action === "exclude_with_rule" ? "Stop it coming back: " : "Fix: "}{triage.fix_hint}</p>}
           {triage.model_reading && <p className="why small">The triage model read it as {triage.model_reading}</p>}
-          {triage.audit === "disputed" && <p className="bad small">Muse Spark checked this requirements rule and thinks it may hide real
+          {triage.audit === "disputed" && <p className="bad small">{aiName("proposal")} checked this requirements rule and thinks it may hide real
             clashes: {triage.audit_note}</p>}
           {triage.alike && <p className="why small">Read once for {triage.alike} alike clashes: the same kinds of element,
             named alike and about as deep{triage.alike_of ? ". This one shares that reading" : ""}.</p>}

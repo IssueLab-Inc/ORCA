@@ -26,7 +26,9 @@ each feature see [01](01-product-and-journeys.md).
 | **Design coordination** | Making the teams' models agree before anything is built. | The product's job; see "Wording" below. |
 | **Clash** | One place where two elements conflict. | `ReportClash`; numbered `#N`. |
 | **Hard clash** | Two solids overlap deeper than a tolerance (1 mm by default). | `detect.Test` kind hard; `verify.Hit.kind == "collision"`. |
-| **Clearance** | The gap required between two elements. A clearance clash is closer than that. ORCA's fixes keep 25 mm by default. | `clearance_m=0.025` across `agent`, `verify`, `service`; `Hit.kind == "clearance"`. |
+| **Clearance** | The gap required between two elements. A clearance clash is closer than that. ORCA's fixes keep 25 mm by default, or what the requirements ask of the pair. | `requirements.DEFAULT_CLEARANCE_M`, `Workspace.clearance`; `Hit.kind == "clearance"`. |
+| **Fixed in place** | An element a fix never moves to make room (a trim between two that stay is allowed). The requirements say which (`stays`, and groups allowed no edits); without them, the domain's frame classes. | `IfcScene.stays`, `requirements.stays_rule`, `domains.STAYS`. |
+| **Domain** | Whether a project is a building (`construction`) or a machine (`machines`): ORCA's voice, fix pack, team guesses and what stays by default. The requirements file says which; else all-STEP models are a machine. | `requirements.Doc.domain`, `domains.of`. |
 | **Tolerance** | The smallest overlap a test reports. | `ReportClash.tolerance_m`; requirements levels set it (`requirements.LEVELS`). |
 | **Touch** | Elements meeting within 1 mm, not overlapping. Not a clash. | Triage basis `touch`; detection counts touches, does not report them. |
 | **Duplicate** | An element modelled twice in the same place. | Detection's duplicates test. |

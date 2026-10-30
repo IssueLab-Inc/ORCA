@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, CircleCheck, ClipboardCheck, ClipboardPlus, Filter, Flag, ListChecks, Network, Repeat2, Sparkles, Wand2 } from "lucide-react";
 import { useState } from "react";
 import type { Pattern, PatternVerdict, RootCause } from "./api";
+import { aiName } from "./aiNames";
 
 /** "IfcMechanicalFastener" → "Mechanical fastener". */
 const human = (c: string) => {
@@ -82,8 +83,8 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
         <h3><Repeat2 size={14} aria-hidden /> Patterns</h3>
         <p className="hint">The same pair of element types clashing again and again: usually one decision, not many problems.</p>
         {!verdicts && <button className="btn small explain-all" data-tour="explain" disabled={explaining || busy} onClick={onExplain}>
-          {explaining ? <><i className="spinner" aria-hidden /> Muse Spark is reading the patterns…</>
-            : <><Sparkles size={13} aria-hidden /> Explain the {pats.length} patterns with Muse Spark</>}</button>}
+          {explaining ? <><i className="spinner" aria-hidden /> {aiName("proposal")} is reading the patterns…</>
+            : <><Sparkles size={13} aria-hidden /> Explain the {pats.length} patterns with {aiName("proposal")}</>}</button>}
         {!verdicts && <p className="hint small">Marks, flags and fixes for each pattern appear once they are read.</p>}
         {shownPats.map((p) => {
           const v = verdicts?.[p.id];
@@ -106,7 +107,7 @@ export function Insights({ rootCauses, patterns, verdicts, explaining, busy, onF
                 {v?.verdict === "by_design" && onAddRule ? (hasRule(p)
                   ? <span className="chip small ok req-added"><ClipboardCheck size={11} aria-hidden /> in your requirements</span>
                   : <button className="btn small ghost req-add" data-tour="add-requirement"
-                    data-tip="Make it a rule in your coordination requirements: these pairs are settled as by design without the model, here and on every project you reuse the file on. Muse Spark still checks the rule."
+                    data-tip={`Make it a rule in your coordination requirements: these pairs are settled as by design without the model, here and on every project you reuse the file on. ${aiName("proposal")} still checks the rule.`}
                     onClick={() => onAddRule(p, v)}><ClipboardPlus size={12} aria-hidden /> Add to requirements</button>) : <span />}
                 <div className="insight-actions">
                   {filterButton(patLabel(p), p.clash_ids)}

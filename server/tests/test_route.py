@@ -219,7 +219,7 @@ def test_a_single_proposal_hears_of_the_runs_other_clash_nearby(tmp_path):
     text = agent._describe(scene, clash)
     assert "also clashes nearby with IfcColumn 'Column B4' at 3.80-4.20 m along it" in text
     # The fixed side's other clashes are not this fix's: a column's other partners are never named.
-    assert all(not scene.element(g).fixed for g in [duct]) and b2 not in clash.nearby.get(duct, [])
+    assert all(not scene.stays(g) for g in [duct]) and b2 not in clash.nearby.get(duct, [])
 
 
 def test_a_single_step_on_a_sloped_run_or_drainage_keeps_the_routes_own_rules(scene):
@@ -273,7 +273,7 @@ def test_nearby_clashes_are_each_sides_own_and_near_where_they_meet(tmp_path):
     boxes = {"duct": box(0, 14, -0.2, 0.2), "pipe": box(0.9, 1.1, -3, 3), "wall": box(0.8, 1.2, 2, 2.5)}
     boxes.update({f"beam{x}": box(x - 0.1, x + 0.1, -1, 1) for x in (1, 2.5, 6, 9, 12.5)})
     fixed = {g: g.startswith(("beam", "wall")) for g in boxes}
-    scene = NS(bounds=lambda: boxes, element=lambda g: NS(fixed=fixed[g]))
+    scene = NS(bounds=lambda: boxes, element=lambda g: NS(fixed=fixed[g]), stays=lambda g: fixed[g])
     side = lambda g, cls="IfcBeam": NS(global_id=g, ifc_class=cls)
     clashes = [NS(a=side("duct", "IfcDuctSegment"), b=side(f"beam{x}"), distance_m=-0.05) for x in (1, 2.5, 6, 9, 12.5)]
     clashes += [NS(a=side("duct", "IfcDuctSegment"), b=side("pipe", "IfcPipeSegment"), distance_m=-0.02),

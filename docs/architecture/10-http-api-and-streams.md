@@ -162,7 +162,7 @@ classes in `app.py`.
 | `GET` | `/api/owner` | Whether an owner is configured and whether this request is the owner's | none | `{available, owner}` | free |
 | `POST` | `/api/owner/unlock` | Checks the owner token once (`owner.check_token`, constant time) and sets the signed cookie | `{token}` | `{owner: true}` and `Set-Cookie: sightline_owner` | 404 with no token configured; wrong token 403, capped by `unlock_limit` (5 per visitor per hour, 50 a day) → 429 |
 | `POST` | `/api/owner/lock` | Clears the cookie | none | `{owner: false}` | free |
-| `GET` | `/api/models` | Which model titles and triage use for this request (`triage_model_info`), the escalation model and mode (`escalation_info`), whether Show it built is on, the upload cap | none | `{triage, escalation, built_views, model_upload_max_mb, model_upload_max_files}` | free |
+| `GET` | `/api/models` | Which model titles and triage use for this request (`triage_model_info`), the escalation model and mode (`escalation_info`), whether Show it built is on, each role's model name for the words on screen (`meta_client.labels`), triage's calls at a time, the upload cap | none | `{triage, escalation, built_views, labels: {proposal, escalation, triage, image, voice}, triage_workers, model_upload_max_mb, model_upload_max_files}` | free |
 | `GET` | `/api/settings` | The settings for everyone (`settings.current`), their defaults, whether an open-weights host key is set | none | `{everyone, defaults, host}` | owner only (403) |
 | `PUT` | `/api/settings` | Changes settings for everyone (`settings.update`) | partial settings dict | as `GET` | owner only (403); 400 on a bad value |
 
@@ -170,7 +170,7 @@ classes in `app.py`.
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `GET` | `/api/samples` | Model files in `samples/` (`Workspace.list_samples`) | none | `[name]` | free |
+| `GET` | `/api/samples` | Model files in `samples/` (`Workspace.list_samples`) and the demos among them (`demos.listing`) | none | `{files: [name], demos: [{id, name, label, kind, files, context, tour}]}` | free |
 | `POST` | `/api/scenes` | Opens sample models; a STEP sample is converted first (cached by hash) with the triage model naming parts | `Open {samples}` | `{id, files, step, revision}` | free; 404 unknown name, 400 STEP error |
 | `POST` | `/api/models/upload` | Opens the visitor's own IFC/STEP files (`_receive_models`, then `Workspace.open_paths`) | multipart `files` (each may be `<name>.gz`); `Content-Length` required | `{id, files, step, revision}` | `model_upload_limit` (`SIGHTLINE_MODEL_UPLOADS_PER_HOUR`/`_DAY`); 411, 413, 400, 429 |
 | `POST` | `/api/models/upload/stream` | The same, with the opening streamed (below) | as above | NDJSON | as above; refusals before the files are in are plain HTTP errors |
@@ -186,7 +186,7 @@ classes in `app.py`.
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `POST` | `/api/scenes/{scene_id}/verify` | Checks a move without keeping it (`Workspace.verify_move`); with `obstacles`, what the moved elements stand on is kept | `Move {moved, delta_m, clearance_m=0.025, obstacles=[]}` | verdict `{passed, hits, min_clearance_m, checked_against, reason?, placements}` | free |
+| `POST` | `/api/scenes/{scene_id}/verify` | Checks a move without keeping it (`Workspace.verify_move`); with `obstacles`, what the moved elements stand on is kept | `Move {moved, delta_m, clearance_m? (none: the pair's, Workspace.clearance), obstacles=[]}` | verdict `{passed, hits, min_clearance_m, checked_against, reason?, placements}` | free |
 | `POST` | `/api/scenes/{scene_id}/propose` | Runs the fix agent (`Workspace.propose`), or a second try (`Workspace.escalate`), one JSON reply | `Propose {element_a, element_b, distance_m?, notes, report_id?, clash_id?, escalate=false}` | the proposal (`understanding, options, attempts, advice, recommendation, requirements, clearance_m, model, usage, escalated?`) | one proposal (`propose_limit`); a second try: 409 if nothing may be edited, 403 if switched off, then the Wonder budget and one escalation plus one proposal (`escalation_refused`) |
 | `POST` | `/api/scenes/{scene_id}/propose/stream` | The same, streamed (below); `api.proposeStream` | as above | NDJSON | as above |
 | `POST` | `/api/scenes/{scene_id}/apply` | Keeps a move through `plans.apply` (tried again first against `obstacles[0]`, the rest as `others`; the requirements' clearance, not the body's `clearance_m`) and returns the patch (`_with_patch`); the page no longer calls it | `Move` (`obstacles` required) | as `fix/apply` | free; 422 without `moved` or `obstacles`, 409 when it does not pass |
@@ -270,8 +270,8 @@ triage jobs (`_triage_jobs`) and 32 titling jobs (`_title_jobs`).
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
 | `POST` | `/api/chat` | One chat message, answered by Muse Spark with tools (`chat.Chat.turn`); the message is cut to 4,000 characters | `ChatTurn {message, session_id?, scene_id?, report_id?, clash_id?, fixed=[]}` | NDJSON | `chat_limit` (`SIGHTLINE_CHAT_PER_HOUR`/`_DAY`) per message; the tools charge proposals and second tries as the page's own buttons do; 422 on an empty message |
-| `POST` | `/api/transcribe` | A recorded clip to text with Muse Voice Transcribe (`meta_client.transcribe`), biased to BIM words and the open report's element names and titles (`_voice_words`) | multipart `audio` (WAV, mono 16-bit, 16 or 24 kHz, at most 3 MB), optional `report_id` | `{transcript, duration_ms}` | `voice_limit` (`SIGHTLINE_VOICE_PER_HOUR`/`_DAY`); 413, 422, 502 |
-| `WEBSOCKET` | `/api/voice/live` | Live voice: the microphone relayed to Meta's realtime recognition and the words back as they are said (below) | JSON first frame, then PCM | JSON frames | one `voice_limit` use per session; same origin only |
+| `POST` | `/api/transcribe` | A recorded clip to text with Muse Voice Transcribe (`meta_client.transcribe`), biased to coordination words, the domain's (`domains.VOICE`), the open models' levels and systems and the open report's element names and titles (`_voice_words`) | multipart `audio` (WAV, mono 16-bit, 16 or 24 kHz, at most 3 MB), optional `report_id`, `scene_id` | `{transcript, duration_ms}` | `voice_limit` (`SIGHTLINE_VOICE_PER_HOUR`/`_DAY`); 413, 422, 502 |
+| `WEBSOCKET` | `/api/voice/live` | Live voice: the microphone relayed to Meta's realtime recognition and the words back as they are said (below) | JSON first frame (`mode`, `report_id`, `scene_id`), then PCM | JSON frames | one `voice_limit` use per session; same origin only |
 
 ### Documents
 

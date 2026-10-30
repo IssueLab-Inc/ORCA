@@ -74,7 +74,7 @@ export function hostRows(o: Pick<Option, "kind" | "edit">): [string, string][] {
   const out: [string, string][] = [];
   const { host_reading: reading, numbers, reading_source: source } = o.edit;
   if (typeof reading === "string" && reading) {
-    out.push(["Host", reading + (source === "requirements" ? " (requirements)" : source === "muse" ? " (Muse Spark's reading)" : "")]);
+    out.push(["Host", reading + (source === "requirements" ? " (requirements)" : source === "muse" ? " (the AI's reading)" : "")]);
   }
   if (Array.isArray(numbers) && numbers.length) out.push(["Hole", numbers.join("; ")]);
   return out;

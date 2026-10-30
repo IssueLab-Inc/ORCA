@@ -260,7 +260,12 @@ export interface Requirements {
   groups: ReqGroup[]; checks: ReqCheck[]; duplicates: boolean; rules: Record<string, boolean>;
   who_moves: ReqMover[]; by_design: ReqByDesign[]; guidance: { triage: string; fixes: string }; notes: string;
   penetrations?: ReqPenRule[];
+  /** A building or a machine (server: domains.py); absent: as the models were opened (all STEP: a machine). */
+  domain?: Domain;
+  /** IFC classes fixed in place: a fix never moves them to make room. Absent: the domain's (`Inventory.stays`). */
+  stays?: string[];
 }
+export type Domain = "construction" | "machines";
 /** The numbers a level and strictness resolve to (server: requirements.resolve). */
 export interface ReqParams {
   level: number; level_name: string; strictness: Strictness; strictness_name: string; tolerance_mm: number;
@@ -271,10 +276,16 @@ export interface ReqParams {
 export interface ReqLevel { level: number; name: string; meaning: string; hints: string[]; tolerance_mm: number; min_size_mm: number; service_clearance_mm: number; edits: string }
 export interface ReqStep { id: Strictness; name: string; meaning: string; fix_clearance_mm: number; max_move_mm: number | null; trims: string; lean: string | null }
 export interface ReqScale { levels: ReqLevel[]; strictness: ReqStep[]; format: string }
+/** A demo among the samples (server: demos.listing): its default files, the start button's words and its tour. */
+export interface Demo {
+  id: string; name: string; label: string; kind: Domain; files: string[]; context: string[]; tour: string | null;
+}
 export interface Inventory {
   files: { file: string; team: string; elements: number; classes: Record<string, number> }[];
   classes: Record<string, number>; systems: Record<string, number>; storeys: Record<string, number>;
   step_groups: Record<string, number>; groups: ReqGroup[];
+  /** The domain the default groups were made for, and its classes fixed in place by default. */
+  domain?: Domain; stays?: string[];
 }
 export interface Registered { id: string; doc: Requirements; params: ReqParams; label: string; model_key: string }
 export interface ReqPreview { clashes: number; baseline: number; seconds: number; tests: { name: string; kind: string; clashes: number }[]; params: ReqParams }
@@ -538,7 +549,8 @@ export const api = {
   lock: () => call<{ owner: boolean }>("/owner/lock", { method: "POST" }),
   settings: () => call<SettingsState>("/settings"),
   /** Which model this browser's titles and triage would use now (the owner's choice, else the setting for everyone). */
-  models: () => call<{ triage: TriageModel; escalation?: EscalationInfo; built_views?: boolean; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
+  models: () => call<{ triage: TriageModel; escalation?: EscalationInfo; built_views?: boolean; labels?: Partial<Record<"proposal" | "escalation" | "triage" | "image" | "voice", string>>;
+    triage_workers?: number; model_upload_max_mb?: number; model_upload_max_files?: number }>("/models"),
   /** Every physical element's class and name (GlobalId → [class, name]): a built view's cutaway costs, its caption. */
   classes: (sceneId: string) => call<Record<string, [string, string]>>(`/scenes/${sceneId}/classes`),
   /** Levels, grid axes and each element's storey (docs/views.md, "Datums from the server"). */
@@ -592,7 +604,8 @@ export const api = {
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
                  clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
-  samples: () => call<string[]>("/samples"),
+  /** The sample models, and the demos among them (server: demos.py). */
+  samples: () => call<{ files: string[]; demos: Demo[] }>("/samples"),
   /** Open sample models (a STEP sample is converted to IFC on the server). `step`: file index → its STEP name. */
   open: (samples: string[]) => call<OpenedScene>("/scenes", { method: "POST", body: JSON.stringify({ samples }) }),
   /** Open your own IFC or STEP files (capped per visitor and in size). */
@@ -746,10 +759,11 @@ export const api = {
     return r.json() as Promise<Report>;
   },
   /** A spoken message (16 kHz WAV) to text, with Muse Voice Transcribe; biased to the open report's clash names. */
-  transcribe: async (wav: Blob, reportId: string | null) => {
+  transcribe: async (wav: Blob, reportId: string | null, sceneId: string | null = null) => {
     const form = new FormData();
     form.append("audio", wav, "voice.wav");
     if (reportId) form.append("report_id", reportId);
+    if (sceneId) form.append("scene_id", sceneId);
     const r = await send("/api/transcribe", { method: "POST", body: form, headers: settingsHeader() });
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Transcription failed (${r.status})`);
     return r.json() as Promise<{ transcript: string; duration_ms: number | null }>;

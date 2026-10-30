@@ -101,7 +101,7 @@ export class LiveVoice {
 
   /** Ask for the microphone and open the session; resolves once the words can flow. The microphone starts at once,
    * so what is said while the socket connects is kept and sent when it is ready. */
-  async start(mode: VoiceMode, reportId: string | null, on: LiveHandlers): Promise<void> {
+  async start(mode: VoiceMode, reportId: string | null, on: LiveHandlers, sceneId: string | null = null): Promise<void> {
     const mic = navigator.mediaDevices.getUserMedia(micConstraints());
     mic.catch(() => undefined);  // handled below; this only stops an unhandled rejection while the socket opens
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
@@ -111,7 +111,7 @@ export class LiveVoice {
     const opened = new Promise<void>((resolve, reject) => {
       let refusal: string | null = null;
       const timer = setTimeout(() => reject(new LiveVoiceError("The voice connection timed out.", "fallback")), 8000);
-      socket.onopen = () => socket.send(JSON.stringify({ mode, report_id: reportId }));
+      socket.onopen = () => socket.send(JSON.stringify({ mode, report_id: reportId, scene_id: sceneId }));
       socket.onmessage = (m) => {
         const e = JSON.parse(String(m.data));
         if (!this.ready) {

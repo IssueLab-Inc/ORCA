@@ -50,7 +50,7 @@ export function DetectSetupCard({ setup, progress, onRun, disabled, requirements
         <input type="number" min={0} step={1} value={toleranceMm} onChange={(e) => setToleranceMm(Number(e.target.value))} /> mm</label>}
       <button className="btn primary triage-go" disabled={disabled || !chosen.length} onClick={() => onRun(chosen)}>
         <Radar size={15} aria-hidden /> Check {checkedElements(setup, chosen).toLocaleString()} elements</button>
-      <p className="hint">About ten seconds for a building. Then Muse names each clash, triage sorts them, and ORCA
+      <p className="hint">Seconds for a few thousand elements. Then the AI names each clash, triage sorts them, and ORCA
         proposes verified fixes.</p>
     </section>
   );

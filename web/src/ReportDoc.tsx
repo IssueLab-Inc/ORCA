@@ -2,6 +2,7 @@ import { CircleCheck, CircleX, Download, FileText, LoaderCircle, X } from "lucid
 import { useEffect, useState } from "react";
 import { api, type DocEvent, type Evidence, type ModelTeam, type Report, type ReportClash, type Signoff, type Team, type TriageVerdict } from "./api";
 import type { Review } from "./ReportList";
+import { aiName } from "./aiNames";
 
 type Scope = "combined" | "team" | "model";
 
@@ -61,10 +62,10 @@ export function ReviewBlock({ clash, teams, signoffs, onAdd, onRemove }: {
   );
 }
 
-const STEP: Record<string, string> = {
-  drawing: "Drawing the accepted fixes as they could look built (Muse Image, checked against the model)",
-  explaining: "Muse Spark is writing each clash's explanation", summarising: "Writing the summary",
-  rendering: "Laying out the PDF", bcf: "Writing the BCF issues",
+const STEP: Record<string, () => string> = {
+  drawing: () => `Drawing the accepted fixes as they could look built (${aiName("image")}, checked against the model)`,
+  explaining: () => `${aiName("proposal")} is writing each clash's explanation`, summarising: () => "Writing the summary",
+  rendering: () => "Laying out the PDF", bcf: () => "Writing the BCF issues",
 };
 
 /** Build a coordination report: scope, which team owns each model, BCF, then progress and the download. */
@@ -118,7 +119,7 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
       <div className="report-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="row"><h2><FileText size={18} aria-hidden /> Coordination report</h2>
           <button className="ibtn" aria-label="Close" onClick={onClose}><X size={16} aria-hidden /></button></div>
-        <p className="hint">A PDF for the design teams: every real clash and every fix on its own page, with Muse Spark's explanation,
+        <p className="hint">A PDF for the design teams: every real clash and every fix on its own page, with {aiName("proposal")}'s explanation,
           the original and the fix side by side, and a review block for each team involved. Model errors go in a table for the
           models' authors; noise in a summary by clash test. BCF issues open in Revit, Navisworks, Solibri or BIMcollab.</p>
 
@@ -158,10 +159,10 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
 
         {!triageDone && <p className="nofix">{triageRunning
           ? <><LoaderCircle size={13} className="spin" aria-hidden /> Triage is running ({Object.keys(triage).length} of {report.clashes.length}). The report can be built when it ends.</>
-          : <>The report sorts clashes by triage. Run it first (about 3 minutes for Northbank).
+          : <>The report sorts clashes by triage. Run it first (a few minutes for a few hundred clashes).
             <button className="btn small" onClick={onRunTriage}>Triage all</button></>}</p>}
         {busy && step?.type === "progress" && (
-          <p className="hint"><LoaderCircle size={13} className="spin" aria-hidden /> {STEP[step.step]}
+          <p className="hint"><LoaderCircle size={13} className="spin" aria-hidden /> {STEP[step.step]?.() ?? step.step}
             {step.total ? ` · ${step.done ?? 0} of ${step.total}` : ""}…</p>)}
         {error && <p className="bad">{error}</p>}
         {error?.startsWith("Triage the report first") && !triageRunning &&
@@ -173,7 +174,7 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
               {busy ? <><i className="spinner" aria-hidden /> Building…</> : <><FileText size={16} aria-hidden /> Build the report</>}</button>}
           {ready && <button className="btn" onClick={() => setReady(null)}>Change and build again</button>}
         </div>
-        <p className="hint">Explanations are drafted by Muse Spark and marked as such; a fix marked verified passed ORCA's
+        <p className="hint">Explanations are drafted by {aiName("proposal")} and marked as such; a fix marked verified passed ORCA's
           geometry check against the whole model. Building costs one proposal from the demo allowance.</p>
       </div>
     </div>

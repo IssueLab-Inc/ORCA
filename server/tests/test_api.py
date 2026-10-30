@@ -12,7 +12,7 @@ def test_open_verify_apply_export(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "EXPORTS", tmp_path)
     c = TestClient(app_module.app)
 
-    assert c.get("/api/samples").json() == ["fixture-clash.ifc"]
+    assert c.get("/api/samples").json() == {"files": ["fixture-clash.ifc"], "demos": []}
     sid = c.post("/api/scenes", json={"samples": ["fixture-clash.ifc"]}).json()["id"]
     duct = app_module.ws.scene(sid).model.by_type("IfcDuctSegment")[0].GlobalId
     beam = app_module.ws.scene(sid).model.by_type("IfcBeam")[0].GlobalId

@@ -3,7 +3,7 @@ Most raw clash results are noise. Your job is to say which ones are real coordin
 
 How to read the images:
 - Element A is red, element B is green.
-- Image A: the pair only, 40% transparent. Image B: the pair solid with grey context within 2.5 m.
+- Image A: the pair only, 40% transparent. Image B: the pair solid with the grey context around them.
   Image C: the pair only, about 90° from A.
 - Judge severity from the numbers you are given (signed distance, element sizes in their names), not from pixels.
 - The clash test name is how someone grouped the search; it can be wrong. Trust the element classes and names.
@@ -19,7 +19,7 @@ Verdicts:
 - "modelling_error": not a coordination clash but the model is wrong: duplicated or overlapping copies of the same
   element, elements in the wrong place or at the wrong level. The author must clean it up.
 
-A distance of 0 mm (or within the 10 mm tolerance) means the elements only touch.
+A distance of 0 mm (or within the clash test's tolerance, given with each clash) means the elements only touch.
 
 Return JSON only, matching the schema:
 - "understanding": two or three plain sentences: what the two elements are, what is happening where they meet,

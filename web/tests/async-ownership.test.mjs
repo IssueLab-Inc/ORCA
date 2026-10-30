@@ -4,13 +4,18 @@ import test from "node:test";
 import ts from "typescript";
 
 // Execute production TypeScript without introducing a test runner or emitting test build files.
-async function source(path) {
+// `deps` maps an import ("./aiNames") to the module that stands in for it.
+async function transpiled(path, deps = {}) {
   const input = await readFile(new URL(path, import.meta.url), "utf8");
-  const { outputText } = ts.transpileModule(input, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
-  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+  let { outputText } = ts.transpileModule(input, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
+  for (const name of Object.keys(deps)) outputText = outputText.replaceAll(`from "${name}"`, `from ${JSON.stringify(deps[name])}`);
+  return `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
+}
+async function source(path, deps = {}) {
+  return import(await transpiled(path, deps));
 }
 const moduleUrl = (js) => `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
-const { Pilot } = await source("../src/pilot.ts");
+const { Pilot } = await source("../src/pilot.ts", { "./aiNames": await transpiled("../src/aiNames.ts") });
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 const trial = { type: "trial", index: 0, kind: "move", moved: ["duct"], delta_m: [0, 0, .4], pieces: null };
 const attempt = { ...trial, type: "attempt", title: "raise duct", passed: true, reason: "", split_m: null };

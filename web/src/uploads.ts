@@ -26,7 +26,7 @@ export function uploadStatus(e: UploadEvent, step: boolean): string | null {
     }
     case "received": return step ? "Received: converting the STEP…" : `Received ${mb((e as { bytes: number }).bytes)} MB: reading the models…`;
     case "reading": return "Reading the STEP file…";
-    case "classifying": return `Muse is naming ${(e as { parts?: number }).parts ?? ""} STEP parts…`;
+    case "classifying": return `The AI is naming ${(e as { parts?: number }).parts ?? ""} STEP parts…`;
     case "meshing": return "Converting the STEP parts…";
     case "opening": return "Reading the models…";
     case "boxes": {

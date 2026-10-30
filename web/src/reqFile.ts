@@ -1,6 +1,6 @@
 /** Coordination requirements in the browser (server: requirements.py; docs/requirements.md): kept in this browser,
  *  downloaded and uploaded as a file, edited a cell at a time. Pure functions, so the panel and App share them. */
-import type { Pattern, PatternVerdict, ReqCheck, ReqMover, ReqPenRule, Requirements, Strictness } from "./api";
+import type { Domain, Pattern, PatternVerdict, ReqCheck, ReqMover, ReqPenRule, Requirements, Strictness } from "./api";
 
 export const FORMAT = "orca-requirements/1";
 const STORE = "sightline.requirements";
@@ -92,6 +92,19 @@ export function setMover(doc: Requirements, group: string, patch: Partial<ReqMov
   const who_moves = has ? doc.who_moves.map((m) => (m.group === group ? { ...m, ...patch } : m))
     : [...doc.who_moves, { group, edits: "any" as const, max_move_mm: null, trims: true, ...patch }];
   return bump({ ...doc, who_moves });
+}
+
+/** A building or a machine (server: domains.py): ORCA's voice, its fix pack and the classes fixed in place by default. */
+export function setDomain(doc: Requirements, domain: Domain): Requirements {
+  return bump({ ...doc, domain });
+}
+
+/** The IFC classes fixed in place (null: the domain's defaults). */
+export function setStays(doc: Requirements, stays: string[] | null): Requirements {
+  const next = { ...doc };
+  if (stays === null) delete next.stays;
+  else next.stays = [...new Set(stays)];
+  return bump(next);
 }
 
 /** Move a group up (-1) or down (+1) the who-moves order. */

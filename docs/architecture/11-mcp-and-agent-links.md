@@ -146,7 +146,8 @@ call cap still applies to them.
 
 `build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None, local: agents.Link | None = None)` returns
 an `MCPServer("orca", title="ORCA", instructions=INSTRUCTIONS, website_url=…)` from the `mcp` package
-(`mcp.server.mcpserver`).
+(`mcp.server.mcpserver`). `website_url` is `SIGHTLINE_PUBLIC_URL` (the deploy sets its own address), else none: no
+address is written into the code.
 
 - **`ws`** is a Workspace or a function returning the current one (`app.py` passes `lambda: ws`; tests swap the web
   server's workspace). `T()` keeps one `chat.Chat` per workspace, used only for `_run`: the MCP side never runs
