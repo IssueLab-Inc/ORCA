@@ -23,7 +23,7 @@ kind of fix is [07](07-fixes-and-edits.md); the wire format of every event is [1
 | Second try | `Workspace.escalate` → `agent.resolve` | Muse Wonder | the same routes with `escalate: true`, automatic mode, chat, MCP | `escalating`, then as above with `model` |
 | Fix together | `plans.build_batch` | Muse Spark, one agent per item | `POST /api/scenes/{scene_id}/plan/stream` (`clash_ids`), chat `plan_fixes_together` | `plan_items`, `item`, `checking_plan`, then `plan` |
 | Root cause | `plans.root_causes`, `plans.build_root_cause` | Muse Spark | `GET .../root_causes/{scene_id}`, plan stream (`hub`), chat | `thinking`, `root_cause`, then as Fix together |
-| Patterns | `plans.patterns`, `plans.triage_patterns` | Muse Spark (one call) | `GET .../patterns/{scene_id}`, `POST .../patterns/{scene_id}/triage`, chat `find_patterns` | none (one reply) |
+| Patterns | `plans.patterns`, `plans.read_patterns` → `triage_patterns` | Muse Spark (one call, once) | `GET .../patterns/{scene_id}`, `POST .../patterns/{scene_id}/triage`, chat and MCP `find_patterns` | none (one reply) |
 | Bulk triage | `triage.Job` → `triage.triage_report` | triage model | `POST /api/reports/{report_id}/triage/stream` | `start`, `clash`, `reasoning`, `audit`, `done`, `ping` |
 | Titles | `titles.Job` → `titles.title_report` | triage model | `POST /api/reports/{report_id}/titles/stream` | `start`, `titles`, `batch_error`, `done`, `ping` |
 | Chat | `chat.Chat.turn` | Muse Spark with tools | `POST /api/chat`, and the MCP tools reuse `Chat._run` | `session`, `thinking`, `tool`, `tool_result`, `ui`, `agent`, `proposal`, `plan_*`, `detect_event`, `context_event`, `message`, `done` |
@@ -323,8 +323,15 @@ flowchart TD
 pairs is a pattern (`id` `"classA|classB|fileA|fileB"`, counts, levels, overlap range, `constant` when the overlap
 varies by 2 mm or less, examples). Cross-discipline patterns come first. `triage_patterns` makes one Muse Spark call
 over all of them (`domain_packs/patterns.md` + the requirements' triage lines) and returns `{pattern id: {verdict,
-cause, action, rule}}`. The route caches that per report, scene, pattern set and requirements prompt
-(`app._pattern_triage`); the chat tool asks afresh each time.
+cause, action, rule}}`. `read_patterns(ws, scene_id, report_id, pats, charge)` makes that reading once per report,
+scene, set of pattern ids and triage prompt (`requirements.model_key`) and keeps it on the Workspace (`_patterns`, the
+last `service.PATTERNS_KEPT` 64). The route, the chat and MCP `find_patterns` all go through it:
+
+- only a reading not made yet asks `charge` (one proposal); a refusal comes back as `(None, words)` and calls nothing;
+- a caller who comes while the same reading is being made waits on its lock (`_pattern_locks`) and gets it free;
+- no patterns: `{}`, no call and no charge.
+
+So the page's automatic reading also answers the chat and an agent, and asking again is free.
 
 ### Failures and keeping
 
@@ -494,9 +501,12 @@ Muse Spark with tools over the open report and model. The tools are the same ope
    `MAX_HISTORY` (40) messages without splitting a tool call from its results. A cancelled turn (the browser went
    away) publishes nothing.
 
-Caps are captured per turn, not on the shared `Chat`: `propose_allowed`, `propose_allowed_many` and
-`escalate_allowed` come from the request (`app.chat_turn`) or from the agent link (MCP). Each message takes one
-`chat_limit` use.
+Caps are captured per turn, not on the shared `Chat`: `propose_allowed`, `propose_allowed_many`,
+`escalate_allowed` and `detect_allowed` come from the request (`app.chat_turn`: the visitor's caps, none for the owner)
+or from the agent link (MCP: `mcp_server` `caps(link)`, charged to the link's creator). Each message takes one
+`chat_limit` use. A tool that does what a capped route does takes that route's cap: `propose_fixes` and the plans
+take proposals as their routes do, `find_patterns` the pattern route's one proposal (once, shared), and
+`detect_clashes` one detection run like `POST /detect/stream`. A refusal is the tool result `{"error": …}`.
 
 ### The tools
 
@@ -510,9 +520,9 @@ Caps are captured per turn, not on the shared `Chat`: `propose_allowed`, `propos
 | `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration` | A specific idea checked against the whole model, not kept | none | none |
 | `propose_fixes` (`escalate`) | `Workspace.propose`, or `Workspace.escalate` with `escalate: true`; the reply lists verified options and failed ideas, and suggests a second try when nothing (or only a resize or an opening) passed | one proposal; a second try's caps and budget | `ui` `select_clash`, `agent` (each agent event), `proposal` |
 | `find_root_causes` | `plans.root_causes` | none | none |
-| `find_patterns` | `plans.patterns` and a fresh `plans.triage_patterns` call | none beyond the chat message | none |
+| `find_patterns` | `plans.patterns`, then the shared reading (`plans.read_patterns`) | one proposal for a reading not made yet (as the route); a kept reading is free | none |
 | `plan_root_cause`, `plan_fixes_together` | `plans.build_root_cause` (one for the cause, the fixes only if edits are needed), `plans.build_batch` (one per pair) | as Plans | `plan_started`, `plan_event`, `plan` |
-| `detect_clashes` (`tolerance_mm`) | `Workspace.detect`; the result becomes the open report for the rest of the answer | none beyond the chat message | `detect_event`, `ui` `open_report` |
+| `detect_clashes` (`tolerance_mm`) | `Workspace.detect`; the result becomes the open report for the rest of the answer | one detection run (`detect_limit`, as `/detect/stream`) | `detect_event`, `ui` `open_report` |
 | `explore_wider_fix` | `context_planner.build` for one clash | three proposals | `context_event` |
 | `show_clash`, `set_view` | Select a clash and fly to it; change the view mode or section box | none | `ui` `select_clash`, `ui` `set_view` |
 | `show_it_built` | Asks the page to draw the chosen or kept fix (the page's request pays) | the page's built-view caps | `ui` `select_clash`, `ui` `show_it_built` |

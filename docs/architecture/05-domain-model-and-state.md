@@ -510,7 +510,7 @@ stateDiagram-v2
 | Title runs | `app._title_jobs` | 32 |
 | Built documents (PDF or zip bytes) | `app._documents` | 24 |
 | Requirements previews | `app._previews` | 64 |
-| Pattern readings | `app._pattern_triage` | Not bounded |
+| Pattern readings | `Workspace._patterns` (`plans.read_patterns`; route, chat and MCP share them) | 64 (`service.PATTERNS_KEPT`), oldest first |
 | Chat sessions | `app._chat.sessions` | 200 sessions, 40 messages each |
 | Agent links, their proposals, plans and jobs | `app.links` (`agents.Links`) | 200 links, 12 h idle, 24 h total; 16 jobs per link; 200 queued events per following page |
 | Registered requirements files | `requirements._registry` | 500, least recently used dropped |

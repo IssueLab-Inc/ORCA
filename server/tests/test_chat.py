@@ -6,8 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sightline import app as app_module
+from sightline import plans
 from sightline.chat import Chat, Context
 from sightline.fixtures import build_run_fixture
+from sightline.limits import ProposeLimit
 from sightline.service import Workspace
 
 from test_reports import GROUPED
@@ -95,6 +97,88 @@ def test_chat_finds_root_causes_and_builds_a_plan(tmp_path):
     plan = next(e for e in events if e["type"] == "plan")
     assert plan["kind"] == "batch" and plan["check"]["passed"]
     assert any(e["type"] == "plan_event" for e in events)
+
+
+def _pattern(n: int = 1) -> dict:
+    """A pattern as plans.patterns gives it (the run fixture has too few pairs to make one)."""
+    return {"id": f"IfcBeam|IfcDuctSegment|S{n}|M", "classes": ["IfcBeam", "IfcDuctSegment"], "files": [f"S{n}", "M"],
+            "cross_discipline": True, "clashes": 3, "pairs": 3, "levels": ["Level 02"], "min_mm": -30, "max_mm": -30,
+            "constant": True, "clash_ids": ["c0001"], "examples": ["IfcBeam 'B' x IfcDuctSegment 'D' (-30 mm)"]}
+
+
+class PatternReader:
+    """Muse Spark's one call over the patterns (plans.triage_patterns), counted."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def complete_json(self, system, text, images=None):
+        self.calls += 1
+        return {"patterns": [{"id": "P1", "verdict": "by_design", "cause": "c", "action": "a", "rule": "r"}]}
+
+
+def _lines(r) -> list[dict]:
+    return [json.loads(line) for line in r.text.splitlines()]
+
+
+def test_find_patterns_costs_one_proposal_once_and_shares_the_routes_reading(tmp_path, monkeypatch):
+    ws, sid, rid = _setup(tmp_path)
+    ws._model = reader = PatternReader()
+    pats = [_pattern()]
+    monkeypatch.setattr(plans, "patterns", lambda *a, **k: pats)
+    monkeypatch.setattr(app_module, "ws", ws)
+    monkeypatch.setattr(app_module, "propose_limit", ProposeLimit(per_day=1))
+    c = TestClient(app_module.app)
+
+    # The page reads the patterns first: one proposal, the day's only one.
+    r = c.post(f"/api/reports/{rid}/patterns/{sid}/triage", json={})
+    assert r.status_code == 200 and r.json()[pats[0]["id"]]["verdict"] == "by_design"
+    assert c.post(f"/api/reports/{rid}/patterns/{sid}/triage", json={}).status_code == 200   # cached: free
+    # The chat asks twice: it gets the same reading, no model call and nothing charged.
+    monkeypatch.setattr(app_module, "_chat", Chat(ws, Scripted([[("find_patterns", {})], [("find_patterns", {})], "x"])))
+    events = _lines(c.post("/api/chat", json={"message": "noise?", "scene_id": sid, "report_id": rid}))
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert [e["summary"] for e in results] == ["1 pattern(s)", "1 pattern(s)"] and reader.calls == 1
+
+    # Patterns nobody has read yet: a new reading, which the spent allowance refuses (no model call).
+    pats[:] = [_pattern(2)]
+    monkeypatch.setattr(app_module, "_chat", Chat(ws, Scripted([[("find_patterns", {})], "x"])))
+    events = _lines(c.post("/api/chat", json={"message": "noise?", "scene_id": sid, "report_id": rid}))
+    assert next(e for e in events if e["type"] == "tool_result")["summary"] == "refused: allowance used"
+    assert reader.calls == 1
+    assert c.post(f"/api/reports/{rid}/patterns/{sid}/triage", json={}).status_code == 429
+
+
+def test_find_patterns_in_chat_is_charged_and_kept_like_the_route(tmp_path, monkeypatch):
+    ws, sid, rid = _setup(tmp_path)
+    ws._model = reader = PatternReader()
+    monkeypatch.setattr(plans, "patterns", lambda *a, **k: [_pattern()])
+    charged = []
+    chat = Chat(ws, Scripted([[("find_patterns", {})], [("find_patterns", {})], "Two looks, one reading."]))
+    chat.turn(chat.session(None), "what is this noise", Context(sid, rid), lambda e: None,
+              propose_allowed=lambda: charged.append(1))
+    assert charged == [1] and reader.calls == 1
+    monkeypatch.setattr(plans, "patterns", lambda *a, **k: [])   # nothing to read: nothing charged
+    events = []
+    again = Chat(ws, Scripted([[("find_patterns", {})], "None."]))
+    again.turn(again.session(None), "and now?", Context(sid, rid), events.append, propose_allowed=lambda: "spent")
+    assert next(e for e in events if e["type"] == "tool_result")["summary"] == "0 pattern(s)"
+
+
+def test_chat_detection_takes_a_detection_run(tmp_path, monkeypatch):
+    ws, sid, rid = _setup(tmp_path)
+    monkeypatch.setattr(app_module, "ws", ws)
+    monkeypatch.setattr(app_module, "detect_limit", ProposeLimit(1, 0, noun="detection runs"))
+    monkeypatch.setattr(app_module, "_chat", Chat(ws, Scripted([[("detect_clashes", {})], [("detect_clashes", {})],
+                                                                 "Checked once."])))
+    c = TestClient(app_module.app)
+    events = _lines(c.post("/api/chat", json={"message": "check it twice", "scene_id": sid}))
+    summaries = [e["summary"] for e in events if e["type"] == "tool_result"]
+    assert "clashes found by ORCA" in summaries[0]
+    assert summaries[1] == "refused: detection runs used"
+    assert sum(1 for e in events if e.get("action") == "open_report") == 1
+    # The route shares the cap: this visitor has used their run.
+    assert c.post(f"/api/scenes/{sid}/detect/stream", json={}).status_code == 429
 
 
 @pytest.mark.parametrize('cancel_older', [True, False])

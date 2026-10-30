@@ -1129,19 +1129,15 @@ def patterns(report_id: str, scene_id: str, fixed: str = ""):
 
 @app.post("/api/reports/{report_id}/patterns/{scene_id}/triage")
 def triage_patterns(report_id: str, scene_id: str, body: PatternTriage, request: Request):
-    """Ask Muse Spark what each pattern is (one call for all). Counts as one proposal."""
+    """Ask Muse Spark what each pattern is (one call for all). Counts as one proposal, once: the reading is shared with
+    the chat and MCP (`plans.read_patterns`)."""
     pats = plans.patterns(ws, _scene(scene_id), _report(report_id), body.fixed)
-    doc = requirements.current()
-    key = (report_id, scene_id, tuple(p["id"] for p in pats), requirements.model_key(doc) if doc else None)
-    if key not in _pattern_triage:
-        refused = _take(propose_limit, request)
-        if refused:
-            raise HTTPException(429, refused)
-        _pattern_triage[key] = plans.triage_patterns(ws, pats)
-    return _pattern_triage[key]
+    verdicts, refused = plans.read_patterns(ws, scene_id, report_id, pats, lambda: _take(propose_limit, request))
+    if refused:
+        raise HTTPException(429, refused)
+    return verdicts
 
 
-_pattern_triage: dict[tuple, dict] = {}
 _triage_jobs: dict[str, triage.Job] = {}
 _triage_lock = threading.Lock()
 
@@ -1395,6 +1391,7 @@ def chat_turn(body: ChatTurn, request: Request):
     allowed = lambda: None if no_caps else propose_limit.take(who)
     allowed_many = lambda n: None if no_caps else propose_limit.take_many(who, n)
     escalate_allowed = _escalation_check(request)
+    detect_allowed = lambda: None if no_caps else detect_limit.take(who)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
     events = _RequestEvents(request)
@@ -1408,7 +1405,7 @@ def chat_turn(body: ChatTurn, request: Request):
         try:
             c.turn(session, body.message[:4000], ctx, events.put, cancel=events.cancel,
                    propose_allowed=allowed, propose_allowed_many=allowed_many, escalate_allowed=escalate_allowed,
-                   before_publish=finish)
+                   detect_allowed=detect_allowed, before_publish=finish)
         except Exception as e:
             events.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         finish()  # idempotent after successful completion; also close failed/cancelled turns
@@ -1677,13 +1674,17 @@ def revoke_link(token: str):
 
 
 def mcp_hooks() -> mcp_server.Hooks:
-    """What the MCP tools borrow from this server: links, the demo caps, triage and reports."""
+    """What the MCP tools borrow from this server: links, the demo caps (proposals, second tries, detection runs, all
+    charged to the link's creator), triage and reports."""
     def charge(link: agents.Link, n: int) -> str | None:
         return None if link.owner else propose_limit.take_many(link.visitor, n)
 
     def escalate(link: agents.Link) -> str | None:
         r = escalation_refused(link.visitor, link.owner)
         return r[1] if r else None
+
+    def detect_run(link: agents.Link) -> str | None:
+        return None if link.owner else detect_limit.take(link.visitor)
 
     def start_triage(report_id: str, scene_id: str | None, link: agents.Link):
         return _start_triage(ws.report(report_id), scene_id, lambda: charge(link, 1))
@@ -1697,7 +1698,8 @@ def mcp_hooks() -> mcp_server.Hooks:
         return _build_document(report, verdicts, scene_id, scope)
 
     return mcp_server.Hooks(
-        links=links, charge=charge, escalate=escalate, allow_call=lambda link: agent_call_limit.take(link.id),
+        links=links, charge=charge, escalate=escalate, detect=detect_run,
+        allow_call=lambda link: agent_call_limit.take(link.id),
         start_triage=start_triage, triage_state=lambda rid, sid: triage_state(rid, sid),
         build_document=build_document, spawn=owner.spawn)
 
