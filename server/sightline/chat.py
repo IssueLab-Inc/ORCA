@@ -536,11 +536,16 @@ class Chat:
                     else plans.build_batch(ws, self._scene(ctx), self._report(ctx).id, list(args["clash_ids"]), forward))
             data = json.loads(plans.to_json(plan))
             emit({"type": "plan", **data})
-            summary = {"root_cause": plan.root_cause, "strategy": plan.strategy, "verified_together": plan.check.get("passed"),
+            summary = {"title": plan.title, "root_cause": plan.root_cause, "strategy": plan.strategy,
+                       "verified_together": plan.check.get("passed"),
                        "fixes": [{"pair": it.label, "fix": it.option["title"] if it.option else None, "error": it.error,
                                   "in_report": it.in_report} for it in plan.items],
                        "note": "The plan is in the user's Plan tab to preview and accept; you cannot accept it."}
-            return summary, f"{sum(1 for it in plan.items if it.option)} of {len(plan.items)} fixed, "                             f"{'verified together' if plan.check.get('passed') else 'not all verified'}", []
+            # Counted in clashes, as the plan's title is: one fix can clear several (plans.merge_shared).
+            n = plans.clashes_covered(plan.items)
+            return summary, (f"{plans.clashes_covered([it for it in plan.items if it.option])} of {n} "
+                             f"clash{'es' if n != 1 else ''} fixed, "
+                             f"{'verified together' if plan.check.get('passed') else 'not all verified'}"), []
         if name == "show_clash":
             c = self._report(ctx).clash(args["clash_id"])
             emit({"type": "ui", "action": "select_clash", "clash_id": c.id})
