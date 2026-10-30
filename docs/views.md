@@ -275,9 +275,11 @@ needs none) and is composited into its pane:
 1. **Paper fill.** Batches swap to unlit materials for the pass: near-white, faintly tinted per file (structure grey,
    MEP blue, architecture warm), ignoring the batch's mode colours. The pair keeps flat red / green; previews keep
    their colours, the "before" ghost stays orange.
-2. **Cut faces (poché).** The standard stencil cap, by parity, clipped by the cut plane alone (View range and clip
-   planes, above): each cut solid is drawn once, both faces, colour and depth off, inverting a stencil bit, so a pixel whose bit is set lies inside a solid the cut passes through. Bits:
-   1 everything else, 2 side A, 4 side B, 8 one element on both sides. Full-view quads then fill by stencil value:
+2. **Cut faces (poché).** Stencil caps, clipped by the cut plane alone (View range and clip planes, above), colour and
+   depth off. Everything but the pair is **counted** (built, after review): back faces add one, front faces take one
+   away, so a nonzero count lies inside some solid the cut passes through, and a column set in a wall or two
+   overlapping slabs still fill (by parity they cancelled and left paper holes); the count then becomes bit 1. The
+   pair and a preview flip their own bits by parity: 2 side A, 4 side B, 8 one element on both sides, 16 a preview. Full-view quads then fill by stencil value:
    grey with a 45° hatch for 1 only, red for A, green for B, purple for both, and **amber where A and B overlap**: the
    interference shows as a filled region in plan and section. Caps write a class into the colour target's alpha.
 3. **Linework.** A second pass writes normals and depth (`MeshNormalMaterial` as override). The composite shader marks a

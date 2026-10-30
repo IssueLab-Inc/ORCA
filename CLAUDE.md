@@ -186,7 +186,7 @@ viewer lights what an element is linked to: `docs/connections.md`), Fix together
 chat and live voice, the MCP server with pairing links, coordination requirements, STEP models (the palletising cell),
 PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder, Show it built, phones and tablets,
 guided tours, free navigation and drawing views (plans, sections, elevations beside 3D, up to four). Latest validation
-(Oct 30): 601 server tests, 95 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1,
+(Oct 30): 601 server tests, 102 web tests; answer key 3/3 first try at Rev04 heights; `evals/step_cell.py` passes (C1,
 C2, C3, C6, C7, C8, Rev B 0). How each part works now: `docs/architecture/`. What was
 built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
 

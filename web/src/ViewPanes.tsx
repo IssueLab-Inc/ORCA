@@ -17,7 +17,8 @@ const PRESETS: { id: PlanPreset; label: string; hint: string }[] = [
 export function ViewPanes({ viewer, chip, offset, compact = false }: { viewer: Viewer | null; chip: React.ReactNode; offset: number; compact?: boolean }) {
   if (!viewer || !viewer.models.length) return null;
   const panes = viewer.visiblePanes();
-  const single = panes.length === 1 && panes[0].spec.kind === "3d";
+  // Single is the layout of one pane; a maximised pane keeps its header, with the way back to the layout.
+  const single = viewer.panes.length === 1;
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   if (single) return chip ? <div className="pane-head solo" style={{ left: offset, top: compact ? 56 : 12 }} onClick={stop} onPointerDown={stop} onDoubleClick={stop}>{chip}</div> : null;
   return (<>
@@ -45,7 +46,7 @@ function DrawingHead({ viewer, pane, i }: { viewer: Viewer; pane: Pane; i: numbe
   const pick = (v: string) => {
     const [kind, arg] = v.split(":");
     if (kind === "plan") viewer.setPaneSpec(i, spec.kind === "plan" ? { ...spec, level: Number(arg) } : { kind: "plan", level: Number(arg), cut: 1.2, bottom: 0 });
-    else if (kind === "section") viewer.setPaneSpec(i, { kind: "section", origin: [0, 0], angle: 0, flip: false, far: null, crop: null, ...(spec.kind === "section" ? spec : {}) });
+    else if (kind === "section") viewer.setPaneSpec(i, spec.kind === "section" ? spec : viewer.defaultSpec("section"));
     else viewer.setPaneSpec(i, { kind: "elevation", facing: arg as Compass, far: spec.kind === "elevation" ? spec.far : null });
   };
   return (<>
@@ -61,7 +62,8 @@ function DrawingHead({ viewer, pane, i }: { viewer: Viewer; pane: Pane; i: numbe
       data-tip={pane.pinned ? "Pinned: a clash I pick leaves it alone" : "Pin: keep this view when I pick a clash"} data-tip-side="bottom"
       aria-pressed={pane.pinned} onClick={() => viewer.setPinned(i, !pane.pinned)}>
       {pane.pinned ? <Pin size={14} aria-hidden /> : <PinOff size={14} aria-hidden />}</button>
-    <button className="ibtn" aria-label="Go to the clash" data-tip="Go to the clash" data-tip-side="bottom" onClick={() => viewer.paneToClash(i)}><LocateFixed size={14} aria-hidden /></button>
+    <button className="ibtn" aria-label="Go to the clash" data-tip={viewer.hasClash ? "Go to the clash" : "No clash on screen"} data-tip-side="bottom"
+      disabled={!viewer.hasClash} onClick={() => viewer.paneToClash(i)}><LocateFixed size={14} aria-hidden /></button>
     <button className="ibtn" aria-label="Fit the whole model" data-tip="Fit the whole model" data-tip-side="bottom" onClick={() => viewer.fitPane(i)}><Maximize size={14} aria-hidden /></button>
   </>);
 }
@@ -97,8 +99,8 @@ function RangeMenu({ viewer, spec, i }: { viewer: Viewer; spec: DrawingSpec; i: 
           return <button key={p.id} className="btn small" disabled={!r} data-tip={r ? p.hint : "Needs a level above"} data-tip-side="bottom"
             onClick={() => r && set({ ...spec, ...r })}>{p.label}</button>;
         })}
-        <button className="btn small" data-tip="Its level and a cut through the clash picked" data-tip-side="bottom"
-          onClick={() => viewer.paneToClash(i)}>Through the clash</button>
+        <button className="btn small" data-tip={viewer.hasClash ? "Its level and a cut through the clash picked" : "No clash on screen"} data-tip-side="bottom"
+          disabled={!viewer.hasClash} onClick={() => viewer.paneToClash(i)}>Through the clash</button>
       </div>
       <Metres label="Cut plane" value={spec.cut} onSet={(cut) => set({ ...spec, cut: Math.max(cut, (spec.bottom ?? -1e9) + 0.01) })} />
       <input className="range-slider" type="range" min={0} max={h} step={0.01} value={spec.cut} aria-label="Cut plane height"
@@ -116,7 +118,7 @@ function RangeMenu({ viewer, spec, i }: { viewer: Viewer; spec: DrawingSpec; i: 
       <p className="pop-title">Section A–A · depth and crop</p>
       <div className="range-presets">
         <button className="btn small" onClick={() => set({ ...spec, flip: !spec.flip })}><FlipHorizontal2 size={13} aria-hidden /> Look the other way</button>
-        <button className="btn small" onClick={() => viewer.paneToClash(i)}>Through the clash</button>
+        <button className="btn small" disabled={!viewer.hasClash} onClick={() => viewer.paneToClash(i)}>Through the clash</button>
       </div>
       <label className="pop-item check"><input type="checkbox" checked={spec.far != null}
         onChange={(e) => set({ ...spec, far: e.target.checked ? 2 : null })} /> Far clip (leave out what lies further)</label>
@@ -147,11 +149,14 @@ function Splitters({ viewer }: { viewer: Viewer }) {
   const W = host.clientWidth, H = host.clientHeight, s = viewer.splitShares;
   const drag = (axis: "x" | "y") => (e: React.PointerEvent) => {
     e.stopPropagation();
+    e.preventDefault();   // no text selection while dragging
     const r = host.getBoundingClientRect();
     const move = (m: PointerEvent) => viewer.setSplit(axis === "x" ? (m.clientX - r.left) / r.width : s.x, axis === "y" ? (m.clientY - r.top) / r.height : s.y);
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    // Whatever ends the drag (a release, or the browser cancelling it) lets the line go.
+    const up = () => { for (const [k, f] of [["pointermove", move], ["pointerup", up], ["pointercancel", up]] as const) window.removeEventListener(k, f as EventListener); };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
   return (<>
     <div className="pane-split x" style={{ left: W * s.x - 3 }} onPointerDown={drag("x")} onClick={(e) => e.stopPropagation()} aria-hidden />

@@ -137,11 +137,11 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 | Loading | `load(files, names, isCurrent)`, `replace(index, bytes, isCurrent)`, `patch(meshes, origin)`, `dispose()`; fields `models`, `names` |
 | Visibility per model | `setModelVisible(index, visible)` (the toolbar's Models list; `App` keeps `tool.hiddenModels`) |
 | Modes and focus | `setMode(mode)`, `setFocus({ a, b, group })`, `setEdges(on)`, `setHits(ids)`, `setLinks(groups)`; private `applyMode`, `aroundIds`, `drawFocus`, `nearFocus`, `focusSide` |
-| Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(info)` (class and storey per element, from `api.classes`), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `infoCounts()`, `ofClass(cls)`; private `filterTest`, `drawSelection` |
+| Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(classes, storeys)` (either may be null to keep what it had), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `infoCounts()` (cached until the models or the info change), `ofClass(cls)`; private `filterTest`, `drawSelection` |
 | Previews | `preview(moves)`, `showOption(shape, mode, colour)`, `showOptions(shapes, mode)` |
 | Camera | `focusClash(ids, point, label, fly)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
 | Navigation | `activeCamera()`, `setProjection(p)`, `pose()`, `applyPose(p)`, `back()`, `forward()`, getters `canBack`, `canForward`, `setHome(p)`, getter `homeView`, `home()`, `lookFrom(dir)`, callback `onChange` (history, Home, layout or hides changed); private `press` (pivot or grip), `turn` (cube drag), `syncOrtho` |
-| Panes and drawing views | `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)`, getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
+| Panes and drawing views | `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)` (shares kept within 0.2–0.8), getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `defaultSpec(kind)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, getter `hasClash`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
 | Section box and marker | `setSection(on, margin, box)`, getter `section`, `setMarker(point, label)`; private `boxAroundFocus`, `boxInView`, `buildGrips`, `placeGrips`, `gripAt`, `dragGrip` |
 | Picking and measuring | `pickAt(event, { ghosts })`, `pick(event)`, `setMeasure(p1, p2)`, `has(gid)`, `boxOf(ids)` |
 | Captures | `snapshot()`, `capture(side)`, `captureClash(a, b, side)`, `thumbClash(a, b, side)`, `captureBuilt(fix, pair, classOf, radius, side)`; private `posed`, `posedShots`, `builtPasses`, `fullCanvas`, `png` |
@@ -195,6 +195,9 @@ every style.
   the toolbar its per-class and per-level counts, `ofClass(cls)` the GlobalIds for "Hide all / Isolate all".
 - **Lifted:** while a capture shoots, `lifted` puts the style back to shaded and drops filters, temporary hides and the
   selection, so the pictures the server reads do not depend on how the user is looking (Captures, below).
+- **The section box in Shaded with edges and Hidden line:** the drawings' fills, pair colours, selection and normals
+  materials share the section box's planes, so it cuts those styles too (a drawing view empties the planes while it
+  draws).
 
 ### Previews
 
@@ -304,14 +307,16 @@ flowchart LR
   uses it). `frame(box, rect)`, `pan` and `zoomAt` (the point under the pointer stays put) move it.
 - **Drawing it** (`drawInto`): the section box is lifted (its planes are the 3D view's) and the view's planes become
   `renderer.clippingPlanes`. The batches take paper fills tinted per file, the pair flat red and green; then, with the
-  cut plane alone, each cut solid is drawn on its `CAP_LAYER` with colour and depth off, flipping a stencil bit by
-  parity (`CUT`: rest 1, A 2, B 4, both 8, a preview 16), and full-view caps fill where a bit is set (grey with a 45°
+  cut plane alone, each cut solid is drawn on its `CAP_LAYER` with colour and depth off: everything but the pair is
+  counted (back faces up, front faces down, `DrawingStyle.counting`; nonzero becomes bit 1, `settleCount`), so
+  overlapping solids still fill, and the pair and a preview flip their own bits by parity (`CUT`: rest 1, A 2, B 4,
+  both 8, a preview 16); then full-view caps fill where a bit is set (grey with a 45°
   hatch, red, green, purple, the preview's colour, amber where A and B overlap), writing a class in alpha; the pair's
   hidden parts are drawn ghosted where something stands in front (`behind`); last a normals and depth pass. The
   composite shader (every frame, from the targets) draws projection lines where normals turn or depth jumps, the heavy
   cut outline where the alpha class changes, and paper outside the crop.
 - **When it redraws:** `renderDrawing` keeps a key of `version` (bumped by `applyMode`, previews, hits, the marker and
-  loads), the view's camera, the follow toggle and the hidden models; only a change redraws the targets. Captures
+  loads), the view's camera (centre, look, up, scale, planes, crop), the follow toggle and the hidden models; only a change redraws the targets. Captures
   restore `version` after they shoot, so a thumbnail does not redraw every drawing.
 - **Full model or follow 3D:** `applyMode` records each element whose 3D visibility differs from the drawings' (what
   Context or Isolate hide) in `drawVis`; `useDrawingVisibility` swaps the drawings' set in around a drawing's passes
@@ -329,6 +334,10 @@ flowchart LR
   (`lookHere`). Clicks bubble to the stage, so `App`'s click, double-click and long press work in every pane;
   `pickAt` hands a drawing pane's event to `pickDrawing`, which uses that view's camera and skips what its planes
   remove.
+- **New panes** (`setLayout`) look at the clash on screen, else the whole model, never at empty paper round the IFC
+  origin; a pane switched to Section from its header starts through the model's middle (`defaultSpec`). New datums
+  with other levels put plans back on the ground level (Level 01, not the foundations). The clash a pane can go to
+  (`lastClash`) is dropped when the marker is cleared or new models load, and its Go to the clash is then off.
 - **Going to a clash** (`clashViews`, from `focusClash` with `fly`): every unpinned drawing pane, or one with its own
   Go to clash (`paneToClash`), is set to the clash and framed on where the pair meets: a plan at the storey the clash
   stands in with the cut through it (`views.planThrough`), a section through it along the run of the side that moves

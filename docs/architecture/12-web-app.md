@@ -133,7 +133,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 | Report | `report`, `reportSamples`, `matches`, `clash`, `measure`, `remeasure`, `titles`, `naming`, `views`, `capturing`, `lightbox` | `reportRef`, `captures`, `folderInput`, `filesInput` | `shown()`, `shownReport`, `shownClash` |
 | Detection | `detectSetup`, `detecting`, `detection` | `lastTests`, `pendingDetect` | |
 | Selection and the view's tools | `a`, `b`, `standIns`, `selected`, `tool` (`ToolbarState`: mode, style, ortho, grey, edges, section, measure, links, hidden models), `measurePts`, `measured`, `toast` | `down`, `longPress`, `flashTimer`, `sides` | `group` |
-| Views and navigation ([docs/views.md](../views.md)) | `fly`, `filters`, `temporary`, `savedViews`, `viewsTick` (the viewer's `onChange`: history, Home, layout or hides changed), `viewLayout`, `drawingsFollow` | `sectionTo` | `shownLayout` (phone Single, tablet at most Two), `viewsControls`, `counts`, `clashBusy` |
+| Views and navigation ([docs/views.md](../views.md)) | `fly`, `filters`, `temporary`, `savedViews`, `viewsTick` (the viewer's `onChange`: history, Home, panes or hides changed; at most one tick a frame), `viewLayout`, `drawingsFollow`, `infoRev` (bumped after a kept fix, so classes and storeys are read again for its new elements) | `sectionTo`, `viewsQueued` | `shownLayout` (phone Single, tablet at most Two), `viewsControls`, `counts`, `clashBusy` |
 | Proposal and options | `proposal`, `chosen`, `progress`, `thoughts`, `compare`, `tab`, `fixAnyway`, `pilotStatus`, `escalation`, `manual`, `manualDz`, `manualPreview` | `pilot`, `agentRun`, `previewRequest`, `directAgent`, `golden` | `option`, `proposing`, `notAClash`, `hideFix`, `canEscalate`, `wonder`, `nextClash` |
 | Kept work | `edits` (element → pieces a fix added), `fixes` (clash id → fix title), `reviewed`, `evidence`, `checked` | | `resolved`, `resolvedSet`, `fixedCount` |
 | Plan and `viewPlan` | `plan`, `planRun`, `planError`, `viewPlan`, `planKind` | `planRequest`, `planRevision`, `directPlan`, `chatPlan`, `planThisTurn` | `planGroup`, `planOptions`, `planStale`, `planning` |
@@ -172,7 +172,7 @@ Notes on the less obvious ones:
   `force`, from F or a click on the clash), takes every unpinned view to it (`Viewer.focusClash(…, fly)`).
   `leaveClash()` clears the pair, stand-ins, marker and previews and leaves the camera, style and visibility as they
   are; Esc reaches it last (`views.escStep`) and the ✕ on the clash chip calls it, but not while ORCA works on the clash
-  (`clashBusy`). `focusNow` (F) frames the selected element first.
+  (`clashBusy`), nor in a clash plan or a wider fix (`viewPlan`, `activeContext`), where the chip is hidden too. `focusNow` (F) frames the selected element first.
 - **Saved views and Home** are per project (`viewsKey`, from `About.projectName` of the open files): `saveView` keeps
   the pose, projection, style, mode, filters and section box; `applyView` puts them back. The element card adds Zoom
   to it, Hide, Isolate, Section box round it (`sectionRound`) and Hide all / Isolate all of its class (temporary hides,

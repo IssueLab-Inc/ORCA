@@ -45,8 +45,9 @@ export class ViewCube {
     this.el.addEventListener("click", stop);
     this.el.addEventListener("dblclick", stop);
     this.el.addEventListener("pointerdown", (e) => {
-      if (e.target === home || home.contains(e.target as Node)) return;
+      // Never to the 3D view's controls: an orbit there would capture the pointer and take Home's click.
       e.stopPropagation();
+      if (e.target === home || home.contains(e.target as Node)) return;
       this.el.setPointerCapture(e.pointerId);
       this.drag = { x: e.clientX, y: e.clientY, moved: false };
     });

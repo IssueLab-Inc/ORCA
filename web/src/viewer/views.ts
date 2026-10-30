@@ -57,9 +57,15 @@ export function planRange(levels: Level[], spec: PlanSpec): { level: Level; cutZ
   return { level, cutZ: bottomZ == null ? cutZ : Math.max(cutZ, bottomZ + MIN_RANGE), bottomZ };
 }
 
+/** The next level above level `i`: one at the same height (another file's name for the same floor) is not above it. */
+export function nextAbove(levels: Level[], i: number): Level | null {
+  const z = levels[i]?.elevation_m ?? 0;
+  return levels.slice(i + 1).find((l) => l.elevation_m > z + 1e-6) ?? null;
+}
+
 /** The storey's height: to the next level up, or what the server says, else 4 m. */
 export function storeyHeight(levels: Level[], i: number): number {
-  const next = levels[i + 1];
+  const next = nextAbove(levels, i);
   return next ? next.elevation_m - levels[i].elevation_m : levels[i].height_m ?? 4;
 }
 
@@ -67,7 +73,7 @@ export type PlanPreset = "floor" | "ceiling" | "storey";
 /** The plan presets (docs/views.md, "Plan: view range"): Floor plan, Ceiling void (beams and services, no floor),
  * Whole storey. Null when the preset needs a next level and there is none. */
 export function planPreset(levels: Level[], i: number, preset: PlanPreset): { cut: number; bottom: number | null } | null {
-  const h = storeyHeight(levels, i), hasNext = !!levels[i + 1];
+  const h = storeyHeight(levels, i), hasNext = !!nextAbove(levels, i);
   if (preset === "floor") return { cut: Math.min(1.2, h - 0.05), bottom: 0 };
   if (!hasNext) return null;
   const underNext = h - 0.05;

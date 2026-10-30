@@ -96,7 +96,16 @@ export function App() {
   const [temporary, setTemporary] = useState<Temporary>({ hidden: [], isolated: null });
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [viewsTick, setViewsTick] = useState(0);
-  const viewsChanged = () => setViewsTick((n) => n + 1);   // the viewer's history, Home or hides changed: redraw the menus
+  const [infoRev, setInfoRev] = useState(0);
+  // The viewer's history, Home, panes or hides changed: redraw the menus and pane headers, at most once a frame (a handle
+  // drag changes a pane on every pointer move).
+  const viewsQueued = useRef(false);
+  const viewsChanged = () => {
+    if (viewsQueued.current) return;
+    viewsQueued.current = true;
+    const tick = () => { viewsQueued.current = false; setViewsTick((n) => n + 1); };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(tick); else tick();
+  };
   const sectionTo = useRef<THREE.Box3 | null>(null);
   // Views beside the 3D one (docs/views.md): Single, Two or Quad, kept per browser; a phone shows one, a tablet two.
   const [viewLayout, setViewLayout] = useState<Layout>(() => { try { return (localStorage.getItem("sightline.views.layout") as Layout) || "single"; } catch { return "single"; } });
@@ -374,20 +383,27 @@ export function App() {
     setSavedViews(store.saved);
     viewer.current?.setHome(store.home);
   }, [modelNames]);
-  // What the filters read: each element's class (the server's) and storey (datums).
+  // What the filters read: each element's class (the server's) and storey (datums). Read again after a kept fix (same
+  // scene, new elements: `infoRev`); filters and hides start clean only with a new scene.
+  useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); }, [sceneId]);
   useEffect(() => {
     if (!sceneId) return;
     let live = true;
-    setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null });
-    void Promise.all([api.classes(sceneId), api.datums(sceneId)]).then(([classes, datums]) => {
+    // Each on its own: a failed datums request keeps the classes, and the other way round.
+    void api.classes(sceneId).then((classes) => {
       if (!live) return;
       sceneClasses.current = { scene: sceneId, map: classes };
-      viewer.current?.setInfo(Object.fromEntries(Object.keys(classes).map((g) => [g, classes[g][0]])), datums.storeys);
+      viewer.current?.setInfo(Object.fromEntries(Object.keys(classes).map((g) => [g, classes[g][0]])), null);
+      viewsChanged();
+    }).catch(() => undefined);
+    void api.datums(sceneId).then((datums) => {
+      if (!live) return;
+      viewer.current?.setInfo(null, datums.storeys);
       viewer.current?.setDatums(datums);
       viewsChanged();
     }).catch(() => undefined);
     return () => { live = false; };
-  }, [sceneId]);
+  }, [sceneId, infoRev]);
   useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
   // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
   useEffect(() => {
@@ -1419,7 +1435,9 @@ export function App() {
       else if (k === "escape") {
         // One thing at a time: the measure, the image dialog, the selected element, then the clash.
         unpin(); clearHover();
-        const step = escStep({ measuring: tool.measure, lightbox: !!lightbox, selection: !!selected, clash: !!(clash || a || b), working: clashBusy });
+        // The clash is left only where its chip shows: a clash plan or a wider fix keeps it (their own panels close them).
+        const step = escStep({ measuring: tool.measure, lightbox: !!lightbox, selection: !!selected,
+          clash: !!(clash || a || b) && !viewPlan && !activeContext, working: clashBusy });
         if (step === "measure") { if (measurePts.length) setMeasurePts([]); else toggle("measure"); }
         else if (step === "lightbox") setLightbox(null);
         else if (step === "selection") setSelected(null);
@@ -1717,6 +1735,7 @@ export function App() {
     if (kept.meshes && kept.scene_id === sid && kept.revision_before != null && kept.revision_before === sceneRevision.current
         && viewer.current?.patch(kept.meshes, origin)) {
       sceneRevision.current = kept.revision ?? null;
+      setInfoRev((n) => n + 1);   // the fix's new pieces: their classes and storeys for the filters
       return;
     }
     // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
@@ -1728,7 +1747,7 @@ export function App() {
       if (!live()) return;
       await viewer.current!.replace(i, bytes, live);
     }
-    if (live()) sceneRevision.current = kept.revision ?? null;
+    if (live()) { sceneRevision.current = kept.revision ?? null; setInfoRev((n) => n + 1); }
   }
 
   /** Mark every report clash of these element pairs as fixed (one pair can be reported by several tests). */

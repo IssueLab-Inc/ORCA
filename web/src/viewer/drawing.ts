@@ -141,7 +141,7 @@ export class DrawingView {
 
   /** A key for what the camera shows, to draw again only when it changes. */
   cameraKey(rect: Rect): string {
-    return [this.center.toArray(), this.scale, rect.w, rect.h, this.planes.map((p) => [p.normal.toArray(), p.constant]),
+    return [this.center.toArray(), this.look.toArray(), this.up.toArray(), this.scale, rect.w, rect.h, this.planes.map((p) => [p.normal.toArray(), p.constant]),
       this.crop?.map((c) => c.toArray())].flat(3).map((n) => (typeof n === "number" ? n.toFixed(5) : String(n))).join(",");
   }
 
@@ -181,7 +181,9 @@ export function farBehind(spec: SectionSpec, pair: THREE.Box3, extra: number): n
 
 // ---------------------------------------------------------------- the drawing style (docs/views.md, "The drawing style")
 
-/** Stencil bits a cut solid flips (by parity: a pixel whose bit is set lies inside a solid the cut passes through). */
+/** Stencil bits for what a cut passes through. The pair's and a preview's flip by parity; everything else is counted
+ * first (back faces up, front faces down: nonzero lies inside some solid, so two overlapping walls or a column in a wall
+ * still fill), then set to the `rest` bit. */
 export const CUT = { rest: 1, a: 2, b: 4, ab: 8, preview: 16 } as const;
 /** Layers the stencil passes draw: everything else, side A, side B, both sides, a fix's preview. */
 export const CAP_LAYER = { rest: 2, a: 3, b: 4, ab: 5, preview: 6 } as const;
@@ -217,6 +219,12 @@ export class DrawingStyle {
   readonly hidden = { a: behind("#d0342c"), b: behind("#1f9d3a"), ab: behind("#8e44ad") };
   readonly normals = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
   private stencil = new Map<number, THREE.MeshBasicMaterial>();
+  /** Counting what a cut passes through: back faces add one, front faces take one away (wrapping). */
+  readonly counting = [THREE.BackSide, THREE.FrontSide].map((side) => new THREE.MeshBasicMaterial({ side, colorWrite: false,
+    depthWrite: false, depthTest: false, stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc, stencilWriteMask: 0xff,
+    stencilZPass: side === THREE.BackSide ? THREE.IncrementWrapStencilOp : THREE.DecrementWrapStencilOp }));
+  /** Every counted pixel (1 ≤ count, wrapped) becomes the `rest` bit alone, before the pair's parity passes. */
+  private settle: THREE.Mesh;
   private caps: { mesh: THREE.Mesh; ref: number; mask: number }[];
   private quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   readonly composite: THREE.ShaderMaterial;
@@ -252,6 +260,14 @@ export class DrawingStyle {
       cap("#b37fd6", "#6d3f8f", CLASS.ab, false, CUT.ab, CUT.ab),
       cap("#ffb000", "#9a6100", CLASS.both, false, CUT.a | CUT.b, CUT.a | CUT.b),   // where A and B overlap: the clash
     ];
+    this.settle = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+      colorWrite: false, depthTest: false, depthWrite: false,
+      stencilWrite: true, stencilRef: CUT.rest, stencilFuncMask: 0xff, stencilWriteMask: 0xff, stencilFunc: THREE.LessEqualStencilFunc,
+      stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.ReplaceStencilOp,
+      vertexShader: "void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }",
+      fragmentShader: "void main() { gl_FragColor = vec4(0.0); }",
+    }));
+    this.settle.frustumCulled = false;
     this.composite = new THREE.ShaderMaterial({
       uniforms: {
         color: { value: null }, normals: { value: null }, depth: { value: null }, texel: { value: new THREE.Vector2() },
@@ -278,6 +294,9 @@ export class DrawingStyle {
     }
     return m;
   }
+
+  /** After counting: nonzero → the `rest` bit. */
+  settleCount(renderer: THREE.WebGLRenderer) { renderer.render(this.settle, this.quadCamera); }
 
   /** Fill the cut faces by their stencil value (after the stencil passes, in the same target). */
   drawCaps(renderer: THREE.WebGLRenderer, previewColour: THREE.Color | null) {

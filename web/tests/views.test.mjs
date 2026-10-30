@@ -36,6 +36,16 @@ test("plan presets: floor plan, ceiling void and whole storey; none needing a ne
   assert.deepEqual(v.planPreset(levels, 3, "floor"), { cut: 1.2, bottom: 0 });
 });
 
+test("two files' names for one floor: the storey runs to the next level above, not the one at the same height", () => {
+  const twice = [{ name: "Level 01", elevation_m: 0, height_m: 4 }, { name: "Level 02", elevation_m: 4, height_m: 4 },
+    { name: "L02", elevation_m: 4, height_m: 4 }, { name: "Level 03", elevation_m: 8, height_m: null }];
+  assert.equal(v.storeyHeight(twice, 1), 4);
+  assert.deepEqual(v.planPreset(twice, 1, "floor"), { cut: 1.2, bottom: 0 });
+  assert.ok(Math.abs(v.planPreset(twice, 1, "ceiling").cut - 3.95) < 1e-9);
+  assert.equal(v.nextAbove(twice, 1).name, "Level 03");
+  assert.equal(v.nextAbove(twice, 3), null);
+});
+
 test("a clash sets the plan's level and a cut through it, between 0.3 m and the storey less 50 mm", () => {
   const spec = { kind: "plan", level: 0, cut: 1.2, bottom: 0 };
   assert.deepEqual(v.planThrough(levels, 3.5, spec), { kind: "plan", level: 1, cut: 3.5, bottom: 0 });

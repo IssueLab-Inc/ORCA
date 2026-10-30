@@ -221,6 +221,10 @@ export class Viewer {
     this.scene.add(sun);
     this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.selectionLayer, this.marker, this.measureLayer, this.grips);
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, this.consistent, this.xrayAll, this.selectionMaterial]) m.clippingPlanes = this.clipping;
+    // Shaded with edges and Hidden line draw through the drawings' materials: the section box cuts them too (a drawing
+    // view empties `clipping` while it draws, so it never does there).
+    const st = this.drawStyle;
+    for (const m of [...st.fills, st.glass, ...Object.values(st.side), st.selected, st.normals]) m.clippingPlanes = this.clipping;
     this.buildGrips();
     this.camera.layers.enable(1);
     this.ortho.layers.enable(1);
@@ -252,13 +256,14 @@ export class Viewer {
     this.models = staged.map((m) => this.adopt(m));
     this.pane3d.hidden = !this.models.length;
     for (const pane of this.panes) pane.el.hidden = !this.models.length;
-    this.sceneSize = 0;
-    this.history.clear();
-    this.configureViews(true);
+    this.sceneChanged();
     this.names = names;
     this.hiddenModels.clear();
+    this.lastClash = null;
+    this.configureViews(true);
     this.applyMode();
     this.fitAll(false);
+    this.history.clear();   // after the fit: Back never flies to the camera of the models before
     return {
       elements: this.models.reduce((n, m) => n + m.stats.elements, 0),
       triangles: this.models.reduce((n, m) => n + m.stats.triangles, 0),
@@ -275,7 +280,7 @@ export class Viewer {
     const m = this.adopt(loaded);
     if (old) { this.scene.remove(...batches(old)); disposeBatches(old); }
     this.models[index] = m;
-    this.sceneSize = 0;
+    this.sceneChanged();
     this.clearFocusCache();
     this.applyMode();
   }
@@ -305,11 +310,16 @@ export class Viewer {
       console.warn("Patching the model failed; reloading the files instead.", e);
       return false;
     }
-    this.sceneSize = 0;
+    this.sceneChanged();
     this.clearFocusCache();  // focus geometry shares the batches' buffers, which may have moved or grown
     this.applyMode();
     return true;
   }
+
+  /** The models changed (loaded, replaced, patched): what is measured over them is measured again. */
+  private sceneChanged() { this.sceneSize = 0; this.boxCache = null; this.countsCache = null; }
+  private boxCache: THREE.Box3 | null = null;
+  private countsCache: ReturnType<Viewer["infoCounts"]> | null = null;
 
   /** The diagonal of everything loaded, metres (cached until the models change). */
   private sceneSize = 0;
@@ -330,6 +340,7 @@ export class Viewer {
 
   setModelVisible(index: number, visible: boolean) {
     if (visible) this.hiddenModels.delete(index); else this.hiddenModels.add(index);
+    this.boxCache = null;
     this.applyMode();
   }
 
@@ -440,12 +451,17 @@ export class Viewer {
   setGreyContext(on: boolean) { this.greyContext = on; this.applyMode(); }
 
   /** Element facts for the filters: IFC class and storey name, by GlobalId. */
-  setInfo(classes: Record<string, string>, storeys: Record<string, string>) {
+  setInfo(classes: Record<string, string> | null, storeys: Record<string, string> | null) {
+    if (classes) this.infoClasses = classes;
+    if (storeys) this.infoStoreys = storeys;
     this.info = new Map();
-    for (const [g, c] of Object.entries(classes)) this.info.set(g, { cls: c });
-    for (const [g, l] of Object.entries(storeys)) this.info.set(g, { ...this.info.get(g), level: l });
+    for (const [g, c] of Object.entries(this.infoClasses)) this.info.set(g, { cls: c });
+    for (const [g, l] of Object.entries(this.infoStoreys)) this.info.set(g, { ...this.info.get(g), level: l });
+    this.countsCache = null;
     this.applyMode();
   }
+  private infoClasses: Record<string, string> = {};
+  private infoStoreys: Record<string, string> = {};
 
   /** Classes and levels hidden (viewing only). */
   setFilters(f: Filters) { this.filters = { classes: [...f.classes], levels: [...f.levels] }; this.applyMode(); }
@@ -486,13 +502,14 @@ export class Viewer {
 
   /** Every element's class and storey known to the filters, with counts (for the Visibility menu). */
   infoCounts(): { classes: [string, number][]; levels: [string, number][] } {
+    if (this.countsCache) return this.countsCache;
     const classes = new Map<string, number>(), levels = new Map<string, number>();
     for (const m of this.models) for (const g of m.byGlobalId.keys()) {
       const i = this.info.get(g);
       if (i?.cls) classes.set(i.cls, (classes.get(i.cls) ?? 0) + 1);
       if (i?.level) levels.set(i.level, (levels.get(i.level) ?? 0) + 1);
     }
-    return { classes: [...classes].sort((a, b) => b[1] - a[1]), levels: [...levels] };
+    return this.countsCache = { classes: [...classes].sort((a, b) => b[1] - a[1]), levels: [...levels] };
   }
 
   /** Elements of a class among the loaded ones (to hide or isolate a class). */
@@ -1324,6 +1341,7 @@ export class Viewer {
   /** A press in the 3D view, before the controls see it: a section box grip starts a drag; otherwise an orbit (left
    * button) turns about what is under the pointer: the target moves along the view to that depth, so nothing jumps. */
   private press(e: PointerEvent) {
+    if (this.cube.el.contains(e.target as Node)) return;   // the view cube handles its own
     this.onUserCamera?.();
     if (e.button !== 0 || !this.models.length) return;
     const grip = this.gripAt(e);
@@ -1369,15 +1387,29 @@ export class Viewer {
     if (layout === this.layout && this.maximised == null) return;
     this.maximised = null;
     const old = [...this.panes];
+    const made: Pane[] = [];
     const next = defaultKinds(layout).map((kind) => {
       const i = old.findIndex((p) => p.spec.kind === kind);
-      return i >= 0 ? old.splice(i, 1)[0] : this.makePane(kind as DrawingSpec["kind"]);
+      if (i >= 0) return old.splice(i, 1)[0];
+      const p = this.makePane(kind as DrawingSpec["kind"]);
+      made.push(p);
+      return p;
     });
     for (const p of old) { p.view?.dispose(); p.el.remove(); }
     this.panes = next;
     this.layout = layout;
     this.layoutPanes();
     this.configureViews(false);
+    if (this.models.length) {
+      // A new pane looks at the clash on screen, else the whole model (never at empty paper round the origin).
+      const c = this.lastClash, box = this.modelBox();
+      for (const p of made) {
+        if (!p.view) continue;
+        if (c) this.clashViews(c.ids, c.zone, c.point, p);
+        else p.view.frame(box, p.rect, 0.08);
+      }
+      this.applyMode();   // the drawings' own visibility (Context and Isolate hide nothing there by default)
+    }
     this.onChange?.();
   }
 
@@ -1389,7 +1421,7 @@ export class Viewer {
   }
 
   /** Where the panes split (shares of the stage), from a drag on the line between them. */
-  setSplit(x: number, y: number) { this.split = { x, y }; this.layoutPanes(); }
+  setSplit(x: number, y: number) { this.split = { x: THREE.MathUtils.clamp(x, 0.2, 0.8), y: THREE.MathUtils.clamp(y, 0.2, 0.8) }; this.layoutPanes(); }
 
   /** Change what a drawing pane shows: another kind (framed on the model), or new settings (kept framing). */
   setPaneSpec(i: number, spec: DrawingSpec) {
@@ -1419,8 +1451,20 @@ export class Viewer {
 
   /** Levels and grids from the server (api.datums). */
   setDatums(d: Datums | null) {
+    const before = this.levels.map((l) => `${l.name}@${l.elevation_m}`).join("|");
     this.datums = d;
     this.configureViews(false);
+    // New levels (the first datums of a scene, or another project's): plans start again on the ground level, not on
+    // whichever index the old levels gave.
+    if (this.levels.map((l) => `${l.name}@${l.elevation_m}`).join("|") !== before) {
+      const box = this.modelBox();
+      for (const pane of this.panes) {
+        if (pane.view && pane.spec.kind === "plan") {
+          pane.spec = { ...pane.spec, level: this.groundLevel() };
+          pane.view.configure(pane.spec, this.levels, box);
+        }
+      }
+    }
     this.onChange?.();
   }
 
@@ -1441,7 +1485,8 @@ export class Viewer {
     return pane;
   }
 
-  private defaultSpec(kind: DrawingSpec["kind"]): DrawingSpec {
+  /** What a pane of a kind shows at first: a plan of the ground level, a section through the model's middle. */
+  defaultSpec(kind: DrawingSpec["kind"]): DrawingSpec {
     const c = toIfc(this.modelBox().getCenter(new THREE.Vector3()));
     if (kind === "plan") return { kind, level: this.groundLevel(), cut: 1.2, bottom: 0 };
     if (kind === "section") return { kind, origin: [c[0], c[1]], angle: 0, flip: false, far: null, crop: null };
@@ -1453,9 +1498,12 @@ export class Viewer {
 
   /** The whole model's box (three.js world), visible models only. */
   modelBox(): THREE.Box3 {
-    const box = new THREE.Box3();
-    this.models.forEach((m, i) => { if (!this.hiddenModels.has(i)) for (const b of batches(m)) { b.computeBoundingBox(); if (b.boundingBox) box.union(b.boundingBox); } });
-    return box;
+    if (!this.boxCache) {
+      const box = new THREE.Box3();
+      this.models.forEach((m, i) => { if (!this.hiddenModels.has(i)) for (const b of batches(m)) { b.computeBoundingBox(); if (b.boundingBox) box.union(b.boundingBox); } });
+      this.boxCache = box;
+    }
+    return this.boxCache.clone();
   }
 
   /** Levels from the server, or one for the whole model when it has none; every drawing configured again (framed on
@@ -1488,7 +1536,11 @@ export class Viewer {
       pane.rect = rects[k++] ?? { x: 0, y: 0, w: W, h: H };
       Object.assign(pane.el.style, { inset: "auto", left: `${pane.rect.x}px`, top: `${pane.rect.y}px`, width: `${pane.rect.w}px`, height: `${pane.rect.h}px` });
       const layer = pane.el.querySelector("canvas");
-      if (layer) { const dpr = Math.min(window.devicePixelRatio || 1, 2); layer.width = Math.round(pane.rect.w * dpr); layer.height = Math.round(pane.rect.h * dpr); }
+      if (layer) {
+        // Setting a canvas's size clears it, even to the same size: only when it changes, and then draw it again.
+        const dpr = Math.min(window.devicePixelRatio || 1, 2), w = Math.round(pane.rect.w * dpr), h = Math.round(pane.rect.h * dpr);
+        if (layer.width !== w || layer.height !== h) { layer.width = w; layer.height = h; pane.annotated = undefined; }
+      }
       // A drawing keeps what is at its middle when its pane changes size.
       if (pane.view && before.w > 2 && (before.w !== pane.rect.w || before.h !== pane.rect.h)) pane.view.drawn = "";
     }
@@ -1674,7 +1726,11 @@ export class Viewer {
         r.autoClear = false;
         scene.background = null;
         r.clippingPlanes = [view.cut];
-        for (const [layer, bit] of [[CAP_LAYER.rest, CUT.rest], [CAP_LAYER.a, CUT.a], [CAP_LAYER.b, CUT.b], [CAP_LAYER.ab, CUT.ab], [CAP_LAYER.preview, CUT.preview]]) {
+        cam.layers.set(CAP_LAYER.rest);
+        for (const m of st.counting) { scene.overrideMaterial = m; r.render(scene, cam); }
+        scene.overrideMaterial = null;
+        st.settleCount(r);
+        for (const [layer, bit] of [[CAP_LAYER.a, CUT.a], [CAP_LAYER.b, CUT.b], [CAP_LAYER.ab, CUT.ab], [CAP_LAYER.preview, CUT.preview]]) {
           cam.layers.set(layer);
           scene.overrideMaterial = st.stencilFor(bit);
           r.render(scene, cam);
@@ -1864,10 +1920,13 @@ export class Viewer {
     this.onChange?.();
   }
   private lastClash: { ids: string[]; zone: THREE.Box3; point: THREE.Vector3 | null } | null = null;
+  /** Is there a clash on screen for a pane's Go to the clash? */
+  get hasClash() { return !!this.lastClash; }
 
   /** One pane to the last clash (its own Go to clash, pinned or not). */
   paneToClash(i: number) {
     const c = this.lastClash, pane = this.panes[i];
+    if (!c) return;
     if (c && pane?.view) this.clashViews(c.ids, c.zone, c.point, pane);
   }
 
@@ -1906,7 +1965,8 @@ export class Viewer {
     }
     this.placeGrips();
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, ...Object.values(this.focusMaterials),
-      ...Object.values(this.focusGlass), ...[...this.linkMaterials.values()].map((x) => x.mesh)]) m.needsUpdate = true;
+      ...Object.values(this.focusGlass), ...[...this.linkMaterials.values()].map((x) => x.mesh), ...this.drawStyle.fills,
+      this.drawStyle.glass, ...Object.values(this.drawStyle.side), this.drawStyle.selected, this.drawStyle.normals]) m.needsUpdate = true;
     return true;
   }
 
@@ -2001,6 +2061,7 @@ export class Viewer {
 
   setMarker(point: THREE.Vector3 | null, label = "") {
     this.version++;
+    if (!point) this.lastClash = null;   // no clash on screen: Go to the clash has nowhere to go
     this.marker.visible = !!point;
     if (point) this.marker.position.copy(point);
     this.markerLabel.textContent = label;

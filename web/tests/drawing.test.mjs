@@ -69,3 +69,13 @@ test("framing, panning and zooming: the point under the pointer stays put", () =
   v.pan(10, 0);
   assert.ok(Math.abs(v.center.x - (x0 - 10 * v.scale)) < 1e-9, "dragging right moves the drawing right");
 });
+
+test("a drawing redraws when it turns: an elevation facing another way has another camera key", () => {
+  const v = new d.DrawingView({ kind: "elevation", facing: "south", far: null });
+  v.configure(v.spec, levels, model);
+  v.updateCamera(rect, 100);
+  const south = v.cameraKey(rect);
+  v.configure({ kind: "elevation", facing: "north", far: null }, levels, model);
+  v.updateCamera(rect, 100);
+  assert.notEqual(v.cameraKey(rect), south);
+});

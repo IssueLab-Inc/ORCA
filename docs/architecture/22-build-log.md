@@ -1058,3 +1058,23 @@ Navigate freely, and drawing views beside 3D (Oct 30; design [docs/views.md](../
   section line moved in plan; phone shows Single only with no sideways scroll. `server/tests/test_datums.py` (6),
   `web/tests/views.test.mjs` (11), `web/tests/drawing.test.mjs` (4); 95 web tests; `npm run build` and `tsc` clean.
   Frame times on a real GPU are still to measure.
+
+Review of the drawing views (Oct 30; PR review on `feature/drawing-views`; code `web/src/viewer/Viewer.ts`, `drawing.ts`,
+`views.ts`, `cube.ts`, `web/src/ViewPanes.tsx`, `App.tsx`):
+- **Drawing:** everything but the pair is counted for cut faces (back faces up, front down) instead of parity, so a post
+  set in a wall or a car built of overlapping parts fills instead of leaving a paper hole (checked against the parity
+  render of Level 01: only those overlaps differ). The redraw key includes the look and up, so an elevation turned
+  from its header redraws. The section box cuts Shaded with edges and Hidden line.
+- **Panes:** new panes frame the clash or the model, never the IFC origin; the header's Section starts through the
+  model's middle; the drawings' own visibility is built on a layout change; annotation canvases are cleared only when
+  their size changes (maximise and back kept them blank); the splitter stays within 0.2–0.8 and lets go on a cancelled
+  drag, with no text selected; a maximised 3D pane keeps its way back to the layout.
+- **State:** the view cube's Home gets its click; plans open on Level 01 once the real levels arrive; two names for one
+  floor no longer make a 0 m storey (`views.nextAbove`); Go to the clash is off once the clash is gone; Back is off
+  right after opening models; Esc keeps the clash in a clash plan or a wider fix; classes and storeys are read again
+  after a kept fix, each request on its own; the menus re-render at most once a frame, with counts and the model's box
+  cached.
+- **Checked:** 102 web tests (a same-height level, an elevation's key), build and `tsc` clean; in Chromium on
+  Northbank: Isolate then Quad shows the whole model in the plan, North elevation redraws, annotations survive
+  maximise and back, the splitter stops at 0.8 and stays put after, Home picks nothing, Go to the clash off after
+  leaving, Back off after opening, the plan opens on Level 01.
