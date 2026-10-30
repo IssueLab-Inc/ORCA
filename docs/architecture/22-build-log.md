@@ -1196,3 +1196,19 @@ Properties of any element (Oct 30; `feature/element-properties`, on top of the p
   In Playwright on Northbank: #1 in focus (X-ray), a click on the faded furniture behind selects it; the girder reads
   Steel S355, 400 × 12000 × 1000 mm, Model data without its scripting note; the filter; Esc empties the panel; the
   classic card's All properties; the page never scrolls.
+
+The owner's test of the panels (Oct 30; `fix/dock-empty-bars-tooltips`; code `web/src/dock.tsx`, `dockLayout.ts`,
+`index.css`; [docs/panels.md](../panels.md)):
+- **Empty side bars give their room to the model** (`fitEdges`, dockview's `setEdgeGroupVisible`): a bar whose panels
+  all floated, popped out, closed or moved beside the model is hidden; it comes back at its width when a panel docks
+  there. A saved layout whose pop-out emptied a bar shows the bar again (`withoutPopouts`).
+- **On top:** the dock area is its own stacking layer, so tooltips (200) and dialogs (40) are above dockview's floating
+  panels (999 and up); a rail or view header with an open menu rises to 5000 while it is open.
+- **Pop out a bar's only panel:** dockview does nothing for it (it won't take an edge group out), so Open in New Window
+  never worked for Coordination or Activity. `popOut` floats it first and `returnToBars` puts it back in its bar when the
+  window closes. Floated panels step down and left so none covers another's tabs.
+- **Checked:** 121 web tests (`dock.test.mjs`: a bar emptied by a pop-out shows again on load); build clean. In
+  Chromium on Northbank at 1440×900: Coordination floated, model 750 → 1060 px; all five floated, model 1440 × 850, kept
+  after a reload; Clash put back, right bar at 380 px; Coordination, Activity and a lone Clash out and back through the
+  button and the menu; Reset; a floating panel's tooltip, a rail tooltip, the Visibility menu and a Quad view's menu
+  over floating panels, and the panel on top again once a menu closes.

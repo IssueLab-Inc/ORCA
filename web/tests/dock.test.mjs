@@ -80,6 +80,8 @@ test("a saved layout puts what was in its own window back in its side bar", () =
   const back = dock.withoutPopouts(noBar);
   assert.deepEqual(back.edgeGroups.bottom.group, { id: "edge-bottom", views: ["activity"], activeView: "activity" });
   assert.ok(dock.validLayout(back));
+  const emptied = layout({ left: [], popout: ["clashes"] }); emptied.edgeGroups.left.visible = false;
+  assert.equal(dock.withoutPopouts(emptied).edgeGroups.left.visible, true, "the bar it emptied, hidden then, shows again");
   const plain = layout();
   assert.equal(dock.withoutPopouts(plain), plain, "nothing to move: the same layout");
   const props = dock.withoutPopouts(layout({ popout: ["properties"] }));
