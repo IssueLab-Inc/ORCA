@@ -56,6 +56,23 @@ class Option:
                                         # geometry alone cannot say it works
     model: str = ""                     # who proposed it, as people read it ("Muse Spark", "Muse Wonder")
 
+    def __post_init__(self):
+        self.also_needs = plain_needs(self.also_needs)
+
+
+def plain_needs(text: str | None) -> str:
+    """What else a fix needs, without the "none" the prompt's examples invite ("re-fix anchors; none" → "re-fix
+    anchors"; "none" → "")."""
+    parts = [p.strip() for p in (text or "").split(";")]
+    return "; ".join(p for p in parts if p and p.rstrip(".").lower() not in ("none", "nothing", "n/a", "-"))
+
+
+def move_words(delta_m) -> str:
+    """A move in words, on the model's axes (+X east, +Y north, +Z up): "north 250 mm", "east 100 mm, up 400 mm"."""
+    names = (("east", "west"), ("north", "south"), ("up", "down"))
+    out = [f"{names[k][0 if v > 0 else 1]} {abs(round(v * 1000))} mm" for k, v in enumerate(delta_m) if abs(v) >= 0.0005]
+    return ", ".join(out) or "0 mm"
+
 
 @dataclass
 class Attempt:
@@ -580,7 +597,7 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
         rec = {"title": best.get("title", ""), "kind": kind, "element": target, "delta_m": delta,
                "split_m": best.get("split_m"), "edit": {k: best[k] for k in PARAMS.get(kind, ()) if k in best},
                "rationale": best.get("rationale", ""),
-               "also_needs": best.get("also_needs", ""), "blocked_by": why,
+               "also_needs": plain_needs(best.get("also_needs", "")), "blocked_by": why,
                "others": [c.get("title", "") for c in candidates[1:3]]}
     return Result(reply.get("understanding", ""), [], [], reply.get("advice", ""), recommendation=rec,
                   requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
@@ -1020,7 +1037,7 @@ def _step_summary(scene: IfcScene, st: dict) -> str:
         return f"{name}: offset {st['delta_m'][2] * 1000:+.0f} mm at {st['split_m'][0]:.2f}-{st['split_m'][1]:.2f} m"
     if st["kind"] == "route":
         return f"{name}: {st['edit']['summary']}"
-    return f"{name}: move {[round(d * 1000) for d in st['delta_m']]} mm"
+    return f"{name}: move {move_words(st['delta_m'])}"
 
 
 def apply_combined(scene: IfcScene, steps: list[dict]) -> list[tuple[dict, list[str]]]:
