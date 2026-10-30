@@ -1232,3 +1232,22 @@ When the server lets go of the models (Oct 30; code `server/sightline/app.py`, `
   124 web tests, build clean. In Chromium on Northbank against a local server restarted mid-session: a clash picked
   after the restart brings the notice naming the models (its report call failed first; the scene probe followed), no
   error line, Export hidden; **Open them again** reloads the models and the check, with no notice or error after.
+
+The ORCA notch, menu and brand in the app (Oct 30; code `web/src/Brand.tsx`, `App.tsx`, `AppMenu.tsx`, `ViewPanes.tsx`,
+`viewer/Viewer.ts`, `index.css`, `web/index.html`, `web/public/brand/`, `server/sightline/document.py`):
+- **Header:** the desktop's header bar is gone; the panels and the model reach the top of the window. The wordmark
+  (20 px) hangs from the model's top edge in a notch, and clicking it opens About ORCA. The model's top right corner
+  holds the pills, Export and **Menu**, which opens `MenuSheet` (the phone's panel) on every layout, with Panels and
+  layout on a desktop. Phones and tablets keep their bar with the wordmark or the app icon. Mockups were agreed first.
+- **Progress:** the notch grows while ORCA works (`notchStatus`: opening models with one bar segment per model, the
+  check, triage, proposing, a plan, a wider fix). While the first models open, `LoadCard` lists the real steps:
+  `open()` records the server's answer, each downloaded file and each model drawn (`Viewer.load`'s new `onDrawn`
+  callback, which yields so the count paints). Every `.spinner` is the split-O. A kept fix (`markFixed`) shows a toast
+  where the mark settles once.
+- **Brand:** navy accent and ink text from the kit's tokens; the adaptive favicon, ICO, Apple, Android and maskable
+  icons, manifest and `og.png`; a boot splash with the Reveal letters in `index.html`; the PDF cover's lockup.
+- **Tests:** `app-host.mjs` opens Models and Coordinate through the menu (`menu()`), and both stub lists name `./Brand`.
+- **Checked:** 124 web tests, build clean; server tests below. In Chromium at 1440×900 on Northbank: landing,
+  loading card (opened 4.7 s, 4 of 4 downloaded 5.1 MB, 1,961 elements drawn), working notch ("Checking the models")
+  clear of Export, loaded model, the menu, a selected clash with its chip under the notch, and the PDF cover rendered
+  with WeasyPrint.

@@ -1,6 +1,7 @@
 :root {
-  --bg: #f2f4f7; --surface: #fff; --raised: #fbfcfd; --ink: #16202b; --muted: #5d6a7a; --line: #d7dde5; --line-soft: #e9edf2;
-  --accent: #2f5d8a; --accent-ink: #234a6f; --accent-soft: #e4edf6; --red: #d0342c; --green: #1f9d3a;
+  /* ORCA's palette (assets/brand/orca/tokens): ink, navy, paper, line and muted; the accent is the brand navy */
+  --bg: #f5f7f8; --surface: #fff; --raised: #fbfcfd; --ink: #11161b; --muted: #52636e; --line: #dde3e7; --line-soft: #ebeff2;
+  --navy: #052640; --accent: #052640; --accent-ink: #052640; --accent-soft: #e3eaf0; --red: #d0342c; --green: #1f9d3a;
   --ok: #1d7f47; --ok-soft: #e6f4ec; --fail: #b8352a; --fail-soft: #fbeceb; --warn: #9a6100; --warn-soft: #fbf1df;
   --wonder: #5b3c99; --wonder-ink: #432a78; --wonder-soft: #efe8fb; --wonder-line: #d8cbef;
   --body: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -76,7 +77,7 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .dockview-theme-orca {
   color-scheme: light; font-family: var(--body);
   --dv-paneview-active-outline-color: var(--accent); --dv-tabs-and-actions-container-font-size: 13px;
-  --dv-tabs-and-actions-container-height: 40px; --dv-drag-over-background-color: rgba(47, 93, 138, .16);
+  --dv-tabs-and-actions-container-height: 40px; --dv-drag-over-background-color: rgba(5, 38, 64, .14);
   --dv-drag-over-border-color: var(--accent); --dv-edge-dock-indicator-color: var(--accent);
   --dv-tabs-container-scrollbar-color: #9aa5b1; --dv-icon-hover-background-color: var(--accent-soft);
   --dv-floating-box-shadow: 0 12px 32px rgba(16, 24, 40, .18), 0 2px 8px rgba(16, 24, 40, .1);
@@ -108,8 +109,70 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .bar-side.end { justify-content: flex-end; }
 @media (max-width: 1280px) { .bar .lbl { display: none; } }
 .bar .stat { margin-left: -2px; margin-right: 4px; white-space: nowrap; }
-.brand { font-size: 16px; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-.logo { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 15px; }
+.brand { all: unset; display: inline-flex; align-items: center; color: var(--ink); cursor: pointer; border-radius: 6px; }
+.brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.wordmark, .app-icon, .orca-mark { display: block; flex: none; }
+
+/* The desktop has no header bar: the panels and the model reach the top of the window. The logo hangs from the top
+   edge of the model in a notch that grows while ORCA works (Brand.tsx); the menu and Export sit in the model's top
+   right corner. */
+.app.notched { grid-template-rows: minmax(0, 1fr) auto; }
+.app.notched.docked { grid-template-rows: minmax(0, 1fr); }
+.app.notched .resizer { grid-row: 1 / 2; }
+.notch { position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: flex-start; pointer-events: none; max-width: calc(100% - 24px); }
+.notch > * { pointer-events: auto; }
+.notch-shoulder { width: 14px; height: 14px; flex: none; pointer-events: none; }
+.notch-shoulder.left { background: radial-gradient(circle at 0 100%, transparent 13.5px, var(--surface) 14px); }
+.notch-shoulder.right { background: radial-gradient(circle at 100% 100%, transparent 13.5px, var(--surface) 14px); }
+.notch-body { background: var(--surface); border-radius: 0 0 14px 14px; min-width: 0; }
+.notch-logo { all: unset; box-sizing: border-box; display: flex; align-items: center; height: 40px; padding: 0 16px; color: var(--ink); cursor: pointer;
+  background: var(--surface); border-radius: 0 0 14px 14px; }
+.notch-logo:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+.app.notched .stage { container-type: inline-size; }
+/* Never under the corner's buttons: narrower when the model is (the text then ellipsises). */
+.notch.working .notch-body { width: clamp(220px, calc(100cqw - 420px), 380px); padding: 10px 18px 14px; display: flex; flex-direction: column; gap: 9px;
+  box-shadow: 0 10px 24px rgba(5, 38, 64, .10); animation: notch-in .22s ease both; }
+@keyframes notch-in { from { clip-path: inset(0 20% 40% 20% round 0 0 16px 16px); } }
+.notch-line { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--navy); }
+.notch-text { display: flex; flex-direction: column; min-width: 0; color: var(--ink); }
+.notch-text b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notch-text span { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parts { display: grid; gap: 4px; }
+.parts span { height: 5px; border-radius: 3px; background: var(--accent-soft); transition: background .3s; }
+.parts span.done { background: var(--navy); }
+.parts span.now { background: #9fb3c4; }
+.corner { position: absolute; top: 8px; right: 10px; z-index: 6; display: flex; align-items: center; gap: 8px; }
+.corner > .btn, .corner > .chip, .corner .owner-pop .btn { box-shadow: 0 2px 8px rgba(17, 22, 27, .10); }
+.corner .menu-btn { width: 40px; height: 40px; padding: 0; justify-content: center; background: var(--surface); }
+.corner .btn.primary { height: 40px; }
+/* Things that sat at the model's top centre move below the notch. */
+.app.notched .overlay.gone { top: 66px; }
+.app.notched .pilot { top: 108px; }
+.app.notched .props { top: 60px; }
+.app.notched .measure-panel { top: 108px; }
+.app.notched.landing .about { padding-top: 84px; }
+/* Opening the first models: the checklist card in the middle of the empty model */
+.load-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 5; width: min(440px, calc(100% - 32px));
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgba(5, 38, 64, .08);
+  padding: 24px 24px 22px; display: flex; flex-direction: column; gap: 18px; }
+.load-head { display: flex; align-items: center; gap: 16px; color: var(--navy); }
+.load-head h2 { margin: 0; font-size: 16px; color: var(--ink); }
+.load-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.load-steps li { display: flex; gap: 12px; align-items: flex-start; }
+.load-steps .tick { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); margin-top: 1px; box-sizing: border-box; }
+.load-steps .done .tick { border: 0; background: var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E") center / 11px no-repeat; }
+.load-steps .now .tick { border-color: var(--navy); background: radial-gradient(circle, var(--navy) 3.5px, transparent 4px); }
+.load-steps .next { color: var(--muted); }
+.load-steps .now .load-row > .row span:first-child { font-weight: 600; }
+.load-row { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.load-row .row span:first-child { overflow-wrap: anywhere; }
+/* The kit's motion: Orbit while work runs, Settle once after a confirmed action; still under reduced motion. */
+.orca-mark g { transform-box: view-box; transform-origin: 128px 128px; }
+.orca-mark.orbit g { animation: orca-orbit 1.6s linear infinite; }
+.orca-mark.settle g { animation: orca-settle .76s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes orca-orbit { to { transform: rotate(360deg); } }
+@keyframes orca-settle { 0% { transform: scale(.88); opacity: .2; } 60% { transform: scale(1.055); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .orca-mark g { animation: none !important; } .notch.working .notch-body { animation: none; } }
 .stat { color: var(--muted); font-size: 11.5px; margin-left: 6px; }
 .spacer { flex: 1; }
 .pane { padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); overflow: auto; min-width: 0; }
@@ -203,9 +266,12 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .ibtn.on { background: var(--accent-soft); color: var(--accent-ink); }
 .ibtn:disabled { color: var(--muted); opacity: .4; cursor: default; }
 .spin { animation: spin 1s linear infinite; }
-.spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite; display: inline-block; flex: none; }
+/* Every spinner is ORCA's split-O at its optical small size (assets/brand/orca/icons/orca-symbol-micro.svg), in the
+   accent colour, turning at the kit's Orbit speed. */
+.spinner { width: 14px; height: 14px; display: inline-block; flex: none; background: var(--accent); animation: spin 1.6s linear infinite;
+  -webkit-mask: url("/brand/orca-spinner.svg") center / contain no-repeat; mask: url("/brand/orca-spinner.svg") center / contain no-repeat; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spinner, .spin { animation-duration: 3s; } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } .spin { animation-duration: 3s; } }
 
 /* Tooltips: data-tip on any element; side from data-tip-side; drawn by Tooltips (ui.tsx), kept inside the window */
 [data-tip] { position: relative; }
@@ -1405,6 +1471,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   background: #18212c; color: #fff; font-size: 13px; line-height: 1.4; padding: 8px 14px; border-radius: 999px; box-shadow: var(--shadow);
   animation: toast-in .2s ease both; }
 @keyframes toast-in { from { opacity: 0; translate: 0 6px; } }
+.toast.kept { display: flex; align-items: center; gap: 12px; background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 16px 10px 12px; box-shadow: 0 6px 18px rgba(17, 22, 27, .10); }
+.toast.kept .orca-mark { color: var(--ok); }
 .pop-item.on { color: var(--accent-ink); }
 .pop-item .tick, .menu-section .pop-item .chip, .menu-section .pop-item .why { margin-left: auto; }
 a.pop-item { color: inherit; }
@@ -1446,6 +1515,8 @@ a.pop-item { color: inherit; }
 .menu-section { display: flex; flex-direction: column; gap: 2px; }
 .menu-section h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 6px 4px; }
 .menu-section h3 svg { color: var(--accent); }
+.menu-section h3 .why { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.menu-head .brand { padding: 4px 2px; }
 .menu-section .pop-title { margin: 8px 6px 4px; font-size: 12.5px; }
 .menu-section .btn { align-self: flex-start; margin: 6px 6px 2px; }
 .menu-section .hint { margin: 4px 6px; }

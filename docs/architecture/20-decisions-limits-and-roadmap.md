@@ -85,12 +85,12 @@ carries the decision today.
 | Oct 30 | Panels that dock, collapse, float and pop out on the desktop, on a real docking library: dockview's free MIT core only (never its paid package: the public repo must build for anyone), the default layout the classic one, pop-out windows in the first version, phones and tablets unchanged, a Classic layout switch | `web/src/dock.tsx`, `dockLayout.ts`, `inSlot` / `SlotHost` in `App.tsx`; [docs/panels.md](../panels.md), [12](12-web-app.md) |
 | Oct 30 (request) | Measure in every view (3D and each drawing, on the drawing's plane), with snapping to ends, midpoints and edges (a toggle), several measurements to delete or clear, copied to the clipboard; the rail's 3D-only tools in the 3D pane when there are several panes | `viewer/measure.ts`, `Viewer.measureClick` / `snapAt`, `MeasurePanel.tsx`, `ViewerToolbar` (`Rail3d`); [docs/measure.md](../measure.md) |
 | Oct 30 | Navigate the model with or without a clash: leave a clash (Esc, the chip's ✕), CAD-style 3D (view cube, orthographic, styles, visibility by model, class and level, hide and isolate); a picked clash shows in every open view, and clicking a clash takes every view to it by default (Fly to clash) | `leaveClash`, `views.escStep`, `viewer/cube.ts`, `Viewer.setStyle` / `setFilters` / `setTemporary`, `Viewer.clashViews`; [docs/views.md](../views.md) |
+| Oct 30 | The desktop has no header bar: the ORCA wordmark hangs from the model's top edge in a notch (20 px high, smaller than the brand guide's minimum, to stay out of the model) that grows to show live progress; Export and one menu sit in the model's top right corner; the brand's navy and ink across the app; the favicon and icons from the kit; not a redesign of the landing | `web/src/Brand.tsx`, `App.tsx` (`notchStatus`, `corner`), `AppMenu.tsx`; [docs/brand-assets.md](../brand-assets.md), [12](12-web-app.md) |
 
 **Oct 30, owner decision:** approved direction **05 / ORCA Type** (custom wordmark and split-O symbol), then the full
 asset and motion pack, and requested its repository PR and merge for the upcoming application redesign. The approved
 library is [`assets/brand/orca/`](../../assets/brand/orca/README.md), documented in [docs/brand-assets.md](../brand-assets.md).
-This slice stores the library for that redesign; it does not integrate or deploy a new interface. Decision inventory
-checked 2026-10-30 against `0390a12` plus this slice.
+The app adopted it on Oct 30 (the notch row above).
 
 ## Tried and dropped
 

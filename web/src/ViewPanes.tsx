@@ -14,20 +14,22 @@ const PRESETS: { id: PlanPreset; label: string; hint: string }[] = [
 
 /** Each pane's header over the viewer (docs/views.md, "Interaction"): what it shows, its view range or depth and crop,
  * pin, go to the clash, fit and maximise; the lines between panes to drag; and the clash chip, in the 3D pane. */
-export function ViewPanes({ viewer, chip, offset, compact = false }: { viewer: Viewer | null; chip: React.ReactNode; offset: number; compact?: boolean }) {
+/** `clear`: the height kept free at the model's top edge (the desktop's notch and corner menu); headers in the top row sit
+ *  below it. */
+export function ViewPanes({ viewer, chip, offset, compact = false, clear = 0 }: { viewer: Viewer | null; chip: React.ReactNode; offset: number; compact?: boolean; clear?: number }) {
   if (!viewer || !viewer.models.length) return null;
   const panes = viewer.visiblePanes();
   // Single is the layout of one pane; a maximised pane keeps its header, with the way back to the layout.
   const single = viewer.panes.length === 1;
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-  if (single) return chip ? <div className="pane-head solo" style={{ left: offset, top: compact ? 56 : 12 }} onClick={stop} onPointerDown={stop} onDoubleClick={stop}>{chip}</div> : null;
+  if (single) return chip ? <div className="pane-head solo" style={{ left: offset, top: compact ? 56 : 12 + clear }} onClick={stop} onPointerDown={stop} onDoubleClick={stop}>{chip}</div> : null;
   return (<>
     {panes.map((pane) => {
       const i = viewer.panes.indexOf(pane);
       // The header's room: the pane less the rail (top-left pane) and a margin; less the maximise button for the rest.
       const room = Math.max(pane.rect.w - (pane.rect.x < 4 ? offset : 8) - 16, 120);
       return (
-        <div key={i} className={`pane-head of-${pane.spec.kind}`} style={{ left: pane.rect.x + (pane.rect.x < 4 ? offset : 8), top: pane.rect.y + 8,
+        <div key={i} className={`pane-head of-${pane.spec.kind}`} style={{ left: pane.rect.x + (pane.rect.x < 4 ? offset : 8), top: pane.rect.y + 8 + (pane.rect.y < 4 ? clear : 0),
           maxWidth: room }}
           onClick={stop} onPointerDown={stop} onDoubleClick={stop}>
           {pane.spec.kind === "3d" ? <><b className="pane-name">3D</b>{chip}</>

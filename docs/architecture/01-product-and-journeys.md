@@ -4,8 +4,8 @@
 > `web/src/AppMenu.tsx`, `web/src/Detect.tsx`, `web/src/ReportList.tsx`, `web/src/Triage.tsx`,
 > `web/src/Insights.tsx`, `web/src/ClashPanel.tsx`, `web/src/PlanPanel.tsx`, `web/src/ContextPlan.tsx`,
 > `web/src/Chat.tsx`, `web/src/Requirements.tsx`, `web/src/ReportDoc.tsx`, `web/src/Agent.tsx`, `web/src/Owner.tsx`,
-> `web/src/Sheet.tsx`, `web/src/layout.ts`, `web/src/ViewerToolbar.tsx` · **Checked against code:** 2026-10-30
-> (`104fda9`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/detection.md](../detection.md),
+> `web/src/Sheet.tsx`, `web/src/layout.ts`, `web/src/ViewerToolbar.tsx`, `web/src/Brand.tsx` · **Checked against code:** 2026-10-30
+> (`104fda9`; the notch and menu on `claude/laughing-allen-29oggh`) · **Deeper design:** [docs/mobile.md](../mobile.md), [docs/detection.md](../detection.md),
 > [docs/edits.md](../edits.md), [docs/requirements.md](../requirements.md), [docs/escalation.md](../escalation.md),
 > [docs/show-it-built.md](../show-it-built.md), [docs/voice.md](../voice.md), [docs/mcp.md](../mcp.md),
 > [docs/step.md](../step.md), [docs/uploads.md](../uploads.md)
@@ -54,18 +54,18 @@ zone has the whole stage.
 
 | Way in | Control | What it calls | What happens |
 |---|---|---|---|
-| **Golden path** | Landing hero **Watch ORCA fix a clash** (`data-tour=golden`); also in the landing header | `startGolden` → `openDemo()` | Opens the default demo models, runs the check, then picks the duct through the girder and proposes (below). |
+| **Golden path** | Landing hero **Watch ORCA fix a clash** (`data-tour=golden`); also at the landing's top right | `startGolden` → `openDemo()` | Opens the default demo models, runs the check, then picks the duct through the girder and proposes (below). |
 | **Northbank demo** | Demo card **Open the Northbank demo** (`data-tour=demo`) | `openDemo()` → `open(picked)` → `runDetect(null, id)` | Opens the default pick and checks it. The label is "Open the models" when the pick holds no Northbank file (`startLabel`). |
 | **Machine cell demo** | Demo card **Open the machine cell** (`data-tour=cell`) | `openDemo([cellSample])` | Opens `PC-03-Palletising-Cell-RevA.step` from `samples/` (`cellSample`, matched by name), converts it and checks it. The card shows only when that file is there. |
-| **Guided tours** | **Take the guided tour** / **Take the cell tour** on the cards; header **Tour** once something is open | `startTour("northbank" \| "cell")` | `Tour` walks the real app (below). |
+| **Guided tours** | **Take the guided tour** / **Take the cell tour** on the cards; **Menu** › **Take the guided tour** once something is open | `startTour("northbank" \| "cell")` | `Tour` walks the real app (below). |
 | **Pick a demo** | Hero link | scrolls to `#demos` | The two `DemoCard`s: picture, what it is, what it shows, measured chips, Open and Tour. |
 | **Resume** | **Pick up where you left off** card (`ResumeCard`), shown while the server still holds the session | `resumeSession` | Reopens the saved scene (`open(files, existing)`), its report, the fixes, and the agent link. **Start fresh** forgets it and revokes the link (`startFresh`). The session is kept in `localStorage` (`sightline.session`). |
 | **Blank project** | Hero **Use your own models** (`data-tour=blank`) | `setBlank(true)` → `ProjectStart` | A drop zone or **Choose files** for IFC/STEP (→ `openDemo(files)`: upload, open, check), **Import a report folder**, **Back to the demos**. |
-| **Models menu** | Header **Models** popover | `open()` / `openDemo(files)` | Tick sample files and **Open n models**, or **Upload models (IFC or STEP)…**. The default pick is the samples matching `(structure\|mep\|architecture\|site).ifc`. |
-| **Coordinate menu** | Header **Coordinate** popover | `runDetect(null)` / `loadReport` / `upload` | **Check the open models** first; then **Or import a Navisworks clash report (XML)**: a sample folder from `samples/reports/`, **Upload an export folder…** (not on iOS), **Upload XML files…**. |
-| **Agent over MCP** | Header **Connect an agent** | `AgentDialog`, `connectAgent` | A pairing link for an MCP client; the page follows what the agent does ([11](11-mcp-and-agent-links.md)). |
-| **Owner** | Header gear, only for the owner or on a page opened with `#owner` | `OwnerSettingsMenu` | Unlock with the owner token, then settings "For me" and "For everyone" ([15](15-requirements-settings-and-config.md), [16](16-security-caps-and-cost.md)). |
-| **Help** | Header **About ORCA** (also on the landing, in the phone menu, the landing's "Go deeper" card, or the address `#about`, `#about/<tab>`) | `openAbout(tab)` | A full page over the app in six tabs: Overview, How it works, The fixes, The AI, Under the hood, Proof and limits. Animated pictures (the ORCA loop, the duct raised through the girder, each fix kind before and after, the propose-check loop, the architecture); still under reduced motion. Escape, Close or Back closes it. |
+| **Models menu** | **Menu** › Models (the model's top right corner on a desktop) | `open()` / `openDemo(files)` | Tick sample files and **Open n models**, or **Upload models (IFC or STEP)…**. The default pick is the samples matching `(structure\|mep\|architecture\|site).ifc`. |
+| **Coordinate menu** | **Menu** › Coordinate | `runDetect(null)` / `loadReport` / `upload` | **Check the open models** first; then **Or import a Navisworks clash report (XML)**: a sample folder from `samples/reports/`, **Upload an export folder…** (not on iOS), **Upload XML files…**. |
+| **Agent over MCP** | **Menu** › **Connect an agent** (once connected, the agent pill beside the menu) | `AgentDialog`, `connectAgent` | A pairing link for an MCP client; the page follows what the agent does ([11](11-mcp-and-agent-links.md)). |
+| **Owner** | The gear beside the menu, only for the owner or on a page opened with `#owner` | `OwnerSettingsMenu` | Unlock with the owner token, then settings "For me" and "For everyone" ([15](15-requirements-settings-and-config.md), [16](16-security-caps-and-cost.md)). |
+| **Help** | The ORCA logo in the notch, or **Menu** › **About ORCA** (also on the landing, the landing's "Go deeper" card, or the address `#about`, `#about/<tab>`) | `openAbout(tab)` | A full page over the app in six tabs: Overview, How it works, The fixes, The AI, Under the hood, Proof and limits. Animated pictures (the ORCA loop, the duct raised through the girder, each fix kind before and after, the propose-check loop, the architecture); still under reduced motion. Escape, Close or Back closes it. |
 
 ```mermaid
 flowchart TD
@@ -113,7 +113,7 @@ verified fix".
 | 6. Propose | **Propose fixes** runs by itself: "Understanding", Muse Spark's live reasoning notes, the status line. | `propose()` → `runProposal`: waits up to 4 s for the views, then `api.proposeStream`. |
 | 7. Pilot | The glowing border: ORCA is driving. Each idea appears in place, amber while checked, teal when clear, what it hit in magenta; the camera follows and turns slowly while Muse thinks. **Take the view** / **Let ORCA drive**. The dock's "Agent activity" table fills. | `trackAgent` feeds every event to `Pilot` (`web/src/pilot.ts`); any user camera move is a takeover (`Viewer.onUserCamera`). |
 | 8. Options | "Verified options": rank, kind chip (Move, Offset, Trim, Reroute, Resize, Opening, Combined), title, Edit / Clearance / Review facts, what it meets, the rationale and a proof strip. The bar over the stage switches **Before / After / Both**, with a before/after summary. On Northbank the first idea is the offset up 400 mm through the girder's web opening, Rev04's height. | The first option is chosen; the viewer frames what changed (`frameFix`) and, 1.4 s later, captures the proposed fix for the report. |
-| 9. Accept | **Accept this fix**: "Applying the fix…", the edited pieces appear without a reload, the row and panel get "✓ fixed", the header counts "1 fixed". | `accept` → `api.accept` (`/fix/apply` with the clash's pair; the server tries the fix again and refuses it with why if it no longer passes) → `applyToViewer`, which patches the viewer when the page is at the server's `revision_before`, else reloads the changed files; `markFixed` marks every report clash of that pair; the clash is measured again. |
+| 9. Accept | **Accept this fix**: "Applying the fix…", the edited pieces appear without a reload, the row and panel get "✓ fixed", a toast says "Fix kept in the model" as the ORCA mark settles, and the corner counts "1 fixed". | `accept` → `api.accept` (`/fix/apply` with the clash's pair; the server tries the fix again and refuses it with why if it no longer passes) → `applyToViewer`, which patches the viewer when the page is at the server's `revision_before`, else reloads the changed files; `markFixed` marks every report clash of that pair; the clash is measured again. |
 | 10. Re-check | **Detect again** (the icon on the Insights tab's run summary): the chips say how many clashes the fixes resolved and how many are new. | `runDetect(lastTests)`. Clash ids are stable across runs, so the page keeps its "not a clash" marks and the server carries titles and views over (`Workspace._carry`). |
 
 ## Every feature as a journey
@@ -178,10 +178,10 @@ Transcribe through the server; an upload is the fallback ([docs/voice.md](../voi
 
 ### Coordination requirements
 
-Header **Requirements** (once models are open) opens `RequirementsDialog`: level cards (L1 Concept to L5 As-built), a
+**Menu** › **Requirements** (once models are open) opens `RequirementsDialog`: level cards (L1 Concept to L5 As-built), a
 strictness slider (Lenient to Exacting) with the numbers it sets and the expected count, the check matrix between
 groups, who moves, by-design rules with Muse's audit, openings for services, guidance, **Suggest with Muse Spark**,
-Download / Upload, then **Use these requirements** or **Use them and check again**. The header pill then shows the
+Download / Upload, then **Use these requirements** or **Use them and check again**. A pill beside the menu then shows the
 short label ("L4 · Strict"). Detect and Triage cards say what they ran under; options say what they meet; under L5 a
 recommendation replaces edits ("Recommended for the designer"). Design: [docs/requirements.md](../requirements.md);
 code: [15](15-requirements-settings-and-config.md).
@@ -190,11 +190,11 @@ code: [15](15-requirements-settings-and-config.md).
 
 - **Review:** in the clash panel, every team with an element in a real or fixed clash adds a review: a name and a
   decision (`ReviewBlock`, kept in `localStorage` per report). No sign-in yet.
-- **Report:** header **Report** opens `ReportDialog`: scope (**One report**, **One per team**, **One per model**),
+- **Report:** **Menu** › **Report: PDF and BCF** opens `ReportDialog`: scope (**One report**, **One per team**, **One per model**),
   the team that owns each model (guessed, confirmed here), **Include BCF issues**, **Build the report**, then
   **Download**. It needs triage done (it offers Triage all otherwise) and costs one proposal. The PDF says DRAFT until
   every page has a review from every team involved.
-- **Export:** header **Export IFC** (or **Export STEP + IFC** when a STEP model is open) downloads every edited file,
+- **Export:** **Export IFC** (the model's top right corner) (or **Export STEP + IFC** when a STEP model is open) downloads every edited file,
   zipped when several changed. Details in [14](14-files-in-and-out.md).
 
 ### A second try on Muse Wonder
@@ -282,19 +282,19 @@ remembered in `sightline.left-w` / `sightline.right-w`; defaults 310 px and 380 
 
 | Area | What it holds |
 |---|---|
-| **Header** (`.bar`, three columns) | Left: **Models** (with the element count after it), **Coordinate**, **Requirements**, **About ORCA**, **Tour**. Centre: the ORCA brand. Right: "n fixed", **Connect an agent** (or the agent pill: "Agent · tool"), the owner chip and gear, **Report**, **Export IFC** / **Export STEP + IFC**. At 1280 px and below, Requirements, About ORCA, Tour and Connect an agent show their icons only (`.bar .lbl`). |
+| **Notch and corner** (no header bar) | The panels and the model reach the top of the window. The ORCA wordmark hangs from the model's top edge in a notch (`Notch` in `Brand.tsx`; click: About ORCA). While ORCA works the notch grows to say what is happening (opening models with one bar segment per model, the check, triage, proposing, a plan), from the same live state as the phone's peek line, and folds back after. The model's top right corner holds "n fixed", the requirements pill, the agent pill, the owner chip and gear, **Export IFC** / **Export STEP + IFC** and **Menu** (`MenuSheet`: Models, Coordinate, this session's Requirements, Report, Export and Connect an agent, Panels and layout, Help). |
 | **Left pane** (`.pane.left`) | Over a report, `ReportList` with two tabs: **Clashes** (title and test count, Triage folded to one line, search with filters, the list grouped by test, ticks and the Fix together bar) and **Insights** (impact line, the run's summary with Detect again, root causes, patterns). Models open with no report: the Detect setup card. Nothing open: "Nothing to coordinate yet". |
-| **Stage** (`main.stage`) | The viewer canvas; the rail (`ViewerToolbar`: Shaded, X-ray, Context, Isolate; section box, outlines, measure; Go to the clash, Fit, standard views, models shown, screenshot); the properties card on single click; the busy and status overlays; the pilot pill and glow; the Before / After / Both bar; the landing (`About`) or the blank project (`ProjectStart`) when nothing is open. |
+| **Stage** (`main.stage`) | The viewer canvas; the rail (`ViewerToolbar`: Shaded, X-ray, Context, Isolate; section box, outlines, measure; Go to the clash, Fit, standard views, models shown, screenshot); the properties card on single click; the notch and the corner; the loading card while the first models open (`LoadCard`: opened on the server, downloaded n of n, drawing model k of n); the pilot pill and glow; the Before / After / Both bar; the landing (`About`) or the blank project (`ProjectStart`) when nothing is open. |
 | **Right pane** (`.pane.right`) | Tabs **Clash** (the clash panel, Propose fixes, Explore wider fix, Go to the clash, Understanding, reasoning, options, Try a move yourself), **Plan** (Fix together, root cause plan, wider fix) and **Chat**. |
 | **Dock** (`footer.dock`) | "Agent activity": every attempt of the running or last proposal. |
 
 ```mermaid
 flowchart TB
-  subgraph header["Header: menus, ORCA brand, outputs"]
+  subgraph header["Top edge: no bar"]
     direction LR
-    h1["Models and Coordinate menus"]
-    h2["Requirements pill"]
-    h3["Report and Export"]
+    h1["Notch: ORCA wordmark, grows with live status"]
+    h2["Corner: pills, Export, Menu"]
+    h3["Menu: models, coordinate, session, panels, help"]
   end
   subgraph body["Workspace"]
     direction LR
@@ -349,7 +349,7 @@ flowchart TB
 
 ## When to update this doc
 
-- A new way in: a landing button or card, a header action, a menu item in `modelsMenu` / `coordinateMenu` /
+- A new way in: a landing button or card, a corner button, a menu item in `modelsMenu` / `coordinateMenu` /
   `MenuSheet`, a new dialog.
 - A change to the golden path: `startGolden`, `openDemo`, the golden effect in `App.tsx`, the default model pick, or
   what Accept does on the page (`accept`, `applyToViewer`).

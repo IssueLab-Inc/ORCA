@@ -98,7 +98,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   globalThis.setInterval = () => Symbol(); globalThis.clearInterval = () => {};
   const react = url(`const h=globalThis.${key}.hooks; export const useState=(...a)=>h.useState(...a),useRef=(...a)=>h.useRef(...a),useMemo=(...a)=>h.useMemo(...a),useEffect=(...a)=>h.useEffect(...a);`);
   const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} } export const setRequirements=()=>{}; export const setGoneHandler=(fn)=>{globalThis.${key}.gone=fn;};`);
-  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "DockHost", "SlotHost", "MeasurePanel", "PropertySets"];
+  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "DockHost", "SlotHost", "MeasurePanel", "PropertySets", "Wordmark", "AppIcon", "Notch", "LoadCard", "KeptToast", "OrcaMark"];
   const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
     export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
     export const clashLabel=(c)=>"#"+c.number; export const inSlot=(s,n)=>n; export const usePanelSlots=()=>({}); export const STYLES=[{id:"shaded"},{id:"consistent"},{id:"edges"},{id:"hidden"},{id:"xray"}];
@@ -117,7 +117,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds, "./uploads": uploads, "./links": links,
     "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./viewer/views": views };
-  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel", "./Properties"]) dependencies[name] = mocks;
+  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel", "./Properties", "./Brand"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   function render() {
     let passes = 0;
@@ -133,16 +133,17 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     component(name) { return find(tree, (n) => n.type?.name === name); },
     find(predicate) { return find(tree, predicate); },
     input(id) { return find(tree, (n) => n.type === "input" && n.props.id === id); },
-    reportMenu() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Coordinate"); return p.props.children(() => {}); },
+    /** ORCA's menu (the model's top right corner on a desktop): opened, and what it holds. */
+    menu() { const b = find(tree, (n) => n.type === "button" && n.props["data-tour"] === "menu"); b.props.onClick(); render();
+      return find(tree, (n) => n.type?.name === "MenuSheet"); },
+    reportMenu() { return this.menu(); },
     fileInput(kind) { return find(tree, (n) => n.type === "input" && n.props.type === "file"
       && (kind === "folder" ? "webkitdirectory" in n.props : String(n.props.accept ?? "").includes(".xml"))); },
     chat(event) { find(tree, (n) => n.type?.name === "ChatPanel").props.onEvent(event); render(); },
     /** The server answered that a scene or report is gone (api.ts, X-Sightline-Gone). */
     gone(g) { globalThis[key].gone?.(g); render(); },
-    open() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Models");
-      find(p.props.children(() => {}), (n) => n.props?.id === "open").props.onClick(); render(); },
-    loadReport() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Coordinate");
-      find(p.props.children(() => {}), (n) => n.type === "button" && hasText(n, "sample")).props.onClick(); render(); },
+    open() { find(this.menu(), (n) => n.props?.id === "open").props.onClick(); render(); },
+    loadReport() { find(this.menu(), (n) => n.type === "button" && hasText(n, "sample")).props.onClick(); render(); },
     runTimers() { const entries = [...timers.values()]; timers.clear(); for (const fn of entries) fn(); render(); },
     unmount() { for (const cell of cells) cell?.cleanup?.(); delete globalThis[key]; },
   };

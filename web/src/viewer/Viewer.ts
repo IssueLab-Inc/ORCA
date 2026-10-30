@@ -247,13 +247,20 @@ export class Viewer {
 
   // ---------------------------------------------------------------- models
 
-  async load(files: Uint8Array[], names: string[] = [], isCurrent: () => boolean = () => true) {
+  async load(files: Uint8Array[], names: string[] = [], isCurrent: () => boolean = () => true,
+    onDrawn?: (count: number, elements: number) => void) {
     // Parse the entire replacement off-screen. A failed or superseded load leaves the usable scene intact.
     const staged: LoadedModel[] = [];
     try {
       for (const bytes of files) {
         staged.push(await loadIfc(bytes));
         if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
+        if (onDrawn) {
+          onDrawn(staged.length, staged.reduce((n, m) => n + m.stats.elements, 0));
+          // Parsing a file holds the thread: let the page paint the count before the next one starts.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
+        }
       }
     } catch (e) { for (const m of staged) disposeBatches(m); throw e; }
     if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
