@@ -16,10 +16,12 @@ inside is in [09](09-agent-workflows.md) and [07](07-fixes-and-edits.md); the ca
 ## How the server is put together
 
 - **One app, one process.** `app = FastAPI(title="ORCA")`, with one `Workspace` (`ws`) holding scenes, reports and
-  jobs in memory ([05](05-domain-model-and-state.md)). `load_env()` runs right after the package imports, so the
-  repo's `.env` is read before the caps and the owner token are built (real environment variables win); settings
-  that modules read at import time (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB` and others, listed in
-  [15](15-requirements-settings-and-config.md)) are read before it and so come only from the real environment. Locally: `uv run uvicorn sightline.app:app --reload`. On
+  jobs in memory ([05](05-domain-model-and-state.md)). The repo's `.env` is loaded by the package's `__init__.py`
+  (`meta_client.load_env()`), which runs on the first import of any `sightline` module and so before `app.py` or
+  any module it imports reads a setting: the caps, the owner token and the settings modules read at import time
+  (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB` and the others marked "import" in
+  [15](15-requirements-settings-and-config.md)) all come from `.env` when the real environment does not set them
+  (real environment variables win). Locally: `uv run uvicorn sightline.app:app --reload`. On
   Modal, `deploy/modal_app.py` imports the same `app` under `@modal.asgi_app()`, one container, up to 64 requests at
   once (`@modal.concurrent(max_inputs=64)`: linked pages each hold an events stream), 10-minute request timeout
   ([17](17-deployment-and-operations.md)).
@@ -83,7 +85,7 @@ requirements together. `/mcp` passes through `_OwnerContext` too, but MCP tools 
 | `X-Sightline-Requirements` | request | `api.ts` `settingsHeader()` once `setRequirements(id, doc)` | `_OwnerContext` → `requirements.enter` | The id of a registered requirements file ([15](15-requirements-settings-and-config.md)). |
 | `sightline_owner` cookie | both | `POST /api/owner/unlock` | `_OwnerContext` | Signed `v1.<expiry>.<sig>`; HttpOnly, Secure, SameSite=Strict, Path=/api, 30 days (`owner.DAYS`). Path=/api: it never reaches `/mcp` or the static files. |
 | `Authorization: Bearer <token>` or `?key=<token>` | request | the MCP client | `_McpGate`, `agents.token_from` | An agent link token ([11](11-mcp-and-agent-links.md)). |
-| `X-Forwarded-For` | request | Modal's proxy | `limits.client_id` | The visitor's address for per-visitor caps, only when `SIGHTLINE_TRUST_FORWARDED=1` (else the socket peer). |
+| `X-Forwarded-For` | request | a proxy in front (Modal's edge strips it and sets none) | `limits.client_id` | The visitor's address for per-visitor caps only with `SIGHTLINE_TRUST_FORWARDED=N`: the N-th entry from the right. Else, and on Modal, the socket peer. |
 | `X-Forwarded-Host`, `X-Forwarded-Proto` | request | the proxy | `create_link`, `mcp_server.base_url` | The public `mcp_url` and download links. |
 | `Content-Length` | request | the browser | `_receive_models` | Required on model uploads (411 without it); checked against the cap before the body is read. |
 | `Origin`, `Host` | request | the browser | `voice_live.same_origin` | The live-voice socket opens only when they match (or no Origin is sent). |
@@ -234,7 +236,7 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 |---|---|---|---|---|---|
 | `GET` | `/api/reports/{report_id}/root_causes/{scene_id}` | Elements in several real clashes, plus geometry hits missing from the report (`plans.root_causes`) | `?fixed=` comma-separated clash ids | `[RootCause]` | free |
 | `GET` | `/api/reports/{report_id}/patterns/{scene_id}` | The same kind of clash many times over (`plans.patterns`), no model call | `?fixed=` | `[Pattern]` | free |
-| `POST` | `/api/reports/{report_id}/patterns/{scene_id}/triage` | One Muse Spark call judging every pattern (`plans.triage_patterns`), cached in `_pattern_triage` by report, scene, pattern ids and the requirements' `model_key` | `PatternTriage {fixed}` | `{pattern_id: {verdict, cause, action, rule}}` | one proposal, only when not cached |
+| `POST` | `/api/reports/{report_id}/patterns/{scene_id}/triage` | One Muse Spark call judging every pattern (`plans.read_patterns` → `triage_patterns`), kept on the Workspace by report, scene, pattern ids and the requirements' `model_key`, and shared with chat and MCP `find_patterns` | `PatternTriage {fixed}` | `{pattern_id: {verdict, cause, action, rule}}` | one proposal, only when not cached |
 
 ### Triage and titles
 

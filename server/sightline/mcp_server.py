@@ -51,6 +51,7 @@ class Hooks:
     links: agents.Links | None = None                                # remote: links by token
     charge: Callable[[agents.Link, int], str | None] = lambda link, n: None   # proposals; why not, or None
     escalate: Callable[[agents.Link], str | None] = lambda link: _local_escalate()   # a second try (docs/escalation.md)
+    detect: Callable[[agents.Link], str | None] = lambda link: None          # a detection run; why not, or None
     allow_call: Callable[[agents.Link], str | None] = lambda link: None     # per-link call cap
     start_triage: Callable[[str, str | None, agents.Link], Any] | None = None
     triage_state: Callable[[str, str | None], dict] | None = None
@@ -147,14 +148,16 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             link.publish(e)
         return emit
 
+    def caps(link: agents.Link) -> dict:
+        """The chat tools' caps for this link: charged to whoever made it (`hooks`)."""
+        return dict(propose_allowed=lambda: hooks.charge(link, 1), propose_allowed_many=lambda n: hooks.charge(link, n),
+                    escalate_allowed=lambda: hooks.escalate(link), detect_allowed=lambda: hooks.detect(link))
+
     def run(ctx: Context | None, name: str, args: dict | None = None) -> dict:
         """One of the chat's tools, on this link's session."""
         args = args or {}
         link = call(ctx, name, args)
-        result, summary, _ = T()._run(name, args, link.ctx, emit_for(link),
-                                       propose_allowed=lambda: hooks.charge(link, 1),
-                                       propose_allowed_many=lambda n: hooks.charge(link, n),
-                                       escalate_allowed=lambda: hooks.escalate(link))
+        result, summary, _ = T()._run(name, args, link.ctx, emit_for(link), **caps(link))
         done(link, name, summary)
         return result
 
@@ -163,10 +166,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         link = call(ctx, name, args)
 
         def work():
-            result, summary, _ = T()._run(name, args, link.ctx, emit_for(link),
-                                           propose_allowed=lambda: hooks.charge(link, 1),
-                                           propose_allowed_many=lambda n: hooks.charge(link, n),
-                                           escalate_allowed=lambda: hooks.escalate(link))
+            result, summary, _ = T()._run(name, args, link.ctx, emit_for(link), **caps(link))
             done(link, name, summary)
             return after(result) if after else result
         return link.wait(link.start(name, work, hooks.spawn), wait_s)
@@ -215,8 +215,10 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     @tool()
     def open_models(names: list[str], ctx: Context) -> dict:
         """Open models that share coordinates (e.g. the structure, MEP and architecture of one building) and check
-        them for clashes. With a browser connected, the person's page opens them; else they open here."""
+        them for clashes. With a browser connected, the person's page opens them; else they open here, and the check
+        is one of the demo's detection runs."""
         link = call(ctx, "open_models", {"names": names})
+        checked: dict = {}
         known = set(W().list_samples())
         missing = [n for n in names if n not in known]
         if missing:
@@ -233,10 +235,13 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         else:
             link.ctx.scene_id = W().open(names)
             link.ctx.report_id, link.ctx.clash_id, link.ctx.fixed = None, None, []
-            T()._run("detect_clashes", {}, link.ctx, lambda e: None)
+            checked, _, _ = T()._run("detect_clashes", {}, link.ctx, lambda e: None, **caps(link))
         done(link, "open_models", f"opened {len(names)} model(s)")
         r = W().report(link.ctx.report_id) if link.ctx.report_id in W().reports else None
-        return {"status": "open", "files": names, "clashes": len(r.clashes) if r else None}
+        out = {"status": "open", "files": names, "clashes": len(r.clashes) if r else None}
+        if checked.get("error"):   # the page's check is its own request; this one is a detection run like any other
+            out["note"] = f"Opened, not checked: {checked['error']}"
+        return out
 
     # ------------------------------------------------------------------ clashes
 
@@ -244,7 +249,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     def detect_clashes(ctx: Context, tolerance_mm: float | None = None) -> dict:
         """Check the open models for clashes with ORCA's own detection: every pair of models and each model against
         itself. Opens the result as the clash report (in the person's page too). Running it again after fixes says
-        which clashes were resolved."""
+        which clashes were resolved. Each run is one of the demo's detection runs."""
         return run(ctx, "detect_clashes", {} if tolerance_mm is None else {"tolerance_mm": tolerance_mm})
 
     @tool(read_only=True)
@@ -414,7 +419,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     @tool()
     def find_patterns(ctx: Context) -> dict:
         """The same kind of clash many times over, each judged as by design, a modelling error or a real problem,
-        with the clash rule or action to take."""
+        with the clash rule or action to take. The first reading of a report's patterns costs one proposal; asking
+        again (or after the person's page read them) is free."""
         return run(ctx, "find_patterns")
 
     @tool(read_only=True)

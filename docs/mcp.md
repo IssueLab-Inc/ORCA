@@ -99,7 +99,7 @@ cd server && uv run python -m sightline.mcp_server
 - `show_clash`, `set_view`, `capture_view`.
 
 Muse Code runs those without an approval prompt under on-request approvals. The rest ask: proposals, plans, applying,
-detection, triage, the report, opening models, and `find_patterns` (a model call).
+detection, triage, the report, opening models, and `find_patterns` (a model call, charged once as a proposal).
 
 The tool layer is shared with the in-app chat (`chat.Chat._run`), so the chat and an outside agent can do the same
 things the same way.

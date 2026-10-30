@@ -867,7 +867,7 @@ export function App() {
       sceneRevision.current = revision ?? null;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
-      setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setChecked(new Set());
+      setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
       setStepFiles(Object.values(step ?? {})); setSceneFiles(files); setResumable(null);
       return id;
@@ -912,7 +912,7 @@ export function App() {
     setBusy(`Reading ${what}…`); setError(null);
     try {
       const r = await get(); if (workspaceEpoch.current !== workspace) return;
-      setReport(r); setChatReport(r.id); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({}); setVerdicts(null);
+      setReport(r); setChatReport(r.id); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({}); setVerdicts(null);
       setDetection(null); setViews({}); captures.current.clear();
       return r;
     }
@@ -989,7 +989,7 @@ export function App() {
     try {
       const r = await api.report(reportId);
       if (workspaceEpoch.current !== workspace) return;
-      setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setFixes({}); setReviewed({});
+      setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({});
       setVerdicts(null); setViews({}); captures.current.clear(); setDetection(found);
     } catch (e) { setError((e as Error).message); }
     finally { setDetecting(null); }

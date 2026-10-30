@@ -135,9 +135,9 @@ clients with short tool timeouts safe: a proposal takes 20-60 s (the tool's own 
 |---|---|---|---|
 | Links made | `SIGHTLINE_LINKS_PER_HOUR` per visitor, `SIGHTLINE_LINKS_PER_DAY` for everyone (`link_limit`) | `POST /api/links` | 10 an hour, 500 a day |
 | Tool calls | `SIGHTLINE_AGENT_CALLS_PER_HOUR` per link id (`agent_call_limit`; no day cap) | every MCP tool call (`hooks.allow_call`) | 600 an hour |
-| Proposals and second tries | the page's own caps (`propose_limit`, `escalation_refused`), charged to `link.visitor` | the tools that spend (table below) | as the page's |
+| Proposals, second tries and detection runs | the page's own caps (`propose_limit`, `escalation_refused`, `detect_limit`), charged to `link.visitor` | the tools that spend (table below) | as the page's (detection runs: no cap) |
 
-The owner's links (`link.owner`) skip the proposal caps and are not refused by the Muse Wonder budget; the per-link
+The owner's links (`link.owner`) skip the proposal and detection caps and are not refused by the Muse Wonder budget; the per-link
 call cap still applies to them.
 
 ## The MCP server (`mcp_server.py`)
@@ -164,6 +164,7 @@ an `MCPServer("orca", title="ORCA", instructions=INSTRUCTIONS, website_url=…)`
 | `links` | `None` | `app.links` (stdio sets it back to `None`) |
 | `charge(link, n)` | always allowed | `None` for an owner link, else `propose_limit.take_many(link.visitor, n)` |
 | `escalate(link)` | `_local_escalate`: refused when switched off, else `spend.claim(…, exempt=True)` | `escalation_refused(link.visitor, link.owner)` |
+| `detect(link)` | always allowed | `None` for an owner link, else `detect_limit.take(link.visitor)` (`mcp_hooks.detect_run`) |
 | `allow_call(link)` | always allowed | `agent_call_limit.take(link.id)` |
 | `start_triage(report_id, scene_id, link)` | `None` | `app._start_triage(…, charge one proposal)` |
 | `triage_state(report_id, scene_id)` | `None` | the `GET /api/reports/{report_id}/triage` route function, called directly |
@@ -194,7 +195,8 @@ an `MCPServer("orca", title="ORCA", instructions=INSTRUCTIONS, website_url=…)`
 | `call(ctx, tool, args)` | `link_of`, then `hooks.allow_call` (refusal → `PermissionError`), counts the call, sets `last_call`, publishes `agent_call {tool, args (long lists cut by _short), expires_at}` |
 | `done(link, tool, summary)` | Publishes `agent_result {tool, summary}` |
 | `emit_for(link)` | The `emit` the chat tools get: keeps `proposal` events in `link.proposals` and `plan` events in `link.plans` (by `_plan_id`), and publishes every event to the page |
-| `run(ctx, name, args)` | `call`, then `T()._run(name, args, link.ctx, emit_for(link), propose_allowed=…, propose_allowed_many=…, escalate_allowed=…)` with the link's charges, then `done` |
+| `caps(link)` | The chat tools' caps for this link: `propose_allowed`, `propose_allowed_many`, `escalate_allowed`, `detect_allowed`, each a `hooks` charge on the link |
+| `run(ctx, name, args)` | `call`, then `T()._run(name, args, link.ctx, emit_for(link), **caps(link))`, then `done` |
 | `job(ctx, name, args, wait_s, after)` | The same as `run`, inside `Link.start`, waited on up to `wait_s` (`after` shapes the result: numbered options, the plan id) |
 | `need_report(link)` | The link's open report, else `LookupError` "No clashes are open. Call detect_clashes to check the open models." |
 | `base_url(ctx)` | `proto://host` from the forwarded headers, for download links |
@@ -212,8 +214,8 @@ call goes through `chat.Chat._run` under the same name.
 |---|---|---|---|---|
 | `get_session` | yes | What is open: model files and element count, the report (title, clashes, found by ORCA or Navisworks), triage state, the selected clash, what is fixed, whether a browser follows; a `next` step or a `note` that the page is closed | `Workspace` scenes and reports, `hooks.triage_state` | none |
 | `list_models` | yes | The models ORCA can open (IFC, STEP) | `Workspace.list_samples` | none; no `agent_result` |
-| `open_models` | no | Opens sample models that share coordinates and checks them | with a browser: the page's own open and check (waits up to 60 s for the page's context to show the new report, else returns `opening`); without: `Workspace.open` then chat `detect_clashes` | `ui open_models {names}` when a browser follows |
-| `detect_clashes` | no | ORCA's own detection on the open models; the result becomes the open report; a rerun says what was resolved | chat → `Workspace.detect` | `detect_event` per step, `ui open_report` |
+| `open_models` | no | Opens sample models that share coordinates and checks them | with a browser: the page's own open and check (waits up to 60 s for the page's context to show the new report, else returns `opening`); without: `Workspace.open` then chat `detect_clashes`, one detection run (refused: open, with a `note` "Opened, not checked: …") | `ui open_models {names}` when a browser follows |
+| `detect_clashes` | no | ORCA's own detection on the open models; the result becomes the open report; a rerun says what was resolved. One detection run (`hooks.detect`) | chat → `Workspace.detect` | `detect_event` per step, `ui open_report` |
 | `report_summary` | yes | Counts per test and per class pair: deepest overlap, touches, non-physical sides, how many fixed | chat | none |
 | `list_clashes` | yes | Clashes filtered by words, test or in-model only | chat | none |
 | `get_clash` | yes | One clash by id or `#N`: both elements, depth, point, model ids, fixed, pictures | chat | none |
@@ -234,7 +236,7 @@ call goes through `chat.Chat._run` under the same name.
 | `plan_fixes_together` | no | One plan for several clashes, checked together; returns a `plan_id`. One proposal per distinct pair | `job` + chat → `plans.build_batch` | `plan_started`, `plan_event`, `plan` |
 | `find_root_causes` | yes | Elements in several real clashes, with clashes the report missed | chat → `plans.root_causes` | none |
 | `plan_root_cause` | no | The cause and one coordinated plan for a hub; returns a `plan_id`. One proposal, its fixes only if it needs edits | `job` + chat → `plans.build_root_cause` | `plan_started`, `plan_event`, `plan` |
-| `find_patterns` | no | Patterns judged by design, modelling error or real problem. A Muse Spark call, not charged as a proposal here | chat → `plans.patterns`, `plans.triage_patterns` | none |
+| `find_patterns` | no | Patterns judged by design, modelling error or real problem. One proposal for a reading not made yet; the route, chat and MCP share readings | chat → `plans.patterns`, `plans.read_patterns` | none |
 | `get_job` | yes | A long call's state, waiting up to `wait_s` (default 30, at most 55) | `Link.jobs`, `Link.wait` | none; no `agent_result` |
 | `apply_fix` | no | Keeps option N of the last proposal for a clash; a penetration whose host may not be cut is only requested (`requested_only`) | `link.proposals`, `plans.apply`, `Workspace.patch` under `Workspace.lock` | `ui applied` (patch fields included) |
 | `apply_plan` | no | Keeps every verified fix of a plan | `link.plans`, `plans.apply`, `Workspace.patch` | `ui applied` |

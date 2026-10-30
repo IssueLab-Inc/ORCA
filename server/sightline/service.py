@@ -18,18 +18,20 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import agent, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
+from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 # Each open scene holds its federated models in memory; a public server keeps only the most recent ones.
-MAX_SCENES = int(os.environ.get("SIGHTLINE_MAX_SCENES", "0"))  # 0 = no limit
+MAX_SCENES = env_int("SIGHTLINE_MAX_SCENES", 0)  # 0 = no limit
 # Open model sets also held within a size budget: the IFC bytes they were opened from, a stand-in for memory (a scene
 # holds several times its file: docs/uploads.md). 0 = by count only.
-SCENE_BUDGET_MB = int(os.environ.get("SIGHTLINE_SCENE_BUDGET_MB", "0"))
+SCENE_BUDGET_MB = env_int("SIGHTLINE_SCENE_BUDGET_MB", 0)
 HOSTS_TIMEOUT_S = 60   # a host reading that takes longer (a cold open-weights host) leaves the defaults
 LAST_KEPT = 200        # the last try per clash pair kept for a second try to read (docs/escalation.md)
-MAX_REPORTS = int(os.environ.get("SIGHTLINE_MAX_REPORTS", "0"))  # open clash reports kept, same rule
+PATTERNS_KEPT = 64     # Muse's readings of report patterns kept (plans.read_patterns)
+MAX_REPORTS = env_int("SIGHTLINE_MAX_REPORTS", 0)  # open clash reports kept, same rule
 # Uploaded models and STEP conversions live here; a converted STEP is cached by its hash (`step-cache`).
 MODELS = Path(tempfile.gettempdir()) / "sightline-models"
 MODEL_SUFFIXES = {".ifc"} | step.SUFFIXES
@@ -76,6 +78,12 @@ class Workspace:
         # read: what was tried and why it failed. Pairs are sorted; the oldest go past LAST_KEPT.
         self._last: dict[tuple[str, str, str], tuple[tuple, dict]] = {}   # → (what it was tried on, the try)
         self._last_lock = threading.Lock()
+        # (report id, scene id, pattern ids, triage prompt) → Muse's reading of those patterns (plans.read_patterns),
+        # made once and shared by the route, the chat and MCP; the oldest go past PATTERNS_KEPT. One lock per reading
+        # being made, so a second caller waits for it instead of paying for it again.
+        self._patterns: dict[tuple, dict] = {}
+        self._pattern_locks: dict[tuple, threading.Lock] = {}
+        self._patterns_lock = threading.Lock()
 
     @property
     def model(self) -> ChatModel:

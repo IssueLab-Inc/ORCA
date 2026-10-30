@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -30,11 +29,12 @@ import ifcopenshell.api
 import ifcopenshell.guid
 import numpy as np
 
+from .limits import env_int
 from .scene import STEP_PSET
 
 SUFFIXES = {".step", ".stp"}
-MAX_PARTS = int(os.environ.get("SIGHTLINE_STEP_MAX_PARTS", "20000"))
-MAX_TRIANGLES = int(os.environ.get("SIGHTLINE_STEP_MAX_TRIANGLES", "5000000"))
+MAX_PARTS = env_int("SIGHTLINE_STEP_MAX_PARTS", 20000)
+MAX_TRIANGLES = env_int("SIGHTLINE_STEP_MAX_TRIANGLES", 5000000)
 PSET = STEP_PSET
 NAMESPACE = uuid.UUID("3b8f2d0e-6c1a-4f5e-9a7d-2f1c5b8e4a90")
 
