@@ -131,6 +131,27 @@ def test_a_page_can_reopen_a_scene_the_server_still_holds(tmp_path, monkeypatch)
     assert c.get("/api/scenes/nothing-here").status_code == 404
 
 
+def test_a_scene_or_report_the_server_let_go_says_so(tmp_path, monkeypatch):
+    """A restart drops every open scene and report: their 404 names what is gone, for the page to offer to open them
+    again (api.ts, setGoneHandler). A scene still held, or an id the server never makes, gets no such header."""
+    build_clash_fixture(tmp_path / "fixture-clash.ifc")
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))
+    c = TestClient(app_module.app)
+    sid = c.post("/api/scenes", json={"samples": ["fixture-clash.ifc"]}).json()["id"]
+    c.post(f"/api/scenes/{sid}/detect/stream", json={}).read()
+    rid = c.get(f"/api/scenes/{sid}").json()["detection"]["report_id"]
+    assert "x-sightline-gone" not in c.get(f"/api/scenes/{sid}/classes").headers
+
+    monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))   # the server restarted
+    r = c.post(f"/api/scenes/{sid}/built/stream", json={"look": "", "ids": "", "normals": ""})
+    assert r.status_code == 404 and r.json()["detail"] == "Model not loaded. Open it again."
+    assert r.headers["x-sightline-gone"] == f"scene:{sid}"
+    r = c.get(f"/api/reports/{rid}")
+    assert r.status_code == 404 and r.headers["x-sightline-gone"] == f"report:{rid}"
+    r = c.get("/api/scenes/not%0Aan-id")
+    assert r.status_code == 404 and "x-sightline-gone" not in r.headers
+
+
 def test_eviction_spares_what_live_links_point_at(tmp_path):
     for name in ("a.ifc", "b.ifc", "c.ifc"):
         build_clash_fixture(tmp_path / name)

@@ -90,6 +90,7 @@ requirements together. `/mcp` passes through `_OwnerContext` too, but MCP tools 
 | `Content-Length` | request | the browser | `_receive_models` | Required on model uploads (411 without it); checked against the cap before the body is read. |
 | `Origin`, `Host` | request | the browser | `voice_live.same_origin` | The live-voice socket opens only when they match (or no Origin is sent). |
 | `Content-Encoding: identity`, `Cache-Control: no-store, no-transform`, `X-Accel-Buffering: no` | response | `_ndjson` (`NDJSON_HEADERS`), and `_McpGate` adds the first | the edge | Keep streams flowing (below). |
+| `X-Sightline-Gone` | response | `_gone` on the 404 of `_scene` and `_report` | `api.ts` `send` → `goneOf`, App's handler | What the server no longer holds: `scene:<id>` or `report:<id>` (a restart, a redeploy or eviction). Only an id the server could have made (hex) goes back. |
 | `Cache-Control: no-store` | response | `GET /api/scenes/{scene_id}/files/{index}` | the browser | The same URL serves the edited model after a kept fix. |
 | `Cache-Control: private, max-age=86400` | response | `GET /api/built/{name}` | the browser | A checked picture never changes for its key. |
 | `Content-Disposition: attachment` | response | `GET /api/documents/{doc_id}`, `FileResponse(filename=…)` on export | the browser | The download's file name. |
@@ -106,7 +107,7 @@ is a 422 whose `detail` is a list, not a string.
 | 400 | A request the server cannot use | an upload that is not IFC/STEP, a file given twice, a truncated `.gz`, a model IfcOpenShell cannot read, a report upload with no XML, a fix with no element, a fix that does not say which clash it is for ("Not a fix ORCA can apply: the fix does not say which clash it is for (pair: [A, B])"), or whose changed element is neither side of it, a STEP conversion error, a bad setting value |
 | 401 | `/mcp` without a live link token | `{"error": "An ORCA agent link token is required: …"}` (the gate's own body, not `detail`) |
 | 403 | Not allowed | owner-only settings; a wrong owner token (under the unlock cap); second tries switched off; Show it built switched off; a live-voice socket from another origin (closed before the handshake, which the server answers as HTTP 403) |
-| 404 | Gone or never there | "Model not loaded. Open it again." (`_scene`), "Clash report not loaded. Open it again." (`_report`), "This agent link has expired or was revoked." (`_link`), "That report has expired. Build it again.", "No such picture.", "No such image.", "No such clash.", "No owner is configured on this server.", "Proposal expired or unknown. Generate a new wider fix." |
+| 404 | Gone or never there | "Model not loaded. Open it again." (`_scene`), "Clash report not loaded. Open it again." (`_report`), both with `X-Sightline-Gone`; "This agent link has expired or was revoked." (`_link`), "That report has expired. Build it again.", "No such picture.", "No such image.", "No such clash.", "No owner is configured on this server.", "Proposal expired or unknown. Generate a new wider fix." |
 | 409 | The state does not allow it | `requirements_unknown` (middleware); "Nothing has been changed yet. Accept a fix first." (export); "Triage the report first: …" (document); "Nothing may be edited here (…), so there is no second try to make."; "Only clashes found by ORCA take captured views."; a wider fix whose scene changed or whose fresh check failed; a fix that does not pass when tried again before it is kept (`plans.NotVerified`, every keep route): "'Offset up 400' does not pass ORCA's check on the model as it is now (collision with IfcSlab (-50 mm)), so nothing was kept. The model or the requirements may have changed since it was proposed: propose again.", or for a plan "Fix 2 of 3, '…', does not pass …" and "… with the other fixes in place (…)" |
 | 411 | Model upload without `Content-Length` | "Send the upload with its length (Content-Length)." |
 | 413 | Too big | model upload over `SIGHTLINE_MODEL_UPLOAD_MAX_MB` (checked on `Content-Length`, then on the unpacked size); report upload over `SIGHTLINE_UPLOAD_MAX_MB` or `SIGHTLINE_UPLOAD_MAX_FILES`; a requirements file over 64 KB (`requirements.MAX_BYTES`); a captured view over 4 MB; a capture reply over 6 MB; a voice clip over 3 MB; models too big for a wider fix (`SIGHTLINE_WIDER_FIX_MAX_MB`) |
@@ -126,7 +127,10 @@ is a 422 whose `detail` is a list, not a string.
 
 - **`send(url, init)`** wraps `fetch`: on a 409 whose `detail` is `requirements_unknown`, it registers the file again
   (`reRegister`: `POST /api/requirements` with the saved document, no requirements header) and retries the request
-  once with the new id.
+  once with the new id. On a 404 with `X-Sightline-Gone` (`goneOf`) it calls the page's handler (`setGoneHandler`)
+  with the kind, the id and the server's words, then returns the reply as usual: App shows one notice that offers to
+  open the models again ([12](12-web-app.md), "When the server lets go of the models"). `saveView` goes through `send`
+  too.
 - **`call<T>(path)`** sends JSON with `jsonHeaders()` (both headers above) and throws `ApiError(detail, status)` on
   any non-2xx; components read `e.status` where it matters (a 404 on any agent-link call drops the link; a 409 or 404
   on a wider-fix accept marks the proposal stale).

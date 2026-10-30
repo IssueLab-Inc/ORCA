@@ -564,6 +564,38 @@ sequenceDiagram
 Owned by: [12](12-web-app.md) (the saved session), [05](05-domain-model-and-state.md) (what the server keeps and for
 how long), [11](11-mcp-and-agent-links.md) (`Link.applied`).
 
+## When the server lets go of the models
+
+A redeploy, a restart, a scale-down after 20 idle minutes ([17](17-deployment-and-operations.md)) or eviction drops
+the open scene, its kept edits and the report, while the page still shows them. The page's next call about either
+(Show it built, Accept, an element's card, triage…) answers 404 "Model not loaded. Open it again." with
+`X-Sightline-Gone: scene:<id>`. `api.ts` `send` hands that to App's handler (`setGoneHandler`), which acts only for
+the scene or report on screen (a gone report also asks after the scene, so a restart always reads as the models). The
+page shows one notice, **The server no longer holds your models**, in place of the
+calls' own errors; drops `fixes` and accepted `evidence` (the edits went with the scene); hides Export; and a failed
+Show it built offers the reopen instead of Try again. **Open them again** (`reopenGone`) reopens the same sample
+models (`open(sceneFiles)`) and then the same clashes: ORCA's check again (`runDetect(lastTests)`), or the same sample
+report. Uploaded models go back to the file picker (**Pick your files again**); an uploaded report is imported again.
+Fixes are accepted again from there.
+
+```mermaid
+sequenceDiagram
+  participant App as App.tsx
+  participant Api as api.ts send
+  participant API as app.py
+  App->>Api: POST scenes/:sid/built/stream
+  Api->>API: fetch
+  API-->>Api: 404 Model not loaded, X-Sightline-Gone scene:sid
+  Api->>App: gone handler: scene sid, the server's words
+  App->>App: notice, fixes and accepted evidence dropped, Export hidden
+  App->>API: Open them again: POST scenes with the same samples
+  App->>API: POST scenes/:new/detect/stream
+  App->>App: new scene and report, notice gone
+```
+
+Owned by: [12](12-web-app.md) ("When the server lets go of the models"), [10](10-http-api-and-streams.md) (the
+header).
+
 ## Upload your own models (big ones too)
 
 **Use your own models** (`ProjectStart.tsx`) or **Models › Upload models** calls `openDemo(files)`. `open()` checks the

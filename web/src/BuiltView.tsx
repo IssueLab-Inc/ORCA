@@ -41,8 +41,9 @@ export function cutText(cut: string[], sectioned: string[], classOf: (gid: strin
 
 const verdictText = (r: BuiltResult) => (r.verdicts ?? []).map((v) => v.verdict.replace("_", " ")).join(" and ");
 
-/** The picture over ORCA's view with a wipe between them, the model's lines on top when asked, and what checked it. */
-export function BuiltView({ run, onRetry }: { run: BuiltRun; onRetry?: () => void }) {
+/** The picture over ORCA's view with a wipe between them, the model's lines on top when asked, and what checked it.
+ * `reopen`: the server let go of the models, so a failed picture offers to open them again instead of trying again. */
+export function BuiltView({ run, onRetry, reopen }: { run: BuiltRun; onRetry?: () => void; reopen?: { label: string; onClick: () => void } }) {
   const [wipe, setWipe] = useState(100);
   const [lines, setLines] = useState(false);
   const r = run.result;
@@ -56,7 +57,8 @@ export function BuiltView({ run, onRetry }: { run: BuiltRun; onRetry?: () => voi
     <div className="built failed" role="status">
       <p><b>No built view.</b> {run.error ?? r?.why ?? "Muse Image couldn't keep to the model here."}</p>
       <p className="hint">ORCA's own views of the fix stand; the model is the record.</p>
-      {onRetry && <button className="btn small" onClick={onRetry}><RotateCcw size={13} aria-hidden /> Try again</button>}
+      {reopen ? <button className="btn small" onClick={reopen.onClick}><RotateCcw size={13} aria-hidden /> {reopen.label}</button>
+        : onRetry && <button className="btn small" onClick={onRetry}><RotateCcw size={13} aria-hidden /> Try again</button>}
     </div>);
   const judge = r.judge ?? "Muse Wonder";
   const check = `Checked against the model: outline match ${r.gate ? r.gate.f.toFixed(2) : "?"}${verdictText(r) ? `; ${judge} judges: ${verdictText(r)}` : ""}`

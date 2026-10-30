@@ -129,7 +129,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_api.py` | 7 | Open → verify → apply → export (a move still clashing is refused), sample names cannot escape `samples/`, a federated export writes only the edited file, export carries kept fixes and no tried ones (as `orca-export.zip`; an offset the other model's beam blocks is refused until that beam moves), a multi-file export named for its project (`<project>-orca.zip`), reopening a held scene, eviction spares linked scenes |
+| `test_api.py` | 8 | Open → verify → apply → export (a move still clashing is refused), sample names cannot escape `samples/`, a federated export writes only the edited file, export carries kept fixes and no tried ones (as `orca-export.zip`; an offset the other model's beam blocks is refused until that beam moves), a multi-file export named for its project (`<project>-orca.zip`), reopening a held scene, a scene or report the server let go of answers 404 with `X-Sightline-Gone` (only for ids it could have made), eviction spares linked scenes |
 | `test_reports.py` | 8 | `reports.py`: Navisworks grouped tags and three views, upload/match/measure/images, no-XML uploads refused, sample report folders, report clashes send their images and distance, a port's owner, `SAMPLE_EXCLUDE` renumbering, `/api/transcribe` biased to clash names |
 | `test_step.py` | 8 | `step.py`: names, groups, colours and metres survive conversion, detection finds the ladder through the post, group runs move together, export writes moves back, classes from the model, upload accepts STEP and IFC only, caps, older conversions still read |
 | `test_uploads.py` | 10 | Bigger uploads: gzipped parts unpacked, the cap on the unpacked size, 411/413 before reading, broken or repeated archives refused, the streamed open's events and errors, the scene byte budget, wider fixes refused on big models, bounded gunzip steps, room made first |
@@ -167,7 +167,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 cd web
 npm install            # once; postinstall copies web-ifc's wasm into public/wasm
 npm run build          # tsc --noEmit (type-check src/ and vite.config.ts), then vite build
-npm test               # node --test tests/*.test.mjs (95 tests on Oct 30)
+npm test               # node --test tests/*.test.mjs (124 tests on Oct 30)
 ```
 
 There is no test framework beyond Node's own runner: the tests use `node:test` and `node:assert`, and the
@@ -231,6 +231,7 @@ flowchart LR
 | `signoffs.test.mjs` | 5 | `compiled` + `appHost` | `signoffs.ts`: an imported report's are kept by its title and files (opening it again finds them); a detection run's per clash id (a rerun, other requirements or fewer models open find them; another project's ids don't); empty entries dropped, junk read as none, no storage no throw; title-keyed entries move over for the report's clashes, never over newer ones, the rest stay for their reports; the page shows each run its own and writes per clash |
 | `uploads.test.mjs` | 3 | `compiled` | `uploads.ts`: the cap checked before sending, stage progress words, an uploaded IFC read from the visitor's own file |
 | `upload-retry.test.mjs` | 1 | `compiled` | `api.ts`: a 409 `requirements_unknown` re-registers the file and resends once |
+| `gone.test.mjs` | 3 | `compiled` + `appHost` | Models the server let go of: `api.ts` hands a 404's `X-Sightline-Gone` (and only that) to the page with the server's words; the page shows one notice instead of the calls' errors, stops claiming kept fixes and hides Export, ignores late answers about replaced models, and reopens the same samples and check; the visitor's own files go back to the picker, a sample report reopens, and Show it built offers the reopen instead of Try again |
 | `views.test.mjs` | 11 | `compiled` | `viewer/views.ts`: layouts tile the stage; a plan's view range, presets and clash default; sections look to the line's left and run along the moving run; which elevation and grid axes; the nearest standard scale and scale bar; the view cube's 26 directions; camera history; visibility (hidden, isolated, class and level filters); the Esc chain, never leaving a clash ORCA works on |
 | `properties.test.mjs` | 4 | `compiled` (React stubbed) | `Properties.tsx`: values as people read them, the sections in order (type, material, size, attributes, then each set), an element with only its size, the filter |
 | `dock.test.mjs` | 9 | `compiled` | `dockLayout.ts`: every panel's home (only the model in the middle); which saved layouts load (floating, closed, beside the model, a window split in several groups) and which give way to the default (the model elsewhere, a panel twice or nowhere, a stranger, another component); the widths the classic panes and the side bars share; pop-outs back in their bars on save; storage and versions; what showing a panel takes; dockview pinned at 8.5.1 and its paid package or options never used |

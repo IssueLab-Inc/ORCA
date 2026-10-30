@@ -212,6 +212,16 @@ Image restyles ORCA's own view of the fix as a presentation render, checked agai
 with a wipe and **Lines from the model** (`BuiltView.tsx`). A kept fix shows "As it could look built", and the PDF's fix
 page gets the picture. Never for a trim or a cleanup. Design: [docs/show-it-built.md](../show-it-built.md).
 
+### When the server lets go of the models
+
+Open models and kept fixes live only in the server's memory, so a redeploy, a restart or a long idle spell drops them
+while the page still shows them. The page's next call then brings one notice over the viewer, **The server no longer
+holds your models (it restarted, or made room for other visitors). The fixes you kept went with them.**, with **Open
+them again**: the same sample models and the same check (or sample report) come back, and fixes are accepted again
+from there. The visitor's own models go back to the file picker (**Pick your files again**). Until then the clash list
+stops showing kept fixes, Export is hidden, and a failed Show it built offers the same reopen instead of Try again.
+How: [03](03-end-to-end-flows.md), "When the server lets go of the models".
+
 ### By hand
 
 Double-click element A, then B (on touch: tap, then **Set as A** / **Set as B** on its card, or a long press) to work

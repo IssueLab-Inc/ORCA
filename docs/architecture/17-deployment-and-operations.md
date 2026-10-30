@@ -281,8 +281,8 @@ container's temp folders is gone; the page and agents recover as follows:
 
 | Lost | What people see | Recovery |
 |---|---|---|
-| open scenes and every kept edit | 404 "Model not loaded. Open it again."; the resume card no longer appears (`GET /api/scenes/{sid}` 404, the saved session is forgotten) | open the models again; export kept fixes before leaving (edits live only in memory) |
-| open reports | 404 "Clash report not loaded. Open it again." | run the check again or reopen the report |
+| open scenes and every kept edit | a page still open shows one notice, "The server no longer holds your models", at its next call (the 404 "Model not loaded. Open it again." carries `X-Sightline-Gone`); its kept fixes are no longer claimed and Export is hidden. After a reload the resume card no longer appears (`GET /api/scenes/{sid}` 404, the saved session is forgotten) | the notice's **Open them again** reopens the same sample models and runs the check again (uploads: **Pick your files again**); fixes are accepted again from there, so export kept fixes before a redeploy (edits live only in memory) |
+| open reports | the same notice, for the clash report (404 "Clash report not loaded. Open it again.") | **Open it again**: ORCA's check runs again, or the same sample report reopens; an uploaded report is imported again |
 | registered requirements | 409 `requirements_unknown` | automatic: `api.ts` `send` registers the file again and retries once |
 | triage and title runs | the Triage card shows nothing new | run triage again; a report request uses the verdicts the page sends (`DocumentRequest.triage`) |
 | agent links | the agent gets 401, the page drops the link | make a new link |
@@ -323,7 +323,7 @@ the browser's view of the stream is often the quickest place to look.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | A stream's events arrive all at once at the end, in the browser only | the stream does not go through `app._ndjson` (no `Content-Encoding: identity`) | send it through `_ndjson`; test with `Accept-Encoding: gzip, deflate, br, zstd` |
-| "Model not loaded. Open it again." during a session | a restart, a scale-down, or eviction under the scene budget | open the models again; for many visitors, check `SIGHTLINE_MAX_SCENES` and `SIGHTLINE_SCENE_BUDGET_MB` |
+| "The server no longer holds your models" (or "Model not loaded. Open it again.") during a session | a restart: every `modal deploy` replaces the container (Oct 30: the page's next call, a Show it built, answered 404 seconds after v16 went live), a scale-down after 20 idle minutes; or eviction under the scene budget | **Open them again** on the notice; don't redeploy while someone is working or recording; for many visitors, check `SIGHTLINE_MAX_SCENES` and `SIGHTLINE_SCENE_BUDGET_MB` |
 | "Triage the report first" from Report | no verdicts on the page and no finished run on the server | Triage all, then build again |
 | 401 from `/mcp` | the link expired (12 h after its last use, 24 h at most), was revoked, or the server restarted | make a new link in **Connect an agent** |
 | The voice socket closes at once | another origin (1008 from `voice_live.same_origin`), the voice cap, or Meta refused the session (its close codes become sentences, `voice_live.CLOSED`) | open the page from the same host; read the `error` frame |

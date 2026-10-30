@@ -165,6 +165,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 | Show it built | `builtOn`, `builtRuns` | `sceneClasses`, `builtFixes`, `builtDone`, `builtPending`, `latest` | `buildable`, `canBuild`, `builtKey` |
 | Owner | `ownerSettings`, `modelsAsked` | | |
 | Agent link and session | `agentLink`, `agentOpen`, `agentLog`, `agentBusy`, `agentError`, `resumable` | `agentStream`, `agentHandler` | |
+| Models the server let go of | `goneIds` (`{ scene, report }`: the ids the server said are gone) | `holding` (the ids on screen, for the handler), `sceneUploaded`, `sampleReports` (report id → sample), `goneWords` (the server's words for it, never shown as an error line) | `goneScene`, `goneReport`, `gone` (only while those ids are on screen), `reopenable()`, `reopenLabel`, `builtReopen` |
 | Tour | `touring`, `tourWhich`, `replaying`, `about` | | `tourState`, `tourActions` |
 | Layout and sheet | `widths`, `resizing`, `listOpen`, `snap`, `menuOpen` | `followed` | `layout`, `compact`, `coarse`, `peekLine` |
 | Panels (docs/panels.md) | `tab` (set through `setTab`, which also shows the panel in the dock), `classic`, `popouts` (pop-out windows open now) | `dock` (`DockHandle`), `dockedNow`; `slots` (`usePanelSlots`) | `docked`, `dockTabs`, `showPanel`, `layoutMenu` |
@@ -200,6 +201,16 @@ Notes on the less obvious ones:
   shown by a cyan frame and a "N hidden · Reset" chip).
 - **`evidence`** (clash id → `Evidence`) is what the PDF shows per clash: proposed (captured 1.4 s after an option is
   picked), accepted, or recommended, with before/after pictures and the built picture.
+- **When the server lets go of the models.** A restart or redeploy (or eviction) drops the open scene and report; the
+  next call about either answers 404 with `X-Sightline-Gone` ([10](10-http-api-and-streams.md)). `api.ts` hands it to
+  the handler App registers with `setGoneHandler`, which records the id in `goneIds` only for the scene or report on
+  screen (`holding`); a gone report also asks after the scene (`api.sceneInfo`), since a restart drops both. `gone` is
+  derived while rendering (the recorded ids still on screen), so new models or a new report end it in the same
+  render, with no effect to clear it. Then: one notice over the viewer ("The server no longer holds your models … The
+  fixes you kept went with them."), hidden while `busy` or `detecting` (a reopen's check may still ask after the old
+  report); the server's words never show as an error line (`goneWords`); `fixes` and accepted `evidence` are dropped
+  (the edits went with the scene, so the list and the PDF stop claiming them); Export is hidden; a failed Show it built
+  offers the reopen instead of Try again (`BuiltView`'s `reopen`).
 
 ## The main handlers
 
@@ -233,6 +244,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 | `onChatEvent(e)` | Turns chat events into page state (below). |
 | `connectAgent`, `disconnectAgent`, `onAgentEvent(e)` | The MCP agent link ([11](11-mcp-and-agent-links.md)). |
 | `resumeSession()`, `startFresh()` | Reopen the saved session, or forget it and revoke its link. |
+| `reopenGone()` | The notice's button: reopen the same sample models (`open(sceneFiles)`; the visitor's own files go back to the file picker), then the same clashes: ORCA's check again (`runDetect(lastTests)`), or the same sample report (`sampleReports`), or a line asking to import an uploaded report again. A Navisworks report the server still holds is kept. |
 | `drawBuilt`, `builtPasses`, `showBuilt`, `buildAccepted`, `redrawKept`, `builtFromChat`, `prepareReport` | Show it built ([docs/show-it-built.md](../show-it-built.md)): one request per key (`builtKey`), shared while drawing. |
 | `captureViews(report, clash, a, b)` | A/B/C pictures of a detected clash (`Viewer.captureClash`), saved with `api.saveView`; once per clash. |
 | `needThumb(c)`, `pumpThumbs()` | The list-thumbnail queue (below). |
@@ -370,8 +382,8 @@ built-picture events into `builtRuns[key].step`. Event types are listed in [10](
   reply. `ndjson<T>(path, body, onEvent, signal, method)` POSTs (or GETs) and reads the body line by line; it stops
   when `onEvent` returns `true` or the signal aborts, and cancels the reader in `finally`. `proposeStream` has its own
   reader (it resolves on `result`, throws on `error`, and throws if the stream ends first). `uploadModelsStream` uses
-  `XMLHttpRequest` for upload progress and parses `responseText` as it grows. `file`, `saveView`, `uploadReport` and
-  `linkCapture` use plain `fetch`; `leaveLink` uses `navigator.sendBeacon` so it still goes while the page unloads.
+  `XMLHttpRequest` for upload progress and parses `responseText` as it grows. `file`, `uploadReport` and `linkCapture` use
+  plain `fetch` (`saveView` goes through `send`); `leaveLink` uses `navigator.sendBeacon` so it still goes while the page unloads.
 - **Headers.** `settingsHeader()` adds `X-Sightline-Settings` (the owner's own settings as JSON, set by
   `OwnerSettingsMenu` through `setOwnerSettings` only once the owner is unlocked) and `X-Sightline-Requirements`
   (the registered requirements id, set by `App` through `setRequirements`). Every `call`, `ndjson`, `proposeStream`,
@@ -379,6 +391,9 @@ built-picture events into `builtRuns[key].step`. Event types are listed in [10](
 - **Re-register.** `send(url, init)` retries once when the server answers 409 with detail `requirements_unknown` (it
   forgot the id, e.g. after a restart): `reRegister()` posts the kept document to `/api/requirements` and the request
   goes again with the new id. `uploadModelsStream` does the same by hand.
+- **Gone.** On a 404 with `X-Sightline-Gone`, `send` calls the handler set by `setGoneHandler` with `goneOf(reply)`
+  (`{ kind: "scene" | "report", id }`) and the reply's `detail`; the caller still gets its `ApiError`. App turns it
+  into one notice ("When the server lets go of the models", above).
 - **Packing.** `pack(file)` gzips files over 1 MiB with `CompressionStream` before an upload (sent as `name.gz`).
 
 | Group | Functions | Notes |

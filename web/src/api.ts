@@ -337,9 +337,22 @@ async function reRegister(): Promise<boolean> {
   return true;
 }
 
-/** fetch, registering the requirements again and retrying once when the server has forgotten them. */
+/** A scene or report the server no longer holds (a restart, or let go to make room), from the 404's X-Sightline-Gone
+ *  header: the page offers to open them again rather than show each call's error. */
+export interface Gone { kind: "scene" | "report"; id: string; detail?: string }  // detail: the server's words
+let goneHandler: ((g: Gone) => void) | null = null;
+export function setGoneHandler(fn: ((g: Gone) => void) | null) { goneHandler = fn; }
+export function goneOf(r: Pick<Response, "status" | "headers">): Gone | null {
+  const m = r.status === 404 ? /^(scene|report):(\w+)$/.exec(r.headers.get("X-Sightline-Gone") ?? "") : null;
+  return m ? { kind: m[1] as Gone["kind"], id: m[2] } : null;
+}
+
+/** fetch, registering the requirements again and retrying once when the server has forgotten them, and telling the
+ *  page when a scene or report is gone. */
 async function send(url: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(url, init);
+  const gone = goneOf(r);
+  if (gone && goneHandler) goneHandler({ ...gone, detail: (await r.clone().json().catch(() => null))?.detail });
   if (r.status !== 409 || !requirementsId || !requirementsDoc) return r;
   const detail = (await r.clone().json().catch(() => null))?.detail;
   if (detail !== "requirements_unknown" || !(await reRegister())) return r;
@@ -713,7 +726,7 @@ export const api = {
     const form = new FormData();
     form.append("label", label);
     form.append("image", png, `${label}.png`);
-    const r = await fetch(`/api/reports/${reportId}/clashes/${clashId}/images`, { method: "POST", body: form });
+    const r = await send(`/api/reports/${reportId}/clashes/${clashId}/images`, { method: "POST", body: form });
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Saving the view failed (${r.status})`);
     return (await r.json()).images as string[];
   },

@@ -97,7 +97,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     setTimeout(fn) { const id = Symbol(); timers.set(id, fn); return id; }, clearTimeout(id) { timers.delete(id); } };
   globalThis.setInterval = () => Symbol(); globalThis.clearInterval = () => {};
   const react = url(`const h=globalThis.${key}.hooks; export const useState=(...a)=>h.useState(...a),useRef=(...a)=>h.useRef(...a),useMemo=(...a)=>h.useMemo(...a),useEffect=(...a)=>h.useEffect(...a);`);
-  const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} } export const setRequirements=()=>{};`);
+  const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} } export const setRequirements=()=>{}; export const setGoneHandler=(fn)=>{globalThis.${key}.gone=fn;};`);
   const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "DockHost", "SlotHost", "MeasurePanel", "PropertySets"];
   const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
     export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
@@ -131,11 +131,14 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     async settle() { await flush(); render(); await flush(); render(); },
     button(text) { return find(tree, (n) => n.type === "button" && hasText(n, text)); },
     component(name) { return find(tree, (n) => n.type?.name === name); },
+    find(predicate) { return find(tree, predicate); },
     input(id) { return find(tree, (n) => n.type === "input" && n.props.id === id); },
     reportMenu() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Coordinate"); return p.props.children(() => {}); },
     fileInput(kind) { return find(tree, (n) => n.type === "input" && n.props.type === "file"
       && (kind === "folder" ? "webkitdirectory" in n.props : String(n.props.accept ?? "").includes(".xml"))); },
     chat(event) { find(tree, (n) => n.type?.name === "ChatPanel").props.onEvent(event); render(); },
+    /** The server answered that a scene or report is gone (api.ts, X-Sightline-Gone). */
+    gone(g) { globalThis[key].gone?.(g); render(); },
     open() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Models");
       find(p.props.children(() => {}), (n) => n.props?.id === "open").props.onClick(); render(); },
     loadReport() { const p = find(tree, (n) => n.type?.name === "Popover" && n.props.label === "Coordinate");
