@@ -1,7 +1,8 @@
 import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { Wordmark } from "./Brand";
 
-/** The header's menu on phones and tablets: every header action in one panel from the right, each with its name,
+/** ORCA's menu (the model's top right corner on a desktop, the header on phones and tablets): every action in one panel from the right, each with its name,
  * in the order of the work (models, coordinate, this session's outputs, help). Escape or the scrim closes it. */
 export function MenuSheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -17,7 +18,7 @@ export function MenuSheet({ title, onClose, children }: { title: string; onClose
     <div className="menu-sheet" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       <div className="menu-panel" ref={panel} onClick={(e) => e.stopPropagation()}>
         <div className="menu-head">
-          <span className="brand"><span className="logo" aria-hidden>◎</span><b>{title}</b></span>
+          <span className="brand"><Wordmark height={24} title={title} /></span>
           <button type="button" className="ibtn" aria-label="Close the menu" onClick={onClose}><X size={20} aria-hidden /></button>
         </div>
         {children}

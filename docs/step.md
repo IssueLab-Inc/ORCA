@@ -57,6 +57,12 @@ opens, checked like any model, and written back as STEP with the fixes. Code: `s
   services) is not merged.
 - **Trims never cut guarding or structure for a service:** `agent._try_trim` refuses to trim a fixed element when the
   other side can move, so a post is never cut down to let a cable tray pass.
+- **A machine's voice (Oct 30):** a scene whose every model came from STEP is a machine cell (`domains.of`), so the fix
+  agent reads `domain_packs/machines.md` (a mechanical integration engineer: guarding and safety zones intact, robot
+  bases and anchored frames stay, maintenance access; static geometry only, never robot reach or motion) instead of
+  `construction.md`, and the chat, triage, patterns, root causes and reports speak in that role
+  ([08](architecture/08-ai-models-prompts-and-spend.md#how-the-domain-is-chosen)). A mix of IFC and STEP stays
+  construction.
 
 ## Upload
 

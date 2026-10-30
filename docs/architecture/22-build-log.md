@@ -1233,6 +1233,51 @@ When the server lets go of the models (Oct 30; code `server/sightline/app.py`, `
   after the restart brings the notice naming the models (its report call failed first; the scene probe followed), no
   error line, Export hidden; **Open them again** reloads the models and the check, with no notice or error after.
 
+The ORCA notch, menu and brand in the app (Oct 30; code `web/src/Brand.tsx`, `App.tsx`, `AppMenu.tsx`, `ViewPanes.tsx`,
+`viewer/Viewer.ts`, `index.css`, `web/index.html`, `web/public/brand/`, `server/sightline/document.py`):
+- **Header:** the desktop's header bar is gone; the panels and the model reach the top of the window. The wordmark
+  (20 px) hangs from the model's top edge in a notch, and clicking it opens About ORCA. The model's top right corner
+  holds the pills, Export and **Menu**, which opens `MenuSheet` (the phone's panel) on every layout, with Panels and
+  layout on a desktop. Phones and tablets keep their bar with the wordmark or the app icon. Mockups were agreed first.
+- **Progress:** the notch grows while ORCA works (`notchStatus`: opening models with one bar segment per model, the
+  check, triage, proposing, a plan, a wider fix). While the first models open, `LoadCard` lists the real steps:
+  `open()` records the server's answer, each downloaded file and each model drawn (`Viewer.load`'s new `onDrawn`
+  callback, which yields so the count paints). Every `.spinner` is the split-O. A kept fix (`markFixed`) shows a toast
+  where the mark settles once.
+- **Brand:** navy accent and ink text from the kit's tokens; the adaptive favicon, ICO, Apple, Android and maskable
+  icons, manifest and `og.png`; a boot splash with the Reveal letters in `index.html`; the PDF cover's lockup.
+- **Tests:** `app-host.mjs` opens Models and Coordinate through the menu (`menu()`), and both stub lists name `./Brand`.
+- **Checked:** 124 web tests, build clean; server tests below. In Chromium at 1440×900 on Northbank: landing,
+  loading card (opened 4.7 s, 4 of 4 downloaded 5.1 MB, 1,961 elements drawn), working notch ("Checking the models")
+  clear of Export, loaded model, the menu, a selected clash with its chip under the notch, and the PDF cover rendered
+  with WeasyPrint.
+
+A machines pack and a persona per domain (Oct 30; code `server/sightline/domains.py`, `domain_packs/machines.md`, the six
+shared prompts, `service.py`, `plans.py`, `chat.py`, `triage.py`, `document.py`, `app.py`):
+- **Why:** every prompt said "senior BIM coordinator", so the palletising cell was triaged, fixed, chatted about and
+  reported on as a building.
+- **What:** `domains.of(ws, scene_id)` reads a scene opened wholly from STEP as `machines`, everything else as
+  `construction`. The fix agent reads `machines.md` (a mechanical integration engineer's rules for static coordination:
+  anchored frames and robot bases stay, guarding and safety zones stay intact, maintenance access, conveyor lines; never
+  a claim about robot motion), with construction's fix kinds and output contract word for word. Chat, triage, report,
+  report summary, patterns and root cause fill `{role}` per domain; construction's text is byte-identical.
+- **Checked:** `test_domains.py` (11); 618 server tests; `evals/step_cell.py` passes on the real models (17 of 17
+  planted pairs, C1, C2, C3, C6, C7, C8, Rev B 0 planted; `evals/runs/2026-10-30-cell-step-machines/`).
+
+Team names typed, titles and the rule audit by domain (Oct 30; code `domains.py`, `titles.py`, `triage.py`,
+`document.py`, `app.py`, `domain_packs/titles.md`, `triage.md`, `report.md`, `web/src/ReportDoc.tsx`, `api.ts`):
+- **Teams:** no team name is fixed any more. The report dialog has a text field per model (a cleared field goes back to
+  the guess; a list suggests the names in use). `document.TEAMS` and the web's `TEAMS` are gone. ORCA's guess stays a
+  building discipline from the model's content, and becomes the model's own name for a machine cell or a model with
+  nothing to go on. Triage's `responsible` is held to the guessed teams (`triage.schema_for`); the report translates it
+  to the typed name for that model, ranks typed names by their model's guessed discipline (`STAYS_FIRST`), and
+  `report.md` names the typed teams.
+- **Titles:** `titles.md` says `{meeting}` ("a BIM coordination meeting" or "a machine cell design review"); the page
+  sends `?scene_id=` so a cell's titles are written for its domain. **Rule audit:** `triage.AUDIT` takes `{role}`.
+- **Checked:** `test_domains.py` (14: titles and audit by domain, guesses never fixed, typed names in the report and its
+  prompt); 621 server tests; 124 web tests, build clean. In Chromium on Northbank: the dialog's first model retyped to
+  "Acme Mechanical" kept it; the second cleared and left went back to "MEP".
+
 Workings (Oct 30, owner decision; code `web/src/runlog.ts`, `workingsGraph.ts`, `Workings.tsx`, `Activity.tsx`, `App.tsx`,
 `dock.tsx`, `pilot.ts`, `index.css`, `server/sightline/agent.py`; design [docs/workings.md](../workings.md)):
 - **What:** the Activity panel draws each run as it happens, as lanes (who started it, Muse, ORCA) of steps joined by

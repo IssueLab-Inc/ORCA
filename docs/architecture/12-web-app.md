@@ -2,7 +2,7 @@
 
 > **Covers:** `web/src/` (all but `viewer/`, which is [13](13-3d-viewer.md)), `web/index.html`, `web/vite.config.ts`,
 > `web/tsconfig.json`, `web/package.json`, `web/scripts/`, `web/public/`, `assets/brand/orca/` · **Checked against code:**
-> 2026-10-30 (`main` at `b74d70b`; the dock again on `fix/dock-empty-bars-tooltips`) · **Deeper design:** [docs/mobile.md](../mobile.md),
+> 2026-10-30 (`main` at `b74d70b`; the dock again on `fix/dock-empty-bars-tooltips`; the notch, menu and brand on `claude/laughing-allen-29oggh`) · **Deeper design:** [docs/mobile.md](../mobile.md),
 > [docs/views.md](../views.md), [docs/panels.md](../panels.md), [docs/brand-assets.md](../brand-assets.md)
 
 The web app is a single-page React 19 app built with Vite and TypeScript. One component, `App` in `App.tsx`, owns
@@ -18,7 +18,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | File | What it is | Main exports | Used by |
 |---|---|---|---|
 | `main.tsx` | Entry: mounts `<App />` in `StrictMode` on `#root`, imports the stylesheet | (none) | `web/index.html` |
-| `App.tsx` | The whole page: state, handlers, effects, header, panes, sheet, dialogs. Also small local components `ProofStrip`, `Recommended`, `NoFix`, `Thinking` and helpers `keepPlaces`, `movedPairs`, `clampPane`, `shortName` | `App` | `main.tsx` |
+| `App.tsx` | The whole page: state, handlers, effects, the notch and corner (desktop) or the compact header, panes, sheet, dialogs. Also small local components `ProofStrip`, `Recommended`, `NoFix`, `Thinking` and helpers `keepPlaces`, `movedPairs`, `clampPane`, `shortName` | `App` | `main.tsx` |
 | `index.css` | The one stylesheet: tokens, layout grid, every feature's styles, then the "Responsive" block | (CSS) | `main.tsx` |
 | `api.ts` | Every server call, the NDJSON reader, the wire types, the two request headers | `api`, `ApiError`, `setOwnerSettings`, `setRequirements`, `requirementsInUse`, ~100 types | everything |
 | `About.tsx` | Landing page in the empty viewer (hero, demo cards, resume card, before/after picture, the "Go deeper" card that opens About ORCA) | `About`, `Resume`, `projectName` | `App` |
@@ -29,7 +29,8 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `workingsGraph.ts` | A run's events as a graph to draw (lanes, columns, steps, edges, timeline bars), one builder per kind of run, as it stood at any moment | `graphOf`, `sec`, `Graph`, `Step`, `Edge`, `Lane`, `Part` | `Workings.tsx` |
 | `runlog.ts` | The runs the page watched, for Workings: each run's events (meshes dropped) with when they arrived, its origin (you, the chat, an agent over MCP, a tour replay); 12 kept, never letting a live one go | `runs`, `RunLog`, `lean`, `Run`, `RunHandle`, `RunKind`, `Origin`, `RUNS_KEPT` | `App`, `Workings.tsx` |
 | `Agent.tsx` | "Connect an agent" dialog: token and server fields, client set-up snippets, time left, the agent's log | `AgentDialog`, `timeLeft`, `secondsLeft`, `AgentLogEntry` | `App` |
-| `AppMenu.tsx` | The header's menu on phones and tablets: a panel from the right with every header action | `MenuSheet` | `App` |
+| `AppMenu.tsx` | ORCA's menu, on every layout: a panel from the right with every action by name (Models, Coordinate, this session, Panels and layout on a desktop, Help) | `MenuSheet` | `App` |
+| `Brand.tsx` | ORCA's identity in the page: the wordmark, the split-O (`OrcaMark`, still, orbiting or settling once), the app icon, the notch at the model's top edge (grows with a `NotchStatus` while ORCA works), the loading card while the first models open (`LoadCard`, fed by `LoadProgress`) and the kept-fix toast | `Wordmark`, `OrcaMark`, `AppIcon`, `Notch`, `NotchStatus`, `LoadCard`, `LoadProgress`, `KeptToast` | `App`, `AppMenu.tsx` |
 | `BuiltView.tsx` | Show it built's picture over ORCA's view, the wipe, "Lines from the model", the check's tooltip | `BuiltView`, `builtStep`, `cutText`, `BuiltRun` | `App`, `PlanPanel.tsx` |
 | `Chat.tsx` | "Chat with ORCA": turns, tool steps, suggestions, the mic (hold to talk, hands-free, upload fallback) | `ChatPanel`, `Turn`, `Step` | `App` |
 | `ClashPanel.tsx` | The selected clash's card (both sides, how each matched, Navisworks or captured views, triage reading), the image dialog, thumbnails | `ClashPanel`, `Lightbox`, `ClashThumb` | `App`, `ReportList.tsx` |
@@ -42,7 +43,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `PlanPanel.tsx` | A Fix-together or root-cause plan: its items, their status, the joint check, Accept | `PlanPanel`, `PlanRun` | `App` |
 | `Properties.tsx` | The selected element's properties under its card: type, material, size, attributes, each property set and quantity set, a filter, click to copy | `PropertySets`, `sections`, `filtered`, `shown` | `App` |
 | `ProjectStart.tsx` | The blank project's drop zone (IFC/STEP models, or a Navisworks report or folder) | `ProjectStart` | `App` |
-| `ReportDoc.tsx` | The coordination report dialog (scope, teams, build PDF and BCF) and the per-clash review block | `ReportDialog`, `ReviewBlock`, `reviewersOf`, `TEAMS` | `App` |
+| `ReportDoc.tsx` | The coordination report dialog (scope, a typed team name per model, build PDF and BCF) and the per-clash review block | `ReportDialog`, `ReviewBlock`, `reviewersOf` | `App` |
 | `ReportList.tsx` | The left pane over a report: Clashes / Insights tabs, impact bar, search and filters, the list with lazy thumbnails | `ReportList`, `clashLabel`, `mm`, `linkState`, `Review` | `App`, `ClashPanel.tsx`, `ContextPlan.tsx`, `PlanPanel.tsx`, `ReportDoc.tsx` |
 | `Requirements.tsx` | The requirements dialog: level cards, strictness, the check matrix, who moves, rules and Muse's audit, openings | `RequirementsDialog` | `App` |
 | `Sheet.tsx` | The phone's bottom sheet bar: handle, drag and flick, snap heights | `SheetBar` | `App` |
@@ -83,7 +84,7 @@ Nothing remounts when a panel moves or the layout changes: only the slot element
 ```mermaid
 flowchart TD
   main["main.tsx"] --> app["App"]
-  app --> header["header.bar (desktop, or compact on phone and tablet)"]
+  app --> header["Notch and corner menu in the stage (desktop), or header.bar (phone and tablet)"]
   app --> slots["inSlot: each panel's content into its slot"]
   slots --> left["aside.pane.left (Coordination)"]
   slots --> stage["main.stage (Model: the Viewer canvas lives here)"]
@@ -598,11 +599,13 @@ No `sessionStorage` or IndexedDB is used.
 
 ## Build, assets and tests
 
-- **Approved redesign assets:** [`assets/brand/orca/`](../../assets/brand/orca/README.md) holds direction-05 vector
-  masters, static exports, icons, motion and React/native integration examples. It is outside `web/public` and
-  `web/src`; the current app does not load it. Static and motion builders share `source/master.json`. The redesign
-  should copy/import only what it needs and drive phase/completion feedback from real events. Design and commands:
-  [docs/brand-assets.md](../brand-assets.md). Brand inventory checked 2026-10-30 against `0390a12` plus this slice.
+- **Brand assets:** [`assets/brand/orca/`](../../assets/brand/orca/README.md) holds the direction-05 library (vector
+  masters, exports, icons, motion). The app does not import it: `Brand.tsx` carries the wordmark and symbol paths, and
+  `web/public/brand/` holds copies of the icons it serves (favicon `.ico`, Apple touch, Android and maskable icons,
+  `site.webmanifest`, the Safari pinned tab, `og.png` from `social/og-light.png`, and `orca-spinner.svg`, the optical
+  micro symbol that `.spinner` uses as a mask). `web/public/favicon.svg` is the kit's adaptive favicon. Motion follows
+  the kit's semantics: Orbit only while work runs, Settle only after the server kept a fix (`markFixed`), Reveal once
+  in the boot splash; reduced motion stills all three. Design and commands: [docs/brand-assets.md](../brand-assets.md).
 
 - **`package.json` scripts:** `dev` (Vite dev server), `build` (`tsc --noEmit && vite build` into `web/dist/`),
   `test` (`node --test tests/*.test.mjs`), `preview`, `copy-wasm`, and `postinstall` (runs `copy-wasm`).
@@ -619,10 +622,11 @@ No `sessionStorage` or IndexedDB is used.
   `http://localhost:8765`), waits for the check, picks a view, saves the viewer's screenshot and writes
   `web/public/demos/northbank.webp` and `cell.webp` (cropped to 16:10 with Pillow). Recapture after visual changes;
   the landing's demo cards and the README use these pictures.
-- **`web/public/`:** `favicon.svg`, `popout.html` (the page a panel's own window opens: dockview moves the panel in
+- **`web/public/`:** `favicon.svg`, `brand/` (above), `popout.html` (the page a panel's own window opens: dockview moves the panel in
   and copies the styles), `demos/*.webp`, `tour/*.json` (the five recordings), and the generated `wasm/`.
 - **`web/index.html`:** the shell (`#root`, `viewport-fit=cover`, the IBM Plex fonts from Google Fonts, title "ORCA ·
-  AI design coordination").
+  AI design coordination", theme colour navy `#052640`, the icon and manifest links, the Open Graph image). `#root`
+  starts with the boot splash: the wordmark's letters arrive once (inline CSS) until React mounts and replaces it.
 - **Serving:** in production the server mounts `web/dist` at `/` when `index.html` exists (`app.WEB_DIST`, env
   `SIGHTLINE_WEB_DIST`); see [17](17-deployment-and-operations.md).
 - **Tests:** `web/tests/` runs on Node's test runner without a browser. `app-host.mjs` compiles a source file with the

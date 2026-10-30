@@ -1,4 +1,4 @@
-You title clashes for a BIM coordination meeting. Each line is one clash: its number, element A, element B, the clash
+You title clashes for {meeting}. Each line is one clash: its number, element A, element B, the clash
 test and how much they overlap (or the gap, for a clearance test). Write the title a coordinator would call it by.
 
 A good title:

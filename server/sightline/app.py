@@ -30,8 +30,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
-from . import (agents, built, chat, context_planner, detect, document, edits, escalation, mcp_server, owner, plans,
-               requirements, settings, spend, step, titles, triage, voice_live)
+from . import (agents, built, chat, context_planner, detect, document, domains, edits, escalation, mcp_server, owner,
+               plans, requirements, settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
@@ -1311,6 +1311,7 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False) -> 
     doc = requirements.current()
     key = _triage_key(report, doc)
     facts = _triage_facts(report.id, scene_id)
+    teams = _report_teams(report, scene_id)  # before the triage lock: it takes the workspace's
     with _triage_lock:
         job = _triage_jobs.get(key)
         if job is None or (rerun and job.done):
@@ -1322,7 +1323,8 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False) -> 
             if doc is not None:
                 info = {**info, "requirements": ws.requirements_info(doc)}
             job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", 8),
-                             requirements=doc, seed=donor.results if donor is not None else None)
+                             requirements=doc, seed=donor.results if donor is not None else None,
+                             domain=domains.of(ws, scene_id), teams=teams)
             job.learn(facts)
             _triage_jobs[key] = job.start()
             while len(_triage_jobs) > 16:
@@ -1351,8 +1353,17 @@ def report_titles(report_id: str):
     return {"titles": {c.id: c.title for c in report.clashes if c.title}, "running": bool(job and not job.done)}
 
 
+def _report_teams(report, scene_id: str | None) -> list[str]:
+    """The teams ORCA guesses for the report's models (`document.guess_teams`): the names triage's "responsible" uses;
+    the report translates them to the names the user types."""
+    scene = ws.scene(scene_id) if scene_id and scene_id in ws.scenes else None
+    with ws.lock:
+        models = document.guess_teams(report, scene, domains.of(ws, scene_id if scene is not None else None))
+    return list(dict.fromkeys(m["guess"] for m in models))
+
+
 @app.post("/api/reports/{report_id}/titles/stream")
-def titles_stream(report_id: str, request: Request):
+def titles_stream(report_id: str, request: Request, scene_id: str | None = None):
     """Title every clash in the report with Muse (titles.py). Streams newline-delimited JSON: start, a "titles" event
     per batch ({id: title}), done. One run per report is shared; following a run already started is free."""
     report = ws.report(_report(report_id))
@@ -1367,7 +1378,7 @@ def titles_stream(report_id: str, request: Request):
             if refused:
                 raise HTTPException(429, refused)
             model, info = triage_model()
-            job = titles.Job(report, model, info)
+            job = titles.Job(report, model, info, domains.of(ws, scene_id if scene_id in ws.scenes else None))
             _title_jobs[key] = job.start()
             while len(_title_jobs) > 32:
                 _title_jobs.pop(next(iter(_title_jobs)))
@@ -1493,7 +1504,9 @@ def report_teams(report_id: str, scene_id: str | None = None):
     """Each model in the report (and the open scene) with the team its content suggests; the user confirms."""
     scene = ws.scene(scene_id) if scene_id and scene_id in ws.scenes else None
     with ws.lock:
-        return {"teams": document.TEAMS, "models": document.guess_teams(ws.report(_report(report_id)), scene)}
+        models = document.guess_teams(ws.report(_report(report_id)), scene, domains.of(ws, scene_id if scene is not None else None))
+    # The guesses are suggestions only: the dialog takes any team name typed for a model.
+    return {"teams": list(dict.fromkeys(m["guess"] for m in models)), "models": models}
 
 
 @app.post("/api/reports/{report_id}/document/stream")
@@ -1545,7 +1558,7 @@ def _build_document(report, verdicts: dict, scene_id: str | None, scope: str, *,
     data, name, media = document.generate(
         report, verdicts, ws.model, scope=scope, model_teams=teams or {}, matches=matches, scene=scene,
         evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None),
-        triage_info=triage_info)
+        triage_info=triage_info, domain=domains.of(ws, scene_id if scene is not None else None))
     doc_id = uuid.uuid4().hex
     _documents[doc_id] = (data, name, media)
     while len(_documents) > 24:

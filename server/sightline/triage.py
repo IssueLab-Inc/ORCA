@@ -17,14 +17,12 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Callable
 
-from . import owner, requirements as reqs
+from . import domains, owner, requirements as reqs
 from .meta_client import ChatModel
 from .reports import Report, ReportClash
 
-PROMPT = Path(__file__).parent / "domain_packs" / "triage.md"
 NON_PHYSICAL = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
 TOUCH_M = 0.001  # |distance| at or under this is a touch
 
@@ -34,7 +32,7 @@ SCHEMA = {
         "understanding": {"type": "string"},
         "verdict": {"type": "string", "enum": ["real_clash", "by_design", "non_physical", "modelling_error"]},
         "severity": {"type": "string", "enum": ["high", "medium", "low", "none"]},
-        "responsible": {"type": "string", "enum": ["Structure", "MEP", "Architecture", "Site", "none"]},
+        "responsible": {"type": "string"},  # a team of the report's models (`teams`), or "none": schema_for
         "action": {"type": "string", "enum": ["move_A", "move_B", "modify_A", "modify_B", "exclude_with_rule",
                                               "fix_model", "none"]},
         "fix_hint": {"type": "string"},
@@ -112,17 +110,29 @@ def same_element(c: ReportClash) -> dict:
         "composite object\").")
 
 
+def schema_for(teams: list[str] | tuple[str, ...] = ()) -> dict:
+    """SCHEMA with "responsible" held to the teams the models belong to (the user names them; `document.guess_teams`
+    until then), or "none"; free text when no team is known."""
+    if not teams:
+        return SCHEMA
+    return {**SCHEMA, "properties": {**SCHEMA["properties"],
+                                     "responsible": {"type": "string", "enum": [*dict.fromkeys(teams), "none"]}}}
+
+
 def triage_one(model: ChatModel, c: ReportClash, images: bool = True,
-               on_reasoning: Callable[[str], None] | None = None, note: str = "", guidance: str = "") -> dict:
+               on_reasoning: Callable[[str], None] | None = None, note: str = "", guidance: str = "",
+               domain: str = domains.CONSTRUCTION, teams: list[str] | tuple[str, ...] = ()) -> dict:
     """One verdict. With `on_reasoning`, and a model that streams its reasoning, each piece of it is passed on as the
     model writes it. `note` is added to the clash's facts (see `alike_groups`); `guidance` (the project's coordination
-    requirements, `requirements.prompt_text`) to the system prompt."""
+    requirements, `requirements.prompt_text`) to the system prompt. `domain` (`domains.of`) says who ORCA is; `teams`
+    are the teams the models belong to, one of which is "responsible"."""
     pics = [p for _, p in c.images] if images else []
     text = describe(c) + (f"\n{note}" if note else "")
-    system = PROMPT.read_text() + guidance
+    system = domains.prompt("triage", domain, teams=", ".join(dict.fromkeys(teams))) + guidance
+    schema = schema_for(teams)
     if on_reasoning and hasattr(model, "complete_json_streamed"):
-        return model.complete_json_streamed(system, text, pics, SCHEMA, on_reasoning)  # type: ignore[attr-defined]
-    return model.complete_json(system, text, pics, schema=SCHEMA)  # type: ignore[call-arg]
+        return model.complete_json_streamed(system, text, pics, schema, on_reasoning)  # type: ignore[attr-defined]
+    return model.complete_json(system, text, pics, schema=schema)  # type: ignore[call-arg]
 
 
 # Alike clashes: a model is checked against itself, so the same joint repeats many times (48 holding-down bolts in
@@ -177,7 +187,8 @@ REASONING_EVERY_S = 0.6    # how often a clash's new reasoning goes to the brows
 def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
                   workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
                   settled: dict | None = None, reasoning: bool = False, alike: bool = True,
-                  requirements: "reqs.Doc | None" = None) -> dict[str, dict]:
+                  requirements: "reqs.Doc | None" = None, domain: str = domains.CONSTRUCTION,
+                  teams: list[str] | tuple[str, ...] = ()) -> dict[str, dict]:
     """A verdict for every clash in `report`. `done` holds results already known (resumed or cached); they are kept.
     `settled` holds verdicts the open model already decides (`same_element`): no model call for those.
 
@@ -226,7 +237,7 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
                     sent[0] = time.perf_counter()
 
             try:
-                v = triage_one(model, c, images, heard if reasoning else None, _alike_note(group), guidance)
+                v = triage_one(model, c, images, heard if reasoning else None, _alike_note(group), guidance, domain, teams)
                 out = {**v, "source": "model", "seconds": round(time.perf_counter() - started, 1)}
                 if doc is not None:
                     out = reqs.overlay(doc, out)
@@ -253,7 +264,7 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
     return results
 
 
-AUDIT = """You are ORCA, a senior coordinator checking one rule in a project's coordination requirements.
+AUDIT = """You are ORCA, {role} checking one rule in a project's coordination requirements.
 The rule declares a pair of element kinds "by design" (meant to meet: no fix needed), so the clashes it covers are set
 aside without being read. You are shown up to three of them, deepest first (element A is red, element B is green in any
 pictures). Answer "consistent" when they look like what the rule describes, "looks_real" when any of them looks like a
@@ -267,7 +278,7 @@ AUDIT_RULES = 8
 
 
 def audit_rules(model: ChatModel, report: Report, doc: "reqs.Doc", results: dict[str, dict],
-                images: bool = True) -> dict[int, dict]:
+                images: bool = True, domain: str = domains.CONSTRUCTION) -> dict[int, dict]:
     """Muse checks the rules that set clashes aside: one call per by-design rule that settled any (at most
     AUDIT_RULES), on its deepest AUDIT_SAMPLES clashes. {rule index: {answer, note, rule, samples, settled}}."""
     by_rule_index: dict[int, list[ReportClash]] = {}
@@ -287,7 +298,7 @@ def audit_rules(model: ChatModel, report: Report, doc: "reqs.Doc", results: dict
                 + "\n\n".join(f"Clash #{c.number or k + 1}:\n{describe(c)}" for k, c in enumerate(samples)))
         pics = [p for _, p in samples[0].images] if images and samples[0].images else []
         try:
-            reply = model.complete_json(AUDIT + reqs.prompt_text(doc, "triage", rules=False), text, pics,
+            reply = model.complete_json(domains.fill(AUDIT, domain) + reqs.prompt_text(doc, "triage", rules=False), text, pics,
                                         schema=AUDIT_SCHEMA)  # type: ignore[call-arg]
         except Exception as e:
             reply = {"answer": "unsure", "note": f"Could not check: {type(e).__name__}"}
@@ -310,11 +321,16 @@ class Job:
     """One triage run over a report, shared by everyone who opens it: late subscribers replay what has landed."""
 
     def __init__(self, report: Report, model: ChatModel, info: dict, workers: int = 8,
-                 requirements: "reqs.Doc | None" = None, seed: dict[str, dict] | None = None):
+                 requirements: "reqs.Doc | None" = None, seed: dict[str, dict] | None = None,
+                 domain: str = domains.CONSTRUCTION, teams: list[str] | tuple[str, ...] = ()):
         """`requirements`: the coordination requirements this run reads under. `seed`: model readings from an earlier
-        run under the same prompt (only the rules changed): kept, so only what they no longer settle is asked."""
+        run under the same prompt (only the rules changed): kept, so only what they no longer settle is asked.
+        `domain`: the scene's (`domains.of`), whose voice the triage prompt takes. `teams`: the teams the models belong
+        to (`document.guess_teams`), which "responsible" names."""
         self.report, self.model, self.info, self.workers = report, model, info, workers
         self.requirements = requirements
+        self.domain = domain
+        self.teams = tuple(teams)
         self.seed = {k: v for k, v in (seed or {}).items() if v.get("source") == "model"}
         self.audit: dict[int, dict] = {}
         self.results: dict[str, dict] = {}
@@ -371,7 +387,7 @@ class Job:
                     self._emit({"type": "clash", "id": cid, **v})
                 triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True),
                               done=dict(self.seed), settled=dict(self.facts), reasoning=True,
-                              requirements=self.requirements)
+                              requirements=self.requirements, domain=self.domain, teams=self.teams)
                 if self.requirements is not None and self.requirements.by_design:
                     self._audit()
             except Exception as e:
@@ -390,7 +406,8 @@ class Job:
         """Muse checks the by-design rules on the clashes they set aside; a rule it disputes marks them."""
         with self._cond:
             results = dict(self.results)
-        found = audit_rules(self.model, self.report, self.requirements, results, self.info.get("images", True))
+        found = audit_rules(self.model, self.report, self.requirements, results, self.info.get("images", True),
+                            self.domain)
         with self._cond:
             self.audit = found
         for i, a in found.items():

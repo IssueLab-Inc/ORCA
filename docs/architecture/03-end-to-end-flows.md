@@ -422,7 +422,7 @@ Owned by: [docs/show-it-built.md](../show-it-built.md) (design), [09](09-agent-w
 ## Build the PDF report and BCF
 
 **Report** opens `ReportDialog` (`ReportDoc.tsx`), which asks the server to guess each model's team
-(`document.guess_teams`) for the person to confirm. On build the page finishes the built pictures first (`prepareReport`,
+(`document.guess_teams`) as a starting name the person can retype. On build the page finishes the built pictures first (`prepareReport`,
 at most 10), then streams `document/stream` with the scope, teams, evidence, reviews, marks and the triage verdicts it
 shows. The route needs verdicts for at least half the clashes (else 409 "Triage the report first") and charges one
 proposal; `document.generate` explains each page with Muse Spark (6 at a time), writes one summary, renders a PDF per

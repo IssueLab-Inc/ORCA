@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, connections, datums, detect, edits, escalation, hosts, properties, reports, requirements, settings, spend, step, verify
+from . import agent, connections, datums, detect, domains, edits, escalation, hosts, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -274,7 +274,8 @@ class Workspace:
         second try at once, if `escalate_check` (the caller's caps: why not, or None) allows it."""
         clash = self.clash_for(element_a, element_b, distance_m, images, notes, report_id, clash_id, scene_id)
         stamp = self._stamp(scene_id)
-        result = asdict(agent.resolve(self.scene(scene_id), clash, self.model, on_event=on_event, lock=self.lock,
+        result = asdict(agent.resolve(self.scene(scene_id), clash, self.model, pack=domains.of(self, scene_id),
+                                      on_event=on_event, lock=self.lock,
                                       trials=on_event is not None, hosts_model=self.hosts_model,
                                       **self.fix_settings(scene_id, element_a, element_b)))
         self._remember(scene_id, element_a, element_b, result, stamp)
@@ -357,7 +358,8 @@ class Workspace:
         with self.lock:
             brief = escalation.brief(scene, clash, first, clearance)
         fix["guidance"] = fix.get("guidance", "") + "\n" + escalation.PACK.read_text()
-        second = asdict(agent.resolve(scene, clash, model, on_event=on_event, lock=self.lock,
+        second = asdict(agent.resolve(scene, clash, model, pack=domains.of(self, scene_id), on_event=on_event,
+                                      lock=self.lock,
                                       trials=on_event is not None, hosts_model=self.hosts_model, max_rounds=2,
                                       brief=brief, label=label, **fix))
         out = {**second, "escalated": True}

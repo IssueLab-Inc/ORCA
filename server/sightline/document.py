@@ -34,12 +34,12 @@ from typing import Callable
 
 import numpy as np
 
-from . import owner, triage as triage_mod
+from . import domains, owner, triage as triage_mod
 from .meta_client import ChatModel, model_label, triage_model_info
 from .reports import Report, ReportClash
 
-PACKS = Path(__file__).parent / "domain_packs"
-TEAMS = ["Structure", "MEP", "Architecture", "Site"]
+# Team names are the user's: each model's team is typed in the report dialog. ORCA only guesses one per model to start
+# from: a building discipline from the model's content, else the model's own name.
 STAYS_FIRST = ["Structure", "Architecture", "Site", "MEP"]  # who keeps their element when two disciplines meet
 
 EXPLAIN_SCHEMA = {
@@ -84,9 +84,13 @@ def _class_team(cls: str) -> str | None:
     return None
 
 
-def guess_team(classes: Counter, file_name: str = "") -> str:
-    """The team a model most likely belongs to, from how many of its elements are typically each discipline's. The
-    file name only breaks ties: names like "Model-02.ifc" say nothing."""
+def guess_team(classes: Counter, file_name: str = "", domain: str = domains.CONSTRUCTION) -> str:
+    """A first guess at the team a model belongs to (the user types the real one). A building's model: the discipline
+    most of its elements typically belong to, the file name only breaking ties (names like "Model-02.ifc" say
+    nothing). A machine cell's, or a model with nothing to go on: the model's own name."""
+    own = Path(file_name).stem or "Model"
+    if domain != domains.CONSTRUCTION:
+        return own
     score = Counter()
     for cls, n in classes.items():
         team = _class_team(cls)
@@ -97,7 +101,7 @@ def guess_team(classes: Counter, file_name: str = "") -> str:
                         ("Architecture", ("arch",)), ("Site", ("site", "civil", "landscape"))):
         if any(w in name for w in words):
             score[team] += 0.5
-    return score.most_common(1)[0][0] if score else "Architecture"
+    return score.most_common(1)[0][0] if score else own
 
 
 def model_files(report: Report, scene=None) -> list[str]:
@@ -108,8 +112,8 @@ def model_files(report: Report, scene=None) -> list[str]:
     return sorted(names)
 
 
-def guess_teams(report: Report, scene=None) -> list[dict]:
-    """[{file, guess, elements}] for the report dialog: what each model contains decides; the user confirms."""
+def guess_teams(report: Report, scene=None, domain: str = domains.CONSTRUCTION) -> list[dict]:
+    """[{file, guess, elements}] for the report dialog: what each model contains suggests a team; the user types it."""
     out = []
     for name in model_files(report, scene):
         classes: Counter = Counter()
@@ -118,7 +122,7 @@ def guess_teams(report: Report, scene=None) -> list[dict]:
             classes.update(e.is_a() for e in m.by_type("IfcElement"))
         else:
             classes.update(e.ifc_class for c in report.clashes for e in (c.a, c.b) if e.file == name and e.ifc_class)
-        out.append({"file": name, "guess": guess_team(classes, name), "elements": sum(classes.values())})
+        out.append({"file": name, "guess": guess_team(classes, name, domain), "elements": sum(classes.values())})
     return out
 
 
@@ -142,21 +146,32 @@ class Row:
     ai: dict | None = None        # Muse Spark's explanation for its page
 
 
-def teams_for(team_a: str, team_b: str, moved_side: str | None, responsible: str | None) -> tuple[str, list[str]]:
-    """(acting team, teams that review). See the module docstring for the rule."""
+def teams_for(team_a: str, team_b: str, moved_side: str | None, responsible: str | None,
+              discipline: dict[str, str] | None = None) -> tuple[str, list[str]]:
+    """(acting team, teams that review). See the module docstring for the rule. `discipline`: a typed team name's
+    guessed discipline (`guess_teams`), which `STAYS_FIRST` ranks; a name with none ranks with the movers."""
     reviewers = list(dict.fromkeys([team_a, team_b]))
     if moved_side in ("a", "b"):
         return (team_a if moved_side == "a" else team_b), reviewers
-    if responsible in TEAMS and responsible in reviewers:
+    if responsible and responsible in reviewers:
         return responsible, reviewers
     if team_a == team_b:
         return team_a, reviewers
     rank = {t: i for i, t in enumerate(STAYS_FIRST)}
-    return max((team_a, team_b), key=lambda t: rank.get(t, len(STAYS_FIRST))), reviewers
+    of = discipline or {}
+    return max((team_a, team_b), key=lambda t: rank.get(of.get(t, t), len(STAYS_FIRST))), reviewers
 
 
 def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str, str], matches: dict | None,
-               scene, evidence: dict, reviews: dict, marks: dict) -> list[Row]:
+               scene, evidence: dict, reviews: dict, marks: dict, guesses: dict[str, str] | None = None) -> list[Row]:
+    """`model_teams`: the team the user typed for each model file; `guesses`: ORCA's guess per file (`guess_teams`),
+    the names triage's "responsible" uses, which are translated to the typed ones."""
+    guesses = guesses or {}
+    typed = {f: model_teams.get(f) or g for f, g in guesses.items()}
+    discipline = {t: guesses[f] for f, t in typed.items()}
+    as_typed = {}
+    for f, g in guesses.items():
+        as_typed.setdefault(g, typed[f])
     rows = []
     for c in report.clashes:
         m = (matches or {}).get(c.id, {})
@@ -171,7 +186,8 @@ def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str,
             return (c.a if side == "a" else c.b).file or "unknown model"
 
         ma, mb = model_of("a"), model_of("b")
-        ta, tb = model_teams.get(ma) or guess_team(Counter(), ma), model_teams.get(mb) or guess_team(Counter(), mb)
+        ta = model_teams.get(ma) or typed.get(ma) or guess_team(Counter(), ma)
+        tb = model_teams.get(mb) or typed.get(mb) or guess_team(Counter(), mb)
         ev = evidence.get(c.id)
         moved_side = None
         if ev and ev.get("moved"):
@@ -179,7 +195,8 @@ def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str,
             show = m.get("show") or [None, None]
             moved_side = ("a" if {m.get("a"), show[0]} & moved else "b" if {m.get("b"), show[1]} & moved else None)
         reading = verdicts.get(c.id, {})
-        acting, reviewers = teams_for(ta, tb, moved_side, reading.get("responsible"))
+        responsible = reading.get("responsible")
+        acting, reviewers = teams_for(ta, tb, moved_side, as_typed.get(responsible, responsible), discipline)
         mark = marks.get(c.id)
         verdict = reading.get("verdict")
         if ev:
@@ -216,10 +233,13 @@ def _facts(r: Row) -> str:
     return "\n".join(lines)
 
 
-def explain(model: ChatModel, rows: list[Row], emit: Callable[[dict], None], workers: int = 6) -> None:
-    """Muse Spark's explanation for every page, in parallel; a failure leaves that page with the triage reading."""
+def explain(model: ChatModel, rows: list[Row], emit: Callable[[dict], None], workers: int = 6,
+            domain: str = domains.CONSTRUCTION) -> None:
+    """Muse Spark's explanation for every page, in parallel; a failure leaves that page with the triage reading. The
+    prompt names the report's teams as the user typed them."""
     pages = [r for r in rows if r.section == "page"]
-    system = (PACKS / "report.md").read_text()
+    teams = ", ".join(dict.fromkeys(t for r in rows for t in (r.team_a, r.team_b)))
+    system = domains.prompt("report", domain, teams=teams)
     done = [0]
     lock = threading.Lock()
 
@@ -238,7 +258,7 @@ def explain(model: ChatModel, rows: list[Row], emit: Callable[[dict], None], wor
             [f.result() for f in [owner.submit(pool, one, r) for r in pages]]
 
 
-def summarise(model: ChatModel, rows: list[Row]) -> dict:
+def summarise(model: ChatModel, rows: list[Row], domain: str = domains.CONSTRUCTION) -> dict:
     counts = Counter(r.verdict or "not triaged" for r in rows)
     pages = [r for r in rows if r.section == "page"]
     text = json.dumps({
@@ -250,7 +270,7 @@ def summarise(model: ChatModel, rows: list[Row]) -> dict:
                         for r in pages],
     }, default=str)
     try:
-        return model.complete_json((PACKS / "report_summary.md").read_text(), text, None, schema=SUMMARY_SCHEMA)  # type: ignore[call-arg]
+        return model.complete_json(domains.prompt("report_summary", domain), text, None, schema=SUMMARY_SCHEMA)  # type: ignore[call-arg]
     except Exception as e:
         return {"summary": "", "team_actions": [], "error": f"{type(e).__name__}"}
 
@@ -394,6 +414,19 @@ def _page(r: Row, n: int) -> str:
 </section>"""
 
 
+# The ORCA wordmark (assets/brand/orca/svg/wordmarks), navy, with "by IssueLab": the cover's lockup.
+LOCKUP = ("<svg class='lockup' xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1077 330' width='150' height='46' fill='#052640'"
+          " role='img' aria-label='ORCA by IssueLab'>"
+          + "".join(f"<path d='{d}'/>" for d in (
+              "M 31.35038 211.9217 C -12.70846 161.18071 -10.02719 85.00785 37.49033 37.49033 C 85.00785 -10.02719 161.18071 -12.70846 211.9217 31.35038 L 172.14842 71.12366 C 143.48543 48.87496 102.74539 51.43123 77.08831 77.08831 C 51.43123 102.74539 48.87496 143.48543 71.12366 172.14842 Z",
+              "M 224.64962 44.0783 C 268.70846 94.81929 266.02719 170.99215 218.50967 218.50967 C 170.99215 266.02719 94.81929 268.70846 44.0783 224.64962 L 83.85158 184.87634 C 112.51457 207.12504 153.25461 204.56877 178.91169 178.91169 C 204.56877 153.25461 207.12504 112.51457 184.87634 83.85158 Z",
+              "M 292 0 L 441 0 C 499 0 530 30 530 80 C 530 126 504 154 455 162 L 543 256 L 466 256 L 347 143 L 320 115 L 435 115 C 460 115 473 102 473 82 C 473 63 458 54 435 54 L 292 54 Z",
+              "M 292 121 L 351 180 L 351 256 L 292 256 Z",
+              "M 791.05369 45.72319 C 756.46465 4.50157 699.78721 -10.6851 649.22142 7.71934 C 598.65563 26.12379 565 74.18901 565 128 C 565 181.81099 598.65563 229.87621 649.22142 248.28066 C 699.78721 266.6851 756.46465 251.49843 791.05369 210.27681 L 748.1552 174.28071 C 728.69887 197.46786 696.81781 206.01037 668.37455 195.65787 C 639.93129 185.30537 621 158.26868 621 128 C 621 97.73132 639.93129 70.69463 668.37455 60.34213 C 696.81781 49.98963 728.69887 58.53214 748.1552 81.71929 Z",
+              "M 805 256 L 941 0 L 975 64 L 877 256 Z", "M 988 88 L 1077 256 L 1004 256 L 951 157 Z"))
+          + "<text x='1077' y='326' text-anchor='end' font-family='Helvetica, Arial, sans-serif' font-size='58' letter-spacing='6'"
+            " fill='#52636E'>BY ISSUELAB</text></svg>")
+
 CSS = """
 @page { size: A4; margin: 18mm 16mm 18mm 16mm; font-family: "DejaVu Sans", sans-serif;
   @top-left { content: string(doc-title); font-size: 8pt; color: #5d6a7a; }
@@ -408,6 +441,7 @@ h2 { font-size: 13pt; margin: 0 0 8pt; color: #16202b; }
 h3 { font-size: 11pt; margin: 14pt 0 6pt; color: #2f5d8a; }
 h4 { font-size: 10pt; margin: 10pt 0 4pt; }
 .cover { page: cover; padding-top: 40mm; }
+.cover .lockup { display: block; margin-bottom: 18pt; }
 .cover .eyebrow { font-family: monospace; letter-spacing: .08em; color: #2f5d8a; font-size: 9pt; text-transform: uppercase; }
 .stamp { display: inline-block; border: 2pt solid #b8352a; color: #b8352a; padding: 4pt 10pt; font-weight: bold;
   font-size: 12pt; margin: 14pt 0; transform: rotate(-2deg); }
@@ -537,6 +571,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
              f"<div class='stamp'>DRAFT · AI-assisted · {reviewed} of {len(pages)} reviewed</div>")
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{_e(title)}</title><style>{CSS}</style></head><body>
 <section class='cover'>
+  {LOCKUP}
   <div class='eyebrow'>ORCA · design coordination</div>
   <h1>{_e(title)}</h1>
   <div style='font-size:12pt;color:#5d6a7a'>{_e(subtitle)}</div>
@@ -673,16 +708,19 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", 
 
 def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, scope: str, model_teams: dict[str, str],
              matches: dict | None, scene, evidence: dict, reviews: dict, marks: dict, include_bcf: bool,
-             emit: Callable[[dict], None] = lambda e: None, triage_info: dict | None = None) -> tuple[bytes, str, str]:
+             emit: Callable[[dict], None] = lambda e: None, triage_info: dict | None = None,
+             domain: str = domains.CONSTRUCTION) -> tuple[bytes, str, str]:
     """Build the report(s). Returns (bytes, file name, media type): one PDF for a combined report without BCF, else a zip
     of the PDFs (one per team or per model) and the BCF. `triage_info`: the model the verdicts came from (a triage
-    run's `info`), else the one triage would run on now."""
+    run's `info`), else the one triage would run on now. `domain`: the scene's (`domains.of`), whose voice the
+    explanations and the summary take."""
     triage_info = triage_info or triage_model_info()
-    rows = build_rows(report, verdicts, model_teams, matches, scene, evidence, reviews, marks)
+    guesses = {g["file"]: g["guess"] for g in guess_teams(report, scene, domain)}
+    rows = build_rows(report, verdicts, model_teams, matches, scene, evidence, reviews, marks, guesses)
     emit({"type": "progress", "step": "explaining", "done": 0, "total": sum(r.section == "page" for r in rows)})
-    explain(model, rows, emit)
+    explain(model, rows, emit, domain=domain)
     emit({"type": "progress", "step": "summarising"})
-    summary = summarise(model, rows)
+    summary = summarise(model, rows, domain)
     stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     models = sorted({r.model_a for r in rows} | {r.model_b for r in rows})
     base_ctx = {"Clashes from": "ORCA's check of the models" if report.origin == "sightline" else f"Navisworks report {report.title}", "Models": ", ".join(f"{m} ({model_teams.get(m, '?')})" for m in models),

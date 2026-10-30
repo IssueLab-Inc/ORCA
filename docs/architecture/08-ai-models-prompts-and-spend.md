@@ -2,7 +2,7 @@
 
 > **Covers:** `server/sightline/meta_client.py`, `server/sightline/spend.py`, the model parts of `settings.py`,
 > `owner.py`, `built.py`, `voice_live.py`, `hosts.py` and `step.py`, and every prompt in
-> `server/sightline/domain_packs/` · **Checked against code:** 2026-10-30 (`104fda9`) ·
+> `server/sightline/domain_packs/` and `domains.py` · **Checked against code:** 2026-10-30 (`a34b1e7` + `domains.py`) ·
 > **Deeper design:** [docs/escalation.md](../escalation.md), [docs/show-it-built.md](../show-it-built.md),
 > [docs/voice.md](../voice.md)
 
@@ -258,29 +258,57 @@ raises when none comes back. How the picture is checked is in [09](09-agent-work
 
 ## Prompts
 
-Every prompt file lives in `server/sightline/domain_packs/` and is read from disk on each call (the chat's when a
-session starts), so a prompt edit takes effect without a restart. A system prompt is usually a pack plus lines
+Every prompt file lives in `server/sightline/domain_packs/` and is read from disk on each call (the chat's on each
+turn), so a prompt edit takes effect without a restart. A system prompt is usually a pack plus lines
 added at run time: the coordination requirements' `requirements.prompt_text(doc, "triage" | "fixes")` (which says
 only what differs from ORCA's defaults; see [15](15-requirements-settings-and-config.md)), the second try's pack,
 or the recommend-only text.
+
+### How the domain is chosen
+
+ORCA has two demos, a building (Northbank, IFC) and a machine cell (the palletising cell, opened from STEP), and the
+prompts follow the work. `domains.of(ws, scene_id)` is the one place that decides: a scene whose every model was
+opened from STEP (`Workspace.sources` has an entry for each of its files) is `machines`; IFC, a mix of IFC and STEP
+(a machine placed in a building is not supported yet) or no scene is `construction`. Callers never test for STEP
+themselves.
+
+- **The fix pack.** `agent.resolve(..., pack=)` reads `domain_packs/<pack>.md` whole. `Workspace.propose`,
+  `Workspace.escalate` and `plans.build_batch` (Fix together, root-cause partners) pass `pack=domains.of(...)`, so the
+  cell gets `machines.md` and Northbank `construction.md`. The two packs share the six fix kinds and the JSON contract
+  word for word (parsing is unchanged); only the opening and the rules of thumb differ.
+- **The shared prompts.** `chat.md`, `triage.md`, `report.md`, `report_summary.md`, `patterns.md` and `root_cause.md`
+  say who ORCA is through one `{role}` placeholder, filled by `domains.prompt(name, domain)` from `domains.ROLES`:
+  "a senior BIM coordinator" for construction (so Northbank's prompts are byte for byte what they were), "a senior
+  mechanical integration engineer on a machine and automation cell" for machines. The domain reaches them from the
+  scene: the chat per turn (`Context.scene_id`), triage through `app._start_triage` (`triage.Job(domain=)`), reports
+  through `app._build_document` (`document.generate(domain=)`), patterns and root causes through their scene id.
+  A triage run started before any scene was open (a Navisworks report alone) reads as construction, and the run is
+  shared per report, not per domain.
+- `titles.md` names the meeting the titles are read out in (`{meeting}`: "a BIM coordination meeting", "a machine
+  cell design review"; `titles.Job(domain=)`, from the `?scene_id=` the page sends), and `triage.AUDIT` takes the
+  role (`domains.fill`). `domains.fill` also fills `{teams}`: `triage.md` and `report.md` name the report's teams, and
+  an empty list drops the " ({teams})" clause. No team names are fixed in any prompt or schema (below).
+- Written for any industry already: the prompts (`penetrations.md`, `requirements.md`, `step_classes.md`,
+  `context.md`, `escalation.md`).
 
 ### The prompt inventory
 
 | Prompt | Loaded by | Model | Asks for | Output | Notable rules |
 |---|---|---|---|---|---|
-| `domain_packs/construction.md` | `agent.resolve` (`pack="construction"`, the only pack it is given), as the system prompt with `guidance` appended | Muse Spark; Muse Wonder on a second try | An understanding, up to 5 candidate fixes best first, and advice for the reviewer | JSON object (not schema-held): `{understanding, candidates: [{title, kind, move: "A" or "B", delta_m, or split_m and dz_m, or steps, or split_m and depth_m and keep, rationale, also_needs}], advice}` | Six kinds (move, offset, route, resize, trim, penetration) with when to use each. Structure stays and services move; drainage never rises; smallest move with margin; resize only when moves, offsets and routes fail; never trim structure, a post or guarding to let a service pass; a penetration's `move` names the service; severity from numbers, not pixels; A red, B green, images A/B/C |
+| `domain_packs/construction.md` | `agent.resolve` (`pack="construction"`, for a scene that is not wholly from STEP: `domains.of`), as the system prompt with `guidance` appended | Muse Spark; Muse Wonder on a second try | An understanding, up to 5 candidate fixes best first, and advice for the reviewer | JSON object (not schema-held): `{understanding, candidates: [{title, kind, move: "A" or "B", delta_m, or split_m and dz_m, or steps, or split_m and depth_m and keep, rationale, also_needs}], advice}` | Six kinds (move, offset, route, resize, trim, penetration) with when to use each. Structure stays and services move; drainage never rises; smallest move with margin; resize only when moves, offsets and routes fail; never trim structure, a post or guarding to let a service pass; a penetration's `move` names the service; severity from numbers, not pixels; A red, B green, images A/B/C |
+| `domain_packs/machines.md` | `agent.resolve` (`pack="machines"`, for a scene opened from STEP: `domains.of`), as the system prompt with `guidance` appended | Muse Spark; Muse Wonder on a second try | The same as `construction.md` | The same JSON object as `construction.md` (its fix kinds and output contract are copied word for word) | Persona: a senior mechanical integration engineer coordinating a machine and automation cell (frames, guarding and fencing, conveyors and pallet stations, robot bases, cable chains, pneumatics). ORCA checks static geometry only: never claim robot reach or motion is clear. Plant structure, anchored frames and robot bases stay; trays, air lines and conduits move; guarding and safety zones stay intact; keep maintenance access and removal room; conveyors keep line and height; keep a cable chain's envelope clear |
 | `domain_packs/escalation.md` | `Workspace._escalate` appends it to the fix guidance (`escalation.PACK`) | Muse Wonder | A second, longer try that beats the first | Adds the `combined` kind: `{kind: "combined", steps: [{kind: move, offset or route, move: "A", "B" or a GlobalId, ...}]}` | Never repeat an idea that failed; beat the first try's fixes (a plain fix over a resize or an opening, more clearance, a smaller change); look past the two elements; structure and anything marked "stays" never moves; only services move to make room; one step must change A or B; prefer one element |
-| `domain_packs/triage.md` | `triage.triage_one`, plus `prompt_text(doc, "triage")` | the triage model | One verdict for one clash (or for a group of alike clashes) | Strict `triage.SCHEMA`: `understanding`, `verdict` (`real_clash`, `by_design`, `non_physical`, `modelling_error`), `severity`, `responsible` (Structure, MEP, Architecture, Site, none), `action`, `fix_hint`, `confidence` | Most raw results are noise; the test name can be wrong, trust classes and names; 0 mm or within the tolerance is a touch; severity from numbers |
-| `domain_packs/titles.md` | `titles.title_batch` | the triage model | A title per clash line, up to 40 lines per call | Strict `titles.SCHEMA`: `{titles: [{number, title}]}` | At most 12 words, sentence case; never an IFC class, a GlobalId or "Clash"; how they meet from the depth (touches at 5 mm or less, clips, runs into, sits inside, is n mm from); "modelled twice" only in a duplicates test; the element that would change first; describe, don't judge |
-| `domain_packs/patterns.md` | `plans.triage_patterns`, plus `prompt_text(doc, "triage")` | Muse Spark | A verdict per pattern (P1, P2, ...) | JSON mode: `{patterns: [{id, verdict, cause, action, rule}]}`; an unknown verdict becomes `real_problem` | `by_design` (a clash rule hides it), `modelling_error` (fix once at the source), `real_problem`; a constant overlap usually means a convention or a systematic error |
-| `domain_packs/root_cause.md` | `plans.build_root_cause`, plus `prompt_text(doc, "fixes")` | Muse Spark | The cause behind one element's clashes and a strategy | JSON mode: `{root_cause, strategy, reason}`; a strategy outside the three becomes `fix_partners` | `move_hub` only for elements that can move; `fix_partners` keeps the hub (a transfer girder) and changes what crosses it; `as_designed` edits nothing; say the cause in design terms; cover clashes the geometry found that the report missed |
-| `domain_packs/chat.md` | `chat.Chat.session` (the first message of every session) | Muse Spark | Short, plain answers using tools | Tool calls from `chat.TOOLS` (23 functions), then text | Each user message starts with a `[context]` line; call a clash "#39 title"; numbers only from tools, saying whose measure; propose_fixes, find_root_causes, find_patterns, check_* and detect_clashes each for its job; show what you talk about (show_clash); you cannot accept a fix; explore_wider_fix costs three proposals |
+| `domain_packs/triage.md` | `triage.triage_one` (`domains.prompt`, `{role}`, `{teams}`: the teams guessed for the report's models, `app._report_teams`), plus `prompt_text(doc, "triage")` | the triage model | One verdict for one clash (or for a group of alike clashes) | Strict `triage.SCHEMA`: `understanding`, `verdict` (`real_clash`, `by_design`, `non_physical`, `modelling_error`), `severity`, `responsible` (one of those teams or none: `triage.schema_for`; free text when none is known), `action`, `fix_hint`, `confidence` | Most raw results are noise; the test name can be wrong, trust classes and names; 0 mm or within the tolerance is a touch; severity from numbers |
+| `domain_packs/titles.md` | `titles.title_batch` (`domains.prompt`, `{meeting}`) | the triage model | A title per clash line, up to 40 lines per call | Strict `titles.SCHEMA`: `{titles: [{number, title}]}` | At most 12 words, sentence case; never an IFC class, a GlobalId or "Clash"; how they meet from the depth (touches at 5 mm or less, clips, runs into, sits inside, is n mm from); "modelled twice" only in a duplicates test; the element that would change first; describe, don't judge |
+| `domain_packs/patterns.md` | `plans.triage_patterns` (`domains.prompt`, `{role}`), plus `prompt_text(doc, "triage")` | Muse Spark | A verdict per pattern (P1, P2, ...) | JSON mode: `{patterns: [{id, verdict, cause, action, rule}]}`; an unknown verdict becomes `real_problem` | `by_design` (a clash rule hides it), `modelling_error` (fix once at the source), `real_problem`; a constant overlap usually means a convention or a systematic error |
+| `domain_packs/root_cause.md` | `plans.build_root_cause` (`domains.prompt`, `{role}`), plus `prompt_text(doc, "fixes")` | Muse Spark | The cause behind one element's clashes and a strategy | JSON mode: `{root_cause, strategy, reason}`; a strategy outside the three becomes `fix_partners` | `move_hub` only for elements that can move; `fix_partners` keeps the hub (a transfer girder) and changes what crosses it; `as_designed` edits nothing; say the cause in design terms; cover clashes the geometry found that the report missed |
+| `domain_packs/chat.md` | `chat.Chat.session`, and set again at each `Chat.turn` in the voice of the turn's scene (`domains.prompt`, `{role}`) | Muse Spark | Short, plain answers using tools | Tool calls from `chat.TOOLS` (23 functions), then text | Each user message starts with a `[context]` line; call a clash "#39 title"; numbers only from tools, saying whose measure; propose_fixes, find_root_causes, find_patterns, check_* and detect_clashes each for its job; show what you talk about (show_clash); you cannot accept a fix; explore_wider_fix costs three proposals |
 | `domain_packs/context.md` | `context_planner.build` | Muse Spark | Complete arrangements of up to three edit groups for one clash | Tool calls from `context_planner.TOOLS` (`inspect_element`, `inspect_neighbourhood`, `evaluate_proposal`) | Only discovered GlobalIds; at most 3 edit groups, 6 model calls, 12 trials, 120 s, 3 alternatives; `Pset_SightlineConstraints.KeepFixed` forbids edits; offsets split along the run, vertical or lateral; never claim engineering adequacy; an empty search is "inconclusive", never "no solution" |
 | `domain_packs/penetrations.md` | `hosts.read` | the triage model | A reading per kind of host a service would pass through | Strict `hosts.SCHEMA`: `{readings: [{kind, verdict, reviewer, fit, limits: {max_depth_ratio, keep_from_ends_depths, keep_from_edges_m, zone}, conditions, reasoning}]}` | Verdicts `allowed`, `with_review`, `not_advised`, `never`, each with examples (a transfer beam or column never); one reviewer; `annular` or `fitted`; limits null when they do not apply; thin facts lean to `with_review` |
 | `domain_packs/requirements.md` | `requirements.suggest` | Muse Spark | A draft of the project's coordination requirements from an inventory of the models | Strict `requirements.SUGGEST_SCHEMA`: `{summary, groups, checks, who_moves, by_design, guidance: {triage, fixes}}` | Any industry, the models' own words; only teams and classes that appear in the files; 2 to 8 groups; one check per pair and per group against itself; at L5 every group is `none`; by-design pairs few and certain |
 | `domain_packs/step_classes.md` | `step.classify` | the triage model | An IFC class and type for each STEP part, 200 parts per call | Strict schema: `{parts: [{i, class, type}]}`, `class` limited to `step.CLASSES` | From the name and groups only, never invented; a name that says nothing becomes a proxy with its group's name; conduits are `CONDUITSEGMENT` |
-| `domain_packs/report.md` | `document.explain`, up to 3 images per page | Muse Spark | The text of one clash's report page | Strict `document.EXPLAIN_SCHEMA`: `{explanation, recommended_action, review_points: [{team, point}]}` | A draft every named team reviews; a verified fix means "clash gone, 25 mm clear, nothing new hit" and no more (structural approval, cost and access are for the teams) |
-| `domain_packs/report_summary.md` | `document.summarise` | Muse Spark | The report's opening summary and actions per team | Strict `document.SUMMARY_SCHEMA`: `{summary, team_actions: [{team, actions}]}` | Three to five sentences; numbers, no marketing, no restating every clash |
+| `domain_packs/report.md` | `document.explain` (`domains.prompt`, `{role}`, `{teams}`: the team names the user typed), up to 3 images per page | Muse Spark | The text of one clash's report page | Strict `document.EXPLAIN_SCHEMA`: `{explanation, recommended_action, review_points: [{team, point}]}` | A draft every named team reviews; a verified fix means "clash gone, 25 mm clear, nothing new hit" and no more (structural approval, cost and access are for the teams) |
+| `domain_packs/report_summary.md` | `document.summarise` (`domains.prompt`, `{role}`) | Muse Spark | The report's opening summary and actions per team | Strict `document.SUMMARY_SCHEMA`: `{summary, team_actions: [{team, actions}]}` | Three to five sentences; numbers, no marketing, no restating every clash |
 
 ### Prompts written in code
 
@@ -293,8 +321,8 @@ or the recommend-only text.
 | `built.JUDGE_SYSTEM` with `built.JUDGE` (`{model_view_objects, differences: [{kind, what, where, size}], verdict}`) | `built.judge` | Compare the restyle with the model view region by region; image 3 (the ids picture) only to read image 1 |
 
 Changing a prompt's version-free text changes behaviour silently: run the eval that covers it
-([18](18-testing-and-evals.md)). The triage prompt and schema are shared with `evals/navisworks_triage.py`, so its
-scores describe the app.
+([18](18-testing-and-evals.md)). The triage prompt (construction's voice, `domains.prompt("triage")`) and schema are shared
+with `evals/navisworks_triage.py`, so its scores describe the app.
 
 ## Money
 
@@ -386,6 +414,7 @@ its env vars and who is exempt are owned by [16 · Security, caps and cost contr
 - A new feature that calls a model (add a row to "Which feature uses which model").
 - A new, renamed or removed file in `server/sightline/domain_packs/`, a change to what a prompt asks for or the schema
   it is held to, or a new prompt written in code (`tests/test_docs_map.py` checks the inventory).
+- A new domain, a change to how `domains.of` picks one, or a new placeholder in the shared prompts.
 - A change to `PRICES`, `Usage`, `spend.py`, an estimate (`escalation.ESTIMATE_USD`, `built.ESTIMATE_USD`,
   `built.PICTURES_USD`, `built.IMAGE_USD`) or how Show it built falls back to lighter judges.
 - A change to the voice request shapes (`transcribe`, `voice_live.handshake`).

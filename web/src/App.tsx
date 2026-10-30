@@ -29,7 +29,7 @@ import { TriageCard, type TriageRun } from "./Triage";
 import { DetectSetupCard, DetectSummary, type DetectProgress } from "./Detect";
 import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
-import { Popover, Tooltips } from "./ui";
+import { Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode, type VisualStyle } from "./viewer/Viewer";
 import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./ViewerToolbar";
@@ -39,6 +39,7 @@ import { MeasurePanel } from "./MeasurePanel";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
+import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type NotchStatus } from "./Brand";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { PropertySets } from "./Properties";
@@ -152,6 +153,11 @@ export function App() {
   });
   const down = useRef<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Opening models, step by step (Brand.tsx LoadCard and the notch); null when nothing is opening.
+  const [loading, setLoading] = useState<LoadProgress | null>(null);
+  // A fix the server kept (markFixed): the mark settles once beside it.
+  const [kept, setKept] = useState<{ text: string; detail?: string; n: number } | null>(null);
+  const keptTimer = useRef<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [chosen, setChosen] = useState<number | null>(null);
@@ -489,7 +495,7 @@ export function App() {
 
   // A clock for the live status lines while an agent works.
   const working = (!!progress && progress.phase !== "done") || (!!planRun && planRun.phase !== "done")
-    || (!!triageRun && !triageRun.done) || contextWorking;
+    || (!!triageRun && !triageRun.done) || contextWorking || !!loading;
   useEffect(() => {
     if (!working) return;
     const t = setInterval(() => setNow(Date.now()), 500);
@@ -1039,38 +1045,47 @@ export function App() {
     pilot.current?.cancel();
     setChatAsk(undefined);
     setContext(null); setContextChosen(null); setContextNames({}); setAcknowledged([]); setViewContext(false); setViewPlan(false);
-    setBusy(existing ? "Reopening your session…" : upload ? `Uploading ${names.length} model${names.length > 1 ? "s" : ""}${hasStep ? " and converting the STEP" : ""}…`
-      : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`);
+    const title = existing ? "Reopening your session…" : upload ? `Uploading ${names.length} model${names.length > 1 ? "s" : ""}${hasStep ? " and converting the STEP" : ""}…`
+      : hasStep ? "Opening the STEP model…" : `Loading ${names.length} model${names.length > 1 ? "s" : ""}…`;
+    setBusy(title);
+    let load: LoadProgress = { title: title.replace(/…$/, ""), files: names.map(shortName), step: "server", fetched: 0, bytes: 0, drawn: 0, elements: 0, started: Date.now(), ends: {} };
+    const step = (next: Partial<LoadProgress>) => { load = { ...load, ...next }; if (sceneEpoch.current === epoch) setLoading(load); };
+    step({}); setNow(Date.now());
     setError(null); resetWork(false, true);
     try {
       if (upload && !existing) {
         const refusal = uploadRefusal(source as File[], uploadMax);
         if (refusal) throw new Error(refusal);
       }
-      const { id, files, step, revision } = existing ?? (upload
+      const { id, files, step: stepMap, revision } = existing ?? (upload
         ? await api.uploadModelsStream(source as File[], (e) => {
           const line = uploadStatus(e, hasStep);
-          if (line && sceneEpoch.current === epoch) setBusy(line);
+          if (line && sceneEpoch.current === epoch) { setBusy(line); step({ line }); }
         })
         : await api.open(source as string[]));
       if (sceneEpoch.current !== epoch) return;
       if (upload) setBusy("Drawing the models…");
+      step({ step: "download", files: files.map(shortName), ends: { server: Date.now() - load.started } });
       // An uploaded IFC is parsed from the visitor's own file; a STEP comes back converted, samples come from the server.
       const bytes = await Promise.all(files.map(async (_, i) => {
-        const local = upload ? localFile(source as File[], files, step, i) : null;
-        return local ? new Uint8Array(await local.arrayBuffer()) : api.file(id, i);
+        const local = upload ? localFile(source as File[], files, stepMap, i) : null;
+        const got = local ? new Uint8Array(await local.arrayBuffer()) : await api.file(id, i);
+        step({ fetched: load.fetched + 1, bytes: load.bytes + got.byteLength });
+        return got;
       }));
       if (sceneEpoch.current !== epoch) return;
-      const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch);
+      step({ step: "draw", ends: { ...load.ends, download: Date.now() - load.started } });
+      const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch,
+        (drawn, elements) => step({ drawn, elements }));
       if (sceneEpoch.current !== epoch || !stats) return;
       sceneRevision.current = revision ?? null;
       setModelNames(files.map(shortName));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
-      setStepFiles(Object.values(step ?? {})); setSceneFiles(files); setResumable(null); sceneUploaded.current = upload;
+      setStepFiles(Object.values(stepMap ?? {})); setSceneFiles(files); setResumable(null); sceneUploaded.current = upload;
       return id;
-    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
+    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) { setBusy(null); setLoading(null); } }
   }
 
   /** The start page's buttons: open the demo models and let ORCA check them (the golden path also picks the duct
@@ -1133,7 +1148,7 @@ export function App() {
         setNaming((n) => Math.max(0, n - Object.keys(e.items).length));
       }
       if (e.type === "done") setNaming(0);
-    }).catch(() => { if (live) setNaming(0); });  // no titles (no key, cap reached): the plain names stay
+    }, sceneId).catch(() => { if (live) setNaming(0); });  // no titles (no key, cap reached): the plain names stay
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report?.id]);
@@ -1916,6 +1931,14 @@ export function App() {
       if (title) fixed[c.id] = title;
     }
     setFixes((f) => ({ ...f, ...fixed }));
+    // Only here, after the server kept the fix: the mark settles once (docs/brand-assets.md, "Motion semantics").
+    const n = Object.keys(fixed).length;
+    if (n) {
+      const one = report.clashes.find((c) => fixed[c.id]);
+      setKept({ text: n === 1 ? "Fix kept in the model" : `${n} fixes kept in the model`, detail: n === 1 && one ? `${clashLabel(one)}: checked again` : "Each checked again", n: Date.now() });
+      window.clearTimeout(keptTimer.current);
+      keptTimer.current = window.setTimeout(() => setKept(null), 3200);
+    }
   }
 
   function focusItem(it: PlanItem) {
@@ -2516,13 +2539,15 @@ export function App() {
     reveal: (sel, el) => {
       const view = el?.closest("[data-left-view]")?.getAttribute("data-left-view");
       if (view === "clashes" || view === "insights") setLeftView(view);
+      // Requirements and Report are in the menu on a desktop and a phone (a tablet keeps Report in its bar).
+      if (!el && /data-tour=["']?(report|export|requirements)\b/.test(sel) && (!compact || layout === "phone")) { setMenuOpen(true); return; }
       if (docked) {  // the panel it is in, open and in this window
         const id = el?.closest("[data-panel]")?.getAttribute("data-panel") ?? el?.closest("[data-panel-tab]")?.getAttribute("data-panel-tab");
         if (id && isPanel(id)) dock.current?.show(id, { dock: true });
         return;
       }
       if (!compact) return;
-      if (!el) { if (/data-tour=["']?(report|export|requirements)\b/.test(sel) && layout === "phone") setMenuOpen(true); return; }
+      if (!el) return;
       if (el.closest(".pane.left")) { setListOpen(true); if (snap === "peek") setSnap("half"); }
       else if (el.closest(".pane.right")) {
         setListOpen(false);
@@ -2598,6 +2623,43 @@ export function App() {
     const open = (c: ReportClash) => c.id !== clash.id && !fixes[c.id] && !reviewed[c.id] && !!matches[c.id]?.a && !!matches[c.id]?.b;
     return list.slice(at + 1).find(open) ?? list.slice(0, Math.max(0, at)).find(open) ?? null;
   })();
+  // The notch over the model (desktop): what ORCA is doing now, from the same live state as the peek line. While the
+  // first models open, the card in the middle says it in full and the notch keeps the logo.
+  const notchStatus: NotchStatus | null = loading
+    ? (stats ? { title: loading.title, parts: loading.step === "draw" ? { done: loading.drawn, total: loading.files.length } : undefined,
+        detail: loading.step === "server" ? loading.line ?? "Opening on the server"
+          : loading.step === "download" ? `Downloading ${loading.fetched} of ${loading.files.length}`
+          : loading.drawn < loading.files.length ? `Drawing model ${loading.drawn + 1} of ${loading.files.length}: ${loading.files[loading.drawn]}` : "Fitting the view" }
+      : null)
+    : busy ? { title: busy.replace(/…$/, "") }
+    : detecting ? { title: "Checking the models", detail: detecting.phase }
+    : proposing ? { title: clash ? `Fixing #${clash.number}` : "Proposing fixes", detail: statusLine(progress, now, proposal?.attempts ?? []) }
+    : planning ? { title: "Building a plan" }
+    : contextWorking ? { title: "Exploring a wider fix" }
+    : triageRun && !triageRun.done ? { title: "Triage is sorting the clashes" }
+    : null;
+  // The model's top right corner (desktop): the one main action, what is connected, and the menu with everything else.
+  const corner = (
+    <div className="corner" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+      {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
+      {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
+      {reqLabel && !landing && <button className="btn req-pill" onClick={() => setReqOpen(true)} data-tip-side="bottom"
+        data-tip={`Checking, triage and fixes follow "${reqSaved!.doc.name}" (${reqLabel})`}><ClipboardCheck size={15} aria-hidden /><span className="req-pill-label"> {reqLabel}</span></button>}
+      {agentLink && <button className="btn agent-pill" onClick={() => setAgentOpen(true)} aria-label="Agent connected" data-tip-side="bottom"
+        data-tip={`An agent works on this session over MCP · the link has ${timeLeft(agentLink, now)} left`}>
+        <Bot size={15} aria-hidden /><span className="lbl"> {agentLink.last_call ? `Agent · ${agentLink.last_call.tool}` : "Agent · waiting"}</span></button>}
+      {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
+        owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
+        {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}
+        {ownerSettings.escalation ? ` · second try ${ownerSettings.escalation}` : ""}</span>}
+      <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
+      {sceneId && !gone?.scene && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
+        data-tip={stepFiles.length ? "Download the changed models: the STEP with its fixes, and the IFC" : "Download the changed IFC files"}>
+        <Download size={15} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
+      <button className="btn menu-btn" data-tour="menu" aria-expanded={menuOpen} aria-label="Menu" data-tip="Models, coordinate, requirements, report, agent, help" data-tip-side="bottom"
+        onClick={() => setMenuOpen(true)}><Menu size={18} aria-hidden /></button>
+    </div>
+  );
   // The phone sheet's peek line: what is happening now, and the one next step, so the sheet is useful folded down.
   const peekLine: { text: React.ReactNode; live?: boolean; action?: { label: string; run: () => void; disabled?: boolean; tour?: string } } =
     busy ? { text: busy, live: true }
@@ -2714,11 +2776,12 @@ export function App() {
     loading={elementProps?.gid !== selected.globalId || elementProps.loading} />;
 
   return (
-    <div className={`app ${docked ? "docked" : ""} ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${starting ? "starting" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
+    <div className={`app ${compact ? "" : "notched"} ${docked ? "docked" : ""} ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${starting ? "starting" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
       style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}>
       {compact ? (
       <header className="bar">
-        <span className="brand"><span className="logo" aria-hidden>◎</span><b>ORCA</b></span>
+        <button type="button" className="brand" onClick={() => openAbout()} aria-label="About ORCA">
+          {layout === "phone" ? <AppIcon size={30} /> : <Wordmark height={24} />}</button>
         <span className="spacer" />
         {layout === "tablet" && !landing && (report || sceneId) && <button className={`btn ghost ${listOpen ? "on" : ""}`} data-tour="drawer"
           aria-expanded={listOpen} onClick={() => setListOpen(!listOpen)}>
@@ -2734,47 +2797,7 @@ export function App() {
         <button className="btn ghost menu-btn" data-tour="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
           <Menu size={18} aria-hidden /><span>Menu</span></button>
       </header>
-      ) : (
-      <header className="bar">
-        <div className="bar-side">
-        <Popover icon={Boxes} label="Models" text="Models" tip="bottom">
-          {modelsMenu}
-        </Popover>
-        {stats && <span className="stat mono" title={`${modelNames.join(", ")}: ${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>
-          {stats.elements.toLocaleString()} elements</span>}
-        <Popover icon={Radar} label="Coordinate" text="Coordinate" tip="bottom">
-          {coordinateMenu}
-        </Popover>
-        {!landing && sceneId && <button className={`btn ${reqLabel ? "req-pill" : "ghost"}`} data-tour="requirements" onClick={() => setReqOpen(true)}
-          aria-label="Coordination requirements" data-tip-side="bottom"
-          data-tip={reqLabel ? `Checking, triage and fixes follow "${reqSaved!.doc.name}" (${reqLabel})` : "Optional: set the design level, how strict to be and who moves. Off: ORCA's defaults"}>
-          <ClipboardCheck size={15} aria-hidden />{reqLabel ? <span className="req-pill-label"> {reqLabel}</span> : <span className="lbl"> Requirements</span>}</button>}
-        <button className="btn ghost" onClick={() => openAbout()} aria-label="About ORCA" title="About ORCA: how it works, the fixes, the AI, the proof"><Info size={15} aria-hidden /><span className="lbl"> About ORCA</span></button>
-        {!landing && !touring && (stats || report) && <button className="btn ghost" onClick={() => startTour(cellOpen ? "cell" : "northbank")} aria-label="Tour" title="Take the guided tour"><Compass size={15} aria-hidden /><span className="lbl"> Tour</span></button>}
-        </div>
-        <span className="brand"><span className="logo" aria-hidden>◎</span><b>ORCA</b></span>
-        <div className="bar-side end">
-        {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
-        {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
-        {!landing && <Popover icon={LayoutPanelLeft} label="Panels and layout" tip="bottom">{layoutMenu}</Popover>}
-        {!landing && <button className={`btn ${agentLink ? "agent-pill" : "ghost"}`} onClick={() => setAgentOpen(true)}
-          aria-label={agentLink ? "Agent connected" : "Connect an agent"} data-tip-side="bottom"
-          data-tip={agentLink ? `An agent works on this session over MCP · the link has ${timeLeft(agentLink, now)} left` : "Let an AI agent (Muse Code, Claude) work on this session over MCP"}>
-          {agentLink ? <><Bot size={15} aria-hidden /><span className="lbl"> {agentLink.last_call ? `Agent · ${agentLink.last_call.tool}` : "Agent · waiting"}</span></>
-            : <><Plug size={15} aria-hidden /><span className="lbl"> Connect an agent</span></>}</button>}
-        {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
-          owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
-          {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}
-          {ownerSettings.escalation ? ` · second try ${ownerSettings.escalation}` : ""}</span>}
-        <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
-        {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
-          <FileText size={15} aria-hidden /> Report</button>}
-        {sceneId && !gone?.scene && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
-          data-tip={stepFiles.length ? "Download the changed models: the STEP with its fixes, and the IFC" : "Download the changed IFC files"}>
-          <Download size={15} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
-        </div>
-      </header>
-      )}
+      ) : null}
       <input ref={modelInput} type="file" hidden multiple accept=".ifc,.step,.stp" disabled={!!busy}
         onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) void openDemo(files); }} />
       <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
@@ -2826,7 +2849,7 @@ export function App() {
         {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b || selected)} views={viewsControls} split={rail3d()}
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onStyle={(style) => setTool((t) => ({ ...t, style }))} onToggle={toggle}
           onView={(p) => viewer.current?.view(p)} onFit={() => viewer.current?.home()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
-        {stats && <ViewPanes viewer={viewer.current} offset={layout === "phone" ? 8 : 64} compact={layout === "phone"} chip={(clash || a || b) && !viewPlan && !activeContext ? (
+        {stats && <ViewPanes viewer={viewer.current} offset={layout === "phone" ? 8 : 64} compact={layout === "phone"} clear={compact ? 0 : 52} chip={(clash || a || b) && !viewPlan && !activeContext ? (
           <div className="clash-chip">
             <span className="sw-pair"><i className="sw red" /><i className="sw green" /></span>
             <span className="clash-chip-text">{clashBusy ? `ORCA is working on ${clash ? `#${clash.number}` : "this pair"}` : clash ? clashLabel(clash) : "Your pair"}</span>
@@ -2855,7 +2878,7 @@ export function App() {
               agent: !!resumable.saved.link, agentLeft: resumable.saved.link ? timeLeft(resumable.saved.link, now) : null, savedAt: resumable.saved.saved_at, onResume: () => void resumeSession(), onFresh: startFresh } : undefined,
             details: <>
               Loads {picked.length} building model{picked.length === 1 ? "" : "s"} ({picked.map(shortName).join(", ")}) and
-              checks them, in about 25 seconds. Other models: {compact ? <><b>Menu</b>, then <b>Models</b></> : <><b>Models</b>, in the header</>}.
+              checks them, in about 25 seconds. Other models: <b>Menu</b>, then <b>Models</b>.
             </>,
           }} />
         )}
@@ -2871,8 +2894,11 @@ export function App() {
             <details className="all-props"><summary>All properties</summary>{elementSets}</details>
           </div>
         )}
-        {busy && <div className="overlay live"><i className="spinner" aria-hidden />{busy}</div>}
-        {proposing && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
+        {!compact && <Notch status={notchStatus} onLogo={() => openAbout()} />}
+        {!compact && corner}
+        {loading && !stats && <LoadCard load={loading} now={now} />}
+        {compact && busy && <div className="overlay live"><i className="spinner" aria-hidden />{busy}</div>}
+        {compact && proposing && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
         <div className={`pilot-glow ${pilotStatus?.driving ? "on" : ""}`} aria-hidden />
         {pilotStatus && (
           <div className={`pilot ${pilotStatus.state}`} role="status" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
@@ -2892,7 +2918,7 @@ export function App() {
           </div>
         )}
         {error && !goneWords.current.has(error) && <div className="overlay error" role="alert" onClick={() => setError(null)}>{error}<X size={14} aria-hidden /></div>}
-        {toast && <div className="toast" role="status">{toast}</div>}
+        {toast ? <div className="toast" role="status">{toast}</div> : kept && <KeptToast key={kept.n} text={kept.text} detail={kept.detail} />}
       </main>)}
 
       {docked ? <div className="dock-area"><DockHost slots={slots} sizes={widths} tabs={dockTabs} onReady={(d) => { dock.current = d; }}
@@ -3141,8 +3167,10 @@ export function App() {
           </div>
         </SheetBar>
       )}
-      {menuOpen && compact && <MenuSheet title="ORCA" onClose={() => setMenuOpen(false)}>
-        <section className="menu-section"><h3><Boxes size={15} aria-hidden /> Models</h3>{modelsMenu(() => setMenuOpen(false))}</section>
+      {menuOpen && <MenuSheet title="ORCA" onClose={() => setMenuOpen(false)}>
+        <section className="menu-section"><h3><Boxes size={15} aria-hidden /> Models{stats && <span className="mono why"
+          title={`${modelNames.join(", ")}: ${stats.elements} elements, ${Math.round(stats.triangles / 1000)}k triangles, parsed in ${(stats.parseMs / 1000).toFixed(1)} s`}>
+          {stats.elements.toLocaleString()} elements</span>}</h3>{modelsMenu(() => setMenuOpen(false))}</section>
         <section className="menu-section"><h3><Radar size={15} aria-hidden /> Coordinate</h3>{coordinateMenu(() => setMenuOpen(false))}</section>
         {!landing && <section className="menu-section"><h3>This session</h3>
           {sceneId && <button className="pop-item" data-tour="requirements" onClick={() => { setMenuOpen(false); setReqOpen(true); }}>
@@ -3154,9 +3182,10 @@ export function App() {
           <button className="pop-item" onClick={() => { setMenuOpen(false); setAgentOpen(true); }}>
             {agentLink ? <><Bot size={16} aria-hidden /> Agent connected · {timeLeft(agentLink, now)} left</> : <><Plug size={16} aria-hidden /> Connect an agent</>}</button>
         </section>}
+        {!compact && !landing && <section className="menu-section"><h3><LayoutPanelLeft size={15} aria-hidden /> Panels and layout</h3>{layoutMenu(() => setMenuOpen(false))}</section>}
         <section className="menu-section"><h3>Help</h3>
           <button className="pop-item" onClick={() => { setMenuOpen(false); openAbout(); }}><Info size={16} aria-hidden /> About ORCA</button>
-          {!touring && <button className="pop-item" onClick={() => { setMenuOpen(false); startTour(cellOpen ? "cell" : "northbank"); }}>
+          {!touring && (compact || stats || report) && <button className="pop-item" onClick={() => { setMenuOpen(false); startTour(cellOpen ? "cell" : "northbank"); }}>
             <Compass size={16} aria-hidden /> Take the guided tour</button>}
         </section>
       </MenuSheet>}

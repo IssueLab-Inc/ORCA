@@ -40,11 +40,31 @@ The production `<orca-phase>` element is controlled by its `phase` attribute. It
 
 The native elements are dependency-free and scoped with shadow DOM. They inherit colour, expose accessible labels, support pause and reduced attributes, and honour `prefers-reduced-motion`. React TypeScript wrappers use the same native implementation. Animated SVGs contain CSS and vector paths, without script. GIF/APNG cannot detect operating-system motion preferences; their host must select static artwork when necessary.
 
-## Adoption boundary
+## In the app
 
-This PR stores and documents the approved library. The existing favicon, application header, loading states, reports, viewer and production deployment continue to use their current assets. The redesign should select only the required files for serving and wire phase/completion feedback to real events. It should preserve the loading and acceptance semantics of the application.
+Adopted on Oct 30 (`claude/laughing-allen-29oggh`). The app does not import the kit: it carries copies of what it uses.
 
-Before adoption, run the consumer's production build and tests, check sizes and colour contrast in the actual layouts, and exercise reduced motion and phase transitions in the running app. Package checks do not replace integration checks.
+- **Header:** the desktop has no header bar. The wordmark hangs from the model's top edge in a notch (`web/src/Brand.tsx`,
+  `Notch`), and the model's top right corner holds Export and the menu (`MenuSheet`, the same panel phones use). Phones
+  and tablets keep their compact bar with the wordmark (tablet) or the app icon (phone).
+- **Loading:** while ORCA works the notch grows to say what it is doing, with Orbit on the split-O; while the first
+  models open, a card in the middle of the empty model lists the real steps (opened on the server, downloaded n of n,
+  drawing model k of n). Both read live state; nothing advances on a timer. Every `.spinner` is the optical micro
+  symbol (`web/public/brand/orca-spinner.svg`) as a CSS mask, at Orbit's 1.6 s.
+- **Completion:** Settle plays once in a toast after the server kept a fix (`markFixed`), never for a proposal.
+- **Notch size:** the wordmark there is 20 px high (84 px wide), smaller than the guide's 128 px minimum artwork width;
+  an owner decision on Oct 30, so the notch stays small over the model.
+- **Report:** the PDF cover starts with the wordmark and BY ISSUELAB (`document.LOCKUP`, navy).
+- **Boot:** `web/index.html` shows the wordmark with the Reveal letters until React mounts.
+- **Icons:** `web/public/favicon.svg` (adaptive) and `web/public/brand/` (ICO, Apple touch, Android, maskable,
+  manifest, pinned tab, `og.png`); theme colour navy.
+- **Colour:** the app's accent is navy `#052640`, text ink `#11161B`, the background paper, lines and muted text the
+  kit's. The viewer's own 3D colours (section box, measurements) are unchanged.
+- **Not used yet:** the `<orca-phase>` element (no Observe/Resolve/Check/Apply events are wired), social files other
+  than `og.png`, and the video files.
+
+Reduced motion stills Orbit, Settle and Reveal. Checked in Chromium at 1440×900 on Northbank (landing, loading card,
+working notch, loaded, menu, a selected clash); web tests and build in [22](architecture/22-build-log.md).
 
 ## Provenance and validation
 

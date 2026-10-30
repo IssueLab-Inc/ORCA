@@ -18,7 +18,8 @@ class Scripted:
         self.lock = threading.Lock()
 
     def complete_json(self, system, text, images=None, schema=None):
-        assert schema == triage.SCHEMA
+        # The schema of a triage reading; "responsible" may be held to the report's teams (triage.schema_for).
+        assert schema["required"] == triage.SCHEMA["required"] and schema["properties"]["verdict"] == triage.SCHEMA["properties"]["verdict"]
         with self.lock:
             self.asked.append(text)
         return {"understanding": "Duct through beam.", "verdict": "real_clash", "severity": "high",

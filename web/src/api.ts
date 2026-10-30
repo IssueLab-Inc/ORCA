@@ -434,7 +434,8 @@ export type ChatEvent =
   | { type: "done" };
 
 /** Coordination reports (server: document.py). */
-export type Team = "Structure" | "MEP" | "Architecture" | "Site";
+/** A team, named by the user (the report dialog); ORCA only guesses a first name per model (`ModelTeam.guess`). */
+export type Team = string;
 export interface ModelTeam { file: string; guess: Team; elements: number }
 /** A fix shown in the report: what it changes, and the view of the clash as it is and with the fix. */
 export interface Evidence {
@@ -722,8 +723,9 @@ export const api = {
   },
   report: (reportId: string) => call<Report>(`/reports/${reportId}`),
   /** Muse titles the report's clashes; one run per report is shared, so this may join one already going. */
-  titles: (reportId: string, onEvent: (e: TitleEvent) => void) =>
-    ndjson<TitleEvent>(`/reports/${reportId}/titles/stream`, {}, (e) => { onEvent(e); return e.type === "done"; }),
+  /** `sceneId`: the open models, whose domain (a building or a machine cell) the titles are written for. */
+  titles: (reportId: string, onEvent: (e: TitleEvent) => void, sceneId?: string | null) =>
+    ndjson<TitleEvent>(`/reports/${reportId}/titles/stream${sceneId ? `?scene_id=${sceneId}` : ""}`, {}, (e) => { onEvent(e); return e.type === "done"; }),
   /** A view of a clash ORCA found (A, B or C), captured in the browser for the fix agent, triage and the PDF. */
   saveView: async (reportId: string, clashId: string, label: string, png: Blob) => {
     const form = new FormData();
