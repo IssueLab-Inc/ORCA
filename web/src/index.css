@@ -59,7 +59,10 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .pane-head.solo { max-width: min(440px, calc(100% - 140px)); }
 .pane-head:not(.solo):not(.of-3d) { background: var(--surface); border-radius: 8px; padding: 3px 4px 3px 6px; box-shadow: var(--shadow); }
 .pane-head .pane-name { font-size: 12px; background: var(--surface); border-radius: 6px; padding: 4px 8px; box-shadow: var(--shadow); }
-.pane-head .pane-pick { font: inherit; font-size: 12.5px; font-weight: 600; border: 0; background: transparent; padding: 2px 2px; max-width: 150px; min-width: 0; cursor: pointer; }
+.pane-head > * { flex-shrink: 0; }
+.pane-head > .clash-chip { flex-shrink: 1; }
+/* The view picker is what gives way in a narrow pane (down to a few letters), never the buttons beside it. */
+.pane-head .pane-pick { font: inherit; font-size: 12.5px; font-weight: 600; border: 0; background: transparent; padding: 2px 2px; max-width: 150px; min-width: 64px; flex: 0 1 auto; text-overflow: ellipsis; cursor: pointer; }
 .pane-head .pop > .btn { margin: 0; padding: 3px 8px; font-size: 12px; font-family: var(--mono); }
 .pane-head .ibtn { width: 26px; height: 26px; }
 .pane-split { position: absolute; z-index: 3; background: transparent; touch-action: none; }

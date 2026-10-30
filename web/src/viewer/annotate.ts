@@ -87,7 +87,7 @@ export function annotate(g: CanvasRenderingContext2D, dpr: number, a: AnnotateIn
         g.fillStyle = "#2f8fdf"; g.beginPath(); g.arc(P.x, P.y, 4, 0, Math.PI * 2); g.fill(); g.restore();
       }
     }
-    north(g, rect.w - 34, 50);
+    north(g, rect.w - 34, 68);
   } else {
     const look = spec.kind === "section" ? sectionFrame(spec).look : facingLook(spec.facing);
     // Levels: a line across, its head at the right.
@@ -146,18 +146,33 @@ export function annotate(g: CanvasRenderingContext2D, dpr: number, a: AnnotateIn
     : spec.far != null ? `far clip ${spec.far.toFixed(2)} m` : "no far clip";
   const by = rect.h - 14;
   const tx = a.left + 16;
-  g.fillStyle = "rgba(251,251,248,.86)"; g.fillRect(tx - 8, by - 32, Math.max(Math.min(rect.w - 150 - a.left, 300), 120), 38);
-  g.fillStyle = INK; g.font = font(12.5, 700); g.textBaseline = "alphabetic"; g.textAlign = "left";
-  g.fillText(a.title.toUpperCase(), tx, by - 14);
-  g.fillStyle = MUTED; g.font = font(11); g.fillText(`${detail}  ·  ≈ 1:${sc}`, tx, by);
+  const title = a.title.toUpperCase(), sub = `${detail}  ·  ≈ 1:${sc}`;
+  // The title block as wide as its words, within the pane; the scale bar beside it, or above it when the pane is too
+  // narrow for both on one line.
+  g.font = font(12.5, 700); const tw = g.measureText(title).width;
+  g.font = font(11); const sw = g.measureText(sub).width;
+  const boxW = Math.max(Math.min(Math.max(tw, sw) + 16, rect.w - tx - 8), 60);
   const bx = rect.w - 18 - bar.pixels;
-  g.fillStyle = "rgba(251,251,248,.86)"; g.fillRect(bx - 8, by - 22, bar.pixels + 18, 28);
-  for (let i = 0; i < 4; i++) { g.fillStyle = i % 2 ? "#fff" : INK; g.fillRect(bx + (bar.pixels / 4) * i, by - 6, bar.pixels / 4, 4); }
-  g.strokeStyle = INK; g.lineWidth = 0.8; g.strokeRect(bx, by - 6, bar.pixels, 4);
-  g.fillStyle = INK; g.font = font(10.5); g.textAlign = "left"; g.fillText("0", bx - 2, by - 10);
-  g.textAlign = "right"; g.fillText(`${bar.metres >= 1 ? bar.metres : bar.metres * 1000}${bar.metres >= 1 ? " m" : " mm"}`, bx + bar.pixels + 4, by - 10);
+  const sy = tx - 8 + boxW > bx - 16 ? by - 44 : by;
+  g.fillStyle = "rgba(251,251,248,.86)"; g.fillRect(tx - 8, by - 32, boxW, 38);
+  g.fillStyle = INK; g.font = font(12.5, 700); g.textBaseline = "alphabetic"; g.textAlign = "left";
+  g.fillText(fit(g, title, boxW - 16), tx, by - 14);
+  g.fillStyle = MUTED; g.font = font(11); g.fillText(fit(g, sub, boxW - 16), tx, by);
+  g.fillStyle = "rgba(251,251,248,.86)"; g.fillRect(bx - 8, sy - 22, bar.pixels + 18, 28);
+  for (let i = 0; i < 4; i++) { g.fillStyle = i % 2 ? "#fff" : INK; g.fillRect(bx + (bar.pixels / 4) * i, sy - 6, bar.pixels / 4, 4); }
+  g.strokeStyle = INK; g.lineWidth = 0.8; g.strokeRect(bx, sy - 6, bar.pixels, 4);
+  g.fillStyle = INK; g.font = font(10.5); g.textAlign = "left"; g.fillText("0", bx - 2, sy - 10);
+  g.textAlign = "right"; g.fillText(`${bar.metres >= 1 ? bar.metres : bar.metres * 1000}${bar.metres >= 1 ? " m" : " mm"}`, bx + bar.pixels + 4, sy - 10);
   g.textAlign = "left";
   return handles;
+}
+
+/** Text cut with an ellipsis to `w` pixels in the current font. */
+function fit(g: CanvasRenderingContext2D, text: string, w: number): string {
+  if (g.measureText(text).width <= w) return text;
+  let t = text;
+  while (t.length > 1 && g.measureText(`${t}…`).width > w) t = t.slice(0, -1);
+  return `${t.trimEnd()}…`;
 }
 
 function line(g: CanvasRenderingContext2D, a: THREE.Vector2, b: THREE.Vector2) { g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); }

@@ -24,11 +24,14 @@ export function ViewPanes({ viewer, chip, offset, compact = false }: { viewer: V
   return (<>
     {panes.map((pane) => {
       const i = viewer.panes.indexOf(pane);
+      // The header's room: the pane less the rail (top-left pane) and a margin; less the maximise button for the rest.
+      const room = Math.max(pane.rect.w - (pane.rect.x < 4 ? offset : 8) - 16, 120);
       return (
         <div key={i} className={`pane-head of-${pane.spec.kind}`} style={{ left: pane.rect.x + (pane.rect.x < 4 ? offset : 8), top: pane.rect.y + 8,
-          maxWidth: Math.max(pane.rect.w - (pane.rect.x < 4 ? offset : 8) - 16, 120) }}
+          maxWidth: room }}
           onClick={stop} onPointerDown={stop} onDoubleClick={stop}>
-          {pane.spec.kind === "3d" ? <><b className="pane-name">3D</b>{chip}</> : <DrawingHead viewer={viewer} pane={pane} i={i} />}
+          {pane.spec.kind === "3d" ? <><b className="pane-name">3D</b>{chip}</>
+            : <DrawingHead viewer={viewer} pane={pane} i={i} room={room - (viewer.panes.length > 1 ? 30 : 0)} />}
           {viewer.panes.length > 1 && (
             <button className="ibtn" aria-label={viewer.maximisedPane === i ? "Back to the layout" : "Maximise this view"}
               data-tip={viewer.maximisedPane === i ? "Back to the layout" : "Maximise this view"} data-tip-side="bottom"
@@ -40,7 +43,11 @@ export function ViewPanes({ viewer, chip, offset, compact = false }: { viewer: V
   </>);
 }
 
-function DrawingHead({ viewer, pane, i }: { viewer: Viewer; pane: Pane; i: number }) {
+/** Widths (px) below which a drawing's header folds: the range button loses its words, then pin, go to the clash and
+ * fit move into the range menu. The view picker and maximise always stay. */
+const HEAD_FULL = 380, HEAD_SHORT = 300;
+
+function DrawingHead({ viewer, pane, i, room }: { viewer: Viewer; pane: Pane; i: number; room: number }) {
   const spec = pane.spec as DrawingSpec;
   const value = spec.kind === "plan" ? `plan:${spec.level}` : spec.kind === "section" ? "section" : `elevation:${spec.facing}`;
   const pick = (v: string) => {
@@ -49,22 +56,34 @@ function DrawingHead({ viewer, pane, i }: { viewer: Viewer; pane: Pane; i: numbe
     else if (kind === "section") viewer.setPaneSpec(i, spec.kind === "section" ? spec : viewer.defaultSpec("section"));
     else viewer.setPaneSpec(i, { kind: "elevation", facing: arg as Compass, far: spec.kind === "elevation" ? spec.far : null });
   };
+  const folded = room < HEAD_SHORT;
+  const pin = pane.pinned ? "Pinned: a clash I pick leaves it alone" : "Pin: keep this view when I pick a clash";
   return (<>
     <select className="pane-pick" value={value} onChange={(e) => pick(e.target.value)} aria-label="What this view shows">
       <optgroup label="Plans">{viewer.levels.map((l, k) => <option key={k} value={`plan:${k}`}>{l.name} · Plan</option>)}</optgroup>
       <optgroup label="Section"><option value="section">Section A–A</option></optgroup>
       <optgroup label="Elevations">{COMPASSES.map((c) => <option key={c} value={`elevation:${c}`}>{COMPASS_NAME[c]} elevation</option>)}</optgroup>
     </select>
-    <Popover icon={SlidersHorizontal} label="View range, depth and crop" text={rangeText(spec)} tip="bottom">
-      {() => <RangeMenu viewer={viewer} spec={spec} i={i} />}
+    <Popover icon={SlidersHorizontal} label={folded ? "This view: range, depth, crop, pin and fit" : "View range, depth and crop"}
+      text={room < HEAD_FULL ? undefined : rangeText(spec)} tip="bottom">
+      {() => <>
+        {folded && <div className="range-presets">
+          <button className="btn small" aria-pressed={pane.pinned} onClick={() => viewer.setPinned(i, !pane.pinned)}>
+            {pane.pinned ? <Pin size={13} aria-hidden /> : <PinOff size={13} aria-hidden />} {pane.pinned ? "Pinned" : "Pin"}</button>
+          <button className="btn small" disabled={!viewer.hasClash} onClick={() => viewer.paneToClash(i)}><LocateFixed size={13} aria-hidden /> Go to the clash</button>
+          <button className="btn small" onClick={() => viewer.fitPane(i)}><Maximize size={13} aria-hidden /> Fit</button>
+        </div>}
+        <RangeMenu viewer={viewer} spec={spec} i={i} />
+      </>}
     </Popover>
-    <button className="ibtn" aria-label={pane.pinned ? "Unpin: follow the clashes I pick" : "Pin: keep this view when I pick a clash"}
-      data-tip={pane.pinned ? "Pinned: a clash I pick leaves it alone" : "Pin: keep this view when I pick a clash"} data-tip-side="bottom"
-      aria-pressed={pane.pinned} onClick={() => viewer.setPinned(i, !pane.pinned)}>
-      {pane.pinned ? <Pin size={14} aria-hidden /> : <PinOff size={14} aria-hidden />}</button>
-    <button className="ibtn" aria-label="Go to the clash" data-tip={viewer.hasClash ? "Go to the clash" : "No clash on screen"} data-tip-side="bottom"
-      disabled={!viewer.hasClash} onClick={() => viewer.paneToClash(i)}><LocateFixed size={14} aria-hidden /></button>
-    <button className="ibtn" aria-label="Fit the whole model" data-tip="Fit the whole model" data-tip-side="bottom" onClick={() => viewer.fitPane(i)}><Maximize size={14} aria-hidden /></button>
+    {!folded && <>
+      <button className="ibtn" aria-label={pane.pinned ? "Unpin: follow the clashes I pick" : "Pin: keep this view when I pick a clash"}
+        data-tip={pin} data-tip-side="bottom" aria-pressed={pane.pinned} onClick={() => viewer.setPinned(i, !pane.pinned)}>
+        {pane.pinned ? <Pin size={14} aria-hidden /> : <PinOff size={14} aria-hidden />}</button>
+      <button className="ibtn" aria-label="Go to the clash" data-tip={viewer.hasClash ? "Go to the clash" : "No clash on screen"} data-tip-side="bottom"
+        disabled={!viewer.hasClash} onClick={() => viewer.paneToClash(i)}><LocateFixed size={14} aria-hidden /></button>
+      <button className="ibtn" aria-label="Fit the whole model" data-tip="Fit the whole model" data-tip-side="bottom" onClick={() => viewer.fitPane(i)}><Maximize size={14} aria-hidden /></button>
+    </>}
   </>);
 }
 

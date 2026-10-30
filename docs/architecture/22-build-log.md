@@ -1078,3 +1078,7 @@ Review of the drawing views (Oct 30; PR review on `feature/drawing-views`; code 
   Northbank: Isolate then Quad shows the whole model in the plan, North elevation redraws, annotations survive
   maximise and back, the splitter stops at 0.8 and stays put after, Home picks nothing, Go to the clash off after
   leaving, Back off after opening, the plan opens on Level 01.
+- **Narrow panes (owner feedback, same day):** a drawing's header overflowed its pane at smaller widths (the picker
+  squeezed to nothing, maximise outside the header). It now folds (range words, then pin / go / fit into the range
+  menu) and the picker shrinks last; the title block and scale bar stack when they would meet. Checked in Chromium in
+  Quad at 1600, 1366 and 1180 px: no control outside its header in any pane.

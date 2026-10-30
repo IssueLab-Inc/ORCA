@@ -488,7 +488,10 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
   standard views, projection, back and forward, Fly to clash and Set as Home; Views (layout, and whether drawings show
   the whole model or what the 3D view shows); saved views; visibility by model, level and class, and what is hidden for
   now; screenshot). Each pane's header (`ViewPanes.tsx`) has its view
-  picker, view range or depth and crop, pin, go to the clash, fit and maximise. On a phone (`compact`) one labelled
+  picker, view range or depth and crop, pin, go to the clash, fit and maximise. A narrow pane's header folds rather
+  than overflow: under 380 px the range button loses its words, under 300 px pin, go to the clash and fit move into
+  the range menu; the view picker shrinks to a few letters and maximise always stays. Its title block and scale bar
+  stack when they would meet, and a long title ends in "…". On a phone (`compact`) one labelled
   **Tools** popover (a sheet from the bottom) holds the same, beside **Go to clash** and **Fit**. The rail stops click,
   double-click and pointer-down events so they never reach the canvas.
 - **Connections:** hold Alt (Option) and point, or turn on Connections (L): what the element under the pointer is
