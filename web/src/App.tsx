@@ -564,6 +564,7 @@ export function App() {
         else if (e.type === "done") { setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error }); setTriageLive({}); }
       }, rerun);
     } catch (e) { setError((e as Error).message); trace.add({ type: "error", detail: (e as Error).message }); trace.end((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
+    trace.end("The stream ended before triage finished");   // nothing if it ended with its done event
   }
 
   // The requirements in use: registered with the server (content-addressed), then their id goes with every call.
@@ -759,7 +760,7 @@ export function App() {
     };
     set({ status: "working", step: "Muse Image is drawing two pictures from ORCA's view…", look: passes.look, cut, result: undefined, error: undefined });
     // Several pictures can be drawn at once (a plan's): each is a run of its own, and none grows the panel.
-    const trace = traceStart("built", origin, title, { look: passes.look }, { alone: false, grow: false });
+    const trace = traceStart("built", origin, title, {}, { alone: false, grow: false });
     const work = api.built(sid, { look: passes.look, ids: passes.ids, normals: passes.normals }, kind, (e) => { trace.add(e); set({ step: builtStep(e) }); })
       .then((res) => {
         trace.add({ ...res, type: "result" }); trace.end();
@@ -1032,6 +1033,7 @@ export function App() {
     const names = (source as (string | File)[]).map((x) => (typeof x === "string" ? x : x.name));
     const hasStep = names.some((n) => /\.(step|stp)$/i.test(n));
     ++workspaceEpoch.current; replaceChatWork(); retireDirectWork();
+    runs.stopAll("The models were opened again");
     const epoch = ++sceneEpoch.current;
     ++contextRequest.current; ++agentRun.current; ++planRequest.current;
     pilot.current?.cancel();
@@ -1105,7 +1107,6 @@ export function App() {
     if (busy) return;
     const workspace = ++workspaceEpoch.current;
     replaceChatWork(); retireDirectWork(); ++agentRun.current; ++planRequest.current; ++contextRequest.current; ++sceneEpoch.current;
-    runs.stopAll("The models were opened again");
     pilot.current?.cancel(); resetWork(); setContext(null); setContextChosen(null); setAcknowledged([]); setPlanKind("batch"); setChatAsk(undefined);
     setBusy(`Reading ${what}…`); setError(null);
     try {
@@ -1181,7 +1182,7 @@ export function App() {
       setReviewed(Object.fromEntries(Object.entries(keep).filter(([id]) => ids.has(id))));
       const still = selected && r.clashes.find((c) => c.id === selected);
       if (still) selectClash(still);
-    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); }
+    } catch (e) { traces.current.detect?.end((e as Error).message); if (sceneEpoch.current === epoch) setError((e as Error).message); }
     finally { setDetecting(null); }
   }
 
@@ -1556,10 +1557,10 @@ export function App() {
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. With
    * `first` (a second try), the first try's ideas stay in the activity table and the second's are numbered after them. */
-  function trackAgent(first: Proposal | null = null, origin: Origin = "you") {
+  function trackAgent(first: Proposal | null = null, origin: Origin = "you", title = "") {
     directContext.current?.retire();
     clearManual();
-    const trace = traceStart("propose", origin, clash ? clashLabel(clash) : "The pair you picked", { second: !!first });
+    const trace = traceStart("propose", origin, title, { second: !!first });
     const run = ++agentRun.current;
     const epoch = sceneEpoch.current;
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
@@ -1574,8 +1575,10 @@ export function App() {
     pilot.current?.start(first ? wonder : undefined);
     const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
     let attempts = first?.attempts.length ?? 0;
+    // Work that took over ends this run's record too (a plan, a wider fix, other models), whichever of these sees it first.
+    const superseded = () => { if (live()) return false; trace.end("Stopped when newer work took over"); return true; };
     const onEvent = (e: AgentEvent) => {
-      if (!live()) return;
+      if (superseded()) return;
       trace.add(e);
       pilot.current?.event(e);
       // A second try starting in the same stream (automatic): its ideas are numbered after the first's.
@@ -1604,7 +1607,7 @@ export function App() {
       }
     };
     const finish = (result: Proposal | null) => {
-      if (!live()) return;
+      if (superseded()) return;
       if (result) trace.add({ ...result, type: "result" });
       trace.end(result ? null : "Stopped before a result");
       const show = () => {
@@ -1618,7 +1621,7 @@ export function App() {
       if (pilot.current) pilot.current.finish(show); else show();
     };
     const retire = () => {
-      if (!live()) return;
+      if (superseded()) return;
       trace.end("Stopped");
       ++agentRun.current; pilot.current?.cancel();
       const owned = p;
@@ -1633,6 +1636,7 @@ export function App() {
   /** Each run the page watches, logged for Workings (docs/workings.md): one of each kind at a time, a new one ending the
    * one it replaces. Workings needs more room than the table, so the bottom bar grows for a run when it is short. */
   const traces = useRef<Partial<Record<RunKind, RunHandle>>>({});
+  const chatTitle = useRef("");   // the clash the chat's propose_fixes named, for its run's title
   const grownFrom = useRef<number | null>(null);
   function traceStart(kind: RunKind, origin: Origin, title: string, meta: Record<string, unknown> = {},
                       { alone = true, grow = true }: { alone?: boolean; grow?: boolean } = {}) {
@@ -1644,8 +1648,11 @@ export function App() {
   }
   /** An element's name, from the open report's clashes (for a run's title). */
   const elementName = (id: string) => { for (const c of report?.clashes ?? []) for (const e of [c.a, c.b]) if (e.global_id === id) return e.name; return ""; };
+  /** A proposal's title: its clash, else the pair by name. */
+  const pairTitle = (c: ReportClash | null | undefined, x?: string | null, y?: string | null) => c ? clashLabel(c)
+    : x && y ? `${elementName(x) || "Element A"} × ${elementName(y) || "Element B"}` : "";
   function growActivity() {
-    const was = dock.current?.fitBar("activity", WORKINGS_HEIGHT, WORKINGS_SHORT) ?? null;
+    const was = dock.current?.fitBar("activity", WORKINGS_HEIGHT, { below: WORKINGS_SHORT }) ?? null;
     if (was != null && grownFrom.current == null) grownFrom.current = was;
   }
   /** Steps or Workings in the Activity panel; back on Steps, a bar Workings grew is given back. */
@@ -1653,7 +1660,8 @@ export function App() {
     setWorkings((w) => ({ ...w, view }));
     if (!docked) return;
     if (view === "work") growActivity();
-    else if (grownFrom.current != null) { dock.current?.fitBar("activity", grownFrom.current); grownFrom.current = null; }
+    // Only from the height Workings set: a bar the person has resized since stays as they left it.
+    else if (grownFrom.current != null) { dock.current?.fitBar("activity", grownFrom.current, { at: WORKINGS_HEIGHT }); grownFrom.current = null; }
   }
   function setWorkingsOn(on: boolean) {
     if (!on && workings.view === "work") setActivityView("steps");
@@ -1679,7 +1687,7 @@ export function App() {
     const ea = pick ? pick.a : a, eb = pick ? pick.b : b, on = pick ? pick.clash : clash;
     if (!sceneId || !ea || !eb || busy) return;
     replaceChatWork();
-    const tracker = trackAgent(second && !pick ? proposal : null); directAgent.current = tracker;
+    const tracker = trackAgent(second && !pick ? proposal : null, "you", pairTitle(on, ea, eb)); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     const from = on && report ? { report_id: report.id, clash_id: on.id } : undefined;
@@ -1704,7 +1712,7 @@ export function App() {
     const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } =
       await (await fetch(`/tour/${{ duct: "c0053", joint: "c0051", ladder: "cell-ladder" }[which]}.json`)).json();
     if (sceneEpoch.current !== epoch) return;
-    const tracker = trackAgent(null, "replay"); directAgent.current = tracker;
+    const tracker = trackAgent(null, "replay", clashLabel(c)); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     setReplaying(true);
@@ -1712,7 +1720,7 @@ export function App() {
     for (const { t, event } of rec.events) {
       const wait = start + t * 1000 - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      if (agentRun.current !== run) return;
+      if (agentRun.current !== run) { tracker.trace.end("Stopped when newer work took over"); return; }
       if (event.type === "result") { finish(event as Proposal); setReplaying(false); return; }
       onEvent(event as AgentEvent);
     }
@@ -1759,7 +1767,7 @@ export function App() {
     for (const { t, event } of rec.events) {
       const wait = start + t * 1000 - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      if (!live()) return;
+      if (!live()) { tracker.trace.end("Stopped when newer work took over"); return; }
       if (event.type === "plan") { finish(event); setReplaying(false); return; }
       if (event.type !== "error") onEvent(event);
     }
@@ -1779,8 +1787,9 @@ export function App() {
     let run: PlanRun = { kind, started: t, phase: kind === "root_cause" ? "cause" : "fixing", rootCause: "", items: [], status: {} };
     setPlanRun(run); setNow(t);
     const update = (f: (r: PlanRun) => PlanRun) => { run = f(run); setPlanRun(run); };
+    const superseded = () => { if (live()) return false; trace.end("Stopped when newer work took over"); return true; };
     const onEvent = (e: PlanEvent) => {
-      if (!live()) return;
+      if (superseded()) return;
       trace.add(e);
       if (e.type === "root_cause") update((r) => ({ ...r, rootCause: e.root_cause, phase: "fixing" }));
       if (e.type === "plan_items") update((r) => ({ ...r, phase: "fixing", items: e.items,
@@ -1790,14 +1799,14 @@ export function App() {
       if (e.type === "checking_plan") update((r) => ({ ...r, phase: "checking" }));
     };
     const finish = (p: Plan | null) => {
-      if (!live()) return;
+      if (superseded()) return;
       if (p) trace.add({ ...p, type: "plan" });
       trace.end(p ? null : "Stopped before a plan");
       if (p) { setPlan(p); planRevision.current = sceneRevision.current; }   // what its joint check was made on
       update((r) => ({ ...r, phase: "done" })); setNow(Date.now());
     };
     const retire = () => {
-      if (!live()) return;
+      if (superseded()) return;
       trace.end("Stopped when newer work took over");
       const retiredRequest = ++planRequest.current, owned = run;
       if (owned.phase !== "done") {
@@ -2026,6 +2035,10 @@ export function App() {
   }
   function onChatEvent(e: ChatEvent, origin: Origin = "chat") {
     if (e.type === "thinking") directContext.current?.retire();
+    if (e.type === "tool" && e.name === "propose_fixes") {
+      const c = report?.clashes.find((x) => x.id === e.args.clash_id);
+      chatTitle.current = c ? clashLabel(c) : "";
+    }
     if (e.type === "tool" && e.name === "explore_wider_fix") {
       const c = report?.clashes.find((x) => x.id === e.args.clash_id), pair = c && matches?.[c.id];
       chatContext.current = trackContext(c && pair?.a && pair.b ? { element_a: pair.a, element_b: pair.b, report_id: report!.id, clash_id: c.id } : null);
@@ -2055,15 +2068,15 @@ export function App() {
       if (e.event.type === "escalating" && !chatAgent.current) {
         const f = e.event.first_try;
         chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: f.options ?? [] }
-          : { understanding: "", attempts: [], options: [] }, origin);
+          : { understanding: "", attempts: [], options: [] }, origin, chatTitle.current);
         chatEscalating.current = true;
       } else if (e.event.type === "escalating") chatEscalating.current = true;
-      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent(null, origin);
+      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent(null, origin, chatTitle.current);
       chatAgent.current?.onEvent(e.event);
     }
     if (e.type === "proposal") {
       setA(e.element_a); setB(e.element_b);
-      (chatAgent.current ?? trackAgent(null, origin)).finish(e);
+      (chatAgent.current ?? trackAgent(null, origin, chatTitle.current)).finish(e);
       chatAgent.current = null; chatEscalating.current = false;
     }
     if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind, origin); planThisTurn.current = true; }

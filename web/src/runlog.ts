@@ -35,8 +35,20 @@ export interface RunHandle {
   end(error?: string | null): void;
 }
 
-/** Runs kept: enough for a session's recent work, small enough that a triage's events never pile up. */
+/** Runs kept: enough for a session's recent work, small enough that a triage's events never pile up. A run still
+ * going is never let go of: the oldest finished ones go first, and the log grows past this while more are live. */
 export const RUNS_KEPT = 12;
+
+/** What Workings never reads and a run would otherwise carry: meshes (a trial's pieces, an option's preview, before
+ * and placements). Dropped from every event as it is logged, at any depth. */
+const HEAVY = new Set(["pieces", "preview", "before", "placements"]);
+export function lean<T>(value: T, depth = 0): T {
+  if (depth > 6 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((v) => lean(v, depth + 1)) as T;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) if (!HEAVY.has(k)) out[k] = lean(v, depth + 1);
+  return out as T;
+}
 
 export class RunLog {
   private all: Run[] = [];
@@ -48,15 +60,19 @@ export class RunLog {
 
   start(kind: RunKind, { origin = "you", title = "", meta = {} }: { origin?: Origin; title?: string; meta?: Record<string, unknown> } = {}): RunHandle {
     const run: Run = { id: ++this.seq, kind, origin, title, started: this.now(), events: [], ended: null, error: null, meta, version: 0 };
-    const dropped = this.all.length >= this.kept ? this.all.slice(0, this.all.length - this.kept + 1) : [];
-    for (const old of dropped) if (old.ended === null) { old.ended = this.since(old); old.error = "Not followed any more"; }
-    this.all = [...this.all.slice(dropped.length), run];
+    const kept = [...this.all];
+    while (kept.length >= this.kept) {
+      const finished = kept.findIndex((r) => r.ended !== null);
+      if (finished < 0) break;
+      kept.splice(finished, 1);
+    }
+    this.all = [...kept, run];
     this.changed();
     return {
       id: run.id,
       add: (event) => {
         if (run.ended !== null) return;
-        run.events.push({ t: this.since(run), e: event as RunEvent["e"] });
+        run.events.push({ t: this.since(run), e: lean(event) as RunEvent["e"] });
         run.version++;
         this.changed();
       },

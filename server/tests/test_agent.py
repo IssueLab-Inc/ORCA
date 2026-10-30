@@ -118,6 +118,9 @@ def test_reasoning_summaries_stream_before_the_ideas_only_when_watched(tmp_path:
     ideas, checking = events[3], [e for e in events if e["type"] == "checking"]
     assert ideas["count"] == len(ideas["candidates"]) == len(checking)
     assert ideas["candidates"] == [{"title": e["title"], "kind": e["kind"]} for e in checking]
+    tried = [e for e in events if e["type"] == "attempt"]
+    assert tried and all(isinstance(e["seconds"], float) and e["seconds"] >= 0 for e in tried)   # each check, timed
+    assert all(e["checked"] > 0 for e in tried if e["passed"])
     quiet = []  # plans run several agents at once and show no thinking
     resolve(s, Clash(duct, beam), ThinkingModel(), max_rounds=1, on_event=quiet.append)
     assert "reasoning" not in [e["type"] for e in quiet]

@@ -1233,7 +1233,7 @@ When the server lets go of the models (Oct 30; code `server/sightline/app.py`, `
   after the restart brings the notice naming the models (its report call failed first; the scene probe followed), no
   error line, Export hidden; **Open them again** reloads the models and the check, with no notice or error after.
 
-Workings (Oct 30, owner decision; code `web/src/runlog.ts`, `workings.ts`, `Workings.tsx`, `Activity.tsx`, `App.tsx`,
+Workings (Oct 30, owner decision; code `web/src/runlog.ts`, `workingsGraph.ts`, `Workings.tsx`, `Activity.tsx`, `App.tsx`,
 `dock.tsx`, `pilot.ts`, `index.css`, `server/sightline/agent.py`; design [docs/workings.md](../workings.md)):
 - **What:** the Activity panel draws each run as it happens, as lanes (who started it, Muse, ORCA) of steps joined by
   edges: proposals (rounds, ideas, checks, a second try, the stop, the rank, the options), Fix together and root
@@ -1251,3 +1251,14 @@ Workings (Oct 30, owner decision; code `web/src/runlog.ts`, `workings.ts`, `Work
   on #1 (the duct) followed at a readable zoom; the cable tray with Activity floated, then popped out mid-run, `W` in
   that window; off and on again; Fix together on #1–#3 (37 s, 18 steps); triage of all 464 (58 s); the cold-water
   main's ideas shown together. Show it built was not run live (it spends Muse Wonder's budget).
+- **Review (PR 58):** `workings.ts` became `workingsGraph.ts` (it and `Workings.tsx` differ only in case, which breaks
+  the build on Windows and macOS); a run whose tracker finds newer work has taken over is ended then, and a detection
+  that throws or a triage stream that closes without `done` is ended too; titles come from the pair being worked on;
+  `stopAll` moved to `open()`; live runs are never let go of; meshes are dropped from logged events and Show it built
+  keeps no capture; the bar goes back only from Workings' own height; detection phases last until the next event; a
+  judge without a verdict draws; Follow's glide is no longer cut short; a newer run takes over from a picked one;
+  effects measure only when the drawing changes; the edit words come from `fixKinds.ts`; `checking.kind` matches
+  `ideas.candidates`. And the server now times each check: `attempt` has `seconds` and, for a passing fix, `checked`,
+  which a plan's `item` events pass on with the failure's `reason`; Workings shows them. 607 server tests, 136 web
+  tests.
+

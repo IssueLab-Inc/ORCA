@@ -2,6 +2,8 @@
  * steps sit in columns in the order they happened, so nothing jumps as events land; edges join a step to the steps it
  * led to. Everything shown comes from the run's own events: times are when each arrived, numbers are the server's,
  * Muse's words are its own. Pure, so each builder is tested against the tour's recorded runs. */
+import type { Option as FixOption } from "./api";
+import { clearanceText, editText, kindLabel } from "./fixKinds";
 import type { Run, RunEvent } from "./runlog";
 
 export type Actor = "you" | "orca" | "spark" | "wonder" | "image";
@@ -65,8 +67,9 @@ export interface Graph {
 }
 
 export const sec = (s: number) => `${Math.max(0, s).toFixed(1)} s`;
-const mm = (m: number) => `${Math.round(m * 1000)} mm`;
-const signedMm = (m: number) => { const v = Math.round(m * 1000) || 0; return `${v > 0 ? "+" : ""}${v} mm`; };
+/** What a fix leaves between the elements, as the option cards say it (fixKinds.clearanceText). */
+const clear = (kind: string, m: number) => kind === "trim" ? "butt joint"
+  : `${clearanceText({ kind, min_clearance_m: m } as Pick<FixOption, "kind" | "min_clearance_m">)} clear`;
 const text = (t: string, extra: Omit<Extract<Part, { kind: "text" }>, "kind" | "text"> = {}): Part => ({ kind: "text", text: t, ...extra });
 const actorOf = (model?: string): Actor => /wonder/i.test(model ?? "") ? "wonder" : /image/i.test(model ?? "") ? "image" : "spark";
 
@@ -114,21 +117,13 @@ function startStep(run: Run, title: string, ev: string, col: number): Step {
 
 /* ---------- a proposal: rounds of ideas from Muse, each checked by ORCA ---------- */
 
-interface Attempt { title: string; passed: boolean; reason: string; kind: string; delta_m?: number[]; split_m?: number[] | null; hit_ids?: string[]; trim?: { by_m: number } | null; edit?: { summary?: string } | null; model?: string }
+interface Attempt { title: string; passed: boolean; reason: string; kind: string; delta_m: number[]; split_m: number[] | null; hit_ids?: string[]; trim?: { by_m: number } | null; edit?: { summary?: string } | null; model?: string;
+  /** The geometry check's seconds and how many elements it tested a passing fix against (server: agent.on_step). */
+  seconds?: number; checked?: number }
 interface Option { title: string; kind: string; min_clearance_m?: number | null; delta_m?: number[]; split_m?: number[] | null }
 interface Round { step: Step; thoughts: string[]; notes: string[]; ideas?: { t: number; seconds: number; understanding: string; count: number } }
 interface Result { options?: Option[]; escalated?: boolean; recommendation?: { title: string; rationale?: string } | null; usage?: { usd?: number } | null }
 interface Check { idea: Step; check: Step; checking: number; trial?: number; attempt?: Attempt; at?: number }
-
-/** The edit an idea makes, in a few words, as the activity table words it (fixKinds.editText). */
-function editWords(a: Attempt): string {
-  if (a.edit?.summary) return a.edit.summary;
-  const d = a.delta_m ?? [0, 0, 0];
-  if (a.kind === "offset" && a.split_m) return `offset ${a.split_m.map((v) => v.toFixed(2)).join("–")} m by ${signedMm(d[2] ?? 0)}`;
-  if (a.kind === "trim") return a.trim ? `trim one end ${Math.round(a.trim.by_m * 1000)} mm` : "trim at the joint";
-  const names = [["east", "west"], ["north", "south"], ["up", "down"]];
-  return `move ${d.map((v, k) => Math.abs(v) >= 0.0005 ? `${names[k][v > 0 ? 0 : 1]} ${Math.abs(Math.round(v * 1000))} mm` : "").filter(Boolean).join(", ") || "0 mm"}`;
-}
 
 function proposal(run: Run, at: number): Graph {
   const events = upTo(run, at), done = finished(run, at), cols = new Columns();
@@ -236,7 +231,7 @@ function proposal(run: Run, at: number): Graph {
   const clearance = (a: Attempt) => options.find((o) => o.title === a.title && o.kind === a.kind)?.min_clearance_m;
   for (const c of checks.values()) {
     const a = c.attempt;
-    c.idea.body = a ? [text(editWords(a), { mono: true, tone: "muted" })] : [];
+    c.idea.body = a ? [text(editText(a as unknown as Parameters<typeof editText>[0]), { mono: true, tone: "muted" })] : [];
     if (!a) {
       const live = !done && !failure;
       Object.assign(c.check, { status: live ? "run" : "done", time: live ? sec(at - c.checking) : "",
@@ -244,12 +239,14 @@ function proposal(run: Run, at: number): Graph {
       continue;
     }
     c.idea.status = a.passed ? "ok" : "fail";
-    const took = `${(c.at! - c.checking).toFixed(2)} s`, clear = clearance(a);
+    // The server's own time for the check when it sends one, else from when the events arrived.
+    const took = `${(a.seconds ?? c.at! - c.checking).toFixed(2)} s`, gap = clearance(a);
+    const against = a.checked ? text(`Checked against ${a.checked} element${a.checked === 1 ? "" : "s"}${a.seconds != null ? ` in ${a.seconds.toFixed(2)} s` : ""}`, { tone: "muted" }) : null;
     Object.assign(c.check, a.passed
-      ? { status: "ok", t1: c.at, time: took, body: [text(`✓ Verified${clear != null ? ` · ${mm(clear)} clear` : ""}`, { tone: "ok", strong: true })],
-        detail: [text(a.kind === "offset" || a.kind === "route" || a.kind === "resize" ? "Bends, risers and middle against everything; the shortened ends against the other side. Nothing new hit."
+      ? { status: "ok", t1: c.at, time: took, body: [text(`✓ Verified${gap != null ? ` · ${clear(a.kind, gap)}` : ""}`, { tone: "ok", strong: true })],
+        detail: [...(against ? [against] : []), text(a.kind === "offset" || a.kind === "route" || a.kind === "resize" ? "Bends, risers and middle against everything; the shortened ends against the other side. Nothing new hit."
           : a.kind === "trim" ? "Only contacts new or worse than before count. Nothing new hit." : "The whole run against everything near it. Nothing new hit.", { tone: "muted" })] }
-      : { status: "fail", t1: c.at, time: took, body: [text(`✗ ${a.reason || "Failed the check"}`, { tone: "bad", strong: true })],
+      : { status: "fail", t1: c.at, time: a.seconds != null || a.hit_ids?.length ? took : "", body: [text(`✗ ${a.reason || "Failed the check"}`, { tone: "bad", strong: true })],
         detail: a.hit_ids?.length ? [text(`${a.hit_ids.length} element${a.hit_ids.length === 1 ? "" : "s"} hit, lit in the viewer`, { tone: "muted" })] : [] });
   }
 
@@ -266,7 +263,7 @@ function proposal(run: Run, at: number): Graph {
     }
     if (options.length) {
       const rank = add({ id: "rank", lane: "orca", col: cols.next(), actor: "orca", status: "done", t0: resultAt, title: "Rank", ev: "result",
-        body: [{ kind: "list", items: options.map((o, i) => ({ mark: `${i + 1}`, text: `${o.kind}${o.min_clearance_m != null ? ` · ${mm(o.min_clearance_m)} clear` : ""}` })) }],
+        body: [{ kind: "list", items: options.map((o, i) => ({ mark: `${i + 1}`, text: `${kindLabel(o.kind)}${o.min_clearance_m != null ? ` · ${clear(o.kind, o.min_clearance_m)}` : ""}` })) }],
         detail: [text("Simplest kind first, then comfortable clearance, the smallest change, the most clearance.", { tone: "muted" })] });
       edges.push({ from: prev, to: rank.id, win: true }); prev = rank.id;
     }
@@ -326,7 +323,7 @@ function plan(run: Run, at: number): Graph {
   let cause: { t: number; text: string; strategy: string; reason: string } | null = null, thinkingAt: number | null = null;
   let items: PlanItemLite[] = [], skipped = 0, itemsAt = 0, checkingAt: number | null = null, retried = 0;
   let result: PlanLite | null = null, resultAt = 0, failure: string | null = null;
-  const per = new Map<string, { think?: number; checks: { t: number; attempt: string; passed: boolean }[]; done?: { t: number; ok: boolean; title: string } }>();
+  const per = new Map<string, { think?: number; checks: { t: number; attempt: string; passed: boolean; seconds?: number; reason?: string }[]; done?: { t: number; ok: boolean; title: string } }>();
   for (const { t, e } of events) {
     if (e.type === "thinking") thinkingAt = t;
     else if (e.type === "root_cause") cause = { t, text: String(e.root_cause ?? ""), strategy: String(e.strategy ?? ""), reason: String(e.reason ?? "") };
@@ -334,7 +331,8 @@ function plan(run: Run, at: number): Graph {
     else if (e.type === "item") {
       const s = per.get(String(e.key)); if (!s) continue;
       if (e.status === "thinking") s.think ??= t;
-      else if (e.status === "checking") s.checks.push({ t, attempt: String(e.attempt ?? ""), passed: !!e.passed });
+      else if (e.status === "checking") s.checks.push({ t, attempt: String(e.attempt ?? ""), passed: !!e.passed,
+        seconds: typeof e.seconds === "number" ? e.seconds : undefined, reason: e.reason ? String(e.reason) : undefined });
       else if (e.status === "done") s.done = { t, ok: !!e.ok, title: String(e.title ?? "") };
     } else if (e.type === "checking_plan") { checkingAt ??= t; if (Array.isArray(e.retry)) retried += e.retry.length; }
     else if (e.type === "plan") { result = e as unknown as PlanLite; resultAt = t; }
@@ -380,17 +378,18 @@ function plan(run: Run, at: number): Graph {
       let from = `${lane}-t`;
       s.checks.forEach((c, j) => {
         const id = `${lane}-c${j}`;
-        add({ id, lane, col: checkCols[j], actor: "orca", t0: c.t, status: c.passed ? "ok" : "fail", time: `at ${sec(c.t)}`, title: c.attempt,
-          ev: "item: checking", body: [text(c.passed ? "✓ Passed the check" : "✗ Failed the check", { tone: c.passed ? "ok" : "bad", strong: true })], detail: [] });
+        add({ id, lane, col: checkCols[j], actor: "orca", t0: c.t, status: c.passed ? "ok" : "fail", title: c.attempt, ev: "item: checking",
+          time: c.seconds != null ? `${c.seconds.toFixed(2)} s` : `at ${sec(c.t)}`,
+          body: [text(c.passed ? "✓ Passed the check" : `✗ ${c.reason ?? "Failed the check"}`, { tone: c.passed ? "ok" : "bad", strong: true })], detail: [] });
         edges.push({ from, to: id, kind: j ? "seq" : undefined }); from = id;
         ticks.push({ lane, at: c.t, tone: c.passed ? "ok" : "fail" });
       });
       if (s.done) {
-        const kept = result?.check?.items?.[it.key];
+        const kept = result?.check?.items?.[it.key], kind = result?.items?.find((i) => i.key === it.key)?.option?.kind ?? "move";
         add({ id: `${lane}-d`, lane, col: cDone, actor: "orca", t0: s.done.t, status: s.done.ok ? "ok" : "fail", time: `at ${sec(s.done.t)}`,
           title: s.done.ok ? "Kept for the plan" : "No fix for this pair", ev: "item: done",
           body: s.done.title ? [text(s.done.title)] : [],
-          detail: kept?.min_clearance_m != null ? [text(`${mm(kept.min_clearance_m)} clear in the plan`, { tone: "muted" })] : [] });
+          detail: kept?.min_clearance_m != null ? [text(`${clear(kind, kept.min_clearance_m)} in the plan`, { tone: "muted" })] : [] });
         edges.push({ from, to: `${lane}-d` });
       }
     });
@@ -542,7 +541,7 @@ function built(run: Run, at: number): Graph {
     if (e.type === "drawing") { lastRound = Number(e.round ?? 1); const r = round(lastRound); r.drawing ??= t; r.pictures = Number(e.pictures ?? 2); r.shared = !!e.shared; }
     else if (e.type === "gate") round(Number(e.round ?? lastRound)).gates.push({ t, picture: Number(e.picture ?? 0), f: e.f as number | undefined, tile: e.tile as number | undefined, passed: !!e.passed, error: e.error as string | undefined });
     else if (e.type === "judging") round(Number(e.round ?? lastRound)).judging.set(Number(e.picture ?? 0), t);
-    else if (e.type === "judged") round(Number(e.round ?? lastRound)).judged.set(Number(e.picture ?? 0), { t, verdicts: (e.verdicts as string[]) ?? [] });
+    else if (e.type === "judged") round(Number(e.round ?? lastRound)).judged.set(Number(e.picture ?? 0), { t, verdicts: Array.isArray(e.verdicts) ? e.verdicts.map((v) => String(v ?? "no verdict")) : [] });
     else if (e.type === "retry") round(lastRound).retry = { t, why: String(e.why ?? "") };
     else if (e.type === "result") result = { t, ...(e as unknown as { status: string }) };
     else if (e.type === "error") failure = String(e.detail ?? "The picture failed");
@@ -554,9 +553,8 @@ function built(run: Run, at: number): Graph {
   const add = (s: Step) => { steps.push(s); return s; };
   add(startStep(run, "show it built", "POST /built/stream", cols.next()));
   if (run.origin === "you") steps[0].title = "Show it built";
-  const look = typeof run.meta.look === "string" ? run.meta.look : "";
   add({ id: "capture", lane: "orca", col: cols.next(), actor: "orca", status: "done", t0: 0, title: "One camera, three passes", ev: "the page's own step",
-    body: [text("look · ids · normals", { tone: "muted" })], detail: look ? [{ kind: "image", src: look, alt: "ORCA's view of the fix" }] : [] });
+    body: [text("look · ids · normals: the picture to restyle, which element is where, which way each face points", { tone: "muted" })], detail: [] });
   edges.push({ from: "start", to: "capture" });
   let prev = "capture";
   for (const [n, r] of [...rounds.entries()].sort((x, y) => x[0] - y[0])) {
@@ -587,7 +585,7 @@ function built(run: Run, at: number): Graph {
         time: judgedAll ? sec(lastJudged - first) : live ? sec(at - first) : "",
         body: [{ kind: "list", items: [...r.judging.keys()].sort().map((p) => { const j = r.judged.get(p);
           return { mark: `${p + 1}`, tone: j ? (j.verdicts.every((v) => v === "faithful" || v === "minor_differences") ? "ok" : "bad") : undefined,
-            text: j ? j.verdicts.map((v) => v.replace(/_/g, " ")).join(", ") || "no verdict" : "comparing with the model…" }; }) }], detail: [] });
+            text: j ? j.verdicts.map((v) => String(v ?? "no verdict").replace(/_/g, " ")).join(", ") || "no verdict" : "comparing with the model…" }; }) }], detail: [] });
       edges.push({ from: prev, to: id }); prev = id;
       if (judgedAll) bars.push({ lane: "judges", a: first, b: lastJudged, tone: actorOf(judge) });
     }
@@ -646,8 +644,11 @@ function detect(run: Run, at: number): Graph {
   add(startStep(run, "check the models", "POST /detect/stream", cols.next()));
   if (run.origin === "you") steps[0].title = "Check the models";
   let prev = "start";
+  // A phase lasts until the first event after it (the server sends "start" between reading and building).
+  const after = (t: number) => { const later = [...phases.map((p) => p.t), start?.t, ...[...tests.values()].map((s) => s.t), end?.t, failure != null ? at : undefined]
+    .filter((x): x is number => x != null && x > t); return later.length ? Math.min(...later) : null; };
   phases.forEach((p, i) => {
-    const next = phases[i + 1]?.t ?? start?.t ?? tests.get(0)?.t, id = `phase${i}`, running = next == null && live;
+    const next = after(p.t), id = `phase${i}`, running = next == null && live;
     add({ id, lane: "orca", col: cols.next(), actor: "orca", t0: p.t, status: running ? "run" : "done", ev: "phase", title: p.text,
       time: next != null ? sec(next - p.t) : running ? sec(at - p.t) : "", body: [], detail: [] });
     edges.push({ from: prev, to: id }); prev = id;

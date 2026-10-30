@@ -1,11 +1,11 @@
 import { Bot, CircleDot, Crosshair, Eye, Image as ImageIcon, Maximize, MessageSquare, Minus, Pause, Play, Plus, Radio, RotateCcw, Sparkles, Tags, User, type LucideIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kindLabel } from "./fixKinds";
 import { runs, type Run } from "./runlog";
-import { graphOf, sec, type Actor, type Edge, type Graph, type Part, type Side, type Step } from "./workings";
+import { graphOf, sec, type Actor, type Edge, type Graph, type Part, type Side, type Step } from "./workingsGraph";
 
 /*
- * Workings (docs/workings.md): the Activity panel's drawing of a run as it happens. The graph comes from `workings.ts`;
+ * Workings (docs/workings.md): the Activity panel's drawing of a run as it happens. The graph comes from `workingsGraph.ts`;
  * this draws it on a canvas that pans and zooms, follows the newest step, and replays a finished run from its events.
  *
  * The panel can float or open in a window of its own (docs/panels.md) without remounting, so whatever needs a window
@@ -134,13 +134,31 @@ function Strip({ graph, at, onSeek }: { graph: Graph; at: number; onSeek: (t: nu
   );
 }
 
+/** A run Workings can't draw says so in place; the rest of the page carries on (there is no boundary above it). */
+class Boundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(e: unknown) { return { error: e instanceof Error ? e.message : String(e) }; }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <div className="workings empty"><p className="hint">Workings couldn't draw this run ({this.state.error}). Steps still lists it.</p>
+      <button type="button" className="btn small" onClick={() => this.setState({ error: null })}>Try again</button></div>;
+  }
+}
+
 /** Workings: the run picked (the newest by default), drawn as it stands. `inView`: the check the 3D viewer's pilot
  *  is showing (its step number), marked on the drawing. */
-export function Workings({ inView = null }: { inView?: number | null }) {
+export function Workings(props: { inView?: number | null }) {
+  return <Boundary><WorkingsView {...props} /></Boundary>;
+}
+
+function WorkingsView({ inView = null }: { inView?: number | null }) {
   const host = useRef<HTMLDivElement>(null), canvas = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
   const labels = useRef<HTMLDivElement>(null), mini = useRef<SVGSVGElement>(null), zoomText = useRef<HTMLSpanElement>(null);
   const list = useRuns(host);
+  // A run picked from the list stays until a newer run starts (or the newest is picked): new work always shows.
   const [pick, setPick] = useState<number | null>(null);
+  const newest = list[list.length - 1]?.id ?? null;
+  useEffect(() => { setPick(null); }, [newest]);
   const run = (pick != null ? list.find((r) => r.id === pick) : undefined) ?? list[list.length - 1] ?? null;
   const [replay, setReplay] = useState<{ at: number; playing: boolean } | null>(null);
   const [speed, setSpeed] = useState(1);
@@ -156,6 +174,7 @@ export function Workings({ inView = null }: { inView?: number | null }) {
   const setFollowing = (on: boolean) => { following.current = on; setFollow(on); };
   const rects = useRef(new Map<string, Rect>()), size = useRef({ w: 0, h: 0 }), curves = useRef(new Map<string, number[][]>());
   const dots = useRef<SVGGElement>(null);
+  const glideTimer = useRef<{ w: Window; id: number } | null>(null);
   const live = !!run && run.ended === null;
   const at = !run ? 0 : replay ? replay.at : run.ended ?? Math.max(0, (now - run.started) / 1000);
   const graph = useMemo(() => (run ? graphOf(run, at) : null), [run, run?.version, at]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -185,12 +204,13 @@ export function Workings({ inView = null }: { inView?: number | null }) {
     return () => { stop = true; w.clearTimeout(timer); };
   }, [ticking, speed, run]);
 
-  /** Where the drawing sits in the canvas: pans, zoom, lane labels, the overview's frame. */
-  function apply(glide = false) {
+  /** Where the drawing sits in the canvas: pans, zoom, lane labels, the overview's frame. `glide`: true eases there
+   *  (its timer ends the easing), false jumps (the person is dragging or zooming), unset leaves an easing running. */
+  function apply(glide?: boolean) {
     const c = canvas.current, L = layer.current, g = graph;
     if (!c || !L || !g) return;
     const v = view.current, lw = c.clientWidth < 560 ? LABELS_NARROW : LABELS;
-    L.classList.toggle("glide", glide); labels.current?.classList.toggle("glide", glide);
+    if (glide != null) { L.classList.toggle("glide", glide); labels.current?.classList.toggle("glide", glide); }
     c.classList.toggle("narrow", c.clientWidth < 560);
     c.classList.toggle("short", c.clientHeight < 280);
     L.style.transform = `translate(${v.tx}px, ${v.ty}px) scale(${v.k})`;
@@ -208,7 +228,9 @@ export function Workings({ inView = null }: { inView?: number | null }) {
     const vp = mini.current?.querySelector(".vp");
     if (vp) { vp.setAttribute("x", `${-v.tx / v.k}`); vp.setAttribute("y", `${-v.ty / v.k}`); vp.setAttribute("width", `${c.clientWidth / v.k}`); vp.setAttribute("height", `${c.clientHeight / v.k}`); }
     if ((v.k < FAR) !== far) setFar(v.k < FAR);
-    if (glide) winOf(c).setTimeout(() => { L.classList.remove("glide"); labels.current?.classList.remove("glide"); }, 650);
+    // One easing at a time: a newer glide restarts the clock, so an older one's timer never cuts it short.
+    if (glide != null && glideTimer.current) { glideTimer.current.w.clearTimeout(glideTimer.current.id); glideTimer.current = null; }
+    if (glide) { const w = winOf(c); glideTimer.current = { w, id: w.setTimeout(() => { glideTimer.current = null; L.classList.remove("glide"); labels.current?.classList.remove("glide"); }, 650) }; }
   }
   const labelsWidth = () => ((canvas.current?.clientWidth ?? 800) < 560 ? LABELS_NARROW : LABELS);
   function fit() {
@@ -226,7 +248,7 @@ export function Workings({ inView = null }: { inView?: number | null }) {
   }
   function zoomAt(f: number, px: number, py: number) {
     const v = view.current, k = clamp(v.k * f, MIN_K, MAX_K), r = k / v.k;
-    view.current = { k, tx: px - (px - v.tx) * r, ty: py - (py - v.ty) * r }; apply();
+    view.current = { k, tx: px - (px - v.tx) * r, ty: py - (py - v.ty) * r }; apply(false);
   }
   function handOver() { autoFit.current = false; if (following.current) setFollowing(false); }
   /** The zoom to follow at: the lanes' height where the canvas allows, never so small the titles can't be read. */
@@ -235,7 +257,12 @@ export function Workings({ inView = null }: { inView?: number | null }) {
     return clamp(((c?.clientHeight ?? 300) - 16) / H, 0.5, 0.85);
   }
 
-  // After each drawing: measure the steps, draw the edges between them, follow the newest step.
+  // What handlers and long-lived effects call: the latest of each (they read this render's graph).
+  const act = useRef({ apply, fit, glideTo, zoomAt, handOver });
+  act.current = { apply, fit, glideTo, zoomAt, handOver };
+  const miniKey = useRef("");
+
+  // After each new drawing: measure the steps, draw the edges between them, follow the newest step.
   useLayoutEffect(() => {
     const L = layer.current, g = graph; if (!L || !g) return;
     const map = new Map<string, Rect>();
@@ -248,7 +275,9 @@ export function Workings({ inView = null }: { inView?: number | null }) {
       const label = L.querySelector<SVGTextElement>(`text[data-edge="${p.dataset.edge}"]`);
       if (label) { const m = bez(c, 0.5); label.setAttribute("x", m[0].toFixed(1)); label.setAttribute("y", (m[1] - 6).toFixed(1)); }
     }
-    if (mini.current) {
+    const key = [...map].map(([id, r]) => `${id}:${r.x},${r.y},${r.w},${r.h}`).join("|") + g.steps.map((s) => s.status).join("");
+    if (mini.current && key !== miniKey.current) {
+      miniKey.current = key;
       const W = GX + g.cols.reduce((x, y) => x + y, 0) + 20, H = g.lanes.reduce((x, l) => x + l.h, 0);
       mini.current.setAttribute("viewBox", `0 0 ${W} ${H}`);
       const byId = new Map(g.steps.map((s) => [s.id, s]));
@@ -268,7 +297,7 @@ export function Workings({ inView = null }: { inView?: number | null }) {
       if (best && best.id !== followId.current) { followId.current = best.id; glideTo(map.get(best.id)); }
       else apply();
     } else apply();
-  });
+  }, [graph, far, showEv, pinned, follow, runId, live]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // The canvas's size, checked a few times a second from its own window: it changes when the panel floats, pops out,
   // is resized or comes back from behind another tab.
@@ -279,28 +308,31 @@ export function Workings({ inView = null }: { inView?: number | null }) {
       const c = canvas.current;
       if (c && c.clientWidth && (c.clientWidth !== size.current.w || c.clientHeight !== size.current.h)) {
         size.current = { w: c.clientWidth, h: c.clientHeight };
-        if (following.current) { followId.current = null; const r = rects.current.get([...rects.current.keys()].pop() ?? ""); if (r) glideTo(r); }
-        else if (autoFit.current) fit(); else apply();
+        if (following.current) { followId.current = null; const r = rects.current.get([...rects.current.keys()].pop() ?? ""); if (r) act.current.glideTo(r); }
+        else if (autoFit.current) act.current.fit(); else act.current.apply();
       }
       w = winOf(host.current); timer = w.setTimeout(check, 300);
     };
     check();
     return () => { stop = true; w.clearTimeout(timer); };
-  });
+  }, []);
 
   // Dots carried along the busy edges (triage's clashes on their way to a verdict), while the run is live or replaying.
   const flowing = !!graph && graph.flows.some((f) => at >= f.a && at < f.b) && (live || !!replay?.playing);
+  const now$ = useRef({ graph, at });
+  now$.current = { graph, at };
   useEffect(() => {
     const g = dots.current;
     if (!g) return;
-    if (!flowing || !graph) { g.innerHTML = ""; return; }
+    if (!flowing) { g.innerHTML = ""; return; }
     let stop = false, frame = 0, w = winOf(host.current);
     const draw = (ms: number) => {
       if (stop) return;
       let o = "";
-      for (const f of graph.flows) {
+      const { graph: gr, at: t } = now$.current;
+      for (const f of gr?.flows ?? []) {
         const c = curves.current.get(`${f.from}>${f.to}`);
-        if (!c || at < f.a || at >= f.b) continue;
+        if (!c || t < f.a || t >= f.b) continue;
         for (let i = 0; i < f.n; i++) { const p = bez(c, (ms / 1800 + i / f.n) % 1); o += `<circle class="${f.tone ?? ""}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.4"/>`; }
       }
       g.innerHTML = o;
@@ -308,15 +340,16 @@ export function Workings({ inView = null }: { inView?: number | null }) {
     };
     frame = w.requestAnimationFrame(draw);
     return () => { stop = true; w.cancelAnimationFrame(frame); };
-  }, [flowing, graph, at]);
+  }, [flowing]);
 
   // Zooming with the wheel takes the page's scroll there: a listener that may prevent it (React's is passive).
+  const drawn = !!run && !!graph;
   useEffect(() => {
     const c = canvas.current; if (!c) return;
-    const wheel = (e: WheelEvent) => { e.preventDefault(); handOver(); const b = c.getBoundingClientRect(); zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - b.left, e.clientY - b.top); };
+    const wheel = (e: WheelEvent) => { e.preventDefault(); act.current.handOver(); const b = c.getBoundingClientRect(); act.current.zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - b.left, e.clientY - b.top); };
     c.addEventListener("wheel", wheel, { passive: false });
     return () => c.removeEventListener("wheel", wheel);
-  });
+  }, [drawn]);
 
   // Dragging pans, two fingers zoom, a click on a step pins it open (and a click elsewhere lets it go).
   const pointers = useRef(new Map<number, [number, number]>());
@@ -338,7 +371,7 @@ export function Workings({ inView = null }: { inView?: number | null }) {
     }
     const d = drag.current; if (!d) return;
     if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) { d.moved = true; e.currentTarget.classList.add("dragging"); handOver(); }
-    if (d.moved) { view.current.tx = d.tx + e.clientX - d.x; view.current.ty = d.ty + e.clientY - d.y; apply(); }
+    if (d.moved) { view.current.tx = d.tx + e.clientX - d.x; view.current.ty = d.ty + e.clientY - d.y; apply(false); }
   };
   const up = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!pointers.current.delete(e.pointerId)) return;
@@ -414,7 +447,7 @@ export function Workings({ inView = null }: { inView?: number | null }) {
       </div>
       <div className="wk-foot">
         <label className="wk-run"><OriginIcon size={14} aria-hidden />
-          <select value={run.id} onChange={(e) => setPick(Number(e.target.value))} aria-label="Run">
+          <select value={run.id} onChange={(e) => { const id = Number(e.target.value); setPick(id === newest ? null : id); }} aria-label="Run">
             {[...list].reverse().map((r) => <option key={r.id} value={r.id}>
               {KIND_NAME[r.kind]}{r.title ? `: ${r.title}` : ""}{r.ended === null ? " (running)" : r.error ? " (stopped)" : ""}</option>)}
           </select></label>

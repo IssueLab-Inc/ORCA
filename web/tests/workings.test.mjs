@@ -4,7 +4,7 @@ import test from "node:test";
 import { compiled } from "./app-host.mjs";
 
 const log = await import(await compiled("../src/runlog.ts", {}));
-const workings = await import(await compiled("../src/workings.ts", { "./runlog": "data:text/javascript," }));
+const workings = await import(await compiled("../src/workingsGraph.ts", { "./runlog": "data:text/javascript,", "./fixKinds": await compiled("../src/fixKinds.ts", {}) }));
 
 /** A run as the page logs it, from a recording's events ({t, event}) or plain events (one second apart). */
 function runOf(kind, events, { origin = "you", end = true, error = null, meta = {} } = {}) {
@@ -32,15 +32,15 @@ test("the run log keeps each run's events with when they arrived, ends a run onc
   assert.deepEqual(run.events, [{ t: 1.5, e: { type: "thinking", round: 1 } }]);
   assert.equal(run.ended, 3); assert.equal(run.error, null); assert.equal(run.origin, "chat");
   assert.equal(heard, 3);
-  const b = runs.start("triage");
-  const dropped = runs.runs().at(-1);
-  runs.start("plan"); runs.start("built");
-  assert.deepEqual(runs.runs().map((r) => r.kind), ["triage", "plan", "built"]);
+  const triage = runs.start("triage");
+  runs.start("plan").end(); runs.start("built");
+  assert.deepEqual(runs.runs().map((r) => r.kind), ["triage", "plan", "built"], "the finished proposal went first");
   runs.start("detect");
-  assert.deepEqual(runs.runs().map((r) => r.kind), ["plan", "built", "detect"]);
-  assert.equal(dropped.error, "Not followed any more", "a running run let go of is ended");
-  b.add({ type: "start" });
-  assert.equal(dropped.events.length, 0, "and takes nothing more");
+  assert.deepEqual(runs.runs().map((r) => r.kind), ["triage", "built", "detect"], "then the finished plan; live runs stay");
+  runs.start("propose");
+  assert.equal(runs.runs().length, 4, "never a live run let go of: the log grows while more are live");
+  triage.add({ type: "start", total: 3 });
+  assert.equal(runs.runs()[0].events.length, 1);
   const kept = runs.runs();
   assert.equal(runs.runs(), kept, "the same snapshot until something changes");
   runs.stopAll("The models were opened again");
@@ -203,7 +203,9 @@ test("Show it built draws each round, the gate's numbers, the judges and the ret
   assert.ok(g.edges.some((e) => e.to === "draw2" && e.kind === "feedback"));
   assert.match(texts(step(g, "retry1").body), /a second web opening/);
   assert.equal(step(g, "ready").body[0].src, "/api/built/x.jpg");
-  assert.equal(step(g, "capture").detail[0].src, "data:image/png;base64,AA");
+  const odd = workings.graphOf(runOf("built", [{ type: "drawing", round: 1, pictures: 1 }, { type: "gate", round: 1, picture: 0, f: 0.7, tile: 0.2, passed: true },
+    { type: "judging", round: 1, picture: 0 }, { type: "judged", round: 1, picture: 0, verdicts: [null, "faithful"] }]));
+  assert.match(texts(step(odd, "judge1").body), /no verdict, faithful/, "a judge reply without a verdict draws, never throws");
 });
 
 test("ORCA's check draws each phase and test with its clashes, then what it found", () => {
@@ -217,6 +219,11 @@ test("ORCA's check draws each phase and test with its clashes, then what it foun
     { type: "done", coverage: [{ clashes: 3 }, { clashes: 0 }], diff: { new: [], resolved: [], first: true }, elements: 1732, seconds: 4.1 },
   ]));
   assert.equal(step(g, "phase0").title, "Reading the models");
+  assert.equal(step(g, "phase1").time, "1.0 s", "building lasts until the first test, not until the start before it");
+  const building = workings.graphOf(runOf("detect", [{ type: "phase", text: "Reading the models" }, { type: "start", elements: 9, tests: [] },
+    { type: "phase", text: "Building geometry for 9 elements" }], { end: false }), 3.5);
+  assert.equal(step(building, "phase1").status, "run"); assert.equal(step(building, "phase1").time, "0.5 s");
+  assert.equal(step(building, "phase0").status, "done");
   assert.equal(step(g, "test0").status, "fail"); assert.match(texts(step(g, "test0").body), /3 clashes/);
   assert.equal(step(g, "test1").status, "ok");
   assert.equal(step(g, "found").title, "3 clashes in 1,732 elements");
@@ -239,4 +246,31 @@ test("ideas the server names with `ideas` appear at once, then each is checked i
   assert.equal(step(later, "k0-1").col, step(later, "i0-1").col);
   assert.equal(later.edges.filter((e) => e.to === "i0-1").length, 1, "one edge from the round to each idea");
   assert.equal(step(later, "k0-1").status, "run");
+});
+
+test("the run log drops the meshes Workings never reads, and the server's check times and counts show", () => {
+  let now = 0;
+  const runs = new log.RunLog(() => now);
+  const h = runs.start("propose");
+  h.add({ type: "trial", index: 0, kind: "offset", pieces: [{ verts: [1, 2, 3] }] });
+  h.add({ type: "result", options: [{ title: "O", kind: "offset", preview: [{}], before: [{}], placements: {}, min_clearance_m: 0.05 }] });
+  const [trial, result] = runs.runs()[0].events.map((x) => x.e);
+  assert.equal("pieces" in trial, false);
+  assert.deepEqual(result.options[0], { title: "O", kind: "offset", min_clearance_m: 0.05 });
+  const g = workings.graphOf(runOf("propose", [
+    { type: "thinking", round: 1 }, { type: "ideas", round: 1, seconds: 5, understanding: "", count: 1 },
+    { type: "checking", index: 0, title: "Raise", kind: "move" },
+    { type: "attempt", index: 0, title: "Raise", passed: true, reason: "", kind: "move", delta_m: [0, 0, 0.4], split_m: null, seconds: 0.48, checked: 214 },
+    { type: "result", options: [{ title: "Raise", kind: "move", min_clearance_m: 0.05 }] },
+  ]));
+  assert.equal(step(g, "k0-0").time, "0.48 s");
+  assert.match(texts(step(g, "k0-0").detail), /Checked against 214 elements in 0\.48 s/);
+  assert.match(texts(step(g, "rank").body), /Move · 50 mm clear/);
+  const plan = workings.graphOf(runOf("plan", [
+    { type: "plan_items", items: [{ key: "k", label: "IfcPipeSegment 'Pipe' x IfcBeam 'Beam'" }], skipped: [] },
+    { type: "item", key: "k", status: "thinking" },
+    { type: "item", key: "k", status: "checking", attempt: "Lift", passed: false, seconds: 0.61, reason: "collision with IfcWall (-200 mm)" },
+  ], { meta: { kind: "batch" } }));
+  assert.equal(step(plan, "it0-c0").time, "0.61 s");
+  assert.match(texts(step(plan, "it0-c0").body), /collision with IfcWall/);
 });

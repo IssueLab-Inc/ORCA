@@ -237,7 +237,7 @@ All carry `model` (the label) when the model has an id, except in recommend mode
 | `ideas` | `round`, `seconds`, `understanding`, `count`, `candidates` (each idea's `title` and `kind`, before any is checked; not in recommend mode) | The model replied |
 | `checking` | `index`, `title`, `kind` | Before each candidate |
 | `trial` | `index`, `kind`, `moved`, `delta_m`, `pieces` (world triangles; null for a move), `summary` (route, resize, penetration, combined) | The candidate is in place, before its check (`trials=True` only) |
-| `attempt` | `index` and every `Attempt` field | After each candidate |
+| `attempt` | `index`, every `Attempt` field, and `seconds` (the check, timed inside the lock) and `checked` (elements a passing fix was tested against), none for an idea refused before any geometry | After each candidate |
 | `escalating` | `model`, `first`, `first_try` (`understanding`, `advice`, `attempts`, `options`) | A second try starts (`Workspace._escalate`) |
 
 The streaming route ends with `{"type": "result", ...Result}` or `{"type": "error", "detail"}`. The page's pilot
@@ -352,7 +352,7 @@ So the page's automatic reading also answers the chat and an agent, and asking a
 | `thinking` | `what: "root cause"` |
 | `root_cause` | `root_cause`, `strategy`, `reason` |
 | `plan_items` | `items` (each `Item`), `skipped` |
-| `item` | `key`, `status` (`thinking`, `checking` with `attempt` and `passed`, `done` with `ok` and `title`) |
+| `item` | `key`, `status` (`thinking`, `checking` with `attempt`, `passed` and, when the attempt has them, `seconds`, `checked` and `reason`, `done` with `ok` and `title`) |
 | `checking_plan` | `retry` (the keys whose option was swapped), absent the first time |
 
 The route ends with `{"type": "plan", ...Plan}` (`kind`, `title`, `root_cause`, `strategy`, `hub`, `items`, `check`,
