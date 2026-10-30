@@ -340,7 +340,8 @@ flowchart TB
   otherwise the cover's stamp says "DRAFT · AI-assisted · k of n reviewed" and every page's header "DRAFT · requires
   review".
 - **Also in the PDF:** cover with counts and the clearance sentence (the requirements' fix clearance, else 25 mm);
-  summary and actions by team (AI-drafted); the authors' table; noise by test; "How this report was made"; and, under
+  summary and actions by team (AI-drafted); the authors' table; noise by test; "How this report was made" (fixed
+  text, which names Muse Spark Open as the triage model whichever model ran); and, under
   requirements, an appendix of the whole file (`requirements_html`) with "Requirements: name vN, label (id)" in the
   cover's facts.
 - **HTML to PDF:** `document.to_pdf` renders with WeasyPrint (A4, DejaVu Sans). On Modal the image installs
@@ -356,6 +357,8 @@ flowchart TB
   `sightline-report.zip` of `sightline-report[-<team or model>].pdf` files and `sightline-issues.bcfzip`.
   `_build_document` keeps the bytes in `_documents` (the 24 newest) for `GET /api/documents/{doc_id}` (404 "That
   report has expired. Build it again." after), and writes a copy to `$TMP/sightline-exports/<doc id>-<name>`.
+  These download names, and the export zip's, still carry the internal name `sightline`; the files' contents say
+  ORCA.
 
 ## Out: built-view pictures
 

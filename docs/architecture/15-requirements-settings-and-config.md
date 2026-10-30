@@ -52,7 +52,8 @@ are dropped, numbers clamped, and anything that names a group that does not exis
 ### Level and strictness become numbers
 
 `requirements.resolve(doc)` turns the level and strictness into a `Params` record through the `LEVELS` and
-`STRICTNESS` tables, and nothing else in the code reads the level or strictness directly for numbers. The tables
+`STRICTNESS` tables; every number they set comes from there (other code reads them only for names and prompt
+words). The tables
 (tolerance, smallest element, services-to-structure clearance, fix clearance, largest move, trims, the triage lean
 and the "dispute below" confidence) are reproduced in [docs/requirements.md](../requirements.md), which matches the
 code at this commit. Rules worth knowing:
@@ -153,8 +154,8 @@ sequenceDiagram
   `removeByDesign`, `setPenetration`, `addPenetration` (an opening option's host reading, for that kind of host only).
 - `web/src/Requirements.tsx` (`RequirementsDialog`): level cards, the strictness slider with the numbers it sets
   and the expected count (from preview), the check grid, who moves, by-design rules with Muse's audit (Keep rule /
-  Remove rule), openings for services, guidance, Suggest with Muse Spark, Download, Upload, Start from the models, "Use these requirements" and
-  "Use them and check again" ([12](12-web-app.md)).
+  Remove rule), openings for services, guidance, Suggest with Muse Spark, Download, Upload, Start from the models,
+  "Use these requirements" and "Use them and check again" ([12](12-web-app.md)).
 
 ## Settings
 

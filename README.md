@@ -344,6 +344,7 @@ default `0`): off, titles and triage use Muse Spark.
 ```bash
 cd server && uv run pytest -q      # geometry check, detection, agent loop, web API, MCP tools
 cd web && npm run build            # type-check + production build
+cd web && npm test                 # web unit tests (node --test)
 ```
 
 ## How it is built
