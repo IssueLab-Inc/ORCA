@@ -72,8 +72,10 @@ first takes A/B/C views of a detected clash that has none (`captureViews` → `V
 then streams `propose/stream`: one proposal is charged, and a worker runs `Workspace.propose` → `agent.resolve(trials=True)`
 for up to three rounds. Each round asks Muse Spark through Meta's Responses endpoint (`complete_json_reasoning`: live
 `reasoning` notes), then checks each candidate under `Workspace.lock`, sending `checking`, `trial` (the candidate in
-place, before its check) and `attempt`. `trackAgent` fills the activity table and feeds `Pilot`, which plays the trials
-at a readable pace; the `result` (ranked verified options with `before` meshes) shows once the pilot has caught up.
+place, before its check) and `attempt`. `trackAgent` fills the activity table, logs the run for Workings (`runs`,
+[docs/workings.md](../workings.md)) and feeds `Pilot`, which plays the trials at a readable pace; the `result` (ranked
+verified options with `before` meshes) shows once the pilot has caught up, and the Clash panel scrolls to it. Options
+rejected for the pair go with the next request as `notes` ([docs/edits.md](../edits.md), "Rejecting a fix").
 
 ```mermaid
 sequenceDiagram

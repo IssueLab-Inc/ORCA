@@ -2,7 +2,7 @@ import { Bot, CircleDot, Crosshair, Eye, Image as ImageIcon, Maximize, MessageSq
 import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kindLabel } from "./fixKinds";
 import { runs, type Run } from "./runlog";
-import { graphOf, sec, type Actor, type Edge, type Graph, type Part, type Side, type Step } from "./workingsGraph";
+import { graphOf, sec, type Actor, type Edge, type Graph, type Part, type Peek, type Side, type Step } from "./workingsGraph";
 
 /*
  * Workings (docs/workings.md): the Activity panel's drawing of a run as it happens. The graph comes from `workingsGraph.ts`;
@@ -89,10 +89,11 @@ function PartView({ p }: { p: Part }): ReactNode {
   }
 }
 
-function StepView({ s, x, y, w, inView, pinned, you }: { s: Step; x: number; y: number; w: number; inView: boolean; pinned: boolean; you: string }) {
+function StepView({ s, x, y, w, inView, pinned, peeking, you }: { s: Step; x: number; y: number; w: number; inView: boolean; pinned: boolean; peeking: boolean; you: string }) {
   const a = ACTOR[s.actor], Icon = a.icon;
   return (
-    <div className={`wk-step a-${s.actor} st-${s.status}${pinned ? " pinned" : ""}`} data-id={s.id} style={{ left: x, top: y, width: w }}>
+    <div className={`wk-step a-${s.actor} st-${s.status}${pinned ? " pinned" : ""}${s.peek ? " has-peek" : ""}${peeking ? " peeking" : ""}`} data-id={s.id}
+      style={{ left: x, top: y, width: w }} data-tip={s.peek && !pinned ? "In the viewer while you point at it; click to keep it there" : undefined}>
       <div className="wk-head">
         <span className="wk-actor"><Icon size={13} aria-hidden />{s.actor === "you" ? you : s.model ?? a.label}</span>
         {inView && <span className="wk-eye"><Eye size={11} aria-hidden />in view</span>}
@@ -107,17 +108,19 @@ function StepView({ s, x, y, w, inView, pinned, you }: { s: Step; x: number; y: 
 }
 
 /** The timeline under the canvas: who was busy when, and where the drawing stands. Drag to replay. */
-function Strip({ graph, at, onSeek }: { graph: Graph; at: number; onSeek: (t: number) => void }) {
+function Strip({ graph, at, onSeek, clock }: { graph: Graph; at: number; onSeek: (t: number) => void; clock: string }) {
   const dur = Math.max(graph.duration, 0.5), X = (v: number) => (v / dur) * 1000;
-  let y = 2;
+  // Lanes in pixels: a bar 8 px tall (or a row per item), 4 px apart.
+  let y = 3;
   const pos: Record<string, { y: number; h: number }> = {};
-  const rows = graph.rows.map((r) => { const h = r.subs ? r.subs * 3 + 2 : 7; pos[r.id] = { y, h }; y += h + 3; return { ...r, h }; });
+  const rows = graph.rows.map((r) => { const h = r.subs ? r.subs * 3 + 2 : 8; pos[r.id] = { y, h }; y += h + 4; return { ...r, h }; });
   const step = dur <= 25 ? 5 : dur <= 70 ? 10 : dur <= 160 ? 20 : 60;
   const ticks: number[] = []; for (let s = 0; s <= dur; s += step) ticks.push(s);
   const seek = (e: React.PointerEvent<HTMLDivElement>) => { const b = e.currentTarget.getBoundingClientRect(); onSeek(clamp((e.clientX - b.left) / b.width, 0, 1) * dur); };
   return (
     <div className="wk-strip">
-      <div className="wk-rows">{rows.map((r) => <span key={r.id} style={{ height: r.h + 3 }}>{r.label}</span>)}</div>
+      {/* Each label sits on its own lane's bars: the same top and height, in pixels */}
+      <div className="wk-rows" style={{ height: y }}>{rows.map((r) => <span key={r.id} style={{ top: pos[r.id].y - 2, height: r.h + 4 }}>{r.label}</span>)}</div>
       <div className="wk-track" onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); seek(e); }}
         onPointerMove={(e) => { if (e.buttons) seek(e); }} role="slider" aria-label="Replay the run" aria-valuemin={0}
         aria-valuemax={Math.round(dur)} aria-valuenow={Math.round(at)} tabIndex={0}
@@ -127,9 +130,12 @@ function Strip({ graph, at, onSeek }: { graph: Graph; at: number; onSeek: (t: nu
             return <rect key={i} className={`g-${b.tone}`} x={X(b.a)} y={yy} width={Math.max(3, X(b.b) - X(b.a))} height={b.sub != null ? 2.2 : p.h} rx={1} />; })}
           {graph.ticks.map((k, i) => { const p = pos[k.lane]; return p ? <rect key={`t${i}`} className={`g-${k.tone}`} x={X(k.at) - 2} y={p.y - 1} width={4} height={p.h + 2} rx={1} /> : null; })}
         </svg>
-        <div className="wk-ticks">{ticks.map((s) => <span key={s} style={{ left: `${(s / dur) * 100}%`, transform: `translateX(${s / dur > 0.94 ? -100 : -50}%)` }}>{s} s</span>)}</div>
+        {/* The first tick starts at the track's left edge and the last ends at its right, so none hangs outside it */}
+        <div className="wk-ticks">{ticks.map((s) => <span key={s} style={{ left: `${(s / dur) * 100}%`,
+          transform: `translateX(${s === 0 ? 0 : s / dur > 0.94 ? -100 : -50}%)` }}>{s} s</span>)}</div>
         <div className="wk-head-line" style={{ left: `${(clamp(at, 0, dur) / dur) * 100}%` }} />
       </div>
+      <span className="wk-clock mono">{clock}</span>
     </div>
   );
 }
@@ -147,11 +153,11 @@ class Boundary extends Component<{ children: ReactNode }, { error: string | null
 
 /** Workings: the run picked (the newest by default), drawn as it stands. `inView`: the check the 3D viewer's pilot
  *  is showing (its step number), marked on the drawing. */
-export function Workings(props: { inView?: number | null }) {
+export function Workings(props: { inView?: number | null; onPeek?: (peek: Peek | null, pin: boolean) => void }) {
   return <Boundary><WorkingsView {...props} /></Boundary>;
 }
 
-function WorkingsView({ inView = null }: { inView?: number | null }) {
+function WorkingsView({ inView = null, onPeek }: { inView?: number | null; onPeek?: (peek: Peek | null, pin: boolean) => void }) {
   const host = useRef<HTMLDivElement>(null), canvas = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
   const labels = useRef<HTMLDivElement>(null), mini = useRef<SVGSVGElement>(null), zoomText = useRef<HTMLSpanElement>(null);
   const list = useRuns(host);
@@ -183,6 +189,16 @@ function WorkingsView({ inView = null }: { inView?: number | null }) {
 
   const runId = run?.id ?? null;
   useEffect(() => { setReplay(null); setPinned(null); }, [runId]);
+
+  // A check hovered, or pinned with a click, shows its trial in the viewer (the page decides when it may: not while
+  // the pilot is driving, unless pinned). The hovered one wins while the pointer is on it; the pinned one stays.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const peekOf = (id: string | null) => (id ? graph?.steps.find((s) => s.id === id)?.peek ?? null : null);
+  const hoverPeek = peekOf(hovered), pinPeek = peekOf(pinned), shown = hoverPeek ?? pinPeek;
+  const shownKey = shown ? `${shown.key}|${shown.passed}|${shown === pinPeek && !hoverPeek ? "pin" : "hover"}` : "";
+  const tell = useRef(onPeek); tell.current = onPeek;
+  useEffect(() => { tell.current?.(shown, !!shown && shown === pinPeek && !hoverPeek); }, [shownKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { tell.current?.(null, false); }, []);
 
   // The clock, while the run is live or replaying: from the window the canvas is in now.
   const ticking = live || !!replay?.playing;
@@ -403,7 +419,9 @@ function WorkingsView({ inView = null }: { inView?: number | null }) {
   return (
     <div className="workings" ref={host}>
       <div className={`wk-canvas${far ? " far" : ""}${showEv ? " show-ev" : ""}`} ref={canvas} onPointerDown={down} onPointerMove={move}
-        onPointerUp={up} onPointerCancel={up} aria-label="Workings: the run as a graph" role="figure">
+        onPointerUp={up} onPointerCancel={up} aria-label="Workings: the run as a graph" role="figure"
+        onPointerOver={(e) => { if (e.pointerType !== "touch") setHovered((e.target as Element).closest<HTMLElement>(".wk-step")?.dataset.id ?? null); }}
+        onPointerLeave={() => setHovered(null)}>
         <div className="wk-layer" ref={layer} style={{ width: W, height: H }}>
           {graph.lanes.map((l, i) => <div key={l.id} className={`wk-lane${i % 2 ? " alt" : ""}`} style={{ top: laneTop[l.id], height: l.h, width: W + 8000 }} />)}
           <svg className="wk-edges" width={W} height={H}>
@@ -420,7 +438,7 @@ function WorkingsView({ inView = null }: { inView?: number | null }) {
             <g ref={dots} />
           </svg>
           {graph.steps.map((s) => <StepView key={s.id} s={s} x={colX[s.col]} y={laneTop[s.lane] + (s.dy ?? 14)} w={graph.cols[s.col] - 40}
-            inView={inViewId === s.id} pinned={pinned === s.id} you={you} />)}
+            inView={inViewId === s.id} pinned={pinned === s.id} peeking={!!onPeek && !!shown && s.peek?.key === shown.key} you={you} />)}
         </div>
         <div className="wk-labels" ref={labels} aria-hidden>
           {graph.lanes.map((l) => <div key={l.id} className="wk-ll" style={{ ["--c" as string]: ACTOR[l.actor].color }}>
@@ -458,8 +476,8 @@ function WorkingsView({ inView = null }: { inView?: number | null }) {
             : <span className="chip accent"><Radio size={12} aria-hidden /> Live</span>}
         {finishedRun && <span className="seg wk-speeds" aria-label="Replay speed">{SPEEDS.map((s) =>
           <button key={s} type="button" className={s === speed ? "on" : ""} onClick={() => setSpeed(s)}>{s}×</button>)}</span>}
-        <Strip graph={whole ?? graph} at={at} onSeek={(t) => { setReplay({ at: t, playing: false }); }} />
-        <span className="wk-clock mono">{sec(at)}{finishedRun ? ` / ${sec(run.ended!)}` : ""}</span>
+        <Strip graph={whole ?? graph} at={at} onSeek={(t) => { setReplay({ at: t, playing: false }); }}
+          clock={`${sec(at)}${finishedRun ? ` / ${sec(run.ended!)}` : ""}`} />
       </div>
     </div>
   );

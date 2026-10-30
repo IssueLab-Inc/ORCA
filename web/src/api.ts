@@ -670,9 +670,10 @@ export const api = {
   /** Propose fixes, hearing each step as it happens. Resolves with the final proposal. `escalate`: a second, longer try
    * on the larger model, reading the last try at this pair (docs/escalation.md). */
   proposeStream: async (id: string, element_a: string, element_b: string, from: { report_id: string; clash_id: string } | undefined,
-                        onEvent: (e: AgentEvent) => void, escalate = false): Promise<Proposal> => {
+                        onEvent: (e: AgentEvent) => void, escalate = false, notes = ""): Promise<Proposal> => {
     const r = await send(`/api/scenes/${id}/propose/stream`, {
-      method: "POST", headers: jsonHeaders(), body: JSON.stringify({ element_a, element_b, ...from, ...(escalate ? { escalate } : {}) }),
+      method: "POST", headers: jsonHeaders(),
+      body: JSON.stringify({ element_a, element_b, ...from, ...(escalate ? { escalate } : {}), ...(notes ? { notes } : {}) }),
     });
     if (!r.ok || !r.body) throw new Error((await r.json().catch(() => null))?.detail ?? `Request failed (${r.status})`);
     const reader = r.body.getReader();

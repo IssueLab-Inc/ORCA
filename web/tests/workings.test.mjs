@@ -252,10 +252,11 @@ test("the run log drops the meshes Workings never reads, and the server's check 
   let now = 0;
   const runs = new log.RunLog(() => now);
   const h = runs.start("propose");
-  h.add({ type: "trial", index: 0, kind: "offset", pieces: [{ verts: [1, 2, 3] }] });
+  h.add({ type: "trial", index: 0, kind: "offset", pieces: [{ verts: [1, 2, 3] }], before: [{}] });
   h.add({ type: "result", options: [{ title: "O", kind: "offset", preview: [{}], before: [{}], placements: {}, min_clearance_m: 0.05 }] });
   const [trial, result] = runs.runs()[0].events.map((x) => x.e);
-  assert.equal("pieces" in trial, false);
+  assert.deepEqual(trial.pieces, [{ verts: [1, 2, 3] }]);   // the edit in place, for a check hovered in Workings
+  assert.equal("before" in trial, false);
   assert.deepEqual(result.options[0], { title: "O", kind: "offset", min_clearance_m: 0.05 });
   const g = workings.graphOf(runOf("propose", [
     { type: "thinking", round: 1 }, { type: "ideas", round: 1, seconds: 5, understanding: "", count: 1 },
@@ -273,4 +274,39 @@ test("the run log drops the meshes Workings never reads, and the server's check 
   ], { meta: { kind: "batch" } }));
   assert.equal(step(plan, "it0-c0").time, "0.61 s");
   assert.match(texts(step(plan, "it0-c0").body), /collision with IfcWall/);
+});
+
+test("a trial's pieces stay with the newest proposals only", () => {
+  const runs = new log.RunLog(() => 0);
+  for (let i = 0; i <= log.TRIALS_KEPT; i++) {
+    const h = runs.start("propose");
+    h.add({ type: "trial", index: 0, kind: "offset", pieces: [{ run: i }] });
+    h.end();
+  }
+  runs.start("triage");   // other kinds don't count
+  const trials = runs.runs().filter((r) => r.kind === "propose").map((r) => r.events[0].e);
+  assert.equal("pieces" in trials[0], false);
+  assert.deepEqual(trials.slice(1).map((e) => e.pieces), [[{ run: 1 }], [{ run: 2 }], [{ run: 3 }]]);
+});
+
+test("a check carries its trial for the viewer: in place, then passed or with what it hit", () => {
+  const g = workings.graphOf(runOf("propose", [
+    { type: "thinking", round: 1 }, { type: "ideas", round: 1, seconds: 5, understanding: "", count: 2 },
+    { type: "checking", index: 0, title: "Raise", kind: "move" },
+    { type: "trial", index: 0, kind: "move", moved: ["duct"], delta_m: [0, 0, 0.4], pieces: null },
+    { type: "attempt", index: 0, title: "Raise", passed: false, reason: "collision with IfcCovering (-300 mm)", kind: "move",
+      delta_m: [0, 0, 0.4], split_m: null, hit_ids: ["ceiling"] },
+    { type: "checking", index: 1, title: "Offset", kind: "offset" },
+    { type: "trial", index: 1, kind: "offset", moved: ["duct"], delta_m: [0, 0, 0.4], pieces: [{ id: "middle" }], summary: "offset" },
+  ], { end: false, meta: { scene: "s1" } }));
+  const raise = step(g, "k0-0").peek;
+  assert.deepEqual({ ...raise, key: undefined, run: undefined },
+    { key: undefined, run: undefined, scene: "s1", title: "Raise", kind: "move", moved: ["duct"], delta_m: [0, 0, 0.4], pieces: null,
+      summary: undefined, passed: false, hit_ids: ["ceiling"] });
+  assert.equal(step(g, "i0-0").peek, raise);   // the idea shows the same trial
+  const offset = step(g, "k0-1").peek;
+  assert.equal(offset.passed, null);           // still being checked
+  assert.deepEqual(offset.pieces, [{ id: "middle" }]);
+  assert.notEqual(offset.key, raise.key);
+  assert.equal(step(g, "rank")?.peek, undefined);
 });
