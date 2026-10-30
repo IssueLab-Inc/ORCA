@@ -239,7 +239,8 @@ manager starts in the app's lifespan (`_lifespan`). Each tool call runs inside `
 
 **In a route handler**, typically:
 - `_scene(sid)` / `_report(rid)` answer 404 "Model not loaded. Open it again." / "Clash report not loaded. Open it
-  again." when the server no longer holds them;
+  again." when the server no longer holds them, with `X-Sightline-Gone: scene:<id>` (or `report:<id>`) so the page
+  offers to open them again ([10](10-http-api-and-streams.md));
 - pydantic validates the body (FastAPI's 422);
 - a cap is taken: `_take(limit, request)` → `limits.client_id` → `ProposeLimit.take`, 429 with a sentence that says
   why; the owner (`owner.no_caps()`) skips caps. Plans take several at once (`take_many`), a second try takes one

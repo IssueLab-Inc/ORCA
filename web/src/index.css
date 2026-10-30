@@ -238,6 +238,9 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .overlay { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; box-shadow: var(--shadow); z-index: 5; max-width: 70%; }
 .overlay.live { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .overlay.error { top: auto; bottom: 14px; color: var(--fail); border-color: var(--fail); background: var(--fail-soft); display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.overlay.gone { z-index: 6; width: min(600px, calc(100% - 120px)); max-width: none; display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.overlay.gone b { color: var(--ink); }
+.overlay.gone .btn { flex: none; }
 .hint-bar { top: 12px; font-size: 12.5px; }
 .viewer-label { position: absolute; transform: translate(-50%, -150%); pointer-events: none; background: rgba(24,33,44,.85); color: #fff; font: 600 11.5px var(--mono); padding: 2px 7px; border-radius: 4px; white-space: nowrap; z-index: 2; }
 .measure-label { background: var(--accent); transform: translate(-50%, -130%); }
@@ -1506,6 +1509,7 @@ a.pop-item { color: inherit; }
 .rail.compact .btn, .rail.compact .pop > .btn { background: var(--surface); border-color: transparent; box-shadow: var(--shadow); }
 .app.phone .overlay.live { display: none; }
 .app.phone .overlay, .app.phone .pilot { left: 8px; right: 8px; max-width: none; transform: none; }
+.app.phone .overlay.gone { width: auto; }
 .app.phone .hint-bar { top: 60px; }
 .app.phone .measure-panel { left: 8px; right: 8px; top: 56px; width: auto; max-width: none; }
 .app.phone .pilot { top: 60px; }

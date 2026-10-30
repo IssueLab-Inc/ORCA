@@ -1196,3 +1196,23 @@ Properties of any element (Oct 30; `feature/element-properties`, on top of the p
   In Playwright on Northbank: #1 in focus (X-ray), a click on the faded furniture behind selects it; the girder reads
   Steel S355, 400 × 12000 × 1000 mm, Model data without its scripting note; the filter; Esc empties the panel; the
   classic card's All properties; the page never scrolls.
+
+When the server lets go of the models (Oct 30; code `server/sightline/app.py`, `web/src/api.ts`, `App.tsx`,
+`BuiltView.tsx`, `index.css`):
+- **Found:** "No built view. Model not loaded. Open it again." under Show it built, and Try again failing the same way.
+  Modal's logs: every deploy (v16 16:50, v17 16:56, v19 18:07 UTC) and the 20-minute idle scale-down (17:34) started a
+  fresh process, which holds no scenes; the page kept its old scene id, so its next calls (`built/stream`, then
+  `fix/apply`, element cards for 17 minutes) answered 404. Not eviction: one to three scenes were open, the cap is 8.
+- **Server:** `_scene` and `_report` add `X-Sightline-Gone: scene:<id>` / `report:<id>` to their 404 (`_gone`; only a
+  hex id goes back in a header).
+- **Page:** `api.ts` `send` hands that to App's handler (`setGoneHandler`, `goneOf`); App shows one notice in place of
+  the calls' own errors, drops `fixes` and accepted `evidence`, hides Export, and **Open them again** (`reopenGone`)
+  reopens the same samples and runs the same check, or reopens the same sample report; uploads go back to the file
+  picker. A failed Show it built offers the reopen instead of Try again (`BuiltView`'s `reopen`). What is gone is kept
+  by id (`goneIds`) and the notice derived while rendering: clearing it in an effect let the old report's flag paint
+  once (1.4 s in Chromium) when the reopened check's report arrived.
+- **Checked:** `test_api.py::test_a_scene_or_report_the_server_let_go_says_so`; `web/tests/gone.test.mjs` (3; each
+  breaks when the error line, the fixes, Show it built's reopen or the stale-id guard is left out); 607 server tests,
+  124 web tests, build clean. In Chromium on Northbank against a local server restarted mid-session: a clash picked
+  after the restart brings the notice naming the models (its report call failed first; the scene probe followed), no
+  error line, Export hidden; **Open them again** reloads the models and the check, with no notice or error after.

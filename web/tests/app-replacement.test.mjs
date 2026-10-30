@@ -58,7 +58,7 @@ async function appHost() {
   globalThis.__sightlineAppApi = { proposeStream: () => new Promise((resolve) => requests.push(resolve)),
     contextStream: (_sid, objective, onEvent) => new Promise((resolve) => contextRequests.push({ objective, onEvent, resolve })) };
   const react = url("export const useState=(...a)=>globalThis.__sightlineAppHooks.useState(...a),useRef=(...a)=>globalThis.__sightlineAppHooks.useRef(...a),useMemo=(...a)=>globalThis.__sightlineAppHooks.useMemo(...a),useEffect=()=>{};");
-  const api = url("export const api={proposeStream:(...a)=>globalThis.__sightlineAppApi.proposeStream(...a),contextStream:(...a)=>globalThis.__sightlineAppApi.contextStream(...a),exportUrl:()=>'/export',models:async()=>({triage:{model:'m',open_weights:false}})}; export class ApiError extends Error{} export const setRequirements=()=>{};");
+  const api = url("export const api={proposeStream:(...a)=>globalThis.__sightlineAppApi.proposeStream(...a),contextStream:(...a)=>globalThis.__sightlineAppApi.contextStream(...a),exportUrl:()=>'/export',models:async()=>({triage:{model:'m',open_weights:false}})}; export class ApiError extends Error{} export const setRequirements=()=>{}; export const setGoneHandler=()=>{};");
   const ownership = await compiled("../src/chatRequest.ts", {});
   const kinds = await compiled("../src/fixKinds.ts", {});
   const uploads = await compiled("../src/uploads.ts", {});

@@ -15,7 +15,7 @@ import { localFile, uploadRefusal, uploadStatus } from "./uploads";
 import { countsText, highlightGroups, indexGraph, LINK_COLOURS, LINK_ORDER, LINK_WORDS, type LinkIndex, type LinkKind } from "./links";
 import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
-import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
+import { setGoneHandler, setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
 import { api, ApiError, type ElementProperties, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About, projectName } from "./About";
 import { AboutOrca } from "./AboutOrca";
@@ -255,6 +255,15 @@ export function App() {
   // while the server still holds it. One per browser: opening other models replaces it.
   const [sceneFiles, setSceneFiles] = useState<string[]>([]);
   const [resumable, setResumable] = useState<{ saved: SavedSession; info: SceneInfo; clashes: number | null } | null>(null);
+  // The server let go of the open models or clash report (a restart or a redeploy, or room for other visitors: the
+  // 404's X-Sightline-Gone): one notice that offers to open them again, in place of each call's own error. Kept by id,
+  // so it counts only while those models or that report are the ones on screen.
+  const [goneIds, setGoneIds] = useState<{ scene: string | null; report: string | null }>({ scene: null, report: null });
+  const goneScene = !!sceneId && goneIds.scene === sceneId, goneReport = !!report && goneIds.report === report.id;
+  const gone = goneScene || goneReport ? { scene: goneScene, report: goneReport } : null;
+  const sceneUploaded = useRef(false);   // the open models are the visitor's own files: only they can pick them again
+  const sampleReports = useRef<Record<string, string>>({});   // report id → the sample report it was opened from
+  const goneWords = useRef(new Set<string>());   // the server's words for it: the notice says them, never the error line
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
@@ -1036,7 +1045,7 @@ export function App() {
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
-      setStepFiles(Object.values(step ?? {})); setSceneFiles(files); setResumable(null);
+      setStepFiles(Object.values(step ?? {})); setSceneFiles(files); setResumable(null); sceneUploaded.current = upload;
       return id;
     } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) setBusy(null); }
   }
@@ -2186,6 +2195,52 @@ export function App() {
     setResumable(null);
   }
 
+  // ------------------------------------------------------------------ models the server let go of (gone)
+  const holding = useRef({ scene: sceneId, report: report?.id ?? null });
+  holding.current = { scene: sceneId, report: report?.id ?? null };
+  useEffect(() => {
+    setGoneHandler((g) => {
+      if (g.detail) goneWords.current.add(g.detail);
+      if (g.id !== holding.current[g.kind]) return;   // a late answer about models or a report since replaced
+      setGoneIds((was) => ({ ...was, [g.kind]: g.id }));
+      // A restart drops both: ask after the models too, so the notice says what is really gone.
+      const sid = holding.current.scene;
+      if (g.kind === "report" && sid) api.sceneInfo(sid).catch(() => undefined);
+    });
+    return () => { setGoneHandler(null); };
+  }, []);
+  useEffect(() => {  // the fixes kept went with the models: the list and the report's evidence stop claiming them
+    if (!goneScene) return;
+    setFixes({});
+    setEvidence((ev) => Object.fromEntries(Object.entries(ev).filter(([, e]) => e.status !== "accepted")));
+  }, [goneScene]);
+  /** The open models can be opened again by name: samples, not the visitor's own files. */
+  const reopenable = () => !sceneUploaded.current && sceneFiles.length > 0 && sceneFiles.every((f) => samples.includes(f));
+  const reopenLabel = gone?.scene ? (reopenable() ? "Open them again" : "Pick your files again") : "Open it again";
+  // A picture cannot be drawn again on models the server let go of: Show it built offers to open them instead.
+  const builtReopen = gone?.scene ? { label: reopenLabel, onClick: () => void reopenGone() } : undefined;
+  /** Open again what the server let go of: the same sample models, then the same clashes (ORCA's check run again, or
+   * the same sample report). The visitor's own files cannot be fetched again, so they pick them. */
+  async function reopenGone() {
+    const g = gone, r = report;
+    if (!g || busy) return;
+    let sid = sceneId;
+    if (g.scene) {
+      if (!reopenable()) { modelInput.current?.click(); return; }
+      sid = await open(sceneFiles) ?? null;
+      if (!sid) return;
+    }
+    if (!r) return;
+    if (r.origin === "sightline") { await runDetect(lastTests.current, sid); return; }
+    // A Navisworks report outlives the models it was matched to unless it was let go of too.
+    if (!g.report && await api.report(r.id).then(() => true, () => false)) return;
+    const sample = sampleReports.current[r.id];
+    if (sample) {
+      const again = await loadReport(() => api.openReport(sample), sample);
+      if (again) sampleReports.current[again.id] = sample;
+    } else setError("Import your clash report again: Coordinate, then Import.");
+  }
+
   async function accept(o: Option) {
     if (!sceneId || busy) return;
     replaceChatWork(); retireDirectWork(); clearManual();
@@ -2515,7 +2570,7 @@ export function App() {
     {!sceneId && <p className="hint">Open the models first.</p>}
     <p className="pop-title">Or import a Navisworks clash report (XML)</p>
     {reportSamples.map((s) => (
-      <button key={s} className="pop-item" disabled={!!busy} onClick={() => { close(); loadReport(() => api.openReport(s), s); }}>
+      <button key={s} className="pop-item" disabled={!!busy} onClick={() => { close(); void loadReport(() => api.openReport(s), s).then((r) => { if (r) sampleReports.current[r.id] = s; }); }}>
         <FileSpreadsheet size={14} aria-hidden /> {s}</button>
     ))}
     {!noFolders && <button className="pop-item" disabled={!!busy} onClick={() => { close(); folderInput.current?.click(); }}><Upload size={14} aria-hidden /> Upload an export folder…</button>}
@@ -2590,7 +2645,7 @@ export function App() {
         <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
         {layout === "tablet" && report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }}>
           <FileText size={15} aria-hidden /> Report</button>}
-        {layout === "tablet" && sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)}>
+        {layout === "tablet" && sceneId && !gone?.scene && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)}>
           <Download size={15} aria-hidden /> Export</a>}
         <button className="btn ghost menu-btn" data-tour="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
           <Menu size={18} aria-hidden /><span>Menu</span></button>
@@ -2630,7 +2685,7 @@ export function App() {
         <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
         {report && <button className="btn" data-tour="report" onClick={() => { setDocOpen(true); setDocReady(false); }} data-tip="A PDF for the design teams, with BCF issues" data-tip-side="bottom">
           <FileText size={15} aria-hidden /> Report</button>}
-        {sceneId && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
+        {sceneId && !gone?.scene && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
           data-tip={stepFiles.length ? "Download the changed models: the STEP with its fixes, and the IFC" : "Download the changed IFC files"}>
           <Download size={15} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
         </div>
@@ -2745,7 +2800,14 @@ export function App() {
           </div>
         )}
         {compareBar}
-        {error && <div className="overlay error" role="alert" onClick={() => setError(null)}>{error}<X size={14} aria-hidden /></div>}
+        {gone && !busy && !detecting && (   // a reopen's check may still ask after the old report: not news
+          <div className="overlay gone" role="alert">
+            <span><b>The server no longer holds your {gone.scene ? "models" : "clash report"}</b> (it restarted, or made
+              room for other visitors).{gone.scene ? " The fixes you kept went with them." : ""}</span>
+            <button className="btn small primary" onClick={() => void reopenGone()}><RotateCcw size={13} aria-hidden /> {reopenLabel}</button>
+          </div>
+        )}
+        {error && !goneWords.current.has(error) && <div className="overlay error" role="alert" onClick={() => setError(null)}>{error}<X size={14} aria-hidden /></div>}
         {toast && <div className="toast" role="status">{toast}</div>}
       </main>)}
 
@@ -2835,7 +2897,7 @@ export function App() {
                 const f = builtFixes.current[clash.id], run = builtRuns[f.key];
                 return <div className="built-kept">
                   <h3>As it could look built</h3>
-                  {run ? <BuiltView run={run} onRetry={() => redrawKept(clash.id)} />
+                  {run ? <BuiltView run={run} onRetry={() => redrawKept(clash.id)} reopen={builtReopen} />
                     : <button className="btn small" disabled={!!busy} onClick={() => redrawKept(clash.id)}
                       data-tip="Muse Image draws ORCA's view of the kept fix as a presentation render, checked against the model. About a minute.">
                       <Building2 size={13} aria-hidden /> Show it built</button>}
@@ -2923,7 +2985,7 @@ export function App() {
               {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
               {chosen === i && canBuild(o) && a && b && (() => {
                 const run = builtRuns[builtKey([a, b], o)];
-                return run ? <BuiltView run={run} onRetry={() => showBuilt(o)} />
+                return run ? <BuiltView run={run} onRetry={() => showBuilt(o)} reopen={builtReopen} />
                   : <button className="btn small" data-tour="show-built" disabled={!!busy} onClick={() => showBuilt(o)}
                     data-tip="Muse Image draws ORCA's view of this fix as a presentation render, checked against the model before you see it. About a minute.">
                     <Building2 size={13} aria-hidden /> Show it built</button>;
@@ -3002,7 +3064,7 @@ export function App() {
             <ClipboardCheck size={16} aria-hidden /> Requirements{reqLabel ? <span className="chip accent">{reqLabel}</span> : <span className="why">optional</span>}</button>}
           {report && <button className="pop-item" data-tour="report" onClick={() => { setMenuOpen(false); setDocOpen(true); setDocReady(false); }}>
             <FileText size={16} aria-hidden /> Report: PDF and BCF</button>}
-          {sceneId && <a className="pop-item" data-tour="export" href={api.exportUrl(sceneId)} onClick={() => setMenuOpen(false)}>
+          {sceneId && !gone?.scene && <a className="pop-item" data-tour="export" href={api.exportUrl(sceneId)} onClick={() => setMenuOpen(false)}>
             <Download size={16} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
           <button className="pop-item" onClick={() => { setMenuOpen(false); setAgentOpen(true); }}>
             {agentLink ? <><Bot size={16} aria-hidden /> Agent connected · {timeLeft(agentLink, now)} left</> : <><Plug size={16} aria-hidden /> Connect an agent</>}</button>

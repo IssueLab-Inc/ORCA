@@ -298,9 +298,16 @@ MODEL_UPLOAD_MAX_MB = env_int("SIGHTLINE_MODEL_UPLOAD_MAX_MB", UPLOAD_MAX_MB)
 MODEL_UPLOAD_MAX_FILES = 8
 
 
+def _gone(kind: str, ident: str) -> dict[str, str]:
+    """The header on a 404 for a scene or report the server no longer holds (a restart, or let go to make room):
+    `X-Sightline-Gone: scene:<id>`, so the page offers to open them again rather than show each call's error. Only an
+    id the server could have made goes back in a header."""
+    return {"X-Sightline-Gone": f"{kind}:{ident}"} if re.fullmatch(r"[0-9a-f]{1,32}", ident) else {}
+
+
 def _scene(scene_id: str):
     if scene_id not in ws.scenes:
-        raise HTTPException(404, "Model not loaded. Open it again.")
+        raise HTTPException(404, "Model not loaded. Open it again.", headers=_gone("scene", scene_id))
     return scene_id
 
 
@@ -920,7 +927,7 @@ def export_zip_name(files: list[str]) -> str:
 
 def _report(report_id: str):
     if report_id not in ws.reports:
-        raise HTTPException(404, "Clash report not loaded. Open it again.")
+        raise HTTPException(404, "Clash report not loaded. Open it again.", headers=_gone("report", report_id))
     return report_id
 
 

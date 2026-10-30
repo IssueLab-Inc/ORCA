@@ -209,6 +209,7 @@ Each was checked at HEAD.
 | `server/.sightline-settings.json` | The local settings file (gitignored; `SIGHTLINE_SETTINGS_FILE`) | `settings.py` |
 | `X-Sightline-Settings` | The owner's per-request settings header | `owner.HEADER`, `api.ts` |
 | `X-Sightline-Requirements` | The header carrying the page's requirements id (not in CLAUDE.md's list, kept the same way) | `requirements.py`, `app.py`, `api.ts` |
+| `X-Sightline-Gone` | The 404 header naming a scene or report the server no longer holds (`scene:<id>`, `report:<id>`), kept the same way | `app._gone`, `api.ts` `goneOf` |
 | `sightline_owner` | The owner cookie | `owner.COOKIE` |
 | `sightline.*` | Browser storage keys: `sightline.session`, `sightline.left-w`, `sightline.right-w`, `sightline.signoffs:clash:<id>` / `sightline.signoffs:import:<title>:<files>`, `sightline.reviewer`, `sightline.triage.compact`, `sightline.voice.handsfree`, `sightline.agent.setup`, `sightline.owner`, `sightline.requirements` | `App.tsx`, `ReportDoc.tsx`, `Triage.tsx`, `Chat.tsx`, `Agent.tsx`, `Owner.tsx`, `reqFile.ts`, `signoffs.ts` |
 | `origin: "sightline"` | A report ORCA detected itself (else `"navisworks"`) | `reports.Report.origin`, `detect.py`; `ReportClash.source` |
