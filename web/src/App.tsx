@@ -1184,7 +1184,8 @@ export function App() {
    *  linked to; Shift widens it to the whole run. Never on touch (a tap does it), never while dragging. */
   function stageMove(e: React.PointerEvent) {
     pressMove(e);
-    if (e.pointerType === "touch" || e.buttons) return;
+    // On a touch screen a tap does it (some browsers also send a mouse-type move with the tap): hover only with Alt.
+    if (e.pointerType === "touch" || e.buttons || (coarse && !e.altKey)) return;
     if (!(e.altKey || tool.links) || tool.measure) {
       if (hover.current.gid) clearHover();
       return;
