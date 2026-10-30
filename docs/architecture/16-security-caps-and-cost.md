@@ -121,8 +121,11 @@ What the owner gets that visitors do not:
 - **Who pays.** A link's proposals and second tries are charged to the visitor who made it (`link.visitor`), never
   when the owner made it; each tool call takes one use of `SIGHTLINE_AGENT_CALLS_PER_HOUR` for that link. Making a
   link takes one use of `SIGHTLINE_LINKS_PER_HOUR` / `_PER_DAY`.
-- **The stdio server** (`python -m sightline.mcp_server`) runs as a local owner link: no caps, and a second try only
-  counted against the budget (`mcp_server._local_escalate`), still refused when second tries are switched off.
+- **The stdio server** (`python -m sightline.mcp_server`, `mcp_server.main`) runs as a local link marked owner,
+  with the web server's hooks: no proposal caps, and a second try only counted against the budget, still refused
+  when second tries are switched off (`escalation_refused` with the owner's exemption; `mcp_server._local_escalate`
+  does the same for a server built without hooks). The tool-call cap would apply to it under the id `local` if
+  `SIGHTLINE_AGENT_CALLS_PER_HOUR` were set.
 
 ## Caps
 
