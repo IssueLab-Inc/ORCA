@@ -1025,3 +1025,60 @@ About ORCA (Oct 30, owner request; code `web/src/AboutOrca.tsx`, `web/src/aboutR
   `aboutRoute`); in Chromium at 1440x900 and 390x844 (touch) every tab renders, no console errors, no sideways scroll,
   Escape / Close / Back close it, the tab bar follows the chosen tab, and reduced motion shows the fix pictures' after
   state.
+
+Navigate freely, and drawing views beside 3D (Oct 30; design [docs/views.md](../views.md); code `web/src/viewer/views.ts`,
+`cube.ts`, `drawing.ts`, `annotate.ts`, `Viewer.ts`, `web/src/ViewPanes.tsx`, `ViewerToolbar.tsx`, `App.tsx`,
+`server/sightline/datums.py`; branch `feature/drawing-views`):
+- **Why:** once a clash was picked there was no plain model to move around in, and one view only, where coordinators
+  read a clash in plan at its level and in section through it (owner, Oct 29–30).
+- **Navigation:** leaving a clash (Esc, one thing at a time, or ✕ on the clash chip; not while ORCA works on it); Fly to
+  clash (on: every click on a clash takes every unpinned view there); F frames the selection first; orbit about the
+  point under the pointer (`OrbitControls`' target slid along the view ray, about 8 ms a press); a view cube with 26
+  directions and Home; orthographic; back and forward; Home and saved views per project; a section box round the clash,
+  the selection or what is in view, with grips.
+- **Styles and visibility:** Shaded, Consistent colours, Shaded with edges, Hidden line and X-ray (G); with a clash in
+  Shaded the rest grey or in its own colours; the selection blue in every view; filters by model, class and level; hide
+  and isolate for now (element card, cyan frame and chip). Wireframe left out (three.js cannot draw a `BatchedMesh`
+  as wireframe).
+- **Drawing views:** Single, Two, Quad (Q); plans, a section, elevations as orthographic cameras with global clip planes;
+  paper fills, cut faces filled by stencil parity (grey hatch, red, green, purple, amber where A and B overlap), the
+  pair's hidden parts ghosted, linework and a heavy cut outline from normals and depth in one composite shader; grids,
+  levels, a revision cloud with `#N`, the other views' marks, title, scale and north. Every clash click sets each
+  unpinned view: plan at its storey with the cut through it, section along the run that moves with a far clip 2 m
+  beyond the pair, elevation facing the section's way. Headers set view range, presets, far clip and crop; handles
+  in other views drag a section's line, ends, far clip and sides, a plan's cut and bottom, a section's crop (Esc
+  reverts). A right click in a drawing turns the 3D view there.
+- **Server:** `GET /api/scenes/{sid}/datums` (`datums.py`): levels merged across files at world z, grid axes (a sample
+  scene with none reads `<prefix>-Grids.ifc` as context, never added to the scene), each element's storey.
+- **Captures unchanged:** every capture goes through `fullCanvas` with the user's style, filters, hides, selection and
+  projection lifted, and restores the drawings' version so thumbnails redraw nothing.
+- **Checked:** in Playwright on Northbank (software GL): A/B/C, thumbnails, `capture()` and Show it built's passes
+  byte-identical in Single and Quad and with a style, filters, a hide and orthographic on; redraws in Quad: idle 0,
+  orbiting 0 (the plan's 3D camera mark only), a new clash 3; a cut dragged in a section from +3.058 to +3.568 and a
+  section line moved in plan; phone shows Single only with no sideways scroll. `server/tests/test_datums.py` (6),
+  `web/tests/views.test.mjs` (11), `web/tests/drawing.test.mjs` (4); 95 web tests; `npm run build` and `tsc` clean.
+  Frame times on a real GPU are still to measure.
+
+Review of the drawing views (Oct 30; PR review on `feature/drawing-views`; code `web/src/viewer/Viewer.ts`, `drawing.ts`,
+`views.ts`, `cube.ts`, `web/src/ViewPanes.tsx`, `App.tsx`):
+- **Drawing:** everything but the pair is counted for cut faces (back faces up, front down) instead of parity, so a post
+  set in a wall or a car built of overlapping parts fills instead of leaving a paper hole (checked against the parity
+  render of Level 01: only those overlaps differ). The redraw key includes the look and up, so an elevation turned
+  from its header redraws. The section box cuts Shaded with edges and Hidden line.
+- **Panes:** new panes frame the clash or the model, never the IFC origin; the header's Section starts through the
+  model's middle; the drawings' own visibility is built on a layout change; annotation canvases are cleared only when
+  their size changes (maximise and back kept them blank); the splitter stays within 0.2–0.8 and lets go on a cancelled
+  drag, with no text selected; a maximised 3D pane keeps its way back to the layout.
+- **State:** the view cube's Home gets its click; plans open on Level 01 once the real levels arrive; two names for one
+  floor no longer make a 0 m storey (`views.nextAbove`); Go to the clash is off once the clash is gone; Back is off
+  right after opening models; Esc keeps the clash in a clash plan or a wider fix; classes and storeys are read again
+  after a kept fix, each request on its own; the menus re-render at most once a frame, with counts and the model's box
+  cached.
+- **Checked:** 102 web tests (a same-height level, an elevation's key), build and `tsc` clean; in Chromium on
+  Northbank: Isolate then Quad shows the whole model in the plan, North elevation redraws, annotations survive
+  maximise and back, the splitter stops at 0.8 and stays put after, Home picks nothing, Go to the clash off after
+  leaving, Back off after opening, the plan opens on Level 01.
+- **Narrow panes (owner feedback, same day):** a drawing's header overflowed its pane at smaller widths (the picker
+  squeezed to nothing, maximise outside the header). It now folds (range words, then pin / go / fit into the range
+  menu) and the picker shrinks last; the title block and scale bar stack when they would meet. Checked in Chromium in
+  Quad at 1600, 1366 and 1180 px: no control outside its header in any pane.

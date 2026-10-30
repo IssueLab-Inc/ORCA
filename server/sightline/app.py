@@ -580,6 +580,13 @@ def element(scene_id: str, global_id: str):
     return ws.describe(_scene(scene_id), global_id)
 
 
+@app.get("/api/scenes/{scene_id}/datums")
+def scene_datums(scene_id: str):
+    """Levels, grid axes and each element's storey (datums.read): the drawing views' levels, grids and plan defaults,
+    and the viewer's level filter. Metres, IFC axes."""
+    return ws.datums(_scene(scene_id))
+
+
 @app.get("/api/scenes/{scene_id}/classes")
 def element_classes(scene_id: str):
     """Every physical element's IFC class and name (GlobalId → [class, name]): what a built view's cutaway may take

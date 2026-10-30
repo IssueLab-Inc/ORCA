@@ -23,6 +23,18 @@ export async function compiled(path, dependencies = {}, labels = false) {
   for (const [name, target] of Object.entries(dependencies)) outputText = outputText.replaceAll(`from "${name}"`, `from ${JSON.stringify(target)}`);
   return url(outputText + `\n// host ${sequence++}`);
 }
+/** The real Viewer module with its own modules compiled in, and `loader` (source) standing in for ./ifcLoader. */
+export async function viewerModule(loader = "export const loadIfc=()=>null;") {
+  const three = import.meta.resolve("three");
+  const views = await compiled("../src/viewer/views.ts", { three });
+  return import(await compiled("../src/viewer/Viewer.ts", {
+    three, "three/examples/jsm/controls/OrbitControls.js": import.meta.resolve("three/examples/jsm/controls/OrbitControls.js"),
+    "three/examples/jsm/utils/BufferGeometryUtils.js": import.meta.resolve("three/examples/jsm/utils/BufferGeometryUtils.js"),
+    "./ifcLoader": url(loader), "./views": views, "./cube": await compiled("../src/viewer/cube.ts", { three, "./views": views }),
+    "./drawing": await compiled("../src/viewer/drawing.ts", { three, "./views": views }),
+    "./annotate": await compiled("../src/viewer/annotate.ts", { three, "./views": views }),
+    "./patch": await compiled("../src/viewer/patch.ts", { three }) }));
+}
 export function find(node, predicate) {
   if (!node || typeof node !== "object") return;
   if (predicate(node)) return node;
@@ -77,7 +89,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
     verify: (...args) => new Promise((resolve, reject) => verifyRequests.push({ args, resolve, reject })),
     applyContext: async () => ({ files: [], edits: contextProposal.edits, pieces: [], resolved_pairs: [{ element_a: "duct", element_b: "beam" }], checks }),
     file: async () => new Uint8Array([1]), accept: async () => ({ files: [], pieces: [] }),
-    titles: async () => {}, detectTests: async () => ({ tests: [], teams: {}, elements: 0, rules: {} }), ...overrides };
+    titles: async () => {}, classes: async () => ({}), datums: async () => ({ levels: [], grids: [], storeys: {}, sources: { grids: null } }), detectTests: async () => ({ tests: [], teams: {}, elements: 0, rules: {} }), ...overrides };
   const key = `__sightlineHost${sequence++}`;
   globalThis[key] = { hooks, api, viewer };
   globalThis.window = { innerWidth: 1600, addEventListener() {}, removeEventListener() {},
@@ -85,10 +97,10 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   globalThis.setInterval = () => Symbol(); globalThis.clearInterval = () => {};
   const react = url(`const h=globalThis.${key}.hooks; export const useState=(...a)=>h.useState(...a),useRef=(...a)=>h.useRef(...a),useMemo=(...a)=>h.useMemo(...a),useEffect=(...a)=>h.useEffect(...a);`);
   const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} } export const setRequirements=()=>{};`);
-  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText"];
+  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes"];
   const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
     export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
-    export const clashLabel=(c)=>"#"+c.number;
+    export const clashLabel=(c)=>"#"+c.number; export const STYLES=[{id:"shaded"},{id:"consistent"},{id:"edges"},{id:"hidden"},{id:"xray"}];
     export class Viewer {constructor(){return globalThis.${key}.viewer;}} export const serverPointToViewer=(v)=>v;
     export class Pilot { start(){} event(){} cancel(){globalThis.${key}.viewer.preview([]);} finish(fn){fn();} takeOver(){} }`);
   const icons = url(["Bot", "Plug", "Boxes", "Brain", "Building2", "Check", "ChevronRight", "CircleCheck", "ClipboardCheck", "ClipboardPlus", "Compass", "Download", "FileSpreadsheet", "FileText", "FolderOpen", "Hand", "Info", "LocateFixed", "MessageSquare", "Move", "Navigation", "Network", "Radar", "Sparkles", "Upload", "Wand2", "X", "RefreshCw", "Trash2", "List", "Menu"].map((name) => `export function ${name}(){return null;}`).join("\n"));
@@ -98,11 +110,12 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const links = await compiled("../src/links.ts", {});
   const signoffs = await compiled("../src/signoffs.ts", {});
   const aboutRoute = await compiled("../src/aboutRoute.ts", {});
+  const views = await compiled("../src/viewer/views.ts", { three: import.meta.resolve("three") });
   const context = await compiled("../src/ContextPlan.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), "lucide-react": icons, "./ReportList": mocks });
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds, "./uploads": uploads, "./links": links,
-    "./signoffs": signoffs, "./aboutRoute": aboutRoute };
-  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView"]) dependencies[name] = mocks;
+    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./viewer/views": views };
+  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   function render() {
     let passes = 0;

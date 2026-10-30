@@ -3,6 +3,11 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
 import { patchModel, ROOM, type ElementMesh } from "./patch";
+import { ViewCube } from "./cube";
+import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
+import { annotate, type Handle } from "./annotate";
+import { CameraHistory, defaultKinds, facingFor, levelsOrModel, paneRects, planThrough, sectionFrame, sectionThrough, shownBy,
+  viewTitle, type Datums, type DrawingSpec, type Filters, type Layout, type Level, type Pose, type Rect, type Temporary, type ViewSpec } from "./views";
 
 const RED = new THREE.Color("#d0342c");
 const GREEN = new THREE.Color("#1f9d3a");
@@ -46,6 +51,15 @@ export type OptionShape = { kind: string; moved: string[]; deltaM: number[]; pie
  */
 export type ViewMode = "shaded" | "xray" | "context" | "isolate";
 export type Preset = "top" | "front" | "right" | "iso";
+/** How the 3D view draws what is solid (docs/views.md, "Visual styles"), apart from the mode round the focus:
+ * - shaded: lit, each element in its own colour
+ * - consistent: unlit, own colours
+ * - xray: everything see-through (with nothing in focus too), the pair and the selection solid
+ * - edges, hidden: Shaded with dark outlines, and paper with lines (the drawing views' passes in 3D) */
+export type VisualStyle = "shaded" | "consistent" | "edges" | "hidden" | "xray";
+export type Projection = "perspective" | "orthographic";
+/** The element selected by a single click: blue in every view, a colour no other role uses. */
+export const SELECTED = "#2f8fdf";
 
 /** Side A (red), side B (green), or both at once (purple): the model has one element where the report has two. */
 export type Side = "a" | "b" | "ab";
@@ -59,6 +73,15 @@ export interface Focus {
 /** A picked point on the model: the element and where on it (three.js world coordinates). */
 export interface Pick { globalId: string; point: THREE.Vector3 }
 
+/** One pane of the layout: its view, its element over the canvas, where it sits (stage CSS pixels), and whether a
+ * clash may move it. A drawing pane has its DrawingView. */
+export interface Pane { spec: ViewSpec; el: HTMLDivElement; rect: Rect; pinned: boolean; view: DrawingView | null;
+  /** What its annotation layer was last drawn for, and the marks on it a user can drag. */
+  annotated?: string; handles?: Handle[] }
+
+/** Classes that stay where they are (the server's FIXED_CLASSES): a clash's section runs along the other side. */
+const FIXED = /^Ifc(Beam|Column|Slab|Wall|WallStandardCase|Footing|Member|Plate)$/;
+
 export class Viewer {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -68,6 +91,17 @@ export class Viewer {
   models: LoadedModel[] = [];
   names: string[] = [];
   mode: ViewMode = "shaded";
+  style: VisualStyle = "shaded";
+  projection: Projection = "perspective";
+  /** The orthographic camera follows the perspective one (same view, size from its distance), so the controls,
+   * framing and captures keep working on one camera. */
+  readonly ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 5000);
+  /** With a focus in Shaded, the rest in grey (today's look) or in its own colours. */
+  greyContext = true;
+  /** Called when something the page shows about the views changes (history, temporary hides, projection…). */
+  onChange: (() => void) | null = null;
+  /** The 3D view's element over the canvas: its controls, the view cube and its labels live here. */
+  readonly pane3d: HTMLDivElement;
 
   private raycaster = new THREE.Raycaster();
   private resize = new ResizeObserver(() => this.fit());
@@ -117,27 +151,87 @@ export class Viewer {
   private sectionBox: THREE.Box3 | null = null;
   private sectionHelper: THREE.Box3Helper | null = null;
   private flight: { from: [THREE.Vector3, THREE.Vector3]; to: [THREE.Vector3, THREE.Vector3]; t0: number; ms: number } | null = null;
+  /** Unlit own colours (Consistent colours), and everything see-through with its own colours (X-ray, nothing in focus). */
+  private consistent = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  private xrayAll = new THREE.MeshStandardMaterial({ metalness: 0, roughness: 1, side: THREE.DoubleSide, transparent: true,
+    opacity: 0.22, depthWrite: false });
+  /** The selected element, drawn over the model in blue with an outline through everything. */
+  private selection: string | null = null;
+  private selectionLayer = new THREE.Group();
+  private selectionMaterial = new THREE.MeshStandardMaterial({ color: SELECTED, emissive: new THREE.Color(SELECTED).multiplyScalar(0.3),
+    roughness: 0.5, transparent: true, opacity: 0.75, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    side: THREE.DoubleSide });
+  private selectionEdges = new THREE.LineBasicMaterial({ color: "#7cc0ff", depthTest: false, transparent: true, opacity: 0.95 });
+  /** Element facts the filters read (IFC class, storey), visibility filters and the temporary hide / isolate. */
+  private info = new Map<string, { cls?: string; level?: string }>();
+  private filters: Filters = { classes: [], levels: [] };
+  private temp: Temporary = { hidden: [], isolated: null };
+  /** While a picture is taken: the user's style, filters, hides and selection are lifted (they never reach a picture). */
+  private lifted = false;
+  private history = new CameraHistory();
+  private homePose: Pose | null = null;
+  private cube: ViewCube;
+  /** Grips on the section box's faces, to drag one in or out. */
+  private grips = new THREE.Group();
+  private grip: { axis: "x" | "y" | "z"; side: "min" | "max"; box: THREE.Box3; x: number; y: number; perPx: THREE.Vector2; ppm: number } | null = null;
+  private swallowClick = false;
+  /** The layout (docs/views.md, "Views and layouts"): panes, the split between them, a pane maximised. */
+  layout: Layout = "single";
+  panes: Pane[] = [];
+  private split = { x: 0.5, y: 0.5 };
+  private maximised: number | null = null;
+  /** Drawing views hide what Context / Isolate hide (true), or show the whole model (false, the default). */
+  drawingsFollow = false;
+  /** Levels (sorted) and grids from the server, and a counter every change to what is drawn bumps. */
+  datums: Datums | null = null;
+  levels: Level[] = [];
+  private version = 0;
+  private drawVis: { el: LoadedElement; v3d: boolean; vDraw: boolean }[] = [];
+  /** The drawing style's materials and passes (fills, stencil caps, linework), shared by every drawing. */
+  private drawStyle = new DrawingStyle();
+  /** The 3D view's targets for Shaded with edges and Hidden line. */
+  private styled: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] | null = null;
 
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.localClippingEnabled = true;
     host.appendChild(this.renderer.domElement);
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.pane3d = document.createElement("div");
+    this.pane3d.className = "view-pane view-3d";
+    this.pane3d.hidden = true;   // until models are open: the start page and the project's own page sit there
+    host.appendChild(this.pane3d);
+    this.controls = new OrbitControls(this.camera, this.pane3d);
     this.controls.enableDamping = true;
     this.controls.zoomToCursor = true;  // the wheel zooms to what is under the pointer, not the orbit centre
     this.controls.addEventListener("start", () => { this.flight = null; this.onUserCamera?.(); });
-    this.renderer.domElement.addEventListener("pointerdown", () => this.onUserCamera?.());
+    // Before the controls see the press: a section box grip takes it, else orbiting turns about what is under it.
+    this.pane3d.addEventListener("pointerdown", (e) => this.press(e), { capture: true });
+    this.pane3d.addEventListener("pointermove", (e) => this.dragGrip(e));
+    this.pane3d.addEventListener("pointerup", (e) => this.release(e));
+    this.pane3d.addEventListener("click", (e) => { if (this.swallowClick) { this.swallowClick = false; e.stopPropagation(); } }, { capture: true });
     this.controls.autoRotateSpeed = 0.6;
+    this.cube = new ViewCube((dir) => this.lookFrom(dir), (dx, dy) => this.turn(dx, dy), () => this.home());
+    this.pane3d.appendChild(this.cube.el);
+    this.panes = [{ spec: { kind: "3d" }, el: this.pane3d, rect: { x: 0, y: 0, w: 1, h: 1 }, pinned: false, view: null }];
     this.scene.background = new THREE.Color("#dfe6ee");
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.6));
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
-    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.marker, this.measureLayer);
-    for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial]) m.clippingPlanes = this.clipping;
+    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.selectionLayer, this.marker, this.measureLayer, this.grips);
+    for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, this.consistent, this.xrayAll, this.selectionMaterial]) m.clippingPlanes = this.clipping;
+    // Shaded with edges and Hidden line draw through the drawings' materials: the section box cuts them too (a drawing
+    // view empties `clipping` while it draws, so it never does there).
+    const st = this.drawStyle;
+    for (const m of [...st.fills, st.glass, ...Object.values(st.side), st.selected, st.normals]) m.clippingPlanes = this.clipping;
+    this.buildGrips();
+    this.camera.layers.enable(1);
+    this.ortho.layers.enable(1);
+    this.marker.layers.set(1);
     this.markerLabel = this.label("marker-label");
     this.measureLabel = this.label("measure-label");
+    this.measureLayer.layers.set(1);
     this.buildMarker();
     this.resize.observe(host);
     this.fit();
@@ -160,11 +254,16 @@ export class Viewer {
     this.clearFocusCache();
     for (const m of this.models) { this.scene.remove(...batches(m)); disposeBatches(m); }
     this.models = staged.map((m) => this.adopt(m));
-    this.sceneSize = 0;
+    this.pane3d.hidden = !this.models.length;
+    for (const pane of this.panes) pane.el.hidden = !this.models.length;
+    this.sceneChanged();
     this.names = names;
     this.hiddenModels.clear();
+    this.lastClash = null;
+    this.configureViews(true);
     this.applyMode();
     this.fitAll(false);
+    this.history.clear();   // after the fit: Back never flies to the camera of the models before
     return {
       elements: this.models.reduce((n, m) => n + m.stats.elements, 0),
       triangles: this.models.reduce((n, m) => n + m.stats.triangles, 0),
@@ -181,7 +280,7 @@ export class Viewer {
     const m = this.adopt(loaded);
     if (old) { this.scene.remove(...batches(old)); disposeBatches(old); }
     this.models[index] = m;
-    this.sceneSize = 0;
+    this.sceneChanged();
     this.clearFocusCache();
     this.applyMode();
   }
@@ -211,11 +310,16 @@ export class Viewer {
       console.warn("Patching the model failed; reloading the files instead.", e);
       return false;
     }
-    this.sceneSize = 0;
+    this.sceneChanged();
     this.clearFocusCache();  // focus geometry shares the batches' buffers, which may have moved or grown
     this.applyMode();
     return true;
   }
+
+  /** The models changed (loaded, replaced, patched): what is measured over them is measured again. */
+  private sceneChanged() { this.sceneSize = 0; this.boxCache = null; this.countsCache = null; }
+  private boxCache: THREE.Box3 | null = null;
+  private countsCache: ReturnType<Viewer["infoCounts"]> | null = null;
 
   /** The diagonal of everything loaded, metres (cached until the models change). */
   private sceneSize = 0;
@@ -236,10 +340,12 @@ export class Viewer {
 
   setModelVisible(index: number, visible: boolean) {
     if (visible) this.hiddenModels.delete(index); else this.hiddenModels.add(index);
+    this.boxCache = null;
     this.applyMode();
   }
 
   private adopt(m: LoadedModel): LoadedModel {
+    m.mesh.layers.enable(CAP_LAYER.rest);   // a drawing's cut fills what this batch's solids cross
     m.mesh.material = this.solid;
     if (m.glass) m.glass.material = this.glass;
     this.scene.add(...batches(m));
@@ -280,31 +386,137 @@ export class Viewer {
     return [this.focus.a, this.focus.b, ...Object.keys(this.focus.group ?? {})].filter((g): g is string => !!g);
   }
 
-  /** Re-draw everything for the current mode, focus, moves and hidden elements. */
+  /** What the mode works round: the clash pair (and its group), or, for Context and Isolate with no pair, the selected
+   * element (isolate one element without making it side A). */
+  private aroundIds(focus: string[]): string[] {
+    if (focus.length || this.lifted) return focus;
+    return this.selection && (this.mode === "context" || this.mode === "isolate") && this.has(this.selection) ? [this.selection] : [];
+  }
+
+  /** Re-draw everything for the current mode, style, focus, moves, filters and hidden elements. */
   private applyMode() {
+    this.version++;
+    this.drawVis = [];
     const ids = this.focusIds().filter((g) => !this.hidden.has(g));
-    const hasFocus = ids.length > 0;
-    const near = this.mode === "context" && hasFocus ? this.nearFocus(ids) : null;
+    const around = this.aroundIds(ids);
+    const hasFocus = around.length > 0;
+    const near = this.mode === "context" && hasFocus ? this.nearFocus(around) : null;
+    const keep = new Set(around);
     const ghostly = hasFocus && (this.mode === "xray" || this.mode === "context");
+    const style = this.lifted ? "shaded" : this.style;
+    const ghostAll = !ghostly && style === "xray";   // X-ray as a style: everything see-through, in its own colours
+    const shown = this.lifted ? null : this.filterTest();
+    const solid = style === "consistent" ? this.consistent : this.solid;
     this.models.forEach((model, mi) => {
       model.mesh.visible = !this.hiddenModels.has(mi);
-      model.mesh.material = ghostly ? this.ghost : this.solid;
+      model.mesh.material = ghostly ? this.ghost : ghostAll ? this.xrayAll : solid;
       if (model.glass) {
         model.glass.visible = model.mesh.visible;
         model.glass.material = ghostly ? this.ghost : this.glass;
       }
       for (const el of model.byGlobalId.values()) {
         const inFocus = !!this.focusSide(el.globalId);
-        let visible = !inFocus && !this.hidden.has(el.globalId);  // focus elements are drawn by the focus layer
-        if (visible && hasFocus && this.mode === "isolate") visible = false;
+        let base = !inFocus && !this.hidden.has(el.globalId);  // focus elements are drawn by the focus layer
+        if (base && shown) base = shown(el.globalId);
+        let visible = base;
+        if (visible && hasFocus && this.mode === "isolate") visible = keep.has(el.globalId);
         if (visible && near) visible = near.has(el.globalId);
+        if (visible !== base && this.panes.length > 1) this.drawVis.push({ el, v3d: visible, vDraw: base });
         el.mesh.setVisibleAt(el.instanceId, visible);
-        const c = ghostly ? GHOST : hasFocus && this.mode === "shaded" ? GREY : el.baseColor;
+        const c = ghostly ? GHOST : hasFocus && this.mode === "shaded" && this.greyContext ? GREY : el.baseColor;
         el.mesh.setColorAt(el.instanceId, new THREE.Vector4(c.r, c.g, c.b, ghostly ? 1 : el.baseAlpha));
         el.mesh.setMatrixAt(el.instanceId, this.matrixOf(el));
       }
     });
     this.drawFocus(ids);
+    this.drawSelection();
+  }
+
+  /** The filters' and temporary hides' test for an element, or null when none is on. */
+  private filterTest(): ((gid: string) => boolean) | null {
+    const f = this.filters, t = this.temp;
+    if (!f.classes.length && !f.levels.length && !t.hidden.length && !t.isolated) return null;
+    const classes = new Set(f.classes), levels = new Set(f.levels), hidden = new Set(t.hidden);
+    const isolated = t.isolated ? new Set(t.isolated) : null;
+    return (gid) => {
+      const i = this.info.get(gid);
+      return shownBy(gid, i?.cls, i?.level, f, t, classes, levels, hidden, isolated);
+    };
+  }
+
+  // ---------------------------------------------------------------- style, selection, visibility
+
+  setStyle(style: VisualStyle) { this.style = style; this.applyMode(); this.onChange?.(); }
+
+  setGreyContext(on: boolean) { this.greyContext = on; this.applyMode(); }
+
+  /** Element facts for the filters: IFC class and storey name, by GlobalId. */
+  setInfo(classes: Record<string, string> | null, storeys: Record<string, string> | null) {
+    if (classes) this.infoClasses = classes;
+    if (storeys) this.infoStoreys = storeys;
+    this.info = new Map();
+    for (const [g, c] of Object.entries(this.infoClasses)) this.info.set(g, { cls: c });
+    for (const [g, l] of Object.entries(this.infoStoreys)) this.info.set(g, { ...this.info.get(g), level: l });
+    this.countsCache = null;
+    this.applyMode();
+  }
+  private infoClasses: Record<string, string> = {};
+  private infoStoreys: Record<string, string> = {};
+
+  /** Classes and levels hidden (viewing only). */
+  setFilters(f: Filters) { this.filters = { classes: [...f.classes], levels: [...f.levels] }; this.applyMode(); }
+
+  /** Hide elements for now, or isolate them (null: none isolated). */
+  setTemporary(t: Temporary) {
+    this.temp = { hidden: [...t.hidden], isolated: t.isolated ? [...t.isolated] : null };
+    this.applyMode();
+    this.onChange?.();
+  }
+  get temporary(): Temporary { return this.temp; }
+
+  /** The element picked by a single click (null: none). Draws it in blue; Context and Isolate work round it when
+   * there is no clash pair. */
+  setSelection(gid: string | null) {
+    if (gid === this.selection) return;
+    this.selection = gid;
+    if (this.mode === "context" || this.mode === "isolate") this.applyMode(); else this.drawSelection();
+  }
+
+  private drawSelection() {
+    this.version++;
+    this.selectionLayer.clear();
+    const gid = this.selection;
+    const f = gid && !this.lifted ? this.find(gid) : null;
+    if (!f || this.hidden.has(gid!) || this.hiddenModels.has(this.models.indexOf(f.model))) return;
+    const mesh = new THREE.Mesh(this.geometryOf(f), this.selectionMaterial);
+    const line = new THREE.LineSegments(this.edgeGeometryOf(gid!, f), this.selectionEdges);
+    for (const o of [mesh, line]) {
+      o.matrixAutoUpdate = false;
+      o.matrix.copy(this.matrixOf(f.el));
+      o.frustumCulled = false;
+      o.renderOrder = 8;
+    }
+    line.layers.set(1);   // the outline through everything is the 3D view's; a drawing shows the blue shape
+    this.selectionLayer.add(mesh, line);
+  }
+
+  /** Every element's class and storey known to the filters, with counts (for the Visibility menu). */
+  infoCounts(): { classes: [string, number][]; levels: [string, number][] } {
+    if (this.countsCache) return this.countsCache;
+    const classes = new Map<string, number>(), levels = new Map<string, number>();
+    for (const m of this.models) for (const g of m.byGlobalId.keys()) {
+      const i = this.info.get(g);
+      if (i?.cls) classes.set(i.cls, (classes.get(i.cls) ?? 0) + 1);
+      if (i?.level) levels.set(i.level, (levels.get(i.level) ?? 0) + 1);
+    }
+    return this.countsCache = { classes: [...classes].sort((a, b) => b[1] - a[1]), levels: [...levels] };
+  }
+
+  /** Elements of a class among the loaded ones (to hide or isolate a class). */
+  ofClass(cls: string): string[] {
+    const out: string[] = [];
+    for (const m of this.models) for (const g of m.byGlobalId.keys()) if (this.info.get(g)?.cls === cls) out.push(g);
+    return out;
   }
 
   private matrixOf(el: LoadedElement): THREE.Matrix4 {
@@ -328,6 +540,9 @@ export class Viewer {
         this.focusMeshes.set(gid, mesh);
       }
       mesh.material = material;
+      mesh.userData.side = side;
+      mesh.layers.set(0);
+      if (f.el.baseAlpha >= 1) mesh.layers.enable(CAP_LAYER[side]);
       mesh.matrix.copy(this.matrixOf(f.el));
       this.focusLayer.add(mesh);
       if (this.showEdges) {
@@ -362,6 +577,7 @@ export class Viewer {
       line.matrixAutoUpdate = false;
       line.frustumCulled = false;
       line.renderOrder = 9;
+      line.layers.set(1);   // through everything: the 3D view's way to show a buried pair
       this.edges.set(gid, line);
     }
     line.material = this.edgeMaterials[side];
@@ -392,12 +608,14 @@ export class Viewer {
 
   /** Light up what a candidate fix ran into (magenta, outlined through everything); [] clears it. */
   setHits(ids: string[]) {
+    this.version++;
     this.hitLayer.clear();
     for (const gid of ids) {
       const f = this.find(gid);
       if (!f || this.hiddenModels.has(this.models.indexOf(f.model))) continue;
       const mesh = new THREE.Mesh(this.geometryOf(f), this.hitMaterial);
       const line = new THREE.LineSegments(this.edgeGeometryOf(gid, f), this.hitEdges);
+      line.layers.set(1);
       for (const o of [mesh, line]) {
         o.matrixAutoUpdate = false;
         o.matrix.copy(this.matrixOf(f.el));
@@ -411,6 +629,7 @@ export class Viewer {
   /** Light elements by group, each group in its colour (an element's connections by kind). At most LINK_MAX are
    *  drawn, and outlines only for the first LINK_EDGES of each group: a slab can support hundreds of things. */
   setLinks(groups: { color: string; ids: string[] }[]) {
+    this.version++;
     this.linkLayer.clear();
     for (const group of groups) {
       const mats = this.linkMats(group.color);
@@ -418,7 +637,7 @@ export class Viewer {
         const f = this.find(gid);
         if (!f || this.hidden.has(gid) || this.hiddenModels.has(this.models.indexOf(f.model))) return;
         const parts: THREE.Object3D[] = [new THREE.Mesh(this.geometryOf(f), mats.mesh)];
-        if (k < LINK_EDGES) parts.push(new THREE.LineSegments(this.edgeGeometryOf(gid, f), mats.edges));
+        if (k < LINK_EDGES) { const l = new THREE.LineSegments(this.edgeGeometryOf(gid, f), mats.edges); l.layers.set(1); parts.push(l); }
         for (const o of parts) {
           o.matrixAutoUpdate = false;
           o.matrix.copy(this.matrixOf(f.el));
@@ -552,6 +771,7 @@ export class Viewer {
   }
 
   private addMeshes(meshes: Mesh[], material: THREE.Material) {
+    const capped = !material.transparent;   // a fix's solid pieces are cut like the model; ghosts are not
     for (const p of meshes) {
       const pos = new Float32Array(p.verts.length);
       for (let i = 0; i < p.verts.length; i += 3) {
@@ -561,7 +781,9 @@ export class Viewer {
       g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       g.setIndex(p.faces);
       g.computeVertexNormals();
-      this.overlay.add(new THREE.Mesh(g, material));
+      const mesh = new THREE.Mesh(g, material);
+      if (capped) mesh.layers.enable(CAP_LAYER.preview);
+      this.overlay.add(mesh);
     }
   }
 
@@ -580,7 +802,7 @@ export class Viewer {
   /** Fly to a clash. Frames the zone where the two elements meet (their overlap, or the gap between them for a
    * clearance clash) with a margin, not the two whole elements: a 16 m run crossing a beam frames the crossing.
    * With no geometry here for an element (spaces and ports are not loaded), the report's clash point is enough. */
-  focusClash(ids: string[], point: THREE.Vector3 | null, label = "") {
+  focusClash(ids: string[], point: THREE.Vector3 | null, label = "", fly = true) {
     const boxes = ids.map((g) => this.boxOf([g])).filter((b) => !b.isEmpty());
     let zone: THREE.Box3 | null = null;
     if (boxes.length === 2) zone = meetingZone(boxes[0], boxes[1]);
@@ -588,7 +810,10 @@ export class Viewer {
     if ((!zone || zone.isEmpty()) && point) zone = new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3().setScalar(this.reach(0.6, 0.15)));
     if (!zone || zone.isEmpty()) return false;
     this.setMarker(point ?? zone.getCenter(new THREE.Vector3()), label);
-    this.flyToZone(zone, boxes.reduce((u, b) => u.union(b), zone.clone()));
+    if (fly) {
+      this.flyToZone(zone, boxes.reduce((u, b) => u.union(b), zone.clone()));
+      this.clashViews(ids, zone, point);
+    } else this.lastClash = { ids, zone: zone.clone(), point: point?.clone() ?? null };
     return true;
   }
 
@@ -660,6 +885,12 @@ export class Viewer {
    *   antialiasing) and view-space normals. Null when there is nothing to frame. */
   captureBuilt(fix: { kind: string; moved: string[]; deltaM: number[]; pieces: BuiltPiece[] | null; applied: boolean },
     pair: [string, string], classOf: (gid: string) => string | undefined, radius = 3, side = 1024): BuiltPasses | null {
+    const version = this.version;   // everything is put back: the drawings need not redraw
+    try { return this.fullCanvas(() => this.builtPasses(fix, pair, classOf, radius, side)); } finally { this.version = version; this.drawFrame(); }
+  }
+
+  private builtPasses(fix: { kind: string; moved: string[]; deltaM: number[]; pieces: BuiltPiece[] | null; applied: boolean },
+    pair: [string, string], classOf: (gid: string) => string | undefined, radius: number, side: number): BuiltPasses | null {
     // What the fix changes, to frame: a split run's new middle (not its long shortened ends); a penetration's provision
     // for void (the opening); a combined fix's new middles and the moved runs' parts near the clash.
     const pa = this.boxOf([pair[0]]), pb = this.boxOf([pair[1]]);
@@ -692,7 +923,7 @@ export class Viewer {
     const shaded = () => { this.mode = "shaded"; this.applyMode(); zonesAndCut(); };
     try {
       this.flight = null; this.marker.visible = false; this.overlay.visible = false; this.hitLayer.visible = false;
-      this.measureLayer.visible = false; this.linkLayer.visible = false;
+      this.measureLayer.visible = false; this.linkLayer.visible = false; this.grips.visible = false; this.lifted = true;
       this.focus = { a: null, b: null, group: {} };
       // The fix in place: a proposed option's pieces as their own meshes in their elements' colours (a move translates
       // its run), the originals hidden; an applied fix is the model itself.
@@ -910,13 +1141,13 @@ export class Viewer {
       scene.background = saved.background;
       this.hidden = saved.hidden; this.moved = saved.moved;
       this.overlay.visible = saved.overlay; this.hitLayer.visible = saved.hits; this.linkLayer.visible = saved.links;
+      this.lifted = false;
       this.focus = saved.focus;
       if (saved.section) { this.setSection(true, 0, saved.section); } else this.setSection(false);
       this.mode = saved.mode; this.applyMode();
       camera.position.copy(saved.position); this.controls.target.copy(saved.target);
       this.flight = saved.flight; this.marker.visible = saved.marker;
       this.controls.update(); this.adjustClipRange();
-      this.renderer.render(this.scene, this.camera);
     }
   }
 
@@ -937,6 +1168,14 @@ export class Viewer {
    * in one task, so nothing on screen changes. */
   private posed<T>(a: string, b: string, take: (shot: (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => string,
     turn: () => void) => T): T | null {
+    // Draw the user's view again before the browser paints: the canvas keeps its last frame (preserveDrawingBuffer),
+    // and a shot taken after this frame's own render would otherwise show until the next one (thumbnails flashing).
+    const version = this.version;   // everything is put back: the drawings need not redraw (a thumbnail every 60 ms)
+    try { return this.fullCanvas(() => this.posedShots(a, b, take)); } finally { this.version = version; this.drawFrame(); }
+  }
+
+  private posedShots<T>(a: string, b: string, take: (shot: (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => string,
+    turn: () => void) => T): T | null {
     const boxA = this.boxOf([a]), boxB = this.boxOf([b]);
     if (boxA.isEmpty() || boxB.isEmpty()) return null;
     const zone = meetingZone(boxA, boxB);
@@ -955,6 +1194,8 @@ export class Viewer {
       this.flight = null;
       this.marker.visible = false;
       this.linkLayer.visible = false;   // the connection highlight is the viewer's, never the pictures'
+      this.grips.visible = false;
+      this.lifted = true;               // nor the user's style, filters, hides or selection
       this.setFocus({ a, b });
       const [position, target] = this.zoneCamera(zone, boxA.clone().union(boxB));
       this.camera.position.copy(position);
@@ -963,6 +1204,8 @@ export class Viewer {
         .applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2).add(target)));
     } finally {
       for (const m of pair) { m.transparent = false; m.opacity = 1; m.depthWrite = true; m.needsUpdate = true; }
+      this.lifted = false;
+      this.placeGrips();
       this.focus = saved.focus;
       this.setMode(saved.mode);
       this.camera.position.copy(saved.position);
@@ -972,9 +1215,6 @@ export class Viewer {
       this.linkLayer.visible = saved.links;
       this.controls.update();
       this.adjustClipRange();
-      // Draw the user's view again before the browser paints: the canvas keeps its last frame (preserveDrawingBuffer),
-      // and a shot taken after this frame's own render would otherwise show until the next one (thumbnails flashing).
-      this.renderer.render(this.scene, this.camera);
     }
   }
 
@@ -1023,7 +1263,9 @@ export class Viewer {
     this.flyTo(centre.clone().add(d.multiplyScalar(size * tight)), centre, animate);
   }
 
-  flyTo(position: THREE.Vector3, target: THREE.Vector3, animate = true) {
+  /** Fly the camera there. A jump goes on the history (back / forward) unless `record` is false. */
+  flyTo(position: THREE.Vector3, target: THREE.Vector3, animate = true, record = true) {
+    if (record && this.models.length) { this.history.push(this.pose()); this.onChange?.(); }
     if (!animate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       this.camera.position.copy(position);
       this.controls.target.copy(target);
@@ -1034,15 +1276,681 @@ export class Viewer {
       t0: performance.now(), ms: 650 };
   }
 
+  // ---------------------------------------------------------------- projection, history, home, view cube
+
+  /** The camera the 3D view draws and picks with. */
+  activeCamera(): THREE.Camera { return this.projection === "orthographic" ? this.ortho : this.camera; }
+
+  setProjection(p: Projection) { this.projection = p; this.onChange?.(); }
+
+  /** The orthographic camera as the perspective one sees: the same direction, its frame the size of the view at the
+   * target, set back far enough that nothing in front of the model is cut. */
+  private syncOrtho(aspect: number) {
+    const target = this.controls.target, dist = this.camera.position.distanceTo(target);
+    const h = 2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2), w = h * aspect;
+    const dir = this.camera.position.clone().sub(target).normalize();
+    const back = Math.max(dist, this.sceneDiag() * 1.5);
+    this.ortho.position.copy(target).addScaledVector(dir, back);
+    this.ortho.quaternion.copy(this.camera.quaternion);
+    Object.assign(this.ortho, { left: -w / 2, right: w / 2, top: h / 2, bottom: -h / 2, near: 0.001, far: back + this.sceneDiag() * 2 });
+    this.ortho.updateProjectionMatrix();
+    this.ortho.updateMatrixWorld();
+  }
+
+  pose(): Pose {
+    return { position: this.camera.position.toArray() as Pose["position"], target: this.controls.target.toArray() as Pose["target"] };
+  }
+
+  /** Fly to a saved pose. */
+  applyPose(p: Pose, animate = true) {
+    this.flyTo(new THREE.Vector3(...p.position), new THREE.Vector3(...p.target), animate);
+  }
+
+  back() { const p = this.history.goBack(this.pose()); if (p) this.flyTo(new THREE.Vector3(...p.position), new THREE.Vector3(...p.target), true, false); this.onChange?.(); }
+  forward() { const p = this.history.goForward(this.pose()); if (p) this.flyTo(new THREE.Vector3(...p.position), new THREE.Vector3(...p.target), true, false); this.onChange?.(); }
+  get canBack() { return this.history.canBack; }
+  get canForward() { return this.history.canForward; }
+
+  /** Home: a pose set by the user (per project, kept by the page), else the whole model. */
+  setHome(p: Pose | null) { this.homePose = p; this.onChange?.(); }
+  get homeView(): Pose | null { return this.homePose; }
+  home() { if (this.homePose) this.applyPose(this.homePose); else this.fitAll(); }
+
+  /** Look from a direction (three axes; a view cube face, edge or corner) round the current target. */
+  lookFrom(dir: THREE.Vector3) {
+    const d = dir.clone().normalize();
+    if (Math.abs(d.y) > 0.999) d.set(0, Math.sign(d.y), 0.0001).normalize();   // straight down or up: keep north up
+    const target = this.controls.target.clone();
+    const dist = Math.max(this.camera.position.distanceTo(target), this.reach(2, 0.8));
+    this.onUserCamera?.();
+    this.flyTo(target.clone().addScaledVector(d, dist), target);
+  }
+
+  /** Orbit by a drag on the view cube (pixels). */
+  private turn(dx: number, dy: number) {
+    this.flight = null;
+    this.onUserCamera?.();
+    const target = this.controls.target, offset = this.camera.position.clone().sub(target);
+    const sph = new THREE.Spherical().setFromVector3(offset);
+    sph.theta -= dx * 0.01;
+    sph.phi = THREE.MathUtils.clamp(sph.phi - dy * 0.01, 0.01, Math.PI - 0.01);
+    this.camera.position.copy(target).add(new THREE.Vector3().setFromSpherical(sph));
+    this.camera.lookAt(target);
+  }
+
+  /** A press in the 3D view, before the controls see it: a section box grip starts a drag; otherwise an orbit (left
+   * button) turns about what is under the pointer: the target moves along the view to that depth, so nothing jumps. */
+  private press(e: PointerEvent) {
+    if (this.cube.el.contains(e.target as Node)) return;   // the view cube handles its own
+    this.onUserCamera?.();
+    if (e.button !== 0 || !this.models.length) return;
+    const grip = this.gripAt(e);
+    if (grip) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      this.pane3d.setPointerCapture(e.pointerId);
+      this.grip = grip;
+      this.controls.enabled = false;
+      return;
+    }
+    if (e.shiftKey || e.ctrlKey || e.metaKey || this.projection === "orthographic" || this.flight) return;
+    const hit = this.pickAt(e, { ghosts: true });
+    if (!hit) return;
+    const cam = this.camera.position, dir = this.controls.target.clone().sub(cam).normalize();
+    const depth = hit.point.clone().sub(cam).dot(dir);
+    if (depth > this.camera.near * 2) this.controls.target.copy(cam).addScaledVector(dir, depth);
+  }
+
+  private release(e: PointerEvent) {
+    if (!this.grip) return;
+    this.grip = null;
+    this.controls.enabled = true;
+    this.swallowClick = true;
+    if (this.pane3d.hasPointerCapture(e.pointerId)) this.pane3d.releasePointerCapture(e.pointerId);
+    this.onChange?.();
+  }
+
+  // ---------------------------------------------------------------- panes: layouts and drawing views
+
+  /** The panes on screen: all of them, or the one maximised. */
+  visiblePanes(): Pane[] { return this.maximised != null && this.panes[this.maximised] ? [this.panes[this.maximised]] : this.panes; }
+  private pane3dShown() { return this.visiblePanes().some((p) => p.spec.kind === "3d"); }
+  /** The 3D pane's rectangle in the stage (the whole stage when it is the only one, or hidden). */
+  rect3d(): Rect {
+    const p = this.visiblePanes().find((q) => q.spec.kind === "3d");
+    return p ? p.rect : { x: 0, y: 0, w: this.host.clientWidth || 1, h: this.host.clientHeight || 1 };
+  }
+  get maximisedPane() { return this.maximised; }
+
+  /** Single, Two (plan beside 3D) or Quad (plan, 3D, section, elevation). Panes already showing a kind are kept. */
+  setLayout(layout: Layout) {
+    if (layout === this.layout && this.maximised == null) return;
+    this.maximised = null;
+    const old = [...this.panes];
+    const made: Pane[] = [];
+    const next = defaultKinds(layout).map((kind) => {
+      const i = old.findIndex((p) => p.spec.kind === kind);
+      if (i >= 0) return old.splice(i, 1)[0];
+      const p = this.makePane(kind as DrawingSpec["kind"]);
+      made.push(p);
+      return p;
+    });
+    for (const p of old) { p.view?.dispose(); p.el.remove(); }
+    this.panes = next;
+    this.layout = layout;
+    this.layoutPanes();
+    this.configureViews(false);
+    if (this.models.length) {
+      // A new pane looks at the clash on screen, else the whole model (never at empty paper round the origin).
+      const c = this.lastClash, box = this.modelBox();
+      for (const p of made) {
+        if (!p.view) continue;
+        if (c) this.clashViews(c.ids, c.zone, c.point, p);
+        else p.view.frame(box, p.rect, 0.08);
+      }
+      this.applyMode();   // the drawings' own visibility (Context and Isolate hide nothing there by default)
+    }
+    this.onChange?.();
+  }
+
+  /** Show one pane over the whole stage (null: back to the layout). */
+  maximise(i: number | null) {
+    this.maximised = i != null && this.panes[i] && this.panes.length > 1 ? i : null;
+    this.layoutPanes();
+    this.onChange?.();
+  }
+
+  /** Where the panes split (shares of the stage), from a drag on the line between them. */
+  setSplit(x: number, y: number) { this.split = { x: THREE.MathUtils.clamp(x, 0.2, 0.8), y: THREE.MathUtils.clamp(y, 0.2, 0.8) }; this.layoutPanes(); }
+
+  /** Change what a drawing pane shows: another kind (framed on the model), or new settings (kept framing). */
+  setPaneSpec(i: number, spec: DrawingSpec) {
+    const pane = this.panes[i];
+    if (!pane?.view) return;
+    const kindChanged = pane.spec.kind !== spec.kind;
+    pane.spec = spec;
+    pane.view.configure(spec, this.levels, this.modelBox());
+    if (kindChanged) pane.view.frame(this.modelBox(), pane.rect, 0.08);
+    this.onChange?.();
+  }
+
+  /** Where the panes split, as shares of the stage. */
+  get splitShares() { return { ...this.split }; }
+
+  /** A section's crop by default: 6 m each side of its line, the model's height and a little more. */
+  defaultCrop() {
+    const m = this.modelBox(), pad = this.reach(0.5, 0.05);
+    return { left: this.reach(6, 0.5), right: this.reach(6, 0.5), bottom: (m.isEmpty() ? 0 : m.min.y) - pad, top: (m.isEmpty() ? 3 : m.max.y) + pad };
+  }
+
+  /** A pinned pane keeps its view when a clash is picked. */
+  setPinned(i: number, on: boolean) { if (this.panes[i]) { this.panes[i].pinned = on; this.onChange?.(); } }
+
+  /** Frame a drawing pane on the whole model. */
+  fitPane(i: number) { const p = this.panes[i]; if (p?.view) { p.view.frame(this.modelBox(), p.rect, 0.08); this.onChange?.(); } }
+
+  /** Levels and grids from the server (api.datums). */
+  setDatums(d: Datums | null) {
+    const before = this.levels.map((l) => `${l.name}@${l.elevation_m}`).join("|");
+    this.datums = d;
+    this.configureViews(false);
+    // New levels (the first datums of a scene, or another project's): plans start again on the ground level, not on
+    // whichever index the old levels gave.
+    if (this.levels.map((l) => `${l.name}@${l.elevation_m}`).join("|") !== before) {
+      const box = this.modelBox();
+      for (const pane of this.panes) {
+        if (pane.view && pane.spec.kind === "plan") {
+          pane.spec = { ...pane.spec, level: this.groundLevel() };
+          pane.view.configure(pane.spec, this.levels, box);
+        }
+      }
+    }
+    this.onChange?.();
+  }
+
+  /** Drawing views follow the 3D view's Context / Isolate (true), or show the whole model. */
+  setDrawingsFollow(on: boolean) { this.drawingsFollow = on; this.applyMode(); this.onChange?.(); }
+
+  private makePane(kind: DrawingSpec["kind"]): Pane {
+    const el = document.createElement("div");
+    el.className = `view-pane view-drawing view-${kind}`;
+    el.hidden = !this.models.length;
+    const layer = document.createElement("canvas");
+    layer.className = "view-anno";
+    el.appendChild(layer);
+    this.host.appendChild(el);
+    const view = new DrawingView(this.defaultSpec(kind));
+    const pane: Pane = { spec: view.spec, el, rect: { x: 0, y: 0, w: 1, h: 1 }, pinned: false, view };
+    this.attachDrawingInput(pane);
+    return pane;
+  }
+
+  /** What a pane of a kind shows at first: a plan of the ground level, a section through the model's middle. */
+  defaultSpec(kind: DrawingSpec["kind"]): DrawingSpec {
+    const c = toIfc(this.modelBox().getCenter(new THREE.Vector3()));
+    if (kind === "plan") return { kind, level: this.groundLevel(), cut: 1.2, bottom: 0 };
+    if (kind === "section") return { kind, origin: [c[0], c[1]], angle: 0, flip: false, far: null, crop: null };
+    return { kind, facing: "south", far: null };
+  }
+
+  /** The level a plan starts on: the first at or above zero (Level 01, not the foundations), else the lowest. */
+  private groundLevel(): number { return Math.max(0, this.levels.findIndex((l) => l.elevation_m >= -1e-6)); }
+
+  /** The whole model's box (three.js world), visible models only. */
+  modelBox(): THREE.Box3 {
+    if (!this.boxCache) {
+      const box = new THREE.Box3();
+      this.models.forEach((m, i) => { if (!this.hiddenModels.has(i)) for (const b of batches(m)) { b.computeBoundingBox(); if (b.boundingBox) box.union(b.boundingBox); } });
+      this.boxCache = box;
+    }
+    return this.boxCache.clone();
+  }
+
+  /** Levels from the server, or one for the whole model when it has none; every drawing configured again (framed on
+   * the model when `frame`, as after a load). */
+  private configureViews(frame: boolean) {
+    const box = this.modelBox();
+    this.levels = levelsOrModel(this.datums?.levels ?? [], box.isEmpty() ? 0 : box.min.y, box.isEmpty() ? 1 : box.max.y);
+    for (const pane of this.panes) {
+      if (!pane.view) continue;
+      let spec = pane.spec as DrawingSpec;
+      if (spec.kind === "plan" && (spec.level >= this.levels.length || frame)) spec = { ...spec, level: this.groundLevel() };
+      if (frame && spec.kind === "section") spec = this.defaultSpec("section");
+      pane.spec = spec;
+      pane.view.configure(spec, this.levels, box);
+      if (frame) pane.view.frame(box, pane.rect, 0.08);
+    }
+  }
+
+  /** Place the panes for the layout and the split, and give the 3D camera its pane's shape. */
+  private layoutPanes() {
+    const W = this.host.clientWidth || 1, H = this.host.clientHeight || 1;
+    const shown = new Set(this.visiblePanes());
+    const rects = paneRects(this.maximised != null ? "single" : this.layout, W, H, this.split);
+    let k = 0;
+    for (const pane of this.panes) {
+      const on = shown.has(pane);
+      pane.el.style.display = on ? "" : "none";
+      if (!on) continue;
+      const before = pane.rect;
+      pane.rect = rects[k++] ?? { x: 0, y: 0, w: W, h: H };
+      Object.assign(pane.el.style, { inset: "auto", left: `${pane.rect.x}px`, top: `${pane.rect.y}px`, width: `${pane.rect.w}px`, height: `${pane.rect.h}px` });
+      const layer = pane.el.querySelector("canvas");
+      if (layer) {
+        // Setting a canvas's size clears it, even to the same size: only when it changes, and then draw it again.
+        const dpr = Math.min(window.devicePixelRatio || 1, 2), w = Math.round(pane.rect.w * dpr), h = Math.round(pane.rect.h * dpr);
+        if (layer.width !== w || layer.height !== h) { layer.width = w; layer.height = h; pane.annotated = undefined; }
+      }
+      // A drawing keeps what is at its middle when its pane changes size.
+      if (pane.view && before.w > 2 && (before.w !== pane.rect.w || before.h !== pane.rect.h)) pane.view.drawn = "";
+    }
+    const r3 = this.rect3d();
+    this.camera.aspect = r3.w / Math.max(r3.h, 1);
+    this.camera.updateProjectionMatrix();
+    this.onChange?.();
+  }
+
+  /** The pane under a page point. */
+  paneAt(x: number, y: number): Pane | null {
+    const r = this.host.getBoundingClientRect();
+    return this.visiblePanes().find((p) => x >= r.left + p.rect.x && x < r.left + p.rect.x + p.rect.w
+      && y >= r.top + p.rect.y && y < r.top + p.rect.y + p.rect.h) ?? null;
+  }
+
+  /** Pan (drag with any button), zoom (wheel, pinch) in a drawing pane. A click still reaches the page (a drag of more
+   * than a few pixels is a pan, never a pick). */
+  private attachDrawingInput(pane: Pane) {
+    const el = pane.el, view = pane.view!;
+    const down = new Map<number, { x: number; y: number }>();
+    let pinch = 0;
+    let drag: { handle: Handle; specs: DrawingSpec[]; id: number } | null = null;
+    let right: { x: number; y: number } | null = null;
+    const local = (e: PointerEvent) => { const r = el.getBoundingClientRect(); return new THREE.Vector2(e.clientX - r.left, e.clientY - r.top); };
+    el.addEventListener("pointerdown", (e) => {
+      // A mark to drag (a section's line, a plan's cut…) takes the press; anything else pans.
+      const h = e.button === 0 ? handleAt(pane.handles ?? [], local(e)) : null;
+      if (h) {
+        e.stopPropagation(); e.preventDefault();
+        el.setPointerCapture(e.pointerId);
+        drag = { handle: h, specs: this.panes.map((q) => q.spec as DrawingSpec), id: e.pointerId };
+        const esc = (k: KeyboardEvent) => {
+          if (k.key !== "Escape" || !drag) return;
+          drag.specs.forEach((sp, i) => { if (this.panes[i]?.view && sp !== this.panes[i].spec) this.setPaneSpec(i, sp); });
+          drag = null;
+          window.removeEventListener("keydown", esc, true);
+          k.stopPropagation();
+        };
+        window.addEventListener("keydown", esc, true);
+        return;
+      }
+      if (e.button === 2) right = { x: e.clientX, y: e.clientY };
+      down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      el.setPointerCapture(e.pointerId);
+      if (down.size === 2) { const [a, b] = [...down.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); }
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (drag && drag.id === e.pointerId) { this.dragHandle(pane, drag.handle, local(e), e.shiftKey); return; }
+      if (!down.size) { el.style.cursor = handleAt(pane.handles ?? [], local(e)) ? "move" : ""; return; }
+      const was = down.get(e.pointerId);
+      if (!was) return;
+      if (down.size === 2) {
+        down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const [a, b] = [...down.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+        const r = el.getBoundingClientRect();
+        if (pinch > 0 && d > 0) view.zoomAt(pinch / d, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top, pane.rect);
+        pinch = d;
+        return;
+      }
+      view.pan(e.clientX - was.x, e.clientY - was.y);
+      down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    });
+    const up = (e: PointerEvent) => {
+      if (drag && drag.id === e.pointerId) {
+        drag = null;
+        // The click that ends a drag picks nothing.
+        el.addEventListener("click", (c) => c.stopPropagation(), { once: true, capture: true });
+      }
+      // A right click without a drag: look there in 3D.
+      if (e.button === 2 && right && Math.hypot(e.clientX - right.x, e.clientY - right.y) < 4) this.lookHere(pane, e);
+      if (e.button === 2) right = null;
+      down.delete(e.pointerId); if (down.size < 2) pinch = 0;
+    };
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    el.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      view.zoomAt(Math.exp(e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top, pane.rect);
+    }, { passive: false });
+    el.addEventListener("contextmenu", (e) => e.preventDefault());
+  }
+
+  /** Drag one of a drawing's marks: move or turn a section, set its far clip or sides, a plan's cut or bottom, a crop's
+   * top or bottom. The view it belongs to redraws as it goes. `at`: the pointer in `pane`'s pixels. */
+  private dragHandle(pane: Pane, h: Handle, at: THREE.Vector2, snap: boolean) {
+    const view = pane.view!, target = this.panes[h.pane];
+    if (!target?.view) return;
+    const w = view.fromPane(at.x, at.y, pane.rect), [x, y, z] = toIfc(w);
+    const spec = target.spec as DrawingSpec;
+    if (spec.kind === "section") {
+      const { along, look } = sectionFrame(spec), dx = x - spec.origin[0], dy = y - spec.origin[1];
+      if (h.kind === "section-line") {
+        const d = dx * look[0] + dy * look[1];
+        this.setPaneSpec(h.pane, { ...spec, origin: [spec.origin[0] + look[0] * d, spec.origin[1] + look[1] * d] });
+      } else if (h.kind === "section-end") {
+        let ang = Math.atan2(dy, dx) + (h.end === "left" ? Math.PI : 0) - (spec.flip ? Math.PI : 0);
+        if (snap) ang = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
+        this.setPaneSpec(h.pane, { ...spec, angle: ang });
+      } else if (h.kind === "section-far") {
+        this.setPaneSpec(h.pane, { ...spec, far: Math.max(this.reach(0.05, 0.005), dx * look[0] + dy * look[1]) });
+      } else if (h.kind === "section-side") {
+        const u = dx * along[0] + dy * along[1], crop = spec.crop ?? this.defaultCrop();
+        this.setPaneSpec(h.pane, { ...spec, crop: h.end === "left" ? { ...crop, left: Math.max(0.1, -u) } : { ...crop, right: Math.max(0.1, u) } });
+      } else if ((h.kind === "crop-top" || h.kind === "crop-bottom") && spec.crop) {
+        this.setPaneSpec(h.pane, { ...spec, crop: h.kind === "crop-top" ? { ...spec.crop, top: Math.max(z, spec.crop.bottom + 0.05) }
+          : { ...spec.crop, bottom: Math.min(z, spec.crop.top - 0.05) } });
+      }
+    } else if (spec.kind === "plan") {
+      const level = this.levels[spec.level]?.elevation_m ?? 0;
+      if (h.kind === "plan-cut") this.setPaneSpec(h.pane, { ...spec, cut: Math.max(z - level, (spec.bottom ?? -1e9) + 0.01) });
+      else if (h.kind === "plan-bottom" && spec.bottom != null) this.setPaneSpec(h.pane, { ...spec, bottom: Math.min(z - level, spec.cut - 0.01) });
+    }
+  }
+
+  /** Turn the 3D view to look at what is under a point of a drawing (a right click there), from where it looks now. */
+  private lookHere(pane: Pane, e: PointerEvent) {
+    const hit = this.pickDrawing(pane, e);
+    const r = pane.el.getBoundingClientRect();
+    const at = hit?.point ?? pane.view!.fromPane(e.clientX - r.left, e.clientY - r.top, pane.rect);
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    this.onUserCamera?.();
+    this.flyTo(at.clone().add(offset), at);
+  }
+
+  /** Draw a drawing pane: into its target when anything it shows changed, then onto its rectangle of the canvas
+   * (`g`: GL pixels, the viewport and scissor already set). */
+  private renderDrawing(pane: Pane, g: Rect) {
+    const view = pane.view!, r = this.renderer, dpr = r.getPixelRatio();
+    view.updateCamera(pane.rect, this.sceneDiag() * 2 + 10);
+    const [rt, nrt] = view.target(Math.max(1, Math.round(g.w * dpr)), Math.max(1, Math.round(g.h * dpr)));
+    const key = `${this.version}|${view.cameraKey(pane.rect)}|${this.drawingsFollow}|${this.hiddenModels.size}`;
+    if (view.drawn !== key) {
+      this.drawInto(view, rt, nrt);
+      view.drawn = key;
+      r.setViewport(g.x, g.y, g.w, g.h);
+      r.setScissor(g.x, g.y, g.w, g.h);
+      r.setScissorTest(true);
+    }
+    const u = this.drawStyle.composite.uniforms;
+    u.color.value = rt.texture; u.normals.value = nrt.texture; u.depth.value = nrt.depthTexture;
+    u.texel.value.set(1 / rt.width, 1 / rt.height);
+    u.near.value = view.camera.near; u.far.value = view.camera.far; u.ortho.value = 1;
+    u.tol.value = view.scale * 3; u.cutWidth.value = 1.5 * dpr; u.edges.value = 1;
+    // The crop, as a share of the pane (texture coordinates: y up).
+    if (view.crop) {
+      const px = view.crop.map((c) => view.toPane(c, pane.rect));
+      u.cropMin.value.set(Math.min(...px.map((q) => q.x)) / pane.rect.w, 1 - Math.max(...px.map((q) => q.y)) / pane.rect.h);
+      u.cropMax.value.set(Math.max(...px.map((q) => q.x)) / pane.rect.w, 1 - Math.min(...px.map((q) => q.y)) / pane.rect.h);
+    } else { u.cropMin.value.set(0, 0); u.cropMax.value.set(1, 1); }
+    this.drawStyle.drawComposite(r);
+  }
+
+  /** Render the model as a drawing into its targets (docs/views.md, "The drawing style"): paper fills, the pair flat
+   * in its colours; then, where the view cuts, stencil passes and caps that fill each cut face (amber where A and B
+   * overlap); then normals and depth for the linework. Its clip planes, the whole model unless drawings follow the 3D
+   * view, never the section box or the 3D view's helpers. */
+  private drawInto(view: DrawingView, rt: THREE.WebGLRenderTarget, nrt: THREE.WebGLRenderTarget) {
+    const r = this.renderer, st = this.drawStyle, scene = this.scene, cam = view.camera;
+    const box = this.clipping.splice(0);
+    const background = scene.background, auto = r.autoClear;
+    const materials = this.models.map((m) => [m.mesh.material, m.glass?.material] as const);
+    const focusMats = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+    const sel = this.selectionLayer.children.find((o) => (o as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
+    const restore = this.useDrawingVisibility();
+    const hiddenForNormals: THREE.Object3D[] = [];
+    try {
+      this.models.forEach((m, i) => { m.mesh.material = st.fills[i % st.fills.length]; if (m.glass) m.glass.material = st.glass; });
+      for (const o of this.focusLayer.children) {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh || (mesh.material as THREE.Material).transparent) continue;
+        focusMats.set(mesh, mesh.material);
+        mesh.material = st.side[(mesh.userData.side as Side) ?? "a"];
+      }
+      if (sel) { focusMats.set(sel, sel.material); sel.material = st.selected; }
+      scene.background = PAPER;
+      r.clippingPlanes = view.planes;
+      r.setRenderTarget(rt);
+      r.render(scene, cam);
+      if (view.cut) {
+        // Stencil: each group's cut solids flip their bit; then the caps fill by what is set.
+        r.autoClear = false;
+        scene.background = null;
+        r.clippingPlanes = [view.cut];
+        cam.layers.set(CAP_LAYER.rest);
+        for (const m of st.counting) { scene.overrideMaterial = m; r.render(scene, cam); }
+        scene.overrideMaterial = null;
+        st.settleCount(r);
+        for (const [layer, bit] of [[CAP_LAYER.a, CUT.a], [CAP_LAYER.b, CUT.b], [CAP_LAYER.ab, CUT.ab], [CAP_LAYER.preview, CUT.preview]]) {
+          cam.layers.set(layer);
+          scene.overrideMaterial = st.stencilFor(bit);
+          r.render(scene, cam);
+        }
+        scene.overrideMaterial = null;
+        cam.layers.set(0);
+        const preview = this.overlay.children.find((o) => (o as THREE.Mesh).isMesh && !((o as THREE.Mesh).material as THREE.Material).transparent) as THREE.Mesh | undefined;
+        st.drawCaps(r, preview ? ((preview.material as THREE.MeshStandardMaterial).color ?? null) : null);
+        r.autoClear = auto;
+      }
+      // The pair where something hides it: faint, over what is in front (the colour pass's depth is still there).
+      const pairMeshes = [...focusMats.keys()].filter((m) => m !== sel);
+      if (pairMeshes.length) {
+        r.autoClear = false;
+        scene.background = null;
+        r.clippingPlanes = view.planes;
+        const group = new THREE.Group();
+        const shadows = pairMeshes.map((m) => {
+          const ghost = new THREE.Mesh(m.geometry, st.hidden[(m.userData.side as Side) ?? "a"]);
+          ghost.matrixAutoUpdate = false; ghost.matrix.copy(m.matrix); ghost.matrixWorld.copy(m.matrixWorld); ghost.frustumCulled = false;
+          return ghost;
+        });
+        group.add(...shadows);
+        r.render(group, cam);
+        r.autoClear = auto;
+      }
+      // Normals and depth: what is solid only.
+      for (const m of this.models) if (m.glass?.visible) { m.glass.visible = false; hiddenForNormals.push(m.glass); }
+      for (const o of this.overlay.children) if (((o as THREE.Mesh).material as THREE.Material)?.transparent && o.visible) { o.visible = false; hiddenForNormals.push(o); }
+      scene.background = new THREE.Color(0, 0, 0);
+      r.clippingPlanes = view.planes;
+      scene.overrideMaterial = st.normals;
+      r.setRenderTarget(nrt);
+      r.render(scene, cam);
+    } finally {
+      scene.overrideMaterial = null;
+      cam.layers.set(0);
+      for (const o of hiddenForNormals) o.visible = true;
+      r.autoClear = auto;
+      r.setRenderTarget(null);
+      r.clippingPlanes = [];
+      scene.background = background;
+      this.models.forEach((m, i) => { m.mesh.material = materials[i][0]; if (m.glass && materials[i][1]) m.glass.material = materials[i][1]!; });
+      for (const [mesh, mat] of focusMats) mesh.material = mat;
+      restore();
+      this.clipping.push(...box);
+    }
+  }
+
+  /** The 3D view, in its style: as it is, or (Shaded with edges, Hidden line) through the drawings' passes: the
+   * colour (lit, or paper fills with the pair flat), normals and depth, and the composite's linework on top. `g`: its
+   * viewport, already set. */
+  private render3d(cam: THREE.Camera, g: Rect) {
+    const r = this.renderer;
+    if ((this.style !== "edges" && this.style !== "hidden") || this.lifted) { r.render(this.scene, cam); return; }
+    const st = this.drawStyle, scene = this.scene, dpr = r.getPixelRatio();
+    const w = Math.max(1, Math.round(g.w * dpr)), h = Math.max(1, Math.round(g.h * dpr));
+    if (!this.styled || this.styled[0].width !== w || this.styled[0].height !== h) this.styled = targets(w, h, ...(this.styled ?? []));
+    const [rt, nrt] = this.styled;
+    const hidden = this.style === "hidden";
+    const background = scene.background;
+    const materials = this.models.map((m) => [m.mesh.material, m.glass?.material] as const);
+    const swapped = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+    const off: THREE.Object3D[] = [];
+    try {
+      if (hidden) {
+        this.models.forEach((m, i) => {
+          if (m.mesh.material === this.solid || m.mesh.material === this.consistent) m.mesh.material = st.fills[i % st.fills.length];
+        });
+        for (const o of [...this.focusLayer.children, ...this.selectionLayer.children]) {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh || (mesh.material as THREE.Material).transparent && !this.selectionLayer.children.includes(o)) continue;
+          swapped.set(mesh, mesh.material);
+          mesh.material = this.selectionLayer.children.includes(o) ? st.selected : st.side[(mesh.userData.side as Side) ?? "a"];
+        }
+        scene.background = PAPER;
+      }
+      r.setRenderTarget(rt);
+      r.render(scene, cam);
+      // Normals and depth of what is solid: not glass, ghosts or the 3D view's own helpers.
+      for (const m of this.models) {
+        if (m.glass?.visible) { m.glass.visible = false; off.push(m.glass); }
+        const mat = m.mesh.material as THREE.Material;
+        if (mat.transparent && m.mesh.visible) { m.mesh.visible = false; off.push(m.mesh); }
+      }
+      for (const o of this.overlay.children) if (((o as THREE.Mesh).material as THREE.Material)?.transparent && o.visible) { o.visible = false; off.push(o); }
+      const layers = cam.layers.mask;
+      cam.layers.set(0);
+      scene.overrideMaterial = st.normals;
+      scene.background = new THREE.Color(0, 0, 0);
+      r.setRenderTarget(nrt);
+      r.render(scene, cam);
+      cam.layers.mask = layers;
+    } finally {
+      scene.overrideMaterial = null;
+      for (const o of off) o.visible = true;
+      r.setRenderTarget(null);
+      scene.background = background;
+      this.models.forEach((m, i) => { m.mesh.material = materials[i][0]; if (m.glass && materials[i][1]) m.glass.material = materials[i][1]!; });
+      for (const [mesh, mat] of swapped) mesh.material = mat;
+    }
+    const persp = cam === this.camera;
+    const u = st.composite.uniforms;
+    u.color.value = rt.texture; u.normals.value = nrt.texture; u.depth.value = nrt.depthTexture;
+    u.texel.value.set(1 / w, 1 / h);
+    u.near.value = (cam as THREE.PerspectiveCamera).near; u.far.value = (cam as THREE.PerspectiveCamera).far; u.ortho.value = persp ? 0 : 1;
+    u.tol.value = persp ? 0.015 : ((this.ortho.top - this.ortho.bottom) / g.h) * 3;
+    u.cutWidth.value = 0; u.edges.value = 1;
+    u.cropMin.value.set(0, 0); u.cropMax.value.set(1, 1);
+    st.drawComposite(r);
+    // The 3D view's helpers (marker, outlines through walls, grips, measure) over the drawing.
+    const auto = r.autoClear, layers = cam.layers.mask;
+    r.autoClear = false;
+    cam.layers.set(1);
+    scene.background = null;
+    r.clearDepth();
+    r.render(scene, cam);
+    scene.background = background;
+    cam.layers.mask = layers;
+    r.autoClear = auto;
+  }
+
+  /** Draw a drawing pane's annotation layer when what it shows changed (its view, the other views' marks, the clash,
+   * the 3D camera seen in plan). */
+  private annotatePane(pane: Pane) {
+    const view = pane.view!, layer = pane.el.querySelector("canvas");
+    if (!layer) return;
+    const c = this.lastClash && this.marker.visible ? this.lastClash : null;
+    const cam3 = this.pane3dShown() && pane.spec.kind === "plan" ? { position: this.camera.position, target: this.controls.target, fov: this.camera.fov } : null;
+    const others = this.panes.map((p, index) => ({ index, spec: p.spec, title: viewTitle(this.levels, p.spec) }))
+      .filter((o) => o.spec.kind !== "3d" && o.index !== this.panes.indexOf(pane)) as { index: number; spec: DrawingSpec; title: string }[];
+    const key = [view.cameraKey(pane.rect), JSON.stringify(others.map((o) => o.spec)), JSON.stringify(pane.spec), c?.zone.min.toArray(),
+      c?.zone.max.toArray(), this.markerLabel.textContent, cam3 ? [...cam3.position.toArray(), ...cam3.target.toArray()].map((n) => n.toFixed(2)) : "",
+      this.datums ? this.datums.grids.length : -1, layer.width].join("|");
+    if (pane.annotated === key) return;
+    pane.annotated = key;
+    const g = layer.getContext("2d");
+    if (!g) return;
+    pane.handles = annotate(g, layer.width / Math.max(pane.rect.w, 1), {
+      view, rect: pane.rect, index: this.panes.indexOf(pane), title: viewTitle(this.levels, pane.spec), levels: this.levels,
+      left: pane.rect.x < 4 ? 56 : 0,
+      grids: this.datums?.grids ?? [], model: this.modelBox(), clash: c ? { zone: c.zone, label: this.markerLabel.textContent || "Clash" } : null,
+      others, camera3d: cam3,
+    });
+  }
+
+  /** Swap in the drawings' visibility (the whole model, where the 3D view's Context or Isolate hide part of it);
+   * returns what puts the 3D view's back. */
+  private useDrawingVisibility(): () => void {
+    if (this.drawingsFollow || !this.drawVis.length) return () => undefined;
+    for (const d of this.drawVis) d.el.mesh.setVisibleAt(d.el.instanceId, d.vDraw);
+    return () => { for (const d of this.drawVis) d.el.mesh.setVisibleAt(d.el.instanceId, d.v3d); };
+  }
+
+  /** Take every unpinned drawing pane to a clash (docs/views.md, "Every view goes to the clash"): a plan at its level
+   * with the cut through it, a section through it along the run that moves, an elevation facing the section's way; each
+   * framed on where the pair meets. `only`: one pane (its own Go to clash). */
+  private clashViews(ids: string[], zone: THREE.Box3, point: THREE.Vector3 | null, only?: Pane) {
+    this.lastClash = { ids, zone: zone.clone(), point: point?.clone() ?? null };
+    const panes = only ? [only] : this.panes.filter((p) => p.view && !p.pinned);
+    if (!panes.length) return;
+    const model = this.modelBox();
+    const p = toIfc(point ?? zone.getCenter(new THREE.Vector3()));
+    const runBox = this.boxOf([this.runOf(ids)].filter((g): g is string => !!g));
+    const run = runBox.isEmpty() ? null : { min: [runBox.min.x, -runBox.max.z, runBox.min.y], max: [runBox.max.x, -runBox.min.z, runBox.max.y] };
+    const around = zone.clone().expandByScalar(Math.max(this.reach(2, 0.2), zone.getSize(new THREE.Vector3()).length() * 0.5));
+    let look: [number, number] | null = null;
+    const section = this.panes.find((q) => q.spec.kind === "section");
+    const last = (q: Pane) => (q.spec.kind === "elevation" ? 1 : 0);   // an elevation turns the way the section looks
+    for (const pane of [...panes].sort((a, b) => last(a) - last(b))) {
+      let spec = pane.spec as DrawingSpec;
+      if (spec.kind === "plan") spec = planThrough(this.levels, p[2], spec);
+      else if (spec.kind === "section") {
+        const pad = this.reach(0.5, 0.05);
+        const crop = { left: 4, right: 4, bottom: model.min.y - pad, top: model.max.y + pad };
+        spec = sectionThrough(p, run, { ...spec, flip: false, crop }, this.reach(2, 0.2));
+        spec = { ...spec, far: farBehind(spec, zone, this.reach(2, 0.2)) };
+        look = sectionFrame(spec).look;
+      } else {
+        const from = look ?? (section ? sectionFrame(section.spec as never).look : null);
+        if (from) spec = { ...spec, facing: facingFor(from) };
+      }
+      pane.spec = spec;
+      pane.view!.configure(spec, this.levels, model);
+      pane.view!.frame(around, pane.rect, 0.05);
+    }
+    this.onChange?.();
+  }
+  private lastClash: { ids: string[]; zone: THREE.Box3; point: THREE.Vector3 | null } | null = null;
+  /** Is there a clash on screen for a pane's Go to the clash? */
+  get hasClash() { return !!this.lastClash; }
+
+  /** One pane to the last clash (its own Go to clash, pinned or not). */
+  paneToClash(i: number) {
+    const c = this.lastClash, pane = this.panes[i];
+    if (!c) return;
+    if (c && pane?.view) this.clashViews(c.ids, c.zone, c.point, pane);
+  }
+
+  /** The side of a clash that moves: not structure, else the longer run. */
+  private runOf(ids: string[]): string | null {
+    const found = ids.filter((g) => this.has(g));
+    const free = found.filter((g) => !FIXED.test(this.info.get(g)?.cls ?? ""));
+    const pool = free.length ? free : found;
+    const len = (g: string) => { const b = this.boxOf([g]); return Math.max(b.max.x - b.min.x, b.max.z - b.min.z); };
+    return pool.sort((a, b) => len(b) - len(a))[0] ?? null;
+  }
+
   // ---------------------------------------------------------------- section box and marker
 
-  /** Cut the model to a box around the focus (or `box`), `margin` metres beyond it; null turns it off. */
+  /** Cut the model to a box (docs/views.md, "Section box anywhere"): `box`, else round the clash, else the selected
+   * element, else what is in view; `margin` metres beyond it. Off with `on` false. Its faces have grips to drag. */
   setSection(on: boolean, margin = this.reach(1.5, 0.1), box?: THREE.Box3) {
     if (this.sectionHelper) { this.scene.remove(this.sectionHelper); this.sectionHelper = null; }
     this.clipping.length = 0;
     this.sectionBox = null;
     if (on) {
-      const b = (box ?? this.boxAroundFocus()).clone();
+      let b = (box ?? this.boxAroundFocus()).clone();
+      if (b.isEmpty() && !box) b = this.selection ? this.boxOf([this.selection]) : b;
+      if (b.isEmpty() && !box) { b = this.boxInView(); margin = 0; }
       if (b.isEmpty()) return false;
       b.expandByScalar(margin);
       this.sectionBox = b;
@@ -1052,11 +1960,82 @@ export class Viewer {
         new THREE.Plane(new THREE.Vector3(0, 1, 0), -min.y), new THREE.Plane(new THREE.Vector3(0, -1, 0), max.y),
         new THREE.Plane(new THREE.Vector3(0, 0, 1), -min.z), new THREE.Plane(new THREE.Vector3(0, 0, -1), max.z));
       this.sectionHelper = new THREE.Box3Helper(b, new THREE.Color("#2f5d8a"));
+      this.sectionHelper.layers.set(1);
       this.scene.add(this.sectionHelper);
     }
+    this.placeGrips();
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, ...Object.values(this.focusMaterials),
-      ...Object.values(this.focusGlass), ...[...this.linkMaterials.values()].map((x) => x.mesh)]) m.needsUpdate = true;
+      ...Object.values(this.focusGlass), ...[...this.linkMaterials.values()].map((x) => x.mesh), ...this.drawStyle.fills,
+      this.drawStyle.glass, ...Object.values(this.drawStyle.side), this.drawStyle.selected, this.drawStyle.normals]) m.needsUpdate = true;
     return true;
+  }
+
+  /** The section box's current extent, or null when it is off. */
+  get section(): THREE.Box3 | null { return this.sectionBox?.clone() ?? null; }
+
+  /** What is in view: the model round the target, a cube about as wide as the camera is far from it. */
+  private boxInView(): THREE.Box3 {
+    const all = new THREE.Box3();
+    this.models.forEach((m, i) => { if (!this.hiddenModels.has(i)) for (const b of batches(m)) { b.computeBoundingBox(); all.union(b.boundingBox!); } });
+    const size = Math.max(this.camera.position.distanceTo(this.controls.target), this.reach(2, 0.5));
+    return new THREE.Box3().setFromCenterAndSize(this.controls.target, new THREE.Vector3().setScalar(size)).intersect(all);
+  }
+
+  private buildGrips() {
+    const mat = new THREE.MeshBasicMaterial({ color: "#2f5d8a", depthTest: false, transparent: true, opacity: 0.9 });
+    const geo = new THREE.SphereGeometry(1, 16, 12);
+    for (const [axis, side] of [["x", "min"], ["x", "max"], ["y", "min"], ["y", "max"], ["z", "min"], ["z", "max"]] as const) {
+      const m = new THREE.Mesh(geo, mat);
+      m.userData = { axis, side };
+      m.renderOrder = 12;
+      m.layers.set(1);
+      this.grips.add(m);
+    }
+    this.grips.visible = false;
+  }
+
+  /** Grips at the middle of each face of the section box. */
+  private placeGrips() {
+    const b = this.sectionBox;
+    this.grips.visible = !!b && !this.lifted;   // never in a picture
+    if (!b) return;
+    const c = b.getCenter(new THREE.Vector3());
+    for (const g of this.grips.children) {
+      const { axis, side } = g.userData as { axis: "x" | "y" | "z"; side: "min" | "max" };
+      g.position.copy(c);
+      g.position[axis] = b[side][axis];
+    }
+  }
+
+  /** The grip under the pointer (within 12 px), with what dragging it needs: the screen direction of its axis and the
+   * pixels a metre along it covers. */
+  private gripAt(e: PointerEvent) {
+    if (!this.sectionBox || !this.grips.visible) return null;
+    const r = this.pane3d.getBoundingClientRect(), cam = this.activeCamera();
+    const toPx = (v: THREE.Vector3) => { const q = v.clone().project(cam); return new THREE.Vector2((q.x + 1) / 2 * r.width, (1 - q.y) / 2 * r.height); };
+    const at = new THREE.Vector2(e.clientX - r.left, e.clientY - r.top);
+    for (const g of this.grips.children) {
+      const p = toPx(g.position);
+      if (p.distanceTo(at) > 12) continue;
+      const { axis, side } = g.userData as { axis: "x" | "y" | "z"; side: "min" | "max" };
+      const step = new THREE.Vector3(); step[axis] = 1;
+      const q = toPx(g.position.clone().add(step)).sub(p);
+      const ppm = q.length();
+      if (ppm < 1e-6) continue;   // the axis points at the camera: drag another grip
+      return { axis, side, box: this.sectionBox.clone(), x: e.clientX, y: e.clientY, perPx: q.normalize(), ppm };
+    }
+    return null;
+  }
+
+  /** Drag a grip: its face follows the pointer along its axis, live; the box never turns inside out. */
+  private dragGrip(e: PointerEvent) {
+    const g = this.grip;
+    if (!g) return;
+    const metres = new THREE.Vector2(e.clientX - g.x, e.clientY - g.y).dot(g.perPx) / g.ppm;
+    const b = g.box.clone(), least = this.reach(0.05, 0.01);
+    if (g.side === "min") b.min[g.axis] = Math.min(g.box.min[g.axis] + metres, b.max[g.axis] - least);
+    else b.max[g.axis] = Math.max(g.box.max[g.axis] + metres, b.min[g.axis] + least);
+    this.setSection(true, 0, b);
   }
 
   /** The focus elements, clipped to a few metres around the marker so a long run does not make a huge box. */
@@ -1075,11 +2054,14 @@ export class Viewer {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12), mat);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.012, 8, 48), mat);
     dot.renderOrder = ring.renderOrder = 10;
+    dot.layers.set(1); ring.layers.set(1);   // the 3D view's: a drawing marks the clash its own way
     this.marker.add(dot, ring);
     this.marker.visible = false;
   }
 
   setMarker(point: THREE.Vector3 | null, label = "") {
+    this.version++;
+    if (!point) this.lastClash = null;   // no clash on screen: Go to the clash has nowhere to go
     this.marker.visible = !!point;
     if (point) this.marker.position.copy(point);
     this.markerLabel.textContent = label;
@@ -1089,9 +2071,11 @@ export class Viewer {
 
   /** The element (and point on it) under the pointer, including elements in focus. */
   pickAt(ev: MouseEvent, opts: { ghosts?: boolean } = {}): Pick | null {
-    const r = this.renderer.domElement.getBoundingClientRect();
+    const pane = this.panes.length > 1 ? this.paneAt(ev.clientX, ev.clientY) : null;
+    if (pane?.view) return this.pickDrawing(pane, ev);
+    const r = this.pane3d.getBoundingClientRect();
     const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
-    this.raycaster.setFromCamera(ndc, this.camera);
+    this.raycaster.setFromCamera(ndc, this.activeCamera());
     const targets: THREE.Object3D[] = [...this.focusLayer.children,
       ...this.models.filter((_, i) => !this.hiddenModels.has(i)).flatMap(batches)];
     const ghostly = !opts.ghosts && this.focusIds().length > 0 && this.mode !== "shaded";
@@ -1114,6 +2098,31 @@ export class Viewer {
 
   pick(ev: MouseEvent): string | null { return this.pickAt(ev)?.globalId ?? null; }
 
+  /** A pick in a drawing pane: its camera, what it shows (the whole model unless drawings follow the 3D view), and
+   * only what its cut, bottom, far clip and crop keep. */
+  private pickDrawing(pane: Pane, ev: MouseEvent): Pick | null {
+    const view = pane.view!, r = pane.el.getBoundingClientRect();
+    view.updateCamera(pane.rect, this.sceneDiag() * 2 + 10);
+    const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, view.camera);
+    const restore = this.useDrawingVisibility();
+    try {
+      const targets: THREE.Object3D[] = [...this.focusLayer.children.filter((o) => (o as THREE.Mesh).isMesh),
+        ...this.models.filter((_, i) => !this.hiddenModels.has(i)).flatMap(batches)];
+      let behindGlass: Pick | null = null;
+      for (const hit of this.raycaster.intersectObjects(targets, false)) {
+        if (!view.keeps(hit.point)) continue;
+        if (hit.object.userData.globalId) return { globalId: hit.object.userData.globalId, point: hit.point };
+        if (hit.batchId === undefined) continue;
+        const solid = this.models.find((m) => m.mesh === hit.object), glass = this.models.find((m) => m.glass === hit.object);
+        const el = solid ? solid.byInstance.get(hit.batchId) : glass?.glassByInstance.get(hit.batchId);
+        if (el && solid) return { globalId: el.globalId, point: hit.point };
+        if (el) behindGlass ??= { globalId: el.globalId, point: hit.point };
+      }
+      return behindGlass;
+    } finally { restore(); }
+  }
+
   /** Draw a measured distance between two picked points; null clears it. Returns metres. */
   setMeasure(p1: THREE.Vector3 | null, p2: THREE.Vector3 | null): number | null {
     this.measureLayer.clear();
@@ -1122,6 +2131,7 @@ export class Viewer {
     const mat = new THREE.MeshBasicMaterial({ color: "#2f5d8a", depthTest: false });
     for (const p of [p1, p2].filter((x): x is THREE.Vector3 => !!x)) {
       const s = new THREE.Mesh(new THREE.SphereGeometry(this.reach(0.03, 0.01), 12, 8), mat);
+      s.layers.set(1);
       s.position.copy(p);
       s.renderOrder = 11;
       this.measureLayer.add(s);
@@ -1130,6 +2140,7 @@ export class Viewer {
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p1, p2]),
       new THREE.LineBasicMaterial({ color: "#2f5d8a", depthTest: false }));
     line.renderOrder = 11;
+    line.layers.set(1);
     this.measureLayer.add(line);
     const d = p1.distanceTo(p2);
     const dx = Math.abs(p2.x - p1.x), dy = Math.abs(p2.z - p1.z), dz = Math.abs(p2.y - p1.y);
@@ -1150,15 +2161,50 @@ export class Viewer {
     }
     this.controls.update();
     this.adjustClipRange();
+    this.drawFrame();
+  }
+
+  /** Every pane: the 3D view rendered, each drawing view drawn when something changed and composited from its target;
+   * then the view cube. Also what a capture puts back on screen. */
+  private drawFrame() {
+    const W = this.host.clientWidth || 1, H = this.host.clientHeight || 1;
+    const r3 = this.rect3d();
+    if (this.projection === "orthographic") this.syncOrtho(r3.w / Math.max(r3.h, 1));
+    const cam = this.activeCamera();
     this.place(this.markerLabel, this.marker.visible ? this.marker.position : null);
     this.place(this.measureLabel, this.measureLayer.userData.mid ?? null);
+    // Constant sizes on screen, at any scale: a floor in metres made the marker swallow a 100 mm part.
+    const perPx = (p: THREE.Vector3) => this.projection === "orthographic" ? (this.ortho.top - this.ortho.bottom) / r3.h
+      : 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * Math.max(this.camera.position.distanceTo(p), 1e-4) / r3.h;
     if (this.marker.visible) {
-      // A constant size on screen, at any scale: a floor in metres made it swallow a 100 mm part.
-      const s = Math.max(this.camera.position.distanceTo(this.marker.position) / 8, 1e-4);
-      this.marker.scale.setScalar(s);
-      this.marker.children[1].lookAt(this.camera.position);
+      // As far as the camera is (distance / 8, as always), or the distance that frames as the orthographic view does.
+      const d = this.projection === "orthographic" ? (this.ortho.top - this.ortho.bottom) / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2))
+        : this.camera.position.distanceTo(this.marker.position);
+      this.marker.scale.setScalar(Math.max(d / 8, 1e-4));
+      this.marker.children[1].lookAt(cam.position);
     }
-    this.renderer.render(this.scene, this.camera);
+    for (const g of this.grips.children) g.scale.setScalar(Math.max(perPx(g.position) * 6, 1e-5));
+    const r = this.renderer;
+    if (this.visiblePanes().length === 1 && this.visiblePanes()[0].spec.kind === "3d") {
+      r.setScissorTest(false);
+      r.setViewport(0, 0, W, H);
+      this.render3d(cam, { x: 0, y: 0, w: W, h: H });
+    } else {
+      r.setScissorTest(true);
+      for (const pane of this.visiblePanes()) {
+        const g = { x: pane.rect.x, y: H - pane.rect.y - pane.rect.h, w: pane.rect.w, h: pane.rect.h };
+        r.setViewport(g.x, g.y, g.w, g.h);
+        r.setScissor(g.x, g.y, g.w, g.h);
+        if (pane.spec.kind === "3d") this.render3d(cam, g);
+        else if (pane.view) { this.renderDrawing(pane, g); this.annotatePane(pane); }
+      }
+    }
+    if (this.models.length && this.pane3dShown()) {
+      const g = { x: r3.x, y: H - r3.y - r3.h, w: r3.w, h: r3.h };
+      this.cube.render(r, cam, g);
+    }
+    r.setScissorTest(false);
+    r.setViewport(0, 0, W, H);
   }
 
   /** Near/far planes follow the distance to the target, so close-ups don't clip and far views don't z-fight. */
@@ -1180,18 +2226,46 @@ export class Viewer {
   }
 
   private place(el: HTMLDivElement, p: THREE.Vector3 | null) {
-    if (!p || !el.textContent) { el.style.display = "none"; return; }
-    const v = p.clone().project(this.camera);
+    if (!p || !el.textContent || !this.pane3dShown()) { el.style.display = "none"; return; }
+    const v = p.clone().project(this.activeCamera());
     if (v.z > 1) { el.style.display = "none"; return; }
+    const r = this.rect3d();
     el.style.display = "block";
-    el.style.left = `${((v.x + 1) / 2) * this.host.clientWidth}px`;
-    el.style.top = `${((1 - v.y) / 2) * this.host.clientHeight}px`;
+    el.style.left = `${r.x + ((v.x + 1) / 2) * r.w}px`;
+    el.style.top = `${r.y + ((1 - v.y) / 2) * r.h}px`;
   }
 
-  /** PNG of the current view: the A/B/C images come from the same renderer the user sees. */
+  /** The layout as on screen: every pane, then each drawing's annotation layer over it. */
   snapshot(): string {
-    this.renderer.render(this.scene, this.camera);
-    return this.renderer.domElement.toDataURL("image/png");
+    this.drawFrame();
+    const src = this.renderer.domElement;
+    if (this.visiblePanes().length === 1 && this.visiblePanes()[0].spec.kind === "3d") return src.toDataURL("image/png");
+    const out = document.createElement("canvas");
+    out.width = src.width; out.height = src.height;
+    const g = out.getContext("2d")!;
+    g.drawImage(src, 0, 0);
+    const k = src.width / (this.host.clientWidth || 1);
+    for (const pane of this.visiblePanes()) {
+      const layer = pane.el.querySelector("canvas");
+      if (layer) g.drawImage(layer, pane.rect.x * k, pane.rect.y * k, pane.rect.w * k, pane.rect.h * k);
+      g.strokeStyle = "#c9d1da"; g.lineWidth = k;
+      g.strokeRect(pane.rect.x * k + 0.5, pane.rect.y * k + 0.5, pane.rect.w * k - 1, pane.rect.h * k - 1);
+    }
+    return out.toDataURL("image/png");
+  }
+
+  /** Render with the 3D camera into the whole canvas, as a single view would, whatever the layout: pictures never
+   * depend on the panes (docs/views.md, "What must not change"). The panes are drawn again afterwards. */
+  private fullCanvas<T>(take: () => T): T {
+    const W = this.host.clientWidth || 1, H = this.host.clientHeight || 1;
+    const aspect = this.camera.aspect;
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, W, H);
+    this.renderer.clippingPlanes = [];
+    if (Math.abs(aspect - W / H) > 1e-9) { this.camera.aspect = W / H; this.camera.updateProjectionMatrix(); }
+    try { return take(); } finally {
+      if (this.camera.aspect !== aspect) { this.camera.aspect = aspect; this.camera.updateProjectionMatrix(); }
+    }
   }
 
   /** A PNG of the current view's centre square, `side` pixels across. */
@@ -1205,21 +2279,40 @@ export class Viewer {
     return out.toDataURL(type, 0.85);
   }
 
-  /** A small JPEG of the current view (for reports): the centre square, `side` pixels across. */
+  /** A small JPEG of the 3D view (for reports): the centre square, `side` pixels across, without the user's style,
+   * filters, hides or selection. */
   capture(side = 640): string {
-    this.renderer.render(this.scene, this.camera);
-    const src = this.renderer.domElement;
-    const s = Math.min(src.width, src.height);
-    const out = document.createElement("canvas");
-    out.width = out.height = Math.min(side, s);
-    out.getContext("2d")!.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, 0, 0, out.width, out.height);
-    return out.toDataURL("image/jpeg", 0.85);
+    const lifted = this.lifted, grips = this.grips.visible, version = this.version;
+    this.lifted = true; this.grips.visible = false;
+    this.applyMode();
+    try {
+      return this.fullCanvas(() => {
+        if (this.marker.visible) {   // sized for the perspective camera the picture is taken with, whatever the user's
+          this.marker.scale.setScalar(Math.max(this.camera.position.distanceTo(this.marker.position) / 8, 1e-4));
+          this.marker.children[1].lookAt(this.camera.position);
+        }
+        this.renderer.render(this.scene, this.camera);
+        const src = this.renderer.domElement;
+        const s = Math.min(src.width, src.height);
+        const out = document.createElement("canvas");
+        out.width = out.height = Math.min(side, s);
+        out.getContext("2d")!.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, 0, 0, out.width, out.height);
+        return out.toDataURL("image/jpeg", 0.85);
+      });
+    } finally {
+      this.lifted = lifted; this.grips.visible = grips;
+      this.applyMode();
+      this.version = version;
+      this.drawFrame();
+    }
   }
 
   dispose() {
     this.renderer.setAnimationLoop(null);
     this.resize.disconnect();
     this.controls.dispose();
+    this.cube.dispose();
+    for (const p of this.panes) { p.view?.dispose(); p.el.remove(); }
     this.renderer.dispose();
     this.renderer.domElement.remove();
     this.markerLabel.remove();
@@ -1230,9 +2323,22 @@ export class Viewer {
     const w = this.host.clientWidth || 1;
     const h = this.host.clientHeight || 1;
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+    this.layoutPanes();
   }
+}
+
+/** The mark under a pane point: within 9 px of an end, else within 6 px of a line. */
+function handleAt(handles: Handle[], p: THREE.Vector2): Handle | null {
+  const ends = handles.filter((h) => h.kind === "section-end" && h.a.distanceTo(p) <= 9);
+  if (ends.length) return ends[0];
+  let best: Handle | null = null, bestD = 6;
+  for (const h of handles) {
+    if (h.kind === "section-end") continue;
+    const ab = h.b.clone().sub(h.a), t = THREE.MathUtils.clamp(p.clone().sub(h.a).dot(ab) / Math.max(ab.lengthSq(), 1e-9), 0, 1);
+    const d = h.a.clone().addScaledVector(ab, t).distanceTo(p);
+    if (d <= bestD) { best = h; bestD = d; }
+  }
+  return best;
 }
 
 /** Where two boxes meet: per axis their overlap, or the gap between them when they are apart on that axis. */

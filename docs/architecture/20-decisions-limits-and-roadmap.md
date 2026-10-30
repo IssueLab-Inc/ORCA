@@ -81,6 +81,8 @@ carries the decision today.
 | Oct 29 | Escalation to Muse Wonder: a button by default; also "Look for a better fix" after a successful run | `escalation.py`, the `escalation` setting (`SIGHTLINE_ESCALATION` default `button`); [docs/escalation.md](../escalation.md) |
 | Oct 29 | Show it built: the fix after only; a clean presentation render, not a site photo; a switch in the owner menu; two Muse Wonder judges per picture; the open tray bend to be fixed in the model, not the prompt; the PDF gets a built view for each accepted fix | `built.py`, `BuiltView.tsx`, `built_views` (`SIGHTLINE_BUILT_VIEWS` default `0`); [docs/show-it-built.md](../show-it-built.md) |
 | Oct 30 (request) | A move keeps what it stands on: a post slid along its slab is not a new clash, a lift off it is refused | `verify.supports`, `verify.keep_supports`; [docs/edits.md](../edits.md) |
+| Oct 29–30 | Drawing views beside 3D: up to four panes (Single, Two, Quad), plans, a section and elevations drawn like CAD; a toggle for whether drawings follow the 3D view's Context / Isolate or show the whole model; clip planes the user sets (a plan's cut and bottom, a section's line, far clip and crop) | `ViewPanes.tsx`, `viewer/drawing.ts`, `viewer/annotate.ts`, `Viewer.setLayout` / `setDrawingsFollow`; [docs/views.md](../views.md), [13](13-3d-viewer.md) |
+| Oct 30 | Navigate the model with or without a clash: leave a clash (Esc, the chip's ✕), CAD-style 3D (view cube, orthographic, styles, visibility by model, class and level, hide and isolate); a picked clash shows in every open view, and clicking a clash takes every view to it by default (Fly to clash) | `leaveClash`, `views.escStep`, `viewer/cube.ts`, `Viewer.setStyle` / `setFilters` / `setTemporary`, `Viewer.clashViews`; [docs/views.md](../views.md) |
 
 ## Tried and dropped
 
@@ -105,6 +107,8 @@ carries the decision today.
 | `muse mcp add` for Muse Code | Not a subcommand (owner, Oct 29) | The settings JSON, with `"mode": "optional"` (`required` aborts a run when a link expires) | `web/src/Agent.tsx`; [docs/mcp.md](../mcp.md) |
 | CSS `::after` tooltips | Cut off by panel and window edges | One fixed `Tooltips` layer that flips and clamps | `web/src/ui.tsx` |
 | An effect that returns `scrollIntoView(...)` | Chromium returns a Promise; React's cleanup broke and the panel blanked | Effects use braces | `web/src/App.tsx`, `Chat.tsx` |
+| `camera-controls` for the 3D view's pivot | Not needed: sliding `OrbitControls`' target along the view ray to the point under the pointer pivots without a jump (about 8 ms a press) | `OrbitControls` kept | `Viewer.press` |
+| A Wireframe visual style | three.js cannot draw a `BatchedMesh` as wireframe (its multi-draw ranges index triangles); per-model feature edges were not worth it beside Shaded with edges and Hidden line | Shaded with edges, Hidden line (the drawing views' linework pass in 3D) | `Viewer.render3d`; [docs/views.md](../views.md) |
 | Thumbnails drawn into the visible canvas after the frame's render | The shot showed in the viewer until the next frame | `Viewer.posed` renders the restored view before returning; one thumbnail per 60 ms | `web/src/viewer/Viewer.ts` |
 | Trims on any member | A verified "trim the pad footing 900 mm", half its bearing | A trim needs a slender member (`edits.SLENDER = 3`); a trim inside one model is marked model cleanup | `edits.butt_trim`, `agent._try_trim`; `evals/not_a_clash.py` |
 | Counting a moved element's own footing as a clash | Muse Wonder lifted fence posts 100–200 mm off their slab to pass (E0) | `verify.keep_supports` | `agent._try_move`, `plans.verify_together`, `Workspace.verify_move` |
@@ -216,7 +220,8 @@ and `deploy` finds none: open work is tracked in the feature docs and here, not 
 
 - A human voice on a real microphone, and recognition of real speech on a phone (checked only with espeak-ng speech
   and a fake microphone: [docs/voice.md](../voice.md), [docs/mobile.md](../mobile.md)).
-- Frame rate on a real GPU (spike 1 ran on software GL).
+- Frame rate on a real GPU (spike 1 ran on software GL), also for Quad with three drawing views (measured only as
+  redraw counts in the cloud session's software GL: [docs/views.md](../views.md), "Built").
 - Show it built's S0 did not try radii of 2 and 5 m or Muse Wonder judges at high effort.
 
 ### Known, not fixed
@@ -241,7 +246,7 @@ Recorded after the final review of Show it built (Oct 30) and still true in the 
 |---|---|---|
 | 1 | Spike 4 with images; opening heights fed as text (`edits.passages`) | Done |
 | 2 | Local-offset edit verified on #042/#057/#061 at Rev04's heights; bends | Done. Of its "later": sideways offsets are done (lateral offsets, and route steps sideways); splitting at fittings is not |
-| 3 | Viewer: context and X-ray modes, section box, measure; A/B/C capture in the browser | Done. "Still to do: plan view" (the viewer has a Top preset, nothing named a plan view) |
+| 3 | Viewer: context and X-ray modes, section box, measure; A/B/C capture in the browser; free navigation and plan, section and elevation views | Done (views on `feature/drawing-views`, Oct 30: [docs/views.md](../views.md)). Walk, Wireframe and an elevation's crop are later |
 | 4 | Agent loop end to end in the UI, streamed; chat with tools | Done. Its "later", the report tools on the MCP server, is done: `report_summary`, `list_clashes`, `get_clash`, `get_clash_images`, `measure_clash`, `find_root_causes`, `find_patterns`, `triage` |
 | 5 | Bulk triage on Muse Spark Open; voice; IFC export; PDF and BCF; ORCA detection; numbers and titles; demo, tour and landing on detection; STEP and the cell | Done |
 | 6 | Escalation to Muse Wonder; Show it built | Done. Muse Image cannot design a fix; it only restyles one |

@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, connections, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
+from . import agent, connections, datums, detect, edits, escalation, hosts, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -194,6 +194,13 @@ class Workspace:
         s = self.scene(scene_id)
         with self.lock:
             return {g: [s.element(g).ifc_class, s.element(g).name or s.element(g).ifc_class] for g in s.bounds()}
+
+    def datums(self, scene_id: str) -> dict:
+        """Levels, grids and each element's storey (datums.read). A scene opened from samples may take its grid from
+        the samples' `<prefix>-Grids.ifc`; an upload only from its own files."""
+        s = self.scene(scene_id)
+        with self.lock:
+            return datums.read(s, self.names.get(scene_id, []), None if scene_id in self._roots else self.samples)
 
     def describe(self, scene_id: str, global_id: str) -> dict:
         """An element, with what it is linked to by kind (connections.links_of: joints, assembly, hosted, what it rests
