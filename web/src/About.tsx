@@ -1,31 +1,23 @@
-import { ArrowDown, Box, Check, RotateCcw, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, Upload, X, Compass } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { ArrowDown, ArrowRight, Box, Check, RotateCcw, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, Upload, Compass } from "lucide-react";
+import type { ReactNode } from "react";
 import { useLayout } from "./layout";
 
 /**
  * What ORCA is and does, for people who have never heard of BIM or design coordination: the start page in the
- * empty viewer (with the demo button) and the "How it works" dialog from the header.
+ * empty viewer (with the demo buttons). The longer story, in tabs, is About ORCA (AboutOrca.tsx).
  */
-export function About({ start, onClose, triageOpen = false }: {
+export function About({ start, onAbout, triageOpen = false }: {
   // onGolden: one click opens the demo models, checks them, picks the duct-through-girder clash and proposes a fix.
   start?: { label: string; details: ReactNode; disabled: boolean; onStart: () => void; onTour?: () => void; onGolden?: () => void;
     onCell?: () => void; onCellTour?: () => void;  // the second demo: the palletising cell from STEP
     onBlank?: () => void;  // a blank project: the visitor's own models
     resume?: Resume };  // this browser's last session, still on the server
-  onClose?: () => void;
+  onAbout?: () => void;  // opens About ORCA (AboutOrca.tsx), the longer story in tabs
   triageOpen?: boolean;  // titles and triage run on the open-weights model now (server: /api/models)
 }) {
-  useEffect(() => {
-    if (!onClose) return;
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [onClose]);
-
   const layout = useLayout(), phone = layout === "phone";
   const body = (
     <article className="about">
-      {onClose && <button className="ibtn about-close" onClick={onClose} aria-label="Close"><X size={18} aria-hidden /></button>}
 
       {start?.resume && <ResumeCard r={start.resume} disabled={start.disabled} />}
 
@@ -165,6 +157,14 @@ export function About({ start, onClose, triageOpen = false }: {
         </ol>
       </section>
 
+      {onAbout && (
+        <button className="about-more" onClick={onAbout}>
+          <span><b>Go deeper: About ORCA</b>How a fix is found and checked, all seven kinds of fix, the five models and what they are
+            trusted with, how it is built, and what it has proven.</span>
+          <ArrowRight size={20} aria-hidden />
+        </button>
+      )}
+
       <section className="about-two">
         <div>
           <h2 className="about-h">Reading the 3D view</h2>
@@ -224,12 +224,7 @@ export function About({ start, onClose, triageOpen = false }: {
     </article>
   );
 
-  if (!onClose) return <div className="about-page" onClick={(e) => e.stopPropagation()}>{body}</div>;
-  return (
-    <div className="about-dialog" role="dialog" aria-modal="true" aria-label="How ORCA works" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}>{body}</div>
-    </div>
-  );
+  return <div className="about-page" onClick={(e) => e.stopPropagation()}>{body}</div>;
 }
 
 function Stat({ value, label, note }: { value: string; label: string; note: string }) {

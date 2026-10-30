@@ -1008,3 +1008,20 @@ Sign-offs kept per report (Oct 30; code `web/src/signoffs.ts`, `Report.requireme
 - **Checked:** `tests/test_detect.py` (a run names its requirements), `web/tests/signoffs.test.mjs` (5: keys, a rerun
   under new rules and with fewer models, junk and no storage, the migration with an imported report and two projects of
   one title, the page); 80 web tests.
+
+About ORCA (Oct 30, owner request; code `web/src/AboutOrca.tsx`, `web/src/aboutRoute.ts`, CSS "About ORCA" in
+`index.css`):
+- **What:** a full page over the app, in six tabs (Overview, How it works, The fixes, The AI, Under the hood, Proof and
+  limits), presenting the architecture map's story for visitors and judges. It replaces the header's "How it works"
+  dialog (the old `About` in dialog mode); the landing keeps `About` and gains a "Go deeper" card. Header, phone menu
+  and landing open it; `#about` / `#about/<tab>` is its address (pushed on open, so Back closes it).
+- **Animations:** the ORCA loop (a dot round Observe, Resolve, Check, Apply), Northbank #1 before and after (the duct
+  raised through the web opening), a before/after picture per fix kind, an auto-advancing six-stage pipeline, the
+  propose-check-retry loop, flowing architecture links, count-up numbers, sections fading up as they scroll in. All
+  CSS/SVG, no new dependency; `prefers-reduced-motion` shows the "after" states, still.
+- **Numbers:** only the measured ones the landing and README already use (464 in about 4 s, ~40 s, 3 of 3, 17 of 17,
+  161 parts, 25 of 25 hosts, 150 MB in about two minutes). Change them with the landing's.
+- **Checked:** `npm run build`, `npm test` (`tests/about.test.mjs`, 5; App's stub lists take `AboutOrca` and compile
+  `aboutRoute`); in Chromium at 1440x900 and 390x844 (touch) every tab renders, no console errors, no sideways scroll,
+  Escape / Close / Back close it, the tab bar follows the chosen tab, and reduced motion shows the fix pictures' after
+  state.

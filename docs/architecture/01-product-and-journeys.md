@@ -1,6 +1,6 @@
 # 01 · Product and user journeys
 
-> **Covers:** `web/src/About.tsx`, `web/src/ProjectStart.tsx`, `web/src/Tour.tsx`, `web/src/App.tsx`,
+> **Covers:** `web/src/About.tsx`, `web/src/AboutOrca.tsx`, `web/src/ProjectStart.tsx`, `web/src/Tour.tsx`, `web/src/App.tsx`,
 > `web/src/AppMenu.tsx`, `web/src/Detect.tsx`, `web/src/ReportList.tsx`, `web/src/Triage.tsx`,
 > `web/src/Insights.tsx`, `web/src/ClashPanel.tsx`, `web/src/PlanPanel.tsx`, `web/src/ContextPlan.tsx`,
 > `web/src/Chat.tsx`, `web/src/Requirements.tsx`, `web/src/ReportDoc.tsx`, `web/src/Agent.tsx`, `web/src/Owner.tsx`,
@@ -32,9 +32,10 @@ inside lives in the docs it links to; the cross-layer sequence of each action is
 | **Hand off** | Export the edited IFC (and STEP), a PDF per scope with team reviews, BCF 2.1 issues. | [14](14-files-in-and-out.md), `document.py` |
 
 **Who it is for.** Design coordinators and the teams whose models meet: structure, building services (MEP) and
-architecture on a building; mechanical, electrical and safety on a machine cell. The landing page and the
-"How it works" dialog (`About`) are written for people who have never heard of BIM: what a clash is, the
-disciplines, a colour legend for the viewer and a short glossary ("Words you'll see").
+architecture on a building; mechanical, electrical and safety on a machine cell. The landing page (`About`) is
+written for people who have never heard of BIM: what a clash is, the disciplines, a colour legend for the viewer and a
+short glossary ("Words you'll see"). **About ORCA** (`AboutOrca`) tells the longer story in six tabs, for anyone who
+wants more, judges included.
 
 **The hackathon framing.** ORCA was built for the Meta Global AI Developer Hackathon (Startup track, Oct 27 - Nov 4,
 2026), with only work written during the event. The headline is **verified model edits**: a fix is a real IFC edit,
@@ -64,7 +65,7 @@ zone has the whole stage.
 | **Coordinate menu** | Header **Coordinate** popover | `runDetect(null)` / `loadReport` / `upload` | **Check the open models** first; then **Or import a Navisworks clash report (XML)**: a sample folder from `samples/reports/`, **Upload an export folder…** (not on iOS), **Upload XML files…**. |
 | **Agent over MCP** | Header **Connect an agent** | `AgentDialog`, `connectAgent` | A pairing link for an MCP client; the page follows what the agent does ([11](11-mcp-and-agent-links.md)). |
 | **Owner** | Header gear, only for the owner or on a page opened with `#owner` | `OwnerSettingsMenu` | Unlock with the owner token, then settings "For me" and "For everyone" ([15](15-requirements-settings-and-config.md), [16](16-security-caps-and-cost.md)). |
-| **Help** | Header **How it works** (the `About` page as a dialog) | `setAbout(true)` | The landing's explainer, without the start buttons. |
+| **Help** | Header **About ORCA** (also on the landing, in the phone menu, the landing's "Go deeper" card, or the address `#about`, `#about/<tab>`) | `openAbout(tab)` | A full page over the app in six tabs: Overview, How it works, The fixes, The AI, Under the hood, Proof and limits. Animated pictures (the ORCA loop, the duct raised through the girder, each fix kind before and after, the propose-check loop, the architecture); still under reduced motion. Escape, Close or Back closes it. |
 
 ```mermaid
 flowchart TD
@@ -271,7 +272,7 @@ remembered in `sightline.left-w` / `sightline.right-w`; defaults 310 px and 380 
 
 | Area | What it holds |
 |---|---|
-| **Header** (`.bar`, three columns) | Left: **Models** (with the element count after it), **Coordinate**, **Requirements**, **How it works**, **Tour**. Centre: the ORCA brand. Right: "n fixed", **Connect an agent** (or the agent pill: "Agent · tool"), the owner chip and gear, **Report**, **Export IFC** / **Export STEP + IFC**. At 1280 px and below, Requirements, How it works, Tour and Connect an agent show their icons only (`.bar .lbl`). |
+| **Header** (`.bar`, three columns) | Left: **Models** (with the element count after it), **Coordinate**, **Requirements**, **About ORCA**, **Tour**. Centre: the ORCA brand. Right: "n fixed", **Connect an agent** (or the agent pill: "Agent · tool"), the owner chip and gear, **Report**, **Export IFC** / **Export STEP + IFC**. At 1280 px and below, Requirements, About ORCA, Tour and Connect an agent show their icons only (`.bar .lbl`). |
 | **Left pane** (`.pane.left`) | Over a report, `ReportList` with two tabs: **Clashes** (title and test count, Triage folded to one line, search with filters, the list grouped by test, ticks and the Fix together bar) and **Insights** (impact line, the run's summary with Detect again, root causes, patterns). Models open with no report: the Detect setup card. Nothing open: "Nothing to coordinate yet". |
 | **Stage** (`main.stage`) | The viewer canvas; the rail (`ViewerToolbar`: Shaded, X-ray, Context, Isolate; section box, outlines, measure; Go to the clash, Fit, standard views, models shown, screenshot); the properties card on single click; the busy and status overlays; the pilot pill and glow; the Before / After / Both bar; the landing (`About`) or the blank project (`ProjectStart`) when nothing is open. |
 | **Right pane** (`.pane.right`) | Tabs **Clash** (the clash panel, Propose fixes, Explore wider fix, Go to the clash, Understanding, reasoning, options, Try a move yourself), **Plan** (Fix together, root cause plan, wider fix) and **Chat**. |
