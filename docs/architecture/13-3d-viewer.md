@@ -208,7 +208,8 @@ every style.
   originals and add their pieces as meshes; a penetration draws its provision for void solid and the host with its
   hole at 0.3 opacity); `before` draws the model as it is; `both` adds `before` as an orange ghost (`#e67e22`, 0.35).
   `App` colours an option red when it moves A, else green; a plan's fixes green; the pilot uses amber while checking
-  and teal when clear ([12](12-web-app.md), `pilot.ts`).
+  and teal when clear ([12](12-web-app.md), `pilot.ts`), and so does a check pointed at in Workings, with its hits lit
+  when it failed ([docs/workings.md](../workings.md)).
 
 ### Camera
 

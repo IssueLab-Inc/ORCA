@@ -24,6 +24,13 @@ export type Part =
   | { kind: "image"; src: string; alt: string };
 
 export type Side = "l" | "r" | "t" | "b" | "tr";
+/** A check's trial, for the viewer: the edit in place (a move's elements and delta, or new pieces as world triangles),
+ * and its verdict when it has one (what it hit, lit in magenta). `run` and `scene` say which run and models it is from. */
+export interface Peek {
+  key: string; run: number; scene?: string; title: string;
+  kind: string; moved: string[]; delta_m: number[]; pieces: unknown[] | null; summary?: string;
+  passed: boolean | null; hit_ids: string[];
+}
 export interface Step {
   id: string; lane: string; col: number;
   /** Down from the lane's top, in pixels (default 14). */
@@ -46,6 +53,8 @@ export interface Step {
   ev: string; newEv?: string;
   /** A check's number in the run (the pilot's step), for "in view". */
   seq?: number;
+  /** What the viewer shows when the step is hovered or pinned (an idea and its check: their trial). */
+  peek?: Peek;
 }
 export interface Edge { from: string; to: string; kind?: "seq" | "ghost" | "feedback"; label?: string; fa?: Side; ta?: Side; win?: boolean }
 export interface Lane { id: string; label: string; sub: string; actor: Actor; h: number }
@@ -124,7 +133,7 @@ interface Attempt { title: string; passed: boolean; reason: string; kind: string
 interface Option { title: string; kind: string; min_clearance_m?: number | null; delta_m?: number[]; split_m?: number[] | null }
 interface Round { step: Step; thoughts: string[]; notes: string[]; ideas?: { t: number; seconds: number; understanding: string; count: number } }
 interface Result { options?: Option[]; escalated?: boolean; recommendation?: { title: string; rationale?: string } | null; usage?: { usd?: number } | null }
-interface Check { idea: Step; check: Step; checking: number; trial?: number; attempt?: Attempt; at?: number }
+interface Check { idea: Step; check: Step; checking: number; trial?: number; shape?: Record<string, unknown>; attempt?: Attempt; at?: number }
 
 function proposal(run: Run, at: number): Graph {
   const events = upTo(run, at), done = finished(run, at), cols = new Columns();
@@ -201,7 +210,7 @@ function proposal(run: Run, at: number): Graph {
       ofRound.push(check.id); prev = check.id; firstIdea = false;
     } else if (e.type === "trial") {
       const c = checks.get(`${tryNo}-${Number(e.index ?? 0)}`);
-      if (c) c.trial = t;
+      if (c) { c.trial = t; c.shape = e; }
     } else if (e.type === "attempt") {
       const c = checks.get(`${tryNo}-${Number(e.index ?? 0)}`);
       if (c) { c.attempt = e as unknown as Attempt; c.at = t; bars.push({ lane: "orca", a: c.checking, b: t, tone: c.attempt.passed ? "ok" : "fail" }); }
@@ -232,6 +241,13 @@ function proposal(run: Run, at: number): Graph {
   const clearance = (a: Attempt) => options.find((o) => o.title === a.title && o.kind === a.kind)?.min_clearance_m;
   for (const c of checks.values()) {
     const a = c.attempt;
+    if (c.shape) {   // the trial, for the viewer: in place, then teal (clear) or with what it hit
+      const s = c.shape, peek: Peek = { key: `${run.id}:${c.check.id}`, run: run.id, scene: typeof run.meta.scene === "string" ? run.meta.scene : undefined,
+        title: c.idea.title, kind: String(s.kind ?? a?.kind ?? "move"), moved: (s.moved as string[]) ?? [], delta_m: (s.delta_m as number[]) ?? [0, 0, 0],
+        pieces: Array.isArray(s.pieces) ? s.pieces : null, summary: typeof s.summary === "string" ? s.summary : undefined,
+        passed: a ? a.passed : null, hit_ids: a?.hit_ids ?? [] };
+      c.check.peek = peek; c.idea.peek = peek;
+    }
     c.idea.body = a ? [text(editText(a as unknown as Parameters<typeof editText>[0]), { mono: true, tone: "muted" })] : [];
     if (!a) {
       const live = !done && !failure;

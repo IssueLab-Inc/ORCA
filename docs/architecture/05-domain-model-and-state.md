@@ -570,11 +570,14 @@ does without.
 | `sightline.views.fly` | `App.tsx` | Fly to clash on or off (`"1"` / `"0"`, default on) |
 | `sightline.views.layout` | `App.tsx` | The view layout (`single`, `two`, `quad`); a phone shows Single and a tablet at most Two whatever is kept |
 | `sightline.measure.snap`, `sightline.measure.at` | `App.tsx` | Snapping while measuring (default on), and where the Measure panel was dragged to |
+| `sightline.workings` | `App.tsx` | Workings on or off in the Activity panel (`"0"` / `"1"`, default on) and the view it shows ([docs/workings.md](../workings.md)) |
+| `sightline.dock.v1`, `sightline.dock.classic` | `dockLayout.ts` (`saveLayout`, called by `dock.tsx`) | The desktop's panel layout (dockview's `toJSON`) and whether the Classic layout is on ([docs/panels.md](../panels.md)) |
 | `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box) for a set of models, keyed by `About.projectName` |
 
 The browser also holds the `sightline_owner` cookie (HttpOnly, Secure, SameSite=Strict, path `/api`, 30 days),
 which scripts cannot read. Everything else on the page (the open report, verdicts, `reviewed` marks, plans, clash views,
-built pictures, filters and hides, what each pane shows, the measurements) is React state that a reload loses; see [12](12-web-app.md).
+built pictures, filters and hides, what each pane shows, the measurements, the options rejected for the clash on
+screen, the runs Workings draws) is React state or module state that a reload loses; see [12](12-web-app.md).
 
 ### What survives a restart
 

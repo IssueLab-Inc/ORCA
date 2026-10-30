@@ -104,3 +104,15 @@ export function recEditText(r: Pick<Recommendation, "kind" | "delta_m" | "edit">
   const size = Math.round(Math.max(...d.map(Math.abs)) * 1000);
   return size ? `move ${size} mm` : "";
 }
+
+/** An option the person rejected in the Clash panel, as the next proposal for the pair tells Muse. */
+export interface Rejection { title: string; kind: string; edit: string; why: string }
+/** An option as the person sees it: its kind and title, so the same fix found again keeps its rejection. */
+export const optionKey = (o: { kind: string; title: string }) => `${o.kind}|${o.title}`;
+/** The rejections as the proposal's notes (Muse's brief ends "Notes: …"). Empty when there are none. */
+export function rejectionNotes(rejected: Record<string, Rejection>) {
+  const all = Object.values(rejected);
+  if (!all.length) return "";
+  return "The reviewer rejected these fixes, so propose different ones: " +
+    all.map((r) => `${r.kind} "${r.title}" (${r.edit})${r.why.trim() ? `, because ${r.why.trim()}` : ""}`).join("; ") + ".";
+}

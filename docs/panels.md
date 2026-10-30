@@ -51,7 +51,7 @@ It is new work, written for ORCA during the event. No code from other products.
   the floating panels while it is open.
 - **Put it back** (a button, and on the right-click menu) returns a floating, popped-out or moved panel to its side
   bar, in its place among the tabs.
-- **Close** is on the right-click menu. **Panels and layout** (the header's layout button) shows any panel, closed
+- **Close** is on the right-click menu. **Panels and layout** (in the Menu) shows any panel, closed
   or not, resets the layout, and switches to the **Classic layout** (the fixed panes of before, `sightline.dock.classic`).
 - The layout is kept in this browser (`sightline.dock.v1`, dockview's `toJSON`, saved a moment after each change and
   after a collapse). A layout that can't be ORCA's (another version, a panel it doesn't have, the model anywhere but the

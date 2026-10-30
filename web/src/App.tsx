@@ -2,7 +2,7 @@ import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, Clipboa
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type ActivityView, type Progress } from "./Activity";
 import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
-import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, needsText, recEditText, reviewText } from "./fixKinds";
+import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, needsText, optionKey, recEditText, rejectionNotes, reviewText, type Rejection } from "./fixKinds";
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
@@ -46,6 +46,7 @@ import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./do
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { PropertySets } from "./Properties";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
+import type { Peek } from "./workingsGraph";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
@@ -165,6 +166,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [chosen, setChosen] = useState<number | null>(null);
+  // A check hovered or pinned in Workings: its trial in the viewer, over the chosen option (docs/workings.md).
+  const [peek, setPeek] = useState<{ p: Peek; pin: boolean } | null>(null);
+  // Options the person rejected for this pair (by `optionKey`), with why if they said. The next proposal for the pair
+  // tells Muse, and an option it finds again stays rejected (docs/edits.md, "Rejecting a fix").
+  const [rejected, setRejected] = useState<Record<string, Rejection>>({});
   const [manualDz, setManualDz] = useState(-0.25);
   const [manual, setManual] = useState<Verdict | null>(null);
   const [manualPreview, setManualPreview] = useState<{ element: string; delta: number[]; moved: string[]; pieces: Piece[] | null } | null>(null);
@@ -961,10 +967,26 @@ export function App() {
 
   // What the viewer previews: the chosen option of a single proposal, else every fix of a plan.
   const option = viewPlan || activeContext || chosen == null ? null : proposal?.options[chosen] ?? null;
+  // The chosen option is never one the person rejected (a new proposal can find it again): the first still open.
+  useEffect(() => {
+    const o = chosen == null ? undefined : proposal?.options[chosen];
+    if (!proposal || !o || !rejected[optionKey(o)]) return;
+    const open = proposal.options.findIndex((x) => !rejected[optionKey(x)]);
+    setChosen(open >= 0 ? open : null);
+  }, [proposal, chosen, rejected]);
   const planOptions = useMemo(() => (plan?.items.filter((i) => i.option).map((i) => i.option!) ?? []), [plan]);
+  const peeked = useRef(false);   // a trial lit its hits: clear them when it goes
   useEffect(() => {
     const v = viewer.current;
     if (!v) return;
+    if (peek && !activeContext) {   // a trial from Workings: in place, teal when it passed, amber with its hits when not
+      const t = peek.p;
+      v.showOption({ kind: t.kind, moved: t.moved, deltaM: t.delta_m, pieces: t.pieces as Mesh[] | null, before: null }, "after",
+        t.passed === false ? "#f5a623" : "#12b5cb");
+      v.setHits(t.passed === false ? t.hit_ids : []);
+      return;
+    }
+    if (peeked.current) { v.setHits([]); peeked.current = false; }
     if (activeContext && contextProposal) {
       v.showOptions(contextShapes(contextProposal), compare);
     } else if (activeContext) v.preview([]);
@@ -988,7 +1010,21 @@ export function App() {
       baseLinks.current = base;
       if (!hover.current.gid) restoreLinks();
     }
-  }, [option, plan, planOptions, compare, a, viewPlan, activeContext, contextProposal, manualPreview]);
+  }, [option, plan, planOptions, compare, a, viewPlan, activeContext, contextProposal, manualPreview, peek]);
+  useEffect(() => {
+    if (!peek) return;
+    peeked.current = true;
+    // Pinned: the camera goes to it, as the pilot's would.
+    if (peek.pin) { const t = peek.p; frameFix({ kind: t.kind, moved: t.moved, preview: t.pieces as Mesh[] | null }, [a, b].filter((g): g is string => !!g)); }
+  }, [peek?.p.key, peek?.pin]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** Workings' hover and pin: shown while the pilot isn't driving the viewer; a pin takes the view from it. Only a
+   *  trial from the models open now. */
+  function peekTrial(p: Peek | null, pin: boolean) {
+    if (!p) { setPeek(null); return; }
+    if (p.scene && p.scene !== sceneId) return;
+    if (pilotStatus?.driving) { if (!pin) return; pilot.current?.takeOver(); }
+    setPeek({ p, pin });
+  }
 
   useEffect(() => {
     if (activeContext && contextProposal) viewer.current?.frameMeshes(contextProposal.edits.flatMap((e) => [...e.before, ...e.preview]), 1.4);
@@ -1028,8 +1064,23 @@ export function App() {
     return !!viewer.current?.frameFix(meshes, meshes.length ? [] : movedPairs(o.moved, sides));
   }
 
+  /** Set an option aside: the next one still open is chosen, and the report stops proposing it. */
+  function reject(o: Option, i: number) {
+    const next = { ...rejected, [optionKey(o)]: { title: o.title, kind: o.kind, edit: editText(o), why: "" } };
+    setRejected(next);
+    const open = proposal?.options.map((x, j) => (next[optionKey(x)] ? -1 : j)).filter((j) => j >= 0) ?? [];
+    setChosen(open.find((j) => j > i) ?? open[0] ?? null);
+    const ids = clashIdsOf([[a, b]])[0];
+    setEvidence((ev) => {
+      const out = { ...ev };
+      for (const id of ids) if (out[id]?.status === "proposed" && out[id].kind === o.kind && out[id].title === o.title) delete out[id];
+      return out;
+    });
+  }
+  function unreject(o: Option) { setRejected((r) => { const { [optionKey(o)]: _gone, ...rest } = r; return rest; }); }
+
   function clearManual() { ++previewRequest.current; setManual(null); setManualPreview(null); }
-  function resetWork(keepContext = false, keepStandIns = false) { clearManual(); setProposal(null); setChosen(null); setProgress(null); setCompare("after"); if (!keepStandIns) setStandIns({}); if (!keepContext) setViewContext(false); }
+  function resetWork(keepContext = false, keepStandIns = false) { clearManual(); setProposal(null); setChosen(null); setProgress(null); setCompare("after"); setPeek(null); setRejected({}); if (!keepStandIns) setStandIns({}); if (!keepContext) setViewContext(false); }
 
   function retireDirectWork() {
     directAgent.current?.retire(); directPlan.current?.retire(); directContext.current?.retire();
@@ -1584,7 +1635,8 @@ export function App() {
   function trackAgent(first: Proposal | null = null, origin: Origin = "you", title = "") {
     directContext.current?.retire();
     clearManual();
-    const trace = traceStart("propose", origin, title, { second: !!first });
+    const trace = traceStart("propose", origin, title, { second: !!first, scene: sceneId });
+    setPeek(null);
     const run = ++agentRun.current;
     const epoch = sceneEpoch.current;
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
@@ -1719,7 +1771,8 @@ export function App() {
     if (on && report?.origin === "sightline" && !on.images.length && !views[on.id])
       await Promise.race([captureViews(report.id, on.id, ea, eb), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
-    try { result = await api.proposeStream(sceneId, ea, eb, from, onEvent, second); }
+    const notes = pick ? "" : rejectionNotes(rejected);   // what the person set aside for this pair, and why
+    try { result = await api.proposeStream(sceneId, ea, eb, from, onEvent, second, notes); }
     catch (e) { if (agentRun.current === run) { setError((e as Error).message); tracker.trace.add({ type: "error", detail: (e as Error).message }); } }
     finally { finish(result); }
   }
@@ -2411,6 +2464,14 @@ export function App() {
   }
 
   const proposing = !!progress && progress.phase !== "done";
+  // A proposal landed: bring its options into view in the Clash panel (once per result; the panel scrolls, not the page).
+  const optionsHead = useRef<HTMLHeadingElement | null>(null);
+  const landed = useRef<Proposal | null>(null);
+  useEffect(() => {
+    if (!proposal || proposing || landed.current === proposal) return;
+    landed.current = proposal;
+    if (optionsHead.current) scrollInPane(optionsHead.current);
+  }, [proposal, proposing]);
   // ORCA working on the clash on screen: it can't be left until that finishes.
   const clashBusy = proposing || (!!planRun && planRun.phase !== "done") || contextWorking || replaying;
   // A detected clash's views, taken once the camera has reached it (selecting a clash flies there first).
@@ -3060,7 +3121,7 @@ export function App() {
           </>}
           <Thinking notes={thoughts} live={proposing} thinking={proposing && progress?.phase === "thinking"}
             model={progress?.model ?? proposal?.model ?? labels.proposal} />
-          {proposal && !proposing && <h2>Verified options</h2>}
+          {proposal && !proposing && <h2 ref={optionsHead}>Verified options</h2>}
           {proposal && !proposing && proposal.recommendation && <Recommended rec={proposal.recommendation} advice={proposal.advice} model={proposal.model || labels.proposal} requirements={proposal.requirements ?? null}
             onRequirements={() => setReqOpen(true)} />}
           {proposal && !proposing && !proposal.options.length && !proposal.recommendation && <NoFix proposal={proposal} onRetry={propose}
@@ -3078,7 +3139,18 @@ export function App() {
                 : <button className="btn small" onClick={() => review([clash.id], "by_design", "A joint inside one model: built as modelled")}>
                   <CircleCheck size={13} aria-hidden /> Mark as not a clash</button>}
             </div>)}
-          {proposal?.options.map((o, i) => (
+          {proposal?.options.map((o, i) => rejected[optionKey(o)] ? (
+            <div key={i} className="card rejected">
+              <span className="opt-head">
+                <span className="opt-rank">{i + 1}</span><span className="opt-kind">{kindLabel(o.kind)} · rejected</span>
+                <button type="button" className="btn small ghost undo" onClick={() => unreject(o)} data-tip="Put it back with the other options">
+                  <RotateCcw size={13} aria-hidden /> Undo</button></span>
+              <b className="opt-title">{o.title}</b>
+              <input className="rej-why" value={rejected[optionKey(o)].why} maxLength={200} aria-label={`Why reject ${o.title}`}
+                placeholder={`Why? (optional: ${labels.proposal} reads it on the next try)`}
+                onChange={(e) => { const why = e.target.value; setRejected((r) => r[optionKey(o)] ? { ...r, [optionKey(o)]: { ...r[optionKey(o)], why } } : r); }} />
+            </div>
+          ) : (
             <div key={i} className={`card ${chosen === i ? "pick" : ""}`}>
               <button className="card-body option" onClick={() => { clearManual(); setChosen(chosen === i ? null : i); }} aria-pressed={chosen === i}>
                 <span className="opt-head">
@@ -3102,7 +3174,11 @@ export function App() {
                 {o.rationale && <span className="opt-why">{o.rationale}</span>}
                 <ProofStrip o={o} rank={i} options={proposal!.options} before={measure && measure !== "busy" ? measure.distance_m : null} need={proposal!.clearance_m} />
               </button>
-              {chosen === i && <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>}
+              {chosen === i && <div className="opt-actions">
+                <button className="btn primary" data-tour="accept" disabled={!!busy} onClick={() => accept(o)}><Check size={15} aria-hidden /> {o.cleanup ? "Accept this cleanup" : "Accept this fix"}</button>
+                <button type="button" className="btn" disabled={!!busy} onClick={() => reject(o, i)}
+                  data-tip={`Set it aside: the next proposal for this clash tells ${labels.proposal} you rejected it, and why if you say`}><X size={15} aria-hidden /> Reject</button>
+              </div>}
               {chosen === i && canBuild(o) && a && b && (() => {
                 const run = builtRuns[builtKey([a, b], o)];
                 return run ? <BuiltView run={run} onRetry={() => showBuilt(o)} reopen={builtReopen} />
@@ -3117,6 +3193,14 @@ export function App() {
                     data-tip="Make this reading a rule for the host's group in the coordination requirements"><ClipboardPlus size={13} aria-hidden /> Add to requirements</button>)}
             </div>
           ))}
+          {proposal && !proposing && !hideFix && proposal.options.some((o) => rejected[optionKey(o)]) && (() => {
+            const all = proposal.options.every((o) => rejected[optionKey(o)]);
+            return <div className={`rejected-note${all ? " all" : ""}`}>
+              <span>{all ? "You rejected every option." : `${proposal.options.filter((o) => rejected[optionKey(o)]).length} rejected.`}
+                {" "}A new proposal tells {proposal.model || labels.proposal} what you rejected and why, so it looks for something else.</span>
+              <button type="button" className="btn small" disabled={!!busy} onClick={() => void propose()}><RotateCcw size={13} aria-hidden /> Propose again</button>
+            </div>;
+          })()}
 
           {proposal && !proposing && proposal.options.length > 0 && canEscalate && !proposal.escalated && !hideFix && (
             <button className="better-fix" data-tour="better-fix" disabled={!!busy} onClick={() => void escalate()}
@@ -3150,7 +3234,8 @@ export function App() {
       </div>)}
       {!compact && inSlot(slots.activity, <footer className={`dock${workings.on && workings.view === "work" ? " working" : ""}`}>
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} workings={workings.on} view={workings.view}
-          onView={setActivityView} onHide={() => setWorkingsOn(false)} inView={pilotStatus?.step ?? null} />
+          onView={setActivityView} onHide={() => setWorkingsOn(false)} onTurnOn={workings.on ? undefined : () => setWorkingsOn(true)}
+          inView={pilotStatus?.step ?? null} onPeek={peekTrial} />
       </footer>)}
       {layout === "tablet" && listOpen && !landing && <div className="drawer-scrim" aria-hidden onClick={() => setListOpen(false)} />}
       {layout === "phone" && !landing && !starting && (
@@ -3286,6 +3371,20 @@ function Recommended({ rec, advice, requirements, onRequirements, model }: { rec
         on the model. <button className="btn small ghost" onClick={onRequirements}>Requirements</button></p>
     </div>
   );
+}
+
+/** Scroll the panel `el` is in (its nearest scrolling box, never the page) to bring `el` near its top, unless it is
+ *  near the top already. Works in a popped-out window: everything is read from the element's own window. */
+function scrollInPane(el: HTMLElement) {
+  const win = el.ownerDocument.defaultView ?? window;
+  for (let box = el.parentElement; box; box = box.parentElement) {
+    const { overflowY } = win.getComputedStyle(box);
+    if ((overflowY !== "auto" && overflowY !== "scroll") || box.scrollHeight <= box.clientHeight) continue;
+    const at = el.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    if (at >= 0 && at < box.clientHeight * 0.4) return;
+    box.scrollTo({ top: box.scrollTop + at - 8, behavior: win.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    return;
+  }
 }
 
 /** When nothing passed: what ORCA learned, so the clash reaches a person with a head start, not a dead end. */

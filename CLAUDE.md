@@ -194,7 +194,7 @@ guided tours, free navigation and drawing views (plans, sections, elevations bes
 every view with snapping (`docs/measure.md`), desktop panels that dock, collapse, float and pop out (`docs/panels.md`,
 dockview's free core), properties of any element (a Properties panel: type, material, size, property sets,
 quantities), Workings (the Activity panel draws each run as it happens: `docs/workings.md`). Latest validation
-(Oct 30): 629 server tests, 139 web tests; answer key 3/3 first try at
+(Oct 30): 629 server tests, 142 web tests; answer key 3/3 first try at
 Rev04 heights, with requirements off and with Northbank's own on; `evals/step_cell.py` passes off and on (C1, C2, C3,
 C6, C7, C8, Rev B 0). How each part works now:
 `docs/architecture/`. What was built when, with the numbers measured at the time: `docs/architecture/22-build-log.md`.
