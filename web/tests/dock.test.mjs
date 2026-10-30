@@ -19,7 +19,8 @@ function layout({ grid = ["model"], left = ["clashes"], right = ["clash", "plan"
 }
 
 test("every panel has a home, and only the model lives in the middle", () => {
-  assert.deepEqual(dock.PANEL_IDS, ["model", "clashes", "clash", "plan", "chat", "activity"]);
+  assert.deepEqual(dock.PANEL_IDS, ["model", "clashes", "clash", "plan", "chat", "activity", "properties"]);
+  assert.equal(dock.homeOf("properties"), "float", "Properties floats, and appears on a selection");
   assert.equal(dock.homeOf("model"), "centre");
   assert.equal(dock.homeOf("clashes"), "left");
   for (const id of ["clash", "plan", "chat"]) assert.equal(dock.homeOf(id), "right");
@@ -32,6 +33,7 @@ test("the default layout as saved loads; floating panels and closed ones too", (
   assert.ok(dock.validLayout(layout({ right: ["plan", "chat"], floating: ["clash"] })));
   assert.ok(dock.validLayout(layout({ bottom: [] })), "a closed panel is simply absent");
   assert.ok(dock.validLayout(layout({ grid: ["model", "chat"], right: ["clash", "plan"] })), "a panel docked beside the model");
+  assert.ok(dock.validLayout(layout({ floating: ["properties"] })), "Properties floating over the model");
 });
 
 test("a layout that can't be ORCA's gives way to the default", () => {
@@ -80,6 +82,9 @@ test("a saved layout puts what was in its own window back in its side bar", () =
   assert.ok(dock.validLayout(back));
   const plain = layout();
   assert.equal(dock.withoutPopouts(plain), plain, "nothing to move: the same layout");
+  const props = dock.withoutPopouts(layout({ popout: ["properties"] }));
+  assert.ok(!("properties" in props.panels), "Properties is left closed: the next selection brings it back");
+  assert.ok(dock.validLayout(props));
 });
 
 test("the layout is kept per browser, versioned, and a bad one reads as none", () => {

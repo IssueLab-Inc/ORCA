@@ -16,7 +16,7 @@ import { countsText, highlightGroups, indexGraph, LINK_COLOURS, LINK_ORDER, LINK
 import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
-import { api, ApiError, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
+import { api, ApiError, type ElementProperties, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About, projectName } from "./About";
 import { AboutOrca } from "./AboutOrca";
 import { aboutTabFromHash, currentHash, showAboutHash, type AboutTab } from "./aboutRoute";
@@ -41,6 +41,7 @@ import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
+import { PropertySets } from "./Properties";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
@@ -128,6 +129,8 @@ export function App() {
   const [drawingsFollow, setDrawingsFollow] = useState(false);
   const [modelNames, setModelNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
+  // What the model says about the selected element (properties.py): the Properties panel, or the card's All properties.
+  const [elementProps, setElementProps] = useState<{ gid: string; data: ElementProperties | null; loading: boolean } | null>(null);
   // Measuring (docs/measure.md): the viewer keeps the measurements; snapping is kept in this browser.
   const [snapping, setSnapping] = useState(() => { try { return localStorage.getItem("sightline.measure.snap") !== "0"; } catch { return true; } });
   const measureFrame = useRef(0);
@@ -398,6 +401,15 @@ export function App() {
   useEffect(() => { viewer.current?.setProjection(tool.ortho ? "orthographic" : "perspective"); }, [tool.ortho]);
   useEffect(() => { viewer.current?.setGreyContext(tool.grey); }, [tool.grey]);
   useEffect(() => { viewer.current?.setSelection(selected?.globalId ?? null); }, [selected?.globalId]);
+  useEffect(() => {
+    const gid = selected?.globalId;
+    if (!gid || !sceneId) { setElementProps(null); return; }
+    let live = true;
+    setElementProps({ gid, data: null, loading: true });
+    api.properties(sceneId, gid).then((data) => { if (live) setElementProps({ gid, data, loading: false }); })
+      .catch(() => { if (live) setElementProps({ gid, data: null, loading: false }); });
+    return () => { live = false; };
+  }, [selected?.globalId, sceneId]);
   useEffect(() => { viewer.current?.setFilters(filters); }, [filters]);
   useEffect(() => { viewer.current?.setTemporary(temporary); }, [temporary]);
   useEffect(() => { try { localStorage.setItem("sightline.views.fly", fly ? "1" : "0"); } catch { /* kept for this visit */ } }, [fly]);
@@ -1202,12 +1214,14 @@ export function App() {
       viewsChanged();   // the panel says what to click next
       return;
     }
-    if (!hit) { setSelected(null); return; }
-    if (tool.links || ev.altKey) void pinLinks(hit.globalId, ev.shiftKey);   // a tap on a touch screen, too
+    // Any element can be selected: in a see-through view a click that meets nothing in focus takes what is behind.
+    const picked = hit ?? viewer.current?.pickAt(ev.nativeEvent, { ghosts: true }) ?? null;
+    if (!picked) { setSelected(null); return; }
+    if (tool.links || ev.altKey) void pinLinks(picked.globalId, ev.shiftKey);   // a tap on a touch screen, too
     const epoch = sceneEpoch.current;
-    setSelected({ globalId: hit.globalId, info: null });
-    if (sceneId) api.element(sceneId, hit.globalId)
-      .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === hit.globalId ? { ...s, info } : s)); })
+    setSelected({ globalId: picked.globalId, info: null });
+    if (sceneId) api.element(sceneId, picked.globalId)
+      .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === picked.globalId ? { ...s, info } : s)); })
       .catch(() => undefined);
   }
 
@@ -2253,6 +2267,8 @@ export function App() {
   // The dock is the desktop's; the landing, phones, tablets and the Classic layout switch use the classic layout.
   const docked = layout === "desktop" && !landing && !classic;
   dockedNow.current = docked;
+  // Selecting an element shows its Properties panel (floating at first, wherever the user put it after).
+  useEffect(() => { if (selected?.globalId && docked) dock.current?.show("properties"); }, [selected?.globalId, docked]);
   const startLabel = picked.some((f) => /northbank/i.test(f)) ? "Open the Northbank demo" : "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
   // Phones and tablets: the sheet (or drawer) follows what happens, so the panel people need is the one showing. The
@@ -2519,6 +2535,45 @@ export function App() {
     <label className="pop-item check"><input type="checkbox" checked={classic} onChange={(e) => { close(); setClassic(e.target.checked); }} /> Classic layout (fixed panels)</label>
   </>);
 
+  // The selected element's card: what it is, its links, Set as A / B and what to do with it. The classic card over the
+  // model and the dock's Properties panel both show it (docs/panels.md).
+  const elementCard = selected && (<>
+      <div className="row"><b>{String(selected.info?.ifc_class ?? "Element").replace(/^Ifc/, "")}</b>
+        <button className="ibtn" onClick={() => setSelected(null)} aria-label="Close" data-tip="Close" data-tip-side="left"><X size={15} aria-hidden /></button></div>
+      <div>{String(selected.info?.name ?? "")}</div>
+      <dl className="kv">
+        <dt>GlobalId</dt><dd className="mono">{selected.globalId}</dd>
+        {selected.info?.tag ? <><dt>Tag</dt><dd>{String(selected.info.tag)}</dd></> : null}
+        {selected.info?.storey ? <><dt>Level</dt><dd>{String(selected.info.storey)}</dd></> : null}
+        {selected.info?.source ? <><dt>File</dt><dd>{String(selected.info.source)}</dd></> : null}
+      </dl>
+      <Links info={selected.info} onPick={(gid) => {
+        const epoch = sceneEpoch.current;
+        setSelected({ globalId: gid, info: null });
+        viewer.current?.frame([gid]);
+        if (sceneId) api.element(sceneId, gid)
+          .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === gid ? { ...s, info } : s)); })
+          .catch(() => undefined);
+      }} onShow={() => void pinLinks(selected.globalId, false)} />
+      <div className="row">
+        <button className="btn small" onClick={() => pickSide(selected.globalId, "a")}><i className="sw red" />Set as A</button>
+        <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => pickSide(selected.globalId, "b")}><i className="sw green" />Set as B</button>
+      </div>
+      <div className="card-actions">
+        <button className="btn small ghost" onClick={() => viewer.current?.frame([selected.globalId])}>Zoom to it</button>
+        <button className="btn small ghost" onClick={() => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, selected.globalId] })); setSelected(null); }}>Hide</button>
+        <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: [selected.globalId] })}>Isolate</button>
+        <button className="btn small ghost" onClick={() => sectionRound(selected.globalId)}>Section box</button>
+        {selected.info?.ifc_class ? <>
+          <button className="btn small ghost" onClick={() => { const ids = viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [];
+            setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); }}>Hide all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
+          <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [] })}>Isolate all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
+        </> : null}
+      </div>
+  </>);
+  const elementSets = selected && <PropertySets data={elementProps?.gid === selected.globalId ? elementProps.data : null}
+    loading={elementProps?.gid !== selected.globalId || elementProps.loading} />;
+
   return (
     <div className={`app ${docked ? "docked" : ""} ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${starting ? "starting" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
       style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}>
@@ -2671,40 +2726,10 @@ export function App() {
         {tool.measure && viewer.current && <MeasurePanel measures={viewer.current.measurements} open={viewer.current.measureOpen} snap={snapping} coarse={coarse}
           at={layout === "phone" ? null : measureAt} onMove={setMeasureAt} onSnap={setSnapping} onCopy={(text, what) => void copyToClipboard(text).then((ok) => flash(ok ? `Copied ${what}.` : "Could not copy: the browser said no."))}
           onRemove={(id) => viewer.current?.removeMeasurement(id)} onClear={() => viewer.current?.clearMeasurements()} onClose={() => toggle("measure")} />}
-        {selected && !tool.measure && (
+        {!docked && selected && !tool.measure && (
           <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-            <div className="row"><b>{String(selected.info?.ifc_class ?? "Element").replace(/^Ifc/, "")}</b>
-              <button className="ibtn" onClick={() => setSelected(null)} aria-label="Close" data-tip="Close" data-tip-side="left"><X size={15} aria-hidden /></button></div>
-            <div>{String(selected.info?.name ?? "")}</div>
-            <dl className="kv">
-              <dt>GlobalId</dt><dd className="mono">{selected.globalId}</dd>
-              {selected.info?.tag ? <><dt>Tag</dt><dd>{String(selected.info.tag)}</dd></> : null}
-              {selected.info?.storey ? <><dt>Level</dt><dd>{String(selected.info.storey)}</dd></> : null}
-              {selected.info?.source ? <><dt>File</dt><dd>{String(selected.info.source)}</dd></> : null}
-            </dl>
-            <Links info={selected.info} onPick={(gid) => {
-              const epoch = sceneEpoch.current;
-              setSelected({ globalId: gid, info: null });
-              viewer.current?.frame([gid]);
-              if (sceneId) api.element(sceneId, gid)
-                .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === gid ? { ...s, info } : s)); })
-                .catch(() => undefined);
-            }} onShow={() => void pinLinks(selected.globalId, false)} />
-            <div className="row">
-              <button className="btn small" onClick={() => pickSide(selected.globalId, "a")}><i className="sw red" />Set as A</button>
-              <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => pickSide(selected.globalId, "b")}><i className="sw green" />Set as B</button>
-            </div>
-            <div className="card-actions">
-              <button className="btn small ghost" onClick={() => viewer.current?.frame([selected.globalId])}>Zoom to it</button>
-              <button className="btn small ghost" onClick={() => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, selected.globalId] })); setSelected(null); }}>Hide</button>
-              <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: [selected.globalId] })}>Isolate</button>
-              <button className="btn small ghost" onClick={() => sectionRound(selected.globalId)}>Section box</button>
-              {selected.info?.ifc_class ? <>
-                <button className="btn small ghost" onClick={() => { const ids = viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [];
-                  setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); }}>Hide all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
-                <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [] })}>Isolate all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
-              </> : null}
-            </div>
+            {elementCard}
+            <details className="all-props"><summary>All properties</summary>{elementSets}</details>
           </div>
         )}
         {busy && <div className="overlay live"><i className="spinner" aria-hidden />{busy}</div>}
@@ -2938,6 +2963,9 @@ export function App() {
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
           )}
         </div>)}
+      {docked && inSlot(slots.properties, <div className="props in-panel">
+        {selected ? <>{elementCard}{elementSets}</> : <p className="hint">Click any element in the model to see its properties.</p>}
+      </div>)}
       {!compact && inSlot(slots.activity, <footer className="dock">
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
       </footer>)}

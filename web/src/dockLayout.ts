@@ -1,17 +1,19 @@
 /** The desktop's panels and the layout saved for them (docs/panels.md): what each panel is, where it lives by
  * default, which saved layouts can be loaded, and what showing a panel takes. Pure: `dock.tsx` does the drawing. */
 
-export type PanelId = "model" | "clashes" | "clash" | "plan" | "chat" | "activity";
+export type PanelId = "model" | "clashes" | "clash" | "plan" | "chat" | "activity" | "properties";
 export type Edge = "left" | "right" | "bottom";
 
-/** Every panel, in the order the Layout menu lists them. `home` is where it docks by default and goes back to. */
-export const PANELS: { id: PanelId; title: string; home: Edge | "centre" }[] = [
+/** Every panel, in the order the Layout menu lists them. `home` is where it docks by default and goes back to; a
+ *  `float` panel floats over the model and appears when it is needed (Properties, on a selection). */
+export const PANELS: { id: PanelId; title: string; home: Edge | "centre" | "float" }[] = [
   { id: "model", title: "Model", home: "centre" },
   { id: "clashes", title: "Coordination", home: "left" },  // the clash list and Insights (their own tabs inside)
   { id: "clash", title: "Clash", home: "right" },
   { id: "plan", title: "Plan", home: "right" },
   { id: "chat", title: "Chat", home: "right" },
   { id: "activity", title: "Activity", home: "bottom" },
+  { id: "properties", title: "Properties", home: "float" },
 ];
 export const PANEL_IDS: PanelId[] = PANELS.map((p) => p.id);
 export const isPanel = (id: string): id is PanelId => (PANEL_IDS as string[]).includes(id);
@@ -73,20 +75,23 @@ export function validLayout(layout: unknown): layout is SavedLayout {
 }
 
 /** A browser opens a window only on a click, so a saved layout puts what was in pop-out windows back in its side
- * bar: after a reload those panels are docked where they came from. */
+ * bar: after a reload those panels are docked where they came from. A floating panel's (Properties) is left closed: it
+ * comes back on the next selection. */
 export function withoutPopouts(layout: SavedLayout): SavedLayout {
   if (!layout.popoutGroups?.length) return layout;
   const edgeGroups: Partial<Record<Edge, EdgeEntry>> = structuredClone(layout.edgeGroups ?? {});
+  const panels = { ...layout.panels };
   for (const id of layout.popoutGroups.flatMap(windowViews)) {
     if (!isPanel(id)) continue;
     const home = homeOf(id);
+    if (home === "float") { delete panels[id]; continue; }
     if (home === "centre") continue;
     const entry = edgeGroups[home] ??= { size: EDGE_SIZE[home][2], visible: true };
     entry.group ??= { id: EDGE_GROUP[home], views: [] };
     entry.group.views = [...(entry.group.views ?? []), id];
     entry.group.activeView ??= id;
   }
-  return { ...layout, popoutGroups: [], edgeGroups };
+  return { ...layout, panels, popoutGroups: [], edgeGroups };
 }
 
 /** The layout kept in this browser, or null when there is none or it can't be loaded. */

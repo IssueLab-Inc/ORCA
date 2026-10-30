@@ -4,8 +4,8 @@ import { DockviewReact, type DockviewApi, type DockviewGroupPanelApi, type Dockv
   type IDockviewHeaderActionsProps, type IDockviewPanel, type IDockviewPanelHeaderProps, type IDockviewPanelProps,
   type SerializedDockview } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Activity as Pulse, AppWindow, Box, List, LocateFixed, MessageSquare, Network, PanelBottomClose, PanelBottomOpen,
-  PanelLeftClose, PanelRightClose, PictureInPicture2, Undo2, type LucideIcon } from "lucide-react";
+import { Activity as Pulse, AppWindow, Box, Info, List, LocateFixed, MessageSquare, Network, PanelBottomClose, PanelBottomOpen,
+  PanelLeftClose, PanelRightClose, PictureInPicture2, Undo2, X, type LucideIcon } from "lucide-react";
 import { EDGE_GROUP, EDGE_SIZE, PANELS, PANEL_IDS, homeOf, isPanel, readLayout, showSteps, titleOf, writeLayout,
   type Edge, type PanelId, type SavedLayout, type Where } from "./dockLayout";
 
@@ -89,7 +89,8 @@ type Tabs = Partial<Record<PanelId, ReactNode>>;
 interface Context { slots: Slots; tabs: Tabs; onTab: (id: PanelId) => void }
 const DockContext = createContext<Context | null>(null);
 
-const ICONS: Record<PanelId, LucideIcon> = { model: Box, clashes: List, clash: LocateFixed, plan: Network, chat: MessageSquare, activity: Pulse };
+const ICONS: Record<PanelId, LucideIcon> = { model: Box, clashes: List, clash: LocateFixed, plan: Network, chat: MessageSquare,
+  activity: Pulse, properties: Info };
 const TOUR_TAG: Partial<Record<PanelId, string>> = { plan: "tab-plan", chat: "tab-chat" };
 const THEME: DockviewTheme = { name: "orca", className: "dockview-theme-orca", colorScheme: "light" };
 const SAVE_MS = 400;
@@ -147,7 +148,7 @@ function Actions({ api, containerApi, activePanel }: IDockviewHeaderActionsProps
   const edge = where.type === "edge" ? where.position as Edge : null;
   const collapsed = !!edge && api.isCollapsed();
   if (collapsed && edge !== "bottom") return null;   // a side bar's strip: its tabs open it
-  const away = edge !== homeOf(activePanel.id);
+  const away = !atHome(activePanel);
   const button = (icon: LucideIcon, label: string, run: () => void) => {
     const I = icon;
     return <button type="button" className="ibtn" aria-label={label} data-tip={label} data-tip-side="bottom"
@@ -163,13 +164,23 @@ function Actions({ api, containerApi, activePanel }: IDockviewHeaderActionsProps
       {where.type !== "popout" && button(AppWindow, `Open ${activePanel.title ?? "this panel"} in its own window`,
         () => void containerApi.addPopoutGroup(activePanel))}
       {away && button(Undo2, "Put it back", () => moveHome(containerApi, activePanel))}
+      {activePanel.id === "properties" && button(X, "Close Properties", () => activePanel.api.close())}
     </div>
   );
 }
 
 /** A floating window at the model's top right, about the size of a side bar. */
+const floatBox = (api: DockviewApi) => ({ position: { top: 56, right: 16 }, width: 360,
+  height: Math.round(Math.min(560, Math.max(260, api.height - 112))) });
 function floatPanel(api: DockviewApi, panel: IDockviewPanel) {
-  api.addFloatingGroup(panel, { position: { top: 56, right: 16 }, width: 360, height: Math.round(Math.min(560, Math.max(260, api.height - 112))) });
+  api.addFloatingGroup(panel, floatBox(api));
+}
+
+/** Whether a panel is where it lives: its side bar, or floating for a floating one. */
+function atHome(panel: IDockviewPanel) {
+  if (!isPanel(panel.id)) return true;
+  const home = homeOf(panel.id), where = panel.group.api.location;
+  return home === "float" ? where.type === "floating" : where.type === "edge" && where.position === home;
 }
 
 /** A side bar collapses to a strip of its tabs down its outer edge: the tabs move there first, so the strip is as
@@ -190,6 +201,10 @@ function edgeGroup(api: DockviewApi, edge: Edge, size?: number) {
 function addHome(api: DockviewApi, id: PanelId) {
   const home = homeOf(id);
   if (home === "centre") return;
+  if (home === "float") {
+    api.addPanel({ id, component: "panel", title: titleOf(id), renderer: "always", floating: floatBox(api) });
+    return;
+  }
   edgeGroup(api, home);
   api.addPanel({ id, component: "panel", title: titleOf(id), position: { referenceGroup: EDGE_GROUP[home] }, renderer: "always" });
 }
@@ -198,6 +213,10 @@ function moveHome(api: DockviewApi, panel: IDockviewPanel) {
   if (!isPanel(panel.id)) return;
   const home = homeOf(panel.id);
   if (home === "centre") return;
+  if (home === "float") {
+    if (panel.group.api.location.type !== "floating") floatPanel(api, panel);
+    return;
+  }
   const group = edgeGroup(api, home);
   // In its place among the bar's tabs (Clash, Plan, Chat), not at the end.
   const order = PANELS.filter((p) => p.home === home).map((p) => p.id as string);
@@ -220,7 +239,7 @@ function build(api: DockviewApi, sizes: { left: number; right: number }) {
   model.group.header.hidden = true;
   for (const edge of ["left", "right", "bottom"] as Edge[]) edgeGroup(api, edge, edge === "bottom" ? undefined : sizes[edge]);
   for (const p of PANELS) {
-    if (p.home === "centre") continue;
+    if (p.home === "centre" || p.home === "float") continue;  // a floating panel appears when it is needed
     // "always": a panel behind another tab stays in the page, hidden, so the tour finds what it points at and shows it.
     api.addPanel({ id: p.id, component: "panel", title: p.title, position: { referenceGroup: EDGE_GROUP[p.home] },
       inactive: p.id === "plan" || p.id === "chat", renderer: "always" });
@@ -247,11 +266,8 @@ function wireEdges(api: DockviewApi, changed: (collapsed: boolean) => void) {
 
 function menu({ panel, api }: GetTabContextMenuItemsParams) {
   if (!isPanel(panel.id) || panel.id === "model") return [];
-  const where = panel.group.api.location;
-  const home = homeOf(panel.id);
-  const away = where.type !== "edge" || where.position !== home;
   return ["float" as const, "popout" as const,
-    ...(away ? [{ label: "Put it back", action: () => moveHome(api, panel) }] : []), "separator" as const, "close" as const];
+    ...(atHome(panel) ? [] : [{ label: "Put it back", action: () => moveHome(api, panel) }]), "separator" as const, "close" as const];
 }
 
 const storage = () => { try { return window.localStorage; } catch { return null; } };
@@ -344,7 +360,8 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
         rewire();
       },
       gather() {
-        for (const p of PANELS) if (p.home !== "centre" && !api.getPanel(p.id)) addHome(api, p.id);  // closed ones too
+        // Closed ones too (Properties, which floats in on a selection, stays as it is).
+        for (const p of PANELS) if (p.home !== "centre" && p.home !== "float" && !api.getPanel(p.id)) addHome(api, p.id);
         for (const p of api.panels) if (p.group.api.location.type === "popout") moveHome(api, p);
         for (const edge of ["left", "right", "bottom"] as Edge[]) {
           const g = api.getEdgeGroup(edge);

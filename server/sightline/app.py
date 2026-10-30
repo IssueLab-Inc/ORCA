@@ -587,6 +587,15 @@ def scene_datums(scene_id: str):
     return ws.datums(_scene(scene_id))
 
 
+@app.get("/api/scenes/{scene_id}/elements/{global_id}/properties")
+def element_properties(scene_id: str, global_id: str):
+    """Everything the model says about one element, for the Properties panel (properties.py)."""
+    try:
+        return ws.properties(_scene(scene_id), global_id)
+    except KeyError:
+        raise HTTPException(404, "No such element in these models.")
+
+
 @app.get("/api/scenes/{scene_id}/classes")
 def element_classes(scene_id: str):
     """Every physical element's IFC class and name (GlobalId → [class, name]): what a built view's cutaway may take

@@ -157,6 +157,7 @@ each feature see [01](01-product-and-journeys.md).
 | **Sheet, peek, half, full** | The phone's bottom sheet and its heights. | `Sheet.tsx`, `layout.ts` (`Snap`, `follow`) |
 | **Panel, dock** | On a desktop: Model, Coordination, Clash, Plan, Chat and Activity, laid out by the dock (dockview). | `dock.tsx`, `dockLayout.ts` (`PANELS`); [docs/panels.md](../panels.md) |
 | **Side bar, float, pop out, put back** | A panel's places: a bar along the left, right or bottom that collapses to a strip of tabs; a floating window over the model; a browser window of its own; back in its bar. | dockview edge, floating and pop-out groups; `collapseEdge`, `floatPanel`, `moveHome` |
+| **Properties panel** | The selected element's card and everything its model says about it (type, material, size, property sets, quantities); floats over the model on a selection on a desktop, the card's All properties elsewhere. | `Properties.tsx`, `properties.py`, `GET …/elements/{gid}/properties` |
 | **Slot** | The element a panel's content is drawn into, moved by the dock or placed by the classic layout, so nothing remounts. | `usePanelSlots`, `inSlot`, `SlotHost` |
 | **Classic layout** | The fixed panes of before: phones, tablets, the landing, and the desktop with the switch on. | `classic`, `sightline.dock.classic` |
 | **Tour, recorded run** | The guided walk through the real app; a committed real run it replays when the live one is slow. | `Tour.tsx`; `web/public/tour/*.json` ([19](19-demo-data.md)) |

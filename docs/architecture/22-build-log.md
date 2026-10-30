@@ -1181,3 +1181,18 @@ Review of the panels (Oct 30; PR review on `feature/dockable-panels`; code `web/
   click on the right bar's active tab leaves it at 380 px; after a reload the model's group saves `no-drop-target`;
   Chat closed, the tour opens it again; the Visibility menu fits the Model panel at 1440×800.
 
+Properties of any element (Oct 30; `feature/element-properties`, on top of the panels; code `server/sightline/properties.py`,
+`service.py`, `app.py`, `web/src/Properties.tsx`, `App.tsx`, `dock.tsx`, `dockLayout.ts`):
+- **What:** a click selects any element, also through a see-through view (a click that meets nothing in focus takes the
+  faded element behind); on a desktop the Properties panel floats in where the old card was and can be docked or popped
+  out; it shows the card, then type, materials, size, attributes, every property set and quantity set (SI), with a
+  filter and click to copy. Classic layout, tablets and phones: the card with All properties.
+- **Server:** `GET /api/scenes/{sid}/elements/{gid}/properties`; the demo models' own set shows as "Model data",
+  without its scripting note.
+- **Also on the panels branch:** the docked page could scroll (dockview parks hidden panels' layers below the dock;
+  measured scrollHeight 1750 in a 900 px window, shifted 203 px): the app and dock area now clip.
+- **Checked:** `server/tests/test_properties.py` (5), `web/tests/properties.test.mjs` (4); 113 web tests, 115 after the
+  panels review merged in; build clean.
+  In Playwright on Northbank: #1 in focus (X-ray), a click on the faded furniture behind selects it; the girder reads
+  Steel S355, 400 × 12000 × 1000 mm, Model data without its scripting note; the filter; Esc empties the panel; the
+  classic card's All properties; the page never scrolls.

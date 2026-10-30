@@ -53,6 +53,20 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .dock-tab { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 10px; font-weight: 600; font-size: 13px; white-space: nowrap; }
 .dock-actions { display: flex; align-items: center; gap: 2px; height: 100%; padding: 0 6px; }
 .dock-actions .ibtn { width: 28px; height: 28px; }
+/* Properties (Properties.tsx): the element card in its panel, then the model's property sets */
+.props.in-panel { position: static; width: auto; box-shadow: none; border-radius: 0; background: none; padding: 0; }
+.props.in-panel > .row:first-child .ibtn { display: none; }  /* the panel's own ✕ closes it; Esc clears the selection */
+.slot-properties.in-dock { padding: 10px 12px; }
+.psets { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.pset-filter { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.psets details summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+.psets details .kv { margin: 4px 0 2px 2px; }
+.psets dt { color: var(--muted); }
+.pset-value { all: unset; cursor: copy; overflow-wrap: anywhere; }
+.pset-value:hover, .pset-value:focus-visible { text-decoration: underline; text-decoration-color: var(--line); }
+.props .all-props { border-top: 1px solid var(--line); padding-top: 6px; }
+.props .all-props > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.props .all-props .psets { border-top: 0; padding-top: 6px; max-height: 40vh; overflow: auto; }
 /* dockview's light theme in ORCA's colours */
 .dockview-theme-orca {
   color-scheme: light; font-family: var(--body);
