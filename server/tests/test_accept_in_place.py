@@ -105,3 +105,13 @@ def test_an_unstyled_element_keeps_no_colour_when_a_fix_is_kept(client):
     kept = drop(c, r, scene, main)
     # the page keeps the colour it drew, not IfcOpenShell's class default
     assert kept["meshes"] and all(m["color"] is None for m in kept["meshes"])
+
+
+def test_a_move_keeps_its_whole_run(client):
+    """Asked to move the main alone, the server keeps its run: the segment joined to its end comes too, patched in
+    place (a move that would pull a joint apart is refused: test_connections)."""
+    c, ws = client
+    r, scene, main = open_run(c)
+    run = connections.run(scene, main)
+    kept = drop(c, r, scene, main)
+    assert len(run) == 2 and set(kept["changed"]) == set(run) and {m["global_id"] for m in kept["meshes"]} == set(run)

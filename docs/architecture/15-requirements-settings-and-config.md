@@ -318,7 +318,8 @@ its default, so a bad value fails the wider-fix run with a `ValueError` rather t
 | `SIGHTLINE_ESCALATION` | `button` | not set | `settings.defaults` | Default for `escalation` (off, button, auto) |
 | `SIGHTLINE_BUILT_VIEWS` | `0` | `0` | `settings.defaults` | Default for `built_views` |
 | `SIGHTLINE_OFFSET_CORNERS` | `bends` | not set | `edits.default_corners` | A value starting `sq` makes offsets turn with square corners instead of bend fittings |
-| `SIGHTLINE_CONNECTED_MOVES` | `refuse` | not set | `connections.mode` (each call) | How a move treats joints: `refuse` one that would pull a joint apart, or `off` (moves as before joints were known) ([docs/connections.md](../connections.md)) |
+| `SIGHTLINE_CONNECTED_MOVES` | `carry` | not set | `connections.mode` (each call) | How a move treats joints: `carry` the fittings beyond the run and stretch the segments it runs along, `refuse` one that would pull a joint apart, or `off` (moves as before joints were known) ([docs/connections.md](../connections.md)) |
+| `SIGHTLINE_CARRY_MAX` | 12 | not set | `connections.CARRY_MAX` (import) | Most parts a move may take along before it is refused |
 | `SIGHTLINE_SAMPLE_EXCLUDE` | `IfcGeographicElement,IfcSpace,IfcBuildingElementProxy` | not set | `service.SAMPLE_EXCLUDE` (import) | Classes whose clash tests sample reports leave out; empty keeps everything |
 
 **Paths**

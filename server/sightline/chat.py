@@ -74,8 +74,9 @@ TOOLS = [
         "offset heights (dz, metres) that pass the segment through each with 25 mm clearance.",
         {"element": {"type": "string"}, "obstacle": {"type": "string"}}, ["element", "obstacle"]),
     _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it. "
-        "Give `obstacle` (the element the move must clear) to check it as a proposal is: then what the moved elements "
-        "stand on (a slab, a plinth) may stay as it was, and lifting them off it fails.",
+        "The move keeps their joints (fittings beyond go along, a segment it runs along gets longer or shorter) or "
+        "fails with the reason. Give `obstacle` (the element the move must clear) to check it as a proposal is: then "
+        "what the moved elements stand on (a slab, a plinth) may stay as it was, and lifting them off it fails.",
         {"global_ids": {"type": "array", "items": {"type": "string"}},
          "delta_m": {"type": "array", "items": {"type": "number"}},
          "obstacle": {"type": "string"}}, ["global_ids", "delta_m"]),

@@ -5,8 +5,13 @@ export interface Verdict {
   /** Why a move fails without a hit: it would pull a joint apart (connections.plan_move) or leave what stood on
    *  something standing on nothing (verify.keep_supports). */
   reason?: string | null;
-  /** Set when a move was refused before it was tried, for pulling these joints apart. */
-  joints?: { refused_at: string[] };
+  /** A move's new placements: what was asked to move and what it takes along. */
+  placements?: Record<string, number[]>;
+  /** The segments a move stretches so its joints hold, as they would be. */
+  preview?: Piece[] | null;
+  /** What a move carried and stretched (`summary`), or, when it was refused before it was tried, the joints it would
+   *  pull apart (`refused_at`). */
+  joints?: { refused_at?: string[]; summary?: string };
 }
 export interface Piece { global_id: string; verts: number[]; faces: number[] }
 export interface Option {

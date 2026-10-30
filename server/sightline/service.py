@@ -200,16 +200,23 @@ class Workspace:
 
     def verify_move(self, scene_id: str, moved: list[str], delta_m: list[float], clearance_m: float = 0.025,
                     obstacles: list[str] = ()) -> dict:
-        """Check a move without keeping it. A move that would pull a joint apart fails without being tried, with the
-        `reason` and the elements it would pull apart from (`joints`). With `obstacles` (what the move must clear),
-        what the moved elements stand on is kept as a proposal keeps it (`verify.supports`): slid along a slab is not
-        a clash, lifted off it is refused (`reason`). Without them, every contact counts."""
+        """Check a move without keeping it. It keeps its joints (connections.plan_move): what it takes along is moved
+        too (`placements`), the segments it stretches come back as `preview` meshes, and `joints` says what it carried
+        and stretched. A move that can't keep them fails without being tried, with the `reason` (and `joints`: what it
+        would pull apart from). With `obstacles` (what the move must clear), what the moved elements stand on is kept
+        as a proposal keeps it (`verify.supports`): slid along a slab is not a clash, lifted off it is refused
+        (`reason`). Without them, every contact counts."""
         s = self.scene(scene_id)
         with self.lock:
             plan = connections.plan_move(s, moved, delta_m)
             if not plan.ok:
                 return {"passed": False, "hits": [], "min_clearance_m": None, "checked_against": 0, "placements": {},
                         "reason": plan.refused, "joints": {"refused_at": plan.refused_at}}
+            if not plan.plain:
+                t = connections.trial_move(s, plan, clearance_m, preview=True)
+                return {"passed": not t.hits, "hits": [asdict(h) for h in t.hits], "min_clearance_m": t.least,
+                        "checked_against": t.checked, "placements": t.placements, "preview": t.preview,
+                        "reason": None, "joints": plan.edit(s, moved)}
             sup = verify.supports(s, moved, set(obstacles), clearance_m) if obstacles else None
             placements = s.translate(moved, tuple(delta_m))
             try:
@@ -407,17 +414,29 @@ class Workspace:
                 out[mine] = kept
         return out
 
-    def apply(self, scene_id: str, moved: list[str], delta_m: list[float]) -> dict:
+    def apply(self, scene_id: str, moved: list[str], delta_m: list[float], expect: dict | None = None) -> dict:
+        """Keep a move with its joints: what it takes along moves too and the segments it stretches change
+        (connections.plan_move, planned again here). With `expect` (the option's `edit`), a move whose plan has changed
+        since it was checked is refused."""
         s = self.scene(scene_id)
         with self.lock:
             plan = connections.plan_move(s, moved, delta_m)
             if not plan.ok:
                 raise edits.Unsupported(plan.refused)
-            placements = s.translate(moved, tuple(delta_m))
-            for g in moved:  # kept: export writes these files
+            if expect and expect.get("key") and expect["key"] != plan.key():
+                raise edits.Unsupported("the model changed since this move was checked: propose it again")
+            changed = plan.changed()
+            files = {s.index_of(g) for g in changed}
+            with edits.kept_files(s, files):
+                placements = connections.apply_move(s, plan)
+                broken = connections.check_joints(s, plan)
+                if broken:   # never kept: undone with the rest
+                    raise edits.Unsupported("a joint would not hold: " + "; ".join(w for *_, w in broken))
+            for g in changed:  # kept: export writes these files
                 s.mark_edited(g)
-            s.bump(s.index_of(g) for g in moved)
-        return {"placements": placements, "files": sorted({s.index_of(g) for g in moved}), "changed": list(moved)}
+            s.bump(files)
+        return {"placements": placements, "files": sorted(files), "changed": changed,
+                **({"joints": plan.edit(s, moved)} if not plan.plain else {})}
 
     PATCH_MAX_VERTS = 500_000   # past this, the page reloads the files instead
 

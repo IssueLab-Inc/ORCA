@@ -127,9 +127,16 @@ which the page no longer uses. Routes in full: [10](10-http-api-and-streams.md).
   or for STEP parts flow parts meeting face to face), the element first; a part that is not a flow element keeps
   `IfcScene.connected_run` without flow parts. Nothing new is built; `Option.placements` carries the new matrices for
   the page's preview. Design: [docs/connections.md](../connections.md).
-- **Joints first** (`connections.plan_move`): a move that would pull a joint apart (a bend, a valve or equipment
-  joined to the run that would stay where it is) is refused before it is tried, naming the joint ("cannot keep its
-  joints: …"); the joints are the attempt's hits, so the pilot shows them.
+- **Joints first** (`connections.plan_move`, `SIGHTLINE_CONNECTED_MOVES` carry by default): fittings and in-line valves
+  beyond the run go along, a straight segment the move runs along gets longer or shorter at the joined end
+  (`edits.stretch`), a rectangular segment covered end-on at its side (a ladder riser under its bend) grows that way.
+  Equipment, terminals, structure, a branch, a piece left under 50 mm or more than 12 parts along refuse it before it
+  is tried, naming why ("cannot keep its joints: …"); the joints are the attempt's hits, so the pilot shows them.
+- **A move that carries** is tried in a trial (`connections.trial_move`): what moves is checked against everything
+  but what it changes and what that is joined to; a stretched segment counts only contacts new or worse than before;
+  `check_joints` proves every joint still meets. It stays kind `"move"`, with `edit` {summary, key, run, carried,
+  stretched, joints} and `preview` (the stretched segments). Keeping it (`plans.recheck`) refuses an option whose
+  `edit.key` no longer matches the fresh trial's: the move would now change the model differently.
 - **Checked** (`_try_move`): the run is translated, checked, and translated back in a `finally` (no transaction is
   needed). The fittings at the run's ends (connected but outside it) are ignored. The supports rule applies, with the
   clash's partner and a plan item's `others` as what the move must clear ([06](06-geometry-and-detection.md)): what a

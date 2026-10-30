@@ -37,9 +37,11 @@ opens, checked like any model, and written back as STEP with the fixes. Code: `s
 - **Runs without ports:** a STEP part has no ports, so `IfcScene.connected_run` takes the parts of the same STEP group
   that touch it, transitively (`step_run`). A cable ladder moves as one; a fence post moves alone.
 - **Joints without ports (Oct 30, `docs/connections.md`):** flow parts of one group that meet face to face are joined
-  (a pipe's cap against its bend's face, a valve hanging off a main's side). A move of a flow part takes its straight
-  run only and is refused when it would pull such a joint apart; a part that is not a flow element still moves with
-  the parts of its group it touches, but never pulls flow parts along.
+  (a pipe's cap against its bend's face, a valve hanging off a main's side). A move of a flow part keeps those joints:
+  the bends beyond it go along and a prism the move runs along gets longer or shorter (the cell's ladder riser grows
+  taller on its panel), exported as a replaced prism; a part that is not a flow element still moves with the parts of
+  its group it touches, but never pulls flow parts along. A prototype instanced by several components would change for
+  all of them (as for offsets and trims).
 - **Export:** `service.step_changes` sorts each edited element (`Workspace.export`):
   - **move:** an exact part whose extrusion still matches its manifest `prism`, or a mesh; the delta is its placement
     now minus its origin. `step.export` sets the component's location to parent⁻¹ · T · parent · old.

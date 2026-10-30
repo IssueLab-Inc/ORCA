@@ -26,11 +26,12 @@ test("the cell tour says what the current cell holds", () => {
 test("the ladder's fix is described as the option shown, live or recorded", () => {
   const ask = step(tour.CELL_STEPS, "Ask for a fix");
   const offset = ask.body(state({ proposalDone: true, options: 2, optionKinds: ["offset", "move"] }));
-  assert.ok(hasText(offset, "local offset") && hasText(offset, "Another option raises the whole ladder"));
+  assert.ok(hasText(offset, "local offset") && hasText(offset, "Another option moves the tray and keeps the ladder's joints"));
   const move = ask.body(state({ proposalDone: true, options: 1, optionKinds: ["move"] }));
-  assert.ok(hasText(move, "whole ladder goes up") && hasText(move, "move as one") && !hasText(move, "Another option"));
+  assert.ok(hasText(move, "ladder moves with its bends") && hasText(move, "The move keeps the ladder's joints")
+    && !hasText(move, "Another option"));
   const alone = ask.body(state({ proposalDone: true, options: 1, optionKinds: ["offset"] }));
-  assert.ok(!hasText(alone, "whole ladder"));
+  assert.ok(!hasText(alone, "joints"));
 });
 
 test("accepting says the viewer patches in place, not that it reloads", () => {

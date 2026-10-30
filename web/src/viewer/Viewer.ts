@@ -21,7 +21,7 @@ type Found = { model: LoadedModel; el: LoadedElement };
 const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.glass] : [m.mesh]);
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
 /** Triangles from the server: flat xyz (metres, IFC Z up) and indices. */
-export type Mesh = { verts: number[]; faces: number[] };
+export type Mesh = { verts: number[]; faces: number[]; global_id?: string };
 /** A fix's piece as Show it built frames it: its element (a kept piece), the element its run came from and its part
  * (a combined fix's: "moved", "end" or "middle"). */
 export type BuiltPiece = Mesh & { global_id?: string; origin?: string; part?: string };
@@ -494,6 +494,11 @@ export class Viewer {
         } else {
           const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(opt.deltaM));
           for (const gid of opt.moved) this.moved.set(gid, t);
+          if (opt.pieces?.length) {   // a move that keeps its joints: the segments it stretches, as they would be
+            for (const p of opt.pieces) if (p.global_id) this.hidden.add(p.global_id);
+            this.addMeshes(opt.pieces, new THREE.MeshStandardMaterial({ color: opt.color, roughness: 0.6,
+              side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          }
         }
         if (mode === "both" && opt.before) {
           this.addMeshes(opt.before, new THREE.MeshBasicMaterial({ color: "#e67e22", transparent: true, opacity: 0.35,
@@ -651,40 +656,43 @@ export class Viewer {
       const pieceMeshes: THREE.Mesh[] = [];
       this.hidden = new Set(); this.moved = new Map();   // the model as it is, whatever preview is on screen
       if (!fix.applied) {
+        const first = this.find(fix.moved[0]);
+        const draw = (p: BuiltPiece, i: number) => {
+          // Its own element's colour, else its run's (a combined fix's new pieces), else the first moved element's.
+          const own = p.global_id ? this.find(p.global_id) : null;
+          const origin = p.origin ? this.find(p.origin) : null;
+          const colour = (own ?? origin ?? first)?.el.baseColor ?? GREY;
+          const pos = new Float32Array(p.verts.length);
+          for (let i = 0; i < p.verts.length; i += 3) { pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; }
+          const welded = new THREE.BufferGeometry();
+          welded.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+          welded.setIndex(p.faces);
+          // Sharp edges stay sharp (a wall with a hole, a box): normals averaged across them shade a flat face in
+          // streaks, which Muse Image draws as facets and the judges rightly reject.
+          const g = toCreasedNormals(welded, Math.PI / 6);
+          welded.dispose();
+          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, metalness: 0, roughness: 0.85,
+            side: THREE.DoubleSide, clippingPlanes: this.clipping }));
+          mesh.userData.piece = true;
+          // A penetration's provision for void frames the view but is not drawn: it would fill the opening.
+          if (fix.kind === "penetration" && i === 0) mesh.visible = false;
+          pieceMeshes.push(mesh); temp.add(mesh);
+        };
         if (fix.pieces && fix.kind !== "move") {
           for (const g of fix.moved) this.hidden.add(g);
-          const first = this.find(fix.moved[0]);
-          fix.pieces.forEach((p, i) => {
-            // Its own element's colour, else its run's (a combined fix's new pieces), else the first moved element's.
-            const own = p.global_id ? this.find(p.global_id) : null;
-            const origin = p.origin ? this.find(p.origin) : null;
-            const colour = (own ?? origin ?? first)?.el.baseColor ?? GREY;
-            const pos = new Float32Array(p.verts.length);
-            for (let i = 0; i < p.verts.length; i += 3) { pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; }
-            const welded = new THREE.BufferGeometry();
-            welded.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-            welded.setIndex(p.faces);
-            // Sharp edges stay sharp (a wall with a hole, a box): normals averaged across them shade a flat face in
-            // streaks, which Muse Image draws as facets and the judges rightly reject.
-            const g = toCreasedNormals(welded, Math.PI / 6);
-            welded.dispose();
-            const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, metalness: 0, roughness: 0.85,
-              side: THREE.DoubleSide, clippingPlanes: this.clipping }));
-            mesh.userData.piece = true;
-            // A penetration's provision for void frames the view but is not drawn: it would fill the opening.
-            if (fix.kind === "penetration" && i === 0) mesh.visible = false;
-            pieceMeshes.push(mesh); temp.add(mesh);
-          });
+          fix.pieces.forEach(draw);
         } else if (fix.kind === "move") {
           const t = new THREE.Matrix4().makeTranslation(serverDeltaToViewer(fix.deltaM));
           for (const g of fix.moved) this.moved.set(g, t);
+          for (const p of fix.pieces ?? []) if (p.global_id) this.hidden.add(p.global_id);   // its stretched segments
+          (fix.pieces ?? []).forEach(draw);
         }
       }
       scene.add(temp);
       shaded();
       // What the fix is, to frame and to see: its changed pieces, or (a move, an applied fix) its elements as they are.
       const fixObjects = (): THREE.Object3D[] => {
-        if (!fix.applied && pieceMeshes.length) {
+        if (!fix.applied && pieceMeshes.length && fix.kind !== "move") {
           const keep = new Set(changed);
           return pieceMeshes.filter((_, i) => keep.has(fix.pieces![i]));
         }
@@ -692,11 +700,12 @@ export class Viewer {
         let found = ids.map((g) => this.find(g)).filter((f): f is Found => !!f);
         // Kept pieces whose ids the page doesn't know (a trial's): the elements the fix changed, as they now are.
         if (!found.length) found = fix.moved.map((g) => this.find(g)).filter((f): f is Found => !!f);
-        return found.map((f) => {
+        const els = found.map((f) => {
           const m = new THREE.Mesh(this.geometryOf(f));
           m.matrixAutoUpdate = false; m.matrix.copy(this.matrixOf(f.el)); m.frustumCulled = false;
           return m;
         });
+        return fix.applied ? els : [...els, ...pieceMeshes];   // a move: what it takes along and what it stretches
       };
       const zone = changed.length ? meshBox(changed) : this.boxOf(fix.moved);
       if (!pa.isEmpty() && !pb.isEmpty()) zone.union(meetingZone(pa, pb));

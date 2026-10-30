@@ -346,13 +346,14 @@ function visible(el: Element) {
 // What the best verified option does to the cable ladder, by its kind (Muse's ideas vary from run to run).
 const LADDER_FIX: Record<string, string> = {
   offset: "a local offset lifts the tray over the post, with bends either side",
-  move: "the whole ladder goes up over the post",
+  move: "the ladder moves with its bends, and a straight piece the move runs along gets longer or shorter",
   route: "a detour takes the tray round the post",
 };
-// When a move is on offer, the ladder's parts move as one: say so for the option it is.
+// When a move is on offer, it keeps the ladder's joints: say so for the option it is.
 const ladderMove = (s: TourState) => !s.optionKinds.includes("move") ? ""
-  : ` ${s.optionKinds[0] === "move" ? "The ladder's pieces move" : "Another option raises the whole ladder: its pieces move"}`
-    + " as one, because in the STEP they belong to one group and touch.";
+  : ` ${s.optionKinds[0] === "move" ? "The move keeps" : "Another option moves the tray and keeps"} the ladder's joints:`
+    + " the bends beyond it go along, and a straight piece the move runs along gets longer or shorter (the option says"
+    + " which).";
 
 /** The machine cell's tour: a robot palletising cell opened from its STEP file, checked, fixed and handed back as STEP. */
 export const CELL_STEPS: Step[] = [

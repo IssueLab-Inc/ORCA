@@ -16,6 +16,13 @@ def scene(tmp_path) -> IfcScene:
     return IfcScene(build_joints_fixture(tmp_path / "joints.ifc"))
 
 
+@pytest.fixture
+def refuse(monkeypatch):
+    """Moves that refuse at the first joint they would pull apart (slice 1; "carry" takes parts along: see
+    test_connected_moves.py)."""
+    monkeypatch.setenv("SIGHTLINE_CONNECTED_MOVES", "refuse")
+
+
 def gid(scene, tag):
     return next(e.GlobalId for e in scene.model.by_type("IfcElement") if tag in (e.Tag, e.Name))
 
@@ -44,7 +51,7 @@ def test_classes_and_runs(scene):
     assert tags(scene, cx.run(scene, gid(scene, "Bend B2"))) == ["Bend B2"]
 
 
-def test_a_move_that_would_pull_joints_apart_is_refused_with_them_named(scene, monkeypatch):
+def test_a_move_that_would_pull_joints_apart_is_refused_with_them_named(scene, monkeypatch, refuse):
     run = cx.run(scene, gid(scene, "S3A"))
     plan = cx.plan_move(scene, run, [0, 0.25, 0])
     assert not plan.ok and tags(scene, plan.refused_at) == ["Bend B2", "Bend B3"]
@@ -58,7 +65,7 @@ def test_a_move_that_would_pull_joints_apart_is_refused_with_them_named(scene, m
     assert tags(scene, cx.run(scene, gid(scene, "S3A"))) == ["S3A", "S3B"]
 
 
-def test_the_agent_says_why_and_muse_reads_the_joints(scene):
+def test_the_agent_says_why_and_muse_reads_the_joints(scene, refuse):
     s3a, column = gid(scene, "S3A"), gid(scene, "Column C3")
     trials = []
     attempt, option = agent._try_move(scene, {"title": "Shift north", "delta_m": [0, 0.25, 0]}, s3a, 0.025,
@@ -76,7 +83,7 @@ def test_the_agent_says_why_and_muse_reads_the_joints(scene):
     assert option is not None   # a pipe joined to nothing still moves
 
 
-def test_checks_endpoints_plans_and_combined_fixes_refuse_it_too(tmp_path):
+def test_checks_endpoints_plans_and_combined_fixes_refuse_it_too(tmp_path, refuse):
     path = build_joints_fixture(tmp_path / "samples" / "joints.ifc")
     ws = Workspace(path.parent)
     sid = ws.open([path.name])
@@ -104,7 +111,7 @@ def write_air_step(path: Path) -> Path:
     vertical pipe into a box bend, a pipe on into a filter on a stand ("Frame"), a pipe touching that one side by side
     (ending short of the filter),
     a pipe ending 3 mm short of the bend; group "Spare": a pipe against the filter; group "Ladder": a riser box with a
-    bend box sitting on its side."""
+    bend box sitting on its whole top side, and beside it a stub with a tee box on a third of its top."""
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
     from OCP.IFSelect import IFSelect_RetDone
@@ -138,7 +145,9 @@ def write_air_step(path: Path) -> Path:
              ("Air", "Air pipe 4", rod((0, -1028, 975), (0, 1, 0), 17, 1000)),
              ("Spare", "Spare pipe", rod((100, 1125, 975), (1, 0, 0), 17, 500)),
              ("Ladder", "Ladder riser", box(2000, 0, 1000, 2300, 100, 1150)),
-             ("Ladder", "Ladder bend", box(2100, 0, 1150, 2200, 100, 1250))]
+             ("Ladder", "Ladder bend", box(2000, 0, 1150, 2300, 100, 1250)),   # over the riser's whole top
+             ("Ladder", "Ladder tee", box(2500, 0, 1150, 2600, 100, 1250)),     # on a third of the next one's
+             ("Ladder", "Ladder stub", box(2400, 0, 1000, 2700, 100, 1150))]
     for g, n, shape in items:
         label = shapes.AddShape(shape, False); name(label, n)
         colours.SetColor(label, Quantity_Color(0.2, 0.4, 0.9, Quantity_TOC_RGB), XCAFDoc_ColorSurf)
@@ -153,7 +162,8 @@ def write_air_step(path: Path) -> Path:
 
 class Classes:
     """The part classes Muse would give, by name."""
-    WORDS = (("riser", "IfcCableCarrierSegment"), ("Ladder bend", "IfcCableCarrierFitting"), ("valve", "IfcValve"),
+    WORDS = (("riser", "IfcCableCarrierSegment"), ("stub", "IfcCableCarrierSegment"), ("Ladder bend", "IfcCableCarrierFitting"),
+             ("tee", "IfcCableCarrierFitting"), ("valve", "IfcValve"),
              ("bend", "IfcPipeFitting"), ("filter", "IfcFilter"), ("stand", "IfcMember"), ("main", "IfcPipeSegment"),
              ("pipe", "IfcPipeSegment"))
 
@@ -176,7 +186,7 @@ def named(scene, gids):
     return sorted(scene.entity(g).Name for g in gids)
 
 
-def test_step_parts_are_joined_face_to_face_within_their_group(air):
+def test_step_parts_are_joined_face_to_face_within_their_group(air, refuse):
     by = {air.entity(g).Name: g for g in air.bounds()}
     joined = lambda n: {air.entity(j.b).Name: (j.end_a, j.end_b, j.source) for j in cx.joints_of(air, by[n])}
     # STEP may extrude a rod either way: one joint on each of its caps
@@ -189,6 +199,7 @@ def test_step_parts_are_joined_face_to_face_within_their_group(air):
     assert set(filt) == {"Air pipe 2"} and filt["Air pipe 2"][0] is None and filt["Air pipe 2"][1] in ("start", "end")
     assert joined("Air pipe 3") == {} and joined("Air pipe 4") == {}              # side by side; 3 mm short
     assert joined("Ladder riser") == {"Ladder bend": ("side", None, "geometry")}  # sat on its side
+    assert joined("Ladder stub") == {"Ladder tee": ("side", None, "geometry")}
     assert named(air, cx.run(air, by["Air pipe 2"])) == ["Air pipe 2"]
     plan = cx.plan_move(air, [by["Air pipe 2"]], [0.1, 0, 0])
     assert named(air, plan.refused_at) == ["Air bend 1", "Air filter F1"]
