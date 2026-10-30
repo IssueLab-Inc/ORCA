@@ -83,6 +83,10 @@ export interface DockHandle {
   /** Every panel back in this window, every side bar open (the tour, which reads the main page). */
   gather(): void;
   isOpen(id: PanelId): boolean;
+  /** Size the bottom side bar holding a panel to `height` (Workings needs more room than a table); with `ifBelow`, only
+   *  when the bar is shorter than that. Returns the height it had, or null when nothing changed (the panel is elsewhere,
+   *  or its bar is collapsed or tall enough). */
+  fitBar(id: PanelId, height: number, ifBelow?: number): number | null;
 }
 
 type Tabs = Partial<Record<PanelId, ReactNode>>;
@@ -420,6 +424,14 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
         }
       },
       isOpen: (id) => !!api.getPanel(id),
+      fitBar(id, height, ifBelow) {
+        const g = api.getPanel(id)?.group.api, where = g?.location;
+        if (!g || where?.type !== "edge" || where.position !== "bottom" || g.isCollapsed()) return null;
+        const was = g.height;
+        if ((ifBelow != null && was >= ifBelow) || Math.abs(was - height) < 2) return null;
+        g.setSize({ height });
+        return was;
+      },
     };
     published.current = handle;
     live.current.onReady(handle);

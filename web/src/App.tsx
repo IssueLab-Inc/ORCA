@@ -1,6 +1,6 @@
 import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LayoutPanelLeft, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, RotateCcw, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, statusLine, type Progress } from "./Activity";
+import { Activity, statusLine, type ActivityView, type Progress } from "./Activity";
 import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
 import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, needsText, recEditText, reviewText } from "./fixKinds";
 import { ChatPanel } from "./Chat";
@@ -42,9 +42,22 @@ import { MenuSheet } from "./AppMenu";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { PropertySets } from "./Properties";
+import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
+/** Workings in the Activity panel (docs/workings.md): on or off, and the view the panel shows (Workings by default). */
+const WORKINGS_KEY = "sightline.workings";
+type WorkingsSetting = { on: boolean; view: ActivityView };
+function readWorkings(): WorkingsSetting {
+  try {
+    const w = JSON.parse(localStorage.getItem(WORKINGS_KEY) ?? "null") as WorkingsSetting | null;
+    if (w && typeof w.on === "boolean" && (w.view === "steps" || w.view === "work")) return w;
+  } catch { /* a private window: the default */ }
+  return { on: true, view: "work" };
+}
+/** The bottom bar's height for Workings: it grows to this for a run when it is shorter than WORKINGS_SHORT. */
+const WORKINGS_HEIGHT = 380, WORKINGS_SHORT = 240;
 /** A saved view (docs/views.md): camera, projection, style, mode, visibility and section box. */
 type SavedView = { name: string; pose: Pose; ortho: boolean; style: VisualStyle; mode: ViewMode; filters: Filters;
   section: [number[], number[]] | null };
@@ -426,6 +439,8 @@ export function App() {
   useEffect(() => { viewer.current?.setLayout(shownLayout); }, [shownLayout, stats]);
   useEffect(() => { try { localStorage.setItem("sightline.views.layout", viewLayout); } catch { /* kept for this visit */ } }, [viewLayout]);
   useEffect(() => { try { localStorage.setItem(CLASSIC_KEY, classic ? "1" : "0"); } catch { /* kept for this visit */ } }, [classic]);
+  const [workings, setWorkings] = useState<WorkingsSetting>(readWorkings);
+  useEffect(() => { try { localStorage.setItem(WORKINGS_KEY, JSON.stringify(workings)); } catch { /* kept for this visit */ } }, [workings]);
   // The tour reads the main page: panels in their own windows come back for it.
   useEffect(() => { if (touring) dock.current?.gather(); }, [touring]);
   useEffect(() => { viewer.current?.setDrawingsFollow(drawingsFollow); }, [drawingsFollow]);
@@ -1084,6 +1099,7 @@ export function App() {
     if (busy) return;
     const workspace = ++workspaceEpoch.current;
     replaceChatWork(); retireDirectWork(); ++agentRun.current; ++planRequest.current; ++contextRequest.current; ++sceneEpoch.current;
+    runs.stopAll("The models were opened again");
     pilot.current?.cancel(); resetWork(); setContext(null); setContextChosen(null); setAcknowledged([]); setPlanKind("batch"); setChatAsk(undefined);
     setBusy(`Reading ${what}…`); setError(null);
     try {
@@ -1507,6 +1523,7 @@ export function App() {
       else if (k === "m") toggle("measure");
       else if (k === "n" && tool.measure) setSnapping((on) => !on);
       else if (k === "l") toggle("links");
+      else if (k === "w" && workings.on && !compact) setActivityView(workings.view === "work" ? "steps" : "work");
       else if (k === "escape") {
         // One thing at a time: the measure, the image dialog, the selected element, then the clash.
         unpin(); clearHover();
@@ -1529,9 +1546,10 @@ export function App() {
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. With
    * `first` (a second try), the first try's ideas stay in the activity table and the second's are numbered after them. */
-  function trackAgent(first: Proposal | null = null) {
+  function trackAgent(first: Proposal | null = null, origin: Origin = "you") {
     directContext.current?.retire();
     clearManual();
+    const trace = traceStart("propose", origin, clash ? clashLabel(clash) : "The pair you picked", { second: !!first });
     const run = ++agentRun.current;
     const epoch = sceneEpoch.current;
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
@@ -1548,6 +1566,7 @@ export function App() {
     let attempts = first?.attempts.length ?? 0;
     const onEvent = (e: AgentEvent) => {
       if (!live()) return;
+      trace.add(e);
       pilot.current?.event(e);
       // A second try starting in the same stream (automatic): its ideas are numbered after the first's.
       if (e.type === "escalating") {
@@ -1576,6 +1595,8 @@ export function App() {
     };
     const finish = (result: Proposal | null) => {
       if (!live()) return;
+      if (result) trace.add({ ...result, type: "result" });
+      trace.end(result ? null : "Stopped before a result");
       const show = () => {
         if (!live()) return;
         if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
@@ -1588,6 +1609,7 @@ export function App() {
     };
     const retire = () => {
       if (!live()) return;
+      trace.end("Stopped");
       ++agentRun.current; pilot.current?.cancel();
       const owned = p;
       if (owned.phase !== "done") {
@@ -1595,7 +1617,35 @@ export function App() {
         setProgress((current) => current === owned ? retired : current);
       }
     };
-    return { onEvent, finish, live, retire };
+    return { onEvent, finish, live, retire, trace };
+  }
+
+  /** Each run the page watches, logged for Workings (docs/workings.md): one of each kind at a time, a new one ending the
+   * one it replaces. Workings needs more room than the table, so the bottom bar grows for a run when it is short. */
+  const traces = useRef<Partial<Record<RunKind, RunHandle>>>({});
+  const grownFrom = useRef<number | null>(null);
+  function traceStart(kind: RunKind, origin: Origin, title: string, meta: Record<string, unknown> = {}) {
+    traces.current[kind]?.end("Another run took its place");
+    const trace = runs.start(kind, { origin, title, meta });
+    traces.current[kind] = trace;
+    if (docked && workings.on && workings.view === "work") growActivity();
+    return trace;
+  }
+  function growActivity() {
+    const was = dock.current?.fitBar("activity", WORKINGS_HEIGHT, WORKINGS_SHORT) ?? null;
+    if (was != null && grownFrom.current == null) grownFrom.current = was;
+  }
+  /** Steps or Workings in the Activity panel; back on Steps, a bar Workings grew is given back. */
+  function setActivityView(view: ActivityView) {
+    setWorkings((w) => ({ ...w, view }));
+    if (!docked) return;
+    if (view === "work") growActivity();
+    else if (grownFrom.current != null) { dock.current?.fitBar("activity", grownFrom.current); grownFrom.current = null; }
+  }
+  function setWorkingsOn(on: boolean) {
+    if (!on && workings.view === "work") setActivityView("steps");
+    setWorkings((w) => ({ on, view: on ? "work" : w.view === "work" ? "steps" : w.view }));
+    if (on && docked) growActivity();
   }
 
   /** Propose fixes for the pair (Muse Spark, up to three rounds). */
@@ -1625,7 +1675,7 @@ export function App() {
       await Promise.race([captureViews(report.id, on.id, ea, eb), new Promise((r) => setTimeout(r, 4000))]);
     let result: Proposal | null = null;
     try { result = await api.proposeStream(sceneId, ea, eb, from, onEvent, second); }
-    catch (e) { if (agentRun.current === run) setError((e as Error).message); }
+    catch (e) { if (agentRun.current === run) { setError((e as Error).message); tracker.trace.add({ type: "error", detail: (e as Error).message }); } }
     finally { finish(result); }
   }
 
@@ -1641,7 +1691,7 @@ export function App() {
     const rec: { events: { t: number; event: AgentEvent | ({ type: "result" } & Proposal) }[] } =
       await (await fetch(`/tour/${{ duct: "c0053", joint: "c0051", ladder: "cell-ladder" }[which]}.json`)).json();
     if (sceneEpoch.current !== epoch) return;
-    const tracker = trackAgent(); directAgent.current = tracker;
+    const tracker = trackAgent(null, "replay"); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     setReplaying(true);
@@ -1954,7 +2004,7 @@ export function App() {
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
     chatEscalating.current = false;
   }
-  function onChatEvent(e: ChatEvent) {
+  function onChatEvent(e: ChatEvent, origin: Origin = "chat") {
     if (e.type === "thinking") directContext.current?.retire();
     if (e.type === "tool" && e.name === "explore_wider_fix") {
       const c = report?.clashes.find((x) => x.id === e.args.clash_id), pair = c && matches?.[c.id];
@@ -1985,15 +2035,15 @@ export function App() {
       if (e.event.type === "escalating" && !chatAgent.current) {
         const f = e.event.first_try;
         chatAgent.current = trackAgent(f ? { understanding: f.understanding, advice: f.advice, attempts: f.attempts, options: f.options ?? [] }
-          : { understanding: "", attempts: [], options: [] });
+          : { understanding: "", attempts: [], options: [] }, origin);
         chatEscalating.current = true;
       } else if (e.event.type === "escalating") chatEscalating.current = true;
-      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent();
+      if (e.event.type === "thinking" && e.event.round === 1 && !chatEscalating.current) chatAgent.current = trackAgent(null, origin);
       chatAgent.current?.onEvent(e.event);
     }
     if (e.type === "proposal") {
       setA(e.element_a); setB(e.element_b);
-      (chatAgent.current ?? trackAgent()).finish(e);
+      (chatAgent.current ?? trackAgent(null, origin)).finish(e);
       chatAgent.current = null; chatEscalating.current = false;
     }
     if (e.type === "plan_started") { chatPlan.current = trackPlan(e.kind); planThisTurn.current = true; }
@@ -2090,7 +2140,7 @@ export function App() {
       resetWork(); setRemeasure((n) => n + 1);  // as when the person accepts: the options are spent
       return;
     }
-    onChatEvent(e as ChatEvent);
+    onChatEvent(e as ChatEvent, "agent");
   }
   // When the tab closes, tell the server at once (a proxy may hold a dropped stream open for a while), so the agent
   // is not told a browser is following.
@@ -2587,6 +2637,7 @@ export function App() {
     {docked && <p className="hint">Drag a tab to dock it anywhere. The buttons beside the tabs collapse a side bar, float a
       panel or open it in its own window; a right click on a tab does the same.</p>}
     {docked && <button className="pop-item" onClick={() => { close(); dock.current?.reset(); }}><RotateCcw size={14} aria-hidden /> Reset the layout</button>}
+    <label className="pop-item check"><input type="checkbox" checked={workings.on} onChange={(e) => { close(); setWorkingsOn(e.target.checked); }} /> Workings in Activity</label>
     <label className="pop-item check"><input type="checkbox" checked={classic} onChange={(e) => { close(); setClassic(e.target.checked); }} /> Classic layout (fixed panels)</label>
   </>);
 
@@ -3028,8 +3079,9 @@ export function App() {
       {docked && inSlot(slots.properties, <div className="props in-panel">
         {selected ? <>{elementCard}{elementSets}</> : <p className="hint">Click any element in the model to see its properties.</p>}
       </div>)}
-      {!compact && inSlot(slots.activity, <footer className="dock">
-        <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} />
+      {!compact && inSlot(slots.activity, <footer className={`dock${workings.on && workings.view === "work" ? " working" : ""}`}>
+        <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} workings={workings.on} view={workings.view}
+          onView={setActivityView} onHide={() => setWorkingsOn(false)} inView={pilotStatus?.step ?? null} />
       </footer>)}
       {layout === "tablet" && listOpen && !landing && <div className="drawer-scrim" aria-hidden onClick={() => setListOpen(false)} />}
       {layout === "phone" && !landing && !starting && (
