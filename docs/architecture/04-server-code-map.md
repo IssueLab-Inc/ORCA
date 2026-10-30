@@ -11,7 +11,9 @@ FastAPI app and an MCP server over one shared `Workspace`, which holds the open 
 and offers every operation both front doors use. Under it sit the AI workflows (the fix agent, triage, titles,
 chat, plans, escalation, built views), the geometry engine on IfcOpenShell, the readers and writers for reports and
 documents, and a thin client for Meta's models. This doc lists every module: what it is for, its main symbols, what
-it imports from the package and who imports it, and the rules it enforces. [05](05-domain-model-and-state.md) covers
+it imports from the package and who imports it, and the rules it enforces. The package's `__init__.py` does one thing:
+it loads the repo's `.env` (`meta_client.load_env`) on the first import of any module, before any module reads a
+setting ([15](15-requirements-settings-and-config.md)). [05](05-domain-model-and-state.md) covers
 the objects these modules hold and where their state lives.
 
 ## The layers at a glance
@@ -193,8 +195,9 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
   `escalation.py`, `limits.py`, `mcp_server.py`, `meta_client.py`, `owner.py`, `plans.py`, `requirements.py`,
   `service.py`, `settings.py`, `spend.py`, `step.py`, `titles.py`, `triage.py`, `voice_live.py`.
   **Imported by:** `mcp_server.py` (lazily, for the stdio entry point).
-- **Rules:** `load_env()` runs before anything reads a setting; `ws.keep = links.kept` so live links' scenes and
-  reports are evicted last; a kept fix goes through `_with_patch`, which holds `ws.lock` from the revision read to the
+- **Rules:** `.env` is already loaded when it runs (the package's `__init__.py`), and its caps and sizes are read with
+  `limits.env_int` / `env_float`; `ws.keep = links.kept` so live links' scenes and reports are evicted last; a kept
+  fix goes through `_with_patch`, which holds `ws.lock` from the revision read to the
   patch so another tab's edit cannot land in between; blocking work runs in threads (`run_in_threadpool`,
   `owner.spawn`) so the event loop stays free.
 
@@ -277,7 +280,7 @@ lower by `SIGHTLINE_CONTEXT_*`) over complete arrangements of up to three edit g
 
 - **Main symbols:** `build`, `accept`, `validate_objective`, `Limits`, `Inspection`, `TOOLS`, `ContextError`,
   `WIDER_MAX_MB` (`SIGHTLINE_WIDER_FIX_MAX_MB`, 100).
-- **Imports:** `context_eval.py`, `edits.py`, `verify.py`. **Imported by:** `app.py`, `chat.py`.
+- **Imports:** `context_eval.py`, `edits.py`, `limits.py`, `verify.py`. **Imported by:** `app.py`, `chat.py`.
 - **Rules:** search runs on `IfcScene.snapshot()`; proposals are stored on the Workspace pinned to the scene's
   revision; `accept` holds `ws.lock`, refuses a changed revision (409) or missing acknowledgements (422), and re-runs
   `context_eval.commit_candidate` on a fresh private snapshot before swapping it in. Model output never grants
@@ -304,8 +307,8 @@ plus the STEP export helpers.
 
   Module level: `step_changes`, `_spec`, `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,
   `SCENE_BUDGET_MB`, `LAST_KEPT` (200), `SAMPLE_EXCLUDE`, `HOSTS_TIMEOUT_S`.
-- **Imports:** `agent.py`, `detect.py`, `edits.py`, `escalation.py`, `hosts.py`, `meta_client.py`, `reports.py`,
-  `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
+- **Imports:** `agent.py`, `detect.py`, `edits.py`, `escalation.py`, `hosts.py`, `limits.py`, `meta_client.py`,
+  `reports.py`, `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
   **Imported by:** `app.py`, `chat.py`, `mcp_server.py`, `plans.py`.
 - **Rules:** `Workspace.lock` (an RLock) is held by everything that touches a scene's geometry; every kept edit calls
   `IfcScene.mark_edited` and `IfcScene.bump`; trials never do; a second try's brief (`last_try`) is read only while
@@ -437,7 +440,8 @@ Detail on all of these: [06](06-geometry-and-detection.md) (scene, check, detect
 
 ### `scene.py`: the federated scene
 
-Elements are addressed by IFC GlobalId everywhere, never by express id. Imports nothing from the package.
+Elements are addressed by IFC GlobalId everywhere, never by express id. From the package it imports only `limits.py`
+(`env_int`).
 
 - **Main symbols:** `IfcScene` (`bounds`, `refresh_bounds`, `translate`, `placement`, `element`, `entity`,
   `index_of`, `products`, `near`, `connected_run`, `step_run`, `step_group`, `mark_edited`, `bump`, `snapshot`,
@@ -498,8 +502,8 @@ STEP → IFC on open (cached by file hash) and the fixes written back to STEP on
 - **Main symbols:** `convert`, `export`, `parts`, `classify`, `write_ifc`, `file_hash`, `mesh`, `_prism`, `Part`,
   `StepError`, `SUFFIXES`, `CLASSES`, `MAX_PARTS` (`SIGHTLINE_STEP_MAX_PARTS`), `MAX_TRIANGLES`
   (`SIGHTLINE_STEP_MAX_TRIANGLES`), `NAMESPACE`.
-- **Imports:** `scene.py` (`STEP_PSET`); `cadquery-ocp` (OCP) inside functions. **Imported by:** `app.py`,
-  `service.py`.
+- **Imports:** `limits.py` (`env_int`), `scene.py` (`STEP_PSET`); `cadquery-ocp` (OCP) inside functions.
+  **Imported by:** `app.py`, `service.py`.
 - **Rules:** GlobalIds come from the file hash and the part's label path, so a file converts to the same ids every
   time; only a classified conversion is cached; shapes are placed with `BRepBuilderAPI_Transform`, never `.Moved()`.
 
@@ -659,14 +663,16 @@ owner's settings from `X-Sightline-Settings` in context variables. Imports nothi
 
 ### `limits.py`: demo caps
 
-Rolling caps per visitor per hour and for everyone per day, in memory. Imports nothing from the package.
+Rolling caps per visitor per hour and for everyone per day, in memory, and how every number setting is read.
+Imports nothing from the package.
 
 - **Main symbols:** `ProposeLimit` (`from_env`, `escalate_from_env`, `chat_from_env`, `take`, `take_many`,
   `take_all`, `refusal`), `client_id` (the peer, or with `SIGHTLINE_TRUST_FORWARDED=N` the N-th `X-Forwarded-For`
-  entry from the right), `trusted_hops`.
-- **Imported by:** `app.py`.
+  entry from the right), `trusted_hops`, `env_int`, `env_float`.
+- **Imported by:** `app.py`, `context_planner.py`, `scene.py`, `service.py`, `step.py`.
 - **Rules:** `take_many` and `take_all` count all or nothing; correct only with one server process (the Modal app
-  runs one container). Every cap and its meaning: [16](16-security-caps-and-cost.md).
+  runs one container); a number setting is read with `env_int` / `env_float`, so unset or empty is its default and
+  anything else that is not a number raises. Every cap and its meaning: [16](16-security-caps-and-cost.md).
 
 ### `spend.py`: the Muse Wonder budget
 
@@ -689,8 +695,8 @@ An OpenAI-style client for Meta's API, the open-weights host, and transcription.
   `effort`, `usage`, `on_cost`, `role`, `strict`, `streams_reasoning`), `ChatModel` and `ToolModel` (protocols tests
   script), `Usage`, `cost`, `PRICES`, `LABELS`, `model_label`, `FIXED_EFFORT`, `image_part`, `load_env`,
   `transcribe`, `triage_model`, `triage_model_info`, `escalation_model`, `escalation_info`.
-- **Imported by:** `agent.py`, `app.py`, `built.py`, `chat.py`, `document.py`, `service.py`, `titles.py`,
-  `triage.py`, `voice_live.py`.
+- **Imported by:** the package's `__init__.py` (`load_env`), `agent.py`, `app.py`, `built.py`, `chat.py`,
+  `document.py`, `service.py`, `titles.py`, `triage.py`, `voice_live.py`.
 - **Rules:** effort is the owner's, else everyone's, else the model's own, except for fixed roles; a host that
   refuses `json_schema` drops to JSON mode (`strict`); every priced call is charged through `on_cost`.
 

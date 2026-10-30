@@ -141,6 +141,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 | `test_settings.py` | 8 | `settings.py`: the store survives a restart, refuses unknown values, falls back when broken; effort precedence owner > everyone > environment; open weights off unless switched on; owner-only `/api/settings`; `/api/models` |
 | `test_owner.py` | 7 | `owner.py`: the HttpOnly cookie, a new token logs everyone out, no token no owner, wrong tokens capped, settings count only for the owner, unknown settings dropped, the owner skips the demo caps |
 | `test_limits.py` | 5 | `limits.ProposeLimit`: per-visitor hour, the daily cap for everyone (refusals not counted), no limits by default, 429 on propose, `Workspace` keeps only the newest scenes |
+| `test_env_file.py` | 3 | Configuration: a fresh interpreter on a copy of the package beside its own `.env` (the package's `__init__.py` loads it) reads `.env` for the settings read at import and the caps, a real environment variable wins, and empty numbers take their defaults (`limits.env_int` / `env_float`); a value that is not a number still raises |
 
 **Agents and voice** ([11](11-mcp-and-agent-links.md), [10](10-http-api-and-streams.md))
 

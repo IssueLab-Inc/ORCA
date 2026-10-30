@@ -8,6 +8,9 @@ Off unless configured, so local runs and tests are unaffected:
 
 State is in memory, which is only correct with a single server process; the Modal app pins one container
 for the same reason (scenes are in memory too).
+
+Every number setting is read with `env_int` / `env_float`: unset or empty (`SIGHTLINE_PROPOSE_PER_HOUR=` in .env)
+is its default, so a blanked cap is off (or its own default), never a server that stops at import.
 """
 from __future__ import annotations
 
@@ -17,6 +20,18 @@ from collections import deque
 
 HOUR = 3600
 DAY = 24 * HOUR
+
+
+def env_int(name: str, default: int) -> int:
+    """A whole number from the environment; unset or empty is `default`. Anything else not a number raises."""
+    value = os.environ.get(name, "").strip()
+    return int(value) if value else default
+
+
+def env_float(name: str, default: float) -> float:
+    """A number from the environment; unset or empty is `default`. Anything else not a number raises."""
+    value = os.environ.get(name, "").strip()
+    return float(value) if value else default
 
 
 class ProposeLimit:
@@ -30,21 +45,21 @@ class ProposeLimit:
 
     @classmethod
     def from_env(cls) -> "ProposeLimit":
-        return cls(int(os.environ.get("SIGHTLINE_PROPOSE_PER_HOUR", "0")),
-                   int(os.environ.get("SIGHTLINE_PROPOSE_PER_DAY", "0")))
+        return cls(env_int("SIGHTLINE_PROPOSE_PER_HOUR", 0),
+                   env_int("SIGHTLINE_PROPOSE_PER_DAY", 0))
 
     @classmethod
     def escalate_from_env(cls) -> "ProposeLimit":
         """Second tries on Muse Wonder (docs/escalation.md): SIGHTLINE_ESCALATE_PER_HOUR per visitor,
         SIGHTLINE_ESCALATE_PER_DAY for everyone. Each also takes one proposal."""
-        return cls(int(os.environ.get("SIGHTLINE_ESCALATE_PER_HOUR", "0")),
-                   int(os.environ.get("SIGHTLINE_ESCALATE_PER_DAY", "0")), noun="second tries with Muse Wonder")
+        return cls(env_int("SIGHTLINE_ESCALATE_PER_HOUR", 0),
+                   env_int("SIGHTLINE_ESCALATE_PER_DAY", 0), noun="second tries with Muse Wonder")
 
     @classmethod
     def chat_from_env(cls) -> "ProposeLimit":
         """Chat messages: SIGHTLINE_CHAT_PER_HOUR per visitor, SIGHTLINE_CHAT_PER_DAY for everyone."""
-        return cls(int(os.environ.get("SIGHTLINE_CHAT_PER_HOUR", "0")),
-                   int(os.environ.get("SIGHTLINE_CHAT_PER_DAY", "0")), noun="chat messages")
+        return cls(env_int("SIGHTLINE_CHAT_PER_HOUR", 0),
+                   env_int("SIGHTLINE_CHAT_PER_DAY", 0), noun="chat messages")
 
     @staticmethod
     def _trim(q: deque[float], since: float) -> deque[float]:

@@ -855,6 +855,26 @@ A move keeps what it stands on (Oct 30, owner request; `docs/edits.md`, code `ve
   every horizontal move failed; C5 still has no fix (every direction hits a conveyor, tray or filter: real); 540 server
   tests, 64 web tests.
 
+`.env` before every setting (Oct 30, owner request; code `server/sightline/__init__.py`, `limits.env_int` /
+`env_float`; docs [15](15-requirements-settings-and-config.md), [10](10-http-api-and-streams.md)):
+- **Why:** `app.py` imported its modules before it called `load_env()`, so the settings they read at import
+  (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB`, `SIGHTLINE_MAX_REPORTS`, `SIGHTLINE_SAMPLE_EXCLUDE`,
+  `SIGHTLINE_STEP_MAX_PARTS` / `_MAX_TRIANGLES`, `SIGHTLINE_BIG_MODEL_MB`, `SIGHTLINE_WIDER_FIX_MAX_MB`,
+  `SIGHTLINE_BUILT_CACHE`) ignored a value set only in `.env` on local runs. Modal sets real variables, so the deploy
+  was unaffected. An empty cap (`SIGHTLINE_PROPOSE_PER_HOUR=`) reached `int("")` and stopped the server at import,
+  although `.env.example` said "off when empty or 0"; it also implied every cap is off when unset, but requirements
+  files (120 an hour) and previews (60) have defaults of their own.
+- **Now:** the package's `__init__.py` calls `meta_client.load_env()`, so `.env` is read on the first import of any
+  module (web server, stdio MCP, tests, evals) and before any setting; real environment variables still win. Every
+  number setting is read with `limits.env_int` / `env_float`: unset or empty is the default, anything else that is not
+  a number still raises. An empty `SIGHTLINE_BUILT_CACHE` is its default (it would have been the working directory).
+  `.env.example` says what unset, empty and 0 mean and lists the two caps that default on.
+- **Checked:** `tests/test_env_file.py` (3; a fresh interpreter on a copy of the package beside its own `.env`): before
+  the change `.env`'s `SIGHTLINE_MAX_SCENES=7` read as 0 and an empty cap stopped the import with `ValueError`. 553
+  server tests. Locally, uvicorn started with a `.env` holding empty caps (`/api/models` answered, with the model
+  upload size set there); importing the app with the same file gave `SIGHTLINE_MAX_SCENES=1` as the Workspace's
+  limit, no proposal limit and requirements files at 120 an hour.
+
 Chat and MCP take their routes' caps; a visitor is the peer (Oct 30, owner request; code `plans.read_patterns`,
 `chat.Chat._run`, `mcp_server` `caps` / `Hooks.detect`, `limits.client_id`; docs 09 and 16):
 - **Pattern readings:** chat and MCP `find_patterns` made a fresh Muse Spark call every time, uncharged; the route

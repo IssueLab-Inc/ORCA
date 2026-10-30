@@ -23,6 +23,8 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import ifcopenshell.util.unit
 
+from .limits import env_int
+
 # The pset a part converted from STEP carries (step.py): its group, label and source file. Older conversions, and their
 # caches, called it Sightline_STEP.
 STEP_PSET = "ORCA_STEP"
@@ -68,7 +70,7 @@ BOUNDS_BATCH = 2000   # elements per geometry iterator while measuring boxes
 # From this size (all files together) every element goes through CGAL, extrusions too: about twice as fast, with boxes
 # within 1 mm of OpenCASCADE's on curved sections (it facets them a little differently). Smaller models keep the
 # default kernel for everything but meshes, so their boxes and checks are exactly as before.
-BIG_MODEL_BYTES = int(os.environ.get("SIGHTLINE_BIG_MODEL_MB", "50")) << 20
+BIG_MODEL_BYTES = env_int("SIGHTLINE_BIG_MODEL_MB", 50) << 20
 MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet")
 
 
