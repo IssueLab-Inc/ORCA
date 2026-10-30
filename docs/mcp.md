@@ -87,7 +87,7 @@ cd server && uv run python -m sightline.mcp_server
 | Session | `get_session` (what is open, whether a browser follows), `list_models`, `open_models` |
 | Clashes | `detect_clashes`, `report_summary`, `list_clashes`, `get_clash`, `get_clash_images` (A/B/C pictures), `measure_clash`, `find_root_causes`, `find_patterns`, `triage` |
 | The model | `describe_element`, `find_elements`, `find_openings` |
-| Fixes | `check_move`, `check_offset` (test the agent's own idea), `propose_fixes` (ORCA's fix agent), `plan_fixes_together`, `plan_root_cause`, `get_job`, `apply_fix`, `apply_plan` |
+| Fixes | `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration` (test the agent's own idea), `propose_fixes` (ORCA's fix agent), `plan_fixes_together`, `plan_root_cause`, `get_job`, `apply_fix`, `apply_plan` |
 | The person's view | `show_clash`, `set_view`, `capture_view` (a picture of what they see) |
 | Hand-off | `generate_report` (PDF + BCF, download link), `export_models` (IFC, and STEP for STEP models) |
 
@@ -95,7 +95,7 @@ cd server && uv run python -m sightline.mcp_server
 (`readOnlyHint`):
 - `get_session`, `list_models`, `report_summary`, `list_clashes`, `get_clash`, `get_clash_images`, `measure_clash`;
 - `describe_element`, `find_elements`, `find_openings`, `find_root_causes`;
-- `check_move`, `check_offset`, `get_job`;
+- `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`, `get_job`;
 - `show_clash`, `set_view`, `capture_view`.
 
 Muse Code runs those without an approval prompt under on-request approvals. The rest ask: proposals, plans, applying,
@@ -108,8 +108,9 @@ things the same way.
 - **Long work** (a proposal, a plan, triage, the report) runs as a job. A call waits up to `wait_s` (40 s by default).
   If the job isn't done by then, it returns `{job_id, status: "running"}`, and `get_job` waits for the result. This
   keeps clients with short tool timeouts safe.
-- **Nothing changes the model until `apply_fix` or `apply_plan`.** Both apply on the server. The page then reloads
-  the changed file and marks the clash fixed, exactly as when the person accepts a fix.
+- **Nothing changes the model until `apply_fix` or `apply_plan`.** Both apply on the server. The page then patches
+  the change into the viewer in place (or reloads the changed file when it is behind) and marks the clash fixed,
+  exactly as when the person accepts a fix.
 - **Pictures:**
   - A Navisworks report carries its own pictures.
   - For a clash ORCA found, `get_clash_images` asks the person's page to take the A/B/C views. They are saved on the
