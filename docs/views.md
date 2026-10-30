@@ -93,7 +93,8 @@ with a clash still picked. So the clash and the camera become independent.
 - **Presets:** 1–4 stay (Top, Front, Right, Iso); the cube has the rest, including the four isometrics.
 - **Home:** H fits the whole model as today; "Set this view as Home" in the cube's menu makes H fly there instead (per
   project, `sightline.views.<project>`).
-- **F frames the selection:** the selected element if one is selected, else the clash.
+- **F frames the selection:** the selected element if one is selected (the 3D view frames it), else the clash (every
+  unpinned view, as a click on it does).
 - **Back and forward:** each camera jump (a clash, F, H, a preset, the cube, a saved view) goes on a history; **[** and
   **]** step through it, and so do buttons in the Views popover.
 - **Saved views:** "Save this view" names the camera (position, pivot, projection), style, visibility and section box;
@@ -177,7 +178,7 @@ every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate
   - elevation: the side the section looks towards;
   - and each drawing view pans and zooms to frame where the pair meets, with the same margins as the 3D view.
   What the user changes in a view (pan, zoom, cut, section line) holds until the next click on a clash, which brings
-  it back. A pinned view (pin in its header) is never moved by a click; F still takes it to the clash.
+  it back. A pinned view (pin in its header) is never moved by a click or by F; Go to clash in its own header moves it.
 - **Drawing views and modes (the toggle).** "Full model" (default): drawing views show every element in visible
   models, whatever the 3D mode. "Follow 3D": they hide what Near it / Only it hide. Either way the pair is red and
   green, hidden models stay hidden and an edit preview replaces what it changes.
@@ -321,7 +322,8 @@ with it):
   presets), for a section far clip and crop (fields, flip, far clip off), for an elevation far clip; pin; maximise. The rail gets a Views popover:
   layout, and the Full model / Follow 3D toggle. The rail sits at the stage's top left, so the top-left pane's header
   starts after it.
-- **Camera tools.** F, H, the presets, the view cube, back / forward and saved views act on the 3D view. Fit in a
+- **Camera tools.** F takes every unpinned view to the clash, as a click on it does (or frames the selected element in
+  3D). H, the presets, the view cube, back / forward and saved views act on the 3D view. Fit in a
   drawing view's header frames the model there; a right-click (no drag) on a point in a drawing view offers Look here
   in 3D, which turns the 3D view to it.
 - **Labels.** The marker and measure labels stay with the 3D pane, offset by its rectangle.
