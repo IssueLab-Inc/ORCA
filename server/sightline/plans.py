@@ -567,11 +567,122 @@ KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route":
         "resize": _keep_resize, "penetration": _keep_penetration, "combined": _keep_combined}
 
 
+class NotVerified(ValueError):
+    """A fix that does not pass its check where it would be kept, now: the model or the requirements changed since it
+    was proposed, or the option is not one ORCA verified. Nothing is kept. `index`: which of the options it was."""
+
+    def __init__(self, message: str, index: int = 0):
+        super().__init__(message)
+        self.index = index
+
+
+def _candidate_move(o: dict, a: str, b: str) -> tuple[dict, str]:
+    # A move takes its whole run (agent._try_move): the side of the clash the run holds.
+    return {"delta_m": o["delta_m"]}, a if a in o["moved"] else b if b in o["moved"] else o["moved"][0]
+
+
+def _candidate_offset(o: dict, a: str, b: str) -> tuple[dict, str]:
+    return {"split_m": o["split_m"], "dz_m": o["delta_m"][2]}, o["moved"][0]
+
+
+def _candidate_trim(o: dict, a: str, b: str) -> tuple[dict, str]:
+    return {"by_m": o["trim"]["by_m"]}, o["moved"][0]
+
+
+def _candidate_route(o: dict, a: str, b: str) -> tuple[dict, str]:
+    return {"steps": o["edit"]["steps"]}, o["moved"][0]
+
+
+def _candidate_resize(o: dict, a: str, b: str) -> tuple[dict, str]:
+    e = o["edit"]
+    return {"split_m": e["split_m"], "depth_m": e["depth_m"], "keep": e.get("keep", "bottom")}, o["moved"][0]
+
+
+def _candidate_penetration(o: dict, a: str, b: str) -> tuple[dict, str]:
+    return {}, o["edit"]["service"]
+
+
+def _candidate_combined(o: dict, a: str, b: str) -> tuple[dict, str]:
+    return {"steps": [agent.step_candidate(st) for st in o["edit"]["steps"]]}, a
+
+
+# How each kind of kept option is tried again (agent.TRIES): → (its parameters as Muse proposes them, the element of
+# the clash it changes).
+CANDIDATE = {"move": _candidate_move, "offset": _candidate_offset, "trim": _candidate_trim, "route": _candidate_route,
+             "resize": _candidate_resize, "penetration": _candidate_penetration, "combined": _candidate_combined}
+
+
+def option_pair(o: dict) -> tuple[str, str, list[str]]:
+    """The clash a fix is for (A, B), and the other elements it must clear (a plan's merged item). A penetration is for
+    its service and host, a combined fix for the pair its steps name; any other kind says so in `pair`."""
+    edit = o.get("edit") or {}
+    kind = o.get("kind") or "move"
+    pair = (edit.get("pair") if kind == "combined" else [edit.get("service"), edit.get("host")]
+            if kind == "penetration" else o.get("pair"))
+    if not isinstance(pair, list) or len(pair) != 2 or not all(isinstance(g, str) and g for g in pair):
+        raise ValueError("the fix does not say which clash it is for (pair: [A, B])")
+    return pair[0], pair[1], [str(g) for g in o.get("others") or []]
+
+
+def recheck(ws: Workspace, scene_id: str, o: dict, index: int = 0, count: int = 1) -> dict:
+    """Try a fix again as its proposal tried it (`agent.TRIES`, with the clearance and the requirements
+    `Workspace.fix_settings` sets for its pair) on the model as it is now, and return it as that trial makes it (the
+    run the server moves, the end it trims) to be kept. Raises NotVerified with why when it does not pass, and
+    ValueError (or KeyError) when it is not a fix of a kind ORCA knows for elements in the model."""
+    kind = o.get("kind") or "move"
+    a, b, others = option_pair(o)
+    scene = ws.scene(scene_id)
+    scene.index_of(a), scene.index_of(b)   # both in the model (KeyError)
+    cand, target = CANDIDATE[kind](o, a, b)
+    if target not in (a, b):
+        raise ValueError(f"the fix changes {target}, which is neither element of the clash it names")
+    other = b if target == a else a
+    cand = {"title": o.get("title") or kind, "rationale": o.get("rationale", ""),
+            "also_needs": o.get("also_needs", ""), "kind": kind, **cand}
+    fix = ws.fix_settings(scene_id, a, b)
+    with ws.lock:
+        option, why = None, None
+        if fix.get("recommend"):
+            why = f"nothing may be edited here ({fix['recommend']})"
+        elif fix.get("policy") and (refused := agent._refused(scene, cand, target, other, fix["policy"])):
+            why = refused.reason
+        else:
+            attempt, option = agent.TRIES[kind](scene, cand, target, other, fix.get("clearance_m", 0.025),
+                                                others=others)
+            why = None if option else attempt.reason or "it did not pass"
+    if option is not None and kind == "trim" and o["trim"].get("end") not in (None, option.trim["end"]):
+        option, why = None, f"the joint is at the '{option.trim['end']}' end, not the '{o['trim']['end']}' end"
+    if option is None:
+        which = f"'{cand['title']}'" if count == 1 else f"Fix {index + 1} of {count}, '{cand['title']}',"
+        raise NotVerified(f"{which} does not pass ORCA's check on the model as it is now ({why}), so nothing was "
+                          "kept. The model or the requirements may have changed since it was proposed: propose again.",
+                          index)
+    out = {k: v for k, v in asdict(option).items() if k not in ("preview", "before")}
+    return {**out, "pair": [a, b], "others": others}
+
+
+def _check_together(ws: Workspace, scene_id: str, checked: list[dict]) -> None:
+    """Several fixes kept at once are checked together too, as a plan is (verify_together): each against the others in
+    place. Raises NotVerified for the first that does not pass."""
+    items = [Item(str(k), o["pair"][0], o["pair"][1], o["title"], [], option=o, others=o["others"])
+             for k, o in enumerate(checked)]
+    together = verify_together(ws, scene_id, items)
+    for k, it in enumerate(items):
+        r = together["items"][it.key]
+        if not r["passed"]:
+            raise NotVerified(f"Fix {k + 1} of {len(items)}, '{it.label}', does not pass ORCA's check with the other "
+                              f"fixes in place ({r['reason'] or 'it did not pass'}), so nothing was kept. The model or "
+                              "the requirements may have changed since the plan was checked: plan again.", k)
+
+
 def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
-    """Keep every fix of an accepted plan (or one accepted option). Returns the files changed, per run a fix split its
-    pieces with the original first (`pieces`: one list per fix, or per run of a combined fix; `groups`: those lists by
-    fix), and the penetrations only requested (`not_cut`: the host's team cuts the opening)."""
-    unknown = [o["kind"] for o in options if o.get("kind", "move") not in KEEP]
+    """Keep every fix of an accepted plan (or one accepted option), all or nothing. Each is tried again first, as its
+    proposal tried it (`recheck`), and several are checked together (`verify_together`): a fix that no longer passes
+    (the model changed since, or it was never verified) raises NotVerified and nothing is kept; what the trials make,
+    not what the page sent, is kept. Returns the files changed, per run a fix split its pieces with the original
+    first (`pieces`: one list per fix, or per run of a combined fix; `groups`: those lists by fix), the penetrations
+    only requested (`not_cut`: the host's team cuts the opening) and what each check found (`verified`)."""
+    unknown = [o.get("kind") for o in options if o.get("kind", "move") not in KEEP]
     if unknown:
         raise ValueError(f"unknown kind of fix: {unknown[0]!r}")
     files: set[int] = set()
@@ -580,17 +691,24 @@ def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
     not_cut: list[dict] = []
     groups: list[list[list[str]]] = []
     with ws.lock:
-        for k, o in enumerate(options):
-            r, made = KEEP[o.get("kind", "move")](ws, scene_id, o)
-            runs = made if made and isinstance(made[0], list) else [made] if made else []
-            pieces += runs or [[]]
-            groups.append(runs)
-            files.update(r["files"])
-            changed += r.get("changed", [g for run in runs for g in run] or o["moved"])
-            if r.get("cut") is False:   # a penetration its host's team must cut: the clash stays open
-                not_cut.append({"index": k, "blocked_by": r["blocked_by"]})
+        checked = [recheck(ws, scene_id, o, k, len(options)) for k, o in enumerate(options)]
+        if len(checked) > 1:
+            _check_together(ws, scene_id, checked)
+        scene = ws.scene(scene_id)
+        # All or nothing: a fix refused part way (a penetration whose host may no longer take it) undoes the others.
+        with edits.kept_files(scene, set().union(*(option_files(scene, o) for o in checked))):
+            for k, o in enumerate(checked):
+                r, made = KEEP[o["kind"]](ws, scene_id, o)
+                runs = made if made and isinstance(made[0], list) else [made] if made else []
+                pieces += runs or [[]]
+                groups.append(runs)
+                files.update(r["files"])
+                changed += r.get("changed", [g for run in runs for g in run] or o["moved"])
+                if r.get("cut") is False:   # a penetration its host's team must cut: the clash stays open
+                    not_cut.append({"index": k, "blocked_by": r["blocked_by"]})
     return {"files": sorted(files), "pieces": pieces, "groups": groups, "changed": list(dict.fromkeys(changed)),
-            "not_cut": not_cut}
+            "not_cut": not_cut, "verified": [{"min_clearance_m": o["min_clearance_m"],
+                                              "checked_against": o["checked_against"]} for o in checked]}
 
 
 def to_json(plan: Plan) -> str:

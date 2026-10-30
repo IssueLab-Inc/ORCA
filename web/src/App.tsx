@@ -1385,7 +1385,8 @@ export function App() {
         ? builtPasses(builtFix(i.option!, false), [i.element_a, i.element_b]) : null;
     });
     try {
-      const kept = await api.applyPlan(sceneId, items.map((i) => i.option!));
+      // Each fix names its clash: the server tries them again, alone and together, before keeping any.
+      const kept = await api.applyPlan(sceneId, items.map((i) => ({ ...i.option!, pair: [i.element_a, i.element_b], others: i.others ?? [] })));
       const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
@@ -1824,7 +1825,7 @@ export function App() {
     const built = pair && canBuild(o) && builtDone.current[builtKey(pair, o)]?.status !== "done"
       && !builtPending.current.has(builtKey(pair, o)) ? builtPasses(builtFix(o, false), pair) : null;
     try {
-      const kept = await api.accept(sceneId, o);
+      const kept = await api.accept(sceneId, o, pair);
       // Each split run's pieces, the original first (a combined fix can split several runs).
       const groups = kept.groups ?? (kept.pieces?.length ? [kept.pieces] : []);
       if (!live()) return;

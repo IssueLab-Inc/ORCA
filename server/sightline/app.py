@@ -738,9 +738,39 @@ def _with_patch(scene_id: str, kept) -> dict:
         return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
 
 
+def _keep(scene_id: str, options: list[dict], what: str) -> dict:
+    """Keep fixes through `plans.apply`, which tries each again first (as its proposal did, with the clearance and
+    requirements of its clash) and keeps all or none, plus what the page needs to patch its model. A fix that no longer
+    passes is a 409 with why; one that cannot be made a 422; one that is not a fix ORCA knows a 400."""
+    try:
+        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, options))
+    except plans.NotVerified as e:
+        raise HTTPException(409, str(e))
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot apply {what}: {e}")
+    except (ValueError, KeyError, TypeError, IndexError) as e:
+        raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
+
+
+def _one(r: dict) -> dict:
+    """One fix's reply: `pieces`, the first run's, as one fix of one run has always replied; `groups`, every run's (a
+    combined fix)."""
+    out = {**r, "pieces": r["pieces"][0], "groups": r["groups"][0]}
+    if r.get("not_cut"):   # a penetration requested, not cut: the clash stays open until the host's team cuts it
+        out.update(cut=False, blocked_by=r["not_cut"][0]["blocked_by"])
+    return out
+
+
 @app.post("/api/scenes/{scene_id}/apply")
 def apply(scene_id: str, body: Move):
-    return _with_patch(_scene(scene_id), lambda: ws.apply(scene_id, body.moved, body.delta_m))
+    """Keep a move of `moved` (its whole run) by `delta_m`, tried again first against `obstacles` (the clash's other
+    element first). The clearance is the requirements' (25 mm without any), not the body's."""
+    if not body.moved or not body.obstacles:
+        raise HTTPException(422, "Say what moves (moved) and what it must clear (obstacles): a move is checked "
+                                 "against its clash again before it is kept.")
+    return _one(_keep(scene_id, [{"kind": "move", "title": "Move", "moved": body.moved, "delta_m": body.delta_m,
+                                  "pair": [body.moved[0], body.obstacles[0]], "others": body.obstacles[1:]}],
+                      "this move"))
 
 
 class ContextObjective(BaseModel):
@@ -804,22 +834,25 @@ class TrimBody(BaseModel):
     element: str
     end: str
     by_m: float
+    other: str | None = None   # the element it butts against: the trim is checked against it again before it is kept
 
 
 @app.post("/api/scenes/{scene_id}/trim/apply")
 def apply_trim(scene_id: str, body: TrimBody):
-    try:
-        return _with_patch(_scene(scene_id), lambda: ws.apply_trim(scene_id, body.element, body.end, body.by_m))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot trim this element: {e}")
+    if not body.other:
+        raise HTTPException(422, "Say which element the trim butts against (other).")
+    return _one(_keep(scene_id, [{"kind": "trim", "title": "Trim", "moved": [body.element], "delta_m": [0, 0, 0],
+                                  "trim": {"end": body.end, "by_m": body.by_m}, "pair": [body.element, body.other]}],
+                      "this trim"))
 
 
 @app.post("/api/scenes/{scene_id}/offset/apply")
 def apply_offset(scene_id: str, body: Offset):
-    try:
-        return _with_patch(_scene(scene_id), lambda: ws.apply_offset(scene_id, body.element, body.split_m, body.dz_m))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot offset this element: {e}")
+    if not body.other:
+        raise HTTPException(422, "Say which element the offset goes around (other).")
+    return _one(_keep(scene_id, [{"kind": "offset", "title": "Offset", "moved": [body.element],
+                                  "delta_m": [0, 0, body.dz_m], "split_m": body.split_m,
+                                  "pair": [body.element, body.other]}], "this offset"))
 
 
 class FixApply(BaseModel):
@@ -829,22 +862,14 @@ class FixApply(BaseModel):
 @app.post("/api/scenes/{scene_id}/fix/apply")
 def fix_apply(scene_id: str, body: FixApply):
     """Keep one verified option of any kind (`plans.apply`, which every kind is registered with). The page's preview
-    and before meshes are dropped: the fix is rebuilt on the server from its kind and parameters. A kind whose keeping
-    depends on the requirements decides that in its `plans.KEEP` entry, never from what the page sends."""
+    and before meshes are dropped: the fix is tried again on the server from its kind, its parameters and the clash it
+    names (`pair`, and `others` for a plan's merged item), with the clearance and requirements of that clash, and what
+    that trial makes is kept; one that no longer passes is a 409. A kind whose keeping depends on the requirements
+    decides that in its `plans.KEEP` entry, never from what the page sends."""
     o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
     if not isinstance(o.get("moved"), list) or not o["moved"]:
         raise HTTPException(400, "The fix names no element.")
-    try:
-        r = _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, [o]))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot apply this fix: {e}")
-    except (ValueError, KeyError, TypeError, IndexError) as e:
-        raise HTTPException(400, f"Not a fix ORCA can apply: {e}")
-    # `pieces`: the first run's, as one fix of one run has always replied; `groups`: every run's (a combined fix).
-    out = {**r, "pieces": r["pieces"][0], "groups": r["groups"][0]}
-    if r.get("not_cut"):   # a penetration requested, not cut: the clash stays open until the host's team cuts it
-        out.update(cut=False, blocked_by=r["not_cut"][0]["blocked_by"])
-    return out
+    return _one(_keep(scene_id, [o], "this fix"))
 
 
 @app.get("/api/scenes/{scene_id}/export")
@@ -1361,12 +1386,8 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
 
 @app.post("/api/scenes/{scene_id}/plan/apply")
 def plan_apply(scene_id: str, body: PlanApply):
-    try:
-        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, body.options))
-    except edits.Unsupported as e:
-        raise HTTPException(422, f"Cannot apply the plan: {e}")
-    except ValueError as e:
-        raise HTTPException(400, f"Cannot apply the plan: {e}")
+    """Keep a plan's fixes, all or none: each tried again alone and all together first (plans.apply)."""
+    return _keep(scene_id, body.options, "the plan")
 
 
 _chat: chat.Chat | None = None
