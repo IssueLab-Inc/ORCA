@@ -72,9 +72,12 @@ TOOLS = [
     _fn("find_openings", "Openings through `obstacle` on the line of the straight segment `element`, with the "
         "offset heights (dz, metres) that pass the segment through each with 25 mm clearance.",
         {"element": {"type": "string"}, "obstacle": {"type": "string"}}, ["element", "obstacle"]),
-    _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it.",
+    _fn("check_move", "Check moving elements by [dx, dy, dz] metres (Z up) against the whole model, without keeping it. "
+        "Give `obstacle` (the element the move must clear) to check it as a proposal is: then what the moved elements "
+        "stand on (a slab, a plinth) may stay as it was, and lifting them off it fails.",
         {"global_ids": {"type": "array", "items": {"type": "string"}},
-         "delta_m": {"type": "array", "items": {"type": "number"}}}, ["global_ids", "delta_m"]),
+         "delta_m": {"type": "array", "items": {"type": "number"}},
+         "obstacle": {"type": "string"}}, ["global_ids", "delta_m"]),
     _fn("check_offset", "Check a local offset without keeping it: split the straight segment `element` at two points "
         "(metres along it from its start) around `obstacle` and raise (+) or lower (-) the middle by dz_m.",
         {"element": {"type": "string"}, "obstacle": {"type": "string"},
@@ -430,9 +433,10 @@ class Chat:
             holes = edits.passages(ws.scene(self._scene(ctx)), args["element"], args["obstacle"])
             return {"openings": holes}, f"{len(holes)} opening(s)", []
         if name == "check_move":
-            v = ws.verify_move(self._scene(ctx), list(args["global_ids"]), [float(x) for x in args["delta_m"]])
+            v = ws.verify_move(self._scene(ctx), list(args["global_ids"]), [float(x) for x in args["delta_m"]],
+                               obstacles=[args["obstacle"]] if args.get("obstacle") else [])
             v.pop("placements", None)
-            return v, "passes" if v["passed"] else f"fails: {len(v['hits'])} hit(s)", []
+            return v, "passes" if v["passed"] else f"fails: {v.get('reason') or str(len(v['hits'])) + ' hit(s)'}", []
         if name == "check_offset":
             v = ws.check_offset(self._scene(ctx), args["element"], args["obstacle"],
                                 [float(x) for x in args["split_m"]], float(args["dz_m"]))

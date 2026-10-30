@@ -1855,7 +1855,7 @@ export function App() {
     const element = a, delta = [0, 0, manualDz];
     const live = () => sceneEpoch.current === epoch && workspaceEpoch.current === workspace && previewRequest.current === request;
     try {
-      const v = await api.verify(sceneId, [element], delta);
+      const v = await api.verify(sceneId, [element], delta, b && b !== element ? [b] : []);
       if (!live()) return;
       setViewContext(false); setViewPlan(false); setChosen(null);
       setManual(v); setManualPreview({ element, delta });
@@ -2452,7 +2452,7 @@ export function App() {
               <input id="manual-dz" type="number" step="0.05" value={manualDz} onChange={(e) => setManualDz(Number(e.target.value))} />
             </label>
             <button className="btn" disabled={!a || !sceneId || !!busy} onClick={checkManual}>Check this move</button>
-            {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
+            {manual && <p className={manual.passed ? "ok" : "bad"}>{manual.passed ? `Clear · nearest ${mm(manual.min_clearance_m)}` : manual.reason ?? manual.hits.map((h) => `${h.kind} with ${h.other_class} ${mm(h.distance_m)}`).join("; ")}</p>}
           </details>}
           {checked.size === 0 && report && matches && !proposal && !hideFix && (
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
