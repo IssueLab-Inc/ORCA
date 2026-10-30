@@ -587,22 +587,32 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
 
 
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
-              on_trial: Callable[[dict], None] | None = None) -> tuple[Attempt, Option | None]:
-    """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds."""
+              on_trial: Callable[[dict], None] | None = None, partners: set[str] = frozenset()) -> tuple[Attempt, Option | None]:
+    """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds.
+
+    What the run stands on (a post's anchors in its slab, a stand on the floor: `verify.supports`) is not a new
+    clash when it keeps standing on it as it was; lifted off it, or sunk deeper, the move fails. `partners`: what the
+    move must clear, which never counts as what it stands on."""
     run = scene.connected_run(target)
     delta = [float(v) for v in cand.get("delta_m", [0, 0, 0])]
     # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
     neighbours = {c for g in run for c in scene.element(g).connected} - set(run)
+    sup = verify.supports(scene, run, set(partners), clearance_m, ignore=neighbours) if partners else None
     if on_trial:
         on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
     placements = scene.translate(run, tuple(delta))
     try:
         v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
+        hits, held, why = verify.keep_supports(scene, sup, v.hits) if sup else (v.hits, set(), None)
+        if held and not why and not hits:   # its clearance is to what is near it, not to what it stands on
+            v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours | held)
+            hits = v.hits
     finally:
         scene.translate(run, tuple(-d for d in delta))
-    attempt = Attempt(cand.get("title", "move"), delta, v.passed, _reason(v.hits), hit_ids=_hit_ids(v.hits),
-                      where=_where(v.hits))
-    if not v.passed:
+    passed = not hits and not why
+    attempt = Attempt(cand.get("title", "move"), delta, passed, why or _reason(hits), hit_ids=_hit_ids(hits),
+                      where=_where(hits))
+    if not passed:
         return attempt, None
     return attempt, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""), cand.get("also_needs", ""),
                            v.min_clearance_m, placements, checked_against=v.checked_against)
@@ -905,7 +915,7 @@ def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_
 
 def _try_move_fix(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                   on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
-    return _try_move(scene, cand, target, clearance_m, on_trial)
+    return _try_move(scene, cand, target, clearance_m, on_trial, {other, *others})
 
 
 # A combined fix changes up to three elements together, in one trial (docs/escalation.md): the room a duct needs may

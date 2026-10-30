@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import ifcopenshell.geom
 import numpy as np
 
-from .scene import IfcScene
+from .scene import IfcScene, opacity
 
 # How far to look for the nearest neighbour, so a passing fix can still report its real clearance.
 SEARCH_M = 0.5
@@ -170,3 +170,96 @@ def _rectangular_penetration(scene: IfcScene, a: str, b: str) -> float | None:
             return 0.
         minimum = min(minimum,overlap)
     return minimum
+
+
+# ---------------------------------------------------------------------------------------------- what a move stands on
+
+# How deep a base may sit in what carries it and still stand on it: a post's anchors cast 70 mm into a slab, a plinth.
+EMBED_M = 0.3
+# Runs hang from above or are carried along their length (ducts, pipes, trays, their fittings): they stand on nothing.
+RUNS = ("IfcFlowSegment", "IfcFlowFitting")
+
+
+def is_run(scene: IfcScene, gid: str) -> bool:
+    """A run (it stands on nothing), or a see-through zone (it is not a thing that stands, nor one stood on)."""
+    ent = scene.entity(gid)
+    return any(ent.is_a(c) for c in RUNS) or (ent.is_a("IfcBuildingElementProxy") and opacity(ent) < 0.5)
+
+
+def stands_on(e: np.ndarray, h: np.ndarray, gap_m: float = 0.003) -> bool:
+    """Whether box `e` stands on or in box `h` ([min, max] corners, metres, Z up): its base at, or no deeper than
+    EMBED_M into, the top of `h`, which reaches below that base, with their footprints overlapping."""
+    base, top = e[0][2], h[1][2]
+    return bool(top - EMBED_M <= base <= top + gap_m and h[0][2] <= base
+                and np.all(e[0][:2] <= h[1][:2] + gap_m) and np.all(h[0][:2] <= e[1][:2] + gap_m))
+
+
+@dataclass
+class Support:
+    """What the moved elements stand on or in before a move (a slab, a plinth, a base below them), and how far into
+    each they sit. Never a partner of the clash (what the move must clear) and never a run."""
+    hosts: dict[str, float]   # host → its distance to the moved elements before the move (negative: embedded)
+    standers: set[str]        # the moved elements that stand on something
+    partners: set[str]
+    clearance_m: float
+
+
+def supports(scene: IfcScene, moved: list[str], partners: set[str], clearance_m: float,
+             ignore: set[str] | None = None) -> Support:
+    """Before a move: what its elements stand on, from their contacts now (`check`) and their boxes."""
+    boxes = scene.bounds()
+    standers = [g for g in moved if g in boxes and not is_run(scene, g)]
+    if not standers:
+        return Support({}, set(), set(partners), clearance_m)
+    v = check(scene, moved, clearance_m=clearance_m, ignore=ignore)
+    hosts: dict[str, float] = {}
+    stood: set[str] = set()
+    for h in v.hits:
+        if h.other in partners or h.other not in boxes or is_run(scene, h.other):
+            continue
+        on = [g for g in standers if stands_on(boxes[g], boxes[h.other], max(clearance_m, 0.003))]
+        if on:
+            hosts[h.other] = min(h.distance_m, hosts.get(h.other, h.distance_m))
+            stood.update(on)
+    return Support(hosts, stood, set(partners), clearance_m)
+
+
+def keep_supports(scene: IfcScene, sup: Support, hits: list[Hit]) -> tuple[list[Hit], set[str], str | None]:
+    """After a move (the boxes moved with it): the hits that still count, the support contacts set aside, and why the
+    move is refused, or None. A moved element keeps standing on what it stood on, or on something like it at no
+    greater depth (a post slid along its slab, re-anchored the same way): those contacts are not new clashes. One
+    that stood on something and now stands on nothing (lifted off its slab) is refused; so is one sunk deeper."""
+    if not sup.standers:
+        return hits, set(), None
+    boxes = scene.bounds()
+    gap = max(sup.clearance_m, 0.003)
+    deepest = min(sup.hosts.values()) if sup.hosts else 0.0
+    counted: list[Hit] = []
+    held: set[str] = set()
+    standing: set[str] = set()
+    deeper: list[Hit] = []
+    for h in hits:
+        on = [g for g in sup.standers if h.other in boxes and h.other not in sup.partners
+              and not is_run(scene, h.other) and stands_on(boxes[g], boxes[h.other], gap)]
+        if not on:
+            counted.append(h)
+            continue
+        if h.other in sup.hosts:            # what it stood on: kept as it was, or sunk deeper into it
+            standing.update(on)
+            (held.add(h.other) if h.distance_m >= min(sup.hosts[h.other], 0.0) - 0.002 else deeper.append(h))
+        elif h.distance_m >= min(deepest, 0.0) - 0.002:   # something like it, no deeper (the next bay of slab)
+            standing.update(on)
+            held.add(h.other)
+        else:                               # something else it now cuts into: a clash like any other
+            counted.append(h)
+    why = None
+    floating = sup.standers - standing
+    if floating:
+        names = ", ".join(f"'{scene.element(g).name}'" for g in sorted(floating))
+        under = ", ".join(f"'{scene.element(g).name}'" for g in sorted(sup.hosts))
+        they = "it" if len(floating) == 1 else "they"
+        why = f"would leave {names} standing on nothing ({they} stood on {under}): keep it on what carries it"
+    elif deeper:
+        h = min(deeper, key=lambda x: x.distance_m)
+        why = f"sinks deeper into {h.other_class} '{scene.element(h.other).name}' ({h.distance_m * 1000:+.0f} mm)"
+    return counted, held, why

@@ -210,6 +210,7 @@ class Move(BaseModel):
     moved: list[str]
     delta_m: list[float]
     clearance_m: float = 0.025
+    obstacles: list[str] = []   # what the move must clear: what the moved elements stand on is then kept (verify.supports)
 
 
 class Propose(BaseModel):
@@ -658,7 +659,7 @@ def built_file(name: str):
 
 @app.post("/api/scenes/{scene_id}/verify")
 def verify_move(scene_id: str, body: Move):
-    return ws.verify_move(_scene(scene_id), body.moved, body.delta_m, body.clearance_m)
+    return ws.verify_move(_scene(scene_id), body.moved, body.delta_m, body.clearance_m, body.obstacles)
 
 
 def _refuse_escalation(request: HTTPConnection, scene_id: str, body: "Propose") -> None:

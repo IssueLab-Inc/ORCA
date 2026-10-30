@@ -310,3 +310,31 @@ and re-parse it in the browser. Now every way of keeping a fix answers with what
   file is fetched after an accept. On Northbank's 2.3 MB MEP file the headless browser is barely faster (4.0 s
   against 4.4 s after the reply, software rendering dominates); the gain is the parse of the whole file, which grows
   with its size.
+
+## A move keeps what it stands on (Oct 30)
+
+A moved element's contact with what carries it used to count as a clash wherever it went. The cell's fence posts move
+as a run (post, base plate, M10 anchors cast 70 mm into the floor slab), so every horizontal move of a post hit the slab
+by −70 mm; the C5 HMI stand touches the slab within the clearance. Muse Wonder's way through (E0, `docs/escalation.md`)
+was to lift the post 100-200 mm off its slab: verified by geometry, not buildable.
+
+- **What it stands on** (`verify.supports`, before the move): for each moved element that is not a run (ducts, pipes,
+  trays and their fittings hang or are carried along their length: `IfcFlowSegment` / `IfcFlowFitting`), the elements it
+  touches whose top it stands on or sits in (`verify.stands_on`: its base at that top, or no more than `EMBED_M` 300 mm
+  into it, the host reaching below that base, footprints overlapping) and how far into each it sits. Never what the move
+  must clear (the clash's partner and a plan item's others), so a post-against-slab clash is not "cleared" by sliding.
+- **After the move** (`verify.keep_supports`): a contact with what it stood on, no deeper than before, is not a hit;
+  nor is one with something like it at no greater depth (slid onto the next bay of slab). An element that stood on
+  something and now stands on nothing fails ("would leave … standing on nothing"), one pushed deeper fails ("sinks
+  deeper into …"), and anything else it now cuts into is a clash like any other. A passing move's clearance is measured
+  to what is near it, not to what carries it.
+- **Where:** single proposals (`agent._try_move`), a plan's joint check (`plans.verify_together`), and the manual and
+  chat / MCP move checks when they are told what the move must clear (`Workspace.verify_move(obstacles=)`, the page's
+  "Try a move yourself" sends B, `check_move(obstacle=)`); without it every contact counts, as before. Combined fixes'
+  move steps keep the old rule.
+- **Services are untouched:** runs stand on nothing, so Northbank's answer key and every duct, pipe and tray move are
+  checked exactly as before.
+- **Checked:** `tests/test_supports.py` (a post cast into a slab: slid passes with its real clearance; lifted, sunk or
+  pushed into a cabinet fails; the clash partner is never a support; runs have none; a plan and a checked move agree).
+  On the cell: post N3 slid 300 mm out of the robot's restricted space passes (74 mm clear); the same with a 150 mm lift
+  fails as floating; the HMI 0.5 m out of the panel's working space passes.
