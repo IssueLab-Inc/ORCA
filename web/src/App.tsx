@@ -39,7 +39,7 @@ import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layou
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
-import { CLASSIC_KEY, PANELS, isPanel, type PanelId } from "./dockLayout";
+import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
@@ -2391,13 +2391,13 @@ export function App() {
     if (id === "clash") showClashTab(); else if (id === "plan") showPlanTab(); else if (id === "chat") showChatTab();
     else dock.current?.show(id);
   };
-  // What the dock's tabs say beside their titles, as the classic tabs do.
-  const dockTabs: Partial<Record<PanelId, React.ReactNode>> = {
-    clash: proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null,
-    plan: planning || contextWorking ? <i className="spinner" aria-hidden />
-      : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
-      : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null,
-  };
+  // What the Clash and Plan tabs say beside their titles (a count, a spinner): the classic tabs, the phone sheet's and
+  // the dock's show the same.
+  const clashBadge = proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null;
+  const planBadge = planning || contextWorking ? <i className="spinner" aria-hidden />
+    : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
+    : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null;
+  const dockTabs: Partial<Record<PanelId, React.ReactNode>> = { clash: clashBadge, plan: planBadge };
   const raise = () => { if (snap === "peek") setSnap("half"); };
   // The next clash still open after the selected one (the report's order), for "Next clash" once one is done.
   const nextClash = (() => {
@@ -2686,18 +2686,16 @@ export function App() {
       </main>)}
 
       {docked ? <div className="dock-area"><DockHost slots={slots} sizes={widths} tabs={dockTabs} onReady={(d) => { dock.current = d; }}
-        onTab={showPanel}
+        onGone={(d) => { if (dock.current === d) dock.current = null; }} onShown={setTabState} onTab={showPanel}
         onWindows={setPopouts} /></div> : <>
         <SlotHost slot={slots.clashes} />
         <SlotHost slot={slots.model} />
         <aside className={`pane right ${tab === "chat" ? "chatting" : ""}`}>
           <div className="tabs" role="tablist">
             <button role="tab" aria-selected={tab === "clash"} className={tab === "clash" ? "on" : ""} onClick={showClashTab}>
-              <LocateFixed size={14} aria-hidden /> Clash{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
+              <LocateFixed size={14} aria-hidden /> Clash{clashBadge}</button>
             <button role="tab" data-tour="tab-plan" aria-selected={tab === "plan"} className={tab === "plan" ? "on" : ""} onClick={showPlanTab}>
-              <Network size={14} aria-hidden /> Plan{planning || contextWorking ? <i className="spinner" aria-hidden />
-                : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
-                : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
+              <Network size={14} aria-hidden /> Plan{planBadge}</button>
             <button role="tab" data-tour="tab-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "on" : ""} onClick={showChatTab}>
               <MessageSquare size={14} aria-hidden /> Chat</button>
           </div>
@@ -2919,12 +2917,10 @@ export function App() {
               <List size={17} aria-hidden /><span>Clashes</span>{report ? <span className="badge-n">{report.clashes.length}</span> : null}</button>
             <button role="tab" aria-selected={!listOpen && tab === "clash"} className={!listOpen && tab === "clash" ? "on" : ""} data-tour="sheet-fix"
               onClick={() => { showClashTab(); raise(); }}>
-              <LocateFixed size={17} aria-hidden /><span>Fix</span>{proposal?.options.length ? <span className="badge-n">{proposal.options.length}</span> : null}</button>
+              <LocateFixed size={17} aria-hidden /><span>Fix</span>{clashBadge}</button>
             <button role="tab" aria-selected={!listOpen && tab === "plan"} className={!listOpen && tab === "plan" ? "on" : ""} data-tour="tab-plan"
               onClick={() => { showPlanTab(); raise(); }}>
-              <Network size={17} aria-hidden /><span>Plan</span>{planning || contextWorking ? <i className="spinner" aria-hidden />
-                : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
-                : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null}</button>
+              <Network size={17} aria-hidden /><span>Plan</span>{planBadge}</button>
             <button role="tab" aria-selected={!listOpen && tab === "chat"} className={!listOpen && tab === "chat" ? "on" : ""} data-tour="tab-chat"
               onClick={() => { showChatTab(); raise(); }}>
               <MessageSquare size={17} aria-hidden /><span>Chat</span></button>
@@ -3002,8 +2998,6 @@ function contextEvidence(p: ContextProposal, checks: ContextProposal["checks"], 
     clearance_m: g.min_clearance_m, also_needs: p.review_conditions.map((c) => c.message).join("\n"), ...pics };
 }
 
-/** Side panel widths in px: [min, max, default]. */
-const PANE = { left: [240, 640, 310], right: [300, 720, 380] } as const;
 /** Within the side's limits, leaving the viewer at least 360 px beside the other panel (`other`). */
 const clampPane = (side: "left" | "right", w: number, other = 0) =>
   Math.round(Math.max(Math.min(w, PANE[side][1], window.innerWidth - other - 360), PANE[side][0]));
