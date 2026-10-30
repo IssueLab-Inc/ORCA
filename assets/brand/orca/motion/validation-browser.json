@@ -1,0 +1,23 @@
+{
+  "status": "pass",
+  "browser": "Chromium (Microsoft Edge, headless)",
+  "checks": [
+    "Gallery animations visibly change with time",
+    "Rotating O remains centred",
+    "Pause freezes the actual SVG animation",
+    "Dark background and size controls work",
+    "Speed control changes animation duration",
+    "Manual reduced motion preserves visible final wordmark",
+    "One-shot reveal settles into a fully visible logo",
+    "Manual phase selection stops demo auto-advance",
+    "Gallery fits 320, 390, 768 and desktop widths without overflow",
+    "Native loader exposes one accessible task label",
+    "Native loader animation, pause and reduced attributes work",
+    "Production phase component follows input and never auto-advances",
+    "Dynamic labels are inserted as text, not HTML",
+    "Native components respect operating-system reduced motion",
+    "Standalone SVG respects reduced-motion preference",
+    "No browser JavaScript errors"
+  ],
+  "scope": "Gallery, native module and standalone SVG. React wrappers require the consuming application build."
+}

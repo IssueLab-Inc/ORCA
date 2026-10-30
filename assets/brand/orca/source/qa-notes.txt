@@ -1,0 +1,34 @@
+ORCA identity 01 - quality review
+30 October 2026
+
+VISUAL REVIEW
+Reviewed the rendered asset overview, all four guide pages, all six vector
+print-master pages, and the dark/light social, square, banner and video layouts.
+PDF pages were rendered with Poppler. A clear-space label was moved below the
+diagram border and page 2 was rendered and checked again.
+
+The final artwork follows approved direction 05. It is a manual vector
+reconstruction of the concept, with deliberately defined curves and cuts;
+the generated reference PNG has not been traced into raster-filled SVGs.
+
+The O in the wordmark and the standalone standard symbol share identical path
+commands. The micro version changes only the diagonal cut width, from 18 to 24
+master units. The source ring is 256 units tall and the clear space is 64 units.
+
+AUTOMATED REVIEW
+The build checks PNG decoding, RGBA transparency and clear-space bounds;
+SVG parsing, outlined text and absence of bitmap embeds; PDF reopening, page
+counts, extractable text and absence of raster images; all manifest icon paths
+and dimensions; all seven ICO sizes; shared O geometry; the central 80 percent
+maskable-icon safe circle; sRGB profiles on exported PNGs; and ZIP integrity.
+manifest.json lists file sizes, dimensions where relevant and SHA-256 hashes.
+
+PNG assets are rasterised from SVG at twice their target resolution and then
+downsampled with sharp. Transparent logo exports keep genuine alpha, including
+the white variants. Social/video cards have intentional solid backgrounds.
+
+EPS files contain plain vector PostScript commands from the same master paths.
+They use RGB, as do the print PDFs. The files are not PDF/X or a CMYK proof.
+
+This records the original standalone delivery. Repository-edition commands and
+validation are documented in README.md and docs/brand-assets.md.

@@ -3,7 +3,7 @@
 > **Covers:** the words used across ORCA's code, UI and docs, and the naming rules: `server/sightline/*.py` (the
 > symbols named below), `web/src/api.ts` (shared types), `web/src/fixKinds.ts` (`KIND_LABEL`), `web/src/Triage.tsx`
 > (`TRIAGE`), `web/src/reqFile.ts`, `web/src/About.tsx` ("Words you'll see") · **Checked against code:** 2026-10-30
-> (`104fda9`)
+> (`feature/brand-assets`, based on `0390a12`)
 
 A newcomer to ORCA meets two vocabularies at once: the building and machine design world's (IFC, MEP, ports, provision
 for void) and ORCA's own (scene, option, trial, basis, hub). This doc defines both, maps each ORCA term to the code
@@ -174,6 +174,12 @@ each feature see [01](01-product-and-journeys.md).
   Voice Transcribe) are fine as the names of the models, and the page names them.
 
 ### What users see says ORCA
+
+**Approved identity:** direction **05 / ORCA Type** is the custom geometric wordmark and split-O monogram selected
+on 30 October 2026. The master, icon variants, palette and motion live in
+[`assets/brand/orca/`](../../assets/brand/orca/README.md), for the upcoming redesign. The name remains **ORCA, by IssueLab**.
+Motion names are Orbit, Breathe, Resolve, phase cycle, Settle and Reveal; a cycle is demonstrative, while the production
+phase indicator follows actual events. Identity inventory checked 2026-10-30 against `0390a12` plus this slice.
 
 | Where | Name | Code |
 |---|---|---|

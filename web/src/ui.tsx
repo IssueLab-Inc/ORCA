@@ -30,19 +30,26 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
       const t = e.target as Node;
       if (!ref.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
     };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // Esc closes the menu and nothing else (not the viewer's selection or clash, which listen on the window).
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     const doc = ref.current?.ownerDocument ?? document;  // a panel in its own window has its own document
     doc.addEventListener("pointerdown", off);
     doc.addEventListener("keydown", esc);
     return () => { doc.removeEventListener("pointerdown", off); doc.removeEventListener("keydown", esc); };
   }, [open]);
-  // Kept inside the window: a menu that would run off the right edge opens to the left of its trigger's edge instead.
+  // Kept inside what shows it: a menu that would run off the right edge opens to the left of its trigger's edge instead,
+  // and one that would run off the bottom moves up (scrolling inside when taller than the room). The room is the window,
+  // or a dock panel that clips what overflows it (docs/panels.md); past the window's bottom a menu would make the whole
+  // page scroll, past a panel's it would be cut off.
   useLayoutEffect(() => {
     const m = menu.current;
     if (!open || !m || getComputedStyle(m).position === "fixed") return;
-    m.style.translate = "";
-    const over = m.getBoundingClientRect().right - ((m.ownerDocument.defaultView ?? window).innerWidth - 8);
-    if (over > 0) m.style.translate = `${-Math.round(over)}px 0`;
+    m.style.translate = ""; m.style.maxHeight = ""; m.style.overflowY = "";
+    const room = roomFor(m), r = m.getBoundingClientRect();
+    const overX = r.right - (room.right - 8), overY = r.bottom - (room.bottom - 8);
+    const up = overY > 0 ? Math.min(overY, Math.max(r.top - room.top - 8, 0)) : 0;
+    if (overX > 0 || up > 0) m.style.translate = `${overX > 0 ? -Math.round(overX) : 0}px ${-Math.round(up)}px`;
+    if (r.height > room.bottom - room.top - 16) { m.style.maxHeight = `${room.bottom - room.top - 16}px`; m.style.overflowY = "auto"; }
   }, [open]);
   const close = () => setOpen(false);
   // On a phone the menu is a sheet over the whole page, so it goes to the body: inside the viewer's rail it would sit
@@ -65,6 +72,21 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
       {body && (sheet ? createPortal(body, document.body) : body)}
     </div>
   );
+}
+
+/** The box a menu can show in: its window (a panel in its own window: that one), narrowed by every ancestor that clips
+ *  what overflows it. */
+function roomFor(m: HTMLElement) {
+  const view = m.ownerDocument.defaultView ?? window;
+  const room = { top: 0, left: 0, right: view.innerWidth, bottom: view.innerHeight };
+  for (let e = m.parentElement; e; e = e.parentElement) {
+    const cs = view.getComputedStyle(e);
+    if (!/hidden|clip|auto|scroll/.test(`${cs.overflowX} ${cs.overflowY}`)) continue;
+    const r = e.getBoundingClientRect();
+    room.top = Math.max(room.top, r.top); room.left = Math.max(room.left, r.left);
+    room.right = Math.min(room.right, r.right); room.bottom = Math.min(room.bottom, r.bottom);
+  }
+  return room;
 }
 
 type Side = "right" | "left" | "top" | "bottom";

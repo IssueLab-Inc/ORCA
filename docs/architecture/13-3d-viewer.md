@@ -315,9 +315,30 @@ flowchart LR
   hidden parts are drawn ghosted where something stands in front (`behind`); last a normals and depth pass. The
   composite shader (every frame, from the targets) draws projection lines where normals turn or depth jumps, the heavy
   cut outline where the alpha class changes, and paper outside the crop.
-- **When it redraws:** `renderDrawing` keeps a key of `version` (bumped by `applyMode`, previews, hits, the marker and
-  loads), the view's camera (centre, look, up, scale, planes, crop), the follow toggle and the hidden models; only a change redraws the targets. Captures
-  restore `version` after they shoot, so a thumbnail does not redraw every drawing.
+- **When it redraws:** `renderDrawing` keeps a content key of `version` (bumped by `applyMode`, previews, hits, the
+  marker and loads), what the view shows apart from where it looks (`DrawingView.contentKey`: look, up, size, planes,
+  crop), the follow toggle and the hidden models; a change redraws the targets. A pan or zoom alone does not: while
+  the gesture goes on (a pointer holds the pane, or it moved in the last three frames) the composite moves and scales
+  the last picture (`DrawingView.shift`, paper where it does not reach), and the drawing is drawn once the gesture
+  rests. A drag that reshapes another view (a cut, a section line) redraws that view at most five times a second.
+  Captures restore `version` after they shoot, so a thumbnail does not redraw every drawing.
+- **What it draws:** a view that cuts puts its camera's near plane at the cut (its centre is on the cut plane), so what
+  the cut removes is never drawn, not drawn and clipped: everything above a plan's cut, everything behind a section's
+  line. The fills, the hidden pair and the normals put the far plane at a bottom or far clip too; the cut faces' passes
+  keep it beyond the model (`DrawingView.reach(true)`), since they must see the whole of each solid the cut passes
+  through. Targets have no multisampling (4× took about two thirds of a drawing's graphics memory: some 90 MB a pane
+  at 2× pixels on a large screen, enough in Quad to lose the WebGL context), and a pane hidden by a maximised one
+  gives its targets back.
+- **Compositing:** the canvas keeps what each pane last showed (`preserveDrawingBuffer`), so a pane composites again
+  only when its picture, shift, crop or rectangle changed, or when something drew over the whole canvas or cleared it
+  (`canvasStamp`: captures, a resize, a layout change). Orbiting the 3D view composites no drawing.
+- **A resize** (`fit`, from a `ResizeObserver`) resizes the canvas only when its size really changed, and draws every
+  pane at once: the observer runs after the frame's drawing and before the browser paints, and a cleared canvas
+  showed as the viewer blinking off and on.
+- **A lost WebGL context** (the graphics card short of memory, or a driver reset): the stage says so
+  (`.view-lost`); when the browser gives it back, every pane is drawn again (three.js re-creates what was on the
+  card); not back within 5 s, it offers a reload, which picks the session up. Captures return nothing meanwhile
+  (`Viewer.lost`), never black pictures, and `App` holds the thumbnail queue until it is back.
 - **Full model or follow 3D:** `applyMode` records each element whose 3D visibility differs from the drawings' (what
   Context or Isolate hide) in `drawVis`; `useDrawingVisibility` swaps the drawings' set in around a drawing's passes
   and picks, unless `setDrawingsFollow(true)`.
@@ -476,7 +497,7 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 | E | Outlines | M | Measure |
 | G | Next visual style | L | Connections |
 | O | Perspective / orthographic | Q | Layout: Single, Two, Quad (Two at most on a tablet; none on a phone) |
-| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight |
+| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight. With a menu open it closes only the menu |
 
 - **Mouse:** a single click selects the element and shows its properties card (with Set as A / Set as B and its view
   actions) or, in measure mode, adds a point; a double click picks A, then B (a third pick starts over at A); a drag of
@@ -509,13 +530,15 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 - One draw call per batch, whatever the element count; a preview changes instance matrices, and focus meshes reuse
   the batches' GPU buffers. `applyMode` does walk every element of every model on each mode, focus or preview change.
 - The frame loop renders the 3D pane continuously (`setAnimationLoop`), not on demand. Drawing panes redraw their
-  targets only when their key changes and composite every frame (measured Oct 30 in Quad on Northbank: idle, no
-  redraws; orbiting the 3D view, none, only the plan's annotation for the 3D camera mark; a new clash, three). A
-  drawing with a cut costs about three passes over the visible triangles (fills, stencil, normals) plus full-view
-  quads. Frame times on a real GPU are still to measure (the cloud session renders with software GL).
+  targets only when what they show changes, and composite only when their picture or place changes (measured Oct 30
+  in Quad on Northbank: idle, no redraws; orbiting the 3D view, no redraws and no composites; panning a plan with 60
+  pointer moves, no redraws while it goes on and one when it rests; ten wheel steps on a section, one redraw after; a
+  new clash, three). A drawing with a cut costs four passes over what lies between its cut and its far plane (fills,
+  counting both ways, normals) plus full-view quads. Frame times on a real GPU are still to measure (the cloud session
+  renders with software GL).
 - Thumbnails: `thumbClash` renders into the visible canvas, so `posed` renders the restored view before returning
   (checked Oct 28 by sampling the canvas between frames: the old build jumped 45 levels of brightness, the new one 0;
-  CLAUDE.md). `App` draws one queued thumbnail every 60 ms, newest request first, paused while a proposal, plan,
+  CLAUDE.md). `App` draws one queued thumbnail every 60 ms (waiting while the WebGL context is lost), newest request first, paused while a proposal, plan,
   replay, reload or check runs ([12](12-web-app.md)).
 - Small models: `reach` and `sceneDiag` above, the marker's constant screen size and a near plane down to 0.5 mm
   (checked Oct 29 on a generated 110 mm load cell and on Northbank #1 and #40, which frame as before; CLAUDE.md).
@@ -527,8 +550,6 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
   viewer follows its host with a `ResizeObserver`, so collapsing a side bar grows the canvas with no viewer call.
   Panels floating over the canvas paint no opaque scroller of their own: in Chromium one culled the canvas under it by
   its whole content height and left a hole (Oct 30).
-- **No WebGL context-loss handling yet:** a lost context blanks every view until a reload, and drawing views stay
-  black even when the context comes back (their drawn key is unchanged). Known limit, [20](20-decisions-limits-and-roadmap.md).
 
 ## When to update this doc
 

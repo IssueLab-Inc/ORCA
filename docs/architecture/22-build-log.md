@@ -1083,6 +1083,47 @@ Review of the drawing views (Oct 30; PR review on `feature/drawing-views`; code 
   menu) and the picker shrinks last; the title block and scale bar stack when they would meet. Checked in Chromium in
   Quad at 1600, 1366 and 1180 px: no control outside its header in any pane.
 
+Drawing views after the live smoke test (Oct 30; owner's smoke test of the deploy; code `web/src/viewer/drawing.ts`,
+`Viewer.ts`, `annotate.ts`, `web/src/ui.tsx`, `App.tsx`):
+- **The viewer went blank** (a lost WebGL context, the owner's screenshot: every WebGL picture gone, the 2D layers
+  left): each drawing pane's targets were 4× multisampled, about 90 MB a pane at 2× pixels on a large screen. Drawings
+  now have no multisampling (they differ from before by a pixel at some edges), a pane hidden by a maximised one gives
+  its targets back, and the edge styles' targets go when the style does. A lost context is announced on the stage and
+  every pane is drawn again when it comes back (a reload offered after 5 s); captures return nothing meanwhile and the
+  thumbnail queue waits, so no black pictures reach the list or the server.
+- **Panning a drawing stuttered:** every pointer move redrew it. A pan or zoom now moves the last picture and draws once
+  it rests; a view that cuts starts its camera at the cut (nothing above a plan's cut, nothing behind a section line is
+  drawn) and the passes that clip at a bottom or far clip stop there; a pane composites only when its picture changes.
+- **Blinking:** a resize cleared the canvas after the frame's drawing; the canvas is now resized only when its size
+  changes, and drawn again at once.
+- **The plan's 3D camera mark changed size** as the orbit point moved to what was under the pointer: it is now a fixed
+  size.
+- **The page scrolled** with a rail menu open (the Visibility list, the Camera and Views menus on shorter windows):
+  menus now stay inside the window, moving up and scrolling inside when taller.
+- **Checked** in Chromium on Northbank (software GL): panning a plan, 60 moves, no redraws while it goes on and one at
+  rest; ten wheel steps, one redraw after; orbiting the 3D, no drawing redraws or composites; a context lost and
+  restored with `WEBGL_lose_context`: the notice, then every pane back with the same content, no black thumbnails;
+  A/B/C, thumbnails, `capture()` and Show it built's passes still byte-identical in Single and Quad; the rail menus at
+  1600×1000, 1440×800 and 1366×700 leave the page its height; drawings at rest match the merged build in the section,
+  elevation and 3D panes (no multisampling aside) and in the plan apart from the camera mark; 102 web tests.
+- **Esc closed a menu and left the clash** (found in the live check after the deploy): with a rail or pane menu open,
+  Esc now closes only the menu (`Popover` stops the key there, before `App`'s window listener).
+
+Approved identity and motion library (Oct 30, owner request; `assets/brand/orca/`, design in
+`docs/brand-assets.md`):
+- **Identity:** owner selected direction 05 / ORCA Type: custom geometric wordmark and split-O symbol. Added the
+  shared vector master, outlined SVGs, transparent PNGs, icon/favicons, maskable variants, print PDF/EPS, social/video
+  graphics, palette tokens, approved concept reference and usage guide for the upcoming redesign.
+- **Motion:** Orbit, Breathe and Resolve loading loops, a demonstrative four-phase cycle, Settle and Reveal;
+  animated SVG, transparent APNG and GIF previews; dependency-free native elements and React TypeScript wrappers.
+  Production phases follow real events, one-shot effects settle, and web motion honours reduced-motion preferences.
+- **Repository handoff:** kept outside the served application; locked generator dependencies, one geometry source,
+  portable browser selection, ignored intermediate/archive directories, and reproducible build/check commands.
+- **Checked:** production web build; 102 web tests; 9 architecture-map tests; strict React wrapper type check;
+  actual gallery/native-element/standalone-SVG browser checks (motion, pause, size/speed/theme, accessible labels,
+  safe dynamic text, real phase control, one-shot final states, reduced motion, 320/390/768 px and desktop layouts);
+  static and motion export validation. The pack is ready for integration in a subsequent application redesign.
+
 Panels that dock, collapse, float and pop out (Oct 30; `feature/dockable-panels`; design [docs/panels.md](../panels.md);
 code `web/src/dock.tsx`, `web/src/dockLayout.ts`, `web/src/App.tsx`, `web/src/ui.tsx`, `web/src/Tour.tsx`,
 `web/src/index.css`, `web/public/popout.html`):
@@ -1095,8 +1136,8 @@ code `web/src/dock.tsx`, `web/src/dockLayout.ts`, `web/src/App.tsx`, `web/src/ui
   panels home. Keys, tooltips and popovers work in a pop-out window.
 - **Found on the way:** a floating panel's opaque scroller culled the WebGL canvas under it (fixed: docked slots draw
   no background); StrictMode disposed the dock's subscriptions (fixed: let go only on a real unmount); dockview's
-  `clear()` leaves side bars collapsed (Reset removes them). Recorded as a known limit, not fixed here: the viewer
-  doesn't survive a lost WebGL context (the owner's blank-views screenshot; [20](20-decisions-limits-and-roadmap.md)).
+  `clear()` leaves side bars collapsed (Reset removes them). The blank viewer (a lost WebGL context) was fixed on
+  `main` meanwhile (the entry above) and merged in.
 - **Checked:** `web/tests/dock.test.mjs` (7); 109 web tests; `npm run build` and `tsc` clean; bundle +93 kB JS and
   +11 kB CSS gzipped. In Playwright on Northbank (software GL): the default layout; float, collapse, reopen, tab
   clicks; Chat popped out (styles, typing, a tooltip, M reaching the page), its window closed and popped out again;

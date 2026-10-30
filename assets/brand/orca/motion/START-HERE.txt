@@ -1,0 +1,116 @@
+ORCA / MOTION PACK 01
+Version 1.0 | 30 October 2026 | Direction 05 | By IssueLab
+
+START
+Open preview/index.html to compare the motion, change size and background,
+pause playback, and see the static reduced-motion state.
+preview/motion-overview.gif is a quick animated comparison.
+web/example.html demonstrates the actual reusable native components.
+
+THE MOTIONS
+Orbit       1.60 s loop. The split O rotates continuously. General loading.
+Breathe     2.00 s loop. Two halves gently separate and return. Background work.
+Resolve     2.40 s loop. Two halves slide into alignment, then hold. Checking.
+Phase cycle 4.80 s loop. Four quarter turns. Demonstration only.
+Settle      0.76 s, once. A small completion flourish, ending at the static O.
+Reveal      1.60 s, once. ORCA letters arrive in sequence and hold.
+
+Use Orbit as the default loading indicator. Breathe is a quieter alternative.
+Resolve is useful while testing an arrangement. None is a measured percentage.
+The success flourish should run only after the application confirms completion.
+Motion does not itself establish that geometry, safety or engineering is verified.
+
+FORMATS
+svg/      18 self-contained animated vectors: each motion in ink, navy and white.
+          Three loops, a demo phase cycle, and two one-shots. Pure CSS, no script.
+apng/     12 transparent animated PNGs, ink and white. Loaders loop; reveal and
+          settle play once. Icons are 256 px; reveals are 960 x 306 px.
+gif/      12 compatibility previews: light and dark solid backgrounds. All GIFs
+          loop for easy review, including the one-shot motions' demonstrations.
+web/      Dependency-free native elements, TypeScript declarations, shared CSS,
+          and a working integration example. The component embeds its own styles.
+react/    React TypeScript wrappers around the tested native elements.
+source/   Motion sources and export scripts; the shared master is
+          ../source/master.json in the parent identity library.
+
+Use SVG or the native components for an application loading indicator. These
+honour prefers-reduced-motion. GIF/APNG files do not detect a viewer's preference;
+the host must choose a static image when reduced motion is requested.
+Existing static assets are available in the companion ORCA brand pack.
+
+VANILLA HTML
+Serve web/orca-motion.js as a JavaScript module:
+
+  <script type="module" src="/brand/motion/web/orca-motion.js"></script>
+  <orca-loader variant="orbit" size="32" label="Loading models"></orca-loader>
+  <orca-loader variant="resolve" label="Checking geometry" show-label></orca-loader>
+  <orca-phase phase="check" size="40" label="Checking clearance"></orca-phase>
+  <orca-reveal width="320" label="ORCA by IssueLab"></orca-reveal>
+  <orca-settle size="48" label="Export completed"></orca-settle>
+
+Elements inherit the surrounding text colour, including white on navy.
+Use size for symbols, width for the reveal. Both are pixel values.
+Boolean attributes paused and reduced control manual pause and static mode.
+Labels go into an accessible live status on loaders/phases, not every frame.
+The reveal and completion mark use an accessible image label.
+To replay a reveal or settle element, call its replay() method.
+The component styles are scoped in a shadow root and do not restyle the app.
+
+ACTUAL WORKFLOW PHASES
+The production phase indicator accepts observe, resolve, check or apply.
+Update its phase attribute from actual server or application events:
+
+  document.querySelector('orca-phase').setAttribute('phase', 'check');
+
+It never advances itself, invents a percentage or announces completion on a timer.
+The automatically cycling SVG, GIF and APNG phase assets are for demonstration;
+they are not a truthful substitute for a real workflow phase.
+
+REACT
+Copy react/ and web/ together, preserving their relative paths:
+
+  import { OrcaLoader, OrcaPhaseIndicator, OrcaLogoReveal, OrcaComplete }
+    from './brand/motion/react/OrcaMotion';
+
+  <OrcaLoader variant="orbit" size={32} label="Loading models" />
+  <OrcaPhaseIndicator phase={phaseFromServer} label="Checking clearance" />
+  <OrcaLogoReveal width={320} />
+  {exportFinished && <OrcaComplete label="Export completed" />}
+
+The wrappers use createElement, contain no third-party animation dependency,
+and import the native module automatically. They are intended for React 19.
+Replay a reveal by mounting it with a new React key when explicitly requested.
+Keep the native JavaScript module together with the wrappers in your build.
+Run the application's normal TypeScript/build checks when integrating.
+
+REDUCED MOTION AND PLAYBACK
+With prefers-reduced-motion: reduce, the web/SVG artwork remains visible in its
+final static state. No repeated motion or delayed hidden letter is required.
+The gallery's Reduce motion toggle can also demonstrate this state.
+The native elements accept a reduced attribute for application-level preferences.
+Use a single status label for an active task; avoid announcing animation frames.
+One-shot animations settle and stop. The gallery offers explicit Replay controls.
+
+PROVENANCE
+The O and wordmark paths are copied from the direction-05 vector master in the
+original brand pack. Animation changes placement and opacity, not the logo paths.
+Raster exports use deterministic vector poses; web versions use native CSS easing.
+The raster and web timing curves are visually aligned, not byte-identical players.
+
+REBUILD
+Node 18+ and sharp are required for rendering frames. Python 3.10+ and Pillow
+are required for GIF/APNG encoding and ZIP packaging. From this kit's root:
+
+  node source/build-motion.cjs
+  node source/build-components.cjs
+  python source/package-motion.py
+
+Node can use packages in a different location with --deps /path/to/node_modules.
+Pass that argument to both Node build commands when needed.
+Frame intermediates are written to the ignored .build/frames/ directory.
+Optional: pass --brand-root .. to package-motion.py
+to build a combined static + motion kit. Existing static files are preserved.
+
+The browser runtime was exercised in Chromium. The repository kit also has a
+strict TypeScript check for the React wrappers. See ../README.md for commands.
+The upcoming redesign will integrate these assets into the application.
