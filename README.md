@@ -55,7 +55,8 @@ ranking. An idea that fails the check shows the reason, and is sent back on the 
 <td width="50%" valign="top">
 <img src="docs/media/proposals/cell.webp" alt="ORCA proposing a fix in the PC-03 palletising cell: the compressed-air line dropped under the conveyor's side rails." width="100%">
 
-**PC-03 cell #66, from STEP:** the air line dropped 150 mm under both conveyor side rails as one offset.
+**PC-03 cell #66, from STEP:** the air line dropped 150 mm under both conveyor side rails as one
+offset, 53 mm clear (was 50 mm overlap), checked against 12 elements.
 
 </td>
 <td width="50%" valign="top">
