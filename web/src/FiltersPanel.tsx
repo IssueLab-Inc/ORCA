@@ -81,7 +81,7 @@ export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft
       {rules.length > 0 && <div className="fpanel-switches">
         <label className="check"><input type="checkbox" checked={state.colours} onChange={(e) => onState({ ...state, colours: e.target.checked })} /> Show colours</label>
         <div className="frest"><span className="flabel">The rest</span>
-          <div className="fact frest-seg" role="radiogroup" aria-label="The rest">
+          <div className="fseg frest-seg" role="radiogroup" aria-label="The rest">
             {REST.map((r) => { const on = restOf(state) === r.id; return (
               <button key={r.id} type="button" role="radio" aria-checked={on} className={`seg${on ? " on" : ""}`} data-tip={r.tip}
                 onClick={() => onState({ ...state, greyRest: r.id === "grey", hideRest: r.id === "hide" })}>{r.label}</button>); })}
@@ -297,7 +297,7 @@ function Editor({ p, draft, onDraft, state, onState }: { p: Prepared; draft: Rul
       </div>
       <button type="button" className="btn small ghost" onClick={() => set({ when: [...draft.when, { facet: "", op: "is", values: [] }] })}>
         <Plus size={14} aria-hidden /> Property condition</button>
-      <div className="fact" role="radiogroup" aria-label="What to do">
+      <div className="fseg" role="radiogroup" aria-label="What to do">
         {ACTIONS.map((a) => { const Icon = a.icon; return (
           <button key={a.id} type="button" role="radio" aria-checked={draft.action === a.id} className={`seg${draft.action === a.id ? " on" : ""}`}
             data-tip={a.tip} onClick={() => set({ action: a.id, ...(a.id === "byValue" && !draft.by && byFacet ? { by: { facet: byFacet } } : {}) })}>
