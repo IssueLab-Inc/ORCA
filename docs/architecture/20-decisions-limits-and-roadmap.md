@@ -92,6 +92,8 @@ carries the decision today.
 | Oct 30 | The demo video goes after both hackathon themes as one story: it opens in our world (Theme 1, a building problem IssueLab knows firsthand) and turns to the frontier (Theme 2, the same loop on a robot cell); a narrator with captions; plain words, no BIM or IFC unless explained; Meta's models named with what each does; numbers only from measured runs | [docs/demo-video.md](../demo-video.md) |
 | Oct 30 | The desktop has no header bar: the ORCA wordmark hangs from the model's top edge in a notch (20 px high, smaller than the brand guide's minimum, to stay out of the model) that grows to show live progress; Export and one menu sit in the model's top right corner; the brand's navy and ink across the app; the favicon and icons from the kit; not a redesign of the landing | `web/src/Brand.tsx`, `App.tsx` (`notchStatus`, `corner`), `AppMenu.tsx`; [docs/brand-assets.md](../brand-assets.md), [12](12-web-app.md) |
 | Oct 30 | Nothing about one project, domain, demo or vendor is fixed in code. The requirements file decides whether a project is a building or a machine (`domain`) and what is fixed in place (`stays`, and groups allowed no edits), fully; the demos get default requirements of their own, checked in and evaluated off and on; team names are typed; the clearance follows the requirements on every check; model names, prices and limits are settings; the MCP website address is the deploy's setting | `requirements.Doc.domain` / `stays`, `IfcScene.stays`, `Workspace.requirements_for`, `demos.py`, `Workspace.clearance`, `meta_client.labels`, doc [15](15-requirements-settings-and-config.md) |
+| Oct 31 | More model formats wait until after the freeze, and come in only as models ORCA checks (converted to IFC on the server, like STEP), never as a view-only viewer; glTF/GLB first | Nothing in code yet; "Later", below |
+| Oct 31 | Later work to explore, beyond the hackathon: connectors into design tools (Inventor, Revit and others) so a kept fix lands in the designer's own model, and site data (photos, video, scans) aligned to the coordination model with SAM 3.1 | Nothing in code yet; "Later: connectors into design tools" and "Later: site data aligned to the model", below |
 
 **Oct 30, owner decision:** approved direction **05 / ORCA Type** (custom wordmark and split-O symbol), then the full
 asset and motion pack, and requested its repository PR and merge for the upcoming application redesign. The approved
@@ -278,8 +280,127 @@ From CLAUDE.md and [docs/mcp.md](../mcp.md):
   `muse mcp login`; claude.ai's custom connectors expect it).
 - **STEP machines placed inside building models.**
 - **Offsets and trims on meshed STEP parts** (tubes, bends, castings).
+- **More model formats, glTF/GLB first** (owner decision, Oct 31: after the freeze, and only as models ORCA checks,
+  never as a view-only viewer). The way in is STEP's: the server converts the file to IFC, so detection, fixes,
+  reports and export work unchanged and the viewer needs nothing new. A throwaway test on Oct 31 (not in the repo)
+  wrote `tests/test_step.py`'s cell out with OpenCASCADE and ran it through `step.convert` with only `step._read`
+  swapped:
+  - **glTF/GLB** (`RWGltf_CafReader`): all six parts with their names and groups, in metres, and the same three
+    clashes as the STEP. Parts arrive as meshes, so they only move, like meshed STEP parts. Group names are the
+    file's node names (OpenCASCADE's own writer gives product names only with `RWMesh_NameFormat_Product`). To
+    build: the reader picked by suffix, the suffix lists (`service.MODEL_SUFFIXES`, the message in
+    `app._receive_models`, `web/src/uploads.ts`), moves written back into the `.glb` on export, tests,
+    [14](14-files-in-and-out.md) and [docs/step.md](../step.md).
+  - **IGES** (`IGESCAFControl_Reader`): opened, but the assembly collapsed into one part, so nothing could clash. It
+    would need splitting by solid.
+  - **Not tested:** STL and VRML (OpenCASCADE reads both; an STL has no part names, so one file is one element);
+    OBJ, 3MF, PLY, DAE, 3DS and FBX need an MIT reader such as trimesh or assimp (this OCP build has no OBJ reader);
+    3DM only when the file keeps its render meshes; DXF, SVG and most DWG are 2D drawings, underlays at most; DWG
+    (ODA is paid, LibreDWG is GPL), SKP and DWF are closed; IES is a light's photometric data, not geometry.
+- **Connectors into design tools** (Inventor, Revit and others), so a kept fix lands in the designer's own model:
+  [below](#later-connectors-into-design-tools).
+- **Site data aligned to the coordination model, with SAM 3.1**: [below](#later-site-data-aligned-to-the-model-sam-31).
 - **Panels:** drawing views as dock panels of their own (they share one canvas), pop-out windows restored after a
   reload, docking on tablets ([docs/panels.md](../panels.md)).
+
+### Later: connectors into design tools
+
+Owner direction, Oct 31: explore taking ORCA into the tools models are made in, so a kept fix lands in the designer's
+own model, not only in an exported IFC or STEP. Nothing here is built or tried; each way in is the maker's published
+SDK or API.
+
+**What every connector does,** the same in every tool:
+
+1. **Send** the model to an ORCA session, each native element keeping its own id beside the GlobalId (or STEP label
+   path) ORCA uses. Most tools already write that id when they export IFC or STEP.
+2. **Receive** kept fixes as changes to elements. `plans.apply` has checked them again on the server; a connector
+   never keeps a fix ORCA did not check.
+3. **Apply** them natively. A move is one transform in every API below, so moves come first. Offsets, routes, resizes
+   and penetrations need each tool's own MEP or feature calls (split a duct and add its fittings, cut an opening), so
+   they follow tool by tool.
+
+A connector would join a visitor's session the way MCP agents do, with a pairing link ([11](11-mcp-and-agent-links.md)).
+An assistant inside a tool that speaks MCP can already call `check_move`, `propose_fixes` and `apply_fix` today.
+
+**Feasibility:** *open* is a public REST API or an open-source SDK, no desktop needed; *add-in* is a desktop add-in on
+the maker's public SDK (most are Windows only); *gated* needs a licensed SDK or a partner programme.
+
+| Tool (maker) | Way in | What ORCA would do there | Feasibility |
+|---|---|---|---|
+| **Building design** | | | |
+| Revit (Autodesk) | .NET add-in; Design Automation for Revit on Autodesk Platform Services (APS) runs it in the cloud | Send through Revit's open-source IFC exporter, which keeps each element's IFC GUID; moves with `ElementTransformUtils`; offsets as native duct, pipe and tray segments with their fittings | Add-in, or cloud through APS |
+| Archicad (Graphisoft) | C++ Add-On API; a JSON interface scripted from Python for lighter work | Elements keep their IFC GUIDs; moves first | Add-in |
+| Tekla Structures (Trimble) | .NET Open API | Structure usually stays: send steel and concrete, take issues back; move embeds when asked | Add-in |
+| OpenBuildings, MicroStation, iTwin (Bentley) | iTwin Platform REST APIs and the open-source iTwin.js; MicroStation SDK | An iModel has element ids and changesets: the kept fixes as one changeset | Open (Bentley account) |
+| Vectorworks, Allplan (Nemetschek) | Python (Vectorworks also VectorScript; Allplan's PythonParts) | Moves of placed objects | Add-in |
+| Rhino and Grasshopper (McNeel) | RhinoCommon (.NET) and Python 3 in Rhino 8; a Grasshopper component calling ORCA's HTTP API | Check and fix a design while it is still parametric | Add-in (Windows and Mac) |
+| SketchUp (Trimble) | Ruby API extension | SKP is closed as a file, but an extension can send the model and move components | Add-in |
+| AutoCAD, AutoCAD MEP, Plant 3D (Autodesk) | .NET API, ObjectARX | DWG is closed as a file, but an add-in can read and move its objects | Add-in |
+| Bonsai (on Blender) and FreeCAD BIM, both open source | Python, both built on IfcOpenShell like ORCA's server | A kept fix is already an IFC edit: the shortest path of all | Open |
+| **Mechanical design** (ORCA's STEP path already writes moves back onto assembly components by label path: [docs/step.md](../step.md)) | | | |
+| Inventor (Autodesk) | .NET/COM add-in, iLogic; Design Automation for Inventor on APS | Assembly occurrences match STEP component paths; moves as occurrence transforms; where constraints hold a part, the add-in says so instead of breaking them | Add-in, or cloud through APS |
+| Fusion (Autodesk) | Python or C++ add-in; its data through APS | Occurrence transforms, with joints respected | Add-in (Windows and Mac) |
+| SolidWorks (Dassault Systèmes) | COM/.NET add-in | Component transforms, with mates respected | Add-in |
+| Onshape (PTC) | REST API with OAuth; an assembly's occurrence transforms are set through the API | No desktop at all: the easiest mechanical tool to connect, and to demo | Open |
+| Creo (PTC) | J-Link (Java); Creo Toolkit (C/C++) | Component moves | Add-in (J-Link); gated (Toolkit) |
+| NX and Solid Edge (Siemens) | NX Open (C++, .NET, Python, Java); Solid Edge COM API | Component moves | Add-in (parts of NX Open licensed) |
+| CATIA V5 and 3DEXPERIENCE (Dassault Systèmes) | V5 Automation (COM); 3DEXPERIENCE web services and EKL | Large programmes where clashes are reviewed in bulk | Gated |
+| **Plant, factory and robot cells** | | | |
+| E3D (AVEVA), Smart 3D (Hexagon) | .NET APIs (E3D also PML) | Plant piping, where clash review is daily work | Add-in, for licensed sites |
+| Factory Design Utilities (Autodesk) | Inventor and AutoCAD add-ins | Machines placed in building layouts: the gap in "STEP machines placed inside building models" above | Add-in |
+| Process Simulate (Siemens), RoboDK, Visual Components | .NET API (Process Simulate); Python APIs | A fix in a robot cell must keep the robot's reach and paths clear | Add-in (Process Simulate licensed) |
+| **Coordination and common data environments** | | | |
+| Navisworks (Autodesk) | .NET API | ORCA reads its XML reports today; an add-in would send clash tests live and take fixes back as viewpoints and BCF | Add-in |
+| Autodesk Construction Cloud (BIM 360) | APS Data Management, Model Coordination and Issues APIs | Pull model versions and clash groups; push issues with the fix's pictures | Open (Autodesk account) |
+| Trimble Connect; Procore, Dalux, BIMcollab, Revizto | REST APIs; BCF topics where they take them | Push issues with the fix's pictures; pull model versions | Open |
+| BCF API (buildingSMART, OpenCDE) | An open REST standard | One connector for every common data environment that speaks it; ORCA writes BCF 2.1 files today ([14](14-files-in-and-out.md)) | Open standard |
+| Solibri (Nemetschek) | Java API; BCF | Rule-check results in, fixes back as BCF | Add-in |
+| Speckle (open source) | Python SDK; Speckle's own connectors for Revit, Rhino, Archicad, Tekla, AutoCAD, SketchUp, Navisworks and others | One connector reaches many tools; objects keep their ids from send to send | Open |
+
+**Order to explore:**
+
+1. Open and cloud first, which reach the most tools without a Windows desktop: Speckle, the BCF API, Onshape and
+   Bonsai.
+2. Revit and Inventor next, the largest user bases, with Design Automation on APS so a fix can be applied without the
+   designer's desktop open.
+3. The rest as users ask.
+
+### Later: site data aligned to the model (SAM 3.1)
+
+Owner direction, Oct 31: the other end of the job. Bring what is on site (photos, video, laser scans) into ORCA,
+aligned to the coordination model's own coordinates, so ORCA can compare what was installed with what was designed
+and check fixes against what is really there. Nothing here is built or tried.
+
+**SAM 3.1** is Meta's open-weights Segment Anything model, released March 27, 2026
+([release notes](https://github.com/facebookresearch/sam3/blob/main/RELEASE_SAM3p1.md),
+[weights](https://huggingface.co/facebook/sam3.1)). From a text or visual prompt it finds, outlines and tracks every
+instance of a concept in images and video. 3.1's Object Multiplex tracks many objects together, faster than SAM 3.
+
+How it could work:
+
+1. **Capture:** a laser scan (E57, LAS) with its panoramas, a 360° camera walk, or phone photos and video.
+2. **Align** to the model's coordinates. ORCA never moves models to the origin, so site data joins the federation where
+   it is: a scan registered to the site's survey control; photos placed by their capture tool's camera poses, or by a
+   person picking three points in the photo and in the model, with ORCA reporting the residual. This step, not
+   segmentation, sets the accuracy.
+3. **Segment with SAM 3.1.** Prompts come from the classes of the elements in view (a duct, a cable tray, a pipe, a
+   beam), never a fixed list. Video and panoramas use 3.1's tracking, so one element keeps one mask across frames.
+4. **Lift to 3D:** each mask picks out its points in the scan (the panoramas share the scan's pose), or its depth.
+5. **Match and measure on the server:** each segment is matched to the nearest model element of its class, and its
+   as-built position is measured from its points, not its pixels (as today, numbers come from geometry).
+6. **Use it in ORCA:**
+   - **Installed against designed:** an element installed away from its model position becomes an issue, with its
+     offset in millimetres.
+   - **Check against what is there:** a fix to a service not yet installed is verified against the as-built
+     positions of what is (the matched elements moved to where they were found, as a site model in the federation).
+   - **Not in the model:** points no element explains (something installed but never modelled) become a clash
+     candidate.
+   - **Progress:** which elements are seen installed.
+   - **Reports:** BCF issues and PDF pages with the site photo beside the model view.
+
+**To settle first:** where SAM 3.1 runs (its open weights on a Modal GPU beside the server, or Meta's API if it serves
+the model); how good alignment can be from photos alone (scans first); people in site imagery (SAM can find them, to
+blur them); and the size of scans against the upload caps ([docs/uploads.md](../uploads.md)).
 
 ### Planned per feature
 
