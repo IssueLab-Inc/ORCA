@@ -1490,3 +1490,13 @@ More model formats on the roadmap (Oct 31; owner decision; no code changed):
 - **Checked:** a throwaway script (not committed) wrote `tests/test_step.py`'s cell out as GLB and as IGES with
   OpenCASCADE and ran each through `step.convert` with only `step._read` swapped. GLB gave the six parts, their
   groups, metres and the same three clashes as the STEP, as meshes; IGES came in as one part with no clashes.
+
+Design tools and site data on the roadmap (Oct 31; owner direction; no code changed):
+- **What changed:** two "Later" sections in [20](20-decisions-limits-and-roadmap.md). Connectors into design tools: what
+  every connector does (send with native ids, receive kept fixes, apply them natively, moves first), then a table of
+  building, mechanical, plant and robot-cell, and coordination tools with each one's way in and how feasible it is,
+  and an order to explore. Site data aligned to the model with SAM 3.1: capture, alignment, segmentation, lifting to
+  3D, matching and measuring on the server, and what ORCA would do with it. Also an owner-decision row and CLAUDE.md's
+  "Later".
+- **Checked:** SAM 3.1 against Meta's release notes and model page (released March 27, 2026, open weights). The design
+  tools' ways in are their makers' published SDKs and APIs; none was built or tried.
