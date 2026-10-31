@@ -112,7 +112,10 @@ flowchart TD
   ratio capped at 2, local clipping on. One `setAnimationLoop(frameTick)` renders every frame: it advances a camera
   flight, updates `OrbitControls`, adjusts the clip range, and calls `drawFrame`, which places the DOM labels, keeps
   the marker's and the grips' size on screen, and draws each visible pane into its own rectangle of the one canvas
-  (viewport and scissor), then the view cube (Panes and drawing views, below).
+  (viewport and scissor), then the view cube (Panes and drawing views, below). With no models open (the start page,
+  models loading) it draws one empty 3D view over the whole stage, whatever the layout: the panes' headers are hidden
+  until models are drawn, and their backgrounds alone showed as patches of sky and paper behind the load card. The
+  layout stays chosen; its panes come back with the models.
 - **Layers:** layer 0 is the model, seen by every camera. Layer 1 holds what only the 3D view shows: the marker, the
   outlines drawn through everything (focus, hits, links, selection), the section box helper and its grips, and the
   measure. The 3D camera sees 0 and 1; a drawing view's camera only 0. Layers 2 to 6 (`CAP_LAYER`) hold the stencil

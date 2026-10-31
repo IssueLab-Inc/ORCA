@@ -1469,3 +1469,14 @@ footing B1; design in `docs/edits.md` "Seat", code `edits.seat` / `apply_seat`, 
   above a trim; 0.20 x 0.50 x 0.65 m cut, 10% of the wall, its top 350 mm on the pad; nothing else closer; kept in
   place in the browser; Detect again: 1 resolved, 0 new. `tests/test_seat.py` (15); 644 server tests, 148 web tests;
   answer key 3/3 first try at Rev04 heights (rows in `evals/results.csv`); `evals/step_cell.py` passes.
+
+No layout patches behind the load card (Oct 31; owner report; code `web/src/viewer/Viewer.ts`):
+- **What happened:** with two or four views chosen, opening models from the start page showed the layout's empty panes
+  behind "Loading 4 models": the 3D view's sky in one quarter, drawing paper in the others. The panes' headers are
+  hidden until models are drawn, but the one canvas still painted each pane's background in its rectangle.
+- **What changed:** `drawFrame` draws one empty 3D view over the whole stage while no models are open, whatever the
+  layout. The layout stays chosen and its panes return with the models. Opening models over models already open was
+  not affected: the old ones stay on screen in their layout until the new ones replace them (`Viewer.load` stages first).
+- **Checked:** `web/tests/viewer-empty-stage.test.mjs` (2; the first fails on the old code); in Chromium at 1600×1000,
+  loading Northbank from the start page in the four-view layout now shows the same even stage as the single layout,
+  and the four views (two in the two-view layout) are back once it is drawn; web tests and build.
