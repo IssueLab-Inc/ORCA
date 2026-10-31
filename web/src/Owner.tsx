@@ -20,9 +20,11 @@ function stored(): OwnerSettings {
  * unlocked, or on a page opened with #owner. The token is sent once; the server answers with a cookie this page's
  * scripts cannot read, so the token is never kept in the browser.
  */
-export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: OwnerSettings | null) => void;
+export function OwnerSettingsMenu({ onChange, onEveryone, note }: { onChange: (s: OwnerSettings | null) => void;
   /** A setting for everyone changed: this page asks again what it gets (second tries, Show it built). */
-  onEveryone?: () => void }) {
+  onEveryone?: () => void;
+  /** The owner's settings in force, in a few words: on the button's tip, which is marked while they are on. */
+  note?: string }) {
   const [state, setState] = useState<{ available: boolean; owner: boolean } | null>(null);
   const [settings, setSettings] = useState<OwnerSettings>(stored);
   const [token, setToken] = useState("");
@@ -62,7 +64,7 @@ export function OwnerSettingsMenu({ onChange, onEveryone }: { onChange: (s: Owne
   };
 
   return (
-    <Popover icon={Settings2} label="Owner settings" tip="bottom">
+    <Popover icon={Settings2} label="Owner settings" tip="bottom" note={note}>
       {() => state.owner ? (
         <div className="owner-menu">
           <b>Owner settings</b>

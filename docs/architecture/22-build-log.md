@@ -1705,3 +1705,19 @@ Orbit round the clash in focus (Oct 31; owner report; code `web/src/viewer/Viewe
 - **Checked:** `web/tests/viewer-orbit.test.mjs` (4; the mid-flight one fails on the old code); in Chromium on
   Northbank with #1 in focus, a 220 px drag starting off the clash kept its marker within 3 px (the old code moved it
   370 px), and during a proposal (stream held open, no model call) a drag kept it within 3 px; web tests and build.
+
+The corner keeps clear of the notch (Oct 31; owner report; code `web/src/App.tsx`, `web/src/index.css`,
+`web/src/ui.tsx`, `web/src/Owner.tsx`):
+- **What happened:** the model's top right corner ran under the ORCA wordmark at the top of the model: with a fix kept
+  and the owner's settings on ("1 fixed" and "owner · effort default · no caps" chips), it reached 62 px into the
+  notch at 1600×1000 and 179–222 px at 1366 and 1280; the working notch (fixed at `100cqw − 420px`) overlapped it even
+  at 1920.
+- **What changed:** the count of fixes kept moves onto Export (✓n; its tip and name say "n fixes kept"); the owner's
+  settings move onto their button, marked while on, with what is set in its tip (`Popover` `note`). The corner never
+  reaches past half the model less the wordmark's half (it wraps first); under a 1180 px model the requirements and
+  agent pills keep their icons only, and under 640 px (760 beside them) Export too; the working notch narrows to the
+  room the corner leaves (App measures it into `--corner-w`).
+- **Checked:** `web/tests/corner.test.mjs` (2; both fail on the old code); in Chromium as the owner with a fix kept, at
+  1280×800, 1366×768, 1600×1000 and 1920×1080, idle and while ORCA checks the models: the corner clears the wordmark
+  by 34–311 px and the working notch by 12–179 px, on one row. With requirements and an agent as well it still clears
+  both; at 1280 and 1366 that crowded corner wraps to a second row rather than reaching the notch. Web tests and build.
