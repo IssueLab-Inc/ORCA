@@ -1609,3 +1609,15 @@ The review of the filters PR (Oct 31; [IssueLab-Inc/ORCA#75](https://github.com/
   part by name; yes kept apart from 1 in the index; `facets.resolve` returns what it found.
 - **Checked:** `tests/test_facets.py` (13), `test_properties.py` (11), `web/tests/filters.test.mjs` (12),
   `viewer-filters.test.mjs` (7); server and web suites; build.
+
+Checks on filters, on the server (Oct 31; owner request, "run a clash detection based on filtered elements, also via
+the MCP tools"; owner decisions: side A a filter, side B a filter, everything or itself; results replace the open list;
+code `detect.Selection.filter`, `check_id`, `check_name`, `facets.found` / `name_for`, `Workspace.check_defaults`;
+[docs/detection.md](../../docs/detection.md)):
+- **What:** a detection test's side can be a filter, found against the filters' index when the run starts. A check
+  with no id gets one from what it compares, so Detect again and a filter written another way give the same ids, and a
+  name ("DuctSegment vs Everything") that titles the run. A clash keeps its id, #N, title, views and sign-offs when
+  another check finds the same pair; runs that share no test report no resolved or no-longer-checked noise; an
+  element on both sides is never paired with itself. `detect_tests` gives a check's defaults; a run returns the tests
+  it ran so they can be repeated.
+- **Checked:** `tests/test_detect.py` (26), `test_facets.py` (14).

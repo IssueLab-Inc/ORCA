@@ -105,7 +105,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, `plan_move` (moves that keep their joints: carry fittings, stretch segments, or are refused) and the connection graph |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
-| `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
+| `detect.py` | Geometry | ORCA's own clash detection: tests (sides by file, team, class, system, id or a filter), sort and sweep, triangle tree, exact box depth, stable ids (a clash keeps its id across checks), rerun diff |
 | `demos.py` | Policy | The demo projects in one place: their sample files, start labels, tours, default requirements (`demos/*.json`), and what only the demo models need (their property set, their Navisworks smart tags) |
 | `domains.py` | Policy | Which domain a scene is in (`of`: the effective requirements' `domain`, else opened wholly from STEP is `machines`), the classes that stay in place by default (`STAYS`), who reviews a seat (`SEAT_REVIEW`), voice words, and the shared prompts in that domain's voice (`prompt` fills `{role}`, `{meeting}`, `{teams}`, `{examples}`) |
 | `document.py` | Documents | Coordination reports: PDF (combined, per team, per model) and BCF 2.1, team guessing, who acts and reviews |
@@ -519,10 +519,11 @@ What is joined to what, so a fix that moves something never leaves a joint apart
 Finds the clashes in the open models and returns them as a `reports.Report` (origin `"sightline"`) that the rest of
 ORCA reads unchanged. Deeper design: [docs/detection.md](../detection.md).
 
-- **Main symbols:** `run`, `Run`, `Test`, `Selection`, `Coverage`, `default_tests`, `presets`, `measure_pair`,
+- **Main symbols:** `run`, `Run`, `Test`, `Selection` (`from_dict`, `describe`, `filter`), `check_id`, `check_name`, `Coverage`, `default_tests`, `presets`, `measure_pair`,
   `clash_id`, `_Index`, `_Solids`, `_candidates`, `_measure`, `_diff`, `RULES`, `RULE_LABEL`, `TOLERANCE_M`,
   `DUPLICATE_M`, `FAR_M`, `CAP`.
-- **Imports:** `document.py` (`guess_team`), `reports.py`, `scene.py`, `verify.py`; lazily `edits.py`.
+- **Imports:** `facets.py` (filter sides), `limits.py`, `reports.py`, `requirements.py` (teams per file), `scene.py`,
+  `verify.py`; lazily `edits.py`.
   **Imported by:** `app.py`, `requirements.py` (lazily), `service.py`.
 
 ### `step.py`: STEP models

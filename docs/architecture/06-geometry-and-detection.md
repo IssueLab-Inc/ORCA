@@ -250,15 +250,18 @@ A `Test` asks one question of two selections, or of one selection against itself
 |---|---|
 | `id`, `name` | Stable key and the name shown ("MEP vs Structure") |
 | `kind` | `hard` (overlap deeper than the tolerance), `clearance` (gap under `clearance_m`) or `duplicate` (the same thing twice) |
-| `a`, `b` | `Selection`s: model files, teams (guessed per file by `document.guess_team`), IFC classes (subclasses included) and excluded classes, system names, particular GlobalIds. Empty fields mean any |
+| `a`, `b` | `Selection`s: model files, teams (guessed per file by `document.guess_team`), IFC classes (subclasses included) and excluded classes, system names, particular GlobalIds, or a `filter` (`{when, invert}`, the Filters panel's conditions, found against the filters' index when the run starts: `_Index.filtered`, `facets.found`). Empty fields mean any |
 | `tolerance_m` | Hard: an overlap must be deeper than this. Default `TOLERANCE_M`, 1 mm |
 | `clearance_m` | Clearance tests only |
 | `rules` | Which never-a-clash rules apply (all on by default) |
 | `enabled` | Off tests are listed but not run |
 | `min_size_m` | Elements whose largest box side is under this are left out (early design levels, from the requirements) |
 
-`Test.from_dict` reads a test from JSON (the page's or chat's tests) and refuses an unknown kind; requirements build
-`Test`s directly.
+`Test.from_dict` reads a test from JSON (the page's or chat's tests) and refuses an unknown kind or a malformed filter
+(at most 30 conditions, 500 values each, known tests); requirements build `Test`s directly. A **check on filters**
+comes with no id: it gets `check_id` (`filter:` and a hash of its sides and kind, written one way only) and a name from
+`check_name` ("A vs Everything", "A (within)"). `_candidates` never pairs an element with itself, and pairs each once,
+when an element is on both sides ([docs/filters.md](../filters.md), "Checks").
 
 **Where the tests come from**, in `Workspace.detect`:
 1. tests in the request body (`POST /api/scenes/{scene_id}/detect/stream`), else
@@ -404,11 +407,17 @@ checked, seconds, the offset and the `state` the next run compares against.
   requirements id it ran under. A rerun compares with it only when both ran under the same requirements.
 - `_diff`: each clash is `new` or `active`. A clash that has gone is **resolved** only when its test still ran
   complete (not partial) and both elements were still in its selections; otherwise it is **no longer checked**,
-  which is not the same thing. The first run is all new.
+  which is not the same thing. The first run is all new. A run that shares no test with the last one (a check on
+  filters after the full check, or back) reports nothing resolved or no longer checked.
+- A clash the last run found under another test (same pair, same kind) takes that clash's id, so its #N, title,
+  views, sign-offs and marks follow it between the full check and a check on filters (`state.clashes[...].kind`).
 - `Workspace._carry` copies each surviving clash's title and captured views (A/B/C) from the last run's report into
   the new one; the page keeps its own marks for ids still present ([12](12-web-app.md)).
-- `Workspace.detections[scene_id]` keeps the coverage, diff and report id, so a page that reopens the scene can
-  redraw the summary (`scene_info`).
+- `Workspace.detections[scene_id]` keeps the coverage, diff, report id and the tests as run (`tests`: null for the
+  defaults or the requirements', else the check on filters), so a page that reopens the scene can redraw the summary
+  (`scene_info`) and Detect again repeats the same check.
+- `Workspace.check_defaults` (also `detect_tests`' `check`): what a check on filters takes when it says nothing else,
+  the hard tolerance, rules and smallest size of the tests a run would use and the requirements' clearance.
 - The whole run holds `Workspace.lock`.
 
 ### `measure_pair` and the clash panel's "Now"

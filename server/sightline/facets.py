@@ -340,6 +340,32 @@ def found(idx: dict, when: list[dict], invert: bool = False) -> set[int]:
     return everyone - hit if invert else hit
 
 
+def _shown(v) -> str:
+    return v.removeprefix("Ifc") if isinstance(v, str) else "yes" if v is True else "no" if v is False else str(v)
+
+
+def name_for(when: list[dict], invert: bool = False) -> str:
+    """A filter's name from what it finds, as the page's `nameFor` writes it: "DuctSegment · Level 02"; "Everything"
+    with no complete condition."""
+    parts = []
+    for c in when:
+        if not complete(c):
+            continue
+        prop = _label(c["facet"])[1].rsplit("/", 1)[-1] if ":" in c["facet"] else c["facet"]
+        vals = [_shown(v) for v in c.get("values") or []]
+        if c["op"] == "has":
+            parts.append(f"has {prop}")
+        elif c["op"] == "missing":
+            parts.append(f"no {prop}")
+        elif c["op"] in ("lt", "gt", "between"):
+            parts.append(prop)
+        else:
+            text = ", ".join(vals[:2]) + (f" +{len(vals) - 2}" if len(vals) > 2 else "")
+            parts.append(f"not {text}" if c["op"] == "isNot" else text)
+    head = " · ".join(parts) or "Everything"
+    return f"everything but {head}" if invert else head
+
+
 def _bound(w: dict, name: str):
     """A bound for less / more / between: `min` or `max`, else a lone number in `values` (what a model often sends)."""
     if w.get(name) is not None:

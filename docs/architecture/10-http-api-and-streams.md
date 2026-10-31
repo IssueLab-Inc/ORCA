@@ -225,8 +225,8 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `GET` | `/api/scenes/{scene_id}/detect/tests` | The tests a run would use (defaults and presets, or what the requirements compile to) (`Workspace.detect_tests`) | none | `{tests, teams, elements, file_elements, rules, requirements}` | free |
-| `POST` | `/api/scenes/{scene_id}/detect/stream` | Runs detection (`Workspace.detect` → `detect.run`), opening the result as a report | `DetectRequest {tests: [...] or null}` | NDJSON | `detect_limit` (`SIGHTLINE_DETECT_PER_HOUR`/`_DAY`); 422 bad tests |
+| `GET` | `/api/scenes/{scene_id}/detect/tests` | The tests a run would use (defaults and presets, or what the requirements compile to) (`Workspace.detect_tests`) | none | `{tests, teams, elements, file_elements, rules, requirements, check: {tolerance_m, clearance_m, rules, min_size_m}}` (`check`: a check on filters' defaults, `Workspace.check_defaults`) | free |
+| `POST` | `/api/scenes/{scene_id}/detect/stream` | Runs detection (`Workspace.detect` → `detect.run`), opening the result as a report | `DetectRequest {tests: [...] or null}`; a test with no id and a side with a `filter` is a check on filters ([docs/filters.md](../filters.md)); `done` carries `tests` (as run, or null) | NDJSON | `detect_limit` (`SIGHTLINE_DETECT_PER_HOUR`/`_DAY`); 422 bad tests |
 
 ### Requirements
 

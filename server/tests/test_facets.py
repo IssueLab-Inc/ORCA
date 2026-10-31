@@ -184,3 +184,11 @@ def test_an_unreadable_element_is_skipped_not_the_whole_index(tmp_path, monkeypa
     monkeypatch.setattr(facets.properties.Reader, "read", flaky)
     idx = facets.build(scene)
     assert len(idx["elements"]) == len(scene.bounds()) - 1 and _facet(idx, "class")["values"] == ["IfcDuctSegment", "IfcPipeSegment"]
+
+
+def test_a_filter_is_named_from_what_it_finds_as_the_page_names_it():
+    when = [{"facet": "class", "op": "is", "values": ["IfcDuctSegment"]}, {"facet": "storey", "op": "is", "values": ["Level 02"]},
+            {"facet": "pset:Model data/Length", "op": "gt", "min": 3.0}, {"facet": "pset:P/X", "op": "has"},
+            {"facet": "attr:Tag", "op": "isNot", "values": ["A", "B", "C"]}, {"facet": "pset:P/Y", "op": "gt"}]
+    assert facets.name_for(when) == "DuctSegment · Level 02 · Length · has X · not A, B +1"
+    assert facets.name_for([]) == "Everything" and facets.name_for(when[:1], invert=True) == "everything but DuctSegment"
