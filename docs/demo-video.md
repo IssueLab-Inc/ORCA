@@ -87,7 +87,7 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
 
 ## Before recording
 
-- Merge and deploy the Wonder lane ([workings.md](workings.md)); the video should show the Muse Wonder lane.
+- The Wonder lane ([workings.md](workings.md)) is merged and deployed (Oct 31): check the video shows the Muse Wonder lane.
 - On the live app, the owner signs in (owner menu) and switches on, For me: the open-weights model (triage is on Muse
   Spark otherwise) and Show it built (off on the deploy). The owner is exempt from the caps (Muse Wonder 3 an hour per
   visitor), so retakes don't run out.

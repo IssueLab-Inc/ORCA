@@ -108,6 +108,10 @@ test("a second try is its own branch on Muse Wonder, numbered after the first tr
   ]));
   assert.match(texts(step(g, "try1").body), /2 ideas, 0 passed/);
   assert.equal(step(g, "r1-1").actor, "wonder"); assert.equal(step(g, "r1-1").title, "Muse Wonder, round 1");
+  assert.deepEqual(g.lanes.map((l) => l.id), ["you", "muse", "wonder", "orca"], "the second try has a lane of its own");
+  assert.equal(g.lanes[2].label, "Muse Wonder");
+  for (const id of ["try1", "r1-1", "i1-0"]) assert.equal(step(g, id).lane, "wonder");
+  assert.ok(g.bars.some((b) => b.lane === "wonder") && g.rows.some((r) => r.id === "wonder"), "its timeline row too");
   assert.equal(step(g, "i1-0").time, "idea 3"); assert.equal(step(g, "k1-0").seq, 2);
   assert.match(texts(step(g, "k1-0").body), /40 mm clear/);
   assert.equal(step(g, "better"), undefined, "no further try after a second one");

@@ -1381,6 +1381,15 @@ behind the front one show as icons with a tooltip, so nothing goes behind dockvi
 and select → reload and select (all in the right bar, no overflow) → Float → close and select (floating); the tabs get
 their names back when Properties closes.
 
+Muse Wonder's own lane in Workings (Oct 31; testing the demo video's shots; `fix/workings-wonder-lane`; code
+`web/src/workingsGraph.ts`; [docs/workings.md](../workings.md)): a proposal drew a second try's steps in Wonder's
+colour but under the "Muse Spark" lane label. A second try now adds a Muse Wonder lane under the first model's (only
+when Wonder runs), with its own timeline row. Found while testing the video's shots on a local server at `main` with
+open weights and Show it built on, which also ran Show it built live for the first time (duct #1: 85 s, gate F 0.82,
+kept) and Wonder on the tray (#2), the cell's fence post N3 (#29, ranked first) and the HMI stand (#13, no fix).
+Checked: 143 web tests (`workings.test.mjs`: the lane, its steps, bar and row); build clean; in Chromium on #29 at
+Fit.
+
 The demo video's script (Oct 31; owner decisions Oct 30; `docs/demo-video`; [docs/demo-video.md](../demo-video.md)):
 both themes as one story (our world, then the frontier), a narrator, plain words, and every shot tested first on a
 local server at `main` with open weights and Show it built on: triage on Muse Spark Open (86 s, 5 need a fix), the duct
