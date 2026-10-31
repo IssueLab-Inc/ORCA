@@ -13,7 +13,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import connections, edits, hosts, meta_client, requirements, verify
+from . import connections, domains, edits, hosts, meta_client, requirements, verify
 from .meta_client import ChatModel
 from .requirements import DEFAULT_CLEARANCE_M
 from .limits import env_int
@@ -48,7 +48,8 @@ class Option:
     min_clearance_m: float | None
     placements: dict[str, list[float]]  # GlobalId → new 4x4 world matrix, for the browser preview
     kind: str = "move"                  # "move" (delta_m on the run), "offset" (split, middle piece by delta_m Z)
-                                        # or "trim" (one end cut back to butt the other element; delta_m: that end)
+                                        # or "trim" (one end cut back to butt the other element; delta_m: that end);
+                                        # the newer kinds (route, resize, penetration, seat, combined) carry `edit`
     split_m: list[float] | None = None  # offset only: split points, metres along the segment from its start
     preview: list[dict] | None = None   # offset and trim: world triangles of the changed pieces, for the browser
     before: list[dict] | None = None    # the changed elements as they are now (world triangles), to compare
@@ -132,6 +133,7 @@ def _describe(scene: IfcScene, clash: Clash, clearance_m: float = DEFAULT_CLEARA
         lines += _nearby_text(scene, label, this, [n for n in clash.nearby.get(this, []) if n not in (other, *more)])
     for label, this, other, name in (("A", clash.element_a, clash.element_b, "B"), ("B", clash.element_b, clash.element_a, "A")):
         lines += _joint_text(scene, label, this, other, name)
+        lines += _seat_text(scene, label, this, other, name)
         lines += _penetration_text(scene, label, this, other, name, clearance_m)
     if clash.notes:
         lines.append(f"Notes: {clash.notes}")
@@ -214,6 +216,31 @@ def _joint_text(scene: IfcScene, label: str, gid: str, other: str, other_label: 
                      "how the parts are built (a beam cast into its footing, a transom into its mullion). A trim only tidies "
                      "the model for its author; say so, and say in advice when the overlap is simply by design.")
     return lines
+
+
+def seat_of(scene: IfcScene, element: str, support: str) -> edits.Seat:
+    """`element` seated on `support` (edits.seat), when both are things that bear: a run (a duct, pipe or tray, carried
+    along its length) is never seated, nor seated on, nor is a see-through zone (verify.is_run). Raises Unsupported."""
+    for gid in (element, support):
+        if verify.is_run(scene, gid):
+            raise edits.Unsupported(f"{scene.element(gid).name} is carried along its length or is a zone: nothing bears "
+                                    "on it that way, so it is moved or offset, never seated")
+    return edits.seat(scene, element, support)
+
+
+def _seat_text(scene: IfcScene, label: str, gid: str, other: str, other_label: str) -> list[str]:
+    """When one element comes down into the other and stands above its top, it could bear on it: say so, and what a
+    seat would cut."""
+    try:
+        st = seat_of(scene, gid, other)
+    except (edits.Unsupported, KeyError, RuntimeError, ValueError):
+        return []
+    w, d, h = st.size_m
+    stands = scene.bounds()[gid][1][2] - st.top_m
+    return [f"Bearing: element {label} comes down into element {other_label} and stands {stands * 1000:.0f} mm above "
+            f"its top (z {st.top_m:.3f} m). A \"seat\" of {label} on {other_label} cuts {label} where it is inside "
+            f"{other_label}'s footprint below that top ({w:.2f} x {d:.2f} x {h:.2f} m, {st.share:.0%} of it), so what "
+            f"is left bears on {other_label}'s top: a connection fix, nothing moves, and how it bears is reviewed."]
 
 
 def _run_text(scene: IfcScene, label: str, gid: str, other: str, clearance_m: float = DEFAULT_CLEARANCE_M,
@@ -370,6 +397,8 @@ def edit_text(kind: str, delta_m: list[float], split_m: list[float] | None = Non
         return f"offset {split_m} by {delta_m[2]:+.3f} m"
     if kind == "trim":
         return f"trim the {trim['end']} end by {trim['by_m'] * 1000:.0f} mm" if trim else "trim at the joint"
+    if kind == "seat":
+        return "seat it on the other element"
     if kind == "combined":
         return "several elements changed together"
     return f"move {delta_m}"
@@ -551,7 +580,7 @@ def _candidate_delta(cand: dict, scene: IfcScene | None = None, target: str | No
             return kind, [0.0, 0.0, 0.0]
     if kind == "offset":
         return kind, [0.0, 0.0, float(cand.get("dz_m", 0.0) or 0.0)]
-    if kind in ("trim", "penetration"):
+    if kind in ("trim", "penetration", "seat"):
         return kind, [0.0, 0.0, 0.0]
     if kind == "route":
         try:
@@ -780,6 +809,50 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
     same_model = scene.element(target).source == scene.element(other).source
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
                            v.min_clearance_m, {}, "trim", None, shape, trim=trim, cleanup=same_model, checked_against=v.checked_against)
+
+
+def _try_seat(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
+              on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
+    """Seat `target` on `other` (edits.seat): cut it where it is inside the other's footprint below the other's top,
+    so what is left bears on it; check it, undo it.
+
+    It bears on `other` by design, and edits.seat proves by construction that nothing of it is left inside (the
+    check cannot: its box depth would call the seat's flush faces an overlap), so that contact is not measured.
+    Anything else it is meant to clear (a merged item's `others`) must clear; the rest may only not get closer than
+    before (it was already set in what it stands on)."""
+    title, zero = cand.get("title", "seat it on the other element"), [0.0, 0.0, 0.0]
+    # A seat sets how two elements that stay put bear on each other. When the other can move, it moves.
+    if scene.stays(target) and not scene.stays(other):
+        return Attempt(title, zero, False, f"cannot seat this element: {scene.element(other).name} can move instead; a "
+                       "seat only sets how two elements that stay put bear on each other", "seat"), None
+    try:
+        st = seat_of(scene, target, other)
+    except (edits.Unsupported, KeyError) as e:
+        hint = ""
+        try:
+            seat_of(scene, other, target)
+            hint = f"; the other element comes down into this one: seat {scene.element(other).name} on it instead"
+        except (edits.Unsupported, KeyError):
+            pass
+        return Attempt(title, zero, False, f"cannot seat this element: {e}{hint}", "seat"), None
+    summary = edits.seat_summary(scene, st)
+    edit = {"support": other, "summary": summary, "size_m": st.size_m, "share": st.share, "top_m": st.top_m,
+            "key": json.dumps([other, [[round(v, 2) for v in corner] for corner in st.cut]])}
+    before = {h.other: h.distance_m for h in verify.check(scene, [target], clearance_m=clearance_m, ignore={other}).hits}
+    with edits.trial(scene, target):
+        edits.apply_seat(scene, st)
+        shape = edits.meshes(scene, [target])
+        if on_trial:
+            on_trial({"kind": "seat", "moved": [target], "delta_m": zero, "pieces": shape, "summary": summary})
+        v = verify.check(scene, [target], clearance_m=clearance_m, ignore={other})
+    meant, tol = set(others) - {other}, 0.002
+    hits = [h for h in v.hits if h.other in meant or h.other not in before or h.distance_m < before[h.other] - tol]
+    attempt = Attempt(title, zero, not hits, _reason(hits), "seat", None, _hit_ids(hits), edit=edit, where=_where(hits))
+    if hits:
+        return attempt, None
+    return attempt, Option(title, [target], zero, cand.get("rationale", ""), cand.get("also_needs", ""),
+                           v.min_clearance_m, {}, "seat", None, shape, edit=edit,
+                           review=domains.SEAT_REVIEW.get(scene.domain), checked_against=v.checked_against)
 
 
 def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
@@ -1181,11 +1254,12 @@ def _try_combined(scene: IfcScene, cand: dict, target: str, other: str, clearanc
 # Each kind of fix Muse may propose, and how to try it: (scene, candidate, target, other, clearance, on_trial,
 # others=) → (Attempt, Option or None). A kind not listed here is refused, never tried as a move.
 TRIES: dict[str, Callable] = {"move": _try_move_fix, "offset": _try_offset, "trim": _try_trim, "route": _try_route,
-                              "resize": _try_resize, "penetration": _try_penetration, "combined": _try_combined}
+                              "resize": _try_resize, "penetration": _try_penetration, "seat": _try_seat,
+                              "combined": _try_combined}
 # The candidate fields each kind is described by, carried into a recommendation (never tried) as its "edit".
 PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m"), "trim": ("by_m",),
                                       "route": ("steps",), "resize": ("split_m", "depth_m", "keep"), "penetration": (),
-                                      "combined": ("steps",)}
+                                      "seat": (), "combined": ("steps",)}
 
 
 def to_json(result: Result) -> str:

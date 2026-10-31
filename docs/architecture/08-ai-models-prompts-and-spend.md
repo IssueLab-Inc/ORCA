@@ -274,7 +274,7 @@ STEP or no scene is `construction` (`domains.infer`). Callers never test for STE
 
 - **The fix pack.** `agent.resolve(..., pack=)` reads `domain_packs/<pack>.md` whole. `Workspace.propose`,
   `Workspace.escalate` and `plans.build_batch` (Fix together, root-cause partners) pass `pack=domains.of(...)`, so the
-  cell gets `machines.md` and Northbank `construction.md`. The two packs share the six fix kinds and the JSON contract
+  cell gets `machines.md` and Northbank `construction.md`. The two packs share the seven fix kinds and the JSON contract
   (parsing is unchanged; `tests/test_domains.py` pins the kinds and the JSON keys); the opening, the rules of thumb
   and the examples differ. No example in either pack, nor in `escalation.md`, is a demo's answer (Northbank Rev04's
   +400 mm duct, the cell's C6 route): the numbers are neutral.

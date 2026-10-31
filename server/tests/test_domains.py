@@ -110,11 +110,11 @@ def test_the_machines_pack_keeps_the_contract_and_claims_only_static_geometry():
     # The fix kinds and the JSON Muse returns are the construction pack's: parsing is unchanged. The examples are each
     # domain's own, and none of them is a demo's answer (Northbank Rev04's +400 mm duct, the cell's C6 route).
     def kinds(text):
-        return re.findall(r'^- "(\w+)":', text[text.index("Six kinds of fix:"):], re.M)
+        return re.findall(r'^- "(\w+)":', text[text.index("Seven kinds of fix:"):], re.M)
 
     def keys(text):
         return sorted(set(re.findall(r'"(\w+)":', text[text.index("return JSON only"):])))
-    assert kinds(cell) == kinds(building) == ["move", "offset", "route", "resize", "trim", "penetration"]
+    assert kinds(cell) == kinds(building) == ["move", "offset", "route", "resize", "trim", "seat", "penetration"]
     assert keys(cell) == keys(building)
     for pack in (building, cell, (domains.PACKS / "escalation.md").read_text()):
         assert '"dz_m": 0.4' not in pack and "1.75" not in pack and "2.6, 4.4" not in pack

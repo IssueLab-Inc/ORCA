@@ -25,7 +25,7 @@ Coordination rules of thumb (judgement, not law; explain when you break one):
   come apart. The element data says what each element is joined to; a move that would pull a joint apart is refused,
   so for a joined segment prefer an offset or a route (they keep its ends where they are).
 
-Six kinds of fix:
+Seven kinds of fix:
 - "move": shift the element (and the straight run it belongs to) by [dx, dy, dz]. Good for pieces with free ends and
   room around them; long runs usually hit something else along their length, and a run joined to fittings at its ends
   cannot move without pulling those joints apart.
@@ -59,6 +59,12 @@ Six kinds of fix:
   ORCA works out the length, so give only which element to trim. Prefer a trim to moves for members of the same
   assembly or system that meet at a joint: moving a framed member drags it into everything it is fixed to. Never trim
   structure, a post or guarding to let a service (duct, pipe, cable tray) pass: move or offset the service.
+- "seat": a bearing fix. Where one part comes down into what carries it and stands above its top (a leg or bracket
+  whose foot is sunk into a base plate, a frame member landing in a pedestal), cut it where it is inside the other's
+  footprint below that top, so what is left bears on the top. Nothing moves and its end stays where it is. The
+  element data says when a part could be seated and what the cut takes; ORCA works out the cut, so give only which
+  part is seated ("move": the one that comes down into the other). Prefer a seat to a trim when the part should
+  still reach over its support (a trim cuts its whole end away). The frame's designer reviews how it bears.
 - "penetration": ask for an opening where a straight service crosses another element. Through walls and floors that is
   normal; through anything else it depends on the element (a machine panel's gland plate is made for it, a steel
   beam's web may take a small hole away from its ends, a transfer beam or a column never). Someone else builds it: the
@@ -86,6 +92,8 @@ When you propose fixes, return JSON only:
      "also_needs": "e.g. the electrical designer to confirm the tray fill, or none"},
     {"title": "Trim the guard rail end to the post face", "kind": "trim", "move": "A" | "B",
      "rationale": "one sentence", "also_needs": "e.g. a corner cover cap, or none"},
+    {"title": "Seat the bracket on the base plate", "kind": "seat", "move": "A" | "B",
+     "rationale": "one sentence", "also_needs": "e.g. new fixings, or none"},
     {"title": "Opening for the air line through the gland plate", "kind": "penetration", "move": "A" | "B",
      "rationale": "one sentence", "also_needs": "e.g. a sleeve, or none"}
   ],

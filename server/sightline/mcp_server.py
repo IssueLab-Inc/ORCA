@@ -40,7 +40,8 @@ def _local_escalate() -> str | None:
 INSTRUCTIONS = """ORCA is an AI design coordinator for 3D models (buildings from IFC, machines from STEP). It finds
 clashes between models, proposes fixes that edit real model elements, and checks every fix with geometry before
 anyone sees it. Start with get_session to see what is open. Then report_summary or list_clashes, get_clash and
-get_clash_images to understand a clash, and check_move / check_offset / check_route / check_resize / check_penetration to test your own idea, or propose_fixes to run
+get_clash_images to understand a clash, and check_move / check_offset / check_route / check_resize / check_penetration /
+check_seat to test your own idea, or propose_fixes to run
 ORCA's fix agent. Nothing changes the model until apply_fix or apply_plan. Distances are metres, Z up; a negative
 distance is an overlap. When a person has ORCA open with this link, show_clash and set_view move their view and
 capture_view shows you what they see."""
@@ -386,9 +387,17 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         the opening itself only where the requirements let the host's team's model be edited."""
         return run(ctx, "check_penetration", {"element": element, "host": host})
 
+    @tool(read_only=True)
+    def check_seat(element: str, support: str, ctx: Context) -> dict:
+        """Check seating `element` on `support` without keeping it: where `element` comes down into `support` and
+        stands above its top (a wall or column landing in a footing, a beam end in a pile cap), it is cut where it is
+        inside the support's footprint below that top, so what is left bears on it. Nothing moves; its structural
+        designer reviews how it bears. Kept with apply_fix after propose_fixes offers it."""
+        return run(ctx, "check_seat", {"element": element, "support": support})
+
     @tool()
     def propose_fixes(clash_id: str, ctx: Context, wait_s: float = 40, escalate: bool = False) -> dict:
-        """Run ORCA's fix agent on a clash: it proposes moves, offsets, routes, flatter sections, trims and openings,
+        """Run ORCA's fix agent on a clash: it proposes moves, offsets, routes, flatter sections, trims, seats and openings,
         checks each against the whole model, and returns the verified ones (numbered options). The person's page
         shows it working. Takes 20-60 s; if it is not done within wait_s, you get a job_id for get_job. Costs one
         proposal from the allowance. With escalate true: a second, longer try on Muse Wonder that reads the last

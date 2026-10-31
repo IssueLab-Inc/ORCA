@@ -1449,3 +1449,22 @@ The Triage card and the top of the clash list, laid out again (Oct 31; owner req
   done folded and open, with the triage answer stubbed): no wrapped subtitle or truncated search hint; no filter row on
   a fresh report, then "228 reviewed", the status picker and "236 shown" after Set aside and To fix; the Insights
   tab's Detect card unchanged; 145 web tests, build clean.
+
+Seat: one element bears on another (Oct 31, owner request after Northbank's #16, a lift-pit wall 500 mm into pad
+footing B1; design in `docs/edits.md` "Seat", code `edits.seat` / `apply_seat`, `agent.seat_of` / `_try_seat`):
+- **Why:** the detail a designer draws there is the wall bearing on the pad (its foot stops at the pad's face, its top
+  carries on over it). ORCA could only trim the wall's whole end or move one of them. Asked for as a capability, not
+  a fix for one clash: decided from the geometry for any pair, never a class list.
+- **What:** a seventh kind, `seat`. When an element comes down into another and stands at least 50 mm above its top,
+  its foot landing in it (at most 100 mm below its bottom), the support a straight prism under its top, the cut at most
+  half of it, neither a run nor a zone: a recess (`IfcOpeningElement` RECESS) shaped as the support's top face, from
+  below the foot to the top. The support's contact is proved by construction, not measured (the check's box depth
+  would call an L-shaped element's flush faces an overlap); everything else no closer than before. Structure reviews it
+  (`domains.SEAT_REVIEW`); the requirements treat it as a trim. Muse reads a "Bearing" line with what a seat would cut.
+- **Everywhere:** the registry (`TRIES`, `PARAMS`, `IN_TRIAL`, `KEEPS_CONTACTS`, `KEEP`, `CANDIDATE`), `Workspace.check_seat`
+  / `apply_seat`, chat and MCP `check_seat` (32 tools), both domain packs ("Seven kinds of fix"), `fixKinds.ts`.
+- **A 1 mm bedding joint:** the recess clears the support by 1 mm all round. Flush, Northbank's seated wall still
+  re-measured as -500 mm (the collision query saw the coplanar faces and fell back to the boxes' overlap).
+- **Measured:** Northbank #16 (lift pit wall into pad B1): Muse Spark proposed the seat first (13 s), verified, ranked
+  above a trim; 0.20 x 0.50 x 0.65 m cut, 10% of the wall, its top 350 mm on the pad; nothing else closer; kept in
+  place in the browser. `tests/test_seat.py` (15).

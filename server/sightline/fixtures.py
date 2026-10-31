@@ -693,3 +693,57 @@ def build_joints_fixture(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path
+
+
+def build_seat_fixture(path: Path, millimetres: bool = False) -> Path:
+    """Elements that come down into what carries them, for seats (edits.seat), metres (or millimetres), one storey.
+
+    - Base B1 (IfcFooting, x 0-1.8, y 0-1.8, z -0.6 to 0). Upstand U1 (IfcWall, x 0.8-1.0, y -2.5 to 0.5, z -0.65 to
+      0.4) runs 0.5 m into it, its foot 50 mm below the base: seated, 0.20 x 0.50 x 0.65 m is cut and its top 0.4 m
+      bears on the base. Column K1 (IfcColumn, x 1.3-1.5, y 1.3-1.5, z -0.3 to 3) stands 0.3 m in it: seated, it is
+      shortened to the base's top.
+    - Wall W2 (x 4-4.2, y 0-3, z 0-4) passes slab S1 (x 3-6, y 0-3, z 2.8-3): not a seat (the slab's to notch).
+    - Stepped base B2 (x 8-10, y 0-2, z -0.6 to -0.3, and x 8.5-9.5, y 0.5-1.5, z -0.3 to 0): wider below its top, so
+      upstand U2 (x 8.9-9.1, y -1 to 1, z -0.5 to 0.5) cannot be seated on its top alone.
+    - Riser R1 (IfcPipeSegment, x 0.2-0.3, y 0.2-0.3, z -0.3 to 2) drops into B1: a run is never seated.
+    - Block K2 (IfcColumn, x 0.1-0.5, y 1.2-1.6, z -0.55 to 0.06) is mostly inside B1: not a seat.
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA seat fixture")
+    unit = ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT", prefix="MILLI" if millimetres else None)
+    ifcopenshell.api.run("unit.assign_unit", model, units=[unit])
+    k = 1000.0 if millimetres else 1.0
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Foundations")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+    def block(ifc_class, name, x0, x1, y0, y1, z0, z1):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        _box(model, body, e, ((x1 - x0) * k, (y1 - y0) * k, (z1 - z0) * k), (x0 * k, y0 * k, z0 * k))
+        return e
+
+    block("IfcFooting", "Base B1", 0, 1.8, 0, 1.8, -0.6, 0)
+    block("IfcWall", "Upstand U1", 0.8, 1.0, -2.5, 0.5, -0.65, 0.4)
+    block("IfcColumn", "Column K1", 1.3, 1.5, 1.3, 1.5, -0.3, 3.0)
+    block("IfcSlab", "Slab S1", 3, 6, 0, 3, 2.8, 3.0)
+    block("IfcWall", "Wall W2", 4, 4.2, 0, 3, 0, 4)
+    b2 = block("IfcFooting", "Stepped base B2", 8, 10, 0, 2, -0.6, -0.3)
+    upper = model.create_entity(
+        "IfcExtrudedAreaSolid",
+        SweptArea=model.create_entity("IfcRectangleProfileDef", ProfileType="AREA", XDim=1.0 * k, YDim=1.0 * k,
+                                      Position=model.create_entity("IfcAxis2Placement2D",
+                                                                   Location=model.create_entity("IfcCartesianPoint", (1.0 * k, 1.0 * k)))),
+        Position=model.create_entity("IfcAxis2Placement3D",
+                                     Location=model.create_entity("IfcCartesianPoint", (0.0, 0.0, 0.3 * k))),
+        ExtrudedDirection=model.create_entity("IfcDirection", (0.0, 0.0, 1.0)), Depth=0.3 * k)
+    rep = b2.Representation.Representations[0]
+    rep.Items = [*rep.Items, upper]
+    block("IfcWall", "Upstand U2", 8.9, 9.1, -1, 1, -0.5, 0.5)
+    block("IfcPipeSegment", "Riser R1", 0.2, 0.3, 0.2, 0.3, -0.3, 2.0)
+    block("IfcColumn", "Block K2", 0.1, 0.5, 1.2, 1.6, -0.55, 0.06)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path

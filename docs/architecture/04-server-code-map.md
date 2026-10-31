@@ -106,7 +106,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
 | `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
 | `demos.py` | Policy | The demo projects in one place: their sample files, start labels, tours, default requirements (`demos/*.json`), and what only the demo models need (their property set, their Navisworks smart tags) |
-| `domains.py` | Policy | Which domain a scene is in (`of`: the effective requirements' `domain`, else opened wholly from STEP is `machines`), the classes that stay in place by default (`STAYS`), voice words, and the shared prompts in that domain's voice (`prompt` fills `{role}`, `{meeting}`, `{teams}`, `{examples}`) |
+| `domains.py` | Policy | Which domain a scene is in (`of`: the effective requirements' `domain`, else opened wholly from STEP is `machines`), the classes that stay in place by default (`STAYS`), who reviews a seat (`SEAT_REVIEW`), voice words, and the shared prompts in that domain's voice (`prompt` fills `{role}`, `{meeting}`, `{teams}`, `{examples}`) |
 | `document.py` | Documents | Coordination reports: PDF (combined, per team, per model) and BCF 2.1, team guessing, who acts and reviews |
 | `edits.py` | Geometry | Model edits: offsets with bends, routes, resizes, trims, penetrations; trial and keep transactions; meshes |
 | `escalation.py` | Fix agent | The brief a second try on Muse Wonder reads (first try, neighbourhood, blockers) |
@@ -208,7 +208,7 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
 
 ### `mcp_server.py`: ORCA for agents
 
-`build(ws | getter, hooks, local=)` returns an `MCPServer("orca")` with 31 tools (inventory in
+`build(ws | getter, hooks, local=)` returns an `MCPServer("orca")` with 32 tools (inventory in
 [11](11-mcp-and-agent-links.md)). Most tools call `chat.Chat._run`, so chat and MCP share one tool layer; the rest
 (session, pictures, jobs, `apply_fix` / `apply_plan`, triage, report, export) are MCP's own. Deeper design:
 [docs/mcp.md](../mcp.md).
@@ -374,13 +374,14 @@ flowchart LR
 loop in [09](09-agent-workflows.md); fix kinds in [07](07-fixes-and-edits.md).
 
 - **Main symbols:** `resolve` (the loop), `Clash`, `Option`, `Attempt`, `Result`, `Refused`; the registry `TRIES`
-  (`move`, `offset`, `trim`, `route`, `resize`, `penetration`, `combined` → `_try_*`), `PARAMS`, `TIERS` and `tier`;
-  `_describe` (what Muse reads) with `_run_text`, `_resize_text`, `_joint_text`, `_penetration_text`,
+  (`move`, `offset`, `trim`, `route`, `resize`, `penetration`, `seat`, `combined` → `_try_*`), `PARAMS`, `TIERS` and
+  `tier`; `seat_of` (a seat between things that bear); `_describe` (what Muse reads) with `_run_text`, `_resize_text`,
+  `_joint_text`, `_seat_text`, `_penetration_text`,
   `_nearby_text`, `_room_text`; `_feedback`, `_refused`, `_recommend`; `combined_steps`, `apply_combined`,
   `check_combined`, `step_candidate`, `COMBINED_KINDS`, `COMBINED_MAX`; `stays`, `STAYS`, `is_service`,
   `penetration_pairs`, `penetration_sides`, `may_cut`, `move_words`, `plain_needs`, `PACKS`, `to_json`.
-- **Imports:** `edits.py`, `hosts.py`, `meta_client.py`, `requirements.py`, `scene.py`, `verify.py`.
-  **Imported by:** `escalation.py`, `plans.py`, `service.py`.
+- **Imports:** `connections.py`, `domains.py`, `edits.py`, `hosts.py`, `meta_client.py`, `requirements.py`, `scene.py`,
+  `verify.py`. **Imported by:** `escalation.py`, `plans.py`, `service.py`.
 - **Rules:** a kind not in `TRIES` is a failed attempt ("unknown kind"), never tried as a move; requirements refuse a
   candidate before it is tried (`_refused`); each trial and each description runs under the caller's `lock`; every
   trial is undone; a round with a plain geometry fix (tier below 1) ends the search; options rank by tier, then
@@ -482,7 +483,9 @@ keep them. Deeper design: [docs/edits.md](../edits.md).
 - **Main symbols:** `Unsupported`; results `Run`, `Offset`, `Route`, `Resize`, `Trim`, `Penetration`; `run_of`,
   `apply_offset`, `bend_radius`, `apply_route`, `run_frame`, `route_steps`, `is_gravity`, `resize_size`,
   `apply_resize`, `face_move`, `butt_trim`, `apply_trim`, `member_axis`, `penetration`, `apply_penetration`,
-  `stretch` / `Stretched` (a segment's cap or rectangular side moved, ports with it: connected moves),
+  `stretch` / `Stretched` (a segment's cap or rectangular side moved, ports with it: connected moves), `seat` /
+  `Seat` / `seat_summary` / `apply_seat` (an element cut to bear on its support: a recess shaped by the support's top,
+  `_top_outline`, `_footprint_profile`; `SEAT_ABOVE_M`, `SEAT_BELOW_M`, `SEAT_MAX_SHARE`, `SEAT_PSET`),
   `provision_for`, `not_penetrable`; transactions `trial`, `trial_files`, `kept_files`; `meshes` (with `render=True`
   for accept in place), `openings`, `passages`, `free_bands`, `_build_chain`, `_frames`; constants `PENETRABLE`,
   `SLENDER`, `ROUTE_STEPS`, `RESIZABLE`, `PFV_COLOUR`, `PFV_ALPHA`.
@@ -768,7 +771,7 @@ Small IFC models built in code, so tests and spikes run anywhere in seconds with
 
 - **Main symbols:** `build_clash_fixture`, `build_run_fixture`, `build_joint_fixture`, `build_context_fixture`,
   `build_detection_fixtures`, `build_route_fixture`, `build_penetration_fixture` (IFC4 or IFC2X3),
-  `build_resize_fixture`.
+  `build_resize_fixture`, `build_joints_fixture`, `build_seat_fixture`.
 
 ## Prompts, package and tests
 

@@ -747,8 +747,8 @@ export function App() {
    * different fixes can share. */
   const builtKey = (pair: readonly [string | null, string | null], o: Option) => [[pair[0], pair[1]].sort().join("|"), o.kind, o.title,
     JSON.stringify([o.delta_m, o.split_m ?? null, o.trim ?? null, o.edit?.key ?? o.edit?.summary ?? null])].join("|");
-  /** Show it built is for fixes big enough to see at the view's scale: not a trim or a cleanup. */
-  const buildable = (o: Option) => o.kind !== "trim" && !o.cleanup;
+  /** Show it built is for fixes big enough to see at the view's scale: not a trim, a seat or a cleanup. */
+  const buildable = (o: Option) => o.kind !== "trim" && o.kind !== "seat" && !o.cleanup;
   const canBuild = (o: Option) => builtOn && buildable(o);
   /** A fix as the viewer frames it; `ids`: an applied fix's pieces (the original first), in its preview's order. */
   const builtFix = (o: Option, applied: boolean, ids?: string[]): BuiltFix => ({ kind: o.kind, moved: o.moved, deltaM: o.delta_m,
@@ -2649,6 +2649,7 @@ export function App() {
         <dl className="diff">
           <dt>Before</dt><dd>{measure && measure !== "busy" && measure.distance_m != null ? `overlap ${mm(measure.distance_m)}` : "clashing"}</dd>
           <dt>After</dt><dd className="ok">{option.kind === "trim" ? "clear: the two now butt at the joint"
+            : option.kind === "seat" ? "clear: it now bears on the other's top"
             : `clear${option.min_clearance_m != null ? `, nearest ${mm(option.min_clearance_m)}` : ""}`}</dd>
           <dt>Change</dt><dd>{changeText(option)}</dd>
         </dl>
@@ -3166,7 +3167,7 @@ export function App() {
                 <b className="opt-title">{o.title}</b>
                 <span className="opt-facts">
                   <span className="fact"><span>Edit</span><span>{editText(o)}</span></span>
-                  <span className="fact"><span>Clearance</span><span>{clearanceText(o)}{o.kind !== "trim" && o.min_clearance_m != null && o.edit?.fit !== "fitted"
+                  <span className="fact"><span>Clearance</span><span>{clearanceText(o)}{o.kind !== "trim" && o.kind !== "seat" && o.min_clearance_m != null && o.edit?.fit !== "fitted"
                     ? <span className="why"> · {Math.round((proposal!.clearance_m ?? 0.025) * 1000)} mm needed</span> : null}</span></span>
                   {o.review && <span className="fact"><span>Review</span><span>{reviewText(o.review)}</span></span>}
                   {hostRows(o).map(([k, v]) => <span key={k} className="fact"><span>{k}</span><span>{v}</span></span>)}

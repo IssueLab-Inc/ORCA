@@ -20,6 +20,8 @@ NAMES = {CONSTRUCTION: "Building", MACHINES: "Machine"}
 # list (`Doc.stays`) and adds every group it allows no edits.
 _FRAME = ("IfcBeam", "IfcColumn", "IfcSlab", "IfcWall", "IfcFooting", "IfcPile", "IfcMember", "IfcPlate")
 STAYS = {CONSTRUCTION: _FRAME, MACHINES: _FRAME}
+# Who reviews a seat (one element cut to bear on another, agent._try_seat): how it bears is the frame's designer's.
+SEAT_REVIEW = {CONSTRUCTION: "structure", MACHINES: "structure"}
 ROLES = {
     CONSTRUCTION: "a senior BIM coordinator",
     MACHINES: "a senior mechanical integration engineer on a machine and automation cell",

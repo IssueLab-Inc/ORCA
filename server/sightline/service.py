@@ -661,6 +661,27 @@ class Workspace:
             out["blocked_by"] = f"{host_policy.group_name} may not be edited: its team cuts the opening"
         return out
 
+    def check_seat(self, scene_id: str, element: str, support: str, clearance_m: float | None = None) -> dict:
+        """Try seating `element` on `support` without keeping it (edits.seat): cut where it is inside the support below
+        its top, so it bears on it."""
+        clearance_m = self.clearance(scene_id, element, support) if clearance_m is None else clearance_m
+        with self.lock:
+            attempt, option = agent._try_seat(self.scene(scene_id), {}, element, support, clearance_m)
+        return {"passed": attempt.passed, "reason": attempt.reason, "kind": attempt.kind,
+                "summary": (attempt.edit or {}).get("summary"), "review": option.review if option else None,
+                "min_clearance_m": option.min_clearance_m if option else None,
+                "preview": option.preview if option else None}
+
+    def apply_seat(self, scene_id: str, element: str, support: str) -> dict:
+        """Keep a seat: a recess in `element` where it is inside `support` below its top (edits.apply_seat), measured
+        again on the model as it is now."""
+        s = self.scene(scene_id)
+        with self.lock:
+            st = edits.apply_seat(s, agent.seat_of(s, element, support))
+            s.mark_edited(element)
+            s.bump([s.index_of(element)])
+        return {**asdict(st), "pieces": [element], "files": [s.index_of(element)], "changed": [element]}
+
     def apply_trim(self, scene_id: str, element: str, end: str, by_m: float) -> dict:
         """Keep a trim: the element's end is cut back (see edits.apply_trim)."""
         s = self.scene(scene_id)

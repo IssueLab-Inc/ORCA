@@ -77,6 +77,7 @@ under the lock:
 | How deep a rectangular duct or tray can be over or under the obstacle, and the width that keeps its performance | `_resize_text` → `edits.resize_size` | An obstacle wholly above or below a resizable section |
 | Other clashes of this element along its run | `_nearby_text` | From `Clash.nearby` |
 | A joint: which end runs how far into the other, what a trim takes; "both in the same model" (often by design, a trim only tidies) | `_joint_text` → `edits.butt_trim` | One element's end runs into the other |
+| A bearing: an element that comes down into the other and stands above its top, what a seat would cut and its share | `_seat_text` → `seat_of` → `edits.seat` | One element lands in the other (not a run, a straight-prism support) |
 | A penetration: the opening it would ask for, who cuts it, the reading of that kind of host, limits it breaks, an opening already requested, "runs out of both faces: cross it, don't cut it off" | `_penetration_text` → `hosts.decide`, `edits.penetration`, `hosts.check_hole` | A straight service crossing a non-service |
 | Notes | `Clash.notes` | Source line, plan notes ("Move element A (the hub)..."), "It also runs into..." |
 | The second try's brief | `escalation.brief` | Second tries only |
@@ -179,6 +180,7 @@ the agent checks.
 | `trim` | `_try_trim` | Only contacts new or worse than before count; the trimmed end may touch its partner; refused when the target is fixed and the other side can move | `trim`, `cleanup` when both are in one model |
 | `route` | `_try_route` | As an offset; a single step straight up on a level run that is not drainage is tried as an offset | `edit` (`steps`, `summary`, `key`) |
 | `resize` | `_try_resize` | As an offset | `edit`, `review: "services"`, a performance line in `also_needs` |
+| `seat` | `_try_seat` | `seat_of` may refuse (see [07](07-fixes-and-edits.md)); then, with the recess cut in a trial, the support's contact is not measured (proved by construction), others must clear, the rest only not closer than before | `edit` (`support`, `summary`, `size_m`, `share`, `key`), `review` from `domains.SEAT_REVIEW` |
 | `penetration` | `_try_penetration` | First `hosts.decide` and `hosts.check_hole` may refuse; then, with the opening cut in a trial over both files, the service must clear the host (or touch a fitted gland), every `others` element must clear, nothing else gets worse | `edit` (service, host, size, fit, reading, numbers), `review` (the reading's reviewer), the opening's gap as clearance |
 | `combined` | `_try_combined` | `combined_steps` checks the rules (1 to 3 steps of move, offset or route, each on its own element, never structure, only services besides A and B, one step on A or B, none the requirements forbid); `check_combined` checks every step together | `edit` (`steps`, `pair`, `summary`, `key`), tagged preview meshes |
 
@@ -271,7 +273,8 @@ services raised into the same space), so a plan is checked as a whole.
 All chosen fixes are applied in one multi-file trial (`edits.trial_files`), each changed element is checked against
 everything including the other fixes, then everything is undone. Per kind it uses `plans.IN_TRIAL` (apply inside
 the trial and say what to check), `plans.EXTRA_FILES` (files a fix changes beyond its moved elements: a penetration's
-provision for void) and `plans.KEEPS_CONTACTS` (trims and penetrations: only contacts new or worse count). Moves keep
+provision for void) and `plans.KEEPS_CONTACTS` (trims, seats and penetrations: only contacts new or worse count; a
+seat's support is not measured). Moves keep
 what they stand on (`verify.supports`). A hit on another item's element is a conflict (`conflicts: [{a, b,
 detail}]`). Each item keeps its own clearance from `fix_settings`.
 
@@ -521,7 +524,7 @@ take proposals as their routes do, `find_patterns` the pattern route's one propo
 | `measure_clash` | ORCA's own measure of the clash | none | none |
 | `describe_element`, `find_elements` | An element (and its run); a search by name, tag or class | none | none |
 | `find_openings` | Openings through an obstacle on a segment's line, with the `dz` that passes | none | none |
-| `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration` | A specific idea checked against the whole model, not kept | none | none |
+| `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`, `check_seat` | A specific idea checked against the whole model, not kept | none | none |
 | `propose_fixes` (`escalate`) | `Workspace.propose`, or `Workspace.escalate` with `escalate: true`; the reply lists verified options and failed ideas, and suggests a second try when nothing (or only a resize or an opening) passed | one proposal; a second try's caps and budget | `ui` `select_clash`, `agent` (each agent event), `proposal` |
 | `find_root_causes` | `plans.root_causes` | none | none |
 | `find_patterns` | `plans.patterns`, then the shared reading (`plans.read_patterns`) | one proposal for a reading not made yet (as the route); a kept reading is free | none |

@@ -13,7 +13,7 @@ function mm(m: number | null | undefined) {
 
 export const KIND_LABEL: Record<FixKind, string> = {
   move: "Move", offset: "Offset", trim: "Trim", route: "Reroute", resize: "Resize", penetration: "Opening",
-  combined: "Combined",
+  seat: "Seat", combined: "Combined",
 };
 export const kindLabel = (kind: string) => KIND_LABEL[kind as FixKind] ?? kind;
 
@@ -47,9 +47,10 @@ export const editText = (t: EditLike) => t.edit?.summary
       ? t.trim ? `trim one end ${Math.round(t.trim.by_m * 1000)} mm` : "trim at the joint"
       : `move ${moveWords(t.delta_m)}`;
 
-/** What a fix leaves between the elements: a trim butts them, anything else keeps a measured clearance (a gap, so
- * unsigned; a verified fix never overlaps). */
+/** What a fix leaves between the elements: a trim butts them, a seat bears one on the other, anything else keeps a
+ * measured clearance (a gap, so unsigned; a verified fix never overlaps). */
 export const clearanceText = (o: Pick<Option, "kind" | "min_clearance_m">) => o.kind === "trim" ? "butt joint"
+  : o.kind === "seat" ? "bears on it"
   : o.min_clearance_m == null ? "nothing within 500 mm" : o.min_clearance_m < 0 ? mm(o.min_clearance_m) : `${Math.round(o.min_clearance_m * 1000)} mm`;
 
 /** What else a fix needs, without the "none" Muse copies from the prompt's examples ("re-fix anchors; none"). */

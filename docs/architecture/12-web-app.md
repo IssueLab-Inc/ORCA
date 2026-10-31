@@ -538,7 +538,8 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
   draws outlines in the image dialog.
 - **`fixKinds.ts`:** the client half of the fix-kind registry ([07](07-fixes-and-edits.md)). `framePieces` says what
   to frame (a split run's middle pieces, a penetration's provision for void, every piece of a combined fix; none for a
-  move or trim, which frame where they meet the other side). A new fix kind needs a line here.
+  move, trim or seat, which frame where they meet the other side); `clearanceText` says "butt joint" for a trim and
+  "bears on it" for a seat. A new fix kind needs a line here.
 - **`reqFile.ts`:** the requirements file (`orca-requirements/1`) in the browser: `load`/`save` (key
   `sightline.requirements`, `{ doc, enabled }`), `serialise`, `parseUpload`, `download`, cell, mover and penetration
   edits, `addByDesign` / `addPenetration` and their `has…` checks. Pure functions, shared by `App` and the dialog.

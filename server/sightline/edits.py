@@ -1259,6 +1259,203 @@ def _cut_opening(scene: IfcScene, pen: Penetration, service, host) -> None:
     scene.refresh_bounds([pen.host])
 
 
+# --------------------------------------------------------------------------------------------- seats (docs/edits.md)
+
+SEAT_ABOVE_M = 0.05   # a seated element must stand at least this far above its support's top: what bears on it
+SEAT_BELOW_M = 0.10   # and its foot reach no more than this below the support's bottom: it lands in the support,
+                      # it does not pass it (a wall running down past a footing is the footing's to notch)
+SEAT_MAX_SHARE = 0.5  # nor may the cut take more than this share of it: an element mostly inside its support is
+                      # modelled in the wrong place, not seated
+SEAT_JOINT_M = 0.001  # the recess clears the support by this all round: a bedding joint. Exactly flush faces are
+                      # numerically fragile in the clash queries (Northbank's pit wall read as -500 mm after a flush seat)
+SEAT_PSET = "ORCA_Seat"   # on the recess ORCA writes: the support it bears on
+
+
+@dataclass
+class Seat:
+    element: str             # what is cut: it then bears on `support`
+    support: str             # what it bears on
+    top_m: float             # the support's top (world z): where the element now bears
+    cut: list[list[float]]   # the cut's box, world metres ([min], [max]): the element inside the support's footprint,
+                             # from its foot up to the support's top
+    share: float             # of the element's own box
+    footprint: list[list[float]]   # the support's footprint at its top (world x, y), the recess's outline
+    recess: str | None = None      # the recess's GlobalId, once applied
+
+    @property
+    def size_m(self) -> list[float]:
+        lo, hi = np.asarray(self.cut[0]), np.asarray(self.cut[1])
+        return [round(float(v), 3) for v in hi - lo]
+
+
+def _top_outline(scene: IfcScene, gid: str, top: float) -> tuple[list[list[float]], float]:
+    """The outline of an element's top face (world x, y, in order), from its triangles: the boundary of the faces that
+    look up at its top; and the element's volume. Raises Unsupported when it has none (a sloped or curved top)."""
+    m = meshes(scene, [gid])[0]
+    v = np.asarray(m["verts"], float).reshape(-1, 3)
+    f = np.asarray(m["faces"], int).reshape(-1, 3)
+    p0, p1, p2 = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
+    volume = abs(float(np.einsum("ij,ij->i", p0, np.cross(p1, p2)).sum()) / 6)
+    n = np.cross(p1 - p0, p2 - p0)
+    length = np.linalg.norm(n, axis=1)
+    up = (length > 1e-12) & (n[:, 2] > 0.999 * np.maximum(length, 1e-12)) & (np.abs((p0[:, 2] + p1[:, 2] + p2[:, 2]) / 3 - top) < 0.002)
+    if not up.any():
+        raise Unsupported("its top is not one flat face to bear on")
+    key = lambda i: tuple(np.round(v[i, :2], 4))   # noqa: E731 (vertices welded by plan position)
+    count: dict[tuple, int] = {}
+    for tri in f[up]:
+        for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+            e = tuple(sorted((key(a), key(b))))
+            count[e] = count.get(e, 0) + 1
+    edges = [e for e, k in count.items() if k == 1]
+    nxt: dict[tuple, list[tuple]] = {}
+    for a, b in edges:
+        nxt.setdefault(a, []).append(b)
+        nxt.setdefault(b, []).append(a)
+    loops, seen = [], set()
+    for start in nxt:
+        if start in seen:
+            continue
+        loop, prev, cur = [start], None, start
+        seen.add(start)
+        while True:
+            choices = [q for q in nxt[cur] if q != prev and (q not in seen or (q == start and len(loop) > 2))]
+            if not choices:
+                break
+            prev, cur = cur, choices[0]
+            if cur == start:
+                break
+            loop.append(cur)
+            seen.add(cur)
+        if len(loop) >= 3:
+            loops.append(loop)
+    if not loops:
+        raise Unsupported("its top face has no outline")
+    area = lambda lp: abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(lp, lp[1:] + lp[:1]))) / 2  # noqa: E731
+    outer = max(loops, key=area)
+    # Drop points on a straight line (a tessellated face's interior edge ends): the outline's corners only.
+    pts = [np.asarray(q, float) for q in outer]
+    cross = lambda u, w: u[0] * w[1] - u[1] * w[0]  # noqa: E731
+    keep = [q for i, q in enumerate(pts) if abs(cross(q - pts[i - 1], pts[(i + 1) % len(pts)] - q)) > 1e-7]
+    return [[float(q[0]), float(q[1])] for q in (keep if len(keep) >= 3 else pts)], volume
+
+
+def seat(scene: IfcScene, element: str, support: str) -> Seat:
+    """How `element` would bear on `support`: it comes down into the support (its top stands above the support's top,
+    its foot lands in it), and the part of it inside the support's footprint below the support's top is cut away, so
+    what is left sits on the support's top. From the geometry alone: which kinds of element may be seated is the
+    requirements' and Muse's call. Raises Unsupported, saying why, when it cannot bear on it that way."""
+    b = scene.bounds()
+    if element not in b or support not in b:
+        raise Unsupported("it has no geometry to cut")
+    e, s = np.asarray(b[element], float), np.asarray(b[support], float)
+    lo, hi = np.maximum(e[0], s[0]), np.minimum(e[1], s[1])
+    if np.any(hi - lo <= 0.001):
+        raise Unsupported("it does not run into the other element")
+    top, name = float(s[1][2]), scene.element(support).name or scene.entity(support).is_a()[3:]
+    for rel in getattr(scene.entity(element), "HasOpenings", None) or ():   # its box still reaches in: ask the recess
+        if (ifcopenshell.util.element.get_psets(rel.RelatedOpeningElement).get(SEAT_PSET) or {}).get("Support") == support:
+            raise Unsupported(f"it already bears on {name}")
+    if e[1][2] < top + SEAT_ABOVE_M:
+        raise Unsupported(f"it does not stand above {name}'s top (z {top:.3f} m), so nothing of it would bear on it")
+    if e[0][2] >= top - 0.001:
+        raise Unsupported(f"its foot is not below {name}'s top: it already bears on it")
+    if e[0][2] < s[0][2] - SEAT_BELOW_M:
+        raise Unsupported(f"it runs {(s[0][2] - e[0][2]) * 1000:.0f} mm below {name}: it passes the element rather than "
+                          "landing in it")
+    outline, volume = _top_outline(scene, support, top)
+    xy = np.asarray(outline)
+    # The support must be a straight prism under its top (as wide all the way down): then the cut, its footprint from
+    # the foot up to its top, leaves nothing of the element inside it, by construction.
+    area = abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(outline, outline[1:] + outline[:1]))) / 2
+    prism = area * (top - s[0][2])
+    if prism <= 0 or abs(volume - prism) > 0.01 * prism:
+        raise Unsupported(f"{name} is not as wide below its top as at it, so a seat on its top would leave part of the "
+                          "element inside it")
+    cut_lo = np.array([max(e[0][0], xy[:, 0].min()), max(e[0][1], xy[:, 1].min()), e[0][2]])
+    cut_hi = np.array([min(e[1][0], xy[:, 0].max()), min(e[1][1], xy[:, 1].max()), top])
+    if np.any(cut_hi - cut_lo <= 0.001):
+        raise Unsupported(f"it does not stand over {name}'s top")
+    share = float(np.prod(cut_hi - cut_lo) / max(np.prod(e[1] - e[0]), 1e-12))
+    if share > SEAT_MAX_SHARE:
+        raise Unsupported(f"the cut would take {share:.0%} of it: it is mostly inside {name}, which is not a seat")
+    return Seat(element, support, round(top, 4), [np.round(cut_lo, 4).tolist(), np.round(cut_hi, 4).tolist()],
+                round(share, 3), outline)
+
+
+def seat_summary(scene: IfcScene, st: Seat) -> str:
+    """"seat 'Upstand U1' on 'Base B2': its foot cut where it is inside (0.50 x 0.20 x 0.65 m), so it bears on the top"."""
+    w, d, h = st.size_m
+    return (f"seat '{scene.element(st.element).name}' on '{scene.element(st.support).name}': its foot cut where it is "
+            f"inside ({w:.2f} x {d:.2f} x {h:.2f} m), so it bears on the top")
+
+
+def _grown(outline: list[list[float]], by: float) -> list[list[float]]:
+    """A closed outline (x, y) moved outward by `by` square to each edge (each corner along its mitre)."""
+    q = np.asarray(outline, float)
+    ccw = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(q, np.roll(q, -1, axis=0))) > 0
+    out = []
+    for k in range(len(q)):
+        normals = []
+        for a, b in ((q[k - 1], q[k]), (q[k], q[(k + 1) % len(q)])):
+            d = (b - a) / max(np.linalg.norm(b - a), 1e-12)
+            normals.append(np.array([d[1], -d[0]]) if ccw else np.array([-d[1], d[0]]))
+        mitre = normals[0] + normals[1]
+        mitre /= max(np.linalg.norm(mitre), 1e-12)
+        out.append((q[k] + mitre * by / max(float(np.dot(mitre, normals[0])), 0.2)).tolist())
+    return out
+
+
+def _footprint_profile(m, sc: float, outline: list[list[float]]):
+    """A footprint (world x, y) as a profile and where its placement goes (world x, y and the profile's X direction):
+    a rectangle centred in its own placement when it is one (what most supports are; STEP export cuts it as a prism,
+    as it cuts a penetration's opening), else the outline as a polyline in a placement at the world origin."""
+    q = np.asarray(outline, float)
+    if len(q) == 4:
+        e = [q[(k + 1) % 4] - q[k] for k in range(4)]
+        if all(abs(float(np.dot(e[k], e[(k + 1) % 4]))) < 1e-6 * max(np.linalg.norm(e[k]) * np.linalg.norm(e[(k + 1) % 4]), 1e-12)
+               for k in range(4)):
+            x = e[0] / np.linalg.norm(e[0])
+            at = m.createIfcAxis2Placement2D(_point(m, (0.0, 0.0)), None)
+            profile = m.createIfcRectangleProfileDef("AREA", None, at, float(np.linalg.norm(e[0]) / sc),
+                                                     float(np.linalg.norm(e[1]) / sc))
+            return profile, q.mean(axis=0), x
+    pts = [_point(m, (x / sc, y / sc)) for x, y in outline]
+    return m.createIfcArbitraryClosedProfileDef("AREA", None, m.createIfcPolyline([*pts, pts[0]])), np.zeros(2), np.array([1.0, 0.0])
+
+
+def apply_seat(scene: IfcScene, st: Seat) -> Seat:
+    """Seat the element: a recess (an IfcOpeningElement, RECESS, voiding it) shaped as the support's footprint, from
+    below the element's foot up to the support's top. The element keeps its body and GlobalId; anything that draws
+    or checks it subtracts the recess. Edits the element's model in place; wrap in `trial` to try it and undo."""
+    i = scene.index_of(st.element)
+    m, sc = scene.models[i], scene.unit_scales[i]
+    element, support = scene.entity(st.element), scene.entity(st.support)
+    recess = ifcopenshell.api.run("root.create_entity", m, ifc_class="IfcOpeningElement",
+                                  name=f"Seat on {support.Name or support.is_a()[3:]}")
+    if m.schema != "IFC2X3":
+        recess.PredefinedType = "RECESS"
+    else:
+        recess.ObjectType = "Recess"
+    bottom = st.cut[0][2] - 0.01   # past the foot, so no sliver of it is left under the support
+    profile, centre, x = _footprint_profile(m, sc, _grown(st.footprint, SEAT_JOINT_M))
+    solid = m.createIfcExtrudedAreaSolid(profile, m.createIfcAxis2Placement3D(_point(m, (0.0, 0.0, 0.0)), None, None),
+                                         m.createIfcDirection((0.0, 0.0, 1.0)),
+                                         float((st.top_m + SEAT_JOINT_M - bottom) / sc))
+    rep = m.createIfcShapeRepresentation(_body_context(element), "Body", "SweptSolid", [solid])
+    ifcopenshell.api.run("geometry.assign_representation", m, product=recess, representation=rep)
+    at = np.eye(4)
+    at[:3, 0], at[:3, 1] = [x[0], x[1], 0.0], [-x[1], x[0], 0.0]
+    at[:3, 3] = [centre[0] / sc, centre[1] / sc, bottom / sc]
+    ifcopenshell.api.run("geometry.edit_object_placement", m, product=recess, matrix=at, is_si=False)
+    ifcopenshell.api.run("feature.add_feature", m, feature=recess, element=element)
+    pset = ifcopenshell.api.run("pset.add_pset", m, product=recess, name=SEAT_PSET)
+    ifcopenshell.api.run("pset.edit_pset", m, pset=pset, properties={"Support": st.support, "Top": st.top_m / sc})
+    st.recess = recess.GlobalId
+    scene.refresh_bounds([st.element])
+    return st
+
+
 @contextmanager
 def trial(scene: IfcScene, global_id: str):
     """Make edits to the file holding `global_id`, then undo them all, cached boxes included."""

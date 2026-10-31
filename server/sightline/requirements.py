@@ -740,9 +740,9 @@ def blocked(pol_a: Policy, pol_b: Policy | None, kind: str, delta_m: list[float]
         return f"blocked by requirements: {pol_a.group_name} may not be edited"
     if pol_a.edits == "move" and kind not in ("move", "penetration"):   # a penetration only asks: the service stays
         return f"blocked by requirements: {pol_a.group_name} may only be moved whole (no {kind}s)"
-    if kind == "trim":
+    if kind in ("trim", "seat"):   # a seat reshapes a member at a joint, as a trim does: the same rule
         if pol_a.trims == "no":
-            return f"blocked by requirements: no trims on {pol_a.group_name}"
+            return f"blocked by requirements: no trims or seats on {pol_a.group_name}"
         if pol_a.trims == "cleanup" and not same_model:
             return "blocked by requirements: trims only tidy a joint within one model"
     if pol_a.max_move_m and kind in SIZED:

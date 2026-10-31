@@ -67,3 +67,11 @@ test("rejected options are told to Muse in the next proposal's notes, with why w
   }), 'The reviewer rejected these fixes, so propose different ones: offset "Offset duct up 400 mm" (offset 1.00–2.40 m by +400 mm), '
     + 'because The void is for sprinklers; move "Lower" (move down 150 mm).');
 });
+
+test("a seat is named, bears on the other and is framed where it meets it", () => {
+  assert.equal(kinds.kindLabel("seat"), "Seat");
+  assert.equal(kinds.clearanceText({ kind: "seat", min_clearance_m: 0 }), "bears on it");
+  const summary = "seat 'Upstand U1' on 'Base B1': its foot cut where it is inside (0.20 x 0.50 x 0.65 m), so it bears on the top";
+  assert.equal(kinds.editText({ kind: "seat", delta_m: [0, 0, 0], edit: { summary } }), summary);
+  assert.deepEqual(kinds.framePieces({ kind: "seat", preview: [{ global_id: "u1" }] }), []);
+});

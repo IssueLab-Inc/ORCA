@@ -55,7 +55,7 @@ export interface Trial { index: number; kind: FixKind; moved: string[]; delta_m:
  * host the requirements lock comes back `cut: false`, with who cuts it. */
 /** A kept fix: `pieces`, its split run (the original first); `groups`, every run it split (a combined fix's several). */
 export type Kept = { files: number[]; pieces?: string[]; groups?: string[][]; cut?: boolean; blocked_by?: string } & Patch;
-export type FixKind = "move" | "offset" | "trim" | "route" | "resize" | "penetration" | "combined";
+export type FixKind = "move" | "offset" | "trim" | "route" | "resize" | "penetration" | "seat" | "combined";
 export interface TrimCut { end: "start" | "end"; by_m: number }
 /** Under requirements that allow no edit: Muse Spark's best idea for the designer, never tried or applied. */
 export interface Recommendation {
