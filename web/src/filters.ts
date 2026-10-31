@@ -200,6 +200,41 @@ export function legend(state: FilterState, p: Prepared | null, max = 6): { colou
   return out.slice(0, max + 1);
 }
 
+/** The elements a rule acts on, by GlobalId: what it finds, or for colour by value what it colours. */
+export function actedOn(p: Prepared, rule: Rule): string[] {
+  const hit = found(p, rule);
+  if (rule.action !== "byValue") return [...hit].map((i) => p.index.elements[i]);
+  const facet = rule.by ? p.byKey.get(rule.by.facet) : undefined;
+  if (!facet) return [];
+  const off = new Set(rule.by?.off ?? []), out = new Set<number>();
+  facet.values.forEach((v, k) => { if (!off.has(String(v))) for (const i of facet.items[k]) if (hit.has(i)) out.add(i); });
+  return [...out].map((i) => p.index.elements[i]);
+}
+
+/** The filters just applied, going from one state to the next: added, switched on, or changed while on (not
+ * renamed, nor paused or brought back by chat). Switching one off, deleting, reordering or Show colours applies none. */
+export function applied(prev: FilterState, next: FilterState): Rule[] {
+  const before = new Map(prev.rules.map((r) => [r.id, r]));
+  const what = (r: Rule) => JSON.stringify([r.when, r.action, r.invert ?? false, r.colour ?? null, r.by ?? null]);
+  return next.rules.filter((r) => {
+    if (!r.on) return false;
+    const o = before.get(r.id);
+    if (!o) return true;
+    if (!o.on) return !o.paused;     // chat clearing gives a paused filter back: not an apply
+    return what(o) !== what(r);
+  });
+}
+
+/** What applying filters frames, once the viewer shows them: what they act on that is on screen; for filters that only
+ * hide, everything still on screen. Empty: nothing to frame. */
+export function zoomTarget(p: Prepared, rules: Rule[], isShown: (gid: string) => boolean): string[] {
+  const acting = rules.filter((r) => r.on && r.action !== "hide");
+  const ids = new Set<string>();
+  for (const r of acting) for (const g of actedOn(p, r)) if (isShown(g)) ids.add(g);
+  if (ids.size || acting.length) return [...ids];
+  return p.index.elements.filter(isShown);
+}
+
 /** A facet's values with how many elements have each, among `within` (null: all). */
 export function valueCounts(p: Prepared, key: string, within: Set<number> | null = null): { value: Value; count: number }[] {
   const f = p.byKey.get(key);

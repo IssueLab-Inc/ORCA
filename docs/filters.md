@@ -73,6 +73,23 @@ A filter (`filters.Rule`) finds elements, then does one thing with them.
 - **Kept** per set of models (`sightline.filters.<project>`), and in a saved view (its `rules`). Old saved views,
   without them, leave the filters as they are. `filters.migrate` reads either back, and anything unreadable gives way.
 
+## Zoom (built)
+
+Owner request (Oct 31): applying a filter, from anywhere, takes the views to what it acts on.
+
+- **Applying** (`filters.applied`, comparing the filters before and after): adding a filter, switching one on, or
+  saving a change to one (what it finds, its action, colour or invert), from the panel, Colour by…, a value's row in
+  Properties, chat or an agent over MCP. Switching one off, deleting, renaming, reordering, Show colours and Grey the
+  rest move nothing; nor do the filters a project or a saved view reads back (a saved view has its own camera), nor a
+  filter being edited until it is added or saved, nor a user's filter chat gives back on clear.
+- **What it frames** (`filters.zoomTarget`), once the viewer shows the new filters: the elements the applied filters
+  act on (what they find; for colour by value what they colour) that are on screen; for filters that only hide, what
+  is still on screen. Nothing on screen, nothing moves.
+- **Every view** (`Viewer.frameEverywhere`): the 3D camera flies there, and each drawing view that is not pinned pans
+  and zooms to it, keeping its level, section line and facing.
+- The Properties card's isolates (**Isolate all with this value**, **Isolate this level**, the class's **Isolate them**)
+  frame what they isolate too, and **Zoom to them** on a filter frames what it acts on in every view.
+
 ## What wins
 
 Shown: a hidden model hides; the clash pair, previews and trials always show; then the temporary hide or isolate; the
@@ -135,8 +152,7 @@ value** (a temporary isolate). A storey's breadcrumb offers **Filter by this lev
   the model names what is there.
 - **On the page** (`ui filters`): chat's filters (`origin: "chat"`) replace its own; the user's that were on are
   paused (`Rule.paused`) while they show, and come back with **`clear_filters`**. They show in the Filters panel like
-  any other, so the user can edit, keep or delete them. The views go to what chat isolated (else to what it coloured)
-  unless that is everything.
+  any other, so the user can edit, keep or delete them, and the views go to what they act on (Zoom, above).
 - One line in `domain_packs/chat.md` says when to use them (kinds of element by class, level, model or property).
 - Measured in Chromium on Northbank with Muse Spark: "Isolate the MEP model and colour the services by system." →
   two filters (the MEP model isolated, coloured by System), the views framed on the services, and a reply listing the
@@ -144,14 +160,16 @@ value** (a temporary isolate). A storey's breadcrumb offers **Filter by this lev
 
 ## Tests
 
-- `web/tests/filters.test.mjs` (8): conditions as the server matches them; every condition holding, unfinished ones
+- `web/tests/filters.test.mjs` (10): conditions as the server matches them; every condition holding, unfinished ones
   left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); colour by
   value (chosen colours, palette by place, values ticked off, what it counts); counts among the other conditions,
-  names, sets, a new filter's colour; the key (only colours on screen); `migrate`; the palette against the reserved
+  names, sets, a new filter's colour; the key (only colours on screen); what counts as applying a filter and what it
+  frames; `migrate`; the palette against the reserved
   colours.
-- `web/tests/viewer-filters.test.mjs` (5): hides, isolates and colours reach the batch, with grey for the rest;
+- `web/tests/viewer-filters.test.mjs` (6): hides, isolates and colours reach the batch, with grey for the rest;
   captures never see them; lit links leave out what a filter hides; what drawings show for each setting; a drawing's
-  fill pass takes the colours on paper and gives the 3D ones back.
+  fill pass takes the colours on paper and gives the 3D ones back; framing takes the 3D view and every unpinned
+  drawing there, not a pinned one.
 - `server/tests/test_facets.py` (9): every element with its file, class, storey (as `datums.storeys`), type and
   material; numbers kept as numbers in SI from a millimetre file; the hidden note never in the index; every kind of
   value (classification, group, layers, enumerated, list, complex parts, what the type gives; no ranges or tables);

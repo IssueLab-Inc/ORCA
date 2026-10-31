@@ -45,7 +45,7 @@ import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type 
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { FiltersPanel, blankRule } from "./FiltersPanel";
 import { ElementCard, type CardActions } from "./ElementCard";
-import { EMPTY as NO_FILTERS, complete, evaluate, found, legend, matching, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
+import { EMPTY as NO_FILTERS, applied, complete, evaluate, legend, matching, migrate, prepare, zoomTarget, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type { Peek } from "./workingsGraph";
@@ -471,7 +471,21 @@ export function App() {
       ? filterState.rules.map((r) => (r.id === d.id ? shown ?? { ...r, on: false } : r)) : shown ? [shown, ...filterState.rules] : filterState.rules;
     return evaluate({ ...filterState, rules }, prepared);
   }, [filterState, filterDraft, prepared]);
-  useEffect(() => { viewer.current?.setRules(ruleView); }, [ruleView]);
+  // Applying a filter (the panel, Colour by…, a value's row, chat or an agent) frames what it acts on in every view,
+  // once the viewer shows it (docs/filters.md, "Zoom"). Filters read back with a project or a saved view do not.
+  const lastFilters = useRef<FilterState>(NO_FILTERS);
+  const restoredFilters = useRef<FilterState | null>(null);
+  useEffect(() => {
+    viewer.current?.setRules(ruleView);
+    const prev = lastFilters.current;
+    if (prev === filterState) return;
+    lastFilters.current = filterState;
+    if (restoredFilters.current === filterState) return;
+    const v = viewer.current, rules = applied(prev, filterState);
+    if (!v || !prepared || !rules.length) return;
+    const ids = zoomTarget(prepared, rules, (g) => v.isShown(g));
+    if (ids.length) v.frameEverywhere(ids);
+  }, [ruleView]);  // eslint-disable-line react-hooks/exhaustive-deps
   // The key to the colours on screen, over the model.
   const filterKey = useMemo(() => legend(filterState, prepared), [filterState, prepared]);
   // A filter that takes the selected element off screen clears the selection, as a hide does.
@@ -502,7 +516,9 @@ export function App() {
     viewer.current?.setHome(store.home);
     let kept: unknown = null;
     try { kept = JSON.parse(localStorage.getItem(filtersKey(modelNames)) ?? "null"); } catch { /* none kept */ }
-    setFilterState(migrate(kept));
+    const restored = migrate(kept);
+    restoredFilters.current = restored;
+    setFilterState(restored);
     setFilterDraft(null);
   }, [modelNames]);
   // What the filters read: each element's class (the server's) and storey (datums). Read again after a kept fix (same
@@ -1557,7 +1573,7 @@ export function App() {
     if (!v) return;
     v.applyPose(view.pose);
     setFilters(view.filters);
-    if (view.rules) { setFilterState(migrate(view.rules)); setFilterDraft(null); }
+    if (view.rules) { const restored = migrate(view.rules); restoredFilters.current = restored; setFilterState(restored); setFilterDraft(null); }
     setTool((t) => ({ ...t, ortho: view.ortho, style: view.style, mode: view.mode, section: !!view.section }));
     if (view.section) {
       const box = v.boxOf([]);
@@ -2197,17 +2213,7 @@ export function App() {
           rules: [...(e.filters ?? []).map((r) => ({ ...r, origin: "chat" as const })), ...paused] };
       });
       setFilterDraft(null);
-      if (e.mode === "replace") {
-        openFilters();
-        // Take the views to what chat isolated (else to what it coloured), when that is not everything.
-        if (prepared) {
-          const rules = e.filters ?? [], pick = rules.some((r) => r.action === "isolate") ? rules.filter((r) => r.action === "isolate")
-            : rules.filter((r) => r.action !== "hide");
-          const ids = new Set<number>();
-          for (const r of pick) for (const i of found(prepared, r)) ids.add(i);
-          if (ids.size && ids.size < prepared.n) viewer.current?.frame([...ids].map((i) => prepared.index.elements[i]));
-        }
-      }
+      if (e.mode === "replace") openFilters();   // the views go to what they act on, as any filter applied
     }
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
@@ -2902,12 +2908,12 @@ export function App() {
       onIsolate: () => setTemporary({ hidden: [], isolated: [gid] }),
       onSection: () => sectionRound(gid),
       onHideClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); },
-      onIsolateClass: () => setTemporary({ hidden: [], isolated: viewer.current?.ofClass(cls) ?? [] }),
+      onIsolateClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setTemporary({ hidden: [], isolated: ids }); viewer.current?.frameEverywhere(ids); },
       onFilterClass: () => openFilters(blankRule([{ facet: "class", op: "is", values: [cls] }], "isolate")),
       onLevel: (name, how) => {
         if (how === "filter") { openFilters(blankRule([{ facet: "storey", op: "is", values: [name] }], "isolate")); return; }
         const ids = idsWith("storey", name);
-        if (how === "isolate") setTemporary({ hidden: [], isolated: ids });
+        if (how === "isolate") { setTemporary({ hidden: [], isolated: ids }); viewer.current?.frameEverywhere(ids); }
         else { setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
       },
       load: (ref) => (sceneId && ref.global_id ? api.properties(sceneId, ref.global_id, ref.file) : Promise.reject(new Error("No scene"))),
@@ -2918,7 +2924,7 @@ export function App() {
           setFilterState((st) => ({ ...st, colours: true, rules: [{ ...blankRule([], "byValue"), by: { facet: row.facet! }, name: `By ${row.name}` }, ...st.rules] }));
           openFilters();
         },
-        onIsolate: (row) => setTemporary({ hidden: [], isolated: idsWith(row.facet!, row.raw!) }),
+        onIsolate: (row) => { const ids = idsWith(row.facet!, row.raw!); setTemporary({ hidden: [], isolated: ids }); viewer.current?.frameEverywhere(ids); },
       } : undefined,
     };
   };
@@ -3013,7 +3019,7 @@ export function App() {
             <div className="filters-sheet-head"><b>Filters</b>
               <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
             <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
-              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frame(ids.filter((g) => v.isShown(g))); }}
+              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }}
             drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
           </div>)}
         {stats && filterKey.length > 0 && (
@@ -3326,7 +3332,7 @@ export function App() {
         </div>)}
       {docked && inSlot(slots.filters, <div className="filters-slot">
         <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
-          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frame(ids.filter((g) => v.isShown(g))); }}
+          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }}
           drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}
       {docked && inSlot(slots.properties, <div className="props in-panel">

@@ -92,3 +92,18 @@ test("a drawing's fill pass takes the filters' colours on paper, the rest its fi
   back();
   assert.equal(hex(m, "b"), "#318181"); assert.equal(hex(m, "a"), "#808080");
 });
+
+test("framing for a filter takes the 3D view and every unpinned drawing to the elements, not a pinned one", () => {
+  const { v } = viewer();
+  const framed = [], flown = [];
+  const pane = (pinned) => ({ pinned, rect: { x: 0, y: 0, w: 100, h: 100 }, view: { frame: (box) => framed.push([pinned, box.clone()]) } });
+  Object.assign(v, { panes: [{ view: null }, pane(false), pane(true)], flyToBox: (box) => flown.push(box.clone()),
+    boxOf: (ids) => new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(ids.length, 1, 1)) });
+  v.frameEverywhere(["a", "b"]);
+  assert.equal(flown.length, 1);
+  assert.deepEqual(framed.map(([pinned]) => pinned), [false], "the pinned drawing stays");
+  assert.equal(framed[0][1].max.x, 2);
+  v.boxOf = () => new THREE.Box3();
+  v.frameEverywhere([]);
+  assert.equal(flown.length, 1, "nothing to frame: nothing moves");
+});

@@ -1563,3 +1563,16 @@ Filters by chat, voice and agents (Oct 31; owner decision: chat and voice drive 
 - **Demo shots** (`docs/demo-video.md`, "Proposed"): testing Colour by Discipline with the walls and site hidden showed
   Zoom to them framing hidden elements too, and the key listing colours no longer on screen. Zoom to them now frames
   only what is shown, and the key lists a colour only when an element on screen has it (`filters.legend`, a test).
+
+Applying a filter zooms every view (Oct 31; owner request, "when we apply a filter, either directly, via MCP, chat,
+etc., automatically zoom into the objects in the viewer(s)"; code `filters.applied` / `zoomTarget`,
+`Viewer.frameEverywhere`, App's `ruleView` effect; [docs/filters.md](../filters.md), "Zoom"):
+- **What:** one trigger for every way in. When the filters change, App compares them with what they were: a filter
+  added, switched on or changed is applied, and once the viewer shows it the 3D view flies to what it acts on and each
+  unpinned drawing pans and zooms there (a hide-only filter frames what is left). Restoring a project's or a saved
+  view's filters does not move the camera. Chat's own framing code went: chat and MCP filters arrive as any other.
+  The card's isolates frame what they isolate; Zoom to them works in every view.
+- **Checked:** `web/tests/filters.test.mjs` (10), `viewer-filters.test.mjs` (6), 168 web tests, build; in Chromium on
+  Northbank with 3D and the south elevation: hiding the site closed both views in on the building, isolating MEP
+  coloured by System closed them in on the services, with no zoom button pressed; chat's "Isolate the MEP model and
+  colour the services by system" framed the services the same way.

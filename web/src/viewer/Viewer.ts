@@ -1313,6 +1313,16 @@ export class Viewer {
     if (!box.isEmpty()) this.flyToBox(box, 1.4);
   }
 
+  /** Frame elements in every view (docs/filters.md, "Zoom"): the 3D camera flies to them, and each drawing view that is
+   * not pinned pans and zooms to them, keeping its level, section line and facing. */
+  frameEverywhere(globalIds: string[]) {
+    const box = this.boxOf(globalIds);
+    if (box.isEmpty()) return;
+    this.flyToBox(box, 1.4);
+    for (const pane of this.panes) if (pane.view && !pane.pinned) pane.view.frame(box, pane.rect, 0.08);
+    this.onChange?.();
+  }
+
   /** Frame server triangles (metres, Z up): the part of the model a fix changes. */
   frameMeshes(meshes: Mesh[], tight = 1.4) {
     const box = meshBox(meshes);

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Check, EyeOff, Focus, LocateFixed, Palette, Plus, Rows3, Trash2, X } from "lucide-react";
 import {
-  complete, count, describe, ELEMENT, found, nameFor, newId, nextColour, PALETTE, ruleColour, sets, shownValue, valueColour, valueCounts,
+  actedOn, complete, count, describe, ELEMENT, found, nameFor, newId, nextColour, PALETTE, ruleColour, sets, shownValue, valueColour, valueCounts,
   type Action, type Condition, type FilterState, type Op, type Prepared, type Rule, type Value,
 } from "./filters";
 
@@ -81,7 +81,7 @@ export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft
               <span className="frule-tools">
                 <button type="button" className="ibtn" disabled={i === 0} aria-label="Up" data-tip="Up: wins over those below" onClick={() => move(i, -1)}><ArrowUp size={14} aria-hidden /></button>
                 <button type="button" className="ibtn" disabled={i === rules.length - 1} aria-label="Down" data-tip="Down" onClick={() => move(i, 1)}><ArrowDown size={14} aria-hidden /></button>
-                {onZoom && <button type="button" className="ibtn" aria-label="Zoom to them" data-tip="Zoom to them" onClick={() => onZoom(acted(p, r))}><LocateFixed size={14} aria-hidden /></button>}
+                {onZoom && <button type="button" className="ibtn" aria-label="Zoom to them" data-tip="Zoom to them" onClick={() => onZoom(actedOn(p, r))}><LocateFixed size={14} aria-hidden /></button>}
                 <button type="button" className="ibtn" aria-label="Delete" data-tip="Delete" onClick={() => set(rules.filter((x) => x.id !== r.id))}><Trash2 size={14} aria-hidden /></button>
               </span>
             </div>
@@ -92,15 +92,6 @@ export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft
       {rules.length > 0 && <button type="button" className="btn small ghost" onClick={() => set([])}>Clear all</button>}
     </div>
   );
-}
-
-/** The elements a rule acts on, by GlobalId (for Zoom to them). */
-function acted(p: Prepared, r: Rule): string[] {
-  const hit = found(p, r);
-  if (r.action !== "byValue" || !r.by) return [...hit].map((i) => p.index.elements[i]);
-  const facet = p.byKey.get(r.by.facet), off = new Set(r.by.off ?? []), out = new Set<number>();
-  facet?.values.forEach((v, k) => { if (!off.has(String(v))) for (const i of facet.items[k]) if (hit.has(i)) out.add(i); });
-  return [...out].map((i) => p.index.elements[i]);
 }
 
 /** A rule's mark in the list: its colour, or its action's icon. */

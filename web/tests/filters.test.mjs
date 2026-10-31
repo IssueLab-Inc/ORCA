@@ -101,6 +101,32 @@ test("the key lists the colours on screen, top filter first, and none for what a
   assert.deepEqual(f.legend({ ...state, colours: false }, p), []);
 });
 
+test("applying a filter is adding it, switching it on or changing it; not switching off, deleting, renaming or reordering", () => {
+  const a = rule({ id: "a", when: [{ facet: "class", op: "is", values: ["IfcBeam"] }] }), b = rule({ id: "b", on: false, action: "hide" });
+  const s0 = { v: 1, colours: true, greyRest: false, rules: [a, b] };
+  const ids = (prev, next) => f.applied(prev, next).map((r) => r.id);
+  assert.deepEqual(ids({ ...s0, rules: [] }, s0), ["a"], "added (an added filter that is off is not applied)");
+  assert.deepEqual(ids(s0, { ...s0, rules: [a, { ...b, on: true }] }), ["b"], "switched on");
+  assert.deepEqual(ids(s0, { ...s0, rules: [{ ...a, when: [{ facet: "class", op: "is", values: ["IfcWall"] }] }, b] }), ["a"], "changed");
+  assert.deepEqual(ids(s0, { ...s0, rules: [{ ...a, colour: "#123456" }, b] }), ["a"], "a new colour");
+  assert.deepEqual(ids(s0, { ...s0, rules: [{ ...a, on: false }, b] }), [], "switched off");
+  assert.deepEqual(ids(s0, { ...s0, rules: [b, { ...a, name: "Beams" }] }), [], "renamed and reordered");
+  assert.deepEqual(ids(s0, { ...s0, colours: false }), []);
+  const paused = { ...s0, rules: [{ ...a, on: false, paused: true }] };
+  assert.deepEqual(ids(paused, { ...s0, rules: [a] }), [], "chat giving a paused filter back");
+});
+
+test("applying frames what the filters act on that is on screen; filters that only hide frame what is left", () => {
+  const all = () => true, notWall = (g) => g !== "wall";
+  const ducts = rule({ id: "d", when: [{ facet: "class", op: "is", values: ["IfcDuctSegment"] }] });
+  assert.deepEqual(f.zoomTarget(p, [ducts], all).sort(), ["duct1", "duct2"]);
+  assert.deepEqual(f.zoomTarget(p, [rule({ id: "h", action: "hide", when: [{ facet: "class", op: "is", values: ["IfcWall"] }] })], notWall).sort(),
+    ["beam", "duct1", "duct2", "pipe"]);
+  const bySystem = rule({ id: "s", action: "byValue", by: { facet: "pset:Model data/System", off: ["Cold water"] } });
+  assert.deepEqual(f.zoomTarget(p, [bySystem], all).sort(), ["duct1", "duct2"], "colour by value: what it colours");
+  assert.deepEqual(f.zoomTarget(p, [ducts], () => false), [], "nothing on screen: nothing to frame");
+});
+
 test("a kept or saved filter state reads back, and anything unreadable gives way to none", () => {
   const good = { v: 1, colours: false, greyRest: true, rules: [rule({ id: "a" }), { id: 3 }, rule({ id: "b", action: "explode" })] };
   assert.deepEqual(f.migrate(good), { v: 1, colours: false, greyRest: true, rules: [rule({ id: "a" })] });

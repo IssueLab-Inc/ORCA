@@ -89,7 +89,8 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
   - What it is linked to, by kind (as before).
   - **Every value's row**, on hover (always on a touch screen): **Copy**, and where the filters' index knows the value
     **Filter by this value** (a new filter in the editor, shown live), **Colour by this property** (a colour-by-value
-    filter, on top) and **Isolate all with this value** (for now). The Storey row opens the storey. **Collapse all** /
+    filter, on top) and **Isolate all with this value** (for now); applying a filter or isolating takes every view
+    to what it acts on ([filters.md](filters.md), "Zoom"). The Storey row opens the storey. **Collapse all** /
     **Expand all** beside the filter.
 - **What it shows** under the card, **everything the model says** (owner request, Oct 31):
   - **Element:** its IFC class, every direct attribute (name, description, tag, predefined type, object type, a

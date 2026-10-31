@@ -62,7 +62,7 @@ already at about 2:55, so they go into two shots that exist, as pictures only: n
 
 | Slot | Picture today | Proposed picture | Why there |
 |---|---|---|---|
-| 0:12–0:26 | Northbank opens; the outer walls fade to show the steel and the services | Northbank opens; **Colour by… Discipline** gives each team its own colour; a Hide filter takes the walls and the site away; Zoom to them, from a low side angle (or X-ray) so the services show between the floors | The narration has just named three teams; the picture shows them as three colours, then the steel and services the clash story needs |
+| 0:12–0:26 | Northbank opens; the outer walls fade to show the steel and the services | Northbank opens; **Colour by… Discipline** gives each team its own colour; a Hide filter takes the walls and the site away and the views close in on what is left by themselves; a low side angle (or X-ray) so the services show between the floors | The narration has just named three teams; the picture shows them as three colours, then the steel and services the clash story needs |
 | 2:42–2:50 | A voice command; an AI agent asking ORCA for a fix | The voice command is **"Isolate the services and colour them by system."**: the services alone, framed, a colour per system with the key, then the agent | "Ask it out loud" becomes something anyone sees at once; it is Muse Voice Transcribe and Muse Spark driving the model, which also counts for Meta tooling |
 
 Optional, picture only: while #1 is picked (0:40–1:12), keep the Properties panel in view, so the duct's breadcrumb
@@ -98,7 +98,7 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
 | Cell #29 fence post N3, Propose, then Look for a better fix | Spark: west 90 and north 320 mm, 107 mm clear (once after a failed idea, once first time). Wonder: north 360 mm, 124 mm clear, ranked first | 34–45 s, 34–38 s |
 | Cell #13 HMI stand, Propose, then Ask Muse Wonder | 7 Spark ideas, 10 Wonder ideas, none verified; No verified fix with what decides it | 82 s, 108 s |
 | #16 footing × lift pit wall | No longer a Wonder case: Spark trims the wall end as a model cleanup | 16 s |
-| Colour by Discipline, hide Site and Architecture, Zoom to them (Oct 31, local, this branch) | Four colours, then MEP and Structure only, framed; the key lists the two on screen. The filters' index arrives with the classes and levels, about 9 s after the model is drawn while ORCA's check runs: wait for **Colour by…** | under 3 s once the index is in |
+| Colour by Discipline, hide Site and Architecture (Oct 31, local, this branch) | Four colours, then MEP and Structure only, framed by itself (applying a filter zooms); the key lists the two on screen. The filters' index arrives with the classes and levels, about 9 s after the model is drawn while ORCA's check runs: wait for **Colour by…** | under 3 s once the index is in |
 | "Isolate the services and colour them by system." (typed; the voice goes through chat) | Muse Spark, one tool call: 844 elements isolated, 9 systems, the views framed on them; the reply lists each system with its count | 7 s |
 
 ## Before recording
