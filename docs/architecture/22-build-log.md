@@ -1381,6 +1381,24 @@ behind the front one show as icons with a tooltip, so nothing goes behind dockvi
 and select → reload and select (all in the right bar, no overflow) → Float → close and select (floating); the tabs get
 their names back when Properties closes.
 
+Muse Wonder's own lane in Workings (Oct 31; testing the demo video's shots; `fix/workings-wonder-lane`; code
+`web/src/workingsGraph.ts`; [docs/workings.md](../workings.md)): a proposal drew a second try's steps in Wonder's
+colour but under the "Muse Spark" lane label. A second try now adds a Muse Wonder lane under the first model's (only
+when Wonder runs), with its own timeline row. Found while testing the video's shots on a local server at `main` with
+open weights and Show it built on, which also ran Show it built live for the first time (duct #1: 85 s, gate F 0.82,
+kept) and Wonder on the tray (#2), the cell's fence post N3 (#29, ranked first) and the HMI stand (#13, no fix).
+Checked: 143 web tests (`workings.test.mjs`: the lane, its steps, bar and row); build clean; in Chromium on #29 at
+Fit.
+
+The demo video's script (Oct 31; owner decisions Oct 30; `docs/demo-video`; [docs/demo-video.md](../demo-video.md)):
+both themes as one story (our world, then the frontier), a narrator, plain words, and every shot tested first on a
+local server at `main` with open weights and Show it built on: triage on Muse Spark Open (86 s, 5 need a fix), the duct
+on Muse Spark (29 s, +400 mm at 50 mm, first idea), Show it built on it (85 s, F 0.82, both Muse Wonder judges
+faithful), Wonder beating Spark on the cell's fence post N3 (#29, a straight 360 mm move at 124 mm, ranked first) and
+on the tray (#2, a shorter offset), and the HMI stand (#13) ending in No verified fix. The footing × lift pit wall
+(#16), Wonder's Northbank case in the Oct 29 eval, is now fixed by Spark alone (a trim). The decision is in
+[20](20-decisions-limits-and-roadmap.md).
+
 The repo is `IssueLab-Inc/ORCA` (Oct 31; owner decision; `docs/repo-name`): renamed on GitHub so the link on the
 application and the submission says ORCA. Repo only: the code's internal `sightline` names stay
 ([21](21-glossary-and-naming.md), "Internal names kept on purpose"). Nothing in the code or docs used the old name;

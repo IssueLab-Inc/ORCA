@@ -30,7 +30,7 @@ Look for a better fix) is drawn dashed.
 
 | Run | Steps | Built from (`workingsGraph.ts`) |
 |---|---|---|
-| Proposal | the brief per round, each round (Muse's reasoning summaries and its understanding), each idea (all at once, named by `ideas.candidates`), each geometry check (in place, verified with its clearance, or what it hit), the stop rule, the ranking, the options; a second try is a branch on Muse Wonder that starts from the first try's attempts; a recommendation where nothing may be edited | `thinking`, `reasoning`, `ideas`, `checking`, `trial`, `attempt`, `note`, `escalating`, `result`, `error` |
+| Proposal | the brief per round, each round (Muse's reasoning summaries and its understanding), each idea (all at once, named by `ideas.candidates`), each geometry check (in place, verified with its clearance, or what it hit), the stop rule, the ranking, the options; a second try on Muse Wonder is a branch in a lane of its own (under the first model's, so the drawing says who is working; added only when Wonder runs) that starts from the first try's attempts; a recommendation where nothing may be edited | `thinking`, `reasoning`, `ideas`, `checking`, `trial`, `attempt`, `note`, `escalating`, `result`, `error` |
 | Fix together, root cause | the cause and its strategy, one row per item with its ideas and checks side by side (Muse thinks for all at once; the checks take turns), each item kept or not, the plan checked as a whole, the plan | `thinking`, `root_cause`, `plan_items`, `item`, `checking_plan`, `plan` |
 | Triage | what rules settled (by basis), the alike groups, the model's calls (running ones with their reasoning, when the model streams it), open-model facts winning, the verdict counts, the audit, the end; clashes carried along the busy edges as dots | `start`, `clash` (`source`, `basis`, `alike_of`, `model_reading`), `reasoning`, `audit`, `done` |
 | Show it built | ORCA's view (the look pass), each round's restyles, the pixel gate's numbers, the judges' verdicts, the retry and what it was told, the picture kept | `drawing`, `gate`, `judging`, `judged`, `retry`, `result` |
@@ -100,7 +100,7 @@ step, rows by item), and dockview stays the one library added before the freeze.
   stopping all, meshes dropped, a trial's pieces kept for the newest three proposals only); a check's trial for the
   viewer (passed or what it hit, the idea sharing it, one still being checked); the server's check times and counts; the tour's #042
   recording (round, three ideas, checks verified at 50 mm and the ceiling hit, stop, rank, options, ghosts) whole and
-  part way; the cell's refused trim and route, the curtain wall's trim; a second try on Muse Wonder numbered after the
+  part way; the cell's refused trim and route, the curtain wall's trim; a second try on Muse Wonder in its own lane, numbered after the
   first; a second round fed by the first's failure; a stopped run, an error, a recommendation; the girder's recorded
   root cause (three rows ending in one column, the plan checked together) whole and part way; triage counts, groups,
   running calls and flows; Show it built's rounds, gate, judges and retry; ORCA's check (each phase until the next event); a judge without a verdict; ideas named before they are checked.
@@ -115,8 +115,14 @@ step, rows by item), and dockview stays the one library added before the freeze.
   it with what it hit lit; Workings off, then Turn it on from the status line; the timeline measured on one line (a
   footer 1,182 and 1,582 px wide: the picker, Replay, bars and clock within 1.5 px of one centre) and wrapped (about
   720 px: each label on its bars, the clock on their centre, "0 s" at the track's edge).
-- Not run live: Show it built (it spends Muse Wonder's budget); its builder is tested on events in the shape
-  `built.make` sends.
+- Browser, Oct 30 (local server on `main` with open weights and Show it built switched on, for the demo video's shots):
+  triage of all 464 on Muse Spark Open (86 s, 5 need a fix) drawn with its calls and verdicts; the duct (#1) on Muse
+  Spark (29 s, the first idea verified at 50 mm); **Show it built live for the first time**, on the duct's offset (85 s:
+  Muse Image's rounds, the gate at F 0.82 and worst tile 0.17, the judges, the picture kept); Look for a better fix on
+  the cable tray (#2, 35 s, two Wonder options) and on the cell's fence post N3 (#29, 34-38 s, Wonder's straight move
+  ranked first); the cell's HMI stand (#13: 7 Spark ideas, then 10 on Wonder, none verified, 108 s) ending in No
+  verified fix. Wonder's steps then sat under the "Muse Spark" lane label; they now have their own lane (checked on
+  #29 at Fit: the Muse Wonder lane between Muse Spark and ORCA, with the second try, its round and ideas).
 
 ## Not done (later)
 
