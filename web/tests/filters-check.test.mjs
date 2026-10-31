@@ -21,7 +21,8 @@ const p = f.prepare(index);
 const ducts = { id: "d", name: "Ducts", on: true, when: [{ facet: "class", op: "is", values: ["IfcDuctSegment"] },
   { facet: "pset:Model data/Width", op: "gt" }], action: "colour" };   // the second condition is not complete yet
 const beams = { id: "b", name: "", on: false, when: [{ facet: "class", op: "is", values: ["IfcBeam"] }], action: "hide" };
-const everything = { id: "e", name: "By width", on: true, when: [], action: "byValue", by: { facet: "pset:Model data/Width" } };
+const byWidth = { id: "w", name: "By width", on: true, when: [], action: "byValue", by: { facet: "pset:Model data/Width" } };
+const everything = { id: "e", name: "All", on: true, when: [], action: "colour" };
 const defaults = { tolerance_m: 0.01, clearance_m: 0.025, rules: { same_element: true, connected: true }, min_size_m: 0.005 };
 
 test("a check's sides are a filter's complete conditions; its name says what it compares", () => {
@@ -46,6 +47,28 @@ test("a check's test has no id (the server's), the defaults for what is not give
   assert.equal(checks.checkTest(ducts, beams, "clearance", 0, defaults).clearance_m, 0.025, "no clearance: the default");
 });
 
+test("a filter colouring by value is a side of what it colours, not of everything it finds", () => {
+  assert.deepEqual(checks.sideOf(byWidth).filter, { when: [], invert: false, by: { facet: "pset:Model data/Width", off: [] } });
+  assert.equal(checks.sideCount(p, byWidth), 3, "what has a width: not the room or the wall");
+  assert.equal(checks.sideCount(p, { ...byWidth, by: { ...byWidth.by, off: ["0.4"] } }), 2, "a value ticked off is left out");
+  const lastCondition = { ...byWidth, by: undefined, when: [{ facet: "storey", op: "is", values: ["Level 02"] }] };
+  assert.deepEqual(checks.sideOf(lastCondition).filter.by, { facet: "storey", off: [] }, "no property picked: its last condition's, as it colours");
+});
+
+test("Everything is what the full check covers; what the filters show is a side of its own", () => {
+  const withSite = { ...defaults, everything: { files: ["M.ifc", "S.ifc"], teams: [], classes: [], exclude_classes: [], systems: [], ids: [] } };
+  assert.deepEqual(checks.checkTest(ducts, "everything", "hard", null, withSite).b.files, ["M.ifc", "S.ifc"], "the server's everything: a site model left out");
+  const state = { v: 1, colours: true, greyRest: false, hideRest: true, rules: [ducts, beams, { ...byWidth, on: false }] };
+  assert.deepEqual(checks.viewOf(state), { filters: [{ when: [ducts.when[0]], invert: false, action: "colour" }], hide_rest: true, colours: true },
+    "the filters that are on, and how they show");
+  assert.deepEqual(checks.shownCount(p, state), { shown: 2, all: 4 }, "the ducts, of all but the room");
+  assert.deepEqual(checks.shownCount(p, { ...state, hideRest: false }), { shown: 4, all: 4 }, "colours alone hide nothing");
+  const t = checks.checkTest("shown", "itself", "hard", null, defaults, state);
+  assert.equal(t.name, "What the filters show (within)"); assert.deepEqual(t.a.view, checks.viewOf(state)); assert.equal(t.b, null);
+  assert.equal(checks.checkOf([t]), "What the filters show (within)");
+  assert.equal(checks.checkTest(ducts, "shown", "hard", null, defaults, state).name, "Ducts vs What the filters show");
+});
+
 test("a side counts what a check can test (spaces have no body), and a run says it was a check", () => {
   assert.equal(checks.sideCount(p, ducts), 2);
   assert.equal(checks.sideCount(p, { ...beams, when: [{ facet: "storey", op: "is", values: ["Level 01"] }] }), 2, "the room is left out");
@@ -57,7 +80,9 @@ test("a side counts what a check can test (spaces have no body), and a run says 
 
 test("the page shares its filters by name, with only their complete conditions, within what the server takes", () => {
   const shared = f.shareable([ducts, beams, { ...beams, id: "long", name: "x".repeat(300) }]);
-  assert.deepEqual(shared[0], { id: "d", name: "Ducts", when: [ducts.when[0]], invert: false, on: true, origin: null });
+  assert.deepEqual(shared[0], { id: "d", name: "Ducts", when: [ducts.when[0]], invert: false, on: true, origin: null, action: "colour", by: null });
+  assert.deepEqual(f.shareable([{ ...byWidth, by: { ...byWidth.by, off: ["0.4"] } }])[0].by, { facet: "pset:Model data/Width", off: ["0.4"] },
+    "a filter colouring by value says by what, so a check on it takes what it colours");
   assert.equal(shared[1].name, "Beam"); assert.equal(shared[1].on, false);
   assert.equal(shared[2].name.length, 200, "a long name never refuses the chat turn");
 });
@@ -130,7 +155,9 @@ test("Check clashes: the first filter against everything until another side is c
   assert.ok(block && hasText(block, "Check clashes"));
   const sideB = find(block, (n) => n.type === "select" && n.props["aria-label"] === "Side B");
   const options = all(sideB, (n) => n.type === "option").map((o) => o.props.value);
-  assert.deepEqual(options, ["everything", "itself", "b"], "side B: everything, itself or another filter, never the same one");
+  assert.deepEqual(options, ["everything", "itself", "__shown", "b"], "side B: everything, itself, what the filters show or another filter, never the same one");
+  const sideA = find(block, (n) => n.type === "select" && n.props["aria-label"] === "Side A");
+  assert.deepEqual(all(sideA, (n) => n.type === "option").map((o) => o.props.children), ["What the filters show (4)", "Ducts (2)", "Beam (1)"]);
   assert.ok(hasText(block, "The clashes replace the open list; Detect again repeats this check."));
   find(block, (n) => n.type === "button" && hasText(n, "Check")).props.onClick();
   assert.equal(ran[0].name, "Ducts vs Everything");
@@ -179,7 +206,8 @@ test("chat and an agent see the page's filters by name; Detect again repeats a c
       report: async (id) => ({ id, title: "Coordination · Ducts vs Everything", clashes: [], origin: "sightline", sources: ["model.ifc"] }) } });
   await host.settle();
   const context = host.component("ChatPanel").props.context();
-  assert.deepEqual(context.filters, [{ id: "d", name: "Ducts", when: [ducts.when[0]], invert: false, on: true, origin: null }]);
+  assert.deepEqual(context.filters, [{ id: "d", name: "Ducts", when: [ducts.when[0]], invert: false, on: true, origin: null, action: "colour", by: null }]);
+  assert.deepEqual(context.filter_view, { hide_rest: false, colours: true }, "how the filters show together, for a check of what they show");
   const test0 = { ...checks.checkTest(ducts, "everything", "hard", null, defaults), id: "filter:abc" };
   host.chat({ type: "ui", action: "open_report", report_id: "chat-run", detection: { ...ran("chat-run", [test0]), report: undefined } });
   await host.settle();

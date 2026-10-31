@@ -55,10 +55,15 @@ A test is one question about the models:
 
 A **selection** picks elements by model file, by discipline (the team guessed per file from its contents, as the PDF
 report does), by IFC class (include or exclude), by system, by GlobalId, or by a **filter** (Oct 31, owner request):
-`{when: [conditions], invert}` as the Filters panel writes them, found against the filters' index when the run starts
-(`facets.found`), so a rerun after a kept fix selects by properties again ([filters.md](filters.md), "Checks").
+`{when: [conditions], invert, by?}` as the Filters panel writes them, found against the filters' index when the run
+starts (`facets.acted`: what the filter acts on; with `by`, a colour-by-value filter's `{facet, off}`, only what it
+colours), so a rerun after a kept fix selects by properties again ([filters.md](filters.md), "Checks"). A side's
+`view` is what the page's filters show together (`{filters: [{when, invert, by?, action}], hide_rest, colours}`, at
+most 100 filters, sorted), found the same way by `facets.shown`.
 
-**A check on filters** is one test: side A a filter, side B a filter, everything (`{}`) or itself (`null`). It needs no
+**A check on filters** is one test: side A a filter or what the filters show, side B a filter, what the filters show,
+everything or itself (`null`). Everything is what the full check covers (`detect.everything`: the files without a site
+model, which is context as in the default tests below, unless it is all there is; `{}` when there is none). It needs no
 id: `Test.from_dict` gives it `filter:` and a hash of what it compares (its sides and kind, written one way only, so
 the same filter in another order is the same check; not its name or tolerance), and a name from its sides
 ("DuctSegment vs Everything", "… (within)", ", 50 mm clearance"). An element on both sides is never paired with itself,

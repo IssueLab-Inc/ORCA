@@ -170,6 +170,13 @@ def test_the_page_follows_and_answers_for_pictures(server):
     opened = next(e for e in seen if e.get("action") == "open_report")
     assert opened["detection"]["tests"][0]["name"] == "Beams vs Everything"
     assert "Its filters: Beams" in rpc(server, token, "detect_clashes", {"a": {"filter": "Pipes"}})["error"]
+
+    # What the person's filters show together (the beams coloured, the rest hidden): the agent checks "the filtered items".
+    server.put(f"/api/links/{token}/context", json={"scene_id": sid, "filters": [{**beams, "action": "colour"}],
+                                                       "filter_view": {"hide_rest": True, "colours": True}})
+    assert rpc(server, token, "get_session")["filters_show"]["elements"] == 1
+    shown = rpc(server, token, "detect_clashes", {"a": {"shown": True}, "b": {"itself": True}})
+    assert shown["check"]["a"] == {"name": "what the filters show", "elements": 1}
     link.unsubscribe(page)
     assert rpc(server, token, "capture_view")["texts"][0].startswith("No browser answered")
 

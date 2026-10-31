@@ -269,6 +269,16 @@ class PageFilter(BaseModel):
     invert: bool = False
     on: bool = True
     origin: str | None = Field(None, max_length=20)
+    # What it does (colour, byValue, hide, isolate) and, colouring by value, by what and the values ticked off: a
+    # filter as a check's side takes what it acts on, and together the filters say what the page shows.
+    action: str | None = Field(None, max_length=20)
+    by: dict | None = None
+
+
+class FilterView(BaseModel):
+    """How the page's filters show together: the rest hidden (Hide the rest), and colours on (docs/filters.md)."""
+    hide_rest: bool = False
+    colours: bool = True
 
 
 class ChatTurn(BaseModel):
@@ -279,6 +289,7 @@ class ChatTurn(BaseModel):
     clash_id: str | None = None
     fixed: list[str] = []
     filters: list[PageFilter] = Field(default_factory=list, max_length=100)
+    filter_view: FilterView = Field(default_factory=FilterView)
 
 
 class PlanRequest(BaseModel):
@@ -1486,7 +1497,8 @@ def chat_turn(body: ChatTurn, request: Request):
     escalate_allowed = _escalation_check(request)
     detect_allowed = lambda: None if no_caps else detect_limit.take(who)
     session = c.session(body.session_id)
-    ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed, [f.model_dump() for f in body.filters])
+    ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed, [f.model_dump() for f in body.filters],
+                       body.filter_view.model_dump())
     events = _RequestEvents(request)
     events.put({"type": "session", "id": session.id})
 
@@ -1685,6 +1697,7 @@ class LinkContext(BaseModel):
     clash_id: str | None = None
     fixed: list[str] = []
     filters: list[PageFilter] = Field(default_factory=list, max_length=100)
+    filter_view: FilterView = Field(default_factory=FilterView)
 
 
 def _link(token: str, touch: bool = True) -> agents.Link:
@@ -1703,7 +1716,8 @@ def create_link(body: LinkContext, request: Request):
         raise HTTPException(429, refused)
     who = client_id(request.headers, request.client.host if request.client else None)
     token, link = links.create(who, owner.no_caps(), chat.Context(body.scene_id, body.report_id, body.clash_id,
-                                                                  list(body.fixed), [f.model_dump() for f in body.filters]))
+                                                                  list(body.fixed), [f.model_dump() for f in body.filters],
+                                                                  body.filter_view.model_dump()))
     link.requirements = requirements.current_id()
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
@@ -1722,6 +1736,7 @@ def link_context(token: str, body: LinkContext):
     link.ctx.scene_id, link.ctx.report_id, link.ctx.clash_id = body.scene_id, body.report_id, body.clash_id
     link.ctx.fixed = list(body.fixed)
     link.ctx.filters = [f.model_dump() for f in body.filters]
+    link.ctx.filter_view = body.filter_view.model_dump()
     link.requirements = requirements.current_id()  # the page sends its requirements with every call, this one too
     return link.public()
 

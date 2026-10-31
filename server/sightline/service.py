@@ -801,8 +801,10 @@ class Workspace:
                      detect.default_tests(scene, ix) + detect.presets(scene, ix))
             teams = {name: team for name, team in zip(ix.names, ix.teams)}
             per_file = Counter(ix.names[i] for i in ix.file.values())
+            everything = detect.everything(scene, ix)
         return {"tests": [asdict(t) for t in tests], "teams": teams, "elements": len(ix.entity), "file_elements": dict(per_file),
-                "rules": detect.RULE_LABEL, "requirements": self.requirements_info(doc), "check": self._check_defaults(scene_id, tests)}
+                "rules": detect.RULE_LABEL, "requirements": self.requirements_info(doc),
+                "check": self._check_defaults(scene_id, tests, everything)}
 
     def check_defaults(self, scene_id: str) -> dict:
         """What a check on filters takes when it says nothing else (docs/filters.md, "Checks"): the hard tolerance,
@@ -811,14 +813,18 @@ class Workspace:
         scene = self.scene(scene_id)
         doc = requirements.current()
         with self.lock:
-            tests = requirements.compile_tests(doc, scene) if doc else detect.default_tests(scene)
-        return self._check_defaults(scene_id, tests)
+            ix = detect._Index(scene)
+            tests = requirements.compile_tests(doc, scene) if doc else detect.default_tests(scene, ix)
+            everything = detect.everything(scene, ix)
+        return self._check_defaults(scene_id, tests, everything)
 
-    def _check_defaults(self, scene_id: str, tests: list) -> dict:
+    def _check_defaults(self, scene_id: str, tests: list, everything: "detect.Selection | None" = None) -> dict:
+        """`everything`: what a check's Everything takes, the models the full check covers (a site model left out)."""
         hard = next((t for t in tests if t.kind == "hard" and t.enabled), None)
         return {"tolerance_m": hard.tolerance_m if hard else detect.TOLERANCE_M, "clearance_m": self.clearance(scene_id),
                 "rules": dict(hard.rules) if hard else {r: True for r in detect.RULES},
-                "min_size_m": hard.min_size_m if hard else 0.0}
+                "min_size_m": hard.min_size_m if hard else 0.0,
+                "everything": asdict(everything if everything is not None else detect.Selection())}
 
     @staticmethod
     def requirements_info(doc=None) -> dict | None:

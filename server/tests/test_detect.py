@@ -164,6 +164,49 @@ def test_a_check_on_filters_compares_what_a_filter_finds(paths):
     assert within.report.title == "Coordination · DuctSegment (within)"
 
 
+def test_a_filter_colouring_by_value_is_a_side_of_what_it_colours(paths):
+    """A Colour by… filter has no conditions: as a side it takes what it colours, a value ticked off left out."""
+    scene = IfcScene(paths)
+    by_file = {"when": [], "invert": False, "by": {"facet": "file", "off": ["Fixture-Structure.ifc"]}}
+    t = detect.Test.from_dict({"a": {"filter": by_file}, "b": None})
+    run = detect.run(scene, [t])
+    assert run.report.clashes and all(c.a.file == c.b.file == "Fixture-MEP.ifc" for c in run.report.clashes)
+    assert t.a.filter["by"] == {"facet": "file", "off": ["Fixture-Structure.ifc"]}
+    assert detect.Test.from_dict({"a": {"filter": {**by_file, "by": {"facet": "file", "off": []}}}, "b": None}).id != t.id
+    with pytest.raises(ValueError):
+        detect.Test.from_dict({"a": {"filter": {"when": [], "by": {"off": ["x"]}}}})
+
+
+def test_everything_is_what_the_full_check_covers_a_site_model_left_out(paths):
+    scene = IfcScene(paths)
+    ix = detect._Index(scene)
+    assert detect.everything(scene, ix) == detect.Selection(), "no site model: every model"
+    ix.teams = ["Site" if n == "Fixture-Structure.ifc" else t for n, t in zip(ix.names, ix.teams)]
+    assert detect.everything(scene, ix) == detect.Selection(files=["Fixture-MEP.ifc"])
+    ix.teams = ["Site"] * len(ix.teams)
+    assert detect.everything(scene, ix) == detect.Selection(), "a site model on its own is everything there is"
+
+
+def test_what_the_filters_show_is_a_side_found_on_every_run(paths):
+    """docs/filters.md, "Checks": all the page's filters together, as on screen."""
+    scene = IfcScene(paths)
+    ducts = {**DUCTS, "action": "colour"}
+    beams = {"when": [{"facet": "class", "op": "is", "values": ["IfcBeam"]}], "invert": False, "action": "colour"}
+    view = {"filters": [ducts, beams], "hide_rest": True, "colours": True}
+    t = detect.Test.from_dict({"a": {"view": view}, "b": None})
+    run = detect.run(scene, [t])
+    assert ("Beam B1", "Duct D1") in names(run)
+    assert all({c.a.ifc_class, c.b.ifc_class} <= {"IfcBeam", "IfcDuctSegment"} for c in run.report.clashes)
+    assert run.report.title == "Coordination · What the filters show (within)" and t.name == "What the filters show (within)"
+    again = detect.Test.from_dict({"a": {"view": {**view, "filters": [beams, ducts]}}, "b": None})
+    assert again.id == t.id, "what the filters show together does not depend on their order"
+    nothing = detect.Test.from_dict({"a": {"view": {**view, "hide_rest": False}}, "b": None})
+    assert nothing.id != t.id
+    for bad in ({"filters": "x"}, {"filters": [{**ducts, "action": "explode"}]}, {"filters": [ducts] * 101}):
+        with pytest.raises(ValueError):
+            detect.Test.from_dict({"a": {"view": bad}})
+
+
 def test_a_checks_id_comes_from_what_it_compares(paths):
     two = [{"facet": "class", "op": "is", "values": ["IfcDuctSegment", "IfcPipeSegment"]},
            {"facet": "storey", "op": "is", "values": ["Level 01"]}]
@@ -400,12 +443,59 @@ def test_chat_checks_a_users_filter_by_name_or_what_it_describes(paths, tmp_path
     opened = [e for e in events if e.get("action") == "open_report"]
     first, second = (o["detection"]["tests"][0] for o in opened)
     assert first["name"] == "Ducts vs Everything" and first["id"].startswith("filter:") and first["b"] == {
-        k: [] for k in ("files", "teams", "classes", "exclude_classes", "systems", "ids")} | {"filter": None}
+        k: [] for k in ("files", "teams", "classes", "exclude_classes", "systems", "ids")} | {"filter": None, "view": None}
     assert second["name"] == "DuctSegment (within)" and second["b"] is None
     told = json.loads(model.seen[1]["content"])
     ducts = sum(1 for g in ws.scene(sid).bounds() if ws.scene(sid).element(g).ifc_class == "IfcDuctSegment")
     assert told["check"]["a"] == {"name": "Ducts", "elements": ducts} and told["check"]["b"]["name"] == "everything"
     assert any(c["test"] == "Ducts vs Everything" and c["clashes"] >= 1 for c in told["tests"])
+
+
+def test_chat_checks_the_users_colour_by_filter_what_their_filters_show_and_everything_without_site(paths, tmp_path, monkeypatch):
+    """The owner's case (Oct 31): a Colour by… filter and a colour by model with the site model ticked off, the rest
+    hidden; "run a clash test on the filtered items" must leave the site model out."""
+    import json
+    from sightline import facets, requirements
+    from sightline.chat import Chat, Context
+
+    ws, sid = _workspace(paths, tmp_path)
+    real = requirements._file_teams
+    monkeypatch.setattr(requirements, "_file_teams", lambda scene, domain: [
+        "Site" if p.name == "Fixture-Structure.ifc" else t for p, t in zip(scene.paths, real(scene, domain))])
+    idx, scene = ws.facets(sid), ws.scene(sid)
+    drawn = set(scene.bounds())
+    mep = {g for i, g in enumerate(idx["elements"]) if idx["files"][idx["file"][i]] == "Fixture-MEP.ifc"} & drawn
+    ducts = {g for g in drawn if scene.element(g).ifc_class == "IfcDuctSegment"}
+    others = [v for v in facets.facet(idx, "class")["values"] if v != "IfcDuctSegment"]
+    by_class = {"id": "c", "name": "Ducts by class", "when": [], "invert": False, "on": True, "action": "byValue",
+                "by": {"facet": "class", "off": others}}
+    by_model = {"id": "m", "name": "By Model", "when": [], "invert": False, "on": True, "action": "byValue",
+                "by": {"facet": "file", "off": ["Fixture-Structure.ifc"]}}
+    model = _Scripted([[("detect_clashes", {"a": {"filter": "ducts by class"}})],
+                       [("detect_clashes", {"a": {"shown": True}, "b": {"itself": True}})], "Done."])
+    events = []
+    chat = Chat(ws, model)
+    ctx = Context(sid, None, None, [], [by_class, by_model], {"hide_rest": True, "colours": True})
+    chat.turn(chat.session(None), "run a clash test on the filtered items", ctx, events.append)
+    assert f"together they show {len(mep)} of {len(drawn)} elements" in model.seen[0]["content"]
+    first, second = (json.loads(m["content"])["check"] for m in model.seen[1:3])
+    assert first["a"] == {"name": "Ducts by class", "elements": len(ducts)}, "a Colour by… filter takes what it colours"
+    assert first["b"] == {"name": "everything", "elements": len(mep)}, "everything leaves the site model out"
+    assert second["a"] == {"name": "what the filters show", "elements": len(mep)}
+    tests = [e["detection"]["tests"][0] for e in events if e.get("action") == "open_report"]
+    assert tests[0]["name"] == "Ducts by class vs Everything" and tests[0]["b"]["files"] == ["Fixture-MEP.ifc"]
+    assert tests[1]["name"] == "What the filters show (within)" and tests[1]["a"]["view"]["hide_rest"] is True
+    for e in events:
+        if e.get("action") == "open_report":
+            clashes = ws.report(e["report_id"]).clashes
+            assert all(c.a.file == c.b.file == "Fixture-MEP.ifc" for c in clashes), "no element of the site model"
+
+    # Nothing on: the filtered items cannot be checked, and no run is spent.
+    model = _Scripted([[("detect_clashes", {"a": {"shown": True}})], "Sorry."])
+    chat = Chat(ws, model)
+    chat.turn(chat.session(None), "check the filtered items", Context(sid, None, None, [], [{**by_model, "on": False}]),
+              lambda e: None)
+    assert "no filters on" in model.seen[1]["content"]
 
 
 def test_a_check_on_what_the_models_lack_is_refused_before_a_run_is_spent(paths, tmp_path):

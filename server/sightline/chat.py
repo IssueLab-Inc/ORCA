@@ -40,9 +40,10 @@ def _fn(name: str, description: str, properties: dict | None = None, required: l
         "type": "object", "properties": properties or {}, "required": required or []}}}
 
 
-_SIDE = {"type": "object", "description": "what one side takes: a filter the user made, by name ({\"filter\": name}), or "
+_SIDE = {"type": "object", "description": "what one side takes: a filter the user made, by name ({\"filter\": name}), "
+         "everything the user's filters show together ({\"shown\": true}: the filtered items, as on their screen), or "
          "elements described as in set_filters (classes, levels, models, where, invert); b may instead be "
-         "{\"everything\": true} (the default) or {\"itself\": true}", "properties": {
+         "{\"everything\": true} (the default: the models the full check covers) or {\"itself\": true}", "properties": {
     "filter": {"type": "string", "description": "one of the user's filters, by the name [context] gives"},
     "classes": {"type": "array", "items": {"type": "string"}}, "levels": {"type": "array", "items": {"type": "string"}},
     "models": {"type": "array", "items": {"type": "string"}},
@@ -51,7 +52,8 @@ _SIDE = {"type": "object", "description": "what one side takes: a filter the use
         "op": {"type": "string", "enum": ["is", "is_not", "contains", "has", "missing", "less", "more", "between"]},
         "values": {"type": "array", "items": {"type": "string"}}, "min": {"type": "number"}, "max": {"type": "number"}},
         "required": ["property"]}},
-    "invert": {"type": "boolean"}, "everything": {"type": "boolean"}, "itself": {"type": "boolean"}}}
+    "invert": {"type": "boolean"}, "everything": {"type": "boolean"}, "itself": {"type": "boolean"},
+    "shown": {"type": "boolean"}}}
 
 
 TOOLS = [
@@ -65,7 +67,7 @@ TOOLS = [
         "are counted, not reported. Takes about 10 s and opens the result as the user's clash report, replacing the open "
         "one; running it again after fixes says which clashes were resolved. Each run counts against the demo's "
         "detection runs. To check only some elements, give a (and b): one check of what A takes against what B takes "
-        "(everything, by default, or itself).",
+        "(everything the full check covers, by default, or itself).",
         {"tolerance_mm": {"type": "number", "description": "hard clash tolerance in mm (default 1)"},
          "a": _SIDE, "b": _SIDE,
          "kind": {"type": "string", "enum": ["hard", "clearance", "duplicate"], "description": "with a: the kind of check"},
@@ -213,8 +215,26 @@ class Context:
     report_id: str | None = None
     clash_id: str | None = None
     fixed: list[str] = field(default_factory=list)
-    # The user's own filters on the page (docs/filters.md): [{id, name, when, invert, on}], for detect_clashes by name.
+    # The user's own filters on the page (docs/filters.md): [{id, name, when, invert, on, action, by}], for
+    # detect_clashes by name, and how they show together ({hide_rest, colours}) for its {"shown": true} side.
     filters: list[dict] = field(default_factory=list)
+    filter_view: dict = field(default_factory=dict)
+
+
+def page_view(ctx: Context) -> dict:
+    """What the page's filters show together, as a check's side takes it (detect.Selection.view): the filters that
+    are on, and whether the rest is hidden and colours show."""
+    return {"filters": [_page_filter(f) | {"action": f.get("action") or "colour"} for f in ctx.filters if f.get("on", True)],
+            "hide_rest": bool(ctx.filter_view.get("hide_rest")), "colours": ctx.filter_view.get("colours", True) is not False}
+
+
+def _page_filter(f: dict) -> dict:
+    """One of the page's filters as a check's side takes it: what it finds, and for one colouring by value, only what
+    it colours (detect.Selection.filter)."""
+    side = {"when": list(f.get("when") or []), "invert": bool(f.get("invert"))}
+    if f.get("action") == "byValue" and isinstance(f.get("by"), dict) and f["by"].get("facet"):
+        side["by"] = {"facet": f["by"]["facet"], "off": list(f["by"].get("off") or [])}
+    return side
 
 
 class Chat:
@@ -339,14 +359,18 @@ class Chat:
                 target._published_turn = turn_number
         return answer
 
-    def _side(self, idx: dict, ctx: Context, spec: dict | None, b: bool) -> tuple[dict | None, str]:
-        """One side of a check as the detection test takes it ({} everything, None itself, else a filter), and what it is
-        called. Raises facets.Unresolved, naming what there is."""
+    def _side(self, idx: dict, ctx: Context, spec: dict | None, b: bool, every: dict) -> tuple[dict | None, str]:
+        """One side of a check as the detection test takes it (`every` for everything, None itself, else a filter or
+        what the filters show), and what it is called. Raises facets.Unresolved, naming what there is."""
         spec = spec or {"everything": True}
         if spec.get("itself"):
             if not b:
                 raise facets.Unresolved("Side A cannot be itself: give A a filter or describe its elements.")
             return None, "itself"
+        if spec.get("shown"):
+            if not any(f.get("on", True) for f in ctx.filters):
+                raise facets.Unresolved("The user has no filters on: describe the elements instead.")
+            return {"view": page_view(ctx)}, "what the filters show"
         if spec.get("filter"):
             want = str(spec["filter"]).strip().lower()
             mine = {str(f.get("name") or "").lower(): f for f in ctx.filters}
@@ -357,10 +381,10 @@ class Chat:
                 close = facets.suggest(idx, spec["filter"], among=[str(x.get("name")) for x in ctx.filters], n=4)
                 raise facets.Unresolved(f"No filter {spec['filter']!r} on the page. Its filters: "
                                         + ", ".join(close or [str(x.get("name")) for x in ctx.filters][:12]) + ".")
-            return {"filter": {"when": list(f.get("when") or []), "invert": bool(f.get("invert"))}}, str(f.get("name"))
+            return {"filter": _page_filter(f)}, str(f.get("name"))
         described = {k: v for k, v in spec.items() if k in ("classes", "levels", "models", "where", "invert")}
         if spec.get("everything") or not described:
-            return {}, "everything"
+            return dict(every), "everything"
         rule, _ = facets.resolve(idx, {**described, "action": "isolate"})
         return {"filter": {"when": rule["when"], "invert": bool(rule.get("invert"))}}, facets.name_for(rule["when"], bool(rule.get("invert")))
 
@@ -368,27 +392,35 @@ class Chat:
         """detect_clashes with sides: the one test it runs, and what each side takes."""
         ws = self.ws
         idx = ws.facets(sid)
-        a, a_name = self._side(idx, ctx, args.get("a"), False)
-        b, b_name = self._side(idx, ctx, args.get("b"), True)
+        d = ws.check_defaults(sid)
+        a, a_name = self._side(idx, ctx, args.get("a"), False, d["everything"])
+        b, b_name = self._side(idx, ctx, args.get("b"), True, d["everything"])
         drawn = set(ws.scene(sid).bounds())
+        file_of = {g: idx["files"][idx["file"][i]] for i, g in enumerate(idx["elements"])}
 
         def count(side):
             if side is None:
                 return None
-            if "filter" not in side:
-                return len(drawn)
-            f = side["filter"]
-            return len({idx["elements"][i] for i in facets.found(idx, f["when"], f["invert"])} & drawn)
-        n_a = count(a)
+            if side.get("view"):
+                got = facets.shown(idx, side["view"])
+            elif side.get("filter"):
+                got = facets.acted(idx, side["filter"])
+            else:   # everything: the models the full check covers
+                files = set(side.get("files") or [])
+                return len({g for g in drawn if not files or file_of.get(g) in files})
+            return len({idx["elements"][i] for i in got} & drawn)
+        n_a, n_b = count(a), count(b)
         if not n_a:
             raise facets.Unresolved(f"Side A ({a_name}) finds no element the check can test.")
+        if n_b == 0:
+            raise facets.Unresolved(f"Side B ({b_name}) finds no element the check can test.")
         kind = str(args.get("kind") or "hard")
         if kind not in ("hard", "clearance", "duplicate"):
             raise facets.Unresolved(f"Unknown kind {kind!r}: hard, clearance or duplicate.")
-        d = ws.check_defaults(sid)
         # Named as the user knows its sides (their filter's own name), as detect.check_name does otherwise.
-        name = str(args.get("name") or "") or (f"{a_name} (within)" if b is None else f"{a_name} vs "
-                                              f"{'Everything' if b == {} else b_name}")
+        shown_name = lambda n: "What the filters show" if n == "what the filters show" else n
+        name = str(args.get("name") or "") or (f"{shown_name(a_name)} (within)" if b is None else f"{shown_name(a_name)} vs "
+                                              f"{'Everything' if b_name == 'everything' else shown_name(b_name)}")
         if kind == "clearance" and not args.get("name"):
             mm = d["clearance_m"] if args.get("clearance_mm") is None else float(args["clearance_mm"]) / 1000
             name += f", {round(mm * 1000)} mm clearance"
@@ -396,7 +428,7 @@ class Chat:
                 "min_size_m": d["min_size_m"],
                 "tolerance_m": d["tolerance_m"] if args.get("tolerance_mm") is None else max(0.0, float(args["tolerance_mm"])) / 1000,
                 "clearance_m": d["clearance_m"] if args.get("clearance_mm") is None else max(0.0, float(args["clearance_mm"])) / 1000}
-        return test, {"a": {"name": a_name, "elements": n_a}, "b": {"name": b_name, "elements": count(b)}}
+        return test, {"a": {"name": a_name, "elements": n_a}, "b": {"name": b_name, "elements": n_b}}
 
     def _context_line(self, ctx: Context) -> str:
         parts = ["[context]"]
@@ -415,7 +447,18 @@ class Chat:
             names = [f'"{f.get("name")}"' for f in ctx.filters if f.get("name")]
             more = f" (+{len(names) - 12} more)" if len(names) > 12 else ""
             parts.append(f"the user's filters: {', '.join(names[:12])}{more}")
+            shown = self._shown_count(ctx)
+            if shown is not None:
+                parts.append(f"together they show {shown[0]} of {shown[1]} elements")
         return "; ".join(parts)
+
+    def _shown_count(self, ctx: Context) -> tuple[int, int] | None:
+        """How many elements the user's filters show together, of all drawn, or None without models or filters on."""
+        if ctx.scene_id not in self.ws.scenes or not any(f.get("on", True) for f in ctx.filters):
+            return None
+        idx = self.ws.facets(ctx.scene_id)
+        drawn = set(self.ws.scene(ctx.scene_id).bounds())
+        return len({idx["elements"][i] for i in facets.shown(idx, page_view(ctx))} & drawn), len(drawn)
 
     def _trim(self, session: Session) -> None:
         # Keep the system prompt; drop the oldest turns, never splitting a tool call from its results.
