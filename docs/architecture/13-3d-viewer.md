@@ -139,7 +139,7 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 | Modes and focus | `setMode(mode)`, `setFocus({ a, b, group })`, `setEdges(on)`, `setHits(ids)`, `setLinks(groups)`; private `applyMode`, `aroundIds`, `drawFocus`, `nearFocus`, `focusSide` |
 | Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(classes, storeys)` (either may be null to keep what it had), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `infoCounts()` (cached until the models or the info change), `ofClass(cls)`; private `filterTest`, `drawSelection` |
 | Previews | `preview(moves)`, `showOption(shape, mode, colour)`, `showOptions(shapes, mode)` |
-| Camera | `focusClash(ids, point, label, fly)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
+| Camera | `focusClash(ids, point, label, fly)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, `orbitAround(pivot, dx, dy)`, `setOrbitClash(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
 | Navigation | `activeCamera()`, `setProjection(p)`, `pose()`, `applyPose(p)`, `back()`, `forward()`, getters `canBack`, `canForward`, `setHome(p)`, getter `homeView`, `home()`, `lookFrom(dir)`, callback `onChange` (history, Home, layout or hides changed); private `press` (pivot or grip), `turn` (cube drag), `syncOrtho` |
 | Panes and drawing views | `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)` (shares kept within 0.2–0.8), getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `defaultSpec(kind)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, getter `hasClash`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
 | Section box and marker | `setSection(on, margin, box)`, getter `section`, `setMarker(point, label)`; private `boxAroundFocus`, `boxInView`, `buildGrips`, `placeGrips`, `gripAt`, `dragGrip` |
@@ -216,10 +216,17 @@ every style.
 - **Controls:** `OrbitControls` with damping and `zoomToCursor` (the wheel zooms to what is under the pointer), on the
   3D pane's own element (`pane3d`). Any controls `start` (drag, wheel, touch) and any `pointerdown` call
   `onUserCamera`, which `App` wires to `pilot.takeOver()`.
-- **Pivot:** a left press (capture phase, before the controls see it) picks what is under the pointer, ghosts
-  included, and slides the controls' target along the view ray to that depth (`press`): the orbit turns about that
-  point and nothing jumps. Empty sky keeps the last target. Not with Shift, Ctrl or Cmd (pan), in orthographic, or
-  during a flight. About 8 ms a press on Northbank.
+- **Pivot** (`press`, capture phase, before the controls see it; not with Shift, Ctrl or Cmd, which pan, or during a
+  flight). What a left drag orbits round (`pivotFor`):
+  - **the selected element** (its box's middle), or, with nothing selected, **the clash while ORCA works on it** (a
+    proposal, a plan, a wider fix, a replay: `App` calls `setOrbitClash(clashBusy)`; `clashCentre` is where the pair
+    meets, else the middle of the focus). The drag turns the camera and its target together round that point
+    (`orbitAround`: across round the vertical, up and down tilting, never past straight up or down, at the controls'
+    speed), so the pivot stays where it is on screen and nothing jumps; the controls' own rotation is off for that
+    drag (they still pan, zoom and capture the pointer). Not on touch.
+  - **otherwise the point under the pointer:** a pick, ghosts included, slides the controls' target along the view ray
+    to that depth, so the orbit turns about that point and nothing jumps. Empty sky keeps the last target; not in
+    orthographic. About 8 ms a press on Northbank.
 - **View cube** (`cube.ts`): drawn last in the 3D pane's bottom right (104 px), with its own scene and camera turned
   like the main one. A click on a face, edge or corner calls `lookFrom(dir)` (26 directions round the current target,
   keeping the distance; straight down keeps north up); a drag orbits (`turn`); its Home button calls `home()`.
@@ -230,7 +237,9 @@ every style.
   it leaves (`views.CameraHistory`); `back()` / `forward()` fly through it without pushing. `setHome(pose)` makes `home()` fly there instead of
   `fitAll`; `App` keeps Home and saved views per project (`sightline.views.<project>`, [12](12-web-app.md)).
 - **Flights:** `flyTo` animates position and target over 650 ms (cubic ease in-out), or jumps when `animate` is false
-  or the visitor prefers reduced motion. `orbit(on)` turns `autoRotate` on (speed 0.6) while Muse thinks.
+  or the visitor prefers reduced motion. `orbit(on)` turns `autoRotate` on (speed 0.6) while Muse thinks; turning it
+  on first glides the view sideways so the clash is in the middle (its angle and distance kept), so the turn is round
+  the clash, not wherever the target was left.
 - **Framing a clash:** `focusClash(ids, point, label)` frames the zone where the two elements meet (`meetingZone` of
   their boxes), not the two whole elements, so a 16 m run crossing a beam frames the crossing. With one element and a
   point it frames a `reach(1, 0.2)` cube there; with only a point, a `reach(0.6, 0.15)` cube. It sets the marker

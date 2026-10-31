@@ -2474,6 +2474,8 @@ export function App() {
   }, [proposal, proposing]);
   // ORCA working on the clash on screen: it can't be left until that finishes.
   const clashBusy = proposing || (!!planRun && planRun.phase !== "done") || contextWorking || replaying;
+  // While ORCA works on the clash, a drag with nothing selected orbits round it (the viewer's own orbit does too).
+  useEffect(() => { viewer.current?.setOrbitClash(clashBusy); }, [clashBusy]);
   // A detected clash's views, taken once the camera has reached it (selecting a clash flies there first).
   useEffect(() => {
     if (!clash || !report || report.origin !== "sightline" || clash.images.length || views[clash.id] || !a || !b) return;

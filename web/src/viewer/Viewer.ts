@@ -213,8 +213,9 @@ export class Viewer {
     this.controls.addEventListener("start", () => { this.flight = null; this.onUserCamera?.(); });
     // Before the controls see the press: a section box grip takes it, else orbiting turns about what is under it.
     this.pane3d.addEventListener("pointerdown", (e) => this.press(e), { capture: true });
-    this.pane3d.addEventListener("pointermove", (e) => this.dragGrip(e));
+    this.pane3d.addEventListener("pointermove", (e) => { if (this.spin) this.spinMove(e); else this.dragGrip(e); });
     this.pane3d.addEventListener("pointerup", (e) => this.release(e));
+    this.pane3d.addEventListener("pointercancel", (e) => this.release(e));
     this.pane3d.addEventListener("click", (e) => { if (this.swallowClick) { this.swallowClick = false; e.stopPropagation(); } }, { capture: true });
     this.controls.autoRotateSpeed = 0.6;
     this.cube = new ViewCube((dir) => this.lookFrom(dir), (dx, dy) => this.turn(dx, dy), () => this.home());
@@ -679,7 +680,28 @@ export class Viewer {
   }
 
   /** A slow turn around the current target, while the agent thinks. */
-  orbit(on: boolean) { this.controls.autoRotate = on; }
+  /** Turn the view slowly round the clash while ORCA works on it (the pilot): the view first glides sideways to put the
+   * clash in the middle, keeping its angle and distance, so the turn is round the clash, not wherever the camera's
+   * target was left. */
+  orbit(on: boolean) {
+    if (on && !this.controls.autoRotate) {
+      const c = this.clashCentre(), t = this.controls.target;
+      if (c && c.distanceTo(t) > this.reach(0.01, 0.001)) this.flyTo(this.camera.position.clone().add(c.clone().sub(t)), c, true, false);
+    }
+    this.controls.autoRotate = on;
+  }
+
+  /** While ORCA works on a clash (a proposal, a plan, a wider fix), a drag with nothing selected orbits round it. */
+  setOrbitClash(on: boolean) { this.orbitClash = on; }
+  private orbitClash = false;
+
+  /** The middle of the clash on screen: where its pair meets, else the focus (a plan's or a wider fix's elements). */
+  private clashCentre(): THREE.Vector3 | null {
+    if (this.lastClash) return this.lastClash.zone.getCenter(new THREE.Vector3());
+    const ids = this.focusIds();
+    const box = ids.length ? this.boxOf(ids) : null;
+    return box && !box.isEmpty() ? box.getCenter(new THREE.Vector3()) : null;
+  }
 
   setEdges(on: boolean) { this.showEdges = on; this.applyMode(); }
 
@@ -1354,8 +1376,44 @@ export class Viewer {
     this.camera.lookAt(target);
   }
 
-  /** A press in the 3D view, before the controls see it: a section box grip starts a drag; otherwise an orbit (left
-   * button) turns about what is under the pointer: the target moves along the view to that depth, so nothing jumps. */
+  /** What a drag in the 3D view orbits round (docs/views.md, "Navigate like a CAD tool"): the selected element, else the
+   * clash while ORCA works on it; null: the point under the pointer. */
+  private pivotFor(): THREE.Vector3 | null {
+    if (this.selection && this.has(this.selection)) {
+      const b = this.boxOf([this.selection]);
+      if (!b.isEmpty()) return b.getCenter(new THREE.Vector3());
+    }
+    return this.orbitClash ? this.clashCentre() : null;
+  }
+
+  /** A drag that orbits round a pivot of its own (the selection, the clash): the controls do not turn for it. */
+  private spin: { id: number; x: number; y: number; pivot: THREE.Vector3 } | null = null;
+
+  private spinMove(e: PointerEvent) {
+    const s = this.spin!;
+    if (e.pointerId !== s.id) return;
+    this.orbitAround(s.pivot, e.clientX - s.x, e.clientY - s.y);
+    s.x = e.clientX; s.y = e.clientY;
+  }
+
+  /** Turn the camera and its target together round `pivot`, as the controls turn round their target: a drag across
+   * (`dx` pixels) turns round the vertical, a drag up or down (`dy`) tilts, never past straight up or down. The pivot
+   * stays where it is on screen, so nothing jumps. */
+  orbitAround(pivot: THREE.Vector3, dx: number, dy: number) {
+    const cam = this.camera, t = this.controls.target, up = new THREE.Vector3(0, 1, 0);
+    const k = (2 * Math.PI * this.controls.rotateSpeed) / Math.max(this.pane3d.clientHeight, 1);
+    const yaw = new THREE.Quaternion().setFromAxisAngle(up, -dx * k);
+    const offset = cam.position.clone().sub(t).applyQuaternion(yaw);
+    const phi = offset.angleTo(up), next = THREE.MathUtils.clamp(phi - dy * k, 0.01, Math.PI - 0.01);
+    const axis = offset.clone().cross(up);
+    const turn = axis.lengthSq() > 1e-12 ? new THREE.Quaternion().setFromAxisAngle(axis.normalize(), phi - next).multiply(yaw) : yaw;
+    for (const v of [cam.position, t]) v.sub(pivot).applyQuaternion(turn).add(pivot);
+    this.controls.update();
+  }
+
+  /** A press in the 3D view, before the controls see it: a section box grip starts a drag; an orbit (left button) with
+   * a pivot of its own (the selection, the clash) turns round it; otherwise it turns about what is under the pointer:
+   * the target moves along the view to that depth, so nothing jumps. */
   private press(e: PointerEvent) {
     if (this.cube.el.contains(e.target as Node)) return;   // the view cube handles its own
     this.onUserCamera?.();
@@ -1369,7 +1427,14 @@ export class Viewer {
       this.controls.enabled = false;
       return;
     }
-    if (e.shiftKey || e.ctrlKey || e.metaKey || this.projection === "orthographic" || this.flight) return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey || this.flight) return;
+    const pivot = e.pointerType === "touch" ? null : this.pivotFor();
+    if (pivot) {
+      this.spin = { id: e.pointerId, x: e.clientX, y: e.clientY, pivot };
+      this.controls.enableRotate = false;   // the controls still pan and zoom, and capture the pointer
+      return;
+    }
+    if (this.projection === "orthographic") return;
     const hit = this.pickAt(e, { ghosts: true });
     if (!hit) return;
     const cam = this.camera.position, dir = this.controls.target.clone().sub(cam).normalize();
@@ -1378,6 +1443,7 @@ export class Viewer {
   }
 
   private release(e: PointerEvent) {
+    if (this.spin && e.pointerId === this.spin.id) { this.spin = null; this.controls.enableRotate = true; }
     if (!this.grip) return;
     this.grip = null;
     this.controls.enabled = true;

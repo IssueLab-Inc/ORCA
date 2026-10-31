@@ -102,8 +102,10 @@ with a clash still picked. So the clash and the camera become independent.
 
 ### Navigate like a CAD tool
 
-- **Mouse:** left drag orbits **around the point under the pointer** (the pivot moves there at the press, without a
-  jump; empty sky keeps the last pivot), right or middle drag pans, the wheel zooms to the cursor (as today),
+- **Mouse:** left drag orbits **around the selected element** when one is selected (owner, Oct 31), else **around
+  the clash while ORCA works on it**, else **around the point under the pointer** (the pivot moves there at the press,
+  without a jump; empty sky keeps the last pivot); the view's own turn while ORCA thinks is round the clash too. Right
+  or middle drag pans, the wheel zooms to the cursor (as today),
   Shift + left drag pans (trackpads). Touch as today: one finger orbits, two pan and pinch.
 - **Controls:** `OrbitControls` stays (built: the target shifts along the view ray for the pivot; `camera-controls`
   was the alternative and was not needed). The Viewer keeps its own API (`flyTo`, `frameFix`, `orbit`,
