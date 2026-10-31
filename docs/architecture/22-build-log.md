@@ -1814,3 +1814,18 @@ each check, one list with a picker, one #N per clash across every check, triage 
   full check's ids and numbers; 464 rows with unique numbers; Run all again (3 checks) 7.0 s. In Chromium, resuming
   that session: the picker (All 2 checks · 464, the open models, the ducts check), the ducts check's one clash
   triaged by Muse Spark, Run again on it keeping the verdict free, and All checks showing "Triage 463 unread".
+
+The review of the kept-checks PR (Oct 31; [IssueLab-Inc/ORCA#87](https://github.com/IssueLab-Inc/ORCA/pull/87), 10
+comments, all taken):
+- **Fixed:** a failed triage read (error, no verdict) is no longer kept and carried as read: it stays unread
+  (`Register.keep_reading`, `carried`, the page's count); a run that asks the model nothing makes no audit call and
+  keeps the last audit (`Job(prior_audit)`); titling is one run per scene, a new list following the one under way
+  and asking again for what it adds (`_title_key`, `_kept_titles`, the start's `report_id`); a reading reaches a new
+  list only for a clash that did not change, on the server (`checks.same_clash`, `_same_in`, the followed stream
+  filtered and marked `following`) and the page (`sameClash`); a key used again moves to the end of the jobs' cap
+  (`_keep_job`); a one-check PDF says that check's test names (`_narrowed`); check summaries, contacts and lookups
+  iterate a snapshot; Triage while a run is under way follows it when it reads those clashes, else is charged once and
+  queued behind it (`Job(after, prepare)`, `queued`, `asking`); one name lookup (`checks.pick`) and one settle test
+  for the run and its charge (`triage.settled_by`).
+- **Checked:** `tests/test_checks.py` (20), 701 server tests; `web/tests/checks-list.test.mjs` (8), 201 web tests;
+  build clean.

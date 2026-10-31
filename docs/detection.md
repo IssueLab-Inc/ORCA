@@ -202,10 +202,16 @@ replaces "a check's clashes replace the open list" (Oct 31, [filters.md](filters
   finds it says it was not fixed, one that no longer does has resolved it.
 - **Triage follows the clash.** One triage run per scene (`scene:<id>`) follows its clashes from list to list. Every
   reading the model makes is kept with the clash's pair and depth, under its triage prompt (`requirements.model_key`);
-  a later list gets it free (`carried`) while the pair is the same and the depth moved no more than 1 mm. Triage
-  then asks only about the clashes no reading holds for (`unread`), in the check the list shows (`scope`), or all, for
-  one proposal; with nothing unread it costs nothing. Under requirements with another prompt nothing carries: the last
-  run shows, marked stale, as before.
+  a later list gets it free (`carried`) while the pair is the same and the depth moved no more than 1 mm
+  (`checks.same_clash`; the page drops a verdict on the same test). A failed read (an error, no verdict) is not kept:
+  it stays unread, to be asked again. Triage then asks only about the clashes no reading holds for (`unread`), in
+  the check the list shows (`scope`), or all, for one proposal; with nothing unread it costs nothing, and a run that
+  asks nothing makes no audit call either (it keeps the last audit of the by-design rules). While a run is under
+  way, a new ask follows it when it reads those clashes anyway; otherwise it is charged once and queued behind it
+  ("Waits for the triage already under way"), working out what to read when the first run ends. Under requirements
+  with another prompt nothing carries: the last run shows, marked stale, as before.
+- **Titles** are one titling run per scene too: a new list follows the run under way (titles land on every list),
+  then asks again for the clashes it adds.
 - **Documents.** The PDF and BCF can hold one check's clashes, titled as that check's run (`DocumentRequest.check`;
   MCP `generate_report(check=…)`), or every check's.
 - **An imported Navisworks report** never joins the list (its ids are positions in its file): opening one shows it on

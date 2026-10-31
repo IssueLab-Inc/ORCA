@@ -445,8 +445,14 @@ One run per report is shared by every visitor; late subscribers replay what has 
   the pair is the same and the depth moved no more than 1 mm (`Register.carried`): `GET .../triage` starts a run that
   asks nothing (`_start_triage(ask=False)`), and `unread` says what is left. `POST .../triage/stream?scope=<check>`
   asks the model only about the unread clashes of that check (`Job(only=…)`, `triage_report(only=…)`), one proposal;
-  nothing unread costs nothing. A run under way is followed, never started twice, whatever list asked. The seed is
-  filtered to the report's own clashes, without its alike groups.
+  nothing unread costs nothing. What settles a clash without the model is one test for the run and for the charge
+  (`triage.settled_by`). A failed read is never kept (`Register.keep_reading`) and counts as unread. A run that asks
+  nothing makes no audit call: it keeps the last run's audit (`Job(prior_audit=…)`). While a run is under way, a new
+  ask follows it when it reads those clashes anyway (`app._reading`), else is charged once and queued behind it
+  (`Job(after=…, prepare=…)`: what to read is worked out when the first ends; its `start` says `queued`, then an
+  `asking` event). Following a run over an earlier list, the stream passes only what it says of clashes unchanged
+  here (`app._same_in`, `checks.same_clash`) and its `start` says `following`. Jobs under a key used again move to the
+  end of the cap (`app._keep_job`). The seed is filtered to the report's own clashes, without its alike groups.
 - **Donor** (`app._triage_donor`): a finished run under the same prompt but other rules donates its model readings
   (`seed`), so adding a rule from Insights re-asks nothing and costs nothing. `GET .../triage` starts such a run at
   once.
@@ -486,9 +492,11 @@ evidence: nothing is decided from it.
   time, each with `facts` lines ("#12: A IfcPipeSegment 'Cold water main' (Level 02, ...); B ...; test '...' (hard);
   overlap 77 mm") and strict `titles.SCHEMA`. `_tidy` cuts a title at a word past `MAX_CHARS` (90). A number the
   model leaves out stays on its plain name; a failed batch emits `batch_error` and the rest go on.
-- `titles.Job` is shared like triage's, keyed by `app._title_key(report)` (the triage key without requirements; a
-  detected list's own id; at most 32 kept); for ORCA's checks each batch is also kept with the scene's checks
-  (`Job(on_titles=…)`), so every later list has it.
+- `titles.Job` is shared like triage's, keyed by `app._title_key(report)` (the triage key without requirements;
+  `scene:<id>` for ORCA's lists of checks, so a new list follows the run under way; at most 32 kept); for ORCA's
+  checks each batch is also kept with the scene's checks (`Job(on_titles=…)`) and every list takes them
+  (`app._kept_titles`). Its `start` names the list it titles (`report_id`): a page that followed another list's run
+  asks once more for its own untitled clashes.
   A finished run that left clashes untitled is started again for those only. `app._with_titles` copies a shared run's
   titles onto each visitor's copy of a sample report. Starting a run takes one `title_limit` use.
 - The page starts titling as soon as a report opens. Measured: 633 detected clashes in 60 s on Muse Spark Open (Oct

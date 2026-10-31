@@ -255,7 +255,7 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 | `GET` | `/api/reports/{report_id}/triage` | The report's triage so far (`triage.Job.state`), with facts the open model settles (`_triage_facts`). Under requirements that only change rules since a finished run, starts a run from its readings at no charge; under a different prompt, returns the last run with `stale: true`. A list of ORCA's checks gets at once, free, the readings that still hold for its clashes (same pair, depth within 1 mm, same prompt: `checks.Register.carried`), each marked `carried` | `?scene_id=` | `{results, done, total, seconds, error, summary, audit, model, open_weights, …}`, plus `stale` for an older run, or `{results: {}, done: false, started: false}`; for ORCA's checks also `unread` (clashes no reading holds for) and `scope` | free |
 | `POST` | `/api/reports/{report_id}/triage/stream` | Starts or follows the report's shared triage run (`_start_triage`, `triage.Job.follow`); for ORCA's checks one run per scene, asking only about unread clashes | `?rerun=true` to run a finished one again, `?scene_id=`, `?scope=` (a kept check's key: only its clashes); empty body | NDJSON | one proposal to start a run that asks the model anything; following one, carrying readings over (to new rules, or to a new list of checks), or a scope with nothing unread is free |
 | `GET` | `/api/reports/{report_id}/titles` | Titles so far (from the shared run, `_with_titles`) | none | `{titles: {id: title}, running}` | free |
-| `POST` | `/api/reports/{report_id}/titles/stream` | Starts or follows the report's shared titling run (`titles.Job`); a finished run with untitled clashes starts again for those | empty body; `?scene_id=` (the open models: their domain names the meeting in `titles.md`) | NDJSON | `title_limit` (`SIGHTLINE_TITLES_PER_HOUR`/`_DAY`) to start; following is free |
+| `POST` | `/api/reports/{report_id}/titles/stream` | Starts or follows the report's shared titling run (`titles.Job`; for ORCA's checks one per scene: a new list follows the run under way, and takes the titles the scene keeps); a finished run with untitled clashes starts again for those | empty body; `?scene_id=` (the open models: their domain names the meeting in `titles.md`) | NDJSON | `title_limit` (`SIGHTLINE_TITLES_PER_HOUR`/`_DAY`) to start; following is free |
 
 Shared runs are keyed by `_triage_key`: a sample report by `sample:<root>` (every visitor's copy has the same ids),
 an uploaded or detected one by its id, and under requirements also by `model_key|rules_key`. The server keeps 16
@@ -399,7 +399,8 @@ model that ran it ("Muse Spark", "Muse Wonder").
 
 | Type | Fields |
 |---|---|
-| `start` | `total`, the model info (`model`, `open_weights`, `images`, `note`, `requirements`); for ORCA's checks `asking` (how many the model is asked about) and `scope` |
+| `start` | `total`, the model info (`model`, `open_weights`, `images`, `note`, `requirements`); for ORCA's checks `asking` (how many the model is asked about) and `scope`, `queued` (waits for the run under way) or `following` (the id of the earlier list whose run this follows: only unchanged clashes are passed on) |
+| `asking` | A queued run starts: `asking` (how many it asks about, worked out now) |
 | `clash` | `id`, the verdict (`verdict`, `severity`, `responsible`, `action`, `understanding`, `fix_hint`, `confidence`, `source` rule or model, `seconds`, `basis`, `rule`, `model_reading`, `reasoning`, `alike`, `alike_of`, `audit`, `audit_note`, `carried` (a reading kept from an earlier list of ORCA's checks), `error`) |
 | `reasoning` | `id`, `text` (what the triage model wrote since the last one) |
 | `audit` | `rules` (Muse's check of each by-design rule) |
@@ -409,7 +410,7 @@ model that ran it ("Muse Spark", "Muse Wonder").
 A correction from the open model (`Job.learn`) re-sends a `clash` event; on a finished run it goes in before the
 `done`, which is sent again with the new summary.
 
-**`POST /api/reports/{report_id}/titles/stream`** (`titles.Job`, `titles.title_report`): `start {total, missing,
+**`POST /api/reports/{report_id}/titles/stream`** (`titles.Job`, `titles.title_report`): `start {total, missing, report_id (the list the run titles),
 model…}`, `titles {items: {id: title}}` per batch, `batch_error {detail}`, `done {titled, seconds, error?}`, `ping`.
 
 **`POST /api/scenes/{scene_id}/plan/stream`** (`plans.build_batch`, `plans.build_root_cause`, `plans._resolve_items`,
