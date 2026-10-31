@@ -1829,3 +1829,13 @@ comments, all taken):
   for the run and its charge (`triage.settled_by`).
 - **Checked:** `tests/test_checks.py` (20), 701 server tests; `web/tests/checks-list.test.mjs` (8), 201 web tests;
   build clean.
+
+Proposal clips in the README (Oct 31; owner: "show some actual clash proposal generations in the main readme", "show
+the workings as well, and a zoomed-in version"): a new "See it work" section near the top shows live proposal runs as
+animated WebP time-lapses in `docs/media/proposals/`: Northbank #1, #2 and #3 and the cell's #66, each from picking
+the clash to the verified option and Before / After, and the Workings of #1 and #66 replayed in Activity's own window.
+`web/scripts/capture-proposals.cjs` records them from Chromium's screencast (Playwright's video recording starved the
+page under SwiftShader and the proposal never finished) and `web/scripts/timelapse.py` speeds the waits up 2-6× with
+the speed on each frame. Checked: the four runs made by the committed script against a local server with Muse Spark,
+each with one verified option (duct +400, tray +250, cold water +280: Rev04's heights; air line −150 under both
+rails); frames inspected; `tests/test_docs_map.py` passes.

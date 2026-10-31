@@ -311,6 +311,15 @@ canvas with the viewer's screenshot button, and crops it to 16:10 WebP with Pill
 Recapture after the viewer's look or the demo models change; the cards, the README table and the landing numbers move
 together and only from measured runs.
 
+## Proposal clips (`docs/media/proposals/`)
+
+The README's "See it work" shows live proposal runs as animated WebP time-lapses: `duct`, `tray`, `cold-water`
+(Northbank #1-#3, the answer key) and `cell` (the cell's #66, the air line under the conveyor rails), plus
+`duct-workings` and `cell-workings`, the same runs replayed in the Activity panel's Workings graph.
+`web/scripts/capture-proposals.cjs` records them against a running server with `META_API_KEY` (see
+[18](18-testing-and-evals.md)); every capture is a new proposal, so the README's captions are rewritten from the run
+that made the clips. They live under `docs/`, not `web/public/`, so the deployed app does not carry them.
+
 ## Which evals use which data
 
 Details, commands and results: [18](18-testing-and-evals.md). The server's unit tests use none of this: they build
