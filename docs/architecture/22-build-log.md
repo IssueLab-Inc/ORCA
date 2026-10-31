@@ -1389,3 +1389,12 @@ open weights and Show it built on, which also ran Show it built live for the fir
 kept) and Wonder on the tray (#2), the cell's fence post N3 (#29, ranked first) and the HMI stand (#13, no fix).
 Checked: 143 web tests (`workings.test.mjs`: the lane, its steps, bar and row); build clean; in Chromium on #29 at
 Fit.
+
+The demo video's script (Oct 31; owner decisions Oct 30; `docs/demo-video`; [docs/demo-video.md](../demo-video.md)):
+both themes as one story (our world, then the frontier), a narrator, plain words, and every shot tested first on a
+local server at `main` with open weights and Show it built on: triage on Muse Spark Open (86 s, 5 need a fix), the duct
+on Muse Spark (29 s, +400 mm at 50 mm, first idea), Show it built on it (85 s, F 0.82, both Muse Wonder judges
+faithful), Wonder beating Spark on the cell's fence post N3 (#29, a straight 360 mm move at 124 mm, ranked first) and
+on the tray (#2, a shorter offset), and the HMI stand (#13) ending in No verified fix. The footing × lift pit wall
+(#16), Wonder's Northbank case in the Oct 29 eval, is now fixed by Spark alone (a trim). The decision is in
+[20](20-decisions-limits-and-roadmap.md).
