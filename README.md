@@ -15,6 +15,60 @@ synthetic baseline asset used to demonstrate and evaluate ORCA; it was not creat
 ORCA's application code was written during the event. See [BUILT_DURING_HACKATHON.md](BUILT_DURING_HACKATHON.md)
 for the full distinction between new work, baseline data and third-party dependencies.
 
+## See it work
+
+Real proposal runs, recorded in ORCA's own app with `web/scripts/capture-proposals.cjs` (Oct 31, Muse Spark live; the
+waits are sped up and each frame says by how much). Pick a clash, choose **Propose fixes**: Muse Spark reads the
+pair and the model data, proposes edits, ORCA checks each one against the geometry, and only verified options reach
+the panel, with **Before / After** in 3D.
+
+**Northbank #1: the supply air main through the transfer girder.** Muse Spark offsets the middle of the duct up
+400 mm through the girder's own web opening: 50 mm clear all round (25 mm needed), checked against 21 elements. All three Northbank
+fixes below land at the designer's own Rev04 heights (+400, +250, +280 mm).
+
+<img src="docs/media/proposals/duct.webp" alt="ORCA proposing a fix for Northbank clash #1: the clash is picked, Muse Spark thinks, a verified offset appears, and the 3D view flips between before and after." width="100%">
+
+**The Workings of that run**, replayed in the Activity panel: the brief ORCA gives Muse Spark (the pair in words and
+numbers, the openings it could use, pictures A, B and C), the round's ideas, ORCA's geometry check on each, and the
+ranking. An idea that fails the check shows the reason, and is sent back on the next round.
+
+<img src="docs/media/proposals/duct-workings.webp" alt="The Workings graph replaying the run: You, Muse Spark and ORCA lanes, from the request through Muse Spark's round to ORCA's geometry check and the ranked option." width="100%">
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/media/proposals/tray.webp" alt="ORCA proposing a fix for Northbank clash #2, the cable tray through the girder." width="100%">
+
+**#2, cable tray:** offset up 250 mm through the girder opening, 50 mm clear
+(was 100 mm overlap), checked against 5 elements.
+
+</td>
+<td width="50%" valign="top">
+<img src="docs/media/proposals/cold-water.webp" alt="ORCA proposing a fix for Northbank clash #3, the cold water main through the girder." width="100%">
+
+**#3, cold water main:** offset up 280 mm through the girder opening, 53 mm clear
+(was 77 mm overlap), checked against 15 elements.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/media/proposals/cell.webp" alt="ORCA proposing a fix in the PC-03 palletising cell: the compressed-air line dropped under the conveyor's side rails." width="100%">
+
+**PC-03 cell #66, from STEP:** the air line dropped 150 mm under both conveyor side rails as one offset.
+
+</td>
+<td width="50%" valign="top">
+<img src="docs/media/proposals/cell-workings.webp" alt="The Workings graph replaying the cell run." width="100%">
+
+**The cell run's Workings.**
+
+</td>
+</tr>
+</table>
+
+Each capture is a fresh proposal, so a new run can word or rank its options differently.
+
 ## Try it (judges)
 
 **[Open the live ORCA demo](https://dodzikojo--orca-web.us-east.modal.run)** — no installation or personal API key needed.
