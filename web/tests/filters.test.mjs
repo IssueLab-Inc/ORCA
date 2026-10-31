@@ -61,6 +61,25 @@ test("hide, isolate and colour together; the top colour wins; isolates add up; g
   assert.deepEqual(f.evaluate(f.EMPTY, null), { hide: null, only: null, paint: null, greyRest: false });
 });
 
+test("hide the rest: only what a filter colours or isolates stays, in its colour; hide filters still hide within it", () => {
+  const level2 = rule({ id: "a", when: [{ facet: "storey", op: "is", values: ["Level 02"] }], colour: "#318181" });
+  const state = (rules, more = {}) => ({ v: 1, colours: true, greyRest: false, hideRest: true, rules, ...more });
+  let view = f.evaluate(state([level2]), p);
+  assert.deepEqual([...view.only].sort(), ["duct2", "pipe"]);
+  assert.deepEqual(Object.fromEntries(view.paint), { duct2: "#318181", pipe: "#318181" }, "kept in their colour");
+  assert.equal(view.greyRest, false);
+  const beams = rule({ id: "e", action: "isolate", when: [{ facet: "class", op: "is", values: ["IfcBeam"] }] });
+  assert.deepEqual([...f.evaluate(state([level2, beams]), p).only].sort(), ["beam", "duct2", "pipe"], "coloured and isolated both stay");
+  view = f.evaluate(state([level2, rule({ id: "h", action: "hide", when: [{ facet: "class", op: "is", values: ["IfcPipeSegment"] }] })]), p);
+  assert.deepEqual([...view.hide], ["pipe"], "a hide filter still hides what another keeps");
+  const bySystem = rule({ id: "s", action: "byValue", by: { facet: "pset:Model data/System", off: ["Cold water"] } });
+  assert.deepEqual([...f.evaluate(state([bySystem]), p).only].sort(), ["duct1", "duct2"], "a value ticked off is not kept");
+  assert.equal(f.evaluate(state([rule({ id: "h", action: "hide", when: [] })]), p).only, null, "nothing coloured or isolated: nothing to keep");
+  assert.equal(f.evaluate(state([level2], { colours: false }), p).only, null, "Show colours off: colour filters keep nothing");
+  assert.deepEqual([...f.evaluate(state([level2, beams], { colours: false }), p).only], ["beam"], "isolates still do");
+  assert.equal(f.evaluate(state([level2], { greyRest: true }), p).greyRest, false, "hidden, not greyed");
+});
+
 test("colour by value: a colour per value, its own if chosen, the palette's by the value's place, ticked-off values left", () => {
   const r = rule({ action: "byValue", by: { facet: "pset:Model data/System", colours: { "Cold water": "#123456" }, off: [] } });
   const view = f.evaluate({ v: 1, colours: true, greyRest: false, rules: [r] }, p);
@@ -114,6 +133,9 @@ test("applying a filter is adding it, switching it on or changing it; not switch
   assert.deepEqual(ids(s0, { ...s0, colours: false }), []);
   const paused = { ...s0, rules: [{ ...a, on: false, paused: true }] };
   assert.deepEqual(ids(paused, { ...s0, rules: [a] }), [], "chat giving a paused filter back");
+  assert.deepEqual(ids(s0, { ...s0, rules: [a, { ...b, on: true }], hideRest: true }), ["a", "b"], "hiding the rest applies every filter that is on");
+  assert.deepEqual(ids({ ...s0, hideRest: true }, s0), [], "showing the rest again applies none");
+  assert.deepEqual(ids(s0, { ...s0, greyRest: true }), [], "nor does greying it");
 });
 
 test("applying frames what the filters act on that is on screen; filters that only hide frame what is left", () => {
@@ -129,7 +151,9 @@ test("applying frames what the filters act on that is on screen; filters that on
 
 test("a kept or saved filter state reads back, and anything unreadable gives way to none", () => {
   const good = { v: 1, colours: false, greyRest: true, rules: [rule({ id: "a" }), { id: 3 }, rule({ id: "b", action: "explode" })] };
-  assert.deepEqual(f.migrate(good), { v: 1, colours: false, greyRest: true, rules: [rule({ id: "a" })] });
+  assert.deepEqual(f.migrate(good), { v: 1, colours: false, greyRest: true, hideRest: false, rules: [rule({ id: "a" })] });
+  assert.deepEqual(f.migrate({ ...good, hideRest: true }), { v: 1, colours: false, greyRest: false, hideRest: true, rules: [rule({ id: "a" })] },
+    "grey and hide are one or the other: hide is kept");
   for (const bad of [null, "x", { v: 2, rules: [] }, { v: 1 }]) assert.deepEqual(f.migrate(bad), f.EMPTY);
 });
 

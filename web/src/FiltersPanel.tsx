@@ -31,6 +31,13 @@ const OPS: Record<"text" | "number" | "bool", { op: Op; label: string }[]> = {
   bool: [{ op: "is", label: "is" }, { op: "has", label: "has any value" }, { op: "missing", label: "has none" }],
 };
 const SHOWN_MAX = 300;
+/** What happens to what no filter colours or isolates (docs/filters.md, "The rest"). */
+const REST: { id: "show" | "grey" | "hide"; label: string; tip: string }[] = [
+  { id: "show", label: "Show", tip: "What no filter colours or isolates stays as it is" },
+  { id: "grey", label: "Grey", tip: "What no filter colours turns grey" },
+  { id: "hide", label: "Hide", tip: "Only what the filters colour or isolate stays: everything else is hidden" },
+];
+const restOf = (s: FilterState) => (s.hideRest ? "hide" : s.greyRest ? "grey" : "show");
 
 export interface FiltersPanelProps {
   index: Prepared | null; loading: boolean;
@@ -73,8 +80,13 @@ export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft
       </div>
       {rules.length > 0 && <div className="fpanel-switches">
         <label className="check"><input type="checkbox" checked={state.colours} onChange={(e) => onState({ ...state, colours: e.target.checked })} /> Show colours</label>
-        <label className="check" data-tip="What no filter colours turns grey"><input type="checkbox" checked={state.greyRest}
-          onChange={(e) => onState({ ...state, greyRest: e.target.checked })} /> Grey the rest</label>
+        <div className="frest"><span className="flabel">The rest</span>
+          <div className="fact frest-seg" role="radiogroup" aria-label="The rest">
+            {REST.map((r) => { const on = restOf(state) === r.id; return (
+              <button key={r.id} type="button" role="radio" aria-checked={on} className={`seg${on ? " on" : ""}`} data-tip={r.tip}
+                onClick={() => onState({ ...state, greyRest: r.id === "grey", hideRest: r.id === "hide" })}>{r.label}</button>); })}
+          </div>
+        </div>
         {onDrawingsWhole && <label className="check" data-tip="Plans, sections and elevations ignore the filters">
           <input type="checkbox" checked={!!drawingsWhole} onChange={(e) => onDrawingsWhole(e.target.checked)} /> Drawings show the whole model</label>}
       </div>}

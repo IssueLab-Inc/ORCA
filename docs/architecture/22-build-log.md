@@ -1667,3 +1667,16 @@ Public local setup and bundled demo data (Oct 31; owner request and licence deci
   passes. No application behavior changed; the full server/web suites and a local browser run were not performed
   because the project dependencies are not installed. The README explicitly leaves clean OS installs/live AI/PDF
   checks and a verified Meta API onboarding link outstanding rather than claiming they passed.
+
+Hide the rest (Oct 31; owner: "i can filter but i can't seem to hide everything else?"; code `FilterState.hideRest`,
+`filters.evaluate` / `applied` / `migrate`, `FiltersPanel` (The rest: Show · Grey · Hide), `set_filters` `hide_rest`
+in chat and MCP; [docs/filters.md](../../docs/filters.md)):
+- **What:** Isolate already showed only what a filter finds, but only from the editor and without its colour. Now the
+  panel says what happens to what no filter colours or isolates: shown, grey or hidden. Hidden keeps the filters'
+  colours, frames what is left, and reaches drawings as any filter does; chat and agents can ask for it.
+- **Checked:** `web/tests/filters.test.mjs` (13), `filters-check.test.mjs` (9), `filters-chat.test.mjs` (2);
+  `tests/test_chat.py`, `test_mcp.py`.
+- **In Chromium on Northbank** (local server): Colour by System, then The rest: Hide → only the services, in their
+  system colours, framed; Grey → the rest back in grey; Show → as before. Chat on Muse Spark: "Show only the supply air
+  ducts on level 2 in blue and hide everything else." → `set_filters` with `hide_rest` (a first "Level 2" refused with
+  the closest name, then "Level 02"): 68 ducts and fittings in blue, everything else hidden, the user's filter paused.

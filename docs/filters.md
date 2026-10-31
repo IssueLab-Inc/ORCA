@@ -67,8 +67,13 @@ A filter (`filters.Rule`) finds elements, then does one thing with them.
   property picked takes its last condition's (`filters.withBy`), in the editor, the preview and what is kept alike.
 - **Several at once** (`filters.evaluate`): hide rules hide what they find; while any isolate rule is on, only what
   some isolate rule finds shows (several add up: "Ducts" and "Pipes" shows both); colour rules colour, the top one
-  winning, and a value ticked off lets a lower rule colour it. **Show colours** turns every colour off at once;
-  **Grey the rest** greys what no rule colours (only while something is coloured). Rules reorder with up and down.
+  winning, and a value ticked off lets a lower rule colour it. **Show colours** turns every colour off at once.
+  **The rest: Show · Grey · Hide** says what happens to what no filter colours or isolates: it stays as it is, it turns
+  grey (only while something is coloured), or it is hidden, so a coloured filter shows only what it finds, in its
+  colours (only while something is coloured or isolated; hide filters still hide within it; a value ticked off is not
+  kept). Grey and hide are one or the other. Switching to Hide frames what is left (Zoom, below). Owner request, Oct
+  31: "i can filter but i can't seem to hide everything else" (Isolate did, but only from the editor and without
+  colour). Rules reorder with up and down.
 - **Counts** are live: each list says how many each value would leave among what the other conditions find, the
   editor how many the filter finds, the list how many each filter acts on (by value: how many it colours).
 - **The panel** (`FiltersPanel.tsx`): a tab behind Coordination in the left side bar; where there is no dock (the
@@ -99,7 +104,7 @@ Owner request (Oct 31): applying a filter, from anywhere, takes the views to wha
 ## What wins
 
 Shown: a hidden model hides; the clash pair, previews and trials always show; then the temporary hide or isolate; the
-quick class and level checkboxes; the filters (hide, then isolate); the mode round the focus
+quick class and level checkboxes; the filters (hide, then isolate, then Hide the rest); the mode round the focus
 ([views.md](views.md), "Visibility").
 
 Colour, under the pair, selection, hits, links, previews and measure (their own layers): the top filter's colour, else
@@ -153,7 +158,8 @@ value** (a temporary isolate). A storey's breadcrumb offers **Filter by this lev
 - **`set_filters`** (chat and MCP): a list of filters, each with `classes`, `levels`, `models` (lists), `where`
   (`{property, set?, op: is|is_not|contains|has|missing|less|more|between, values?, min?, max?}`, lengths in metres),
   `action` (`colour`, `colour_by_value`, `hide`, `isolate`), `colour` (#rrggbb), `by` (the property to colour by:
-  System, class, level, model…), `invert`, `name`; and `grey_rest`. Voice goes through chat, so it works by voice too.
+  System, class, level, model…), `invert`, `name`; and `grey_rest` or `hide_rest` (grey or hide what no filter
+  colours or isolates). Voice goes through chat, so it works by voice too.
 - **Resolved on the server** against the same index (`facets.resolve`, which returns the rule and what it acts on): a class with or without its `Ifc` prefix, a
   level as the storey, a model by part of its file name, a property by name (or `set/name`; a property set wins over
   an attribute or quantity of the same name), values in any case. A name the models lack fails back to the model with
