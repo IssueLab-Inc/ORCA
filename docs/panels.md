@@ -132,6 +132,15 @@ wherever it is (checked: floated, proposed, put back mid-run, accepted).
 `display: contents`, so what they hold is a grid item exactly as before and the classic CSS (sheet, drawer, resizers)
 did not change. Crossing 1100 px moves slots between the dock and the grid; nothing remounts.
 
+**Into the dock under a cover.** Switching into the dock (the first models drawn from the start page, a report, the dock
+chosen again) left the page blank for a few frames: dockview lays out its panels in an effect, then each panel takes its
+slot, and until then nothing `App` draws is in the page (on Northbank in a software-rendered test browser, 2.5 s). So
+`App` covers the switch (`dockCover`): a layer over the whole window in the empty 3D view's colour, with the notch and
+the load card as the opening ended, until the stage is inside the dock (`.dock-host`), laid out and three frames drawn
+there (6 s at most), then a 0.2 s fade. Opening the first models from the start page on a desktop, that layer is the
+loading screen itself (`coverLoading`), so the new models never show behind the card before the switch either. Models
+opened again over open ones, phones, tablets and the Classic layout have no switch and no cover.
+
 **The right-hand tab.** `tab` is still `App`'s. `setTab` also asks the dock to show that panel (`DockHandle.show`:
 reopen a closed panel at home, open its collapsed bar, bring its window forward). A click on a dock tab is the user
 choosing it: Clash, Plan and Chat run their classic tab handlers (`showClashTab`, `showPlanTab`, `showChatTab`), so the

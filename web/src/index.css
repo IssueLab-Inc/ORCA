@@ -275,6 +275,12 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .app.notched .measure-panel { top: 108px; }
 .app.notched.landing .about { padding-top: 84px; }
 /* Opening the first models: the checklist card in the middle of the empty model */
+/* Over the switch into the dock (App, "dockCover"): the loading stage's look (the 3D view's empty background, Viewer's
+   scene.background, the notch and the load card) until the model has its panel, then a short fade. Above the dock's
+   floating panels. */
+.load-cover { position: fixed; inset: 0; z-index: 2000; background: #dfe6ee; transition: opacity .18s ease; }
+.load-cover.out { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .load-cover { transition: none; } }
 .load-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 5; width: min(440px, calc(100% - 32px));
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgba(5, 38, 64, .08);
   padding: 24px 24px 22px; display: flex; flex-direction: column; gap: 18px; }

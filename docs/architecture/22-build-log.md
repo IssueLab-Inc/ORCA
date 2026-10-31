@@ -1734,3 +1734,17 @@ in Workings; `web/src/workingsGraph.ts`, `App.tsx`, `Chat.tsx`, `runlog.ts`, `ap
   Reads the question → Set filters (colour by System, the rest greyed, 844 elements) → Reads what the tools said →
   Answers, in about 8 s. No page errors.
 
+
+No blank page as the panels arrive (Oct 31; owner request; code `web/src/App.tsx`, `web/src/index.css`):
+- **What happened:** opening the first models from the start page, the page went blank once they were drawn (2.5 s in
+  a software-rendered test browser; a flash on a real one): the switch into the dock takes the stage, the lists and the
+  notch out of the page, and dockview lays out its panels in an effect, a few frames later. Just before, the new models
+  also showed behind the load card for a frame.
+- **What changed:** a cover over the whole window in the empty 3D view's colour, with the notch and the load card,
+  holds the switch until the stage is in its dock panel and has drawn three frames there (6 s at most), then fades in
+  0.2 s (`dockCover`). Opening from the start page on a desktop it is the loading screen itself (`coverLoading`).
+  Design and limits: `docs/panels.md`, "Into the dock under a cover". `appHost` takes a `layout` for this.
+- **Checked:** `web/tests/dock-cover.test.mjs` (2; the cover test fails on the old code). Recorded in Chromium loading
+  Northbank in the four-view layout and scanned at 10 frames a second: before, 25 blank frames at the switch; after,
+  none: the cover from 0.45 s, the stage in its panel under it at 10.4 s, the fade at 14.3 s (frames are slow in
+  software rendering) and the panels whole on the first frame after it. 189 web tests, build clean.

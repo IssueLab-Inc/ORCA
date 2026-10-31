@@ -196,10 +196,11 @@ flowchart LR
     imp --> host["appHost renders App, runs its effects, drives its handlers"]
 ```
 
-- `appHost({ initial, api, effects })` runs the production `App` with fake hooks keyed by the labelled names (so a
+- `appHost({ initial, api, effects, layout })` runs the production `App` with fake hooks keyed by the labelled names (so a
   test reads `state.context` or `state.planRun`), real effect bodies with cleanup before replacement, a fake `api`
   whose stream calls hand the test their `onEvent` and `resolve`, and a `Proxy` viewer that records every call. It
-  returns helpers to find buttons and components, feed chat events, run timers, settle and unmount. "Only external
+  returns helpers to find buttons and components, feed chat events, run timers, settle and unmount. The page's layout
+  is none (not desktop, phone or tablet) unless a test passes `layout` (`useLayout` then returns it). "Only external
   IO, the GPU viewer and leaf components are replaced"; the assertions drive App's own handlers.
 - **Why App's imports are stubbed:** App imports the GPU viewer, the network and every pane. A data-URL module cannot
   resolve a relative import, so every `./X` App imports must be in the dependencies map: the leaf panes and helpers map
@@ -247,6 +248,7 @@ flowchart LR
 | `links.test.mjs` | 4 | `compiled` | `links.ts`: direct links by kind (rests on read the other way as supports), an element lit once in its first kind, Shift walking the run to equipment, a whole assembly |
 | `viewer-orbit.test.mjs` | 4 | `compiled` | `Viewer.orbitAround`: orbiting round a pivot (the selection, the clash) keeps it at the same place on screen and as far away, with no roll; a sideways drag keeps the camera's height; a long drag down stops short of straight down. `Viewer.press`: with a clash in focus and nothing selected the drag orbits round the clash, a flight under way stops; with none, it turns about what is under the pointer |
 | `viewer-empty-stage.test.mjs` | 2 | `compiled` | `Viewer.drawFrame` in the four-view layout: with nothing open, one empty 3D view over the whole stage and the layout kept; with models, each view in its own pane |
+| `dock-cover.test.mjs` | 2 | `appHost` (desktop) | Opening the first models from the start page: the loading screen is a cover with the load card (none under it), held after the models open while the model is not in its dock panel, fading after three frames there and then gone; no cover for models opened again over open ones or on a phone |
 | `corner.test.mjs` | 2 | `appHost` | The model's top right corner: a kept fix counts on Export (its name says how many were kept) and no "fixed" chip stands beside the notch; the owner's settings go on their button's tip, not in a chip |
 | `viewer-links.test.mjs` | 1 | `compiled` | The connection highlight never shows in a captured picture and is back on screen afterwards |
 | `filters-check.test.mjs` | 9 | `compiled` (React stubbed) + `appHost` | Checks on filters: `checks.ts` (sides, names, the test with no id and the defaults, what a side can test, whether a run was a check), `filters.shareable`; What do these hit? and Check clashes in `FiltersPanel`, and The rest (show, grey or hide, one at a time); App runs a check, Detect again repeats it, Check the open models sends every test; chat's context carries the filters, and Detect again repeats a check chat ran |
