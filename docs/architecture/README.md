@@ -1,6 +1,6 @@
 # 00 · ORCA architecture map
 
-> **Covers:** the whole repository · **Checked against code:** 2026-10-30 (`feature/brand-assets`, based on `0390a12`)
+> **Covers:** the whole repository · **Checked against code:** 2026-10-31 (bundled sample inventory; remaining map at `0390a12`)
 
 These docs map ORCA end to end: what it does, how the parts fit together, where each thing lives in the code, and
 how data and requests move through it. They are written for engineers and agents who need to understand or change
@@ -139,7 +139,7 @@ web/tests/            node test suite and the App harness (18)
 deploy/modal_app.py   the public deploy (17)
 evals/                evals, recorded runs, results.csv (18)
 spikes/               day-1 spikes and the built-view spike (18)
-samples/              models, reports and the STEP cache; gitignored except its README (19)
+samples/              eight bundled MIT demo models; other models, reports and STEP cache gitignored (19)
 docs/                 feature designs; docs/architecture/ is this map
 assets/brand/orca/    approved identity, motion, exports and rebuild/check scripts (12, 18, 20, 21)
 ```

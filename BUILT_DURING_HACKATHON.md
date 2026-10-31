@@ -1,8 +1,9 @@
 # Built during the hackathon
 
-The Meta Global AI Developer Hackathon building period runs Oct 27 – Nov 4, 2026. Everything in this
-repository was written during that period, starting with the first commit on Oct 27. The git history is
-the record.
+The Meta Global AI Developer Hackathon building period runs Oct 27 – Nov 4, 2026. ORCA's application code was
+written during that period, starting with the first commit on Oct 27. The git history is the record. This
+repository also includes pre-existing synthetic baseline models and depends on third-party libraries, as
+disclosed below; those are not claimed as code or assets created during the challenge.
 
 ## New during the event
 
@@ -19,12 +20,15 @@ the record.
 - The domain packs, spikes, tests, evals and the synthetic test models.
 - The approved direction-05 ORCA identity and motion kit (`assets/brand/orca/`): generated concept reference,
   manually authored vector masters, static and animated exports, native elements, React wrappers and build/check scripts.
-- The PC-03 palletising cell demo models (generated during the event by IssueLab's own scripts, in a private repo).
+- The PC-03 palletising cell demo models (generated during the event by IssueLab's own scripts): Rev A and Rev B
+  STEP files are bundled in `samples/` under this repository's MIT licence. Their generator source is not included.
 
 ## Pre-existing, not built during the event
 
-- **The Northbank demo models**, used as demo data: generated before the event by IssueLab's own scripts, in a private
-  repo. They are synthetic; no customer data.
+- **The Northbank demo models**, used as a baseline asset for demonstrations and evaluation: generated before the
+  event by IssueLab's own scripts. The six IFC files are bundled in `samples/` under this repository's MIT licence
+  so judges can reproduce the demo. They are synthetic, contain no customer data, and are not claimed as work
+  created during the challenge. Their generator source is not included. See [samples/README.md](samples/README.md).
 - Open-source libraries listed in the README.
 
 No earlier IssueLab product code is included. If any module is ever adapted from earlier work, it is listed here with

@@ -1,0 +1,3 @@
+# Preserve generated model bytes, federation coordinates and STEP cache identities.
+samples/*.ifc -text -diff
+samples/*.step -text -diff
