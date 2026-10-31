@@ -1398,3 +1398,8 @@ faithful), Wonder beating Spark on the cell's fence post N3 (#29, a straight 360
 on the tray (#2, a shorter offset), and the HMI stand (#13) ending in No verified fix. The footing × lift pit wall
 (#16), Wonder's Northbank case in the Oct 29 eval, is now fixed by Spark alone (a trim). The decision is in
 [20](20-decisions-limits-and-roadmap.md).
+
+The repo is `IssueLab-Inc/ORCA` (Oct 31; owner decision; `docs/repo-name`): renamed on GitHub so the link on the
+application and the submission says ORCA. Repo only: the code's internal `sightline` names stay
+([21](21-glossary-and-naming.md), "Internal names kept on purpose"). Nothing in the code or docs used the old name;
+README's "Run it" now starts with the clone. Checked: `git fetch` on the new remote, `test_docs_map.py`.

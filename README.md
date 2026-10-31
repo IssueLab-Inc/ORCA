@@ -123,6 +123,11 @@ review conditions, not a claim of engineering adequacy or full IFC conformance. 
 
 Requirements: Python 3.13+, [uv](https://docs.astral.sh/uv/), Node 22+.
 
+```bash
+git clone https://github.com/IssueLab-Inc/ORCA.git
+cd ORCA
+```
+
 The server's Python package is still called `sightline` (ORCA's earlier name), as are its `SIGHTLINE_*` settings.
 
 ```bash
