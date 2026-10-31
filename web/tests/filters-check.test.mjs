@@ -49,8 +49,8 @@ test("a check's test has no id (the server's), the defaults for what is not give
 
 test("a filter colouring by value is a side of what it colours, not of everything it finds", () => {
   assert.deepEqual(checks.sideOf(byWidth).filter, { when: [], invert: false, by: { facet: "pset:Model data/Width", off: [] } });
-  assert.equal(checks.sideCount(p, byWidth), 3, "what has a width: not the room or the wall");
-  assert.equal(checks.sideCount(p, { ...byWidth, by: { ...byWidth.by, off: ["0.4"] } }), 2, "a value ticked off is left out");
+  assert.deepEqual(checks.sideCounts(p, byWidth), { n: 3, rooms: 0 }, "what has a width: not the room or the wall");
+  assert.deepEqual(checks.sideCounts(p, { ...byWidth, by: { ...byWidth.by, off: ["0.4"] } }), { n: 2, rooms: 0 }, "a value ticked off is left out");
   const lastCondition = { ...byWidth, by: undefined, when: [{ facet: "storey", op: "is", values: ["Level 02"] }] };
   assert.deepEqual(checks.sideOf(lastCondition).filter.by, { facet: "storey", off: [] }, "no property picked: its last condition's, as it colours");
 });
@@ -61,17 +61,23 @@ test("Everything is what the full check covers; what the filters show is a side 
   const state = { v: 1, colours: true, greyRest: false, hideRest: true, rules: [ducts, beams, { ...byWidth, on: false }] };
   assert.deepEqual(checks.viewOf(state), { filters: [{ when: [ducts.when[0]], invert: false, action: "colour" }], hide_rest: true, colours: true },
     "the filters that are on, and how they show");
-  assert.deepEqual(checks.shownCount(p, state), { shown: 2, all: 4 }, "the ducts, of all but the room");
-  assert.deepEqual(checks.shownCount(p, { ...state, hideRest: false }), { shown: 4, all: 4 }, "colours alone hide nothing");
+  assert.deepEqual(checks.shownCounts(p, state), { n: 2, rooms: 0, all: 5 }, "the ducts, of all five");
+  assert.deepEqual(checks.shownCounts(p, { ...state, hideRest: false }), { n: 5, rooms: 1, all: 5 }, "colours alone hide nothing: the room shows too");
   const t = checks.checkTest("shown", "itself", "hard", null, defaults, state);
   assert.equal(t.name, "What the filters show (within)"); assert.deepEqual(t.a.view, checks.viewOf(state)); assert.equal(t.b, null);
   assert.equal(checks.checkOf([t]), "What the filters show (within)");
   assert.equal(checks.checkTest(ducts, "shown", "hard", null, defaults, state).name, "Ducts vs What the filters show");
 });
 
-test("a side counts what a check can test (spaces have no body), and a run says it was a check", () => {
-  assert.equal(checks.sideCount(p, ducts), 2);
-  assert.equal(checks.sideCount(p, { ...beams, when: [{ facet: "storey", op: "is", values: ["Level 01"] }] }), 2, "the room is left out");
+test("a side counts as the filter list does, the rooms a check cannot test said apart; a run says it was a check", () => {
+  assert.deepEqual(checks.sideCounts(p, ducts), { n: 2, rooms: 0 });
+  const level1 = { ...beams, when: [{ facet: "storey", op: "is", values: ["Level 01"] }] };
+  assert.deepEqual(checks.sideCounts(p, level1), { n: 3, rooms: 1 }, "counted as the filter list counts it, the room said apart");
+  assert.equal(f.count(p, level1), checks.sideCounts(p, level1).n, "the same number as the list");
+  assert.equal(checks.roomsLine([{ name: "Level 01", rooms: 1 }]), "1 room in Level 01 isn't checked: rooms have no solid body to clash.");
+  assert.equal(checks.roomsLine([{ name: "By Model", rooms: 36 }, { name: "What the filters show", rooms: 36 }]),
+    "36 rooms in By Model and 36 in What the filters show aren't checked: rooms have no solid body to clash.");
+  assert.equal(checks.roomsLine([{ name: "Ducts", rooms: 0 }]), null, "no rooms: no line");
   const t = checks.checkTest(ducts, "everything", "hard", null, defaults);
   assert.equal(checks.checkOf([t]), "Ducts vs Everything");
   assert.equal(checks.checkOf([{ ...t, a: { ...t.a, filter: null } }]), null, "a test of whole models is no check on filters");
@@ -130,6 +136,18 @@ test("The rest: show, grey or hide, one at a time", () => {
   assert.deepEqual([saved[2].greyRest, saved[2].hideRest], [false, false]);
 });
 
+test("Check clashes shows the list's numbers and says which rooms are not checked", () => {
+  const level1 = { id: "l1", name: "Level 01", on: true, when: [{ facet: "storey", op: "is", values: ["Level 01"] }], action: "colour" };
+  const block = find(panel([level1, ducts], { defaults, busy: false, onCheck() {} }), (n) => n.type === "details" && n.props.className === "fcheck");
+  assert.ok(hasText(block, "Level 01 (3)"), "the list's count, the room included");
+  assert.ok(hasText(block, "1 room in Level 01 isn't checked: rooms have no solid body to clash."));
+  const none = find(panel([ducts, level1], { defaults, busy: false, onCheck() {} }), (n) => n.type === "details" && n.props.className === "fcheck");
+  assert.ok(!hasText(none, "isn't checked") && !hasText(none, "aren't checked"), "no rooms on either side: no line");
+  const onlyRooms = { id: "r", name: "Rooms", on: true, when: [{ facet: "class", op: "is", values: ["IfcSpace"] }], action: "colour" };
+  const hit = all(panel([onlyRooms], { defaults, busy: false, onCheck() {} }), (n) => n.type === "button" && n.props["aria-label"] === "What do these hit?")[0];
+  assert.equal(hit.props.disabled, true); assert.match(hit.props["data-tip"], /only rooms/);
+});
+
 test("What do these hit? checks a filter against everything; off while a check runs, or for nothing or everything", () => {
   const ran = [];
   const check = { defaults, busy: false, onCheck: (t) => ran.push(t) };
@@ -157,7 +175,8 @@ test("Check clashes: the first filter against everything until another side is c
   const options = all(sideB, (n) => n.type === "option").map((o) => o.props.value);
   assert.deepEqual(options, ["everything", "itself", "__shown", "b"], "side B: everything, itself, what the filters show or another filter, never the same one");
   const sideA = find(block, (n) => n.type === "select" && n.props["aria-label"] === "Side A");
-  assert.deepEqual(all(sideA, (n) => n.type === "option").map((o) => o.props.children), ["What the filters show (4)", "Ducts (2)", "Beam (1)"]);
+  assert.deepEqual(all(sideA, (n) => n.type === "option").map((o) => o.props.children), ["What the filters show (5)", "Ducts (2)", "Beam (1)"],
+    "the filter list's numbers");
   assert.ok(hasText(block, "The clashes replace the open list; Detect again repeats this check."));
   find(block, (n) => n.type === "button" && hasText(n, "Check")).props.onClick();
   assert.equal(ran[0].name, "Ducts vs Everything");

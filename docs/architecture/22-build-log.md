@@ -1754,3 +1754,13 @@ elements, 633 clashes; code `facets.acted` / `shown`, `detect.Selection.filter.b
 - **Check clashes laid out again** (owner: "the check button placement needs to be better", "no gaps"): the
   tolerance or clearance on its own row, a full-width Check clashes button at the end with why it is off right under
   it, and the block's body spaced in its own box (a `details` element takes no flex gap in Chromium).
+
+Counts match between the filter list and Check clashes (Oct 31; owner: "make the counts match between the list and
+check options"; code `checks.sideCounts` / `shownCounts` / `roomsLine`, `chat.side_count`): the list said By Model
+1,768 (rooms included), the check's choices and chat 1,732 (rooms left out: no solid body to clash). Now every place
+says the list's number, and a line under the choices names the rooms a check cannot test ("36 rooms in By Model aren't
+checked"); chat's side counts carry `rooms_not_checked` (Everything counted the same way) and its reply says them.
+What is checked is unchanged. Checked: `web/tests/filters-check.test.mjs` (12), `tests/test_detect.py` (33); in
+Chromium on Northbank with the owner's filters, the list and the choices both say 844 and 1,768, the rooms line shows
+only for a side with rooms, and chat (Muse Spark, "check By Model against everything") said "1,768 elements on each
+side, but 36 on each side are rooms with no solid to clash, so 1,732 checked".

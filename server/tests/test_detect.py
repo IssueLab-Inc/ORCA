@@ -498,6 +498,23 @@ def test_chat_checks_the_users_colour_by_filter_what_their_filters_show_and_ever
     assert "no filters on" in model.seen[1]["content"]
 
 
+def test_a_side_counts_as_the_filters_list_does_and_names_the_rooms_it_cannot_check():
+    """docs/filters.md, "Checks": the same number as the Filters panel (rooms included), and the rooms said apart."""
+    from sightline.chat import side_count
+    idx = {"elements": ["duct", "room", "wall", "site"], "files": ["M.ifc", "S.ifc"], "file": [0, 0, 0, 1], "facets": [
+        {"key": "class", "kind": "text", "values": ["IfcDuctSegment", "IfcSpace", "IfcWall"], "items": [[0], [1], [2, 3]]},
+        {"key": "file", "kind": "text", "values": ["M.ifc", "S.ifc"], "items": [[0, 1, 2], [3]]}]}
+    drawn = {"duct", "wall", "site"}   # a room has no solid body: never drawn into a check
+    by_file = {"when": [], "invert": False, "by": {"facet": "file", "off": ["S.ifc"]}}
+    assert side_count(idx, drawn, {"filter": by_file}) == {"elements": 3, "rooms": 1, "checked": 2}
+    rooms = {"when": [{"facet": "class", "op": "is", "values": ["IfcSpace"]}], "invert": False}
+    assert side_count(idx, drawn, {"filter": rooms}) == {"elements": 1, "rooms": 1, "checked": 0}
+    view = {"filters": [{**by_file, "action": "byValue"}], "hide_rest": True, "colours": True}
+    assert side_count(idx, drawn, {"view": view}) == {"elements": 3, "rooms": 1, "checked": 2}
+    assert side_count(idx, drawn, {"files": ["M.ifc"]}) == {"elements": 3, "rooms": 1, "checked": 2}, "everything, counted the same way"
+    assert side_count(idx, drawn, None) is None
+
+
 def test_a_check_on_what_the_models_lack_is_refused_before_a_run_is_spent(paths, tmp_path):
     from sightline.chat import Chat, Context
 

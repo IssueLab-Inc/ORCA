@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Check, EyeOff, Focus, LocateFixed, Palette, Plus, Radar, Rows3, Trash2, X } from "lucide-react";
 import type { CheckDefaults, DetectTest } from "./api";
-import { checkTest, shownCount, sideCount, type CheckKind, type Side } from "./checks";
+import { checkTest, roomsLine, shownCounts, sideCounts, type CheckKind, type Side } from "./checks";
 import {
   actedOn, complete, count, describe, ELEMENT, found, nameFor, newId, nextColour, PALETTE, ruleColour, sets, shownValue, valueColours, valueCounts,
   withBy, OTHER,
@@ -127,8 +127,9 @@ const SHOWN = "__shown";
 function cannot(p: Prepared, r: Rule, check: CheckProps): string | null {
   if (!check.defaults) return "Reading the models…";
   if (check.busy) return "Wait for the check that is running";
-  const n = sideCount(p, r);
+  const { n, rooms } = sideCounts(p, r);
   if (!n) return r.action === "byValue" ? "It colours nothing to check" : "It finds nothing to check";
+  if (n === rooms) return "It finds only rooms, which have no solid body to clash";
   if (actedOn(p, r).length >= p.n) return "It finds everything: Check the open models instead";
   return null;
 }
@@ -137,9 +138,9 @@ function cannot(p: Prepared, r: Rule, check: CheckProps): string | null {
 function cannotShown(p: Prepared, state: FilterState, check: CheckProps): string | null {
   if (!check.defaults) return "Reading the models…";
   if (check.busy) return "Wait for the check that is running";
-  const { shown, all } = shownCount(p, state);
-  if (!shown) return "The filters show nothing to check";
-  if (shown >= all) return "The filters hide nothing: Check the open models instead";
+  const { n, rooms, all } = shownCounts(p, state);
+  if (!n || n === rooms) return "The filters show nothing to check";
+  if (n >= all) return "The filters hide nothing: Check the open models instead";
   return null;
 }
 
@@ -168,10 +169,16 @@ function CheckClashes({ p, state, check }: { p: Prepared; state: FilterState; ch
   const typed = mm.trim() === "" || !Number.isFinite(Number(mm)) ? null : Number(mm);
   const why = (a === "shown" ? cannotShown(p, state, check) : cannot(p, a, check))
     ?? (b === "shown" ? cannotShown(p, state, check) : null)
-    ?? (typeof b === "object" && !sideCount(p, b) ? `${b.name || "Side B"} finds nothing to check` : null)
+    ?? (typeof b === "object" && sideCounts(p, b).n === sideCounts(p, b).rooms ? `${b.name || "Side B"} finds nothing to check` : null)
     ?? (kind === "clearance" && typed !== null && typed <= 0 ? "A clearance is more than 0 mm" : null);
-  const label = (r: Rule) => `${r.name || nameFor(r.when.filter(complete))} (${sideCount(p, r)})`;
-  const shownLabel = `What the filters show (${shownCount(p, state).shown})`;
+  // The same numbers as the filter list (rooms included); the rooms a check cannot test are said under the choices.
+  const nameOf = (r: Rule) => r.name || nameFor(r.when.filter(complete));
+  const label = (r: Rule) => `${nameOf(r)} (${count(p, r)})`;
+  const shown = shownCounts(p, state);
+  const shownLabel = `What the filters show (${shown.n})`;
+  const roomsOf = (s: Side) => (s === "shown" ? { name: "What the filters show", rooms: shown.rooms }
+    : typeof s === "object" ? { name: nameOf(s), rooms: sideCounts(p, s).rooms } : { name: "", rooms: 0 });
+  const rooms = roomsLine(b === "shown" || typeof b === "object" ? [roomsOf(a), roomsOf(b)] : [roomsOf(a)]);
   return (
     <details className="fcheck">
       <summary><Radar size={14} aria-hidden /> Check clashes</summary>
@@ -201,6 +208,7 @@ function CheckClashes({ p, state, check }: { p: Prepared; state: FilterState; ch
             onChange={(e) => setMm(e.target.value)} /> mm
         </div>
       </div>
+      {rooms && <p className="fcheck-why">{rooms}</p>}
       <button type="button" className="btn primary fcheck-go" disabled={!!why}
         onClick={() => d && check.onCheck(checkTest(a, b, kind, typed, d, state))}><Radar size={15} aria-hidden /> Check clashes</button>
       {why && <p className="fcheck-why" role="status">{why}</p>}

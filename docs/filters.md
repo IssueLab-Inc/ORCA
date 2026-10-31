@@ -203,7 +203,10 @@ own filters by name; the clashes **replace the open list**, as detection does, t
   (Everything, Itself: those elements against each other, What the filters show, or another filter), hard clashes
   deeper than … mm or elements closer than … mm (on its own row; a full-width **Check clashes** button ends the block, with why it is off under it; blank:
   the defaults, `Workspace.check_defaults`, also `detect_tests`' `check`), with each filter's count, and says "The
-  clashes replace the open list; Detect again repeats this check." A filter that is switched off can still be a side:
+  clashes replace the open list; Detect again repeats this check." The choices carry the filter list's numbers (what
+  each acts on, rooms included); when a side takes rooms, a line under the choices says so ("36 rooms in By Model
+  aren't checked: rooms have no solid body to clash"), as rooms are never part of a clash check (owner request, Oct 31:
+  "make the counts match between the list and check options"). A filter that is switched off can still be a side:
   a check reads its conditions, not what is on screen. What the filters show is off when they show nothing, or hide
   nothing (Check the open models does that).
 - **Afterwards** the run summary says "Only <check>" and offers **Check the open models** (every test again). Detect
@@ -213,7 +216,8 @@ own filters by name; the clashes **replace the open list**, as detection does, t
   as for `set_filters`, one of the user's filters by name, or what their filters show (`{"shown": true}`). The page
   shares its filters (`filters.shareable`: each by its name, with only its complete conditions, what it does and,
   colouring by value, by what) and how they show (`filter_view`: Hide the rest, Show colours) with every chat turn and
-  the agent link's context; the `[context]` line and `get_session` say how many the filters show together. Sides are resolved and counted before a run is spent, so a misspelt filter costs no detection run.
+  the agent link's context; the `[context]` line and `get_session` say how many the filters show together. Each
+  side's count is the list's (`chat.side_count`), with `rooms_not_checked` when it takes rooms. Sides are resolved and counted before a run is spent, so a misspelt filter costs no detection run.
 - **Limits:** a side takes at most 30 conditions of 500 values each; an element whose
   GlobalId two open files share is read from the first file by the index and the last by detection
   ([20](architecture/20-decisions-limits-and-roadmap.md)).

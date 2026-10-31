@@ -228,6 +228,23 @@ def page_view(ctx: Context) -> dict:
             "hide_rest": bool(ctx.filter_view.get("hide_rest")), "colours": ctx.filter_view.get("colours", True) is not False}
 
 
+def side_count(idx: dict, drawn: set[str], side: dict | None) -> dict | None:
+    """What a check's side takes, counted as the page's Filters panel counts it (rooms included, docs/filters.md,
+    "Checks"): `elements`, the `rooms` among them (spaces: no solid body, so never checked) and what is `checked`.
+    Everything counts the models the full check covers the same way. None for itself."""
+    if side is None:
+        return None
+    if side.get("view") or side.get("filter"):
+        got = facets.shown(idx, side["view"]) if side.get("view") else facets.acted(idx, side["filter"])
+    else:   # everything: the models the full check covers
+        files = set(side.get("files") or [])
+        got = {i for i in range(len(idx["elements"])) if not files or idx["files"][idx["file"][i]] in files}
+    cls = facets.facet(idx, "class")
+    rooms = set(cls["items"][cls["values"].index("IfcSpace")]) if cls and "IfcSpace" in cls["values"] else set()
+    checked = len({idx["elements"][i] for i in got} & drawn)
+    return {"elements": len(got), "rooms": len(got & rooms), "checked": checked}
+
+
 def _page_filter(f: dict) -> dict:
     """One of the page's filters as a check's side takes it: what it finds, and for one colouring by value, only what
     it colours (detect.Selection.filter)."""
@@ -396,24 +413,11 @@ class Chat:
         a, a_name = self._side(idx, ctx, args.get("a"), False, d["everything"])
         b, b_name = self._side(idx, ctx, args.get("b"), True, d["everything"])
         drawn = set(ws.scene(sid).bounds())
-        file_of = {g: idx["files"][idx["file"][i]] for i, g in enumerate(idx["elements"])}
-
-        def count(side):
-            if side is None:
-                return None
-            if side.get("view"):
-                got = facets.shown(idx, side["view"])
-            elif side.get("filter"):
-                got = facets.acted(idx, side["filter"])
-            else:   # everything: the models the full check covers
-                files = set(side.get("files") or [])
-                return len({g for g in drawn if not files or file_of.get(g) in files})
-            return len({idx["elements"][i] for i in got} & drawn)
-        n_a, n_b = count(a), count(b)
-        if not n_a:
-            raise facets.Unresolved(f"Side A ({a_name}) finds no element the check can test.")
-        if n_b == 0:
-            raise facets.Unresolved(f"Side B ({b_name}) finds no element the check can test.")
+        c_a, c_b = side_count(idx, drawn, a), side_count(idx, drawn, b)
+        for side, c, side_name in (("A", c_a, a_name), ("B", c_b, b_name)):
+            if c is not None and not c["checked"]:
+                raise facets.Unresolved(f"Side {side} ({side_name}) finds no element the check can test"
+                                        + (": only rooms, which have no solid body to clash." if c["elements"] else "."))
         kind = str(args.get("kind") or "hard")
         if kind not in ("hard", "clearance", "duplicate"):
             raise facets.Unresolved(f"Unknown kind {kind!r}: hard, clearance or duplicate.")
@@ -428,7 +432,9 @@ class Chat:
                 "min_size_m": d["min_size_m"],
                 "tolerance_m": d["tolerance_m"] if args.get("tolerance_mm") is None else max(0.0, float(args["tolerance_mm"])) / 1000,
                 "clearance_m": d["clearance_m"] if args.get("clearance_mm") is None else max(0.0, float(args["clearance_mm"])) / 1000}
-        return test, {"a": {"name": a_name, "elements": n_a}, "b": {"name": b_name, "elements": n_b}}
+        told = lambda name, c: None if c is None else {"name": name, "elements": c["elements"],
+                                                       **({"rooms_not_checked": c["rooms"]} if c["rooms"] else {})}
+        return test, {"a": told(a_name, c_a), "b": {"name": b_name, "elements": None} if c_b is None else told(b_name, c_b)}
 
     def _context_line(self, ctx: Context) -> str:
         parts = ["[context]"]
@@ -453,12 +459,12 @@ class Chat:
         return "; ".join(parts)
 
     def _shown_count(self, ctx: Context) -> tuple[int, int] | None:
-        """How many elements the user's filters show together, of all drawn, or None without models or filters on."""
+        """How many elements the user's filters show together, of all there are, rooms included as the page counts
+        them, or None without models or filters on."""
         if ctx.scene_id not in self.ws.scenes or not any(f.get("on", True) for f in ctx.filters):
             return None
         idx = self.ws.facets(ctx.scene_id)
-        drawn = set(self.ws.scene(ctx.scene_id).bounds())
-        return len({idx["elements"][i] for i in facets.shown(idx, page_view(ctx))} & drawn), len(drawn)
+        return len(facets.shown(idx, page_view(ctx))), len(idx["elements"])
 
     def _trim(self, session: Session) -> None:
         # Keep the system prompt; drop the oldest turns, never splitting a tool call from its results.
@@ -550,6 +556,11 @@ class Chat:
                 summary["check"] = {**check, "name": out["tests"][0]["name"]}
                 summary["note"] = ("The check's clashes are now the open clash report; the full check comes back with "
                                    "detect_clashes and no sides.")
+                rooms = [f"{c['rooms_not_checked']} in {c['name']}" for c in (check["a"], check["b"])
+                         if c and c.get("rooms_not_checked")]
+                if rooms:   # counted as the user's Filters panel counts them, but never part of a clash check
+                    summary["note"] += (f" Rooms are counted in elements, as the user's Filters panel counts them, but are "
+                                        f"never checked (no solid body to clash): {' and '.join(rooms)}. Say so with the counts.")
             return summary, f"{n} clashes found by ORCA in {out['seconds']} s", []
         if name == "report_summary":
             r, matches = self._report(ctx), self._matches(ctx)
