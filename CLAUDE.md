@@ -200,7 +200,7 @@ breadcrumbs to its storey, building, site and project, icon buttons, and a filte
 (colour, colour by value, hide, isolate, in every view, from the panel, chat, voice or MCP: `docs/filters.md`) and
 clash checks on them (a filter against everything, itself or another filter, from the panel, chat or MCP),
 Workings (the Activity panel draws each run as it happens: `docs/workings.md`). Latest
-validation (Oct 31): 674 server tests, 183 web tests (with the filters and checks on them); answer key 3/3 first try at Rev04 heights and
+validation (Oct 31): 674 server tests, 187 web tests (with the filters and checks on them); answer key 3/3 first try at Rev04 heights and
 `evals/step_cell.py` passing (C1, C2, C3, C6, C7, C8, Rev B 0) with requirements off (with Northbank's own on: Oct
 30), both last run before the filters, which changed nothing in the fix path. How each part works now: `docs/architecture/`. What was built when, with the numbers measured at the time:
 `docs/architecture/22-build-log.md`.

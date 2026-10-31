@@ -171,7 +171,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 cd web
 npm install            # once; postinstall copies web-ifc's wasm into public/wasm
 npm run build          # tsc --noEmit (type-check src/ and vite.config.ts), then vite build
-npm test               # node --test tests/*.test.mjs (183 tests on Oct 31)
+npm test               # node --test tests/*.test.mjs (187 tests on Oct 31)
 ```
 
 There is no test framework beyond Node's own runner: the tests use `node:test` and `node:assert`, and the
@@ -245,8 +245,9 @@ flowchart LR
 | `measure.test.mjs` | 6 | `compiled` (real three.js) | `viewer/measure.ts`: a box cut by a plane gives its sides joined into runs, corners once each; collinear runs with a gap stay apart; clipping to a view's planes; the snap order (end, midpoint, edge) and tolerances; the edge point in perspective from the pointer's ray; the words and the line to copy |
 | `drawing.test.mjs` | 4 | `compiled` (real three.js) | `viewer/drawing.ts`: what a plan, a section (far clip, crop, flip) and an elevation keep; the section's far clip from the pair; framing, panning and zooming about the pointer |
 | `links.test.mjs` | 4 | `compiled` | `links.ts`: direct links by kind (rests on read the other way as supports), an element lit once in its first kind, Shift walking the run to equipment, a whole assembly |
-| `viewer-orbit.test.mjs` | 2 | `compiled` | `Viewer.orbitAround`: orbiting round a pivot (the selection, the clash) keeps it at the same place on screen and as far away, with no roll; a sideways drag keeps the camera's height; a long drag down stops short of straight down |
+| `viewer-orbit.test.mjs` | 4 | `compiled` | `Viewer.orbitAround`: orbiting round a pivot (the selection, the clash) keeps it at the same place on screen and as far away, with no roll; a sideways drag keeps the camera's height; a long drag down stops short of straight down. `Viewer.press`: with a clash in focus and nothing selected the drag orbits round the clash, a flight under way stops; with none, it turns about what is under the pointer |
 | `viewer-empty-stage.test.mjs` | 2 | `compiled` | `Viewer.drawFrame` in the four-view layout: with nothing open, one empty 3D view over the whole stage and the layout kept; with models, each view in its own pane |
+| `corner.test.mjs` | 2 | `appHost` | The model's top right corner: a kept fix counts on Export (its name says how many were kept) and no "fixed" chip stands beside the notch; the owner's settings go on their button's tip, not in a chip |
 | `viewer-links.test.mjs` | 1 | `compiled` | The connection highlight never shows in a captured picture and is back on screen afterwards |
 | `filters-check.test.mjs` | 9 | `compiled` (React stubbed) + `appHost` | Checks on filters: `checks.ts` (sides, names, the test with no id and the defaults, what a side can test, whether a run was a check), `filters.shareable`; What do these hit? and Check clashes in `FiltersPanel`, and The rest (show, grey or hide, one at a time); App runs a check, Detect again repeats it, Check the open models sends every test; chat's context carries the filters, and Detect again repeats a check chat ran |
 | `filters-chat.test.mjs` | 2 | `appHost` | Chat's filters replace its own, pause the user's that were on, and give them back when it clears; chat's `hide_rest` and `grey_rest` are one or the other |

@@ -1681,6 +1681,47 @@ in chat and MCP; [docs/filters.md](../../docs/filters.md)):
   ducts on level 2 in blue and hide everything else." → `set_filters` with `hide_rest` (a first "Level 2" refused with
   the closest name, then "Level 02"): 68 ducts and fittings in blue, everything else hidden, the user's filter paused.
 
+Windows setup fixes and updating a local checkout (Oct 31; owner setup feedback):
+- **What changed:** README Windows prerequisites now give the WinGet commands for uv and Node.js/npm, require a
+  fresh terminal for PATH, and use `npm.cmd` explicitly to avoid PowerShell's blocked `npm.ps1` wrapper. Root versus
+  web-directory commands are distinguished; macOS/Linux use `npm`. The owner confirmed Windows startup after these
+  fixes, without implying a complete browser/AI/PDF check.
+- **Updates:** README and map doc 17 document exporting in-memory edits, stopping both servers, preserving local
+  changes, fast-forwarding clean main, syncing locked dependencies and restarting. `git fetch` checks upstream
+  without changing the running checkout; Python auto-reload discards the in-memory workspace. No app source or
+  running servers were changed for this documentation work.
+- **Checked:** `server/.venv/Scripts/python.exe -m pytest -q tests/test_docs_map.py` passes all nine checks, using
+  an explicit ignored venv temp directory and disabling pytest's cache to avoid sandbox temp-folder restrictions.
+  Updated local Markdown links, README anchors and `git diff --check` pass. No application behavior changed.
+
+Orbit round the clash in focus (Oct 31; owner report; code `web/src/viewer/Viewer.ts`, `App.tsx`):
+- **What happened:** with a clash in focus and nothing selected, a drag in the 3D view turned about the point under
+  the pointer; only while ORCA worked on the clash did it turn round the clash. And while ORCA worked, a press during
+  one of the pilot's camera flights (each idea framed, the glide to the clash before its slow turn) skipped the pivot,
+  so the drag turned round wherever the flight was going.
+- **What changed:** the clash in focus (its chip shows) is the pivot too, as well as the one ORCA works on
+  (`setOrbitClash`); a press stops a flight under way, then orbits round the pivot. The selected element still comes
+  first; no clash in focus: the point under the pointer, as before.
+- **Checked:** `web/tests/viewer-orbit.test.mjs` (4; the mid-flight one fails on the old code); in Chromium on
+  Northbank with #1 in focus, a 220 px drag starting off the clash kept its marker within 3 px (the old code moved it
+  370 px), and during a proposal (stream held open, no model call) a drag kept it within 3 px; web tests and build.
+
+The corner keeps clear of the notch (Oct 31; owner report; code `web/src/App.tsx`, `web/src/index.css`,
+`web/src/ui.tsx`, `web/src/Owner.tsx`):
+- **What happened:** the model's top right corner ran under the ORCA wordmark at the top of the model: with a fix kept
+  and the owner's settings on ("1 fixed" and "owner · effort default · no caps" chips), it reached 62 px into the
+  notch at 1600×1000 and 179–222 px at 1366 and 1280; the working notch (fixed at `100cqw − 420px`) overlapped it even
+  at 1920.
+- **What changed:** the count of fixes kept moves onto Export (✓n; its tip and name say "n fixes kept"); the owner's
+  settings move onto their button, marked while on, with what is set in its tip (`Popover` `note`). The corner never
+  reaches past half the model less the wordmark's half (it wraps first); under a 1180 px model the requirements and
+  agent pills keep their icons only, and under 640 px (760 beside them) Export too; the working notch narrows to the
+  room the corner leaves (App measures it into `--corner-w`).
+- **Checked:** `web/tests/corner.test.mjs` (2; both fail on the old code); in Chromium as the owner with a fix kept, at
+  1280×800, 1366×768, 1600×1000 and 1920×1080, idle and while ORCA checks the models: the corner clears the wordmark
+  by 34–311 px and the working notch by 12–179 px, on one row. With requirements and an agent as well it still clears
+  both; at 1280 and 1366 that crowded corner wraps to a second row rather than reaching the notch. Web tests and build.
+
 Chat turns in Workings (Oct 31; owner request: "filter by distribution systems" worked in the chat but showed nothing
 in Workings; `web/src/workingsGraph.ts`, `App.tsx`, `Chat.tsx`, `runlog.ts`, `api.ts`):
 - **What:** each Chat panel turn, typed or spoken, is a run ("Chat: <question>"): what was asked, each call to the
@@ -1688,7 +1729,7 @@ in Workings; `web/src/workingsGraph.ts`, `App.tsx`, `Chat.tsx`, `runlog.ts`, `ap
   its own run (proposals, plans, checks, Show it built) say so. Agents over MCP are not drawn yet.
 - **How:** `Chat.tsx` sends the page an `asked` event before each request; `traceChat` (App) logs the turn as run kind
   `chat`; a new builder `chat` in `workingsGraph.ts`.
-- **Checked:** 183 web tests (one new in `workings.test.mjs`; `async-ownership.test.mjs` now expects the `asked` note);
+- **Checked:** 187 web tests after merging main (one new in `workings.test.mjs`; `async-ownership.test.mjs` now expects the `asked` note);
   build clean. In Chromium on Northbank against a local server: "filter by distribution systems" drew You asked →
   Reads the question → Set filters (colour by System, the rest greyed, 844 elements) → Reads what the tools said →
   Answers, in about 8 s. No page errors.
