@@ -1680,3 +1680,16 @@ in chat and MCP; [docs/filters.md](../../docs/filters.md)):
   system colours, framed; Grey → the rest back in grey; Show → as before. Chat on Muse Spark: "Show only the supply air
   ducts on level 2 in blue and hide everything else." → `set_filters` with `hide_rest` (a first "Level 2" refused with
   the closest name, then "Level 02"): 68 ducts and fittings in blue, everything else hidden, the user's filter paused.
+
+Windows setup fixes and updating a local checkout (Oct 31; owner setup feedback):
+- **What changed:** README Windows prerequisites now give the WinGet commands for uv and Node.js/npm, require a
+  fresh terminal for PATH, and use `npm.cmd` explicitly to avoid PowerShell's blocked `npm.ps1` wrapper. Root versus
+  web-directory commands are distinguished; macOS/Linux use `npm`. The owner confirmed Windows startup after these
+  fixes, without implying a complete browser/AI/PDF check.
+- **Updates:** README and map doc 17 document exporting in-memory edits, stopping both servers, preserving local
+  changes, fast-forwarding clean main, syncing locked dependencies and restarting. `git fetch` checks upstream
+  without changing the running checkout; Python auto-reload discards the in-memory workspace. No app source or
+  running servers were changed for this documentation work.
+- **Checked:** `server/.venv/Scripts/python.exe -m pytest -q tests/test_docs_map.py` passes all nine checks, using
+  an explicit ignored venv temp directory and disabling pytest's cache to avoid sandbox temp-folder restrictions.
+  Updated local Markdown links, README anchors and `git diff --check` pass. No application behavior changed.
