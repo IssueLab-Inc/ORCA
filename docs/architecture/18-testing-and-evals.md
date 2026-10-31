@@ -244,6 +244,7 @@ flowchart LR
 | `drawing.test.mjs` | 4 | `compiled` (real three.js) | `viewer/drawing.ts`: what a plan, a section (far clip, crop, flip) and an elevation keep; the section's far clip from the pair; framing, panning and zooming about the pointer |
 | `links.test.mjs` | 4 | `compiled` | `links.ts`: direct links by kind (rests on read the other way as supports), an element lit once in its first kind, Shift walking the run to equipment, a whole assembly |
 | `viewer-orbit.test.mjs` | 2 | `compiled` | `Viewer.orbitAround`: orbiting round a pivot (the selection, the clash) keeps it at the same place on screen and as far away, with no roll; a sideways drag keeps the camera's height; a long drag down stops short of straight down |
+| `viewer-empty-stage.test.mjs` | 2 | `compiled` | `Viewer.drawFrame` in the four-view layout: with nothing open, one empty 3D view over the whole stage and the layout kept; with models, each view in its own pane |
 | `viewer-links.test.mjs` | 1 | `compiled` | The connection highlight never shows in a captured picture and is back on screen afterwards |
 | `tour.test.mjs` | 5 | `compiled` (React and icons stubbed) | `Tour.tsx`: the cell tour's numbers, the ladder's copy per option kind, accepting without a reload, the recorded-run offer when a live proposal fails or finds nothing, a failed plan moving on |
 

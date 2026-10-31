@@ -2469,13 +2469,16 @@ export class Viewer {
     }
     for (const g of this.grips.children) g.scale.setScalar(Math.max(perPx(g.position) * 6, 1e-5));
     const r = this.renderer;
-    if (this.visiblePanes().length === 1 && this.visiblePanes()[0].spec.kind === "3d") {
+    // Nothing open (the start page, models loading): one empty stage, not the layout's panes as patches of sky and
+    // paper behind the load card. The layout stays chosen; its panes come back with the models.
+    const panes = this.visiblePanes();
+    if (!this.models.length || (panes.length === 1 && panes[0].spec.kind === "3d")) {
       r.setScissorTest(false);
       r.setViewport(0, 0, W, H);
       this.render3d(cam, { x: 0, y: 0, w: W, h: H });
     } else {
       r.setScissorTest(true);
-      for (const pane of this.visiblePanes()) {
+      for (const pane of panes) {
         const g = { x: pane.rect.x, y: H - pane.rect.y - pane.rect.h, w: pane.rect.w, h: pane.rect.h };
         r.setViewport(g.x, g.y, g.w, g.h);
         r.setScissor(g.x, g.y, g.w, g.h);
