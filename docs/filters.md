@@ -44,9 +44,9 @@ element is: `GET /api/scenes/{id}/facets` (`facets.py`, `Workspace.facets`).
   facets: [{key, kind: text|number|bool, unit?, values: [v], items: [[element index]]}]}`; values sorted, numbers
   first.
 - **Kept** on the scene (`IfcScene._facets`, `facets.cached` / `keep`) until a kept edit changes its revision or its
-  elements; the page reads it again after a kept fix (`infoRev`). **Built outside `Workspace.lock`** (it only reads, as
-  the requirements' inventory does), so a big model's first build stalls no one, and kept only if no edit landed
-  meanwhile (review, Oct 31). An object IfcOpenShell cannot read is skipped and logged, not the whole index. If the
+  elements; the page reads it again after a kept fix (`infoRev`). **Read and built outside `Workspace.lock`** (it only
+  reads, as the requirements' inventory does), so it never waits for the opening check and a big model's first build
+  stalls no one, and kept only if no edit landed meanwhile (review, Oct 31). An object IfcOpenShell cannot read is skipped and logged, not the whole index. If the
   request fails, the panel says so with **Try again**.
 - **Values keep their type:** yes/no is not merged with 1/0 (Python hashes `True` like `1`).
 - **Measured** (Oct 31, Northbank Structure + MEP + Architecture + Site): 1,997 elements (36 of them spaces), 46

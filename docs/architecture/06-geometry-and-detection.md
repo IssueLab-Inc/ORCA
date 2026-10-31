@@ -408,7 +408,8 @@ checked, seconds, the offset and the `state` the next run compares against.
 - `_diff`: each clash is `new` or `active`. A clash that has gone is **resolved** only when its test still ran
   complete (not partial) and both elements were still in its selections; otherwise it is **no longer checked**,
   which is not the same thing. The first run is all new. A run that shares no test with the last one (a check on
-  filters after the full check, or back) reports nothing resolved or no longer checked.
+  filters after the full check, or back) reports nothing resolved or no longer checked, and only clashes with no
+  number yet (`state.numbers`) as new.
 - A clash the last run found under another test (same pair, same kind) takes that clash's id, so its #N, title,
   views, sign-offs and marks follow it between the full check and a check on filters (`state.clashes[...].kind`).
 - `Workspace._carry` copies each surviving clash's title and captured views (A/B/C) from the last run's report into

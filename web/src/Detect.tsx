@@ -118,7 +118,7 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
       {progress ? <ProgressRows progress={progress} /> : !compact && <>
         <p className="detect-count"><b>{clashes.toLocaleString()}</b> clash{clashes === 1 ? "" : "es"} in
           {" "}{detection.elements.toLocaleString()} elements</p>
-        {check && <p className="detect-check">Only <b>{check}</b>
+        {check && <p className="detect-check"><span>Only <b>{check}</b></span>
           {onWhole && <button type="button" className="btn small ghost" disabled={disabled} onClick={onWhole}>
             <Radar size={14} aria-hidden /> Check the open models</button>}</p>}
         <ReqLine requirements={ran} name={detection.requirements?.name} onRequirements={onRequirements} />

@@ -152,7 +152,8 @@ A run is a clash report like an imported one, so every existing feature works on
   and a clash that has gone is listed as **resolved** only if both elements were still checked against each other in
   a complete test. If one left the selection (deleted, or the test changed) it is **no longer checked**, which is not
   the same as resolved. **Only like with like:** when the run shares no test with the last one (the full check after a
-  check on filters, or the other way round), it says what is new but nothing about resolved or no longer checked.
+  check on filters, or the other way round), it says nothing about resolved or no longer checked, and a clash is new
+  only if these models never gave it a number (going back to the full check brings its clashes back, not anew).
 - **Title.** A run of one check on filters is titled with it: "Coordination · DuctSegment vs Everything".
 - **Coverage.** Per test it reports:
   - elements on each side;

@@ -1635,3 +1635,13 @@ Checks on filters, on the page (Oct 31; same request and decisions; code `web/sr
   open list; the summary says "Only <check>" with Check the open models; Detect again repeats the check, also one chat
   or an agent ran (the run returns its tests). The page shares its filters by name with chat turns and the agent link.
 - **Checked:** `web/tests/filters-check.test.mjs` (8); web build and 179 web tests; `tests/test_docs_map.py`.
+- **Checked in Chromium on Northbank** (local server, Oct 31): a filter "Supply air ducts on Level 02" → What do these
+  hit? → 5.3 s, one clash, the supply air main × the transfer girder under the same id and #1 as in the full check,
+  titled "Coordination · Supply air ducts on Level 02 vs Everything", no diff noise; Detect again repeated it; Check
+  the open models brought back 464; the ducts vs a Structure filter from Check clashes found the same one clash.
+  Found there and fixed: going back to the full check called its 463 other clashes new; a run that shares no test
+  with the last now calls new only a clash with no number yet (`tests/test_detect.py`).
+- **The filters' index no longer waits for the opening check:** `Workspace.facets` reads its cache outside the lock too
+  (it only reads, as the requirements' inventory does). Measured on Northbank: built alone 0.9 s, during the opening
+  check 2.9 s (sharing the CPU, not waiting for it); in the browser about 7 s after the page asks, while the check,
+  four model downloads and the other first requests run.

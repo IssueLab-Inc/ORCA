@@ -194,6 +194,8 @@ def test_a_clash_keeps_its_id_and_number_across_the_full_check_and_a_check_on_fi
     assert check["tests"][0]["id"].startswith("filter:") and ws.detections[sid]["tests"] == check["tests"]
     back = ws.detect(sid)
     assert pair(back)["id"] == pair(full)["id"] and back["diff"]["no_longer_checked"] == []
+    assert back["diff"]["new"] == [], "the full check's clashes come back, not anew"
+    assert {c["status"] for c in back["report"]["clashes"]} == {"active"}
     # Detect again on the same check still says what was fixed.
     ws.detect(sid, check["tests"])
     scene = ws.scene(sid)

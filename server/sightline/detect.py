@@ -701,10 +701,12 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
             numbers[c.id], following = following, following + 1
         c.number = numbers[c.id]
     # Only like with like: a run whose tests share none with the last run's (the full check after a check on filters,
-    # or the other way round) says what is new, but nothing about what was resolved or no longer checked.
+    # or the other way round) says nothing about what was resolved or no longer checked, and calls new only a clash
+    # these models never had a number for (the full check's clashes come back from a check on filters, not anew).
     diff = _diff(previous, clashes, selections)
     if previous and not set(selections) & set(previous.get("selections", {})):
-        diff = {**diff, "resolved": [], "no_longer_checked": []}
+        fresh = sorted({c.id for c in clashes} - set(previous.get("numbers", {})))
+        diff = {**diff, "new": fresh, "new_ids": set(fresh), "resolved": [], "no_longer_checked": []}
     for c in clashes:
         if c.id not in diff["new_ids"]:
             c.status = "active"

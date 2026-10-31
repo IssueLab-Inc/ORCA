@@ -251,12 +251,12 @@ class Workspace:
 
     def facets(self, scene_id: str) -> dict:
         """The filters' index (facets.py): every value a filter can match, with the elements that have it. Kept on the
-        scene until a kept edit changes it. Built outside the lock (it only reads, as the requirements' inventory
-        does), so a big model's first build stalls no one; kept only if no edit landed meanwhile."""
+        scene until a kept edit changes it. Read and built outside the lock (it only reads, as the requirements'
+        inventory does), so it never waits for the opening check and a big model's first build stalls no one; kept
+        only if no edit landed meanwhile."""
         s = self.scene(scene_id)
-        with self.lock:
-            ready = facets.cached(s)
-            at = facets.version(s)
+        at = facets.version(s)
+        ready = facets.cached(s)
         if ready is not None:
             return ready
         built = facets.build(s)
