@@ -45,7 +45,7 @@ import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type 
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { FiltersPanel, blankRule } from "./FiltersPanel";
 import { ElementCard, type CardActions } from "./ElementCard";
-import { EMPTY as NO_FILTERS, applied, complete, evaluate, legend, matching, migrate, prepare, zoomTarget, type FacetIndex, type FilterState, type Rule } from "./filters";
+import { EMPTY as NO_FILTERS, applied, complete, evaluate, legend, matching, migrate, prepare, withBy, zoomTarget, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type { Peek } from "./workingsGraph";
@@ -139,6 +139,8 @@ export function App() {
   const [filterState, setFilterState] = useState<FilterState>(NO_FILTERS);
   const [filterDraft, setFilterDraft] = useState<Rule | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);   // the Filters sheet, where there is no dock
+  const [facetsError, setFacetsError] = useState<string | null>(null);
+  const [facetsTry, setFacetsTry] = useState(0);            // Try again, after the index failed to arrive
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [viewsTick, setViewsTick] = useState(0);
   const [infoRev, setInfoRev] = useState(0);
@@ -465,12 +467,14 @@ export function App() {
   // The filters, with the one being edited shown live (in its place, or on top while new), drawn in every view.
   const prepared = useMemo(() => (facetIndex ? prepare(facetIndex) : null), [facetIndex]);
   const facetKeys = useMemo(() => new Set(prepared?.byKey.keys() ?? []), [prepared]);
+  // The filter being edited counts by what it does, not its name: typing a name redraws nothing.
+  const draftKey = filterDraft ? JSON.stringify({ ...filterDraft, name: "" }) : "";
   const ruleView = useMemo(() => {
-    const d = filterDraft, shown = d && (d.when.some(complete) || d.invert || d.action === "byValue") ? { ...d, on: true } : null;
+    const d = filterDraft, shown = d && (d.when.some(complete) || d.invert || d.action === "byValue") ? { ...withBy(d), on: true } : null;
     const rules = !d ? filterState.rules : filterState.rules.some((r) => r.id === d.id)
       ? filterState.rules.map((r) => (r.id === d.id ? shown ?? { ...r, on: false } : r)) : shown ? [shown, ...filterState.rules] : filterState.rules;
     return evaluate({ ...filterState, rules }, prepared);
-  }, [filterState, filterDraft, prepared]);
+  }, [filterState, draftKey, prepared]);  // eslint-disable-line react-hooks/exhaustive-deps
   // Applying a filter (the panel, Colour by…, a value's row, chat or an agent) frames what it acts on in every view,
   // once the viewer shows it (docs/filters.md, "Zoom"). Filters read back with a project or a saved view do not.
   const lastFilters = useRef<FilterState>(NO_FILTERS);
@@ -540,9 +544,17 @@ export function App() {
       viewer.current?.setDatums(datums);
       viewsChanged();
     }).catch(() => undefined);
-    void api.facets(sceneId).then((index) => { if (live) setFacetIndex(index); }).catch(() => undefined);
     return () => { live = false; };
   }, [sceneId, infoRev]);
+  // The filters' index, read again after a kept fix; a failure says so in the panel, with Try again.
+  useEffect(() => {
+    if (!sceneId) return;
+    let live = true;
+    setFacetsError(null);
+    void api.facets(sceneId).then((index) => { if (live) setFacetIndex(index); })
+      .catch((e: unknown) => { if (live) setFacetsError(e instanceof Error ? e.message : "The server did not answer."); });
+    return () => { live = false; };
+  }, [sceneId, infoRev, facetsTry]);
   useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
   // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
   useEffect(() => {
@@ -2889,6 +2901,13 @@ export function App() {
     if (!prepared) return [];
     return [...matching(prepared, { facet, op: "is", values: [value] })].map((i) => prepared.index.elements[i]);
   };
+  /** Isolate these for now and take every view to them; an empty list does nothing (isolating nothing would blank the
+   * model). */
+  const isolateNow = (ids: string[]) => {
+    if (!ids.length) return;
+    setTemporary({ hidden: [], isolated: ids });
+    viewer.current?.frameEverywhere(ids);
+  };
   const cardActions = (gid: string): CardActions => {
     const cls = String(selected?.info?.ifc_class ?? elementProps?.data?.ifc_class ?? "");
     return {
@@ -2908,12 +2927,15 @@ export function App() {
       onIsolate: () => setTemporary({ hidden: [], isolated: [gid] }),
       onSection: () => sectionRound(gid),
       onHideClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); },
-      onIsolateClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setTemporary({ hidden: [], isolated: ids }); viewer.current?.frameEverywhere(ids); },
+      onIsolateClass: () => isolateNow(viewer.current?.ofClass(cls) ?? []),
       onFilterClass: () => openFilters(blankRule([{ facet: "class", op: "is", values: [cls] }], "isolate")),
       onLevel: (name, how) => {
         if (how === "filter") { openFilters(blankRule([{ facet: "storey", op: "is", values: [name] }], "isolate")); return; }
-        const ids = idsWith("storey", name);
-        if (how === "isolate") { setTemporary({ hidden: [], isolated: ids }); viewer.current?.frameEverywhere(ids); }
+        // The viewer's own storeys (the datums), so this works before the filters' index arrives; nothing found, nothing done.
+        const level = viewer.current?.ofLevel(name) ?? [];
+        const ids = level.length ? level : idsWith("storey", name);
+        if (!ids.length) return;
+        if (how === "isolate") isolateNow(ids);
         else { setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
       },
       load: (ref) => (sceneId && ref.global_id ? api.properties(sceneId, ref.global_id, ref.file) : Promise.reject(new Error("No scene"))),
@@ -2924,7 +2946,7 @@ export function App() {
           setFilterState((st) => ({ ...st, colours: true, rules: [{ ...blankRule([], "byValue"), by: { facet: row.facet! }, name: `By ${row.name}` }, ...st.rules] }));
           openFilters();
         },
-        onIsolate: (row) => { const ids = idsWith(row.facet!, row.raw!); setTemporary({ hidden: [], isolated: ids }); viewer.current?.frameEverywhere(ids); },
+        onIsolate: (row) => isolateNow(idsWith(row.facet!, row.raw!)),
       } : undefined,
     };
   };
@@ -3018,7 +3040,7 @@ export function App() {
           <div className="filters-sheet" role="dialog" aria-label="Filters" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             <div className="filters-sheet-head"><b>Filters</b>
               <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
-            <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
+            <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex && !facetsError} error={facetIndex ? null : facetsError} onRetry={() => setFacetsTry((n) => n + 1)} state={filterState} onState={setFilterState}
               draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }}
             drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
           </div>)}
@@ -3331,7 +3353,7 @@ export function App() {
           )}
         </div>)}
       {docked && inSlot(slots.filters, <div className="filters-slot">
-        <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
+        <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex && !facetsError} error={facetIndex ? null : facetsError} onRetry={() => setFacetsTry((n) => n + 1)} state={filterState} onState={setFilterState}
           draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }}
           drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}

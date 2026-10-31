@@ -24,7 +24,7 @@ import ifcopenshell.util.classification
 import ifcopenshell.util.element
 import ifcopenshell.util.unit
 
-from . import demos
+from . import datums, demos
 from .scene import IfcScene
 
 # The demo models carry their own notes in a property set named for the tool that generated them. The page shows the
@@ -80,7 +80,9 @@ def value(v):
 
 
 def named(e) -> str:
-    """What to call an entity: its name, else its long name, else its class."""
+    """What to call an entity: its name, else its long name, else its class (a storey as the level filter names it)."""
+    if e.is_entity() and e.is_a("IfcBuildingStorey"):
+        return datums.storey_name(e)
     for attr in ("Name", "LongName"):
         n = getattr(e, attr, None) if e.is_entity() else None
         if isinstance(n, str) and n:
@@ -267,7 +269,11 @@ class Reader:
             symbol, power = SI[unit_type]
             u = own if own is not None else self.project_unit(unit_type)
             if u is not None:
-                scale = ifcopenshell.util.unit.get_unit_scale(u) / (1000.0 if unit_type == "MASSUNIT" else 1.0)
+                try:
+                    scale = ifcopenshell.util.unit.get_unit_scale(u)
+                except Exception:
+                    scale = 1.0
+                scale /= 1000.0 if unit_type == "MASSUNIT" else 1.0
             else:
                 scale = self.length ** power if power else 1.0
             row["value"], row["unit"] = value(float(raw) * scale), symbol

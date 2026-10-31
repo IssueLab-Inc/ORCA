@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Check, EyeOff, Focus, LocateFixed, Palette, Plus, Rows3, Trash2, X } from "lucide-react";
 import {
-  actedOn, complete, count, describe, ELEMENT, found, nameFor, newId, nextColour, PALETTE, ruleColour, sets, shownValue, valueColour, valueCounts,
+  actedOn, complete, count, describe, ELEMENT, found, nameFor, newId, nextColour, PALETTE, ruleColour, sets, shownValue, valueColours, valueCounts,
+  withBy, OTHER,
   type Action, type Condition, type FilterState, type Op, type Prepared, type Rule, type Value,
 } from "./filters";
 
@@ -38,13 +39,18 @@ export interface FiltersPanelProps {
   drawingsWhole?: boolean; onDrawingsWhole?: (whole: boolean) => void;
   /** Frame these elements in the views. */
   onZoom?: (ids: string[]) => void;
+  /** Why the index did not arrive, and asking for it again. */
+  error?: string | null; onRetry?: () => void;
 }
 
 /** A blank filter for the editor. */
 export const blankRule = (when: Condition[] = [], action: Action = "colour"): Rule =>
   ({ id: newId(), name: "", on: true, when, action });
 
-export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft, drawingsWhole, onDrawingsWhole, onZoom }: FiltersPanelProps) {
+export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft, drawingsWhole, onDrawingsWhole, onZoom, error, onRetry }: FiltersPanelProps) {
+  if (!p && error) return (
+    <div className="fpanel"><p className="hint">Could not read what the models say: {error}</p>
+      {onRetry && <button type="button" className="btn small" onClick={onRetry}>Try again</button>}</div>);
   if (!p) return <div className="fpanel"><p className="hint">{loading ? "Reading what the models say…" : "Open models to filter them."}</p></div>;
   if (draft) return <div className="fpanel"><Editor p={p} draft={draft} onDraft={onDraft} state={state} onState={onState} /></div>;
   const rules = state.rules;
@@ -106,12 +112,12 @@ function ActionMark({ rule, at }: { rule: Rule; at: number }) {
 function Legend({ p, rule }: { p: Prepared; rule: Rule }) {
   const facet = rule.by ? p.byKey.get(rule.by.facet) : undefined;
   if (!facet) return null;
-  const within = found(p, rule), off = new Set(rule.by?.off ?? []);
+  const within = found(p, rule), off = new Set(rule.by?.off ?? []), colours = valueColours(rule, facet, within);
   const values = valueCounts(p, facet.key, within).filter((v) => !off.has(String(v.value)));
   return (
     <div className="flegend">
       {values.slice(0, 12).map((v) => (
-        <span key={String(v.value)}><i className="fswatch" style={{ background: valueColour(rule, facet, v.value) }} aria-hidden />
+        <span key={String(v.value)}><i className="fswatch" style={{ background: colours.get(String(v.value)) }} aria-hidden />
           {shownValue(v.value, facet.unit)} <small className="why">{v.count}</small></span>))}
       {values.length > 12 && <span className="why">and {values.length - 12} more</span>}
     </div>
@@ -153,12 +159,14 @@ function Editor({ p, draft, onDraft, state, onState }: { p: Prepared; draft: Rul
   const setCond = (i: number, c: Condition) => set({ when: draft.when.map((x, k) => (k === i ? c : x)) });
   const hits = found(p, draft).size;
   const save = () => {
-    const rule = { ...draft, name: draft.name.trim() || nameFor(draft.when.filter(complete), draft.action === "byValue" ? draft.by?.facet : undefined),
+    const kept = withBy(draft);
+    const rule = { ...kept, name: kept.name.trim() || nameFor(kept.when.filter(complete), kept.action === "byValue" ? kept.by?.facet : undefined),
       ...(draft.action === "colour" && !draft.colour ? { colour: nextColour(state.rules, draft.id) } : {}) };
     onState({ ...state, rules: isNew ? [rule, ...state.rules] : state.rules.map((r) => (r.id === rule.id ? rule : r)) });
     onDraft(null);
   };
-  const byFacet = draft.by?.facet ?? props.map(({ c }) => c.facet).filter(Boolean).pop();
+  // A By value filter takes the last condition's property until one is picked: shown, saved and previewed alike.
+  const byFacet = withBy(draft).by?.facet;
   return (
     <div className="feditor">
       <div className="feditor-head">
@@ -173,7 +181,7 @@ function Editor({ p, draft, onDraft, state, onState }: { p: Prepared; draft: Rul
             <Pick options={valueCounts(p, s.key, without(s.key))} chosen={scope(s.key)} onChange={(v) => setScope(s.key, v)} />
           </Row>))}
         {props.map(({ c, i }) => (
-          <PropertyCondition key={i} p={p} c={c} within={without(i)} onChange={(next) => setCond(i, next)}
+          <PropertyCondition key={`${i}:${c.facet}`} p={p} c={c} within={without(i)} onChange={(next) => setCond(i, next)}
             onRemove={() => set({ when: draft.when.filter((_, k) => k !== i) })} />
         ))}
       </div>
@@ -187,7 +195,7 @@ function Editor({ p, draft, onDraft, state, onState }: { p: Prepared; draft: Rul
       </div>
       {draft.action === "colour" && <Swatches value={draft.colour ?? nextColour(state.rules, draft.id)}
         onChange={(colour) => set({ colour })} />}
-      {draft.action === "byValue" && <ByValue p={p} draft={draft} facet={byFacet} onChange={set} />}
+      {draft.action === "byValue" && <ByValue p={p} draft={withBy(draft)} facet={byFacet} onChange={set} />}
       <label className="check"><input type="checkbox" checked={!!draft.invert} onChange={(e) => set({ invert: e.target.checked })} />
         Invert: everything it does not find</label>
       <p className="fcount"><b>{hits}</b> {hits === 1 ? "element" : "elements"}{draft.when.filter(complete).length === 0 && !draft.invert ? " (everything)" : ""}</p>
@@ -209,9 +217,11 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function PropertyCondition({ p, c, within, onChange, onRemove }: { p: Prepared; c: Condition; within: Set<number>;
   onChange: (c: Condition) => void; onRemove: () => void }) {
   const groups = useMemo(() => sets(p), [p]);
+  // The set comes from the chosen property; only a condition with none yet keeps the set picked for it.
   const chosenSet = c.facet ? describe(c.facet).set : "";
-  const [setName, setSetName] = useState(chosenSet);
-  const inSet = groups.find((g) => g.set === (setName || chosenSet))?.facets ?? [];
+  const [picked, setSetName] = useState(chosenSet);
+  const setName = chosenSet || picked;
+  const inSet = groups.find((g) => g.set === setName)?.facets ?? [];
   const facet = c.facet ? p.byKey.get(c.facet) : undefined;
   const kind = facet?.kind ?? "text";
   const metres = facet?.unit === "m";
@@ -220,7 +230,7 @@ function PropertyCondition({ p, c, within, onChange, onRemove }: { p: Prepared; 
   return (<>
     <span className="flabel">Property set</span>
     <div className="fcontrol fcond-head">
-      <select className="fselect" value={setName || chosenSet} aria-label="Property set" onChange={(e) => { setSetName(e.target.value); onChange({ facet: "", op: "is", values: [] }); }}>
+      <select className="fselect" value={setName} aria-label="Property set" onChange={(e) => { setSetName(e.target.value); onChange({ facet: "", op: "is", values: [] }); }}>
         <option value="">Choose…</option>
         {groups.map((g) => <option key={g.set} value={g.set}>{g.set}</option>)}
       </select>
@@ -298,6 +308,7 @@ function ByValue({ p, draft, facet: key, onChange }: { p: Prepared; draft: Rule;
   const facet = key ? p.byKey.get(key) : undefined;
   const within = found(p, draft);
   const off = new Set(draft.by?.off ?? []);
+  const colours = facet ? valueColours(draft, facet, within) : new Map<string, string>();
   const by = draft.by ?? { facet: key ?? "" };
   return (<div className="fbyvalue">
     <label className="fbyvalue-pick">Colour by
@@ -313,7 +324,7 @@ function ByValue({ p, draft, facet: key, onChange }: { p: Prepared; draft: Rule;
         <th>Value</th><th>Items</th><th>Colour</th></tr></thead>
       <tbody>
         {valueCounts(p, facet.key, within).slice(0, SHOWN_MAX).map((v) => {
-          const k = String(v.value), colour = valueColour(draft, facet, v.value);
+          const k = String(v.value), colour = colours.get(k) ?? OTHER;
           return (<tr key={k} className={off.has(k) ? "off" : ""}>
             <td><input type="checkbox" aria-label={`Colour ${k}`} checked={!off.has(k)}
               onChange={(e) => onChange({ by: { ...by, facet: facet.key, off: e.target.checked ? [...off].filter((x) => x !== k) : [...off, k] } })} /></td>

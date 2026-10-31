@@ -19,12 +19,19 @@ index is kept on the scene until a kept edit changes its revision or its element
 from __future__ import annotations
 
 import difflib
+import logging
 from collections import defaultdict
 
 from . import datums, properties
 from .scene import IfcScene
 
 Value = str | int | float | bool
+log = logging.getLogger(__name__)
+
+
+def _vkey(v) -> tuple:
+    """A value as a dictionary key: True and 1 (and False and 0) hash alike in Python, so yes/no stays apart."""
+    return (type(v) is bool, v)
 
 
 def _scalar(v) -> bool:
@@ -67,7 +74,12 @@ def element_facets(read: dict, storey: str | None) -> list[tuple[str, Value, str
         out.append((f"group:{g['ifc_class']}", g["name"], None))
     for s in read["sets"]:
         _rows(out, f"{s['kind']}:{s['name']}", s["props"])
-    return list(dict.fromkeys(out))      # one of each
+    seen, once = set(), []
+    for k, v, u in out:     # one of each (yes/no kept apart from 1/0)
+        if (k, _vkey(v)) not in seen:
+            seen.add((k, _vkey(v)))
+            once.append((k, v, u))
+    return once
 
 
 def _kind(values) -> str:
@@ -89,7 +101,7 @@ def build(scene: IfcScene) -> dict:
     elements: list[str] = []
     seen: set[str] = set()
     files: list[int] = []
-    found: dict[str, dict[Value, list[int]]] = defaultdict(lambda: defaultdict(list))
+    found: dict[str, dict[tuple, list[int]]] = defaultdict(lambda: defaultdict(list))
     units: dict[str, str] = {}
     for i, model in enumerate(scene.models):
         reader = properties.reader(scene, i)
@@ -98,20 +110,25 @@ def build(scene: IfcScene) -> dict:
         for e in objects:
             if e.GlobalId in seen:      # a GlobalId two files share: the first file's
                 continue
+            try:
+                read = reader.read(e, scene.paths[i].name)
+            except Exception:       # one object IfcOpenShell cannot read leaves the rest of the index whole
+                log.exception("Filters' index: skipped %s in %s", e.GlobalId, scene.paths[i].name)
+                continue
             n = len(elements)
             seen.add(e.GlobalId)
             elements.append(e.GlobalId)
             files.append(i)
-            read = reader.read(e, scene.paths[i].name)
             storey = levels.get(e.GlobalId) or (read["storey"] or {}).get("name")
             for key, v, unit in element_facets(read, storey):
-                found[key][v].append(n)
+                found[key][_vkey(v)].append(n)
                 if unit:
                     units.setdefault(key, unit)
     facets = []
     for key in sorted(found, key=_facet_order):
-        values = sorted(found[key], key=_order)
-        facet = {"key": key, "kind": _kind(values), "values": values, "items": [found[key][v] for v in values]}
+        keys = sorted(found[key], key=lambda k: _order(k[1]))
+        values = [k[1] for k in keys]
+        facet = {"key": key, "kind": _kind(values), "values": values, "items": [found[key][k] for k in keys]}
         if key in units:
             facet["unit"] = units[key]
         facets.append(facet)
@@ -128,14 +145,29 @@ def _facet_order(key: str):
     return ({"attr": 1, "pset": 2, "qto": 3, "classif": 4, "group": 5}.get(key.split(":", 1)[0], 6), 0, key.lower())
 
 
+def version(scene: IfcScene) -> tuple:
+    """What the index depends on: the scene's revision and its elements."""
+    return (scene.revision, len(scene.bounds()))
+
+
+def cached(scene: IfcScene) -> dict | None:
+    """The index kept on the scene, if it is still the scene's."""
+    kept = getattr(scene, "_facets", None)
+    return kept[1] if kept is not None and kept[0] == version(scene) else None
+
+
+def keep(scene: IfcScene, built: dict, at: tuple) -> None:
+    scene._facets = (at, built)
+
+
 def index(scene: IfcScene) -> dict:
     """The index, kept on the scene until its revision or its elements change."""
-    key = (scene.revision, len(scene.bounds()))
-    cached = getattr(scene, "_facets", None)
-    if cached is not None and cached[0] == key:
-        return cached[1]
+    found_ = cached(scene)
+    if found_ is not None:
+        return found_
+    at = version(scene)
     built = build(scene)
-    scene._facets = (key, built)
+    keep(scene, built, at)
     return built
 
 
@@ -195,6 +227,8 @@ def suggest(idx: dict, words: str, among: list[str] | None = None, n: int = 3) -
 
 # ---------------------------------------------------------------- resolving what chat and agents ask for
 
+COLOURS = 20     # the page's palette (filters.ts PALETTE): past it, colour-by-value values share one colour, "Other"
+
 OPS = {"is": "is", "is_not": "isNot", "contains": "contains", "has": "has", "missing": "missing", "less": "lt",
        "more": "gt", "between": "between"}
 ACTIONS = {"colour": "colour", "colour_by_value": "byValue", "hide": "hide", "isolate": "isolate"}
@@ -208,7 +242,8 @@ class Unresolved(ValueError):
 
 
 def _label(key: str) -> tuple[str, str]:
-    """A facet's set and property name as people say them: ("Model data", "System"), ("", "Tag")."""
+    """A facet's set and property name as people say them: ("Model data", "System"), ("", "Tag"); a complex
+    property's part keeps its path: ("Pset_X", "Connection/Torque")."""
     kind, _, rest = key.partition(":")
     if not rest:
         return "", key
@@ -218,21 +253,29 @@ def _label(key: str) -> tuple[str, str]:
     return set_name, prop or set_name
 
 
+def _names(prop: str) -> set[str]:
+    """What a property may be called: its path ("connection/torque") or its last part ("torque")."""
+    low = prop.lower()
+    return {low, low.rsplit("/", 1)[-1]}
+
+
 def property_key(idx: dict, prop: str, set_name: str | None = None) -> str:
-    """The facet key for a property named by people: "System", "Model data/System", "Tag", "FireRating"…"""
+    """The facet key for a property named by people: "System", "Model data/System", "Tag", "FireRating", a complex
+    property's part as "Torque" or "Pset_X/Connection/Torque"…"""
     want = prop.strip().lower()
     if want in BY_NAMES:
         return BY_NAMES[want]
     if "/" in want and not set_name:
-        set_name, _, want = prop.strip().rpartition("/")
-        want = want.lower()
-    found = [f["key"] for f in idx["facets"] if _label(f["key"])[1].lower() == want
+        head, _, rest = prop.strip().partition("/")
+        if any(_label(f["key"])[0].lower() == head.lower() for f in idx["facets"]):
+            set_name, want = head, rest.lower()
+    found = [f["key"] for f in idx["facets"] if want in _names(_label(f["key"])[1])
              and (not set_name or _label(f["key"])[0].lower() == set_name.strip().lower())]
     if len(found) > 1:      # the same name in several sets: a property set first, then attributes, then quantities
         found.sort(key=lambda k: {"pset": 0, "attr": 1, "group": 2, "classif": 3, "qto": 4}.get(k.split(":")[0], 5))
     if found:
         return found[0]
-    names = sorted({_label(f["key"])[1] for f in idx["facets"] if ":" in f["key"]})
+    names = sorted({_label(f["key"])[1].rsplit("/", 1)[-1] for f in idx["facets"] if ":" in f["key"]})
     close = difflib.get_close_matches(prop, names, n=4, cutoff=0.5)
     raise Unresolved(f"No property {prop!r}{f' in {set_name!r}' if set_name else ''} in the open models."
                      + (f" Closest: {', '.join(close)}." if close else ""))
@@ -267,9 +310,53 @@ def _values(idx: dict, key: str, asked: list, loose: bool = False) -> list:
     return list(dict.fromkeys(out))
 
 
-def resolve(idx: dict, spec: dict, at: int = 0) -> tuple[dict, int]:
+def complete(c: dict) -> bool:
+    """Whether a condition says enough to find anything by, as the page's filters.ts `complete` reads it: a facet, and
+    the values or bounds its test needs. The page leaves out one that does not, so the server must too."""
+    if not c.get("facet"):
+        return False
+    op = c.get("op")
+    if op in ("has", "missing"):
+        return True
+    if op == "lt":
+        return c.get("max") is not None
+    if op == "gt":
+        return c.get("min") is not None
+    if op == "between":
+        return c.get("min") is not None or c.get("max") is not None
+    return bool(c.get("values"))
+
+
+def found(idx: dict, when: list[dict], invert: bool = False) -> set[int]:
+    """The elements (by index) a filter finds, as the page's `found`: every complete condition holds (none: every
+    element), then inverted if asked."""
+    everyone = set(range(len(idx["elements"])))
+    hit = set(everyone)
+    for c in when:
+        if complete(c):
+            hit &= matching(idx, c["facet"], c["op"], c.get("values"), c.get("min"), c.get("max"))
+            if not hit:
+                break
+    return everyone - hit if invert else hit
+
+
+def _bound(w: dict, name: str):
+    """A bound for less / more / between: `min` or `max`, else a lone number in `values` (what a model often sends)."""
+    if w.get(name) is not None:
+        return float(w[name])
+    vals = w.get("values") or []
+    if len(vals) == 1:
+        try:
+            return float(vals[0])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def resolve(idx: dict, spec: dict, at: int = 0) -> tuple[dict, set[int]]:
     """One filter as chat or an agent describes it (classes, levels, models, where, action, colour, by, invert) as the
-    page's rule (filters.ts `Rule`), and how many elements it finds. Raises Unresolved, naming what is there."""
+    page's rule (filters.ts `Rule`), and the elements (by index) it acts on. Raises Unresolved, naming what is there;
+    a condition the page would leave out (a test with no bound or value) is refused, so the two never disagree."""
     when = []
     for key, field in (("class", "classes"), ("storey", "levels"), ("file", "models")):
         if spec.get(field):
@@ -285,11 +372,24 @@ def resolve(idx: dict, spec: dict, at: int = 0) -> tuple[dict, int]:
             if not c["values"]:
                 raise Unresolved(f"Say which values of {w.get('property')!r} to match.")
         elif op == "contains":
-            c["values"] = [str(v) for v in (w.get("values") or [])]
-        if op in ("gt", "between") and w.get("min") is not None:
-            c["min"] = float(w["min"])
-        if op in ("lt", "between") and w.get("max") is not None:
-            c["max"] = float(w["max"])
+            c["values"] = [str(v) for v in (w.get("values") or []) if str(v) != ""]
+        if op == "gt" and _bound(w, "min") is not None:
+            c["min"] = _bound(w, "min")
+        if op == "lt" and _bound(w, "max") is not None:
+            c["max"] = _bound(w, "max")
+        if op == "between":
+            for name in ("min", "max"):
+                if w.get(name) is not None:
+                    c[name] = float(w[name])
+            vals = w.get("values") or []
+            if "min" not in c and "max" not in c and len(vals) == 2:
+                try:
+                    c["min"], c["max"] = sorted(float(v) for v in vals)
+                except (TypeError, ValueError):
+                    pass
+        if not complete(c):
+            need = "values" if op == "contains" else "max" if op == "lt" else "min" if op == "gt" else "min or max"
+            raise Unresolved(f"Say the {need} for {w.get('property')!r} ({w.get('op')}).")
         when.append(c)
     action = ACTIONS.get(str(spec.get("action") or "colour"))
     if action is None:
@@ -307,12 +407,8 @@ def resolve(idx: dict, spec: dict, at: int = 0) -> tuple[dict, int]:
         if not spec.get("by"):
             raise Unresolved("Say which property to colour by (by), e.g. System, class or level.")
         rule["by"] = {"facet": property_key(idx, str(spec["by"]))}
-    hit = set(range(len(idx["elements"])))
-    for c in when:
-        hit &= matching(idx, c["facet"], c["op"], c.get("values"), c.get("min"), c.get("max"))
-    if spec.get("invert"):
-        hit = set(range(len(idx["elements"]))) - hit
+    hit = found(idx, when, bool(spec.get("invert")))
     if action == "byValue":
         f = facet(idx, rule["by"]["facet"])
         hit &= set().union(*map(set, f["items"])) if f and f["items"] else set()
-    return rule, len(hit)
+    return rule, hit

@@ -522,7 +522,7 @@ stateDiagram-v2
 | Agent links, their proposals, plans and jobs | `app.links` (`agents.Links`) | 200 links, 12 h idle, 24 h total; 16 jobs per link; 200 queued events per following page |
 | Registered requirements files | `requirements._registry` | 500, least recently used dropped |
 | Host readings by kind | `hosts._cache` | The server's life |
-| The filters' index | `IfcScene._facets` (`facets.index`) | Until a kept edit changes the scene's revision or its elements |
+| The filters' index | `IfcScene._facets` (`facets.index`; `Workspace.facets` builds it outside the lock and keeps it only if the revision held) | Until a kept edit changes the scene's revision or its elements |
 | Pictures being drawn | `built._running` | Only while drawing |
 | Settings for everyone (cached) | `settings._current` | Read from the store once |
 | Caps | Each `ProposeLimit`'s deques in `app.py` | The rolling hour and day |

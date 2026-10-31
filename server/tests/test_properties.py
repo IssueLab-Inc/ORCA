@@ -235,3 +235,15 @@ def test_the_route_answers_picks_a_file_and_refuses_an_unknown_element(tmp_path,
     assert c.get(f"/api/scenes/{sid}/elements/{gid}/properties?file=3").status_code == 404
     assert c.get(f"/api/scenes/{sid}/elements/0000000000000000000000/properties").status_code == 404
     assert c.get(f"/api/scenes/nope/elements/{gid}/properties").status_code == 404
+
+
+def test_an_unnamed_storey_has_the_name_the_level_filter_gives_it(tmp_path):
+    gid = _annotated(tmp_path / "beam.ifc")
+    f = ifcopenshell.open(str(tmp_path / "beam.ifc"))
+    st = f.by_type("IfcBuildingStorey")[0]
+    st.Name = None
+    f.write(str(tmp_path / "beam.ifc"))
+    scene = IfcScene(tmp_path / "beam.ifc")
+    from sightline import datums
+    p = properties.properties(scene, gid)
+    assert p["storey"]["name"] == p["path"][-1]["name"] == f"Storey {st.id()}" == datums.storeys(scene)[gid]

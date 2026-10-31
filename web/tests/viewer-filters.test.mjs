@@ -107,3 +107,19 @@ test("framing for a filter takes the 3D view and every unpinned drawing to the e
   v.frameEverywhere([]);
   assert.equal(flown.length, 1, "nothing to frame: nothing moves");
 });
+
+test("a level's elements come from the viewer's own storeys, and what is shown is tested once per change", () => {
+  const { v } = viewer();
+  v.info = new Map([["a", { level: "Level 01" }], ["b", { level: "Level 02" }], ["c", { level: "Level 02" }]]);
+  assert.deepEqual(v.ofLevel("Level 02"), ["b", "c"]);
+  assert.deepEqual(v.ofLevel("Roof"), []);
+  let built = 0;
+  const real = v.filterTest.bind(v);
+  v.filterTest = () => { built++; return real(); };
+  v.setRules({ hide: new Set(["a"]), only: null, paint: null, greyRest: false });
+  built = 0;
+  assert.deepEqual(["a", "b", "c"].map((g) => v.isShown(g)), [false, true, true]);
+  assert.equal(built, 1, "one test for many elements");
+  v.setRules({ hide: new Set(["b"]), only: null, paint: null, greyRest: false });
+  assert.deepEqual(["a", "b"].map((g) => v.isShown(g)), [true, false], "a change makes a new test");
+});

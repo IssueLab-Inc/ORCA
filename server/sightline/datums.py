@@ -84,6 +84,12 @@ def _place(m, p: list[float], scale: float) -> list[float]:
     return [round(x * scale, 6), round(y * scale, 6), round(z * scale, 6)]
 
 
+def storey_name(st) -> str:
+    """A storey's name as everything shows it (the level filter, breadcrumbs, the filters' index): its name, else its
+    long name, else "Storey <id>"."""
+    return st.Name or st.LongName or f"Storey {st.id()}"
+
+
 def storeys(scene: IfcScene) -> dict[str, str]:
     """GlobalId → the name of the storey each physical element stands in (through spaces and assemblies)."""
     out = {}
@@ -91,7 +97,7 @@ def storeys(scene: IfcScene) -> dict[str, str]:
         for e in model.by_type("IfcElement"):
             st = ifcopenshell.util.element.get_container(e, ifc_class="IfcBuildingStorey")
             if st is not None:
-                out[e.GlobalId] = st.Name or st.LongName or f"Storey {st.id()}"
+                out[e.GlobalId] = storey_name(st)
     return out
 
 

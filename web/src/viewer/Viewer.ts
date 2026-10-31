@@ -419,6 +419,7 @@ export class Viewer {
   /** Re-draw everything for the current mode, style, focus, moves, filters and hidden elements. */
   private applyMode() {
     this.version++;
+    this.shownCache = undefined;   // the filters or hides may have changed
     this.drawVis = [];
     const ids = this.focusIds().filter((g) => !this.hidden.has(g));
     const around = this.aroundIds(ids);
@@ -482,7 +483,19 @@ export class Viewer {
   isShown(gid: string): boolean {
     const f = this.find(gid);
     if (!f || this.hiddenModels.has(this.models.indexOf(f.model))) return false;
-    return this.lifted ? true : this.filterTest()?.(gid) ?? true;
+    if (this.lifted) return true;
+    // Built once and kept until the next applyMode: callers test every element (a filter's zoom, Zoom to them).
+    if (this.shownCache === undefined) this.shownCache = this.filterTest();
+    return this.shownCache?.(gid) ?? true;
+  }
+  private shownCache: ((gid: string) => boolean) | null | undefined;
+
+  /** Elements on a storey among the loaded ones (the storey names the level filter reads, from the datums): to hide or
+   * isolate a level before the filters' index arrives. */
+  ofLevel(level: string): string[] {
+    const out: string[] = [];
+    for (const m of this.models) for (const g of m.byGlobalId.keys()) if (this.info.get(g)?.level === level) out.push(g);
+    return out;
   }
 
   /** The filters' rules (filters.ts `evaluate`): hidden, the only ones shown, colours. Null: none. */

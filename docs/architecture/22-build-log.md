@@ -1596,3 +1596,16 @@ etc., automatically zoom into the objects in the viewer(s)"; code `filters.appli
   Northbank with 3D and the south elevation: hiding the site closed both views in on the building, isolating MEP
   coloured by System closed them in on the services, with no zoom button pressed; chat's "Isolate the MEP model and
   colour the services by system" framed the services the same way.
+
+The review of the filters PR (Oct 31; [IssueLab-Inc/ORCA#75](https://github.com/IssueLab-Inc/ORCA/pull/75), 15 comments; the work moved to
+`feature/filters`, per AGENTS.md):
+- **Fixed:** chat's conditions with no bound or value are refused (a lone number taken as the bound), as the page
+  leaves them out; a By value filter saved before its property was picked colours by its last condition's
+  (`filters.withBy`); twenty palette colours, then Other in the key and chat's reply; level actions use the viewer's
+  own storeys and an empty isolate does nothing (no blank model before the index); a failed index request shows Try
+  again, and an unreadable element is skipped, not the index; condition rows keep their set after a removal;
+  `Viewer.isShown` builds its test once per change; a filter's name no longer redraws; the index is built outside the
+  workspace lock; a guarded quantity unit; one name for an unnamed storey (`datums.storey_name`); a complex property's
+  part by name; yes kept apart from 1 in the index; `facets.resolve` returns what it found.
+- **Checked:** `tests/test_facets.py` (13), `test_properties.py` (11), `web/tests/filters.test.mjs` (12),
+  `viewer-filters.test.mjs` (7); server and web suites; build.

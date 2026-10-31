@@ -32,10 +32,14 @@ export interface RuleView { hide: Set<string> | null; only: Set<string> | null; 
 
 export const EMPTY: FilterState = { v: 1, rules: [], colours: true, greyRest: false };
 
-/** Categorical colours for filters, chosen clear of every colour another role uses (each at least ΔE 22 from them):
- * see RESERVED and web/tests/filters.test.mjs. */
+/** Categorical colours for filters, chosen clear of every colour another role uses (each at least ΔE 21 from them) and
+ * of each other: see RESERVED and web/tests/filters.test.mjs. */
 export const PALETTE = ["#318181", "#8e234e", "#e2d136", "#2d57b7", "#dba570", "#62e8cd", "#9c3e16", "#f2a0c4",
-  "#85db70", "#c6c86a"];
+  "#85db70", "#c6c86a",
+  // A second ring, for colour by value past ten values.
+  "#4e7231", "#c757a5", "#888dbf", "#6a4d39", "#da6c6c", "#29a36c", "#59396a", "#adcda2", "#c431c4", "#4e31c4"];
+/** What colour-by-value values past the palette share, shown as "Other" in the key. */
+export const OTHER = "#8a8273";
 /** Colours other roles draw in the viewer: the pair (red, green, purple and their outlines), the selection, hits,
  * links, the "before" ghost, the section box and measure, the clash's overlap, the grey and ghost context. */
 export const RESERVED = ["#d0342c", "#1f9d3a", "#8e44ad", "#ff5a5a", "#5dff8a", "#d39bff", "#2f8fdf", "#7cc0ff",
@@ -109,13 +113,27 @@ export function found(p: Prepared, rule: Pick<Rule, "when" | "invert">): Set<num
   return inv;
 }
 
-/** A value's colour in a colour-by-value rule: its chosen one, else the palette's by the value's place. */
-export function valueColour(rule: Rule, facet: Facet | undefined, v: Value): string {
-  const key = String(v);
-  const chosen = rule.by?.colours?.[key];
-  if (chosen) return chosen;
-  const at = facet ? facet.values.findIndex((x) => same(x, v)) : 0;
-  return PALETTE[(at < 0 ? 0 : at) % PALETTE.length];
+/** The colours of a colour-by-value rule's values: the values among what it finds (`hit`), in the index's order, each
+ * its chosen colour or the palette's by its place; past the palette they share OTHER. A value ticked off keeps its
+ * place, so ticking one off moves no other value's colour. */
+export function valueColours(rule: Rule, facet: Facet, hit: Set<number>): Map<string, string> {
+  const out = new Map<string, string>();
+  let at = 0;
+  facet.values.forEach((v, k) => {
+    if (!facet.items[k].some((i) => hit.has(i))) return;
+    const key = String(v);
+    out.set(key, rule.by?.colours?.[key] ?? (at < PALETTE.length ? PALETTE[at] : OTHER));
+    at++;
+  });
+  return out;
+}
+
+/** A colour-by-value rule with its property: the one it names, else the last complete condition's (what the editor
+ * shows while none is picked), so what is shown is what is kept. */
+export function withBy(rule: Rule): Rule {
+  if (rule.action !== "byValue" || rule.by?.facet) return rule;
+  const facet = [...rule.when].reverse().find((c) => complete(c))?.facet;
+  return facet ? { ...rule, by: { ...rule.by, facet } } : rule;
 }
 
 /** The first palette colour no other filter uses, for a new colour filter (it keeps it when the list is reordered). */
@@ -149,10 +167,10 @@ export function evaluate(state: FilterState, p: Prepared | null): RuleView {
     }
     const facet = rule.by ? p.byKey.get(rule.by.facet) : undefined;
     if (!facet) return;
-    const off = new Set(rule.by?.off ?? []);
+    const off = new Set(rule.by?.off ?? []), colours = valueColours(rule, facet, hit);
     facet.values.forEach((v, k) => {
-      if (off.has(String(v))) return;
-      const c = valueColour(rule, facet, v);
+      const c = colours.get(String(v));
+      if (!c || off.has(String(v))) return;
       for (const i of facet.items[k]) if (hit.has(i) && !paint!.has(gid[i])) paint!.set(gid[i], c);
     });
   });
@@ -191,11 +209,15 @@ export function legend(state: FilterState, p: Prepared | null, max = 6): { colou
     if (rule.action !== "byValue" || !rule.by) return;
     const facet = p.byKey.get(rule.by.facet), off = new Set(rule.by.off ?? []);
     if (!facet) return;
-    const hit = found(p, rule);
+    const hit = found(p, rule), colours = valueColours(rule, facet, hit);
+    let others = 0;
     facet.values.forEach((v, k) => {
-      const c = valueColour(rule, facet, v);
-      if (!off.has(String(v)) && facet.items[k].some((i) => hit.has(i) && shows(i, c))) add(c, shownValue(v, facet.unit));
+      const c = colours.get(String(v));
+      if (!c || off.has(String(v)) || !facet.items[k].some((i) => hit.has(i) && shows(i, c))) return;
+      if (c === OTHER && !rule.by?.colours?.[String(v)]) others++;
+      else add(c, shownValue(v, facet.unit));
     });
+    if (others) add(OTHER, `Other (${others} value${others === 1 ? "" : "s"})`);
   });
   return out.slice(0, max + 1);
 }

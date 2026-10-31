@@ -42,8 +42,12 @@ element is: `GET /api/scenes/{id}/facets` (`facets.py`, `Workspace.facets`).
 - **Shape**, inverted so it stays small: `{revision, files, elements: [GlobalId], file: [file index per element],
   facets: [{key, kind: text|number|bool, unit?, values: [v], items: [[element index]]}]}`; values sorted, numbers
   first.
-- **Kept** on the scene (`IfcScene._facets`) until a kept edit changes its revision or its elements; the page reads it
-  again with the classes and storeys after a kept fix (`infoRev`). Built under `Workspace.lock`.
+- **Kept** on the scene (`IfcScene._facets`, `facets.cached` / `keep`) until a kept edit changes its revision or its
+  elements; the page reads it again after a kept fix (`infoRev`). **Built outside `Workspace.lock`** (it only reads, as
+  the requirements' inventory does), so a big model's first build stalls no one, and kept only if no edit landed
+  meanwhile (review, Oct 31). An object IfcOpenShell cannot read is skipped and logged, not the whole index. If the
+  request fails, the panel says so with **Try again**.
+- **Values keep their type:** yes/no is not merged with 1/0 (Python hashes `True` like `1`).
 - **Measured** (Oct 31, Northbank Structure + MEP + Architecture + Site): 1,997 elements (36 of them spaces), 46
   facets, 0.8 s to build after the boxes, about 240 KB of JSON.
 - **Matching on the server** (`facets.matching`, `facets.suggest`): the same conditions as the page, for chat and MCP.
@@ -58,7 +62,8 @@ A filter (`filters.Rule`) finds elements, then does one thing with them.
   less than, more than (lengths typed in mm, kept in metres). Every condition holds; one still being written is left
   out. No condition finds everything. **Invert** takes what it does not find.
 - **Doing:** **Colour** (a palette colour, or any), **By value** (each value of one property its own colour: the
-  Value | Items | Colour table, values ticked off left uncoloured), **Hide**, **Isolate**.
+  Value | Items | Colour table, values ticked off left uncoloured), **Hide**, **Isolate**. A By value filter with no
+  property picked takes its last condition's (`filters.withBy`), in the editor, the preview and what is kept alike.
 - **Several at once** (`filters.evaluate`): hide rules hide what they find; while any isolate rule is on, only what
   some isolate rule finds shows (several add up: "Ducts" and "Pipes" shows both); colour rules colour, the top one
   winning, and a value ticked off lets a lower rule colour it. **Show colours** turns every colour off at once;
@@ -104,10 +109,14 @@ depends on how the user is looking.
 
 ## The palette
 
-`filters.PALETTE`: ten colours chosen clear of every colour another role draws (`filters.RESERVED`: the pair's red,
-green and purple and their outlines, the selection's blue, hits' magenta, the six link colours, the "before" ghost's
-orange, the section box and measure, the clash overlap's amber, the greys). Each is at least ΔE 22 from all of them
-and 25 from each other (CIE76; `web/tests/filters.test.mjs`).
+`filters.PALETTE`: twenty colours (ten, then a second ring of ten) chosen clear of every colour another role draws
+(`filters.RESERVED`: the pair's red, green and purple and their outlines, the selection's blue, hits' magenta, the six
+link colours, the "before" ghost's orange, the section box and measure, the clash overlap's amber, the greys). Each is
+at least ΔE 20 from all of them and 15 from each other (CIE76; `web/tests/filters.test.mjs`).
+
+Colour by value gives the values a filter finds the palette's colours in the index's order (`filters.valueColours`);
+a value ticked off keeps its place, so the others keep their colours. Past twenty values the rest share **Other**
+(`filters.OTHER`), which the key shows as "Other (n values)"; chat hears the same (its reply's `other`).
 
 ## Drawings (built)
 
@@ -144,10 +153,12 @@ value** (a temporary isolate). A storey's breadcrumb offers **Filter by this lev
   (`{property, set?, op: is|is_not|contains|has|missing|less|more|between, values?, min?, max?}`, lengths in metres),
   `action` (`colour`, `colour_by_value`, `hide`, `isolate`), `colour` (#rrggbb), `by` (the property to colour by:
   System, class, level, model…), `invert`, `name`; and `grey_rest`. Voice goes through chat, so it works by voice too.
-- **Resolved on the server** against the same index (`facets.resolve`): a class with or without its `Ifc` prefix, a
+- **Resolved on the server** against the same index (`facets.resolve`, which returns the rule and what it acts on): a class with or without its `Ifc` prefix, a
   level as the storey, a model by part of its file name, a property by name (or `set/name`; a property set wins over
   an attribute or quantity of the same name), values in any case. A name the models lack fails back to the model with
-  the closest ones (`facets.Unresolved`), so it can try again; the hidden demo note can never be suggested. The reply
+  the closest ones (`facets.Unresolved`), so it can try again; the hidden demo note can never be suggested. A test with
+  no bound or value is refused (the page would leave it out and act on everything), but a lone number in `values` is
+  taken as the bound, two as a range. A complex property's part answers to its own name ("Torque") or its path. The reply
   says how many elements each filter finds, and for a colour-by-value filter each value it colours with its count, so
   the model names what is there.
 - **On the page** (`ui filters`): chat's filters (`origin: "chat"`) replace its own; the user's that were on are

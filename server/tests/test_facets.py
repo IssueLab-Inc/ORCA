@@ -108,12 +108,12 @@ def test_the_route(tmp_path, monkeypatch):
 def test_what_chat_asks_for_resolves_to_the_pages_rule(tmp_path):
     beam = _annotated(tmp_path / "beam.ifc")
     idx = facets.index(IfcScene(tmp_path / "beam.ifc"))
-    rule, n = facets.resolve(idx, {"classes": ["beam"], "where": [{"property": "Span", "op": "between", "min": 5, "max": 7}],
+    rule, hit = facets.resolve(idx, {"classes": ["beam"], "where": [{"property": "Span", "op": "between", "min": 5, "max": 7}],
                                    "action": "isolate", "name": "Long beams"}, 3)
     assert rule == {"id": "chat3", "name": "Long beams", "on": True, "action": "isolate", "origin": "chat", "when": [
         {"facet": "class", "op": "is", "values": ["IfcBeam"]},
         {"facet": "pset:Pset_BeamCommon/Span", "op": "between", "min": 5.0, "max": 7.0}]}
-    assert n == 1 and beam in idx["elements"]
+    assert [idx["elements"][i] for i in hit] == [beam]
     assert facets.property_key(idx, "level") == "storey"
     assert facets.property_key(idx, "Model data/Level") == "pset:Model data/Level"
     assert facets.property_key(idx, "loadbearing") == "pset:Pset_BeamCommon/LoadBearing"
@@ -136,3 +136,51 @@ def test_what_the_models_lack_fails_with_the_closest_and_never_the_hidden_note(t
         facets.resolve(idx, {"action": "colour", "colour": "teal"})
     with pytest.raises(facets.Unresolved, match="colour by"):
         facets.resolve(idx, {"action": "colour_by_value"})
+
+
+def test_a_test_with_no_bound_or_value_is_refused_or_takes_a_lone_number(tmp_path):
+    _annotated(tmp_path / "beam.ifc")
+    idx = facets.index(IfcScene(tmp_path / "beam.ifc"))
+    import pytest
+    for w in ({"property": "Span", "op": "more"}, {"property": "Span", "op": "less", "values": []},
+              {"property": "Span", "op": "between"}, {"property": "Name", "op": "contains", "values": [""]}):
+        with pytest.raises(facets.Unresolved, match="Say the"):
+            facets.resolve(idx, {"where": [w], "action": "hide"})
+    rule, hit = facets.resolve(idx, {"where": [{"property": "Span", "op": "more", "values": ["5"]}], "action": "hide"})
+    assert rule["when"][0] == {"facet": "pset:Pset_BeamCommon/Span", "op": "gt", "min": 5.0} and len(hit) == 1
+    rule, _ = facets.resolve(idx, {"where": [{"property": "Span", "op": "between", "values": [7, 5]}], "action": "hide"})
+    assert (rule["when"][0]["min"], rule["when"][0]["max"]) == (5.0, 7.0)
+    assert facets.found(idx, [{"facet": "pset:Pset_BeamCommon/Span", "op": "gt"}]) == set(range(len(idx["elements"]))), \
+        "an unfinished condition is left out, as the page does"
+
+
+def test_a_complex_propertys_part_by_its_name_or_path(tmp_path):
+    beam, _, _ = _complete(tmp_path / "all.ifc")
+    idx = facets.index(IfcScene(tmp_path / "all.ifc"))
+    for name in ("Torque", "Connection/Torque", "Pset_Everything/Connection/Torque"):
+        assert facets.property_key(idx, name) == "pset:Pset_Everything/Connection/Torque", name
+    import pytest
+    with pytest.raises(facets.Unresolved, match="Closest: Torque"):
+        facets.property_key(idx, "Torqe")
+
+
+def test_yes_and_one_stay_apart(tmp_path):
+    from sightline.facets import element_facets
+    read = {"source": "a.ifc", "ifc_class": "IfcWall", "type": None, "materials": [], "attributes": [],
+            "classifications": [], "groups": [], "sets": [{"kind": "pset", "name": "P", "props": [
+                {"name": "X", "value": True}, {"name": "X", "value": 1}]}]}
+    got = [(k, v) for k, v, _ in element_facets(read, None) if k == "pset:P/X"]
+    assert got == [("pset:P/X", True), ("pset:P/X", 1)] and type(got[1][1]) is int
+
+
+def test_an_unreadable_element_is_skipped_not_the_whole_index(tmp_path, monkeypatch):
+    _annotated(tmp_path / "beam.ifc")
+    scene = IfcScene(tmp_path / "beam.ifc")
+    real = facets.properties.Reader.read
+    def flaky(self, e, *a, **k):
+        if e.is_a("IfcBeam"):
+            raise RuntimeError("unreadable")
+        return real(self, e, *a, **k)
+    monkeypatch.setattr(facets.properties.Reader, "read", flaky)
+    idx = facets.build(scene)
+    assert len(idx["elements"]) == len(scene.bounds()) - 1 and _facet(idx, "class")["values"] == ["IfcDuctSegment", "IfcPipeSegment"]

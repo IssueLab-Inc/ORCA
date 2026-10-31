@@ -133,9 +133,35 @@ test("a kept or saved filter state reads back, and anything unreadable gives way
   for (const bad of [null, "x", { v: 2, rules: [] }, { v: 1 }]) assert.deepEqual(f.migrate(bad), f.EMPTY);
 });
 
-test("the palette keeps clear of every colour another role uses, and of itself", () => {
-  for (const c of f.PALETTE) {
+test("the palette's twenty colours and Other keep clear of every colour another role uses, and of each other", () => {
+  assert.equal(f.PALETTE.length, 20);
+  for (const c of [...f.PALETTE, f.OTHER]) {
     for (const r of f.RESERVED) assert.ok(f.deltaE(c, r) >= 20, `${c} too close to ${r} (${f.deltaE(c, r).toFixed(1)})`);
-    for (const o of f.PALETTE) if (o !== c) assert.ok(f.deltaE(c, o) >= 25, `${c} too close to ${o}`);
+    for (const o of [...f.PALETTE, f.OTHER]) if (o !== c) assert.ok(f.deltaE(c, o) >= 15, `${c} too close to ${o}`);
   }
+});
+
+test("past twenty values, colour by value shares one Other colour, and the key says so", () => {
+  const n = 23, values = Array.from({ length: n }, (_, i) => `V${String(i).padStart(2, "0")}`);
+  const many = f.prepare({ revision: 0, files: ["a"], elements: values.map((v) => `e${v}`), file: values.map(() => 0),
+    facets: [{ key: "pset:P/X", kind: "text", values, items: values.map((_, i) => [i]) }] });
+  const r = rule({ action: "byValue", by: { facet: "pset:P/X" } });
+  const colours = f.valueColours(r, many.byKey.get("pset:P/X"), f.found(many, r));
+  assert.deepEqual([...colours.values()].slice(0, 20), f.PALETTE);
+  assert.deepEqual([...colours.values()].slice(20), [f.OTHER, f.OTHER, f.OTHER]);
+  const key = f.legend({ v: 1, colours: true, greyRest: false, rules: [r] }, many, 30);
+  assert.equal(key.length, 21);
+  assert.deepEqual(key[20], { colour: f.OTHER, label: "Other (3 values)" });
+  // Ticking a value off moves no other value's colour.
+  const off = f.valueColours({ ...r, by: { ...r.by, off: ["V00"] } }, many.byKey.get("pset:P/X"), f.found(many, r));
+  assert.equal(off.get("V01"), f.PALETTE[1]);
+});
+
+test("a By value filter with no property picked takes its last condition's, so what shows is what is kept", () => {
+  const r = rule({ action: "byValue", when: [{ facet: "class", op: "is", values: ["IfcDuctSegment"] },
+    { facet: "pset:Model data/System", op: "has" }, { facet: "", op: "is", values: [] }] });
+  assert.deepEqual(f.withBy(r).by, { facet: "pset:Model data/System" });
+  assert.equal(f.withBy({ ...r, by: { facet: "class" } }).by.facet, "class", "a picked property stays");
+  assert.equal(f.withBy({ ...r, when: [] }).by, undefined, "nothing to take");
+  assert.equal(f.count(p, f.withBy(r)), 2, "the two ducts, coloured by their system");
 });
