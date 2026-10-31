@@ -679,9 +679,17 @@ def clash_id(test_id: str, a: str, b: str) -> str:
 
 
 def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None = None, previous: dict | None = None,
-        cap: int = CAP, title: str | None = None) -> Run:
-    """Run the tests (default: `default_tests`) over the open models and return them as a clash report."""
+        cap: int = CAP, title: str | None = None, known: dict | None = None, root: Path | None = None) -> Run:
+    """Run the tests (default: `default_tests`) over the open models and return them as a clash report.
+
+    `previous`: the state this run compares with (what it calls new, resolved or no longer checked): the same check's
+    last run. `known`: every clash the scene has given an id and a number ({"clashes": id → {kind, a, b}, "numbers",
+    "open": ids in the open list}, `checks.Register.known`); without it, `previous` is all the run knows. `root`: the
+    folder the report keeps its files in (a new temporary one, deleted with the report, by default)."""
     emit = on_event or (lambda e: None)
+    if known is None:
+        was = (previous or {}).get("clashes", {})
+        known = {"clashes": was, "numbers": (previous or {}).get("numbers", {}), "open": set(was)}
     t0 = time.perf_counter()
     emit({"type": "phase", "text": "Reading the models"})
     ix = _Index(scene)
@@ -690,12 +698,6 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         raise ValueError("Two tests share an id")
     emit({"type": "start", "elements": len(ix.entity), "tests": [{"id": t.id, "name": t.name, "kind": t.kind}
                                                                    for t in tests]})
-    # A clash keeps its id, and so its #N, title, views, sign-offs and marks, when another check finds the same pair:
-    # a check on filters that finds a pair the full check found takes the full check's id (once per run).
-    earlier = {(was.get("kind", "hard"), frozenset((was["a"], was["b"]))): cid
-               for cid, was in (previous or {}).get("clashes", {}).items()}
-    taken: set[str] = set()
-
     # Broad phase for every test first, so the triangle tree is built once over just what can clash.
     plans = []
     for t in tests:
@@ -709,9 +711,8 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
     tree = _tree(ix, needed, offset) if needed else None
     solids = _Solids(ix)
 
-    clashes: list[ReportClash] = []
+    hits_found: list[tuple[Test, object]] = []
     contacts: set[frozenset] = set()   # pairs that only touch: what rests on or meets what (connections.graph)
-    tested: dict[str, Test] = {}
     coverage: list[Coverage] = []
     selections: dict[str, dict] = {}
     for n, (t, a, b, pairs) in enumerate(plans):
@@ -731,20 +732,7 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         found.sort(key=lambda h: (h.distance_m, h.a, h.b))
         partial = len(found) > cap
         found = found[:cap]
-        for h in found:
-            cid = clash_id(t.id, h.a, h.b)
-            if cid not in (previous or {}).get("clashes", {}):
-                same = earlier.get((t.kind, frozenset((h.a, h.b))))
-                if same is not None and same not in taken and same not in tested:
-                    cid = same
-            taken.add(cid)
-            tested[cid] = t
-            ea, eb = ix.report_element(h.a), ix.report_element(h.b)
-            clashes.append(ReportClash(
-                id=cid, name=plain_name(ea, eb), guid=cid, test=t.name, test_type=t.kind,
-                tolerance_m=t.clearance_m if t.kind == "clearance" else t.tolerance_m, status="new",
-                distance_m=round(h.distance_m, 6), point=[round(x, 4) for x in h.point], grid=None,
-                a=ea, b=eb, source="sightline"))
+        hits_found.extend((t, h) for h in found)
         cov = Coverage(test=t.id, name=t.name, kind=t.kind, elements_a=len(a), elements_b=len(a if b is None else b),
                        candidate_pairs=len(pairs), clashes=len(found), touching=touching, excluded=dict(excluded),
                        partial=partial, seconds=round(time.perf_counter() - t1, 3))
@@ -752,8 +740,20 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         selections[t.id] = {"a": set(a), "b": None if b is None else set(b), "complete": not partial}
         emit({"type": "test_done", "index": n, "coverage": asdict(cov)})
 
+    ids = _assign_ids(hits_found, known["clashes"])
+    clashes: list[ReportClash] = []
+    tested: dict[str, Test] = {}
+    for (t, h), cid in zip(hits_found, ids):
+        tested[cid] = t
+        ea, eb = ix.report_element(h.a), ix.report_element(h.b)
+        clashes.append(ReportClash(
+            id=cid, name=plain_name(ea, eb), guid=cid, test=t.name, test_type=t.kind,
+            tolerance_m=t.clearance_m if t.kind == "clearance" else t.tolerance_m, status="new",
+            distance_m=round(h.distance_m, 6), point=[round(x, 4) for x in h.point], grid=None,
+            a=ea, b=eb, source="sightline"))
+
     # #N across the whole set and across runs: a clash keeps its number, a new one takes the next, none is reused.
-    numbers = dict((previous or {}).get("numbers", {}))
+    numbers = dict(known["numbers"])
     following = max([0, *numbers.values()]) + 1
     for c in clashes:
         if c.id not in numbers:
@@ -762,14 +762,19 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
     # Only like with like: a run whose tests share none with the last run's (the full check after a check on filters,
     # or the other way round) says nothing about what was resolved or no longer checked, and calls new only a clash
     # these models never had a number for (the full check's clashes come back from a check on filters, not anew).
+    # A check's first run calls new only what the open list does not already hold (another check found the rest).
     diff = _diff(previous, clashes, selections)
     if previous and not set(selections) & set(previous.get("selections", {})):
-        fresh = sorted({c.id for c in clashes} - set(previous.get("numbers", {})))
+        fresh = sorted({c.id for c in clashes} - set(known["numbers"]))
         diff = {**diff, "new": fresh, "new_ids": set(fresh), "resolved": [], "no_longer_checked": []}
+    elif not previous and known["open"]:
+        fresh = sorted({c.id for c in clashes} - set(known["open"]))
+        diff = {**diff, "new": fresh, "new_ids": set(fresh)}
     for c in clashes:
         if c.id not in diff["new_ids"]:
             c.status = "active"
-    root = Path(tempfile.mkdtemp(prefix="sightline-run-"))
+    temporary = root is None
+    root = root if root is not None else Path(tempfile.mkdtemp(prefix="sightline-run-"))
     # The title and the element count say what the tests checked (a site model open for context is not, by default).
     checked_ids = {g for sel in selections.values() for side in (sel["a"], sel["b"] or ()) for g in side}
     checked = len({ix.file[g] for g in checked_ids})
@@ -777,13 +782,43 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         title = f"Coordination · {tests[0].name}"
     report = Report(id=uuid.uuid4().hex[:12], title=title or f"Coordination · {checked} model"
                     f"{'' if checked == 1 else 's'}", root=root, sources=list(ix.names), clashes=clashes,
-                    temporary=True, origin="sightline")
+                    temporary=temporary, origin="sightline")
     state = {"clashes": {c.id: {"test": tested[c.id].id, "name": tested[c.id].name, "kind": tested[c.id].kind,
                                 "a": c.a.global_id, "b": c.b.global_id} for c in clashes},
              "selections": selections, "numbers": numbers, "contacts": [sorted(p) for p in contacts]}
     seconds = round(time.perf_counter() - t0, 2)
     return Run(report, coverage, {k: v for k, v in diff.items() if k != "new_ids"}, len(checked_ids), seconds,
                [float(x) for x in offset], state)
+
+
+def _assign_ids(hits: list[tuple[Test, object]], known: dict[str, dict]) -> list[str]:
+    """Each hit's clash id. A clash keeps its id, and so its #N, title, views, sign-offs and marks, wherever it is found
+    again: first, every hit whose own id (`clash_id` of its test and pair) was issued before keeps it; then any other
+    hit takes the id first issued for its pair and kind (a check on filters finding a pair the full check found takes
+    the full check's id), else its own. No id is taken twice in one run (two tests finding one pair stay two clashes),
+    whatever order the tests ran in."""
+    by_pair: dict[tuple, list[str]] = {}
+    for cid, was in known.items():
+        by_pair.setdefault((was.get("kind") or "hard", frozenset((was["a"], was["b"]))), []).append(cid)
+    out: list[str | None] = [None] * len(hits)
+    taken: set[str] = set()
+    for i, (t, h) in enumerate(hits):
+        own = clash_id(t.id, h.a, h.b)
+        if own in known and (known[own].get("kind") or "hard") == t.kind and own not in taken:
+            out[i] = own
+            taken.add(own)
+    for i, (t, h) in enumerate(hits):
+        if out[i] is not None:
+            continue
+        same = next((cid for cid in by_pair.get((t.kind, frozenset((h.a, h.b))), []) if cid not in taken), None)
+        own = clash_id(t.id, h.a, h.b)
+        if same is None:
+            # Its own id, unless that was issued for another kind of clash on this pair (a test id reused for another
+            # kind under other requirements): then one of its own kind.
+            same = own if own not in known and own not in taken else clash_id(f"{t.id}|{t.kind}", h.a, h.b)
+        out[i] = same
+        taken.add(same)
+    return out  # type: ignore[return-value]
 
 
 def _diff(previous: dict | None, clashes: list[ReportClash], selections: dict[str, dict]) -> dict:

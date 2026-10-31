@@ -188,9 +188,10 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
                   workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
                   settled: dict | None = None, reasoning: bool = False, alike: bool = True,
                   requirements: "reqs.Doc | None" = None, domain: str = domains.CONSTRUCTION,
-                  teams: list[str] | tuple[str, ...] = ()) -> dict[str, dict]:
+                  teams: list[str] | tuple[str, ...] = (), only: set[str] | None = None) -> dict[str, dict]:
     """A verdict for every clash in `report`. `done` holds results already known (resumed or cached); they are kept.
-    `settled` holds verdicts the open model already decides (`same_element`): no model call for those.
+    `settled` holds verdicts the open model already decides (`same_element`): no model call for those. `only`: the
+    clashes the model may be asked about (the rest get what the rules settle, or nothing).
 
     Emits {"type": "clash", "id", "source": "rule" | "model", **verdict} as each one lands. With `reasoning`, also
     {"type": "reasoning", "id", "text"} with what the model has written since the last one (a few times a second per
@@ -216,7 +217,7 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
                 known = {**known, "model_reading": f"{prior.get('verdict', '').replace('_', ' ')}: {prior['understanding']}"}
             results[c.id] = {**known, "source": "rule"}
             emit({"type": "clash", "id": c.id, **results[c.id]})
-        else:
+        elif only is None or c.id in only:
             todo.append(c)
     lock = threading.Lock()
 
@@ -322,16 +323,25 @@ class Job:
 
     def __init__(self, report: Report, model: ChatModel, info: dict, workers: int = 8,
                  requirements: "reqs.Doc | None" = None, seed: dict[str, dict] | None = None,
-                 domain: str = domains.CONSTRUCTION, teams: list[str] | tuple[str, ...] = ()):
+                 domain: str = domains.CONSTRUCTION, teams: list[str] | tuple[str, ...] = (),
+                 only: set[str] | None = None, scope: str | None = None,
+                 on_reading: Callable[[ReportClash, dict], None] | None = None):
         """`requirements`: the coordination requirements this run reads under. `seed`: model readings from an earlier
-        run under the same prompt (only the rules changed): kept, so only what they no longer settle is asked.
-        `domain`: the scene's (`domains.of`), whose voice the triage prompt takes. `teams`: the teams the models belong
-        to (`document.guess_teams`), which "responsible" names."""
+        run under the same prompt (only the rules changed, or ORCA's checks carrying readings to a new list of their
+        clashes): kept, so only what they no longer settle is asked. `domain`: the scene's (`domains.of`), whose voice
+        the triage prompt takes. `teams`: the teams the models belong to (`document.guess_teams`), which "responsible"
+        names. `only`: the clashes the model may be asked about (None: all), and `scope` the kept check they are in
+        (shown, not used). `on_reading`: told every reading the model makes, as it lands (the checks keep them)."""
         self.report, self.model, self.info, self.workers = report, model, info, workers
         self.requirements = requirements
         self.domain = domain
         self.teams = tuple(teams)
-        self.seed = {k: v for k, v in (seed or {}).items() if v.get("source") == "model"}
+        self.only, self.scope, self.on_reading = only, scope, on_reading
+        ids = {c.id for c in report.clashes}
+        # A reading kept from another list: only for clashes here, and without its alike group (read again here).
+        self.seed = {k: {x: y for x, y in v.items() if x not in ("alike", "alike_of")}
+                     for k, v in (seed or {}).items() if v.get("source") == "model" and k in ids}
+        self._by_id = {c.id: c for c in report.clashes}
         self.audit: dict[int, dict] = {}
         self.results: dict[str, dict] = {}
         self.events: list[dict] = []
@@ -377,17 +387,23 @@ class Job:
                 self.results[event["id"]] = {k: v for k, v in event.items() if k not in ("type", "id")}
             self.events.append(event)
             self._cond.notify_all()
+        if (event.get("type") == "clash" and self.on_reading is not None and event.get("source") == "model"
+                and not event.get("carried") and event["id"] in self._by_id):
+            self.on_reading(self._by_id[event["id"]], self.results[event["id"]])
 
     def start(self) -> "Job":
-        self._emit({"type": "start", "total": len(self.report.clashes), **self.info})
+        self._emit({"type": "start", "total": len(self.report.clashes), **self.info,
+                    **({"asking": len(self.only), "scope": self.scope} if self.only is not None else {})})
+
+        # Readings kept from an earlier run are in at once, so a page asking right away sees them.
+        for cid, v in self.seed.items():
+            self._emit({"type": "clash", "id": cid, **v})
 
         def work():
             try:
-                for cid, v in self.seed.items():
-                    self._emit({"type": "clash", "id": cid, **v})
                 triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True),
                               done=dict(self.seed), settled=dict(self.facts), reasoning=True,
-                              requirements=self.requirements, domain=self.domain, teams=self.teams)
+                              requirements=self.requirements, domain=self.domain, teams=self.teams, only=self.only)
                 if self.requirements is not None and self.requirements.by_design:
                     self._audit()
             except Exception as e:

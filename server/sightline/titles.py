@@ -99,8 +99,11 @@ def title_report(report: Report, model: ChatModel, emit: Callable[[dict], None] 
 class Job:
     """One titling run over a report, shared by everyone who opens it (like triage.Job): late subscribers replay it."""
 
-    def __init__(self, report: Report, model: ChatModel, info: dict, domain: str = domains.CONSTRUCTION):
+    def __init__(self, report: Report, model: ChatModel, info: dict, domain: str = domains.CONSTRUCTION,
+                 on_titles: Callable[[dict[str, str]], None] | None = None):
+        """`on_titles`: told each batch as it lands (the scene's checks keep titles for their next list)."""
         self.report, self.model, self.info, self.domain = report, model, info, domain
+        self.on_titles = on_titles
         self.titles: dict[str, str] = {c.id: c.title for c in report.clashes if c.title}
         self.events: list[dict] = []
         self.done = False
@@ -112,6 +115,8 @@ class Job:
         with self._cond:
             if event.get("type") == "titles":
                 self.titles.update(event["items"])
+                if self.on_titles is not None:
+                    self.on_titles(event["items"])
             self.events.append(event)
             self._cond.notify_all()
 
