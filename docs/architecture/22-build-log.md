@@ -1467,4 +1467,5 @@ footing B1; design in `docs/edits.md` "Seat", code `edits.seat` / `apply_seat`, 
   re-measured as -500 mm (the collision query saw the coplanar faces and fell back to the boxes' overlap).
 - **Measured:** Northbank #16 (lift pit wall into pad B1): Muse Spark proposed the seat first (13 s), verified, ranked
   above a trim; 0.20 x 0.50 x 0.65 m cut, 10% of the wall, its top 350 mm on the pad; nothing else closer; kept in
-  place in the browser. `tests/test_seat.py` (15).
+  place in the browser; Detect again: 1 resolved, 0 new. `tests/test_seat.py` (15); 644 server tests, 148 web tests;
+  answer key 3/3 first try at Rev04 heights (rows in `evals/results.csv`); `evals/step_cell.py` passes.
