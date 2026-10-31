@@ -23,7 +23,7 @@ const ACTOR: Record<Actor, { label: string; icon: LucideIcon; color: string }> =
   image: { get label() { return aiName("image"); }, icon: ImageIcon, color: "#9c3a6b" },
 };
 const ORIGIN_ICON: Record<Run["origin"], LucideIcon> = { you: User, chat: MessageSquare, agent: Bot, replay: RotateCcw };
-const KIND_NAME: Record<Run["kind"], string> = { propose: "Fixes", plan: "Plan", triage: "Triage", built: "Show it built", detect: "Check" };
+const KIND_NAME: Record<Run["kind"], string> = { propose: "Fixes", plan: "Plan", triage: "Triage", built: "Show it built", detect: "Check", chat: "Chat" };
 
 type Rect = { x: number; y: number; w: number; h: number };
 type View = { k: number; tx: number; ty: number };

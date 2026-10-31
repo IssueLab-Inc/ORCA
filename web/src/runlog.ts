@@ -2,7 +2,7 @@
  * App starts a run in the tracker that already gathers its events (a click, the chat, an agent linked over MCP and the
  * tour's replays all pass through it), and Workings draws it. Framework-free, so it is tested on its own. */
 
-export type RunKind = "propose" | "plan" | "triage" | "built" | "detect";
+export type RunKind = "propose" | "plan" | "triage" | "built" | "detect" | "chat";
 /** Who started a run: the person on this page, the chat, an agent linked over MCP, or a recorded run the tour plays. */
 export type Origin = "you" | "chat" | "agent" | "replay";
 

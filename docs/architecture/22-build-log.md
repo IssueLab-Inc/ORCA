@@ -1680,3 +1680,16 @@ in chat and MCP; [docs/filters.md](../../docs/filters.md)):
   system colours, framed; Grey → the rest back in grey; Show → as before. Chat on Muse Spark: "Show only the supply air
   ducts on level 2 in blue and hide everything else." → `set_filters` with `hide_rest` (a first "Level 2" refused with
   the closest name, then "Level 02"): 68 ducts and fittings in blue, everything else hidden, the user's filter paused.
+
+Chat turns in Workings (Oct 31; owner request: "filter by distribution systems" worked in the chat but showed nothing
+in Workings; `web/src/workingsGraph.ts`, `App.tsx`, `Chat.tsx`, `runlog.ts`, `api.ts`):
+- **What:** each Chat panel turn, typed or spoken, is a run ("Chat: <question>"): what was asked, each call to the
+  chat's model, each tool with its arguments and result and what the page did for it, the answer. Tools whose work is
+  its own run (proposals, plans, checks, Show it built) say so. Agents over MCP are not drawn yet.
+- **How:** `Chat.tsx` sends the page an `asked` event before each request; `traceChat` (App) logs the turn as run kind
+  `chat`; a new builder `chat` in `workingsGraph.ts`.
+- **Checked:** 183 web tests (one new in `workings.test.mjs`; `async-ownership.test.mjs` now expects the `asked` note);
+  build clean. In Chromium on Northbank against a local server: "filter by distribution systems" drew You asked →
+  Reads the question → Set filters (colour by System, the rest greyed, 844 elements) → Reads what the tools said →
+  Answers, in about 8 s. No page errors.
+

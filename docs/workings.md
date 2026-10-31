@@ -35,6 +35,7 @@ Look for a better fix) is drawn dashed.
 | Triage | what rules settled (by basis), the alike groups, the model's calls (running ones with their reasoning, when the model streams it), open-model facts winning, the verdict counts, the audit, the end; clashes carried along the busy edges as dots | `start`, `clash` (`source`, `basis`, `alike_of`, `model_reading`), `reasoning`, `audit`, `done` |
 | Show it built | ORCA's view (the look pass), each round's restyles, the pixel gate's numbers, the judges' verdicts, the retry and what it was told, the picture kept | `drawing`, `gate`, `judging`, `judged`, `retry`, `result` |
 | ORCA's check | each phase, each test with its candidate pairs and clashes, what was found and the difference from the last check | `phase`, `start`, `test`, `test_done`, `done` |
+| Chat | a turn in the Chat panel (typed or spoken): what you asked, each call to the chat's model, each tool ORCA ran with its arguments and result, what the page did for it (filters set, a clash selected, the view changed), the answer. A tool whose work is a run of its own (a proposal, a plan, a check, Show it built) says so; that work shows as its own run, which takes the view as it starts | `asked` (the page's own, sent by `Chat.tsx` before the request), `thinking`, `tool`, `tool_result`, `ui`, `message`, `error`, `done` |
 
 **It shows only what the streams say.** Times are when each event arrived; numbers are the server's; Muse's words
 are its own reasoning summaries and answers. It never writes "thoughts" of its own (the rule in `CLAUDE.md`: numbers
@@ -84,7 +85,7 @@ last 12), so opening it mid-run shows the run so far.
 | Part | What it does |
 |---|---|
 | `web/src/runlog.ts` | The runs the page watched: `start(kind, { origin, title, meta })` returns a handle; `add(event)` stamps it with seconds since the start and drops the meshes Workings never reads (`lean`: pieces, preview, before, placements), except a `trial`'s own `pieces` (the edit in place, for the viewer), which only the newest three proposals keep (`TRIALS_KEPT`); `end(error?)` once. Keeps 12, letting the oldest finished runs go first and never a live one; `stopAll` when the models are opened again (`open`). |
-| Hooks in `App.tsx` | `traceStart` in each tracker that already gathers a run's events: `trackAgent` (a click, the chat, an agent over MCP and the tour's replays all pass through it), `trackPlan`, `runTriage`, `drawBuilt` (pictures drawn together are runs of their own and don't grow the panel), `runDetect` (a check on filters titled with its name) and the chat's `detect_clashes` (titled as chat named its check, ended by the tool's result: chat's runs send no done event). One run of each kind at a time: a new one ends the one it replaces, and a tracker that finds newer work has taken over ends its run then. A proposal's title is the clash or pair being worked on (the chat's from its `propose_fixes` call), and its `meta.scene` the models it ran on. `peekTrial` shows a check pointed at or kept in Workings (`Peek`) over whatever the viewer showed, frames a kept one (`frameFix`) and takes the view from the pilot for it; it ignores a peek from other models, and pointing while the pilot drives. |
+| Hooks in `App.tsx` | `traceStart` in each tracker that already gathers a run's events: `trackAgent` (a click, the chat, an agent over MCP and the tour's replays all pass through it), `trackPlan`, `runTriage`, `drawBuilt` (pictures drawn together are runs of their own and don't grow the panel), `runDetect` (a check on filters titled with its name) and the chat's `detect_clashes` (titled as chat named its check, ended by the tool's result: chat's runs send no done event). `traceChat` logs each Chat panel turn (`asked` starts it; `done` or `error` ends it, and so does direct work that takes over, `replaceChatWork`); filters are logged by name, not whole. One run of each kind at a time: a new one ends the one it replaces, and a tracker that finds newer work has taken over ends its run then. A proposal's title is the clash or pair being worked on (the chat's from its `propose_fixes` call), and its `meta.scene` the models it ran on. `peekTrial` shows a check pointed at or kept in Workings (`Peek`) over whatever the viewer showed, frames a kept one (`frameFix`) and takes the view from the pilot for it; it ignores a peek from other models, and pointing while the pilot drives. |
 | `web/src/workingsGraph.ts` | A run's events to a graph as it stood at any moment: lanes, columns, steps (actor, title, status, start and end, body and detail parts), edges (sequence, path not taken, feedback, the kept path), timeline bars and ticks, flows. One builder per kind. A proposal's checks and ideas carry their trial (`Peek`: kind, moved, delta, pieces, passed, what it hit). Pure, tested against the tour's recordings. |
 | `web/src/Workings.tsx` | Draws the graph: steps as HTML on a pan-and-zoom layer, edges in SVG drawn after the steps are measured (only when the drawing changes), lane labels, Follow, zoom and Fit, Events, the minimap, the timeline with scrub and replay, the run picker (a newer run takes over from a picked one), the flow dots. The check pointed at, else the one pinned, goes to `onPeek` (not on touch: a tap pins). An error boundary keeps a run it can't draw from blanking the page. |
 | `Activity.tsx` | The Steps / Workings switch and the off button; Workings when on and picked, else the table; off, "Workings is off · Turn it on". |
@@ -96,7 +97,7 @@ step, rows by item), and dockview stays the one library added before the freeze.
 
 ## Checks
 
-- `web/tests/workings.test.mjs` (14): the run log (times, one end, finished runs let go of first and never a live one,
+- `web/tests/workings.test.mjs` (15; a chat turn whole, part way, spoken and stopped): the run log (times, one end, finished runs let go of first and never a live one,
   stopping all, meshes dropped, a trial's pieces kept for the newest three proposals only); a check's trial for the
   viewer (passed or what it hit, the idea sharing it, one still being checked); the server's check times and counts; the tour's #042
   recording (round, three ideas, checks verified at 50 mm and the ceiling hit, stop, rank, options, ghosts) whole and
@@ -126,7 +127,8 @@ step, rows by item), and dockview stays the one library added before the freeze.
 
 ## Not done (later)
 
-- A chat turn as the parent of the runs its tools start (today each run names its origin).
+- A chat turn as the parent of the runs its tools start (today the turn says a tool's work is its own run, and that
+  run names its origin). An agent's calls over MCP drawn as a run (they show in the Agent panel's log).
 - From the server: the size of the neighbourhood a failed check looked at; the alike groups in triage's `start`; a
   call-start event; which judges Show it built uses, at its start.
 - Workings on phones and tablets; comparing two runs; saving or sharing a run.

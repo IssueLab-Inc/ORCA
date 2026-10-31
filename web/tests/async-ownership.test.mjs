@@ -162,7 +162,8 @@ test("actual ChatPanel unmount aborts old-report stream and ignores delayed tool
   old.callback({ type: "ui", action: "select_clash", clash_id: "old" });
   old.resolve(); await flush();
   assert.equal(old.signal.aborted, true);
-  assert.deepEqual(events, []);
+  // Only the page's own note of the question, sent before the request; nothing the stream sent after the unmount.
+  assert.deepEqual(events, [{ type: "asked", text: "Read the old report", voice: false }]);
 });
 
 test("actual ChatPanel preserves completed history and session while direct search replaces a pending turn", async () => {

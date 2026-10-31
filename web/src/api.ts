@@ -480,6 +480,8 @@ export type PlanEvent =
 /** What the chat streams while it works (server: chat.py). */
 export type ChatEvent =
   | { type: "session"; id: string }
+  /** The page's own, before the request: what the person asked (typed or spoken), so Workings can draw the turn. */
+  | { type: "asked"; text: string; voice?: boolean }
   | { type: "thinking" }
   | { type: "tool"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; summary: string }

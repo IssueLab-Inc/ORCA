@@ -314,3 +314,35 @@ test("a check carries its trial for the viewer: in place, then passed or with wh
   assert.notEqual(offset.key, raise.key);
   assert.equal(step(g, "rank")?.peek, undefined);
 });
+
+test("a chat turn: what was asked, each model call, each tool with its result and what the page did, the answer", () => {
+  const events = [
+    { type: "asked", text: "filter by distribution systems" },
+    { type: "thinking" },
+    { type: "tool", name: "set_filters", args: { filters: [{ name: "Distribution systems" }], grey_rest: true } },
+    { type: "ui", action: "filters", mode: "replace", count: 1, names: ["Distribution systems"], grey_rest: true },
+    { type: "tool_result", name: "set_filters", summary: "1 filter on: 214 elements" },
+    { type: "thinking" },
+    { type: "message", text: "Done: distribution systems are coloured, the rest greyed." },
+  ];
+  const whole = workings.graphOf(runOf("chat", events));
+  assert.equal(step(whole, "start").title, "You asked");
+  assert.deepEqual(step(whole, "start").body, [{ kind: "quote", text: "filter by distribution systems" }]);
+  assert.deepEqual(whole.steps.map((s) => [s.lane, s.title]), [["you", "You asked"], ["muse", "Reads the question"],
+    ["orca", "Set filters"], ["muse", "Reads what the tools said"], ["muse", "Answers"]]);
+  const tool = whole.steps.find((s) => s.lane === "orca");
+  assert.equal(tool.status, "ok");
+  assert.match(texts(tool.body), /1 filter on: 214 elements/);
+  assert.equal(tool.body.find((p) => p.kind === "chips").items[0].text, "Filters: Distribution systems, the rest greyed");
+  assert.equal(whole.bars.filter((b) => b.lane === "muse").length, 2);
+  // Part way: the tool still running, no answer yet
+  const live = workings.graphOf(runOf("chat", events.slice(0, 3), { end: false }), 3.5);
+  assert.equal(live.steps.find((s) => s.lane === "orca").status, "run");
+  assert.equal(step(live, "answer"), undefined);
+  // A tool whose work is a run of its own says so; a stopped turn says why
+  const stopped = workings.graphOf(runOf("chat", [{ type: "asked", text: "fix #1", voice: true }, { type: "thinking" },
+    { type: "tool", name: "propose_fixes", args: { clash_id: "c1" } }], { error: "Stopped when newer work took over" }));
+  assert.equal(step(stopped, "start").title, "You said");
+  assert.match(texts(stopped.steps.find((s) => s.lane === "orca").detail), /a run of its own: Fixes/);
+  assert.match(texts(step(stopped, "stopped").body), /newer work/);
+});

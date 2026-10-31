@@ -277,6 +277,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask, voiceModel = "v
     setDraft("");
     setBusy(true);
     setTurns((ts) => [...ts, { role: "user", text: message, steps: [], voice: spoken }, { role: "assistant", text: "", steps: [], pending: true, request }]);
+    onEvent({ type: "asked", text: message, voice: spoken });
     try {
       await api.chat({ message, session_id: session.current, ...context() }, (e) => {
         if (!current()) return;
