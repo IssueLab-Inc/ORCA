@@ -57,7 +57,8 @@ export const contextResult = { type: "context_result", proposals: [contextPropos
 /** Runs production App render + dependency-aware passive effects, including cleanup before replacement.
  * Only external IO, the GPU viewer and leaf components are replaced. State/ref labels aid inspection;
  * the assertions always drive production event handlers and the real effect bodies. */
-export async function appHost({ initial = {}, api: overrides = {}, effects = true } = {}) {
+export async function appHost({ initial = {}, api: overrides = {}, effects = true, layout = null } = {}) {
+  globalThis.__hostLayout = layout;
   const c = { id: "clash", name: "Clash", a: {}, b: {}, images: [] };
   const report = { id: "report", title: "Report", clashes: [c] };
   const matches = { clash: { a: "duct", b: "beam", how: [] } };
@@ -99,7 +100,9 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const react = url(`const h=globalThis.${key}.hooks; export const useState=(...a)=>h.useState(...a),useRef=(...a)=>h.useRef(...a),useMemo=(...a)=>h.useMemo(...a),useEffect=(...a)=>h.useEffect(...a);`);
   const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} } export const setRequirements=()=>{}; export const setGoneHandler=(fn)=>{globalThis.${key}.gone=fn;};`);
   const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "DockHost", "SlotHost", "MeasurePanel", "PropertySets", "FiltersPanel", "blankRule", "ElementCard", "Wordmark", "AppIcon", "Notch", "LoadCard", "KeptToast", "OrcaMark"];
-  const mocks = url(`${names.map((name) => `export function ${name}(){return null;}`).join("\n")}
+  // The page's layout is none (not desktop, phone or tablet) unless a test asks for one: appHost({ layout }).
+  const mocks = url(`${names.filter((name) => name !== "useLayout").map((name) => `export function ${name}(){return null;}`).join("\n")}
+    export function useLayout(){return globalThis.__hostLayout ?? null;}
     export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
     export const clashLabel=(c)=>"#"+c.number; export const inSlot=(s,n)=>n; export const usePanelSlots=()=>({}); export const STYLES=[{id:"shaded"},{id:"consistent"},{id:"edges"},{id:"hidden"},{id:"xray"}];
     export class Viewer {constructor(){return globalThis.${key}.viewer;}} export const serverPointToViewer=(v)=>v;
