@@ -58,22 +58,33 @@ function spaces(p: Prepared): Set<string> {
   return new Set(f && k >= 0 ? f.items[k].map((i) => p.index.elements[i]) : []);
 }
 
-/** How many elements a filter as a side takes that a check can test: what it acts on, spaces left out. */
-export function sideCount(p: Prepared, r: Rule): number {
-  const skip = spaces(p);
-  return actedOn(p, r).filter((g) => !skip.has(g)).length;
+/** What a filter as a side takes, counted as the filter list counts it (`n`: what it acts on, rooms included), and
+ * the `rooms` among them, which a check cannot test (no solid body). */
+export function sideCounts(p: Prepared, r: Rule): { n: number; rooms: number } {
+  const rooms = spaces(p), acted = actedOn(p, r);
+  return { n: acted.length, rooms: acted.filter((g) => rooms.has(g)).length };
 }
 
-/** How many elements the filters show together that a check can test, and how many there are in all. */
-export function shownCount(p: Prepared, state: FilterState): { shown: number; all: number } {
-  const skip = spaces(p), view = evaluate(state, p);
-  let shown = 0, all = 0;
+/** What the filters show together (`n`, rooms included), the `rooms` among them, and how many elements there are. */
+export function shownCounts(p: Prepared, state: FilterState): { n: number; rooms: number; all: number } {
+  const rooms = spaces(p), view = evaluate(state, p);
+  let n = 0, inRooms = 0;
   for (const g of p.index.elements) {
-    if (skip.has(g)) continue;
-    all++;
-    if (!view.hide?.has(g) && (!view.only || view.only.has(g))) shown++;
+    if (view.hide?.has(g) || (view.only && !view.only.has(g))) continue;
+    n++;
+    if (rooms.has(g)) inRooms++;
   }
-  return { shown, all };
+  return { n, rooms: inRooms, all: p.index.elements.length };
+}
+
+/** The line under Check clashes when its sides take rooms: "36 rooms in By Model aren't checked: …". */
+export function roomsLine(sides: { name: string; rooms: number }[]): string | null {
+  const named = sides.filter((s) => s.rooms > 0);
+  if (!named.length) return null;
+  const word = (n: number) => (n === 1 ? "room" : "rooms");
+  const parts = named.map((s, i) => `${s.rooms.toLocaleString()} ${i === 0 ? word(s.rooms) + " " : ""}in ${s.name}`);
+  const one = named.length === 1 && named[0].rooms === 1;
+  return `${parts.join(" and ")} ${one ? "isn't" : "aren't"} checked: rooms have no solid body to clash.`;
 }
 
 /** The check a run was, if it was one (one test with a side from the filters): its name, for the summary. */

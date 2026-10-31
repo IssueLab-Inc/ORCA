@@ -1776,3 +1776,13 @@ took its grey background, border and rounded corners. The filters' class is now 
 `index.css`). Checked: `web/tests/filters.test.mjs` (14, a guard that `.fact` carries no background or border);
 Chromium on Northbank, a proposal on #1: the option's rows plain again (`.fact` background transparent, no border),
 the filters' segmented choices unchanged.
+
+Counts match between the filter list and Check clashes (Oct 31; owner: "make the counts match between the list and
+check options"; code `checks.sideCounts` / `shownCounts` / `roomsLine`, `chat.side_count`): the list said By Model
+1,768 (rooms included), the check's choices and chat 1,732 (rooms left out: no solid body to clash). Now every place
+says the list's number, and a line under the choices names the rooms a check cannot test ("36 rooms in By Model aren't
+checked"); chat's side counts carry `rooms_not_checked` (Everything counted the same way) and its reply says them.
+What is checked is unchanged. Checked: `web/tests/filters-check.test.mjs` (12), `tests/test_detect.py` (33); in
+Chromium on Northbank with the owner's filters, the list and the choices both say 844 and 1,768, the rooms line shows
+only for a side with rooms, and chat (Muse Spark, "check By Model against everything") said "1,768 elements on each
+side, but 36 on each side are rooms with no solid to clash, so 1,732 checked".
