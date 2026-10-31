@@ -68,7 +68,7 @@ A filter (`filters.Rule`) finds elements, then does one thing with them.
 - **The panel** (`FiltersPanel.tsx`): a tab behind Coordination in the left side bar; where there is no dock (the
   classic layout, tablets, phones) a sheet over the model, from the Visibility menu's **Filters by property**. **New
   filter** opens the editor; **Colour by…** adds a colour-by-value filter for a property most elements have in one
-  click; a filter's name opens it again; on hover: up, down, **Zoom to them**, delete. The filter being edited shows in
+  click; a filter's name opens it again; on hover: up, down, **Zoom to them** (what is on screen), delete. The filter being edited shows in
   the model as it is built (in its place; on top while new), and Cancel puts things back.
 - **Kept** per set of models (`sightline.filters.<project>`), and in a saved view (its `rules`). Old saved views,
   without them, leave the filters as they are. `filters.migrate` reads either back, and anything unreadable gives way.
@@ -109,7 +109,8 @@ Owner decision: one set of filters for every view, with one setting that lets th
 ## The key and small screens (built)
 
 - **The key:** while filters colour anything, a chip over the 3D view lists up to six colours and what each means (a
-  colour filter's name, a colour-by-value filter's values) and opens the Filters panel (`filters.legend`).
+  colour filter's name, a colour-by-value filter's values) and opens the Filters panel (`filters.legend`). It lists a
+  colour only when an element on screen has it: not what a filter hides, nor what a higher filter colours.
 - **Without the dock** (the classic layout, tablets, phones) the Filters panel is a sheet over the model, opened from
   the Visibility menu (Tools on a phone).
 
@@ -143,10 +144,11 @@ value** (a temporary isolate). A storey's breadcrumb offers **Filter by this lev
 
 ## Tests
 
-- `web/tests/filters.test.mjs` (7): conditions as the server matches them; every condition holding, unfinished ones
+- `web/tests/filters.test.mjs` (8): conditions as the server matches them; every condition holding, unfinished ones
   left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); colour by
   value (chosen colours, palette by place, values ticked off, what it counts); counts among the other conditions,
-  names, sets, a new filter's colour; `migrate`; the palette against the reserved colours.
+  names, sets, a new filter's colour; the key (only colours on screen); `migrate`; the palette against the reserved
+  colours.
 - `web/tests/viewer-filters.test.mjs` (5): hides, isolates and colours reach the batch, with grey for the rest;
   captures never see them; lit links leave out what a filter hides; what drawings show for each setting; a drawing's
   fill pass takes the colours on paper and gives the 3D ones back.

@@ -175,15 +175,27 @@ export function count(p: Prepared | null, rule: Rule): number {
  * filter's values with their colours; one entry a colour, at most `max`. */
 export function legend(state: FilterState, p: Prepared | null, max = 6): { colour: string; label: string }[] {
   if (!p || !state.colours) return [];
+  // Only colours on screen: an element a hide or isolate filter takes away, or a higher filter colours, does not show it.
+  const view = evaluate(state, p), gid = p.index.elements;
+  const shows = (i: number, colour: string) => !view.hide?.has(gid[i]) && (!view.only || view.only.has(gid[i]))
+    && view.paint?.get(gid[i]) === colour;
   const out: { colour: string; label: string }[] = [], seen = new Set<string>();
   const add = (colour: string, label: string) => { if (!seen.has(colour)) { seen.add(colour); out.push({ colour, label }); } };
   state.rules.forEach((rule, at) => {
     if (!rule.on) return;
-    if (rule.action === "colour") { if (count(p, rule)) add(ruleColour(rule, at), rule.name || nameFor(rule.when)); return; }
+    if (rule.action === "colour") {
+      const c = ruleColour(rule, at);
+      if ([...found(p, rule)].some((i) => shows(i, c))) add(c, rule.name || nameFor(rule.when));
+      return;
+    }
     if (rule.action !== "byValue" || !rule.by) return;
     const facet = p.byKey.get(rule.by.facet), off = new Set(rule.by.off ?? []);
     if (!facet) return;
-    for (const v of valueCounts(p, facet.key, found(p, rule))) if (!off.has(String(v.value))) add(valueColour(rule, facet, v.value), shownValue(v.value, facet.unit));
+    const hit = found(p, rule);
+    facet.values.forEach((v, k) => {
+      const c = valueColour(rule, facet, v);
+      if (!off.has(String(v)) && facet.items[k].some((i) => hit.has(i) && shows(i, c))) add(c, shownValue(v, facet.unit));
+    });
   });
   return out.slice(0, max + 1);
 }

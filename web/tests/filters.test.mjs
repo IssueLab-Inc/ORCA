@@ -92,6 +92,15 @@ test("counts among what the other conditions find, names, sets and a new filter'
   assert.equal(f.nextColour([rule({ id: "a", colour: f.PALETTE[0] })], "a"), f.PALETTE[0], "its own colour is free to keep");
 });
 
+test("the key lists the colours on screen, top filter first, and none for what a filter hides", () => {
+  const byClass = rule({ id: "c", action: "byValue", by: { facet: "class" } });
+  const state = { v: 1, colours: true, greyRest: false, rules: [rule({ id: "a", name: "Level 02", when: [{ facet: "storey", op: "is", values: ["Level 02"] }], colour: "#123456" }),
+    byClass, rule({ id: "h", action: "hide", when: [{ facet: "class", op: "is", values: ["IfcWall"] }] })] };
+  assert.deepEqual(f.legend(state, p).map((k) => k.label), ["Level 02", "Beam", "DuctSegment"],
+    "the pipe is Level 02's colour already; the wall is hidden");
+  assert.deepEqual(f.legend({ ...state, colours: false }, p), []);
+});
+
 test("a kept or saved filter state reads back, and anything unreadable gives way to none", () => {
   const good = { v: 1, colours: false, greyRest: true, rules: [rule({ id: "a" }), { id: 3 }, rule({ id: "b", action: "explode" })] };
   assert.deepEqual(f.migrate(good), { v: 1, colours: false, greyRest: true, rules: [rule({ id: "a" })] });

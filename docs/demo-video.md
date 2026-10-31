@@ -1,6 +1,7 @@
 # The 3-minute demo video
 
-**Status (Oct 31):** script agreed, every shot tested on a local server at `main` (below: "Shots, as tested"). To record
+**Status (Oct 31):** script agreed, every shot tested on a local server at `main` (below: "Shots, as tested"). Two
+picture swaps for the new filters are proposed and tested, for the owner to agree (Script, "Proposed"). To record
 by the Nov 3 freeze; submit Nov 4 before noon ET ([20](architecture/20-decisions-limits-and-roadmap.md), "The hackathon
 frame").
 
@@ -54,6 +55,19 @@ Muse Image. Each is named once, with what it does.
 | 2:42–2:50 | A voice command; an AI agent asking ORCA for a fix | "Ask it out loud, or let your own AI agent drive it." |
 | 2:50–3:00 | The wordmark settles in the notch; Observe · Resolve · Check · Apply | "Each design worked. Now, together, they do. ORCA: AI you can trust to change real designs, because it checks every change." |
 
+### Proposed: where the filters go (Oct 31, for the owner to agree)
+
+Filters, colours and the Properties panel came after the script was agreed ([filters.md](filters.md)). The script is
+already at about 2:55, so they go into two shots that exist, as pictures only: no new narration, no added time.
+
+| Slot | Picture today | Proposed picture | Why there |
+|---|---|---|---|
+| 0:12–0:26 | Northbank opens; the outer walls fade to show the steel and the services | Northbank opens; **Colour by… Discipline** gives each team its own colour; a Hide filter takes the walls and the site away; Zoom to them, from a low side angle (or X-ray) so the services show between the floors | The narration has just named three teams; the picture shows them as three colours, then the steel and services the clash story needs |
+| 2:42–2:50 | A voice command; an AI agent asking ORCA for a fix | The voice command is **"Isolate the services and colour them by system."**: the services alone, framed, a colour per system with the key, then the agent | "Ask it out loud" becomes something anyone sees at once; it is Muse Voice Transcribe and Muse Spark driving the model, which also counts for Meta tooling |
+
+Optional, picture only: while #1 is picked (0:40–1:12), keep the Properties panel in view, so the duct's breadcrumb
+(Northbank › … › Level 02) and its icon bar are on screen. Not narrated.
+
 If a take of #29 shows a failed Spark idea (it did in one of two runs), add after "Muse Spark finds a fix": "Its first
 idea fails, and ORCA says why; the second passes."
 
@@ -84,6 +98,8 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
 | Cell #29 fence post N3, Propose, then Look for a better fix | Spark: west 90 and north 320 mm, 107 mm clear (once after a failed idea, once first time). Wonder: north 360 mm, 124 mm clear, ranked first | 34–45 s, 34–38 s |
 | Cell #13 HMI stand, Propose, then Ask Muse Wonder | 7 Spark ideas, 10 Wonder ideas, none verified; No verified fix with what decides it | 82 s, 108 s |
 | #16 footing × lift pit wall | No longer a Wonder case: Spark trims the wall end as a model cleanup | 16 s |
+| Colour by Discipline, hide Site and Architecture, Zoom to them (Oct 31, local, this branch) | Four colours, then MEP and Structure only, framed; the key lists the two on screen. The filters' index arrives with the classes and levels, about 9 s after the model is drawn while ORCA's check runs: wait for **Colour by…** | under 3 s once the index is in |
+| "Isolate the services and colour them by system." (typed; the voice goes through chat) | Muse Spark, one tool call: 844 elements isolated, 9 systems, the views framed on them; the reply lists each system with its count | 7 s |
 
 ## Before recording
 
@@ -93,6 +109,8 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
   visitor), so retakes don't run out.
 - Workings is cramped in the default bottom bar. Float Activity or open it in its own window, make it tall, and use Fit
   when a run ends.
+- If the filters shots are agreed: **Clear all** in Filters before #1, so the clash shots look as tested. Filters are
+  kept per set of models in the browser, so clear them between takes too.
 - Re-measure every number on the day. A number that comes out differently changes its line, never the other way.
 
 ## Production notes

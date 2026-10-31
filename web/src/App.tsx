@@ -3013,7 +3013,7 @@ export function App() {
             <div className="filters-sheet-head"><b>Filters</b>
               <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
             <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
-              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)}
+              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frame(ids.filter((g) => v.isShown(g))); }}
             drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
           </div>)}
         {stats && filterKey.length > 0 && (
@@ -3326,7 +3326,7 @@ export function App() {
         </div>)}
       {docked && inSlot(slots.filters, <div className="filters-slot">
         <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
-          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)}
+          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frame(ids.filter((g) => v.isShown(g))); }}
           drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}
       {docked && inSlot(slots.properties, <div className="props in-panel">

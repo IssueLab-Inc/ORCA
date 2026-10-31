@@ -1560,3 +1560,6 @@ Filters by chat, voice and agents (Oct 31; owner decision: chat and voice drive 
   system the model does not have, as `set_filters` only said how many elements each filter found. It now also says
   each value a colour-by-value filter colours, with its count, and the page frames what chat isolated. The second run
   listed the nine systems and their counts, and showed the services framed and coloured.
+- **Demo shots** (`docs/demo-video.md`, "Proposed"): testing Colour by Discipline with the walls and site hidden showed
+  Zoom to them framing hidden elements too, and the key listing colours no longer on screen. Zoom to them now frames
+  only what is shown, and the key lists a colour only when an element on screen has it (`filters.legend`, a test).
