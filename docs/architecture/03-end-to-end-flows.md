@@ -71,11 +71,15 @@ A filter's **What do these hit?** or the Filters panel's **Check clashes** build
 (`checks.checkTest`: side A the filter's complete conditions, side B everything, none for itself, or another filter;
 no id) and App calls `runDetect([test])`, the same stream as above. `Workspace.detect` gives the test its id
 (`detect.check_id`) and `detect.run` finds each side against the filters' index (`facets.found`) under the same lock;
-the done event carries the tests it ran, which App keeps for Detect again. The report is titled with the check, and a
-pair the full check found keeps its id and #N. **Check the open models** is `runDetect(null)`. Chat and an agent's
-`detect_clashes` with `a` / `b` resolve their sides first (`chat.Chat._side`: a filter the page shared by name, or
-elements described as for `set_filters`), then run the same test; the page adopts the report (`ui open_report`, with
-`tests`). Design: [docs/filters.md](../filters.md) ("Checks"), [docs/detection.md](../detection.md).
+the done event carries the tests it ran. The check is kept with the scene's other checks (`checks.Register.keep`)
+and the done event's report is the list of every kept check's clashes (`Register.union`): App adopts it without
+starting over (`adoptRun`: the selected clash, marks, plans and the chat stay; a fix's mark goes only for a clash the
+check still finds) and the picker over the list shows the check. A pair the full check found keeps its id and #N.
+**Run again** on the picker (or the summary's Detect again) is `runDetect(null, sid, {check})`; **Run all again**
+`{all: true}`; **Check the open models** `runDetect(null)`. Chat and an agent's `detect_clashes` with `a` / `b`
+resolve their sides first (`chat.Chat._side`: a filter the page shared by name, or elements described as for
+`set_filters`), then run the same test; the page adopts the list (`ui open_report`, with `check` and `checks`).
+Design: [docs/filters.md](../filters.md) ("Checks"), [docs/detection.md](../detection.md) ("Kept checks").
 
 ## Pick a clash and propose fixes
 
@@ -553,8 +557,9 @@ once the server no longer holds it, and the saved session is then forgotten), `G
 `GET /api/links/{token}` (whose `applied` lists fixes its agent made while no page was open), and shows "Pick up where
 you left off". **Resume** (`resumeSession`) calls `open(info.files, existing)`, which skips opening and downloads each
 file: `GET .../files/{i}` serves the model as it is now (`Workspace.file` writes an edited one out), so kept fixes come
-back. Then `loadReport`, the saved and agent-applied fixes, the detection summary and the link (its events stream starts
-again). **Start fresh** revokes the saved link and forgets the session.
+back. Then `loadReport` (an imported report as it was, else the list of the scene's kept checks the server holds now,
+`info.report_id`), the saved and agent-applied fixes, the kept checks and the check the list showed, and the link (its
+events stream starts again). **Start fresh** revokes the saved link and forgets the session.
 
 ```mermaid
 sequenceDiagram
@@ -588,8 +593,9 @@ the scene or report on screen (a gone report also asks after the scene, so a res
 page shows one notice, **The server no longer holds your models**, in place of the
 calls' own errors; drops `fixes` and accepted `evidence` (the edits went with the scene); hides Export; and a failed
 Show it built offers the reopen instead of Try again. **Open them again** (`reopenGone`) reopens the same sample
-models (`open(sceneFiles)`) and then the same clashes: ORCA's check again (`runDetect(lastTests)`), or the same sample
-report. Uploaded models go back to the file picker (**Pick your files again**); an uploaded report is imported again.
+models (`open(sceneFiles)`) and then the same clashes: ORCA's check on screen run again, or the same sample report.
+When only the list of kept checks went (the models are still held), it is made again from them (`GET .../checks`), no
+check run. Uploaded models go back to the file picker (**Pick your files again**); an uploaded report is imported again.
 Fixes are accepted again from there.
 
 ```mermaid

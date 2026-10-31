@@ -1,6 +1,6 @@
 import { CircleCheck, CircleX, Download, FileText, LoaderCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, type DocEvent, type Evidence, type ModelTeam, type Report, type ReportClash, type Signoff, type Team, type TriageVerdict } from "./api";
+import { api, type CheckSummary, type DocEvent, type Evidence, type ModelTeam, type Report, type ReportClash, type Signoff, type Team, type TriageVerdict } from "./api";
 import type { Review } from "./ReportList";
 import { aiName } from "./aiNames";
 
@@ -69,8 +69,10 @@ const STEP: Record<string, () => string> = {
 };
 
 /** Build a coordination report: scope, which team owns each model, BCF, then progress and the download. */
-export function ReportDialog({ report, sceneId, triage, triageDone, triageRunning, teams, onTeams, evidence, signoffs, reviewed, onRunTriage, onClose, onReady, prepare }: {
+export function ReportDialog({ report, sceneId, triage, triageDone, triageRunning, teams, onTeams, evidence, signoffs, reviewed, onRunTriage, onClose, onReady, prepare, check = null }: {
   report: Report; sceneId: string | null; triage: Record<string, TriageVerdict>; triageDone: boolean; triageRunning: boolean;
+  /** The kept check the list shows (ORCA's checks): the report can hold only its clashes. */
+  check?: CheckSummary | null;
   teams: Record<string, Team>; onTeams: (t: Record<string, Team>) => void;
   evidence: Record<string, Evidence>; signoffs: Record<string, Signoff[]>; reviewed: Record<string, Review>;
   /** Before the PDF: the built views still missing or being drawn (Show it built), and the evidence with them. */
@@ -79,6 +81,10 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
 }) {
   const [models, setModels] = useState<ModelTeam[] | null>(null);
   const [scope, setScope] = useState<Scope>("combined");
+  // ORCA's checks: every kept check's clashes, or only those of the check the list shows (docs/detection.md, "Kept checks").
+  const [only, setOnly] = useState<boolean>(!!check);
+  const ofCheck = check ? report.clashes.filter((c) => c.checks && check.key in c.checks) : report.clashes;
+  const narrowed = only && check ? ofCheck : report.clashes;
   const [bcf, setBcf] = useState(true);
   const [step, setStep] = useState<DocEvent | null>(null);
   const [ready, setReady] = useState<{ url: string; name: string; bytes: number } | null>(null);
@@ -92,8 +98,8 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
     }).catch((e) => setError((e as Error).message));
   }, [report.id, sceneId]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pages = report.clashes.filter((c) => evidence[c.id] || (triage[c.id]?.verdict === "real_clash" && !reviewed[c.id])).length;
-  const reviewedPages = report.clashes.filter((c) => (evidence[c.id] || (triage[c.id]?.verdict === "real_clash" && !reviewed[c.id]))
+  const pages = narrowed.filter((c) => evidence[c.id] || (triage[c.id]?.verdict === "real_clash" && !reviewed[c.id])).length;
+  const reviewedPages = narrowed.filter((c) => (evidence[c.id] || (triage[c.id]?.verdict === "real_clash" && !reviewed[c.id]))
     && reviewersOf(c, teams).every((t) => signoffs[c.id]?.some((s) => s.team === t))).length;
 
   async function build() {
@@ -106,6 +112,7 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
         marks: Object.fromEntries(Object.entries(reviewed).map(([id, r]) => [id, r.kind])),
         // The verdicts on screen, without the model's reasoning (kept in the browser; not needed for the report).
         triage: Object.fromEntries(Object.entries(triage).map(([id, { reasoning: _r, ...v }]) => [id, v])),
+        check: only && check ? check.key : null,
       }, (e) => {
         if (e.type === "ready") { setReady(e); onReady?.(); }
         else if (e.type === "error") setError(e.message);
@@ -130,6 +137,13 @@ export function ReportDialog({ report, sceneId, triage, triageDone, triageRunnin
         </div>
         <p className="hint">{scope === "combined" ? "Everything in one PDF." : scope === "team"
           ? "Each team gets the clashes it acts on or reviews." : "Each model's file gets the clashes it is part of."}</p>
+        {check && <>
+          <div className="seg" role="group" aria-label="Which clashes">
+            <button className={!only ? "on" : ""} aria-pressed={!only} onClick={() => setOnly(false)}>All checks · {report.clashes.length}</button>
+            <button className={only ? "on" : ""} aria-pressed={only} onClick={() => setOnly(true)}>Only {check.name} · {ofCheck.length}</button>
+          </div>
+          <p className="hint">{only ? `The clashes ${check.name} found, titled as that check.` : "Every kept check's clashes, each once."}</p>
+        </>}
 
         <h3>Which team owns each model</h3>
         <p className="hint">Type each team's name. ORCA starts from a guess: a building model's discipline from what it

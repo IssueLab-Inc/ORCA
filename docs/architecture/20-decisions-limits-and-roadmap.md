@@ -90,6 +90,7 @@ carries the decision today.
 | Oct 31 (report) | A check on filters takes what the filters show: a colour-by-value filter is a side of what it colours (values ticked off left out), Everything is what the full check covers (a site model left out; site elements only through a filter), and What the filters show (all filters together, as on screen) is a side of its own, also for chat and MCP (`{"shown": true}`). The owner's "run a clash test on the filtered items" took the Site model and all 1,961 elements | `facets.acted` / `shown`, `detect.Selection.filter.by` / `view`, `detect.everything`, `checks.viewOf`; [docs/filters.md](../filters.md), "Checks" |
 | Oct 31 (request) | Hide everything a filter does not find, keeping its colours: The rest: Show · Grey · Hide under the filter list, and `hide_rest` for chat, voice and MCP ("i can filter but i can't seem to hide everything else") | `FilterState.hideRest`, `filters.evaluate`, `FiltersPanel`; [docs/filters.md](../filters.md) |
 | Oct 31 (request) | Clash detection on filtered elements, from the page, chat and MCP: one test of side A (a filter) against side B (a filter, everything or itself), What do these hit? on each filter, chat and agents using both described elements and the user's filters by name, the clashes replacing the open list (titled with the check; Detect again repeats it; Check the open models brings the full check back) | `detect.Selection.filter`, `check_id`, `chat.Chat._check`, `web/src/checks.ts`, `FiltersPanel` (`check`); [docs/filters.md](../filters.md), [docs/detection.md](../detection.md) |
+| Oct 31 (request) | Keep several clash checks at once ("we only have the results of one clash check … implement the ability to have multiple"): the latest result of each check (the open models, each check on filters), not a history of runs; one list of every check's clashes with a picker to narrow it to one; one #N per clash across every check, counting on, no restart under new requirements; triage verdicts follow the clash (carried free while unchanged, Triage reads only the unread ones in the check on screen). Replaces "the clashes replace the open list" above | `checks.py` (`Register`, `Check`, `union`), `Workspace.detect` / `detect_all` / `remove_check`, `CheckPicker`; [docs/detection.md](../detection.md), "Kept checks" |
 | Oct 31 (request) | Applying a filter, from the panel, Properties, chat or an agent, zooms every view to what it acts on (not restoring a project's or a saved view's filters, which keep their camera) | `filters.applied` / `zoomTarget`, `Viewer.frameEverywhere`; [docs/filters.md](../filters.md) |
 | Oct 31 (request) | Retrieve every property of an element, and a Properties panel with icon buttons, breadcrumbs to its storey, building, site and project (each shows its own properties) and filtering from any value | `properties.Reader`, `Properties.tsx`; [docs/panels.md](../panels.md) |
 | Oct 30 | Navigate the model with or without a clash: leave a clash (Esc, the chip's ✕), CAD-style 3D (view cube, orthographic, styles, visibility by model, class and level, hide and isolate); a picked clash shows in every open view, and clicking a clash takes every view to it by default (Fly to clash) | `leaveClash`, `views.escStep`, `viewer/cube.ts`, `Viewer.setStyle` / `setFilters` / `setTemporary`, `Viewer.clashViews`; [docs/views.md](../views.md) |
@@ -196,8 +197,10 @@ and `deploy` finds none: open work is tracked in the feature docs and here, not 
   and 8 minutes; what blocks 500 MB is the server's box measuring (one triangulation per element, about 1 ms each on 4
   CPUs) and web-ifc drawing on the page's main thread (about 3 minutes with the page frozen). See
   [docs/uploads.md](../uploads.md).
-- **Detection:** no saved tests or run history beyond the last run; very large federations are not split into local
-  cells ([docs/detection.md](../detection.md)).
+- **Detection:** each check keeps only its latest run, in memory with the scene (no saved tests, no history of runs; a
+  restart or reopening the models starts with no checks, and opening them again after a restart runs the check on
+  screen again, not every check); Run all again runs the checks one after another, its time on Northbank not yet
+  measured; very large federations are not split into local cells ([docs/detection.md](../detection.md)).
 - **Requirements:** no rules per element (by GlobalId), no import of Navisworks clash-test definitions, no STEP part
   groups as selectors, no requirements from the chat's own words ([docs/requirements.md](../requirements.md)).
 - **iOS cannot pick a folder**, so "Upload an export folder" is left out there; XML files still upload
@@ -421,7 +424,7 @@ blur them); and the size of scans against the upload caps ([docs/uploads.md](../
 | Show it built | On the MCP server (chat has `show_it_built`; MCP has no such tool yet) | [docs/show-it-built.md](../show-it-built.md) |
 | Workings | Hover a check to see its trial in the viewer; a chat turn as the parent of its runs; triage's groups and call starts from the server; phones and tablets | [docs/workings.md](../workings.md) |
 | Big models | Parse in a Web Worker; measure boxes without triangulating | [docs/uploads.md](../uploads.md) |
-| Detection | Tests saved with a project and run history (with saved state); splitting very large federations into local cells | [docs/detection.md](../detection.md) |
+| Detection | Checks saved with a project and a history of each check's runs (with saved state); Run all again in one pass (one triangle tree for every check); splitting very large federations into local cells | [docs/detection.md](../detection.md) |
 | Requirements | Rules per element, Navisworks test import, STEP groups as selectors, requirements from the chat's words | [docs/requirements.md](../requirements.md) |
 | STEP | Exact B-rep for depth | [docs/step.md](../step.md) |
 

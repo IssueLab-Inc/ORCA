@@ -40,7 +40,7 @@ function ImpactBar({ total, triage, fixes, reviewed }: { total: number; triage: 
 /** The left pane over an open report, in two tabs so the list gets the room: **Clashes** (a short head, Triage and the
  * list, which scrolls on its own) and **Insights** (the run, what the clashes add up to, root causes and patterns). */
 export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, triageCard, insights,
-  insightsCount = null, view = "clashes", onView, status, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus }: {
+  insightsCount = null, view = "clashes", onView, status, picker, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
@@ -50,6 +50,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   insightsCount?: number | null; // what is still open there (root causes + patterns), for the tab
   view?: "clashes" | "insights"; onView?: (v: "clashes" | "insights") => void;
   status?: React.ReactNode;      // a check running again, shown over the list
+  picker?: React.ReactNode;      // ORCA's kept checks: which one the list shows (docs/detection.md, "Kept checks")
   busy: boolean;
   triage: Record<string, TriageVerdict>; triageFilter: TriageKind | null;
   naming?: number;  // clashes Muse is still titling
@@ -134,6 +135,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
           {/* A short pill, so the line never wraps while the titles land; the tip names the model */}
           {naming > 0 && <span className="naming" role="status" data-tip={`${aiName("triage")} is giving each clash a short title`} data-tip-side="bottom">
             <Sparkles size={12} aria-hidden /> Naming {naming}…</span>}</p>
+        {picker}
         {status}
       </div>
       {triageCard}

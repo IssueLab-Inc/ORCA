@@ -1,6 +1,6 @@
 # 05 · Domain model and state
 
-> **Covers:** `server/sightline/service.py`, `scene.py`, `reports.py`, `detect.py`, `agent.py`, `plans.py`,
+> **Covers:** `server/sightline/service.py`, `scene.py`, `reports.py`, `detect.py`, `checks.py`, `agent.py`, `plans.py`,
 > `triage.py`, `titles.py`, `chat.py`, `agents.py`, `requirements.py`, `settings.py`, `limits.py`, `spend.py`,
 > `built.py`, `document.py`, `app.py` (its module-level stores), and the browser storage in `web/src/` (`App.tsx`,
 > `Owner.tsx`, `Chat.tsx`, `Triage.tsx`, `Agent.tsx`, `ReportDoc.tsx`, `reqFile.ts`, `signoffs.ts`) ·
@@ -26,11 +26,9 @@ classDiagram
         +dict sources
         +dict names
         +dict sizes
-        +dict detections
+        +dict checks
         +RLock lock
         +callable keep
-        +dict _runs
-        +dict _run_reports
         +dict _matches
         +dict _last
         +dict _roots
@@ -61,6 +59,9 @@ classDiagram
         +bool temporary
         +str origin
         +str requirements_id
+        +str scene_id
+        +int serial
+        +list checks
     }
     class ReportClash {
         +str id
@@ -73,6 +74,7 @@ classDiagram
         +float distance_m
         +list point
         +list images
+        +dict checks
     }
     class ReportElement {
         +str global_id
@@ -90,13 +92,35 @@ classDiagram
         +dict state
         +list offset
     }
+    class Register {
+        +Path root
+        +dict checks
+        +dict ids
+        +dict numbers
+        +dict titles
+        +dict views
+        +dict readings
+        +str report_id
+        +int serial
+    }
+    class Check {
+        +str key
+        +str name
+        +list tests
+        +int revision
+        +dict diff
+        +dict state
+        +list clashes
+    }
     Workspace "1" --> "*" IfcScene : scenes by id
     Workspace "1" --> "*" Report : reports by id
     IfcScene ..> Element : describes each element
     Report "1" --> "*" ReportClash : clashes
     ReportClash --> ReportElement : a and b
-    DetectRun --> Report : a new report per run
-    Workspace ..> DetectRun : keeps its state per scene
+    DetectRun --> Report : a run's clashes
+    Workspace "1" --> "*" Register : checks by scene id
+    Register "1" --> "*" Check : the latest run per check
+    Register ..> Report : the list of every check's clashes
 ```
 
 ```mermaid
@@ -232,8 +256,8 @@ classDiagram
     Link "1" --> "*" AgentJob : at most 16
 ```
 
-`TriageJob` is `triage.Job`, `TitleJob` is `titles.Job`, `AgentJob` is `agents.Job` and `DetectRun` is `detect.Run`
-(the diagrams need plain names).
+`TriageJob` is `triage.Job`, `TitleJob` is `titles.Job`, `AgentJob` is `agents.Job`, `DetectRun` is `detect.Run`,
+and `Register` and `Check` are `checks.Register` and `checks.Check` (the diagrams need plain names).
 
 ### The scene: `IfcScene` (`scene.py`)
 
@@ -263,8 +287,7 @@ The one place the API and MCP find scenes and reports. `app.py` makes one (`ws`)
 |---|---|---|
 | `scenes` | Scene id → `IfcScene` | `max_scenes` (`SIGHTLINE_MAX_SCENES`) and `budget` (`SIGHTLINE_SCENE_BUDGET_MB`, the IFC bytes opened), by `_evict` |
 | `sizes`, `names`, `sources`, `_roots` | Per scene: IFC bytes, the file names as opened, for STEP files the original and its converter manifest, and the scene's own temporary folder | Dropped with the scene |
-| `detections` | Scene id → the last detection run's coverage, diff, element count, seconds, requirements and report id, so a resumed page can redraw it | Dropped with the scene |
-| `_runs`, `_run_reports` | Scene id → the last run's state (clash ids with test and pair, selections, `numbers`, requirements id), and its report id, for the next run's diff and carry-over | Not dropped on eviction (small) |
+| `checks` | Scene id → its `checks.Register`: each kept check's latest run, the ids issued per pair and kind, numbers, titles, captured views (its own folder), triage readings and the current list of their clashes ([docs/detection.md](../detection.md), "Kept checks") | `SIGHTLINE_MAX_CHECKS` (12) checks per scene; dropped with the scene, its folder deleted |
 | `reports` | Report id → `Report` | `max_reports` (`SIGHTLINE_MAX_REPORTS`), by `_keep` |
 | `_matches` | (report id, scene id) → which model element each clash side is | Never dropped |
 | `_last` | (scene id, GlobalId, GlobalId) → (stamp, last try), for a second try to read | `LAST_KEPT` (200); dropped with the scene; valid only while the stamp (scene revision, requirements id) matches |
@@ -282,12 +305,19 @@ Navisworks reports and ORCA's own detection produce the same objects, so everyth
 - **`Report`:** `id`, `title`, `root` (the folder its files and views live in), `sources` (XML paths, or the model
   file names for a detected run), `clashes`, `temporary` (the folder is deleted when the report is dropped), `origin`
   (`"navisworks"` or `"sightline"` for a detected run), `requirements_id` (a detected run: the id of the requirements
-  it ran under, set by `Workspace.detect`; `None` for the defaults and for imports; in the report summary). `clash(id)`
-  also accepts "#39" and "39".
+  it ran under, set by `Workspace.detect`; `None` for the defaults and for imports; in the report summary), and for
+  the list of a scene's kept checks `scene_id`, `serial` (a later list is higher) and `checks` (the check summaries,
+  `stale` recomputed in the summary). `clash(id)` also accepts "#39" and "39".
 - **`ReportClash`:** `id`, `name` (`plain_name`: "A × B"), `guid`, `test`, `test_type`, `tolerance_m`, `status`
   (from the XML for Navisworks; `"new"` or `"active"` for detected), `distance_m` (signed, negative is overlap),
   `point`, `grid`, `a`, `b`, `images` (label and server path: "A"/"B"/"C" or "Navisworks"), `source`, `number`,
-  `title`, `ref`; property `label` ("#N title-or-name").
+  `title`, `ref`, `checks` (a detected clash: the kept checks that found it, key → its test there; empty for an
+  import); property `label` ("#N title-or-name").
+- **Kept checks** (`checks.py`): a `Register` per scene holds each check's latest run as a `Check` (`key` `models` or
+  a `filter:` id, `name`, `title`, `tests` as run, `requirements`, `revision` the scene was at, `ran_at`, `order`,
+  `seconds`, `elements`, `offset`, `coverage`, `diff`, `state`, `clashes`), the scene-wide `ids`, `numbers`, `titles`,
+  `views` and `readings` (triage verdicts by prompt key with the pair and depth they were read at), and the current
+  list's `report_id`, the lists made (`unions`) and `serial`.
 - **`ReportElement`:** `global_id`, `ifc_class`, `name`, `level`, `file`, `system`, `description`, `part_of`.
 - **Detection** (`detect.py`): a `Test` (`id`, `name`, `a` and `b` as `Selection`s of files, teams, classes,
   systems or ids; `kind` hard, clearance or duplicate; `tolerance_m`, `clearance_m`, `rules`, `enabled`,
@@ -363,10 +393,10 @@ Navisworks reports and ORCA's own detection produce the same objects, so everyth
 | Report id | 12 hex characters | `Workspace.open_report_sample`, `open_report_folder`, `detect.run` | The report's life. Every detection run is a new report with a new id |
 | Navisworks clash id | `c` + 4-digit position (`c0053`) | `reports.load`, after duplicates are dropped | Every load of the same files (so every visitor's copy of a sample report has the same ids) |
 | Detected clash id | `s` + the first 9 hex of sha1 of test id and the two GlobalIds sorted | `detect.clash_id` | Reruns, visitors and servers, while the test id and both GlobalIds stay the same |
-| `number` (shown as #N) | Integer, unique across the whole report | Navisworks: the position. Detected: `state["numbers"]` | Navisworks: the files. Detected: reruns under the same requirements id; a new clash takes the next number and a gone one's is never reused. A run under different requirements (or the scene's first) starts again from 1 |
+| `number` (shown as #N) | Integer, unique across the whole report | Navisworks: the position. Detected: the scene's register (`checks.Register.numbers`) | Navisworks: the files. Detected: every check and rerun on the scene, under any requirements; a new clash takes the next number and a gone one's is never reused. A scene's first run starts from 1 |
 | `ref` | The source tool's own label ("Clash39"), repeated per test | `reports.read_xml` | The XML |
 | `name` | "A × B" from the two elements | `reports.plain_name` | The elements' names |
-| `title` | Muse's short title | `titles.Job`, written onto the clash | Carried by clash id to a rerun's report (`Workspace._carry`) and to every copy of a sample report (`app._with_titles`) |
+| `title` | Muse's short title | `titles.Job`, written onto the clash | Kept by clash id with the scene's checks (`checks.Register.titles`), so every later list has it, and carried to every copy of a sample report (`app._with_titles`) |
 | `label` | "#N title-or-name" | `ReportClash.label` | As number and title |
 | `guid` | Navisworks result guid; for a detected clash, the clash id | `reports.read_xml`, `detect.run` | The source |
 | GlobalId | IFC's 22-character id | The authoring tool; STEP parts: uuid5 of the file hash and label path (`step.write_ifc`); new pieces of an edit: IfcOpenShell (`root.copy_class`) | The file. An offset, route or resize keeps the original GlobalId on its first piece; a STEP file always converts to the same ids |
@@ -374,8 +404,9 @@ Navisworks reports and ORCA's own detection produce the same objects, so everyth
 | Requirements id | 16 hex of sha256 of the canonical file | `requirements.doc_id` (content-addressed) | Any server: the same file has the same id. The registry keeps 500 |
 | Sign-off key (browser) | `sightline.signoffs:clash:<clash id>` for each clash of a detection run; `sightline.signoffs:import:<title>:<sorted file names as JSON>` for an imported report | `signoffs.signoffScope`, `loadSignoffs` (`web/src/signoffs.ts`) | Detected: every run of the same elements, whatever the requirements or the other models open (the id hashes the test and the GlobalId pair), and never another project. Imported: every opening of the same report (its title and files), since a Navisworks id is a place in its file |
 | `model_key`, `rules_key` | 12 hex each | `requirements.model_key`, `rules_key` | The parts of the file that change the triage prompt, and the by-design rules |
-| Triage job key | `report.id` (uploaded or detected report) or `sample:<root>`, plus `\|model_key\|rules_key` under requirements | `app._triage_key` | A sample report's run is shared by every visitor |
-| Title job key | As the triage key, without requirements | `app._triage_key` | As above |
+| Triage job key | `scene:<scene id>` (the list of a scene's kept checks), `report.id` (an uploaded report) or `sample:<root>`, plus `\|model_key\|rules_key` under requirements | `app._triage_key` | A sample report's run is shared by every visitor; a scene's run follows its clashes from list to list |
+| Title job key | `scene:<scene id>` for the list of a scene's kept checks; else as the triage key, without requirements | `app._title_key` | As above; a scene's titling follows its clashes from list to list |
+| Check key | `models` (the open models) or a check on filters' `filter:` id | `checks.key_of` | Reruns of the same check; tolerance and name are not part of it |
 | Link token | `orca_` + 43 URL-safe characters | `agents.Links.create` | Shown once; only its sha256 (`Link.key`) is kept |
 | Link id | 8 hex | `Links.create` | Public, for logs and the page |
 | Event stream id, capture id | 10 and 12 hex | `Link.subscribe`, `Link.capture` | One stream, one capture request |
@@ -442,14 +473,16 @@ stateDiagram-v2
     unchecked --> new : a later run finds it, number kept
 ```
 
-- `ReportClash.status` is `"new"` when the id was not in the last run and `"active"` when it was. `resolved` and
-  `no_longer_checked` (unchecked above) are lists in the run's `diff`, not statuses, because those clashes are not in
-  the new report.
-- A rerun compares with the last run only under the same requirements id. Under different requirements every clash
-  is new and numbering starts again.
-- Titles and captured views (A/B/C) carry over by id (`Workspace._carry`). On the page, a rerun clears `fixes` and
-  keeps `reviewed` marks for ids that are still there (`runDetect` in `App.tsx`). "Not a clash" decided from the
-  geometry (`noClash.ts`) is recomputed, not stored.
+- "A rerun" is a run of the same kept check ([docs/detection.md](../detection.md), "Kept checks"). In the list,
+  `ReportClash.status` is `"new"` when the newest run that found it did not have it before and `"active"` otherwise
+  (a check's first run calls new only what the list did not hold). `resolved` and `no_longer_checked` (unchecked
+  above) are lists in that check's `diff`, not statuses, because those clashes are not in its run.
+- A check compares with its own last run only under the same requirements id; under different requirements its run
+  is a first run, but every clash keeps its id and number (the register maps each pair and kind to one id).
+- Titles, captured views (A/B/C) and triage readings are kept with the scene's checks by id (`checks.Register`). On
+  the page, a run keeps a fix's mark until the check that lists its clash runs again (`checks.pruneFixes`), and keeps
+  `reviewed` marks for ids still listed (`adoptRun` in `App.tsx`). "Not a clash" decided from the geometry
+  (`noClash.ts`) is recomputed, not stored.
 
 ### A triage run
 
@@ -468,8 +501,11 @@ stateDiagram-v2
     finished --> [*] : over 16 jobs, or restart
 ```
 
-- A job is keyed by report and requirements (`app._triage_key`) and kept in `app._triage_jobs` (16, oldest
-  dropped). Starting one costs one proposal; following one already started is free; a page that joins late replays
+- A job is keyed by report and requirements (`app._triage_key`; the list of a scene's checks by `scene:<id>`) and
+  kept in `app._triage_jobs` (16, oldest dropped). Over ORCA's checks a model reading is kept with the scene's checks
+  as it lands (`triage.Job(on_reading=…)`, `checks.Register.keep_reading`) and carried free to any later list while
+  the pair is the same and the depth moved no more than 1 mm under the same prompt (`carried`); a new run is seeded
+  with them and asks only about the rest (`only`), in a kept check's `scope`, charged only when it asks. Starting one costs one proposal; following one already started is free; a page that joins late replays
   every event except reasoning sent before it joined (`Job.follow`).
 - `Job.learn` adds what the open model settles (one element on both sides). On a finished run, corrections go in
   before the final `done`, which is re-sent with a new summary.
@@ -508,8 +544,8 @@ stateDiagram-v2
 | What | Where | Bounded by |
 |---|---|---|
 | Open scenes, their in-memory models and edits, boxes, revisions | `Workspace.scenes` (`IfcScene`) | `SIGHTLINE_MAX_SCENES` (code default 0, no limit; Modal 8) and `SIGHTLINE_SCENE_BUDGET_MB` (default 0, by count only; Modal 300), by `Workspace._evict`; live links' last (`Workspace.keep`) |
-| Per-scene facts | `Workspace.sizes`, `names`, `sources`, `detections`, `_roots`, `_last` | Dropped with the scene; `_last` also capped at `LAST_KEPT` (200) |
-| Last detection state per scene | `Workspace._runs`, `_run_reports` | One per scene ever opened; not dropped on eviction |
+| Per-scene facts | `Workspace.sizes`, `names`, `sources`, `_roots`, `_last` | Dropped with the scene; `_last` also capped at `LAST_KEPT` (200) |
+| Kept checks per scene, and what each clash keeps (ids, numbers, titles, views, triage readings) | `Workspace.checks` (`checks.Register`) | `SIGHTLINE_MAX_CHECKS` (12) checks per scene, two lists of them; dropped with the scene |
 | Clash reports, titles on their clashes | `Workspace.reports` | `SIGHTLINE_MAX_REPORTS` (default 0; Modal 8), by `Workspace._keep`; live links' last |
 | Report-to-model matches | `Workspace._matches` | Not bounded |
 | Wider-fix proposals | `Workspace._context_proposals` | 24 per scene, 16 scenes |
@@ -540,7 +576,8 @@ Paths under "temp" are in the system temporary folder (`tempfile.gettempdir()`).
 | Uploaded models and STEP conversions | temp `sightline-models/<folder>/` (`service.MODELS`, `Workspace._roots`) | The scene is evicted (or the open fails) |
 | STEP conversion cache (when `samples/step-cache` is absent) | temp `sightline-models/step-cache/` (`Workspace.step_cache`) | Not cleaned |
 | Uploaded Navisworks reports | temp `sightline-reports/<folder>/` (`app.UPLOADS`) | The report is dropped (it is `temporary`) |
-| Detected report folders, with captured A/B/C views | temp `sightline-run-*/`, `views/<clash id>-<label>.png` | The report is dropped |
+| A run on its own (evals, the requirements preview) | temp `sightline-run-*/` | The report is dropped |
+| A scene's kept checks, with captured A/B/C views | temp `sightline-checks-*/`, `views/<clash id>-<label>.png` (`checks.Register.root`) | The scene is dropped |
 | Edited models served to the page, exports, document copies | temp `sightline-exports/` (`app.EXPORTS`): `<scene>-<index>-<file>`, `<scene>/`, `<scene>-orca.zip`, `<doc id>-<name>` | An hour (`EXPORTS_KEEP_S`), cleaned when a model file or an export is next requested |
 | Exports made over the local (stdio) MCP server | temp `orca-export-*/` (`mcp_server` `export_models`) | Not cleaned |
 | Show it built pictures | `SIGHTLINE_BUILT_CACHE`, default temp `sightline-built/` | Not cleaned |
@@ -559,7 +596,7 @@ does without.
 
 | Key | Written by | Holds |
 |---|---|---|
-| `sightline.session` | `App.tsx` | The session to resume: `scene_id`, `report_id`, `files`, `fixes` (clash id → fix title), `link` (the agent link, token included), `saved_at`. Removed by Start fresh, or when the server no longer has the scene |
+| `sightline.session` | `App.tsx` | The session to resume: `scene_id`, `report_id`, `files`, `fixes` (clash id → fix title), `link` (the agent link, token included), `saved_at`, `check` (the kept check the list showed, null for all). Removed by Start fresh, or when the server no longer has the scene |
 | `sightline.signoffs:clash:<clash id>` (a detection run) / `sightline.signoffs:import:<title>:<files>` (an imported report) | `signoffs.ts` (`saveSignoffs`, called by `App.tsx`) | Reviews (team, name, decision, note, time) for the PDF's sign-off: one entry per detected clash, or one per imported report by clash id (the sign-off key, under Identifiers). A clash with no review left is dropped, and an import's key when none has any. The old title-keyed `sightline.signoffs.<report title>` entries (every detection run shared "Coordination · N models") move over when a report with that title opens, for the clashes it has (`migrateTitleKeyed`); what is left waits for its own report |
 | `sightline.reviewer` | `ReportDoc.tsx`, read by `App.tsx` | The reviewer's name |
 | `sightline.requirements` | `reqFile.ts` | The requirements file and whether it is in use (`{doc, enabled}`); the page registers it with the server and sends its id |
@@ -594,12 +631,14 @@ screen, the runs Workings draws) is React state or module state that a reload lo
 
 On arrival the page reads `sightline.session` and asks `GET /api/scenes/{scene_id}`; a 404 (or any failure) removes
 the key and the page starts fresh. Otherwise the landing offers to pick up where it left off, and `resumeSession`
-(`App.tsx`) reopens the scene's files with their server-side edits, reloads the report, the saved fixes and the
+(`App.tsx`) reopens the scene's files with their server-side edits, reloads the report (an imported one as it was,
+else the list of the scene's kept checks as the server holds it now, on the check it showed), the saved fixes and the
 fixes the link's agent applied meanwhile (`Link.applied`), and follows the link again.
 
 ## When to update this doc
 
 - A field is added to or removed from `Workspace`, `IfcScene`, `Report`, `ReportClash`, `ReportElement`,
+  `checks.Register` or `checks.Check`,
   `detect.Test` or `detect.Run`, `agent.Option`, `Attempt`, `Result` or `Clash`, `plans.Plan` or `Item`,
   `triage.Job` or a verdict dict, `titles.Job`, `chat.Session` or `Context`, `agents.Link` or `Job`,
   `requirements.Doc` and its parts, or `settings.Settings`.

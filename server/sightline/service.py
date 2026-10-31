@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, properties, reports, requirements, settings, spend, step, verify
+from . import agent, checks, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -55,12 +55,11 @@ class Workspace:
         # Ids (scenes or reports) to evict last: what live agent links point at (app.py). Called at eviction time.
         self.keep = keep or (lambda: set())
         self.names: dict[str, list[str]] = {}       # scene id → the file names it was opened from
-        self.detections: dict[str, dict] = {}       # scene id → its last detection run (coverage, diff), to redraw it
         self.scenes: dict[str, IfcScene] = {}
         self.reports: dict[str, reports.Report] = {}
         self._matches: dict[tuple[str, str], dict] = {}
-        self._runs: dict[str, dict] = {}  # scene id → what its last detection run found, for the next run's diff
-        self._run_reports: dict[str, str] = {}  # scene id → its last detection report, whose views a rerun keeps
+        # Scene id → its kept checks and what each clash keeps from check to check (checks.py, docs/detection.md).
+        self.checks: dict[str, checks.Register] = {}
         # Scene id → {file index: {"step": original STEP, "manifest": converter manifest}} for models opened from STEP,
         # and the scene's own temporary folder (uploads, conversions), deleted when the scene is dropped.
         self.sources: dict[str, dict[int, dict]] = {}
@@ -173,7 +172,9 @@ class Workspace:
             self.sizes.pop(old, None)
             self.sources.pop(old, None)
             self.names.pop(old, None)
-            self.detections.pop(old, None)
+            register = self.checks.pop(old, None)
+            if register is not None:
+                register.drop()
             self._stays.pop(old, None)
             with self._last_lock:
                 for key in [k for k in self._last if k[0] == old]:
@@ -266,7 +267,8 @@ class Workspace:
         return built
 
     def _contacts(self, scene_id: str) -> list:
-        return (self._runs.get(scene_id) or {}).get("contacts", [])
+        register = self.checks.get(scene_id)
+        return register.contacts() if register is not None else []
 
     def connections(self, scene_id: str) -> dict:
         """What is linked to what in the open models (connections.graph), with the last check's contacts."""
@@ -763,30 +765,42 @@ class Workspace:
         return self._keep(report)
 
     def _oldest(self, held: dict, newest: str) -> str:
-        """The one to drop: the oldest that no live agent link points at, else the oldest (never the one just added)."""
-        kept = self.keep()
+        """The one to drop: the oldest that no live agent link points at (nor, for reports, is a scene's open list of
+        checks), else the oldest (never the one just added)."""
+        kept = self.keep() | {r.report_id for r in self.checks.values() if r.report_id}
         ids = [k for k in held if k != newest]
         return next((k for k in ids if k not in kept), ids[0])
 
     def _keep(self, report: reports.Report) -> reports.Report:
         self.reports[report.id] = report
         while self.max_reports and len(self.reports) > self.max_reports:
-            old = self.reports.pop(self._oldest(self.reports, report.id))
-            if old.temporary:
-                shutil.rmtree(old.root, ignore_errors=True)
+            self._drop_report(self._oldest(self.reports, report.id))
         return report
+
+    def _drop_report(self, report_id: str) -> None:
+        old = self.reports.pop(report_id, None)
+        for key in [k for k in self._matches if k[0] == report_id]:
+            self._matches.pop(key, None)
+        if old is not None and old.temporary:
+            shutil.rmtree(old.root, ignore_errors=True)
 
     def report(self, report_id: str) -> reports.Report:
         return self.reports[report_id]
 
     def report_summary(self, report_id: str) -> dict:
         r = self.report(report_id)
-        return {
+        out = {
             "id": r.id, "title": r.title, "sources": r.sources, "origin": r.origin,
             "requirements_id": r.requirements_id,
             "clashes": [{**{k: v for k, v in asdict(c).items() if k != "images"},
                          "images": [label for label, _ in c.images]} for c in r.clashes],
         }
+        if r.scene_id is not None:   # ORCA's checks: the scene, which union this is, and the checks it holds
+            scene = self.scenes.get(r.scene_id)
+            rev = scene.revision if scene is not None else None
+            out |= {"scene_id": r.scene_id, "serial": r.serial,
+                    "checks": [{**c, "stale": rev is not None and c["revision"] < rev} for c in r.checks]}
+        return out
 
     # ORCA detection (detect.py; design in docs/detection.md).
 
@@ -835,74 +849,160 @@ class Workspace:
         return {"id": requirements.doc_id(doc), "name": doc.name, "version": doc.version, "label": requirements.label(doc),
                 "level": doc.level, "strictness": doc.strictness}
 
-    def detect(self, scene_id: str, tests: list[dict] | None = None, on_event=None) -> dict:
-        """Run ORCA's own clash detection and open the result as a clash report."""
+    def detect(self, scene_id: str, tests: list[dict] | None = None, on_event=None, check: str | None = None) -> dict:
+        """Run ORCA's own clash detection as a check, keep its result with the scene's other checks, and open every kept
+        check's clashes as one clash report (checks.py). `tests` None: the open models, by the defaults or the
+        requirements'. `check`: a kept check's key, run again with the tests it ran with."""
         scene = self.scene(scene_id)
         doc = requirements.current()
+        with self.lock:
+            register = self._register(scene_id)
+            if check is not None:
+                kept = register.checks.get(check)
+                if kept is None:
+                    raise KeyError(check)
+                tests = kept.tests
+            key, run, chosen = self._run_check(scene_id, register, tests, doc, on_event)
+            report = self._union(scene_id)
+            revision = scene.revision
+        return {"report": self.report_summary(report.id), "check": key, "ran": [key],
+                "checks": register.summaries(revision), "coverage": [asdict(c) for c in run.coverage],
+                "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset,
+                "requirements": self.requirements_info(doc),
+                # The tests as run, when they were chosen (a check on filters), so the check can be run again; None:
+                # the defaults (or the requirements'), read afresh next time.
+                "tests": None if tests is None else [asdict(t) for t in chosen]}
+
+    def detect_all(self, scene_id: str, on_event=None) -> dict:
+        """Run every kept check again, one after another (the open models first), and open them as one clash report.
+        Each check takes the lock on its own, so a proposal waits for one check, not all of them. With none kept: the
+        open models."""
+        emit = on_event or (lambda e: None)
+        scene = self.scene(scene_id)
+        register = self.checks.get(scene_id)
+        keys = list(register.checks) if register is not None else []
+        if not keys:
+            return self.detect(scene_id, None, on_event)
+        doc = requirements.current()
+        ran, seconds = [], 0.0
+        for n, key in enumerate(keys):
+            with self.lock:
+                kept = register.checks.get(key)
+                if kept is None:   # removed meanwhile
+                    continue
+                emit({"type": "check", "key": key, "name": kept.name, "index": n, "of": len(keys)})
+                _, run, _ = self._run_check(scene_id, register, kept.tests, doc, on_event, key=key)
+                ran.append(key)
+                seconds += run.seconds
+        with self.lock:
+            report = self._union(scene_id)
+            revision = scene.revision
+        summaries = register.summaries(revision)
+        return {"report": self.report_summary(report.id), "check": None, "ran": ran, "checks": summaries,
+                "coverage": [c for s in summaries for c in s["coverage"]], "diff": None,
+                "elements": max([s["elements"] for s in summaries] or [0]), "seconds": round(seconds, 2),
+                "offset": None, "requirements": self.requirements_info(doc), "tests": None}
+
+    def _register(self, scene_id: str) -> checks.Register:
+        register = self.checks.get(scene_id)
+        if register is None:
+            register = self.checks[scene_id] = checks.Register()
+        return register
+
+    def _run_check(self, scene_id: str, register: checks.Register, tests: list[dict] | None, doc, on_event,
+                   key: str | None = None):
+        """One check's run, kept in the register (the caller holds the lock): its key, the run and the tests it ran."""
+        scene = self.scene(scene_id)
         if tests is not None:
             chosen = [detect.Test.from_dict(t) for t in tests]
         else:
             chosen = requirements.compile_tests(doc, scene) if doc else None
-        # A rerun compares with the last run only when both ran under the same requirements (the same tests).
+        key = key or checks.key_of(chosen)
+        # A check compares with its own last run, and only under the same requirements (the same tests).
         rid = requirements.doc_id(doc) if doc else None
-        previous = self._runs.get(scene_id)
-        if previous is not None and previous.get("requirements") != rid:
-            previous = None
-        with self.lock:
-            run = detect.run(scene, chosen, on_event=on_event, previous=previous)
-        self._runs[scene_id] = {**run.state, "requirements": rid}
-        self._carry(self.reports.get(self._run_reports.get(scene_id, "")), run.report)
-        self._run_reports[scene_id] = run.report.id
+        register.absorb(self.reports.get(register.report_id or ""))
+        run = detect.run(scene, chosen, on_event=on_event, previous=register.previous(key, rid),
+                         known=register.known(), root=register.root)
         run.report.requirements_id = rid
-        report = self._keep(run.report)
-        out = {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
-               "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset,
-               "requirements": self.requirements_info(doc),
-               # The tests as run, when they were chosen (a check on filters), so Detect again can repeat them; None:
-               # the defaults (or the requirements'), read afresh next time.
-               "tests": None if tests is None else [asdict(t) for t in chosen]}
-        self.detections[scene_id] = {k: out[k] for k in ("coverage", "diff", "elements", "seconds", "requirements", "tests")} | {"report_id": report.id}
-        return out
+        register.keep(key, run, None if tests is None else [asdict(t) for t in chosen], self.requirements_info(doc),
+                      scene.revision)
+        return key, run, chosen
+
+    def _union(self, scene_id: str) -> reports.Report | None:
+        """The scene's kept checks as one new clash report (None when none is kept); the older unions go, but the
+        last one a page or link may still be on."""
+        register = self.checks[scene_id]
+        report = register.union(uuid.uuid4().hex[:12], self.names.get(scene_id, []), scene_id,
+                                self.scene(scene_id).revision)
+        if report is None:
+            register.report_id = None
+            return None
+        self._keep(report)
+        kept = self.keep()
+        while len(register.unions) > checks.UNIONS_KEPT:
+            old = register.unions.pop(0)
+            if old not in kept:
+                self._drop_report(old)
+        return report
+
+    def union_report(self, scene_id: str) -> reports.Report | None:
+        """The scene's open list of checks, made again (with a new id) if the server let its report go."""
+        register = self.checks.get(scene_id)
+        if register is None or not register.checks:
+            return None
+        with self.lock:
+            if register.report_id in self.reports:
+                return self.reports[register.report_id]
+            return self._union(scene_id)
+
+    def checks_info(self, scene_id: str) -> dict:
+        """The scene's kept checks and the report that lists their clashes."""
+        report = self.union_report(scene_id)
+        register = self.checks.get(scene_id)
+        return {"report_id": report.id if report is not None else None,
+                "checks": register.summaries(self.scene(scene_id).revision) if register is not None else []}
+
+    def remove_check(self, scene_id: str, key: str) -> dict:
+        """Drop a check on filters and open what is left (KeyError: no such check; ValueError: the open models)."""
+        self.scene(scene_id)
+        with self.lock:
+            register = self.checks.get(scene_id)
+            if register is None:
+                raise KeyError(key)
+            register.absorb(self.reports.get(register.report_id or ""))
+            register.remove(key)
+            report = self._union(scene_id)
+            revision = self.scene(scene_id).revision
+        return {"report": self.report_summary(report.id) if report is not None else None,
+                "checks": register.summaries(revision)}
 
     def scene_info(self, scene_id: str) -> dict:
         """What a page needs to reopen a scene it had open (a reload, a closed tab): its files as they were opened,
-        which came from STEP, and the last detection run."""
+        which came from STEP, its kept checks and the report that lists their clashes."""
         self.scene(scene_id)
         return {"id": scene_id, "files": self.names.get(scene_id, []), "step": self.step_files(scene_id),
-                "detection": self.detections.get(scene_id), "revision": self.scene(scene_id).revision}
-
-    @staticmethod
-    def _carry(old: reports.Report | None, new: reports.Report) -> None:
-        """A clash keeps its id across runs, so its title and the views taken of it last time come with it."""
-        if old is None:
-            return
-        titles = {c.id: c.title for c in old.clashes if c.title}
-        before = {c.id: c.images for c in old.clashes if c.images}
-        for c in new.clashes:
-            c.title = c.title or titles.get(c.id)
-            for label, path in before.get(c.id, []):
-                if path.exists():
-                    dest = new.root / "views" / path.name
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(path, dest)
-                    c.images.append((label, dest))
+                "revision": self.scene(scene_id).revision, **self.checks_info(scene_id)}
 
     def save_capture(self, report_id: str, clash_id: str, label: str, png: bytes) -> list[str]:
         """A view of a detected clash taken in the browser (A, B or C). It joins the clash's images, so the fix agent,
-        triage and the PDF see it as they see Navisworks views. Only detected reports take captures."""
+        triage and the PDF see it as they see Navisworks views. Only detected reports take captures; they are kept with
+        the scene's checks, so every later list of its clashes has them too."""
         report = self.report(report_id)
         if report.origin != "sightline":
             raise PermissionError("Only clashes found by ORCA take captured views.")
         if label not in ("A", "B", "C"):
             raise ValueError("label must be A, B or C")
         clash = report.clash(clash_id)
-        folder = report.root / "views"
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{clash_id}-{label}.png"
-        path.write_bytes(png)
-        images = dict(clash.images)
-        images[label] = path
-        clash.images = sorted(images.items())
+        register = self.checks.get(report.scene_id or "")
+        if register is None:
+            raise PermissionError("These models are no longer open here: open them again to take views.")
+        register.save_view(clash.id, label, png)
+        clash.images = register.images(clash.id)
+        current = self.reports.get(register.report_id or "")
+        if current is not None and current is not report:
+            same = next((c for c in current.clashes if c.id == clash.id), None)
+            if same is not None:
+                same.images = register.images(clash.id)
         return [k for k, _ in clash.images]
 
     def report_image(self, report_id: str, clash_id: str, index: int) -> Path:

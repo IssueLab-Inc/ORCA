@@ -145,20 +145,22 @@ separating-axis check runs on every pair whose boxes overlap deeper than the tol
 
 A run is a clash report like an imported one, so every existing feature works on it unchanged. It differs in four ways:
 - **Origin.** It is marked `sightline` rather than `navisworks`, so the wording changes: "Found by ORCA: −300 mm".
-- **Stable ids.** A clash's id is `s` plus a hash of its test and the two GlobalIds, sorted. Running again gives the same
-  ids, so fixes, reviews and sign-offs stay attached. There are no "Clash 1, 2, …" names. Each clash has a
-  number, #N, unique across the whole report and kept across runs (a new clash takes the next number; a resolved one's
-  number is never reused). It has a plain name from its two elements at once, and a title Muse writes from its facts
-  shortly after ("Cold-water main clips the transfer girder at grid 3, level 02"; `server/sightline/titles.py`).
-- **The same clash in another check.** A clash takes the id the last run gave the same pair of the same kind under
-  another test (a check on filters finding a pair the full check found), so its #N, title, views, sign-offs and marks
-  follow it between the full check and checks on filters.
-- **Run diff.** ORCA keeps the last run per set of open models. On the next run each clash is `new` or `active`,
-  and a clash that has gone is listed as **resolved** only if both elements were still checked against each other in
-  a complete test. If one left the selection (deleted, or the test changed) it is **no longer checked**, which is not
-  the same as resolved. **Only like with like:** when the run shares no test with the last one (the full check after a
-  check on filters, or the other way round), it says nothing about resolved or no longer checked, and a clash is new
-  only if these models never gave it a number (going back to the full check brings its clashes back, not anew).
+- **Stable ids.** A clash's id is `s` plus a hash of its test and the two GlobalIds, sorted, the first time it is
+  found. Running again gives the same ids, so fixes, reviews and sign-offs stay attached. There are no "Clash 1, 2, …"
+  names. Each clash has a number, #N, unique across every check of the open models and kept across runs (a new clash
+  takes the next number; a resolved one's number is never reused), under any requirements. It has a plain name from
+  its two elements at once, and a title Muse writes from its facts shortly after ("Cold-water main clips the transfer
+  girder at grid 3, level 02"; `server/sightline/titles.py`).
+- **The same clash in another check.** A clash takes the id first issued for the same pair of the same kind, whatever
+  check found it then (a check on filters finding a pair the full check found takes the full check's id), so its #N,
+  title, views, sign-offs, marks and triage reading follow it between the full check and checks on filters ("Kept
+  checks", below). Two tests of one run that find the same pair stay two clashes, whatever order they run in.
+- **Run diff.** Each check is compared with its own last run (under the same requirements). On the next run each
+  clash is `new` or `active`, and a clash that has gone is listed as **resolved** only if both elements were still
+  checked against each other in a complete test. If one left the selection (deleted, or the test changed) it is **no
+  longer checked**, which is not the same as resolved. A check's first run calls new only a clash the open list does
+  not already hold. **Only like with like:** a run of the open models whose tests share none with its last run says
+  nothing about resolved or no longer checked.
 - **Title.** A run of one check on filters is titled with it: "Coordination · DuctSegment vs Everything".
 - **Coverage.** Per test it reports:
   - elements on each side;
@@ -168,6 +170,55 @@ A run is a clash report like an imported one, so every existing feature works on
   - seconds taken, and whether it was partial.
 
   The UI and the PDF show this, so a reader can see what was and wasn't checked.
+
+## 4a. Kept checks (Oct 31)
+
+Owner request (Oct 31): "with ORCA's clash detection, at any given point, we only have the results of one clash check
+… implement the ability to have multiple". Owner decisions, the same day: keep the **latest result of each check**,
+not a history of runs; **one clash list** of every check's clashes with a picker to narrow it; **one #N per clash**
+across all checks, counting on (no restart when the requirements change); **triage verdicts follow the clash**. This
+replaces "a check's clashes replace the open list" (Oct 31, [filters.md](filters.md)). Code: `server/sightline/checks.py`.
+
+- **A check** is one question of the open models: **the open models** (key `models`: every pair and each model against
+  itself, the ticks of the setup card, or what the requirements compile to), or **one check on filters** (key: its
+  `filter:` id, from what it compares; [filters.md](filters.md), "Checks"). Chat's checks of described elements are
+  checks on filters too. Its tolerance and name are not part of it: checking it again at 10 mm replaces it at 1 mm.
+- **Latest per check.** Running a check again replaces only its own clashes and diffs against its own last run, so
+  full check → check on filters → full check still says what was resolved. At most `SIGHTLINE_MAX_CHECKS` (12) are
+  kept per scene; past it the oldest check on filters goes, never the open models. A check on filters can be removed;
+  the open models are run again, never removed. **Run all again** runs every kept check one after another (the open
+  models first), for one detection run, taking the lock per check so a proposal waits for one check, not all.
+- **One list.** Every kept check's clashes make one report (`Register.union`), a new one (new id, higher `serial`)
+  whenever a check runs or goes; the page, triage, Insights, Fix together, chat, MCP and the PDF read it as any
+  report. A clash two checks found is one row: its test as the first check found it (the open models first), its
+  measure from the newest run, and `checks` naming each check that found it with its test there. The report's title
+  says what it holds ("Coordination · 3 models + 2 checks"). Each scene keeps its current list and the one before it.
+- **What a clash keeps** lives with the scene, not a report (`checks.Register`): the ids issued for each pair and kind,
+  the numbers, Muse's titles, the A/B/C views (in the scene's own folder `sightline-checks-*`), and the triage
+  readings. A list the server lets go of (the shared report cap on Modal) is made again from them, with a new id and
+  no detection run (`Workspace.union_report`, `GET /api/scenes/{id}/checks`).
+- **Stale.** Each check records the scene's revision when it ran; a fix kept since leaves it **stale** ("ran before a
+  fix you kept"). The page keeps a fix's mark on a clash until the check that lists it runs again: a check that still
+  finds it says it was not fixed, one that no longer does has resolved it.
+- **Triage follows the clash.** One triage run per scene (`scene:<id>`) follows its clashes from list to list. Every
+  reading the model makes is kept with the clash's pair and depth, under its triage prompt (`requirements.model_key`);
+  a later list gets it free (`carried`) while the pair is the same and the depth moved no more than 1 mm
+  (`checks.same_clash`; the page drops a verdict on the same test). A failed read (an error, no verdict) is not kept:
+  it stays unread, to be asked again. Triage then asks only about the clashes no reading holds for (`unread`), in
+  the check the list shows (`scope`), or all, for one proposal; with nothing unread it costs nothing, and a run that
+  asks nothing makes no audit call either (it keeps the last audit of the by-design rules). While a run is under
+  way, a new ask follows it when it reads those clashes anyway; otherwise it is charged once and queued behind it
+  ("Waits for the triage already under way"), working out what to read when the first run ends. Under requirements
+  with another prompt nothing carries: the last run shows, marked stale, as before.
+- **Titles** are one titling run per scene too: a new list follows the run under way (titles land on every list),
+  then asks again for the clashes it adds.
+- **Documents.** The PDF and BCF can hold one check's clashes, titled as that check's run (`DocumentRequest.check`;
+  MCP `generate_report(check=…)`), or every check's.
+- **An imported Navisworks report** never joins the list (its ids are positions in its file): opening one shows it on
+  its own, and the Coordinate menu offers **Back to ORCA's checks**.
+- **Limits.** Kept checks live in memory with the scene: a restart or reopening the models starts with none, and
+  opening them again after a restart runs the check on screen again, not every check. Run all again is sequential;
+  its time on Northbank is not measured yet.
 
 ## 5. Pictures
 
@@ -214,7 +265,7 @@ agent, triage of that clash and the PDF then use them like Navisworks pictures.
 
 ## Not in this version
 
-- Tests saved with a project, and run history beyond the last run (this belongs with saving state).
+- Tests saved with a project, and a history of runs beyond each check's latest (this belongs with saving state).
 - Splitting very large federations into local cells. Northbank and the cell fit in one tree; the far-from-origin offset
   covers the coordinate trap.
 - Detection on STEP models directly. STEP arrives as IFC (the cell is generated both ways), so it is detected like any IFC.

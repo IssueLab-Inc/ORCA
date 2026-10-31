@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import context_planner, domains, edits, facets, plans, settings
+from . import checks, context_planner, domains, edits, facets, plans, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 from .limits import env_int
@@ -64,11 +64,14 @@ TOOLS = [
     _fn("detect_clashes", "Find the clashes in the open models with ORCA's own detection, no Navisworks report "
         "needed: every pair of models and each model against itself (hard clashes deeper than the tolerance, 1 mm by "
         "default) and duplicates. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and touches "
-        "are counted, not reported. Takes about 10 s and opens the result as the user's clash report, replacing the open "
-        "one; running it again after fixes says which clashes were resolved. Each run counts against the demo's "
-        "detection runs. To check only some elements, give a (and b): one check of what A takes against what B takes "
-        "(everything the full check covers, by default, or itself).",
-        {"tolerance_mm": {"type": "number", "description": "hard clash tolerance in mm (default 1)"},
+        "are counted, not reported. Takes about 10 s. ORCA keeps the latest result of each check (the open models, and "
+        "each check of some elements): running one again replaces only its clashes and says which were resolved since "
+        "its last run. The user's clash list holds every kept check's clashes; a clash two checks find is one clash "
+        "with one #N. Each run counts against the demo's detection runs. To check only some elements, give a (and b): "
+        "one check of what A takes against what B takes (everything the full check covers, by default, or itself). "
+        "To run a kept check again, give check (its name), or \"all\" for every kept check.",
+        {"check": {"type": "string", "description": "a kept check's name to run it again, or \"all\""},
+         "tolerance_mm": {"type": "number", "description": "hard clash tolerance in mm (default 1)"},
          "a": _SIDE, "b": _SIDE,
          "kind": {"type": "string", "enum": ["hard", "clearance", "duplicate"], "description": "with a: the kind of check"},
          "clearance_mm": {"type": "number", "description": "for a clearance check: report gaps under this"},
@@ -78,6 +81,7 @@ TOOLS = [
     _fn("list_clashes", "List clashes in the report, optionally filtered. Returns at most `limit` rows.", {
         "query": {"type": "string", "description": "words to match in names, classes, levels, test names"},
         "test": {"type": "string", "description": "exact clash test name"},
+        "check": {"type": "string", "description": "only the clashes this kept check found (its name)"},
         "in_model_only": {"type": "boolean", "description": "only clashes whose two elements are in the open model"},
         "limit": {"type": "integer"}}),
     _fn("get_clash", "Everything about one clash: both elements, Navisworks distance, clash point, whether it is in "
@@ -219,6 +223,7 @@ class Context:
     # detect_clashes by name, and how they show together ({hide_rest, colours}) for its {"shown": true} side.
     filters: list[dict] = field(default_factory=list)
     filter_view: dict = field(default_factory=dict)
+    check: str | None = None   # the kept check the user's list shows (its key; None: every kept check)
 
 
 def page_view(ctx: Context) -> dict:
@@ -439,10 +444,16 @@ class Chat:
     def _context_line(self, ctx: Context) -> str:
         parts = ["[context]"]
         parts.append("a model is open" if ctx.scene_id in self.ws.scenes else "no model is open")
-        if ctx.report_id in self.ws.reports:
-            r = self.ws.report(ctx.report_id)
+        r = self._open_report(ctx)
+        if r is not None:
             source = "found by ORCA's own detection" if r.origin == "sightline" else "from Navisworks"
             parts.append(f"clash report '{r.title}' is open ({len(r.clashes)} clashes, {source})")
+            if r.origin == "sightline" and r.checks:
+                kept = [f"'{c['name']}' ({c['clashes']})" for c in r.checks]
+                parts.append(f"it lists {len(kept)} kept check{'s' if len(kept) != 1 else ''}: {', '.join(kept)}")
+                viewing = next((c["name"] for c in r.checks if c["key"] == ctx.check), None)
+                if viewing:
+                    parts.append(f"the user's list shows only '{viewing}'")
         else:
             parts.append("no clash report is open")
         if ctx.clash_id:
@@ -480,11 +491,25 @@ class Chat:
             raise LookupError("no model is open: ask the user to open the models first")
         return ctx.scene_id  # type: ignore[return-value]
 
+    def _open_report(self, ctx: Context):
+        """The open report, or None. ORCA's list of checks the server let go is made again (clash ids are the same)."""
+        if ctx.report_id in self.ws.reports:
+            return self.ws.report(ctx.report_id)  # type: ignore[arg-type]
+        if ctx.report_id and ctx.scene_id in self.ws.scenes:
+            register = self.ws.checks.get(ctx.scene_id)  # type: ignore[arg-type]
+            if register is not None and ctx.report_id in register.unions:
+                report = self.ws.union_report(ctx.scene_id)  # type: ignore[arg-type]
+                if report is not None:
+                    ctx.report_id = report.id
+                    return report
+        return None
+
     def _report(self, ctx: Context):
-        if ctx.report_id not in self.ws.reports:
+        report = self._open_report(ctx)
+        if report is None:
             raise LookupError("no clashes are open: check the open models with detect_clashes, or ask the user to import a report "
                               "from 'Coordinate'")
-        return self.ws.report(ctx.report_id)  # type: ignore[arg-type]
+        return report
 
     def _matches(self, ctx: Context) -> dict:
         return self.ws.match(ctx.report_id, ctx.scene_id) if ctx.scene_id in self.ws.scenes else {}  # type: ignore
@@ -523,7 +548,19 @@ class Chat:
             sid = self._scene(ctx)
             tests = None
             check = None
-            if args.get("a") or args.get("b"):
+            # A kept check again, by its name, or every kept check (docs/detection.md, "Kept checks").
+            again = str(args.get("check") or "").strip()
+            register = ws.checks.get(sid)
+            kept = None
+            if again:
+                if again.lower() != "all":
+                    kept = register.find(again) if register is not None else None
+                    if kept is None:
+                        names = [c.name for c in register.checks.values()] if register is not None else []
+                        return ({"error": f"No kept check {again!r}." + (f" Kept: {', '.join(names)}." if names else
+                                                                        " None is kept yet: run one first.")},
+                                "refused: no such check", [])
+            elif args.get("a") or args.get("b"):
                 # One check of what A takes against what B takes (docs/filters.md, "Checks"), resolved and counted
                 # before a detection run is spent: a name the models lack, or an A that finds nothing, costs none.
                 try:
@@ -538,24 +575,42 @@ class Chat:
             refused = detect_ok()   # one detection run, as POST /detect/stream takes
             if refused:
                 return {"error": refused}, "refused: detection runs used", []
-            out = ws.detect(sid, tests, on_event=lambda e: emit({"type": "detect_event", "event": e}))
+            forward = lambda e: emit({"type": "detect_event", "event": e})
+            if again.lower() == "all":
+                out = ws.detect_all(sid, on_event=forward)
+            else:
+                out = ws.detect(sid, tests, on_event=forward, check=kept.key if kept is not None else None)
             rid = out["report"]["id"]
             ctx.report_id = rid  # the rest of this answer works on the new report
+            ctx.check = out["check"]
             detection = {k: out[k] for k in ("coverage", "diff", "elements", "seconds", "tests")}
-            emit({"type": "ui", "action": "open_report", "report_id": rid, "detection": detection})
+            emit({"type": "ui", "action": "open_report", "report_id": rid, "detection": detection,
+                  "check": out["check"], "checks": out["checks"]})
             n = len(out["report"]["clashes"])
+            ran = [c for c in out["checks"] if c["key"] in out["ran"]]
+            kept_checks = [{"name": c["name"], "clashes": c["clashes"], "stale": c["stale"]} for c in out["checks"]]
+            if out["check"] is None:   # every kept check again
+                summary = {"report_id": rid, "clashes": n, "seconds": out["seconds"],
+                           "checks_run": [{"name": c["name"], "clashes": c["clashes"], "since_last_run": None
+                                           if c["diff"].get("first") else {"new": len(c["diff"]["new"]),
+                                                                           "resolved": len(c["diff"]["resolved"])}}
+                                          for c in ran],
+                           "note": "Every kept check ran again; the open list holds all their clashes."}
+                return summary, f"{len(ran)} checks run again, {n} clashes in the list", []
+            this = ran[0]
             diff = out["diff"]
-            summary = {"report_id": rid, "clashes": n, "seconds": out["seconds"], "elements": out["elements"],
+            summary = {"report_id": rid, "check": {"name": this["name"]}, "clashes": this["clashes"],
+                       "open_list": n, "kept_checks": kept_checks,
+                       "seconds": out["seconds"], "elements": out["elements"],
                        "tests": [{"test": c["name"], "clashes": c["clashes"], "touching": c["touching"],
                                   "meant_to_meet": c["excluded"], "partial": c["partial"]} for c in out["coverage"]],
                        "since_last_run": None if diff.get("first") else {
                            "new": len(diff["new"]), "resolved": len(diff["resolved"]),
                            "no_longer_checked": len(diff["no_longer_checked"])},
-                       "note": "The result is now the open clash report. Triage sorts real problems from noise."}
+                       "note": "The check is kept with the others; the open list holds every kept check's clashes, "
+                               "and the user's list now shows this check. Triage sorts real problems from noise."}
             if check is not None:
                 summary["check"] = {**check, "name": out["tests"][0]["name"]}
-                summary["note"] = ("The check's clashes are now the open clash report; the full check comes back with "
-                                   "detect_clashes and no sides.")
                 rooms = [f"{c['rooms_not_checked']} in {c['name']}" for c in (check["a"], check["b"])
                          if c and c.get("rooms_not_checked")]
                 if rooms:   # counted as the user's Filters panel counts them, but never part of a clash check
@@ -578,6 +633,8 @@ class Chat:
                     p["worst_mm"], p["example"] = d, c.id
                 p["touching"] += abs(d) <= 1
             res = {"title": r.title, "clashes": len(r.clashes), "tests": len(tests), "in_open_model": in_model,
+                   **({"checks": [{"name": c["name"], "clashes": c["clashes"], "stale": c["stale"]} for c in
+                                  self.ws.report_summary(r.id).get("checks", [])]} if r.checks else {}),
                    "fixed": len(ctx.fixed), "by_test": dict(tests.most_common(80)),
                    "by_class_pair": dict(sorted(pairs.items(), key=lambda kv: kv[1]["worst_mm"])),
                    "note": "non_physical_side: a space, port or opening is involved (not a physical clash); "
@@ -587,7 +644,16 @@ class Chat:
             r, matches = self._report(ctx), self._matches(ctx)
             q = (args.get("query") or "").lower().split()
             rows = []
+            only = None
+            if args.get("check"):
+                kept = checks.pick(r.checks, args["check"])
+                only = kept["key"] if kept else None
+                if only is None:
+                    return ({"error": f"No kept check {args['check']!r}. Kept: "
+                                      + (", ".join(c["name"] for c in r.checks) or "none") + "."}, "no such check", [])
             for c in r.clashes:
+                if only is not None and only not in c.checks:
+                    continue
                 m = matches.get(c.id, {})
                 text = " ".join(str(x) for x in [f"#{c.number}", c.title, c.name, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class,
                                                  c.a.level, c.b.level, c.a.system, c.b.system]).lower()
@@ -597,7 +663,11 @@ class Chat:
                     continue
                 if args.get("in_model_only") and not (m.get("a") and m.get("b")):
                     continue
-                rows.append(self._row(c, m, ctx))
+                row = self._row(c, m, ctx)
+                if c.checks:   # which kept checks found it, by their names
+                    names = {k["key"]: k["name"] for k in r.checks}
+                    row["checks"] = [names.get(k, k) for k in c.checks]
+                rows.append(row)
             limit = max(1, min(int(args.get("limit") or 30), 60))
             return {"total": len(rows), "clashes": rows[:limit]}, f"{len(rows)} clashes match", []
         if name == "get_clash":

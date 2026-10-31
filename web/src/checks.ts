@@ -1,9 +1,10 @@
-import type { CheckDefaults, CheckView, DetectSelection, DetectTest, SideFilter } from "./api";
+import type { CheckDefaults, CheckSummary, CheckView, DetectSelection, DetectTest, Report, ReportClash, SideFilter } from "./api";
 import { actedOn, complete, evaluate, nameFor, withBy, type FilterState, type Prepared, type Rule } from "./filters";
 
 /** Checks on filters (docs/filters.md, "Checks"): one clash test of what side A takes (a filter, or what the filters
  * show together) against side B (a filter, what the filters show, everything or itself), run by ORCA's own detection;
- * its clashes replace the open list. A filter as a side is what it acts on: colouring by value, what it colours.
+ * its clashes join the list as a check of its own (kept checks, below). A filter as a side is what it acts on: colouring
+ * by value, what it colours.
  * Everything is what the full check covers (the server's `check.everything`: a site model left out). Pure: FiltersPanel
  * builds the test, App runs it. The server gives a check with no id its own (`detect.check_id`), from what it compares. */
 
@@ -92,4 +93,34 @@ export function checkOf(tests: DetectTest[] | null | undefined): string | null {
   if (!tests || tests.length !== 1) return null;
   const t = tests[0];
   return t.a.filter || t.a.view || t.b?.filter || t.b?.view ? t.name : null;
+}
+
+/** Kept checks (docs/detection.md, "Kept checks"): ORCA keeps each check's latest result, and the list holds them all.
+ * The list as one check shows it (null: every check), each clash under its test in that check. */
+export function narrow(report: Report, key: string | null): Report {
+  if (!key || report.origin !== "sightline") return report;
+  return { ...report, clashes: report.clashes.filter((c) => c.checks && key in c.checks).map((c) => ({ ...c, test: c.checks![key] })) };
+}
+
+/** Whether two rows are the same clash, unchanged: the same pair of elements, the depth moved no more than 1 mm (the
+ * server's `checks.same_clash`). A triage verdict holds only while this is so. */
+export function sameClash(a: ReportClash, b: ReportClash): boolean {
+  const pair = (c: ReportClash) => [c.a.global_id ?? "", c.b.global_id ?? ""].sort().join("|");
+  if (pair(a) !== pair(b) || (a.distance_m == null) !== (b.distance_m == null)) return false;
+  return a.distance_m == null || Math.abs(a.distance_m - (b.distance_m as number)) <= 0.001;
+}
+
+/** The fixes to show after `ran` (check keys) ran again: a clash a check that ran still finds was not fixed, and one no
+ * check lists any more has gone; a fixed clash only checks that did not run still list keeps its mark until they do. */
+export function pruneFixes(fixes: Record<string, string>, after: Report, ran: string[]): Record<string, string> {
+  const by = new Map(after.clashes.map((c) => [c.id, c]));
+  return Object.fromEntries(Object.entries(fixes).filter(([id]) => {
+    const c = by.get(id);
+    return !!c && !ran.some((k) => !!c.checks && k in c.checks);
+  }));
+}
+
+/** A kept check's line in the picker: "Ducts vs Everything · 3", and whether a fix was kept since it ran. */
+export function checkLabel(c: CheckSummary): string {
+  return `${c.name} · ${c.clashes.toLocaleString()}${c.stale ? " · ran before a fix" : ""}`;
 }

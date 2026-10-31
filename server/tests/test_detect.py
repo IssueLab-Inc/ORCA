@@ -229,23 +229,34 @@ def test_a_clash_keeps_its_id_and_number_across_the_full_check_and_a_check_on_fi
     sid = ws.open([p.name for p in paths])
     pair = lambda out: next(c for c in out["report"]["clashes"] if {c["a"]["name"], c["b"]["name"]} == {"Duct D1", "Beam B1"})
     full = ws.detect(sid)
-    assert full["tests"] is None
+    assert full["tests"] is None and full["check"] == "models"
     check = ws.detect(sid, [{"a": {"filter": DUCTS}, "b": {}}])
+    key = check["check"]
+    assert key.startswith("filter:") and check["tests"][0]["id"] == key
+    # Both checks are kept and listed together: the pair both found is one clash, with one id and number.
     assert (pair(check)["id"], pair(check)["number"]) == (pair(full)["id"], pair(full)["number"])
-    assert check["report"]["title"] == "Coordination · DuctSegment vs Everything"
-    assert check["diff"]["resolved"] == [] and check["diff"]["no_longer_checked"] == [], "not like with like: no noise"
-    assert check["tests"][0]["id"].startswith("filter:") and ws.detections[sid]["tests"] == check["tests"]
+    assert set(pair(check)["checks"]) == {"models", key}
+    assert [c["key"] for c in check["checks"]] == ["models", key]
+    this = check["checks"][1]
+    assert this["name"] == "DuctSegment vs Everything" and this["title"] == "Coordination · DuctSegment vs Everything"
+    assert check["report"]["title"] == "Coordination · 2 models + 1 check"
+    assert len(check["report"]["clashes"]) == len(full["report"]["clashes"])
+    assert check["diff"]["first"] and check["diff"]["new"] == [], "the list already held what the check found"
+    assert check["diff"]["resolved"] == [] and check["diff"]["no_longer_checked"] == []
+    assert ws.checks[sid].checks[key].tests == check["tests"]
+    # The full check again compares with its own last run, not with the check on filters.
     back = ws.detect(sid)
-    assert pair(back)["id"] == pair(full)["id"] and back["diff"]["no_longer_checked"] == []
-    assert back["diff"]["new"] == [], "the full check's clashes come back, not anew"
+    assert pair(back)["id"] == pair(full)["id"] and back["diff"]["first"] is False
+    assert back["diff"]["new"] == [] and back["diff"]["resolved"] == [] and back["diff"]["no_longer_checked"] == []
     assert {c["status"] for c in back["report"]["clashes"]} == {"active"}
-    # Detect again on the same check still says what was fixed.
-    ws.detect(sid, check["tests"])
+    # Running the check again still says what was fixed; the full check still lists it until it runs again.
     scene = ws.scene(sid)
     scene.translate([pair(full)["a"]["global_id"] if pair(full)["a"]["name"] == "Duct D1" else pair(full)["b"]["global_id"]],
                     (0.0, 0.0, -0.6))
-    moved = ws.detect(sid, check["tests"])
+    moved = ws.detect(sid, check=key)
+    assert moved["check"] == key
     assert any({r["a"], r["b"]} >= {pair(full)["a"]["global_id"]} for r in moved["diff"]["resolved"])
+    assert pair(moved)["checks"] == {"models": "MEP vs Structure"}
 
 
 def test_the_tests_and_their_defaults_for_a_check(paths, tmp_path):
@@ -302,7 +313,7 @@ def test_a_run_is_a_report_the_rest_of_sightline_reads(paths, tmp_path):
     out = ws.detect(sid)
     rid = out["report"]["id"]
     report = ws.report(rid)
-    assert out["report"]["origin"] == "sightline" and report.temporary
+    assert out["report"]["origin"] == "sightline" and report.scene_id == sid and not report.temporary
     matches = ws.match(rid, sid)
     assert all(m["how"] == ["globalid", "globalid"] for m in matches.values())
     assert all(triage.by_rule(c) is None for c in report.clashes)   # real overlaps, not touches or non-physical

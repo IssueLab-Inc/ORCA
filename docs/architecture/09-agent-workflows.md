@@ -435,10 +435,24 @@ system; signed distance; clash point) and the A/B/C pictures when the host takes
 
 One run per report is shared by every visitor; late subscribers replay what has landed.
 
-- **Keys** (`app._triage_key`): a sample report is the same files for everyone, so its key is `sample:<root>`; a
-  temporary report (a detection run, an upload) uses its id. Under requirements the key adds
-  `requirements.model_key` (what changes the prompt) and `requirements.rules_key` (the by-design rules). At most 16
-  jobs are kept.
+- **Keys** (`app._triage_key`): a sample report is the same files for everyone, so its key is `sample:<root>`; an
+  uploaded report uses its id; the list of a scene's kept checks uses `scene:<scene id>`, one run per scene. Under
+  requirements the key adds `requirements.model_key` (what changes the prompt) and `requirements.rules_key` (the
+  by-design rules). At most 16 jobs are kept.
+- **Verdicts follow the clash** (ORCA's checks; [docs/detection.md](../detection.md), "Kept checks"): each reading the
+  model makes is kept with the scene's checks as it lands (`Job(on_reading=…)`, `checks.Register.keep_reading`: the
+  pair and depth it was read at, under the prompt key). A later list of the checks gets them free (`carried`) while
+  the pair is the same and the depth moved no more than 1 mm (`Register.carried`): `GET .../triage` starts a run that
+  asks nothing (`_start_triage(ask=False)`), and `unread` says what is left. `POST .../triage/stream?scope=<check>`
+  asks the model only about the unread clashes of that check (`Job(only=…)`, `triage_report(only=…)`), one proposal;
+  nothing unread costs nothing. What settles a clash without the model is one test for the run and for the charge
+  (`triage.settled_by`). A failed read is never kept (`Register.keep_reading`) and counts as unread. A run that asks
+  nothing makes no audit call: it keeps the last run's audit (`Job(prior_audit=…)`). While a run is under way, a new
+  ask follows it when it reads those clashes anyway (`app._reading`), else is charged once and queued behind it
+  (`Job(after=…, prepare=…)`: what to read is worked out when the first ends; its `start` says `queued`, then an
+  `asking` event). Following a run over an earlier list, the stream passes only what it says of clashes unchanged
+  here (`app._same_in`, `checks.same_clash`) and its `start` says `following`. Jobs under a key used again move to the
+  end of the cap (`app._keep_job`). The seed is filtered to the report's own clashes, without its alike groups.
 - **Donor** (`app._triage_donor`): a finished run under the same prompt but other rules donates its model readings
   (`seed`), so adding a rule from Insights re-asks nothing and costs nothing. `GET .../triage` starts such a run at
   once.
@@ -478,7 +492,11 @@ evidence: nothing is decided from it.
   time, each with `facts` lines ("#12: A IfcPipeSegment 'Cold water main' (Level 02, ...); B ...; test '...' (hard);
   overlap 77 mm") and strict `titles.SCHEMA`. `_tidy` cuts a title at a word past `MAX_CHARS` (90). A number the
   model leaves out stays on its plain name; a failed batch emits `batch_error` and the rest go on.
-- `titles.Job` is shared like triage's, keyed by `app._triage_key(report)` (without requirements; at most 32 kept).
+- `titles.Job` is shared like triage's, keyed by `app._title_key(report)` (the triage key without requirements;
+  `scene:<id>` for ORCA's lists of checks, so a new list follows the run under way; at most 32 kept); for ORCA's
+  checks each batch is also kept with the scene's checks (`Job(on_titles=…)`) and every list takes them
+  (`app._kept_titles`). Its `start` names the list it titles (`report_id`): a page that followed another list's run
+  asks once more for its own untitled clashes.
   A finished run that left clashes untitled is started again for those only. `app._with_titles` copies a shared run's
   titles onto each visitor's copy of a sample report. Starting a run takes one `title_limit` use.
 - The page starts titling as soon as a report opens. Measured: 633 detected clashes in 60 s on Muse Spark Open (Oct
@@ -519,7 +537,7 @@ take proposals as their routes do, `find_patterns` the pattern route's one propo
 
 | Tool | What it does | Costs | Page events |
 |---|---|---|---|
-| `report_summary`, `list_clashes`, `get_clash` | Counts per test and class pair; filtered rows; one clash in full | none | none |
+| `report_summary`, `list_clashes`, `get_clash` | Counts per test and class pair (and the kept checks); filtered rows (`check`: one kept check's, each row naming the checks that found it); one clash in full | none | none |
 | `look_at_clash_images` | Attaches the clash's A/B/C pictures for the model to see | none | none |
 | `measure_clash` | ORCA's own measure of the clash | none | none |
 | `describe_element`, `find_elements` | An element (and its run); a search by name, tag or class | none | none |
@@ -529,7 +547,7 @@ take proposals as their routes do, `find_patterns` the pattern route's one propo
 | `find_root_causes` | `plans.root_causes` | none | none |
 | `find_patterns` | `plans.patterns`, then the shared reading (`plans.read_patterns`) | one proposal for a reading not made yet (as the route); a kept reading is free | none |
 | `plan_root_cause`, `plan_fixes_together` | `plans.build_root_cause` (one for the cause, the fixes only if edits are needed), `plans.build_batch` (one per pair) | as Plans | `plan_started`, `plan_event`, `plan` |
-| `detect_clashes` (`tolerance_mm`; or a check: `a`, `b`, `kind`, `clearance_mm`, `name`) | `Workspace.detect`; the result becomes the open report for the rest of the answer. With sides, one check on filters (`Chat._check`, `_side`): a side is one of the user's filters by name (`Context.filters`; one colouring by value takes what it colours), what the user's filters show together (`{"shown": true}`: `page_view` from `Context.filters` and `Context.filter_view`), elements described as for `set_filters` (`facets.resolve`), or for B everything (the models the full check covers, `check_defaults`' `everything`) / itself; resolved and counted first (`side_count`: the Filters panel's numbers, rooms included, with `rooms_not_checked`), so a name the models lack or an empty A is refused (with the closest names) before a run is spent; named as the user knows its sides ([docs/filters.md](../filters.md), "Checks") | one detection run (`detect_limit`, as `/detect/stream`); none when refused | `detect_event`, `ui` `open_report` (its `detection.tests`) |
+| `detect_clashes` (`tolerance_mm`; or a check: `a`, `b`, `kind`, `clearance_mm`, `name`; or `check`: a kept check's name, or `"all"`) | `Workspace.detect` (or `detect_all`), kept as a check ([docs/detection.md](../detection.md), "Kept checks"); the list of every kept check's clashes becomes the open report for the rest of the answer, and the summary counts this check's clashes, with `open_list` and `kept_checks`; an unknown `check` is refused before a run is spent. With sides, one check on filters (`Chat._check`, `_side`): a side is one of the user's filters by name (`Context.filters`; one colouring by value takes what it colours), what the user's filters show together (`{"shown": true}`: `page_view` from `Context.filters` and `Context.filter_view`), elements described as for `set_filters` (`facets.resolve`), or for B everything (the models the full check covers, `check_defaults`' `everything`) / itself; resolved and counted first (`side_count`: the Filters panel's numbers, rooms included, with `rooms_not_checked`), so a name the models lack or an empty A is refused (with the closest names) before a run is spent; named as the user knows its sides ([docs/filters.md](../filters.md), "Checks") | one detection run (`detect_limit`, as `/detect/stream`), Run all again too; none when refused | `detect_event`, `ui` `open_report` (its `detection.tests`, `check`, `checks`) |
 | `explore_wider_fix` | `context_planner.build` for one clash | three proposals | `context_event` |
 | `show_clash`, `set_view` | Select a clash and fly to it; change the view mode or section box | none | `ui` `select_clash`, `ui` `set_view` |
 | `set_filters`, `clear_filters` | Filters by property on the page: `facets.resolve` turns each (classes, levels, models, `where`, action, colour, `by`, invert) into the page's rule against the index, says how many it finds, and fails with the closest names when the models lack one; clear removes chat's own ([docs/filters.md](../filters.md)) | none | `ui` `filters` |

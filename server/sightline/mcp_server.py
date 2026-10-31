@@ -26,7 +26,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
 from mcp_types import ToolAnnotations
 
-from . import agents, chat, edits, escalation, plans, requirements, settings, spend
+from . import agents, chat, checks, edits, escalation, plans, requirements, settings, spend
 from .service import Workspace
 
 
@@ -57,7 +57,7 @@ class Hooks:
     allow_call: Callable[[agents.Link], str | None] = lambda link: None     # per-link call cap
     start_triage: Callable[[str, str | None, agents.Link], Any] | None = None
     triage_state: Callable[[str, str | None], dict] | None = None
-    build_document: Callable[[str, str | None, str], dict] | None = None
+    build_document: Callable[[str, str | None, str, str | None], dict] | None = None   # report, scene, scope, check
     spawn: Callable[[Callable[[], None]], Any] | None = None
 
 
@@ -175,9 +175,10 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         return link.wait(link.start(name, work, hooks.spawn), wait_s)
 
     def need_report(link: agents.Link):
-        if link.ctx.report_id not in W().reports:
+        report = T()._open_report(link.ctx)   # ORCA's list of checks, made again if the server let it go
+        if report is None:
             raise LookupError("No clashes are open. Call detect_clashes to check the open models.")
-        return W().report(link.ctx.report_id)
+        return report
 
     # ------------------------------------------------------------------ the session
 
@@ -197,10 +198,14 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         if c.scene_id in W().scenes:
             scene = W().scene(c.scene_id)
             out["models"] = {"files": [p.name for p in scene.paths], "elements": len(scene.bounds())}
-        if c.report_id in W().reports:
-            r = W().report(c.report_id)
+        r = T()._open_report(c)
+        if r is not None:
             out["report"] = {"title": r.title, "clashes": len(r.clashes),
                              "found_by": "ORCA's own check" if r.origin == "sightline" else "a Navisworks report"}
+            if r.checks:   # the kept checks it lists (docs/detection.md, "Kept checks"), and the one on their screen
+                out["checks"] = [{"name": k["name"], "clashes": k["clashes"], "stale": k["stale"]}
+                                 for k in W().report_summary(r.id)["checks"]]
+                out["viewing_check"] = next((k["name"] for k in r.checks if k["key"] == c.check), None)
             if hooks.triage_state is not None:
                 t = hooks.triage_state(r.id, c.scene_id)
                 out["triage"] = {"started": t.get("started", bool(t.get("results"))), "done": t.get("done", False),
@@ -256,10 +261,13 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     @tool()
     def detect_clashes(ctx: Context, tolerance_mm: float | None = None, a: dict | None = None, b: dict | None = None,
                        kind: Literal["hard", "clearance", "duplicate"] | None = None, clearance_mm: float | None = None,
-                       name: str | None = None) -> dict:
+                       name: str | None = None, check: str | None = None) -> dict:
         """Check the open models for clashes with ORCA's own detection: every pair of models and each model against
-        itself. Opens the result as the clash report (in the person's page too). Running it again after fixes says
-        which clashes were resolved. Each run is one of the demo's detection runs.
+        itself. ORCA keeps the latest result of each check (the open models, and each check of some elements): the
+        open clash report (in the person's page too) lists every kept check's clashes, a clash two checks find being
+        one clash with one #N. Running a check again after fixes replaces only its clashes and says which were
+        resolved; `check` runs a kept check again by its name (get_session lists them), or "all" every kept check.
+        Each run is one of the demo's detection runs.
 
         To check only some elements (docs/filters.md, "Checks"), give side `a` and optionally `b`: each either one of
         the person's filters by name ({"filter": "<name>"}, as get_session lists them), what their filters show
@@ -269,7 +277,7 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         it colours. `kind` hard (default), clearance (with `clearance_mm`) or duplicate; `name` names the
         check. A name the models lack, or an A that finds nothing, is refused before a run is spent."""
         args: dict = {k: v for k, v in (("tolerance_mm", tolerance_mm), ("a", a), ("b", b), ("kind", kind),
-                                        ("clearance_mm", clearance_mm), ("name", name)) if v is not None}
+                                        ("clearance_mm", clearance_mm), ("name", name), ("check", check)) if v is not None}
         return run(ctx, "detect_clashes", args)
 
     @tool(read_only=True)
@@ -279,11 +287,13 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         return run(ctx, "report_summary")
 
     @tool(read_only=True)
-    def list_clashes(ctx: Context, query: str = "", test: str = "", in_model_only: bool = False, limit: int = 30) -> dict:
-        """Clashes in the open report, filtered by words (names, classes, levels, #numbers), test name or whether
-        both elements are in the open model. Each row has its id, number, title, the two elements and the depth."""
+    def list_clashes(ctx: Context, query: str = "", test: str = "", in_model_only: bool = False, limit: int = 30,
+                     check: str = "") -> dict:
+        """Clashes in the open report, filtered by words (names, classes, levels, #numbers), test name, a kept check
+        (by name: only the clashes it found) or whether both elements are in the open model. Each row has its id,
+        number, title, the two elements and the depth."""
         return run(ctx, "list_clashes", {"query": query, "test": test or None, "in_model_only": in_model_only,
-                                         "limit": limit})
+                                         "limit": limit, "check": check or None})
 
     @tool(read_only=True)
     def get_clash(clash_id: str, ctx: Context) -> dict:
@@ -568,11 +578,12 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             counts: dict[str, int] = {}
             for v in results.values():
                 counts[v.get("verdict", "?")] = counts.get(v.get("verdict", "?"), 0) + 1
-            real = [{"clash_id": cid, "number": f"#{r.clash(cid).number}", "severity": v.get("severity"),
-                     "understanding": v.get("understanding"), "responsible": v.get("responsible")}
-                    for cid, v in results.items() if v.get("verdict") == "real_clash"]
+            real = [{"clash_id": c.id, "number": f"#{c.number}", "severity": results[c.id].get("severity"),
+                     "understanding": results[c.id].get("understanding"), "responsible": results[c.id].get("responsible")}
+                    for c in r.clashes if results.get(c.id, {}).get("verdict") == "real_clash"]
             return {"done": state.get("done", False), "verdicts": counts, "read": len(results),
-                    "of": len(r.clashes), "real_clashes": real[:40]}
+                    "of": len(r.clashes), "real_clashes": real[:40],
+                    **({"unread": state["unread"]} if "unread" in state else {})}
 
         deadline = time.time() + max(0.0, min(wait_s, 55.0))
         while time.time() < deadline and not getattr(tjob, "done", True):
@@ -587,20 +598,27 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
 
     @tool()
     def generate_report(ctx: Context, scope: Literal["combined", "team", "model"] = "combined",
-                        wait_s: float = 40) -> dict:
+                        wait_s: float = 40, check: str | None = None) -> dict:
         """The design coordination report: a PDF (one, or one per team or per model) with BCF issues, built from the
-        triage (run triage first). Returns a download link. Costs one proposal."""
-        link = call(ctx, "generate_report", {"scope": scope})
+        triage (run triage first). `check`: only one kept check's clashes (its name, as get_session lists them).
+        Returns a download link. Costs one proposal."""
+        link = call(ctx, "generate_report", {"scope": scope, **({"check": check} if check else {})})
         if hooks.build_document is None:
             raise RuntimeError("reports are not available here")
         r = need_report(link)
+        key = None
+        if check:
+            kept = checks.pick(r.checks, check)
+            key = kept["key"] if kept else None
+            if key is None:
+                raise LookupError(f"No kept check {check!r}. Kept: " + (", ".join(k["name"] for k in r.checks) or "none"))
         refused = hooks.charge(link, 1)
         if refused:
             raise PermissionError(refused)
         base = base_url(ctx)
 
         def work():
-            doc = hooks.build_document(r.id, link.ctx.scene_id, scope)
+            doc = hooks.build_document(r.id, link.ctx.scene_id, scope, key)
             done(link, "generate_report", doc["name"])
             return {**doc, "url": base + doc["path"] if hooks.links is not None else doc.get("file", doc["path"])}
         return link.wait(link.start("generate_report", work, hooks.spawn), wait_s)

@@ -177,23 +177,35 @@ test("Check clashes: the first filter against everything until another side is c
   const sideA = find(block, (n) => n.type === "select" && n.props["aria-label"] === "Side A");
   assert.deepEqual(all(sideA, (n) => n.type === "option").map((o) => o.props.children), ["What the filters show (5)", "Ducts (2)", "Beam (1)"],
     "the filter list's numbers");
-  assert.ok(hasText(block, "The clashes replace the open list; Detect again repeats this check."));
+  assert.ok(hasText(block, "Kept as a check of its own: its clashes join the list (pick it above the list). Checking it again replaces only its clashes."));
   find(block, (n) => n.type === "button" && hasText(n, "Check")).props.onClick();
   assert.equal(ran[0].name, "Ducts vs Everything");
 });
 
 // ---------------------------------------------------------------- the page
 
-const ran = (id, tests) => ({ type: "done", report: { id, title: "Coordination", clashes: [], origin: "sightline", sources: ["model.ifc"] },
-  coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 2, seconds: 1, tests });
+// Kept checks (docs/detection.md, "Kept checks"): each check's latest run is kept, and the list holds them all.
+const FIRST = { new: [], resolved: [], no_longer_checked: [], first: true };
+const kept = (key, name, extra = {}) => ({ key, name, title: `Coordination · ${name}`, tests: null, requirements: null, revision: 0,
+  stale: false, ran_at: 1, seconds: 1, elements: 2, coverage: [], diff: FIRST, clashes: 1, ...extra });
+const MODELS = kept("models", "The open models");
+const DUCTS = kept("filter:abc", "Ducts vs Everything");
+const row = (id, number, found) => ({ id, number, name: id, title: null, test: Object.values(found)[0], checks: found, a: {}, b: {},
+  images: [], guid: id, test_type: "hard", tolerance_m: 0.001, status: "active", distance_m: -0.1, point: null, grid: null, source: "sightline", ref: null });
+const list = (id, serial, kept, clashes) => ({ id, title: "Coordination", clashes, origin: "sightline", sources: ["model.ifc"], scene_id: "scene", serial, checks: kept });
+const done = (report, check, kept, tests = null) => ({ type: "done", report, check, ran: check ? [check] : kept.map((c) => c.key), checks: kept,
+  coverage: [], diff: FIRST, elements: 2, seconds: 1, tests });
+const BEAM = row("c1", 1, { models: "MEP vs Structure" });
 
-test("a check from the Filters panel replaces the open list; Detect again repeats it; Check the open models runs every test", async () => {
+test("a check from the Filters panel is kept with the others and its clashes join the list; Run again repeats it", async () => {
   const sent = [];
+  const both = list("r1", 2, [MODELS, { ...DUCTS, tests: [{ id: "filter:abc" }] }],
+    [row("c1", 1, { models: "MEP vs Structure", "filter:abc": "Ducts vs Everything" }), row("c2", 2, { models: "MEP (within)" })]);
   const host = await appHost({
     initial: { sceneFiles: ["model.ifc"], filtersOpen: true, filterState: { v: 1, colours: true, greyRest: false, rules: [ducts, beams] },
-      report: { id: "report", title: "Run", clashes: [], origin: "sightline", sources: ["model.ifc"] } },
+      report: list("r0", 1, [MODELS], [BEAM]), checks: [MODELS], chatReport: "r0" },
     api: { detectTests: async () => ({ tests: [], teams: {}, elements: 2, rules: {}, check: defaults }), facets: async () => index,
-      detect: async (_sid, tests) => { sent.push(tests); return ran(`r${sent.length}`, tests && tests.map((t) => ({ ...t, id: "filter:abc" }))); } } });
+      detect: async (_sid, tests, _on, again = {}) => { sent.push({ tests, again }); return done(both, again.all ? null : again.check ?? (tests ? "filter:abc" : "models"), both.checks, tests); } } });
   await host.settle();
   const fp = host.component("FiltersPanel");
   assert.deepEqual(fp.props.check.defaults, defaults);
@@ -201,37 +213,54 @@ test("a check from the Filters panel replaces the open list; Detect again repeat
   fp.props.check.onCheck(checks.checkTest(ducts, "everything", "hard", null, defaults));
   await host.settle();
   assert.equal(host.state.filtersOpen, false, "the sheet makes way for the clashes");
-  assert.equal(sent.length, 1); assert.equal(sent[0].length, 1); assert.equal(sent[0][0].name, "Ducts vs Everything");
-  assert.equal(host.state.report.id, "r1", "the check's clashes are the open list");
-  assert.equal(host.state.detection.tests[0].id, "filter:abc", "the run keeps what it checked");
+  assert.equal(sent.length, 1); assert.equal(sent[0].tests.length, 1); assert.equal(sent[0].tests[0].name, "Ducts vs Everything");
+  assert.equal(host.state.report.id, "r1", "one list of every kept check's clashes");
+  assert.equal(host.state.chatReport, "r0", "a check joins the list: the chat goes on");
+  assert.deepEqual(host.state.checks.map((c) => c.key), ["models", "filter:abc"]);
+  assert.equal(host.state.viewCheck, "filter:abc", "the list shows what just ran");
+  const shown = host.component("ReportList").props.report;
+  assert.deepEqual(shown.clashes.map((c) => [c.id, c.test]), [["c1", "Ducts vs Everything"]], "that check's clashes, under its test");
+  const picker = host.component("ReportList").props.picker;
+  assert.equal(picker.props.value, "filter:abc"); assert.equal(picker.props.total, 2);
+  picker.props.onPick(null);
+  await host.settle();
+  assert.equal(host.component("ReportList").props.report.clashes.length, 2, "All checks: the whole list");
+  picker.props.onAgain("filter:abc");
+  await host.settle();
+  assert.deepEqual(sent[1], { tests: null, again: { check: "filter:abc" } }, "Run again repeats the kept check by its key");
   const summary = () => find(host.component("ReportList").props.insights, (n) => n.type?.name === "DetectSummary");
+  assert.equal(summary().props.onWhole, undefined, "the open models are kept: no Check the open models on the summary");
   summary().props.onAgain();
   await host.settle();
-  assert.equal(sent[1][0].name, "Ducts vs Everything", "Detect again repeats the check");
-  summary().props.onWhole();
+  assert.deepEqual(sent[2].again, { check: "filter:abc" });
+  picker.props.onAll();
   await host.settle();
-  assert.equal(sent[2], null, "the open models: the server's tests");
-  summary().props.onAgain();
+  assert.deepEqual(sent[3], { tests: null, again: { all: true } }, "Run all again");
+  find(host.menu(), (n) => n.type === "button" && hasText(n, "Check the open models")).props.onClick();
   await host.settle();
-  assert.equal(sent[3], null, "and Detect again then repeats the whole check");
+  assert.deepEqual(sent[4], { tests: null, again: {} }, "the open models: the server's tests");
 });
 
-test("chat and an agent see the page's filters by name; Detect again repeats a check chat ran", async () => {
+test("chat and an agent see the page's filters by name; Run again repeats a check chat ran", async () => {
   const sent = [];
+  const chatList = list("chat-run", 3, [MODELS, DUCTS], [row("c1", 1, { models: "MEP vs Structure", "filter:abc": "Ducts vs Everything" })]);
   const host = await appHost({
     initial: { sceneFiles: ["model.ifc"], filterState: { v: 1, colours: true, greyRest: false, rules: [ducts] },
-      report: { id: "report", title: "Run", clashes: [], origin: "sightline", sources: ["model.ifc"] } },
-    api: { detect: async (_sid, tests) => { sent.push(tests); return ran("again", tests); },
-      report: async (id) => ({ id, title: "Coordination · Ducts vs Everything", clashes: [], origin: "sightline", sources: ["model.ifc"] }) } });
+      report: list("r0", 1, [MODELS], [BEAM]), checks: [MODELS], chatReport: "r0", fixes: { c1: "Raise the duct" } },
+    api: { detect: async (_sid, tests, _on, again = {}) => { sent.push({ tests, again }); return done(chatList, "filter:abc", chatList.checks); },
+      report: async () => chatList } });
   await host.settle();
   const context = host.component("ChatPanel").props.context();
   assert.deepEqual(context.filters, [{ id: "d", name: "Ducts", when: [ducts.when[0]], invert: false, on: true, origin: null, action: "colour", by: null }]);
   assert.deepEqual(context.filter_view, { hide_rest: false, colours: true }, "how the filters show together, for a check of what they show");
-  const test0 = { ...checks.checkTest(ducts, "everything", "hard", null, defaults), id: "filter:abc" };
-  host.chat({ type: "ui", action: "open_report", report_id: "chat-run", detection: { ...ran("chat-run", [test0]), report: undefined } });
+  assert.equal(context.check, null, "the list shows every check");
+  host.chat({ type: "ui", action: "open_report", report_id: "chat-run", check: "filter:abc", checks: chatList.checks, detection: { ...done(chatList, "filter:abc", chatList.checks), report: undefined } });
   await host.settle();
   assert.equal(host.state.report.id, "chat-run");
+  assert.equal(host.state.viewCheck, "filter:abc");
+  assert.deepEqual(host.state.fixes, {}, "the check that ran still finds the clash: it was not fixed");
+  assert.equal(host.component("ChatPanel").props.context().check, "filter:abc", "chat knows the check on screen");
   find(host.component("ReportList").props.insights, (n) => n.type?.name === "DetectSummary").props.onAgain();
   await host.settle();
-  assert.deepEqual(sent, [[test0]], "the same check, by its id");
+  assert.deepEqual(sent, [{ tests: null, again: { check: "filter:abc" } }], "the same check, by its key");
 });

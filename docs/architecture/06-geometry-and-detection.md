@@ -1,7 +1,8 @@
 # 06 · Geometry engine and detection
 
-> **Covers:** `server/sightline/scene.py`, `server/sightline/verify.py`, `server/sightline/detect.py`, the geometry
-> parts of `server/sightline/service.py` (`Workspace.open_paths`, `verify_move`, `measure`, `detect`, `detect_tests`),
+> **Covers:** `server/sightline/scene.py`, `server/sightline/verify.py`, `server/sightline/detect.py`,
+> `server/sightline/checks.py`, the geometry parts of `server/sightline/service.py` (`Workspace.open_paths`,
+> `verify_move`, `measure`, `detect`, `detect_all`, `detect_tests`),
 > `requirements.compile_tests`, `server/sightline/fixtures.py` · **Checked against code:** 2026-10-30 (`104fda9`) ·
 > **Deeper design:** [docs/detection.md](../detection.md), [docs/uploads.md](../uploads.md)
 
@@ -390,13 +391,19 @@ back before they are stored. `Run.offset` reports the shift.
 - **Cap.** Hits are sorted by depth; a test with more than `CAP` (5,000) keeps the first 5,000 and is marked
   `partial` in its coverage.
 - **Ids.** `clash_id(test_id, a, b)` is `s` plus the first 9 hex digits of a SHA-1 of the test id and the two
-  GlobalIds, sorted. Running again gives the same ids, so fixes, reviews and views stay attached.
-- **Numbers.** `#N` is unique across the report and kept across runs (`state["numbers"]`): a clash keeps its number,
-  a new one takes the next, a resolved one's number is never reused.
+  GlobalIds, sorted, the first time a pair is found. `_assign_ids` gives each hit its id from what the scene `known`
+  (`checks.Register.known`): first every hit whose own id was issued before keeps it, then any other takes the id first
+  issued for its pair and kind (a check on filters finding a pair the full check found), else its own. No id is
+  taken twice in one run, whatever order the tests ran in. Running again gives the same ids, so fixes, reviews and
+  views stay attached.
+- **Numbers.** `#N` is unique across every check of the scene and kept across runs and requirements
+  (`known["numbers"]`): a clash keeps its number, a new one takes the next, a resolved one's number is never reused.
 - **Names.** `reports.plain_name` gives "A × B" from the two elements; Muse titles come later
   ([09](09-agent-workflows.md)).
-- **The report** has a fresh id, the title "Coordination · N models" (N counts files with an element in some test),
-  its own temporary folder (`sightline-run-*`, deleted when `Workspace._keep` drops the report) and `temporary=True`.
+- **The report** has a fresh id and the title "Coordination · N models" (N counts files with an element in some test).
+  Run on its own (evals, the requirements preview) it has its own temporary folder (`sightline-run-*`, deleted when
+  `Workspace._keep` drops the report) and `temporary=True`; run by `Workspace.detect` it uses the scene's register
+  folder (`root`), is not kept itself and only feeds the scene's list of checks.
 
 ### Coverage and the result
 
@@ -404,26 +411,36 @@ Each test yields a `Coverage`: elements on each side, candidate pairs, clashes, 
 `partial` and seconds. `detect.run` returns a `Run`: the report, the coverage, the diff, the number of elements
 checked, seconds, the offset and the `state` the next run compares against.
 
-### Reruns: `Workspace.detect`
+### Kept checks and reruns: `Workspace.detect`, `checks.Register`
 
-- `Workspace._runs[scene_id]` keeps the last run's `state` (clashes, selections per test, numbers) and the
-  requirements id it ran under. A rerun compares with it only when both ran under the same requirements.
+Design: [docs/detection.md](../detection.md), "Kept checks".
+
+- `Workspace.checks[scene_id]` is the scene's `checks.Register`: each kept check's latest run (`Check`: key, name,
+  tests as run, requirements, the scene revision it ran at, coverage, diff, state, clashes), keyed `models` (the open
+  models) or a check on filters' `filter:` id (`checks.key_of`), at most `SIGHTLINE_MAX_CHECKS` (12), and the
+  scene-wide `ids`, `numbers`, `titles`, `views` and triage `readings`.
+- `Workspace.detect(scene_id, tests, check=…)` runs one check under `Workspace.lock` (its read, run and commit
+  together): `detect.run` with `previous` = that check's own last state under the same requirements id
+  (`Register.previous`) and `known` = the register; `Register.keep` replaces only that check; `_union` builds the new
+  list. `detect_all` runs every kept check again, the lock taken per check.
 - `_diff`: each clash is `new` or `active`. A clash that has gone is **resolved** only when its test still ran
   complete (not partial) and both elements were still in its selections; otherwise it is **no longer checked**,
-  which is not the same thing. The first run is all new. A run that shares no test with the last one (a check on
-  filters after the full check, or back) reports nothing resolved or no longer checked, and only clashes with no
-  number yet (`state.numbers`) as new.
-- A clash the last run found under another test (same pair, same kind) takes that clash's id, so its #N, title,
-  views, sign-offs and marks follow it between the full check and a check on filters (`state.clashes[...].kind`).
-- `Workspace._carry` copies each surviving clash's title and captured views (A/B/C) from the last run's report into
-  the new one; the page keeps its own marks for ids still present ([12](12-web-app.md)).
-- `Workspace.detections[scene_id]` keeps the coverage, diff, report id and the tests as run (`tests`: null for the
-  defaults or the requirements', else the check on filters), so a page that reopens the scene can redraw the summary
-  (`scene_info`) and Detect again repeats the same check.
+  which is not the same thing. A check's first run calls new only what the open list does not hold
+  (`known["open"]`). A run of the open models that shares no test with its last run reports nothing resolved or no
+  longer checked, and only clashes with no number yet as new.
+- **The list** (`Register.union`) is one `Report` of every kept check's clashes, deduped by id, each with `checks`
+  (key → its test there), numbers, titles and views from the register; `scene_id`, `serial` (higher for a later
+  list) and the check summaries on the report; `temporary=False` with the register's folder, so dropping a report
+  never loses a view. `Workspace._oldest` evicts each scene's current list last; `union_report` makes it again (new
+  id) if it went; at most two lists per scene are kept (`checks.UNIONS_KEPT`).
+- Titles are harvested as a titling run lands them (`titles.Job(on_titles=…)`, and `Register.absorb` from the list
+  before it); captured views are written into the register's folder (`Workspace.save_capture`).
+- `scene_info` returns the kept checks and the list's id, so a page that reopens the scene redraws the summary and
+  runs a check again by its key.
 - `Workspace.check_defaults` (also `detect_tests`' `check`): what a check on filters takes when it says nothing else,
   the hard tolerance, rules and smallest size of the tests a run would use, the requirements' clearance, and
   `everything` (`detect.everything`).
-- The whole run holds `Workspace.lock`.
+- Each check's run holds `Workspace.lock`.
 
 ### `measure_pair` and the clash panel's "Now"
 

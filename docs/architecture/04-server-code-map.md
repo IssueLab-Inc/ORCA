@@ -25,7 +25,7 @@ imports made inside functions, which are drawn dotted below).
 |---|---|---|
 | Entry points | `app.py`, `mcp_server.py`, `voice_live.py`, `agents.py` | HTTP routes and NDJSON streams, the MCP server, the live voice relay, pairing links for MCP agents |
 | Workflows over the Workspace | `plans.py`, `chat.py`, `context_planner.py` | Several clashes at once, root causes and patterns; the chat's tool loop; the bounded wider-fix search |
-| Operations | `service.py` | `Workspace`: scenes, reports, detection, every check and keep of a fix, export. Shared by the API and MCP |
+| Operations | `service.py`, `checks.py` | `Workspace`: scenes, reports, detection (each scene's kept checks in a `checks.Register`), every check and keep of a fix, export. Shared by the API and MCP |
 | Per-clash fix agent | `agent.py`, `escalation.py`, `hosts.py` | Propose → verify → retry → rank for one clash; the second try on Muse Wonder; which hosts may take an opening |
 | Report jobs | `triage.py`, `titles.py`, `built.py` | Bulk verdicts, Muse titles, Show it built pictures: work over a whole report or one picture, no scene edits |
 | Documents and inputs | `reports.py`, `document.py` | Navisworks XML in; PDF and BCF out |
@@ -99,13 +99,14 @@ Three edges go "up" and are worth knowing before you add an import:
 | `app.py` | Entry points | The FastAPI app: every `/api` route and stream, the owner and requirements middleware, the caps, `/mcp`, static files |
 | `built.py` | Report jobs | Show it built: outline, Muse Image restyles, pixel gate, judges, the picture cache |
 | `chat.py` | Workflows | Chat with Muse Spark through tools; `Chat._run` is also the MCP server's tool layer |
+| `checks.py` | Operations | Kept checks ([docs/detection.md](../detection.md), "Kept checks"): per scene a `Register` of each check's latest run (`Check`, keyed `models` or a check on filters' `filter:` id), the scene-wide clash identity (ids issued, numbers, titles, captured views in its own folder, triage readings), and the union report of every kept check's clashes (`Register.union`); no geometry, `Workspace` drives it |
 | `properties.py` | Geometry | Everything the model says about one object, for the Properties panel and the filters' index (`Reader`): every attribute, its type, every property and quantity set on it or its type (`from_type`), every kind of property with its unit (lengths, areas, volumes, masses in SI), materials (layers, profiles, constituents), classifications, groups, documents, its storey, container and path up to the project; the demo models' own set shown as "Model data", the hidden note kept out by `shown` ([docs/panels.md](../panels.md)) |
 | `facets.py` | Geometry | The filters' index: every value the Properties panel shows each drawn element with that a filter can match (file, class, storey, type, material, attributes, property and quantity sets, classifications, groups), value → elements, kept on the scene until an edit; `matching` and `suggest` for chat and MCP ([docs/filters.md](../filters.md)) |
 | `datums.py` | Geometry | Levels, grid axes and each element's storey for the viewer's drawing views and level filter; a sample scene with no grid reads its project's `<prefix>-Grids.ifc` as context ([docs/views.md](../views.md)) |
 | `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, `plan_move` (moves that keep their joints: carry fittings, stretch segments, or are refused) and the connection graph |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
-| `detect.py` | Geometry | ORCA's own clash detection: tests (sides by file, team, class, system, id or a filter), sort and sweep, triangle tree, exact box depth, stable ids (a clash keeps its id across checks), rerun diff |
+| `detect.py` | Geometry | ORCA's own clash detection: tests (sides by file, team, class, system, id or a filter), sort and sweep, triangle tree, exact box depth, stable ids (`_assign_ids`: a clash keeps the id first issued for its pair and kind, whatever check finds it, given what the scene `known`), rerun diff against the same check's last run |
 | `demos.py` | Policy | The demo projects in one place: their sample files, start labels, tours, default requirements (`demos/*.json`), and what only the demo models need (their property set, their Navisworks smart tags) |
 | `domains.py` | Policy | Which domain a scene is in (`of`: the effective requirements' `domain`, else opened wholly from STEP is `machines`), the classes that stay in place by default (`STAYS`), who reviews a seat (`SEAT_REVIEW`), voice words, and the shared prompts in that domain's voice (`prompt` fills `{role}`, `{meeting}`, `{teams}`, `{examples}`) |
 | `document.py` | Documents | Coordination reports: PDF (combined, per team, per model) and BCF 2.1, team guessing, who acts and reviews |
@@ -311,7 +312,8 @@ plus the STEP export helpers.
   - proposals: `propose`, `escalate`, `last_try`, `fix_settings`, `clash_for`, `_nearby`, `_stamp`, `_remember`;
   - reports: `open_report_sample`, `open_report_folder`, `report`, `report_summary`, `match`, `measure`,
     `save_capture`, `report_image`, `list_report_samples`;
-  - detection: `detect_tests`, `detect`, `requirements_info`, `_carry`;
+  - detection: `detect_tests`, `detect`, `detect_all`, `_run_check`, `_register`, `_union`, `union_report`,
+    `checks_info`, `remove_check`, `requirements_info`;
   - files: `file`, `export`.
 
   Module level: `step_changes`, `_spec`, `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,

@@ -124,10 +124,12 @@ def test_a_page_can_reopen_a_scene_the_server_still_holds(tmp_path, monkeypatch)
     c = TestClient(app_module.app)
     sid = c.post("/api/scenes", json={"samples": ["fixture-clash.ifc"]}).json()["id"]
     info = c.get(f"/api/scenes/{sid}").json()
-    assert info["files"] == ["fixture-clash.ifc"] and info["step"] == {} and info["detection"] is None
+    assert info["files"] == ["fixture-clash.ifc"] and info["step"] == {}
+    assert info["report_id"] is None and info["checks"] == []
     c.post(f"/api/scenes/{sid}/detect/stream", json={}).read()
-    detection = c.get(f"/api/scenes/{sid}").json()["detection"]
-    assert detection["report_id"] in app_module.ws.reports and detection["coverage"]
+    info = c.get(f"/api/scenes/{sid}").json()
+    assert info["report_id"] in app_module.ws.reports
+    assert [k["key"] for k in info["checks"]] == ["models"] and info["checks"][0]["coverage"]
     assert c.get("/api/scenes/nothing-here").status_code == 404
 
 
@@ -139,7 +141,7 @@ def test_a_scene_or_report_the_server_let_go_says_so(tmp_path, monkeypatch):
     c = TestClient(app_module.app)
     sid = c.post("/api/scenes", json={"samples": ["fixture-clash.ifc"]}).json()["id"]
     c.post(f"/api/scenes/{sid}/detect/stream", json={}).read()
-    rid = c.get(f"/api/scenes/{sid}").json()["detection"]["report_id"]
+    rid = c.get(f"/api/scenes/{sid}").json()["report_id"]
     assert "x-sightline-gone" not in c.get(f"/api/scenes/{sid}/classes").headers
 
     monkeypatch.setattr(app_module, "ws", Workspace(samples=tmp_path))   # the server restarted

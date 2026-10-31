@@ -198,7 +198,9 @@ four), measuring in every view with snapping (`docs/measure.md`), desktop panels
 out (`docs/panels.md`, dockview's free core), everything the model says about any object (a Properties panel with
 breadcrumbs to its storey, building, site and project, icon buttons, and a filter from any value), filters by property
 (colour, colour by value, hide, isolate, in every view, from the panel, chat, voice or MCP: `docs/filters.md`) and
-clash checks on them (a filter against everything, itself or another filter, from the panel, chat or MCP),
+clash checks on them (a filter against everything, itself or another filter, from the panel, chat or MCP), kept
+checks (each check's latest result side by side in one list, one #N per clash, triage verdicts that follow the clash:
+`docs/detection.md`, "Kept checks"),
 Workings (the Activity panel draws each run as it happens: `docs/workings.md`). Latest
 validation (Oct 31): 674 server tests, 187 web tests (with the filters and checks on them); answer key 3/3 first try at Rev04 heights and
 `evals/step_cell.py` passing (C1, C2, C3, C6, C7, C8, Rev B 0) with requirements off (with Northbank's own on: Oct

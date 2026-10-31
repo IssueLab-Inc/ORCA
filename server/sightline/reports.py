@@ -56,6 +56,8 @@ class ReportClash:
     number: int = 0           # #N, unique across the whole report (not per test); people say "#39"
     title: str | None = None  # a short title written by Muse from the clash's facts, when there is one
     ref: str | None = None    # the source tool's own label (Navisworks "Clash39", repeated in every test)
+    # A clash ORCA found: the kept checks that found it, check key → its test there (checks.py); empty for an import.
+    checks: dict[str, str] = field(default_factory=dict)
 
     @property
     def label(self) -> str:
@@ -81,6 +83,11 @@ class Report:
     temporary: bool = False   # uploaded: the folder is deleted when the report is closed
     origin: str = "navisworks"  # "sightline" when ORCA detected the clashes itself (detect.py)
     requirements_id: str | None = None  # a detected run: the requirements it ran under (None: the defaults)
+    # ORCA's checks (checks.Register.union): the scene they checked, which union this is (a later one has a higher
+    # serial) and the checks it holds, as summaries. None, 0 and [] for an import or a run on its own.
+    scene_id: str | None = None
+    serial: int = 0
+    checks: list[dict] = field(default_factory=list)
 
     def clash(self, clash_id: str) -> ReportClash:
         """By id, or by number as people say it ("#39" or "39")."""
