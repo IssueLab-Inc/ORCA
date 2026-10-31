@@ -1645,3 +1645,9 @@ Checks on filters, on the page (Oct 31; same request and decisions; code `web/sr
   (it only reads, as the requirements' inventory does). Measured on Northbank: built alone 0.9 s, during the opening
   check 2.9 s (sharing the CPU, not waiting for it); in the browser about 7 s after the page asks, while the check,
   four model downloads and the other first requests run.
+- **Chat, live on Muse Spark** (Chromium, Northbank): "Check the ducts on level 2 against the structure." → Muse Spark
+  took the user's filter "Supply air ducts on Level 02" as side A by name and the structural classes as side B, found
+  one clash (#1, the supply air main × the transfer girder, the full check's id), and showed it; "check my filter …
+  against everything" → one clash; Detect again then repeated chat's check under the same test id as the page's own.
+  Fixed there: chat's run in Workings is titled as chat named the check and ends with the tool (chat's runs send no
+  done event, so they showed as running).

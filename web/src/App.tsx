@@ -2218,9 +2218,13 @@ export function App() {
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
       if (c) selectClash(c, planThisTurn.current);
     }
-    if (e.type === "tool" && e.name === "detect_clashes") { traceStart("detect", origin, "The open models"); setDetecting({ phase: "Starting…", tests: [] }); }
+    // Chat's check is titled as chat named it (a check on filters), and ends with the tool: chat's run sends no done.
+    if (e.type === "tool" && e.name === "detect_clashes") {
+      const named = typeof e.args?.name === "string" && e.args.name ? e.args.name : e.args?.a ? "A check on filters" : "The open models";
+      traceStart("detect", origin, named); setDetecting({ phase: "Starting…", tests: [] });
+    }
     if (e.type === "detect_event") onDetectEvent(e.event);
-    if (e.type === "tool_result" && e.name === "detect_clashes") setDetecting(null);
+    if (e.type === "tool_result" && e.name === "detect_clashes") { traces.current.detect?.end(null); setDetecting(null); }
     if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
     // After select_clash has had a render to land (the chat names a clash, then asks for its picture).
     if (e.type === "ui" && e.action === "show_it_built") { const id = e.clash_id; setTimeout(() => builtFromChat(id), 80); }
