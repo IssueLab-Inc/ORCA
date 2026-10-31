@@ -378,6 +378,24 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+/** How long to wait before asking again after a gateway failure (milliseconds), once per wait. */
+export const GATEWAY_WAITS = [1500, 4000];
+
+/** A read the server makes once and keeps (a report's patterns reading), asked again after a gateway failure: a 502,
+ * 503 or 504, or no answer at all. Those come from the edge in front of the server, not from it (Oct 31: a patterns
+ * reading's 502 never reached the server). Asking again never charges twice: the server keeps the reading, and a
+ * caller who comes while it is being made waits for it. */
+async function callAgain<T>(path: string, init: RequestInit): Promise<T> {
+  for (let i = 0; ; i++) {
+    try { return await call<T>(path, init); }
+    catch (e) {
+      const gateway = e instanceof ApiError ? [502, 503, 504].includes(e.status) : e instanceof TypeError;
+      if (!gateway || i >= GATEWAY_WAITS.length) throw e;
+      await new Promise((r) => setTimeout(r, GATEWAY_WAITS[i]));
+    }
+  }
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
@@ -584,7 +602,7 @@ export const api = {
   patterns: (reportId: string, sceneId: string, fixed: string[]) =>
     call<Pattern[]>(`/reports/${reportId}/patterns/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
   triagePatterns: (reportId: string, sceneId: string, fixed: string[]) =>
-    call<Record<string, PatternVerdict>>(`/reports/${reportId}/patterns/${sceneId}/triage`, { method: "POST", body: JSON.stringify({ fixed }) }),
+    callAgain<Record<string, PatternVerdict>>(`/reports/${reportId}/patterns/${sceneId}/triage`, { method: "POST", body: JSON.stringify({ fixed }) }),
   rootCauses: (reportId: string, sceneId: string, fixed: string[]) =>
     call<RootCause[]>(`/reports/${reportId}/root_causes/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
   /** Build a plan (clash_ids: fix these together; hub: fix the root cause around it). Resolves with the plan. */
