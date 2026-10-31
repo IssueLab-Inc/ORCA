@@ -1403,3 +1403,15 @@ The repo is `IssueLab-Inc/ORCA` (Oct 31; owner decision; `docs/repo-name`): rena
 application and the submission says ORCA. Repo only: the code's internal `sightline` names stay
 ([21](21-glossary-and-naming.md), "Internal names kept on purpose"). Nothing in the code or docs used the old name;
 README's "Run it" now starts with the clone. Checked: `git fetch` on the new remote, `test_docs_map.py`.
+
+Orbit round the selection and the clash (Oct 31; owner request; code `web/src/viewer/Viewer.ts`, `App.tsx`):
+- **What:** with an element selected, a left drag in the 3D view orbits round it (the middle of its box) instead of the
+  point under the pointer; while ORCA works on a clash (`clashBusy`), a drag with nothing selected orbits round the
+  clash. The camera and its target turn together round the pivot (`orbitAround`), so the pivot stays put on screen.
+  The pilot's slow turn while ORCA thinks (`orbit(true)`) first glides the view sideways to centre the clash, keeping
+  its angle and distance, then turns round it.
+- **Checked:** `web/tests/viewer-orbit.test.mjs` (2: the pivot keeps its place on screen and its distance, no roll, no
+  tilt past vertical); in Chromium on Northbank, the supply air main selected and the view orbited 6 m round it with
+  the duct at the same pixel; a proposal with the target first panned 6.4 m off the clash: autoRotate on, the target
+  glided to the clash (9 mm off) and the orbit flag on while ORCA worked; 145 web tests, build clean.
+
