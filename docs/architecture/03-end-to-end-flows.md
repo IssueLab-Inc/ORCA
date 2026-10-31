@@ -3,7 +3,7 @@
 > **Covers:** `web/src/App.tsx`, `web/src/api.ts`, `web/src/pilot.ts`, `web/src/voice.ts`, `web/src/uploads.ts`,
 > `web/src/Chat.tsx`, `web/src/ReportDoc.tsx`, `web/src/Agent.tsx`, `server/sightline/app.py`,
 > `server/sightline/service.py`, and the workflow modules each flow reaches · **Checked against code:** 2026-10-30
-> (`104fda9`) · **Deeper design:** [docs/detection.md](../detection.md), [docs/edits.md](../edits.md),
+> (`104fda9`; the check on filters, Oct 31 on `feature/filters`) · **Deeper design:** [docs/detection.md](../detection.md), [docs/edits.md](../edits.md),
 > [docs/escalation.md](../escalation.md), [docs/show-it-built.md](../show-it-built.md), [docs/voice.md](../voice.md),
 > [docs/mcp.md](../mcp.md), [docs/uploads.md](../uploads.md), [docs/requirements.md](../requirements.md)
 
@@ -64,6 +64,18 @@ sequenceDiagram
 Owned by: [06](06-geometry-and-detection.md) (scene, boxes, detection), [12](12-web-app.md) (`open`, `runDetect`,
 `loadReport`), [13](13-3d-viewer.md) (`Viewer.load`), [09](09-agent-workflows.md) (titles),
 [19](19-demo-data.md) (Northbank).
+
+### A check on filters
+
+A filter's **What do these hit?** or the Filters panel's **Check clashes** builds one detection test
+(`checks.checkTest`: side A the filter's complete conditions, side B everything, none for itself, or another filter;
+no id) and App calls `runDetect([test])`, the same stream as above. `Workspace.detect` gives the test its id
+(`detect.check_id`) and `detect.run` finds each side against the filters' index (`facets.found`) under the same lock;
+the done event carries the tests it ran, which App keeps for Detect again. The report is titled with the check, and a
+pair the full check found keeps its id and #N. **Check the open models** is `runDetect(null)`. Chat and an agent's
+`detect_clashes` with `a` / `b` resolve their sides first (`chat.Chat._side`: a filter the page shared by name, or
+elements described as for `set_filters`), then run the same test; the page adopts the report (`ui open_report`, with
+`tests`). Design: [docs/filters.md](../filters.md) ("Checks"), [docs/detection.md](../detection.md).
 
 ## Pick a clash and propose fixes
 

@@ -115,6 +115,17 @@ each feature see [01](01-product-and-journeys.md).
 | **Built view, Show it built** | Muse Image restyling ORCA's own view of a verified fix, checked against the model. | `built.py` (`built.make`); `BuiltView.tsx`; `Viewer.captureBuilt` |
 | **Wider fix (context fix)** | A complete arrangement of one to three coordinated edit groups around a clash, for designer review. | `context_planner.py`, `context_eval.py`; `ContextPlan.tsx`; "Explore wider fix" |
 
+### Looking at the model
+
+| Term | Meaning | Code |
+|---|---|---|
+| **Filter** (by property) | A named rule that finds elements by what the model says about them (model, class, floor, any attribute, property or quantity) and colours, colours by value, hides or isolates them; several on at once, the top one winning a colour. For viewing, and to say what a clash check compares (fixes never see them). Not the clash list's filters, nor the quick model, level and class checkboxes. | `filters.Rule`, `FiltersPanel.tsx`, `Viewer.setRules`; [docs/filters.md](../filters.md) |
+| **Facet** | One thing a filter can match by, with its values and the elements that have each: `class`, `storey`, `pset:<Set>/<Prop>`… | `facets.py`, `filters.Facet` |
+| **Colour by value** | A filter that gives each value of one property its own colour (System, Floor, Model…), with a key under it. | `Rule.action` `byValue` |
+| **Breadcrumbs** | Where the selected element sits, from the project down (Project › Site › Building › Level), each opening that object's own properties. | `properties.Reader.path`, `ElementCard.tsx` |
+| **Check on filters** | One clash test of what side A takes (a filter) against side B (a filter, everything or itself), from the Filters panel, chat or MCP; its clashes replace the open list. | `detect.Selection.filter`, `check_id`; [docs/filters.md](../filters.md) |
+| **Grey the rest** | With any filter colouring, what none colours turns grey. | `FilterState.greyRest` |
+
 ### Sorting and planning
 
 | Term | Meaning | Code |

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CircleCheck, ClipboardCheck, Loader2, Radar, RotateCcw } from "lucide-react";
 import type { DetectCoverage, DetectSetup, DetectTest, Detection } from "./api";
+import { checkOf } from "./checks";
 
 /** Live progress of a detection run: the current phase, and each test as it finishes. */
 export interface DetectProgress { phase: string; tests: { name: string; coverage?: DetectCoverage }[]; running?: number }
@@ -92,11 +93,13 @@ function ProgressRows({ progress }: { progress: DetectProgress }) {
 }
 
 /** Over a report ORCA found: what was checked, what changed since the last run, and Detect again. */
-export function DetectSummary({ detection, progress, onAgain, disabled, compact = false, requirementsId = null, onRequirements }: {
+export function DetectSummary({ detection, progress, onAgain, disabled, compact = false, requirementsId = null, onRequirements, onWhole }: {
   detection: Detection; progress: DetectProgress | null; onAgain: () => void; disabled: boolean;
   compact?: boolean;  // the list is filtered: one line, so the list gets the room
   requirementsId?: string | null; onRequirements?: () => void;  // the requirements in use now (their id)
+  onWhole?: () => void;  // after a check on filters: check the open models again, every test
 }) {
+  const check = checkOf(detection.tests);  // a check on filters (docs/filters.md, "Checks"): its name
   const ran = detection.requirements?.label ?? null;  // what this run was checked against
   const clashes = detection.coverage.reduce((n, c) => n + c.clashes, 0);
   const pairs = detection.coverage.reduce((n, c) => n + c.candidate_pairs, 0);
@@ -107,13 +110,17 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
   return (
     <section className={`triage detect summary ${progress ? "running" : ""} ${compact && !progress ? "compact" : ""}`} data-tour="detected">
       <DetectHead sub={progress ? "Checking again…" : compact
-        ? `${clashes.toLocaleString()} clashes in ${detection.elements.toLocaleString()} elements · ${detection.seconds.toFixed(1)} s`
+        ? `${check ? `Only ${check} · ` : ""}${clashes.toLocaleString()} clashes in ${detection.elements.toLocaleString()} elements · ${detection.seconds.toFixed(1)} s`
         : `Found by ORCA · ${detection.seconds.toFixed(1)} s`}
-        action={!progress && <button className="ibtn" aria-label="Detect again" data-tip="Detect again: see what your fixes resolved"
+        action={!progress && <button className="ibtn" aria-label="Detect again"
+          data-tip={check ? `Detect again: ${check}, and what your fixes resolved` : "Detect again: see what your fixes resolved"}
           data-tip-side="left" disabled={disabled} onClick={onAgain}><RotateCcw size={14} aria-hidden /></button>} />
       {progress ? <ProgressRows progress={progress} /> : !compact && <>
         <p className="detect-count"><b>{clashes.toLocaleString()}</b> clash{clashes === 1 ? "" : "es"} in
           {" "}{detection.elements.toLocaleString()} elements</p>
+        {check && <p className="detect-check"><span>Only <b>{check}</b></span>
+          {onWhole && <button type="button" className="btn small ghost" disabled={disabled} onClick={onWhole}>
+            <Radar size={14} aria-hidden /> Check the open models</button>}</p>}
         <ReqLine requirements={ran} name={detection.requirements?.name} onRequirements={onRequirements} />
         {(detection.requirements?.id ?? null) !== requirementsId &&
           <p className="hint small">The requirements changed since this run: Detect again to check under {requirementsId ? "them" : "ORCA's defaults"}.</p>}

@@ -67,7 +67,7 @@ def test_tools_are_registered():
     names = {t.name for t in tools}
     assert {"get_session", "open_models", "detect_clashes", "list_clashes", "get_clash_images", "capture_view",
             "check_move", "check_offset", "check_route", "check_resize", "check_penetration", "propose_fixes", "get_job", "apply_fix", "apply_plan", "triage",
-            "generate_report", "export_models", "show_clash", "set_view"} <= names
+            "generate_report", "export_models", "show_clash", "set_view", "set_filters", "clear_filters"} <= names
     read_only = {t.name for t in tools if t.annotations and t.annotations.read_only_hint}
     assert {"get_session", "list_clashes", "get_clash_images", "check_move", "check_offset", "check_route",
             "check_resize", "check_penetration", "capture_view"} <= read_only
@@ -147,6 +147,28 @@ def test_the_page_follows_and_answers_for_pictures(server):
     while not page.empty():
         seen.append(page.get_nowait())
     assert {"type": "ui", "action": "set_view", "mode": "xray", "section_box": True} in seen
+    assert rpc(server, token, "set_filters", {"filters": [{"classes": ["IfcBeam"], "action": "isolate"}]}) == {
+        "filters": [{"filter": "isolate", "elements": 1}]}
+    rpc(server, token, "clear_filters")
+    seen = []
+    while not page.empty():
+        seen.append(page.get_nowait())
+    sent = [e for e in seen if e.get("action") == "filters"]
+    assert sent[0]["filters"][0]["when"] == [{"facet": "class", "op": "is", "values": ["IfcBeam"]}]
+    assert sent[1] == {"type": "ui", "action": "filters", "mode": "clear"}
+
+    # The page shares the person's filters with the link; the agent checks one by name.
+    beams = {"id": "u1", "name": "Beams", "when": [{"facet": "class", "op": "is", "values": ["IfcBeam"]}], "invert": False}
+    server.put(f"/api/links/{token}/context", json={"scene_id": sid, "filters": [beams]})
+    assert rpc(server, token, "get_session")["filters"] == [{"name": "Beams", "on": True}]
+    found = rpc(server, token, "detect_clashes", {"a": {"filter": "Beams"}})
+    assert found["check"]["name"] == "Beams vs Everything" and found["check"]["a"] == {"name": "Beams", "elements": 1}
+    seen = []
+    while not page.empty():
+        seen.append(page.get_nowait())
+    opened = next(e for e in seen if e.get("action") == "open_report")
+    assert opened["detection"]["tests"][0]["name"] == "Beams vs Everything"
+    assert "Its filters: Beams" in rpc(server, token, "detect_clashes", {"a": {"filter": "Pipes"}})["error"]
     link.unsubscribe(page)
     assert rpc(server, token, "capture_view")["texts"][0].startswith("No browser answered")
 

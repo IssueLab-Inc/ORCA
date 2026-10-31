@@ -522,6 +522,7 @@ stateDiagram-v2
 | Agent links, their proposals, plans and jobs | `app.links` (`agents.Links`) | 200 links, 12 h idle, 24 h total; 16 jobs per link; 200 queued events per following page |
 | Registered requirements files | `requirements._registry` | 500, least recently used dropped |
 | Host readings by kind | `hosts._cache` | The server's life |
+| The filters' index | `IfcScene._facets` (`facets.index`; `Workspace.facets` reads and builds it outside the lock and keeps it only if the revision held) | Until a kept edit changes the scene's revision or its elements |
 | Pictures being drawn | `built._running` | Only while drawing |
 | Settings for everyone (cached) | `settings._current` | Read from the store once |
 | Caps | Each `ProposeLimit`'s deques in `app.py` | The rolling hour and day |
@@ -573,7 +574,8 @@ does without.
 | `sightline.workings` | `App.tsx` | Workings on or off in the Activity panel (`"0"` / `"1"`, default on) and the view it shows ([docs/workings.md](../workings.md)) |
 | `sightline.dock.properties` | `dock.tsx` (`setPropsHome`) | Where the Properties panel opens: floating or the right side bar ([docs/panels.md](../panels.md)) |
 | `sightline.dock.v1`, `sightline.dock.classic` | `dockLayout.ts` (`saveLayout`, called by `dock.tsx`) | The desktop's panel layout (dockview's `toJSON`) and whether the Classic layout is on ([docs/panels.md](../panels.md)) |
-| `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box) for a set of models, keyed by `About.projectName` |
+| `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box, and the filter rules as `rules`) for a set of models, keyed by `About.projectName` |
+| `sightline.filters.<project>` | `App.tsx` (`filtersKey`) | `{v: 1, rules, colours, greyRest}`: the filters for a set of models ([docs/filters.md](../filters.md)) |
 
 The browser also holds the `sightline_owner` cookie (HttpOnly, Secure, SameSite=Strict, path `/api`, 30 days),
 which scripts cannot read. Everything else on the page (the open report, verdicts, `reviewed` marks, plans, clash views,

@@ -258,6 +258,23 @@ const TINTS = ["#eceef0", "#e6eef7", "#f4efe7", "#eaf3ec", "#f3ebf1", "#eef2e4"]
 /** The materials and passes every drawing shares: fills, the pair flat, the stencil caps and the composite. */
 export class DrawingStyle {
   readonly fills = TINTS.map((c) => flat(c));
+  /** The fill while filters colour the model: each element's own colour (set for the pass: its filter's, or its
+   * file's tint), so the colours reach plans, sections and elevations (docs/filters.md, "Drawings"). */
+  readonly paintFill = (() => {
+    const m = new THREE.MeshBasicMaterial({ color: "#ffffff", side: THREE.DoubleSide });
+    m.customProgramCacheKey = () => "paint-fill";
+    return m;
+  })();
+  private tints = TINTS.map((c) => new THREE.Color(c));
+  private papered = new Map<string, THREE.Color>();
+  /** A file's paper tint. */
+  tint(i: number): THREE.Color { return this.tints[i % this.tints.length]; }
+  /** A filter's colour on paper: a quarter of the way to the paper, so linework still reads over it. */
+  onPaper(hex: string): THREE.Color {
+    let c = this.papered.get(hex);
+    if (!c) { c = new THREE.Color(hex).lerp(PAPER, 0.25); this.papered.set(hex, c); }
+    return c;
+  }
   readonly glass = flat("#dbe7f0", 0.35);
   readonly side = { a: flat("#e9877f"), b: flat("#86c896"), ab: flat("#c39be0") };
   readonly selected = flat("#7fb8ec");

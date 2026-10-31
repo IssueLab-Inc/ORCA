@@ -85,10 +85,10 @@ cd server && uv run python -m sightline.mcp_server
 | | Tools |
 |---|---|
 | Session | `get_session` (what is open, whether a browser follows), `list_models`, `open_models` |
-| Clashes | `detect_clashes`, `report_summary`, `list_clashes`, `get_clash`, `get_clash_images` (A/B/C pictures), `measure_clash`, `find_root_causes`, `find_patterns`, `triage` |
+| Clashes | `detect_clashes` (all models, or a check of what side A takes against B: one of the person's filters by name, as `get_session` lists them, or elements described as for `set_filters`), `report_summary`, `list_clashes`, `get_clash`, `get_clash_images` (A/B/C pictures), `measure_clash`, `find_root_causes`, `find_patterns`, `triage` |
 | The model | `describe_element`, `find_elements`, `find_openings` |
 | Fixes | `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`, `check_seat` (test the agent's own idea), `propose_fixes` (ORCA's fix agent), `plan_fixes_together`, `plan_root_cause`, `get_job`, `apply_fix`, `apply_plan` |
-| The person's view | `show_clash`, `set_view`, `capture_view` (a picture of what they see) |
+| The person's view | `show_clash`, `set_view`, `set_filters` / `clear_filters` (colour, hide or isolate by property: [filters.md](filters.md)), `capture_view` (a picture of what they see) |
 | Hand-off | `generate_report` (PDF + BCF, download link), `export_models` (IFC, and STEP for STEP models) |
 
 **Read-only tools.** The tools that change neither the model, the open report nor the allowance declare it
@@ -96,7 +96,7 @@ cd server && uv run python -m sightline.mcp_server
 - `get_session`, `list_models`, `report_summary`, `list_clashes`, `get_clash`, `get_clash_images`, `measure_clash`;
 - `describe_element`, `find_elements`, `find_openings`, `find_root_causes`;
 - `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`, `check_seat`, `get_job`;
-- `show_clash`, `set_view`, `capture_view`.
+- `show_clash`, `set_view`, `set_filters`, `clear_filters`, `capture_view`.
 
 Muse Code runs those without an approval prompt under on-request approvals. The rest ask: proposals, plans, applying,
 detection, triage, the report, opening models, and `find_patterns` (a model call, charged once as a proposal).
@@ -145,7 +145,7 @@ things the same way.
 
 - **The agent keeps working.** The link and the models live on the server, not in the tab. Reading, checking,
   proposing, applying, triage, the report and export all carry on.
-- **Only the page tools stop:** `capture_view`, pictures of clashes ORCA found, `show_clash` and `set_view`.
+- **Only the page tools stop:** `capture_view`, pictures of clashes ORCA found, `show_clash`, `set_view` and the filters.
   `get_session` says the page is closed.
 - **Resume.** The browser keeps the session (models, report, fixes, link) in `localStorage`. Opening ORCA again shows
   "Pick up where you left off" while the server still holds it. **Resume** reopens the same models, with every

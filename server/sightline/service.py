@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, connections, datums, demos, detect, domains, edits, escalation, hosts, properties, reports, requirements, settings, spend, step, verify
+from . import agent, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -240,12 +240,30 @@ class Workspace:
         return {**asdict(s.element(global_id)), "links": named, "systems": g["systems"].get(global_id, []),
                 "part_of": part_of}
 
-    def properties(self, scene_id: str, global_id: str) -> dict:
-        """Everything the model says about one element (properties.py): attributes, type, materials, property sets,
-        quantities in SI and size. KeyError for an element the scene doesn't have."""
+    def properties(self, scene_id: str, global_id: str, file: int | None = None) -> dict:
+        """Everything the model says about one object (properties.py): every attribute, its type, every property and
+        quantity set (the type's marked), units, materials, classifications, groups, documents, its storey and path.
+        `file` picks the model when federated files repeat a GlobalId (a breadcrumb's storey). KeyError for an object
+        the scene doesn't have."""
         s = self.scene(scene_id)
         with self.lock:
-            return properties.properties(s, global_id)
+            return properties.properties(s, global_id, file)
+
+    def facets(self, scene_id: str) -> dict:
+        """The filters' index (facets.py): every value a filter can match, with the elements that have it. Kept on the
+        scene until a kept edit changes it. Read and built outside the lock (it only reads, as the requirements'
+        inventory does), so it never waits for the opening check and a big model's first build stalls no one; kept
+        only if no edit landed meanwhile."""
+        s = self.scene(scene_id)
+        at = facets.version(s)
+        ready = facets.cached(s)
+        if ready is not None:
+            return ready
+        built = facets.build(s)
+        with self.lock:
+            if facets.version(s) == at:
+                facets.keep(s, built, at)
+        return built
 
     def _contacts(self, scene_id: str) -> list:
         return (self._runs.get(scene_id) or {}).get("contacts", [])
@@ -784,7 +802,23 @@ class Workspace:
             teams = {name: team for name, team in zip(ix.names, ix.teams)}
             per_file = Counter(ix.names[i] for i in ix.file.values())
         return {"tests": [asdict(t) for t in tests], "teams": teams, "elements": len(ix.entity), "file_elements": dict(per_file),
-                "rules": detect.RULE_LABEL, "requirements": self.requirements_info(doc)}
+                "rules": detect.RULE_LABEL, "requirements": self.requirements_info(doc), "check": self._check_defaults(scene_id, tests)}
+
+    def check_defaults(self, scene_id: str) -> dict:
+        """What a check on filters takes when it says nothing else (docs/filters.md, "Checks"): the hard tolerance,
+        rules and smallest size of the tests a run would use (the requirements', under requirements), and the clearance
+        the requirements ask for."""
+        scene = self.scene(scene_id)
+        doc = requirements.current()
+        with self.lock:
+            tests = requirements.compile_tests(doc, scene) if doc else detect.default_tests(scene)
+        return self._check_defaults(scene_id, tests)
+
+    def _check_defaults(self, scene_id: str, tests: list) -> dict:
+        hard = next((t for t in tests if t.kind == "hard" and t.enabled), None)
+        return {"tolerance_m": hard.tolerance_m if hard else detect.TOLERANCE_M, "clearance_m": self.clearance(scene_id),
+                "rules": dict(hard.rules) if hard else {r: True for r in detect.RULES},
+                "min_size_m": hard.min_size_m if hard else 0.0}
 
     @staticmethod
     def requirements_info(doc=None) -> dict | None:
@@ -817,8 +851,11 @@ class Workspace:
         report = self._keep(run.report)
         out = {"report": self.report_summary(report.id), "coverage": [asdict(c) for c in run.coverage],
                "diff": run.diff, "elements": run.elements, "seconds": run.seconds, "offset": run.offset,
-               "requirements": self.requirements_info(doc)}
-        self.detections[scene_id] = {k: out[k] for k in ("coverage", "diff", "elements", "seconds", "requirements")} | {"report_id": report.id}
+               "requirements": self.requirements_info(doc),
+               # The tests as run, when they were chosen (a check on filters), so Detect again can repeat them; None:
+               # the defaults (or the requirements'), read afresh next time.
+               "tests": None if tests is None else [asdict(t) for t in chosen]}
+        self.detections[scene_id] = {k: out[k] for k in ("coverage", "diff", "elements", "seconds", "requirements", "tests")} | {"report_id": report.id}
         return out
 
     def scene_info(self, scene_id: str) -> dict:

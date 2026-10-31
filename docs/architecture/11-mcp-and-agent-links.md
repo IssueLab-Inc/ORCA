@@ -28,7 +28,7 @@ flowchart LR
         links["agents.Links: Link per token hash"]
         gate["_McpGate at /mcp"]
         transport["streamable HTTP app, stateless JSON"]
-        tools["mcp_server.build: 32 tools"]
+        tools["mcp_server.build: 34 tools"]
         chatRun["chat.Chat._run: the shared tool layer"]
         ws["service.Workspace"]
         hooks["mcp_hooks: caps, triage, report"]
@@ -156,7 +156,7 @@ address is written into the code.
   (stdio): every call works on `local`.
 - **`INSTRUCTIONS`** tell the agent to start with `get_session`, read clashes, test its own ideas with the `check_*`
   tools or run `propose_fixes`, that nothing changes until `apply_fix` or `apply_plan`, that distances are metres
-  with Z up (negative is overlap), and that `show_clash`, `set_view` and `capture_view` act on the person's page.
+  with Z up (negative is overlap), and that `show_clash`, `set_view`, `set_filters` and `capture_view` act on the person's page.
 
 `Hooks` is what the hosting server lends the tools (`None` parts are not available):
 
@@ -213,10 +213,10 @@ call goes through `chat.Chat._run` under the same name.
 
 | Tool | Read-only | What it does | Reuses | Page events |
 |---|---|---|---|---|
-| `get_session` | yes | What is open: model files and element count, the report (title, clashes, found by ORCA or Navisworks), triage state, the selected clash, what is fixed, whether a browser follows; a `next` step or a `note` that the page is closed | `Workspace` scenes and reports, `hooks.triage_state` | none |
+| `get_session` | yes | What is open: model files and element count, the report (title, clashes, found by ORCA or Navisworks), triage state, the selected clash, what is fixed, the person's filters by name (the page shares them with the link: `LinkContext.filters`), whether a browser follows; a `next` step or a `note` that the page is closed | `Workspace` scenes and reports, `hooks.triage_state` | none |
 | `list_models` | yes | The models ORCA can open (IFC, STEP) | `Workspace.list_samples` | none; no `agent_result` |
 | `open_models` | no | Opens sample models that share coordinates and checks them | with a browser: the page's own open and check (waits up to 60 s for the page's context to show the new report, else returns `opening`); without: `Workspace.open` then chat `detect_clashes`, one detection run (refused: open, with a `note` "Opened, not checked: …") | `ui open_models {names}` when a browser follows |
-| `detect_clashes` | no | ORCA's own detection on the open models; the result becomes the open report; a rerun says what was resolved. One detection run (`hooks.detect`) | chat → `Workspace.detect` | `detect_event` per step, `ui open_report` |
+| `detect_clashes` | no | ORCA's own detection on the open models; the result becomes the open report; a rerun says what was resolved. With `a` (and `b`, `kind`, `clearance_mm`, `name`): one check of what side A takes against B, a side being one of the person's filters by name or elements described as for `set_filters`, B also everything or itself ([docs/filters.md](../filters.md)). One detection run (`hooks.detect`); a refused check spends none | chat → `Workspace.detect` | `detect_event` per step, `ui open_report` |
 | `report_summary` | yes | Counts per test and per class pair: deepest overlap, touches, non-physical sides, how many fixed | chat | none |
 | `list_clashes` | yes | Clashes filtered by words, test or in-model only | chat | none |
 | `get_clash` | yes | One clash by id or `#N`: both elements, depth, point, model ids, fixed, pictures | chat | none |
@@ -224,6 +224,8 @@ call goes through `chat.Chat._run` under the same name.
 | `measure_clash` | yes | ORCA's signed distance for one clash | chat → `Workspace.measure` | none |
 | `show_clash` | yes | Selects a clash in the page and flies the camera to it | chat | `ui select_clash` |
 | `set_view` | yes | Shaded, x-ray, context or isolate, and the section box | chat | `ui set_view` |
+| `set_filters` | yes | Filters by property on the page ([docs/filters.md](../filters.md)): each finds elements by classes, levels, models and `where` conditions and colours, colours by value, hides or isolates them; replaces the agent's own filters, pauses the person's; names the models lack fail with the closest | chat → `facets.resolve` | `ui filters {mode: replace, filters, grey_rest?}` |
+| `clear_filters` | yes | Removes the agent's filters; the person's come back | chat | `ui filters {mode: clear}` |
 | `capture_view` | yes | A picture of the person's current view | `Link.capture("view")`, `Image` | `capture_request {what: "view"}` |
 | `describe_element` | yes | An element's class, name, tag, level, file, connections, and a straight segment's run | chat → `Workspace.describe`, `edits.run_of` | none |
 | `find_elements` | yes | Search elements by name, tag or class | chat | none |
@@ -248,7 +250,7 @@ call goes through `chat.Chat._run` under the same name.
 
 Notes on the table:
 
-- **Read-only is declared, not inferred:** `show_clash`, `set_view` and `capture_view` are read-only (they change
+- **Read-only is declared, not inferred:** `show_clash`, `set_view`, `set_filters`, `clear_filters` and `capture_view` are read-only (they change
   only the person's view), while `find_patterns` is not (it spends a model call).
 - **A report built by an agent** carries none of the page's evidence, reviews or marks (`build_document` passes only
   the scope), so its pages say what the server knows: the triage, not the fixes the person reviewed.
@@ -382,7 +384,7 @@ link change.
 3. **Start fresh** (`startFresh`) forgets the saved session and revokes its link.
 
 When the tab is closed the agent keeps working: the link and the models live on the server. Only the page tools
-stop (`capture_view`, pictures of detected clashes, `show_clash`, `set_view`), and `get_session` says so in its
+stop (`capture_view`, pictures of detected clashes, `show_clash`, `set_view`, `set_filters`, `clear_filters`), and `get_session` says so in its
 `note`.
 
 ## How it differs from the chat

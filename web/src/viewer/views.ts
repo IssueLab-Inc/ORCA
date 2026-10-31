@@ -243,6 +243,10 @@ const near = (a: Pose, b: Pose) => a.position.every((v, i) => Math.abs(v - b.pos
 /** Visibility filters (docs/views.md, "Visibility"): hidden classes and levels, and for now hidden or isolated
  * elements. Viewing only: the check, triage and fixes never see them. */
 export interface Filters { classes: string[]; levels: string[] }
+/** What the drawing views show (docs/filters.md, "Drawings"): what the filters and hides leave (the default; the mode
+ * round the focus is the 3D view's), exactly what the 3D view shows, or the whole model (only hidden models stay
+ * hidden; no filter colours). */
+export type DrawingsShow = "filtered" | "follow" | "whole";
 export interface Temporary { hidden: string[]; isolated: string[] | null }
 
 /** Is an element shown by the filters and the temporary hide / isolate? (The model's own visibility and "round the

@@ -1,3 +1,4 @@
+import type { Condition, FacetIndex, Rule } from "./filters";
 import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
 import type { Datums } from "./viewer/views";
@@ -91,12 +92,38 @@ export type BuiltEvent =
 export interface EscalationInfo { model: string; label: string; mode: "off" | "button" | "auto"; available: boolean }
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
 export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
-/** What the model says about one element (properties.py): quantities in SI with their unit, size in metres (IFC axes). */
+/** One value the model gives (properties.py): lengths, areas, volumes and masses in SI with their unit, others as
+ * authored with theirs; `from_type` when the object's type gives it. Kinds other than a single value say so: an
+ * enumerated or list value is a list, a bounded one {lower, upper, set_point}, a table has `table`, a complex
+ * property nests `rows`, a reference names what it points at. */
+export interface PropRow {
+  name: string; value: unknown; unit?: string; from_type?: boolean;
+  kind?: "enumerated" | "list" | "bounded" | "table" | "reference" | "complex" | string;
+  rows?: PropRow[]; of?: string;
+  table?: { defining: unknown[]; defined: unknown[]; defining_unit: string | null; defined_unit: string | null; expression: string | null };
+}
+/** A property set, quantity set or a material's own set. */
+export interface PropSet { name: string; kind: "pset" | "qto"; props: PropRow[]; from_type?: boolean; material?: string }
+/** An object one points at (a breadcrumb, a container): enough to read its own properties (`file` picks the model). */
+export interface ObjectRef { global_id: string | null; ifc_class: string; name: string; file: number }
+export interface MaterialUse {
+  usage: "single" | "layers" | "profiles" | "constituents" | "list" | string; name: string; from_type: boolean;
+  items: { material: string | null; name?: string; thickness_m?: number; fraction?: number; profile?: string; category?: string }[];
+  total_m?: number; sets: PropSet[];
+}
+/** Everything the model says about one object (properties.py): every attribute, its type, every set (the type's
+ * marked), materials, classifications, groups, documents, where it sits and the path up to the project; size in
+ * metres (IFC axes), none for a storey or a building. */
 export interface ElementProperties {
-  global_id: string; ifc_class: string; attributes: Record<string, unknown>;
-  type: { ifc_class: string; name: string | null } | null; materials: string[];
-  psets: Record<string, Record<string, unknown>>; quantities: Record<string, Record<string, { value: unknown; unit: string }>>;
-  size_m: number[] | null; source: string;
+  global_id: string; ifc_class: string; name: string | null; source: string; file: number; size_m: number[] | null;
+  attributes: PropRow[];
+  type: { global_id: string | null; ifc_class: string; name: string | null; attributes: PropRow[] } | null;
+  storey: ObjectRef | null; container: ObjectRef | null; path: ObjectRef[];
+  materials: MaterialUse[];
+  classifications: { system: string | null; identification: string | null; name: string | null; location: string | null }[];
+  groups: { global_id: string | null; ifc_class: string; name: string }[];
+  documents: { identification: string | null; name: string | null; location: string | null }[];
+  sets: PropSet[];
 }
 export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
 export interface ContextChecks {
@@ -168,7 +195,13 @@ export interface Report {
 }
 
 /** ORCA detection (server: detect.py; design in docs/detection.md). */
-export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[] }
+export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[];
+  /** A side found by a filter (docs/filters.md, "Checks"). */
+  filter?: { when: Condition[]; invert: boolean } | null }
+/** What a check on filters takes when it says nothing else (server: Workspace.check_defaults). */
+export interface CheckDefaults { tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; min_size_m: number }
+/** One of the user's filters as the page shares it with chat and an agent link (server: PageFilter). */
+export interface SharedFilter { id: string; name: string; when: Condition[]; invert: boolean; on: boolean; origin?: string | null }
 export interface DetectTest {
   id: string; name: string; a: DetectSelection; b: DetectSelection | null; kind: "hard" | "clearance" | "duplicate";
   tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; enabled: boolean; min_size_m?: number;
@@ -181,11 +214,14 @@ export interface DetectGone { id: string; test: string; a: string; b: string }
 export interface DetectDiff { new: string[]; resolved: DetectGone[]; no_longer_checked: DetectGone[]; first: boolean }
 /** What a result was checked against (server: Workspace.requirements_info). */
 export interface RequirementsInfo { id: string; name: string; version: number; label: string; level: number; strictness: Strictness }
-export interface Detection { coverage: DetectCoverage[]; diff: DetectDiff; elements: number; seconds: number; requirements?: RequirementsInfo | null }
+export interface Detection { coverage: DetectCoverage[]; diff: DetectDiff; elements: number; seconds: number; requirements?: RequirementsInfo | null;
+  /** The tests as run when they were chosen (a check on filters), for Detect again; null: the defaults. */
+  tests?: DetectTest[] | null }
 export interface DetectSetup {
   tests: DetectTest[]; teams: Record<string, string>; elements: number; rules: Record<string, string>;
   file_elements?: Record<string, number>;  // physical elements per model file
   requirements?: RequirementsInfo | null;  // the tests are what these requirements compile to
+  check?: CheckDefaults;                   // what a check on filters takes by default
 }
 export type DetectEvent =
   | { type: "phase"; text: string }
@@ -450,6 +486,8 @@ export type ChatEvent =
   | { type: "ui"; action: "select_clash"; clash_id: string }
   | { type: "ui"; action: "show_it_built"; clash_id: string }   // draw the chosen or kept fix (docs/show-it-built.md)
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
+  /** Chat's or an agent's filters (docs/filters.md): replace its own (the user's paused), or clear them. */
+  | { type: "ui"; action: "filters"; mode: "replace" | "clear"; filters?: Rule[]; grey_rest?: boolean }
   | { type: "ui"; action: "open_report"; report_id: string; detection: Detection }
   | { type: "detect_event"; event: DetectEvent }
   | { type: "agent"; event: AgentEvent }
@@ -521,7 +559,8 @@ export interface SavedSession {
   scene_id: string; report_id: string | null; files: string[]; fixes: Record<string, string>;
   link: AgentLink | null; clock_offset?: number; saved_at: number;
 }
-export interface LinkContext { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] }
+export interface LinkContext { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[];
+  filters?: SharedFilter[] }
 /** What the agent does, for the page to follow: its calls, requests for pictures, and the chat's ui events. */
 export type LinkEvent =
   | { type: "hello"; stream: string; calls: number; last_call: AgentLink["last_call"]; expires_at: number; max_expires_at: number; server_time: number }
@@ -573,6 +612,8 @@ export const api = {
   classes: (sceneId: string) => call<Record<string, [string, string]>>(`/scenes/${sceneId}/classes`),
   /** Levels, grid axes and each element's storey (docs/views.md, "Datums from the server"). */
   datums: (sceneId: string) => call<Datums>(`/scenes/${sceneId}/datums`),
+  /** The filters' index (docs/filters.md): each facet's values and, per value, the elements that have it. */
+  facets: (sceneId: string) => call<FacetIndex>(`/scenes/${sceneId}/facets`),
   /** Show it built: the passes of one view (Viewer.captureBuilt) → a checked restyle, or why not. */
   built: async (sceneId: string, passes: { look: string; ids: string; normals: string }, fixKind: string,
                 onEvent: (e: BuiltEvent) => void, signal?: AbortSignal): Promise<BuiltResult> => {
@@ -620,7 +661,7 @@ export const api = {
   applyPlan: (sceneId: string, options: Option[]) =>
     call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
-                 clash_id: string | null; fixed: string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
+                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   /** The sample models, and the demos among them (server: demos.py). */
   samples: () => call<{ files: string[]; demos: Demo[] }>("/samples"),
@@ -729,7 +770,8 @@ export const api = {
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
   /** Everything the model says about one element, for the Properties panel (properties.py). */
-  properties: (id: string, globalId: string) => call<ElementProperties>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties`),
+  properties: (id: string, globalId: string, file?: number) =>
+    call<ElementProperties>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties${file === undefined ? "" : `?file=${file}`}`),
   /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
    *  check): the connection highlight's graph (docs/connections.md). */
   connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),

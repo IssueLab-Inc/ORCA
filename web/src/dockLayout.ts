@@ -1,7 +1,7 @@
 /** The desktop's panels and the layout saved for them (docs/panels.md): what each panel is, where it lives by
  * default, which saved layouts can be loaded, and what showing a panel takes. Pure: `dock.tsx` does the drawing. */
 
-export type PanelId = "model" | "clashes" | "clash" | "plan" | "chat" | "activity" | "properties";
+export type PanelId = "model" | "clashes" | "filters" | "clash" | "plan" | "chat" | "activity" | "properties";
 export type Edge = "left" | "right" | "bottom";
 
 /** Every panel, in the order the Layout menu lists them. `home` is where it docks by default and goes back to; a
@@ -9,6 +9,7 @@ export type Edge = "left" | "right" | "bottom";
 export const PANELS: { id: PanelId; title: string; home: Edge | "centre" | "float" }[] = [
   { id: "model", title: "Model", home: "centre" },
   { id: "clashes", title: "Coordination", home: "left" },  // the clash list and Insights (their own tabs inside)
+  { id: "filters", title: "Filters", home: "left" },  // find, colour, hide and isolate by what the model says (docs/filters.md)
   { id: "clash", title: "Clash", home: "right" },
   { id: "plan", title: "Plan", home: "right" },
   { id: "chat", title: "Chat", home: "right" },

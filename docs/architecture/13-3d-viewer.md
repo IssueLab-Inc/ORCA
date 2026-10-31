@@ -140,11 +140,11 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 | Loading | `load(files, names, isCurrent)`, `replace(index, bytes, isCurrent)`, `patch(meshes, origin)`, `dispose()`; fields `models`, `names` |
 | Visibility per model | `setModelVisible(index, visible)` (the toolbar's Models list; `App` keeps `tool.hiddenModels`) |
 | Modes and focus | `setMode(mode)`, `setFocus({ a, b, group })`, `setEdges(on)`, `setHits(ids)`, `setLinks(groups)`; private `applyMode`, `aroundIds`, `drawFocus`, `nearFocus`, `focusSide` |
-| Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(classes, storeys)` (either may be null to keep what it had), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `infoCounts()` (cached until the models or the info change), `ofClass(cls)`; private `filterTest`, `drawSelection` |
+| Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(classes, storeys)` (either may be null to keep what it had), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `setRules(view)` and `isShown(gid)` (the filters' rules, [docs/filters.md](../filters.md); its test is built once and kept until the next `applyMode`), `ofLevel(name)` (a storey's elements from the datums, for the Properties card's level actions), `infoCounts()` (cached until the models or the info change), `ofClass(cls)`; private `filterTest`, `drawSelection` |
 | Previews | `preview(moves)`, `showOption(shape, mode, colour)`, `showOptions(shapes, mode)` |
-| Camera | `focusClash(ids, point, label, fly)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, `orbitAround(pivot, dx, dy)`, `setOrbitClash(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
+| Camera | `focusClash(ids, point, label, fly)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameEverywhere(ids)` (the 3D view and every unpinned drawing: a filter applied, [docs/filters.md](../filters.md)), `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, `orbitAround(pivot, dx, dy)`, `setOrbitClash(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
 | Navigation | `activeCamera()`, `setProjection(p)`, `pose()`, `applyPose(p)`, `back()`, `forward()`, getters `canBack`, `canForward`, `setHome(p)`, getter `homeView`, `home()`, `lookFrom(dir)`, callback `onChange` (history, Home, layout or hides changed); private `press` (pivot or grip), `turn` (cube drag), `syncOrtho` |
-| Panes and drawing views | `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)` (shares kept within 0.2–0.8), getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `defaultSpec(kind)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, getter `hasClash`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
+| Panes and drawing views | `setDrawingsShow(show)`, `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)` (shares kept within 0.2–0.8), getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `defaultSpec(kind)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, getter `hasClash`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
 | Section box and marker | `setSection(on, margin, box)`, getter `section`, `setMarker(point, label)`; private `boxAroundFocus`, `boxInView`, `buildGrips`, `placeGrips`, `gripAt`, `dragGrip` |
 | Picking and measuring | `pickAt(event, { ghosts })`, `pick(event)`, `has(gid)`, `boxOf(ids)`; measuring: getters `measurements`, `measureOpen`, `setMeasuring(on)`, `setSnap(on)`, `measureHover(event)`, `measureClick(event)`, `measureCancel()`, `removeMeasurement(id)`, `clearMeasurements()`; private `snapAt`, `snap3d`, `snapDrawing`, `snapNear`, `edgesFor`, `drawingCandidates`, `drawMeasures` |
 | Captures | `snapshot()`, `capture(side)`, `captureClash(a, b, side)`, `thumbClash(a, b, side)`, `captureBuilt(fix, pair, classOf, radius, side)`; private `posed`, `posedShots`, `builtPasses`, `fullCanvas`, `png` |
@@ -193,10 +193,16 @@ every style.
   in every pane (`selectionLayer`; the outline on layer 1). `App` sets it from a single click.
 - **Visibility:** what wins is a hidden model (`setModelVisible`), then a temporary hide or isolate
   (`setTemporary({ hidden, isolated })`), then the filters (`setFilters({ classes, levels })`: classes and storeys
-  left out, `views.shownBy`), then the mode round the focus. The focus is drawn by its own layer, so the pair, previews
+  left out, `views.shownBy`), then the filters' rules (`setRules`: what hide rules find is hidden; while an isolate
+  rule is on, only what isolate rules find shows), then the mode round the focus. `isShown(gid)` answers for the card
+  and App (a filter that hides the selection clears it); the selection and lit links leave out what is hidden.
+- **Colour:** `applyMode` sets each element's colour: a filter's colour (`setRules`' `paint`, the top rule winning),
+  else the ghost, else grey (the grey context round a focus, or Grey the rest), else its own. One scratch `Vector4`
+  for every element. The pair, selection, hits, links, previews and measure are their own layers over the batches,
+  so they keep their colours over any filter's. The focus is drawn by its own layer, so the pair, previews
   and trials always show. `setInfo` takes each element's class (`api.classes`) and storey (`api.datums`); `infoCounts()` gives
   the toolbar its per-class and per-level counts, `ofClass(cls)` the GlobalIds for "Hide all / Isolate all".
-- **Lifted:** while a capture shoots, `lifted` puts the style back to shaded and drops filters, temporary hides and the
+- **Lifted:** while a capture shoots, `lifted` puts the style back to shaded and drops filters, the filters' rules and colours, temporary hides and the
   selection, so the pictures the server reads do not depend on how the user is looking (Captures, below).
 - **The section box in Shaded with edges and Hidden line:** the drawings' fills, pair colours, selection and normals
   materials share the section box's planes, so it cuts those styles too (a drawing view empties the planes while it
@@ -351,9 +357,16 @@ flowchart LR
   (`.view-lost`); when the browser gives it back, every pane is drawn again (three.js re-creates what was on the
   card); not back within 5 s, it offers a reload, which picks the session up. Captures return nothing meanwhile
   (`Viewer.lost`), never black pictures, and `App` holds the thumbnail queue until it is back.
-- **Full model or follow 3D:** `applyMode` records each element whose 3D visibility differs from the drawings' (what
-  Context or Isolate hide) in `drawVis`; `useDrawingVisibility` swaps the drawings' set in around a drawing's passes
-  and picks, unless `setDrawingsFollow(true)`.
+- **What drawings show** (`setDrawingsShow`, [docs/filters.md](../filters.md), "Drawings"): `filtered` (the default:
+  what the filters and hides leave, without the 3D view's Context or Isolate), `follow` (exactly what the 3D view
+  shows) or `whole` (only hidden models stay hidden). `applyMode` records each element whose 3D visibility differs
+  from the drawings' in `drawVis`; `useDrawingVisibility` swaps the drawings' set in around a drawing's passes and
+  picks.
+- **Filter colours in drawings:** while filters colour anything (and drawings don't show the whole model), `drawInto`
+  fills with `DrawingStyle.paintFill` (a fill that keeps each element's colour) and `useDrawingPaint` sets each
+  element's colour for the pass, its filter's a quarter of the way to paper (`DrawingStyle.onPaper`) or its file's
+  tint (`DrawingStyle.tint`), then puts the 3D colours back: 2N colour writes per redraw, and a drawing redraws only
+  when something changes. Cut faces keep their poché; the 3D Hidden line style shows no filter colours.
 - **Annotations** (`annotate.ts`, redrawn when its own key changes): grid lines and bubbles (in sections and
   elevations only the axes within 25° of the look direction, `views.gridShows`), level lines and heads, a revision
   cloud and the `#N` round where the pair meets, in plan each section's line, heads, far clip and crop sides, each

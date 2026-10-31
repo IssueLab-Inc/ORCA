@@ -16,8 +16,9 @@ It is new work, written for ORCA during the event. No code from other products.
 ## Decisions (owner, Oct 29 and 30)
 
 - **Up to four views.** Layouts: Single, Two, Quad.
-- **A toggle** decides whether drawing views follow the 3D view's Near it / Only it (today's Context / Isolate), or
-  always show the full model.
+- **A setting** decides what drawing views show: what the filters and hides leave (the default, colours too), exactly
+  what the 3D view shows (its Near it / Only it, today's Context / Isolate, as well), or the whole model (no filters)
+  ([filters.md](filters.md), "Drawings").
 - **Clip planes are the user's to set**, in plans (cut plane and bottom) and in sections (the line, far clip and crop),
   by typing a value or dragging it in another view (View range and clip planes, below).
 - **Navigate anywhere, with or without a clash** (Oct 30): leaving a clash is one key or one click, the model can be
@@ -146,7 +147,7 @@ The pair, the selection, previews, trials and hits keep their colours in every s
 
 ### Visibility
 
-Three layers, each applying to every open view (the toggle above covers only the first, for drawing views):
+Four layers, each applying to every open view (the toggle above covers only the first, for drawing views):
 
 1. **Round the focus:** All (default), **Near it** (**C**, within 2.5 m, `reach`-scaled) or **Only it** (**I**); pressing
    the key again goes back to All. The focus is the clash, or the selected element when no clash is picked: isolate an
@@ -159,8 +160,13 @@ Three layers, each applying to every open view (the toggle above covers only the
    class, from the element card. While any is on, the 3D pane has a cyan frame and a "3 hidden · Reset" chip. Hidden
    elements are not picked.
 
-What wins: a hidden model, then a temporary hide or isolate, then the filters, then "round the focus". The clash pair,
-a fix preview and the agent's trials always show while they are on screen.
+4. **Filters by property** (Oct 31, [filters.md](filters.md)): named filters over everything the model says (model,
+   class, floor, any attribute, property or quantity), each colouring, colouring by value, hiding or isolating what it
+   finds; several on at once.
+
+What wins: a hidden model, then a temporary hide or isolate, then the filters (the quick checkboxes), then the filters
+by property, then "round the focus". The clash pair, a fix preview and the agent's trials always show while they are on
+screen.
 
 **Selection.** A single click selects an element (as today) and now draws it in blue (`#2f8fdf`) with an outline in
 every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate, Section box round it and Hide all /

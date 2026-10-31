@@ -16,6 +16,7 @@ and the PDF work on it unchanged.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
 import time
@@ -32,7 +33,7 @@ import ifcopenshell.util.element
 import ifcopenshell.util.system
 import numpy as np
 
-from . import requirements, verify
+from . import facets, requirements, verify
 from .limits import env_int
 from .reports import Report, ReportClash, ReportElement, plain_name
 from .scene import IfcScene
@@ -57,6 +58,71 @@ class Selection:
     exclude_classes: list[str] = field(default_factory=list)
     systems: list[str] = field(default_factory=list)      # distribution system names
     ids: list[str] = field(default_factory=list)          # particular elements, by GlobalId
+    # A filter by what the model says (docs/filters.md): {when: [conditions as the page writes them], invert}, found
+    # against the filters' index at run time, so a rerun after a kept fix selects by properties again.
+    filter: dict | None = None
+
+    @staticmethod
+    def from_dict(s: dict) -> "Selection":
+        lists = {k: [str(x) for x in (v or [])] for k, v in s.items() if k in LIST_FIELDS}
+        return Selection(**lists, filter=_filter(s["filter"]) if s.get("filter") is not None else None)
+
+    def describe(self) -> str:
+        """What the side takes, in words: its filter's name, else its files, classes, systems; "Everything"."""
+        if self.filter is not None:
+            return facets.name_for(self.filter["when"], self.filter["invert"])
+        parts = [", ".join(self.files), ", ".join(c.removeprefix("Ifc") for c in self.classes), ", ".join(self.systems),
+                 ", ".join(self.teams)]
+        return " · ".join(p for p in parts if p) or "Everything"
+
+
+LIST_FIELDS = ("files", "teams", "classes", "exclude_classes", "systems", "ids")
+FILTER_CONDITIONS, FILTER_VALUES = 30, 500
+
+
+def _filter(f) -> dict:
+    """A side's filter checked and written one way only (conditions and values sorted), so the same filter always
+    gives the same check id."""
+    if not isinstance(f, dict):
+        raise ValueError("A filter is {when, invert}")
+    when = f.get("when") or []
+    if not isinstance(when, list) or len(when) > FILTER_CONDITIONS:
+        raise ValueError(f"A filter has at most {FILTER_CONDITIONS} conditions")
+    out = []
+    for c in when:
+        if not isinstance(c, dict) or not isinstance(c.get("facet"), str):
+            raise ValueError("Each condition names its facet")
+        op = c.get("op") or "is"
+        if op not in facets.OPS.values():
+            raise ValueError(f"Unknown condition {op!r}")
+        values = c.get("values") or []
+        if not isinstance(values, list) or len(values) > FILTER_VALUES:
+            raise ValueError(f"A condition has at most {FILTER_VALUES} values")
+        one: dict = {"facet": c["facet"], "op": op}
+        if values:
+            one["values"] = sorted(values, key=lambda v: (type(v).__name__, str(v)))
+        for k in ("min", "max"):
+            if c.get(k) is not None:
+                one[k] = float(c[k])
+        out.append(one)
+    out.sort(key=lambda c: json.dumps(c, sort_keys=True))
+    return {"when": out, "invert": bool(f.get("invert"))}
+
+
+def check_name(a: Selection, b: Selection | None, kind: str = "hard", clearance_m: float = 0.0) -> str:
+    """A check's name from its sides: "A vs B", "A (within)", "A vs Everything", and its clearance."""
+    name = f"{a.describe()} (within)" if b is None else f"{a.describe()} vs {b.describe()}"
+    if kind == "clearance":
+        name += f", {round(clearance_m * 1000)} mm clearance"
+    elif kind == "duplicate":
+        name += ", duplicates"
+    return name
+
+
+def check_id(a: Selection, b: Selection | None, kind: str) -> str:
+    """A check's id from what it compares (not its name or tolerance, as `pair:` ids), so a rerun keeps its clashes."""
+    sides = {"a": asdict(a), "b": None if b is None else asdict(b), "kind": kind}
+    return "filter:" + hashlib.sha1(json.dumps(sides, sort_keys=True).encode()).hexdigest()[:10]
 
 
 @dataclass
@@ -74,14 +140,20 @@ class Test:
 
     @staticmethod
     def from_dict(d: dict) -> "Test":
-        sel = lambda s: None if s is None else Selection(**{k: list(v) for k, v in s.items() if k in Selection.__dataclass_fields__})
+        """A test as the page or a tool sends it. With no id (a check on filters), the id comes from what it compares
+        (`check_id`) and the name from its sides (`check_name`) unless one is given."""
         kind = d.get("kind", "hard")
         if kind not in ("hard", "clearance", "duplicate"):
             raise ValueError(f"unknown test kind {kind!r}")
+        a = Selection.from_dict(d.get("a") or {})
+        b = None if d.get("b") is None else Selection.from_dict(d["b"])
+        clearance_m = max(0.0, float(d.get("clearance_m", 0.0)))
+        tid = str(d.get("id") or "") or check_id(a, b, kind)
+        name = str(d.get("name") or "") or (check_name(a, b, kind, clearance_m) if not d.get("id") else tid)
         rules = {r: True for r in RULES} | {k: bool(v) for k, v in (d.get("rules") or {}).items() if k in RULES}
-        return Test(id=str(d["id"]), name=str(d.get("name") or d["id"]), a=sel(d.get("a") or {}), b=sel(d.get("b")),
+        return Test(id=tid, name=name, a=a, b=b,
                     kind=kind, tolerance_m=max(0.0, float(d.get("tolerance_m", TOLERANCE_M))),
-                    clearance_m=max(0.0, float(d.get("clearance_m", 0.0))), rules=rules,
+                    clearance_m=clearance_m, rules=rules,
                     enabled=bool(d.get("enabled", True)), min_size_m=max(0.0, float(d.get("min_size_m", 0.0))))
 
 
@@ -130,6 +202,7 @@ class _Index:
         # Each file's team, guessed in the scene's domain: the same names requirements groups select by.
         self.teams = list(requirements._file_teams(scene, requirements.domain_of(scene, requirements.current())))
         self._systems: dict[str, list[str]] = {}
+        self._filtered: dict[str, set[str]] = {}
         self.connected = self._connected()
         self.assembly = self._assemblies()
         self.host = self._hosts()
@@ -193,10 +266,22 @@ class _Index:
             return "host"
         return None
 
+    def filtered(self, f: dict) -> set[str]:
+        """The elements a side's filter finds, against the filters' index as the scene is now; once per run."""
+        key = json.dumps(f, sort_keys=True)
+        if key not in self._filtered:
+            idx = facets.index(self.scene)
+            self._filtered[key] = {idx["elements"][i] for i in facets.found(idx, f["when"], f["invert"])}
+        return self._filtered[key]
+
     def select(self, sel: Selection) -> list[str]:
         out = []
+        ids = set(sel.ids)
+        allowed = self.filtered(sel.filter) if sel.filter is not None else None
         for g, e in self.entity.items():
-            if sel.ids and g not in sel.ids:
+            if ids and g not in ids:
+                continue
+            if allowed is not None and g not in allowed:
                 continue
             i = self.file[g]
             if sel.files and self.names[i] not in sel.files:
@@ -272,6 +357,10 @@ def _candidates(ix: _Index, a: list[str], b: list[str] | None, margin: float) ->
     A = np.array([ix.boxes[g] for g in a])            # (n, 2, 3)
     B = A if b is None else np.array([ix.boxes[g] for g in b])
     ids_b = a if b is None else b
+    # A check on filters can take an element on both sides (a filter against Everything): never pair an element with
+    # itself, and each pair once.
+    both = b is not None and not set(a).isdisjoint(b)
+    once: set[tuple[str, str]] = set()
     order = np.argsort(B[:, 0, 0])
     rank = np.empty(len(order), dtype=np.int64)
     rank[order] = np.arange(len(order))
@@ -298,6 +387,10 @@ def _candidates(ix: _Index, a: list[str], b: list[str] | None, margin: float) ->
             h = ids_b[j]
             if b is None and h <= g:      # self test: each unordered pair once, never an element with itself
                 continue
+            if both:
+                if h == g or (min(g, h), max(g, h)) in once:
+                    continue
+                once.add((min(g, h), max(g, h)))
             out.append((g, h))
     return out
 
@@ -538,6 +631,11 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         raise ValueError("Two tests share an id")
     emit({"type": "start", "elements": len(ix.entity), "tests": [{"id": t.id, "name": t.name, "kind": t.kind}
                                                                    for t in tests]})
+    # A clash keeps its id, and so its #N, title, views, sign-offs and marks, when another check finds the same pair:
+    # a check on filters that finds a pair the full check found takes the full check's id (once per run).
+    earlier = {(was.get("kind", "hard"), frozenset((was["a"], was["b"]))): cid
+               for cid, was in (previous or {}).get("clashes", {}).items()}
+    taken: set[str] = set()
 
     # Broad phase for every test first, so the triangle tree is built once over just what can clash.
     plans = []
@@ -576,6 +674,11 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         found = found[:cap]
         for h in found:
             cid = clash_id(t.id, h.a, h.b)
+            if cid not in (previous or {}).get("clashes", {}):
+                same = earlier.get((t.kind, frozenset((h.a, h.b))))
+                if same is not None and same not in taken and same not in tested:
+                    cid = same
+            taken.add(cid)
             tested[cid] = t
             ea, eb = ix.report_element(h.a), ix.report_element(h.b)
             clashes.append(ReportClash(
@@ -597,7 +700,13 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
         if c.id not in numbers:
             numbers[c.id], following = following, following + 1
         c.number = numbers[c.id]
+    # Only like with like: a run whose tests share none with the last run's (the full check after a check on filters,
+    # or the other way round) says nothing about what was resolved or no longer checked, and calls new only a clash
+    # these models never had a number for (the full check's clashes come back from a check on filters, not anew).
     diff = _diff(previous, clashes, selections)
+    if previous and not set(selections) & set(previous.get("selections", {})):
+        fresh = sorted({c.id for c in clashes} - set(previous.get("numbers", {})))
+        diff = {**diff, "new": fresh, "new_ids": set(fresh), "resolved": [], "no_longer_checked": []}
     for c in clashes:
         if c.id not in diff["new_ids"]:
             c.status = "active"
@@ -605,11 +714,13 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
     # The title and the element count say what the tests checked (a site model open for context is not, by default).
     checked_ids = {g for sel in selections.values() for side in (sel["a"], sel["b"] or ()) for g in side}
     checked = len({ix.file[g] for g in checked_ids})
+    if title is None and len(tests) == 1 and (tests[0].a.filter is not None or (tests[0].b and tests[0].b.filter is not None)):
+        title = f"Coordination · {tests[0].name}"
     report = Report(id=uuid.uuid4().hex[:12], title=title or f"Coordination · {checked} model"
                     f"{'' if checked == 1 else 's'}", root=root, sources=list(ix.names), clashes=clashes,
                     temporary=True, origin="sightline")
-    state = {"clashes": {c.id: {"test": tested[c.id].id, "name": tested[c.id].name, "a": c.a.global_id,
-                                "b": c.b.global_id} for c in clashes},
+    state = {"clashes": {c.id: {"test": tested[c.id].id, "name": tested[c.id].name, "kind": tested[c.id].kind,
+                                "a": c.a.global_id, "b": c.b.global_id} for c in clashes},
              "selections": selections, "numbers": numbers, "contacts": [sorted(p) for p in contacts]}
     seconds = round(time.perf_counter() - t0, 2)
     return Run(report, coverage, {k: v for k, v in diff.items() if k != "new_ids"}, len(checked_ids), seconds,

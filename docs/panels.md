@@ -24,6 +24,7 @@ It is new work, written for ORCA during the event. No code from other products.
 |---|---|---|
 | Model | The stage: the canvas, PR 49's view panes, the rail, the element card, the pilot pill, toasts | the middle; never moves, floats or pops out |
 | Coordination | The left pane: the clash list and Insights (their own tabs), or the check's set-up card | left side bar |
+| Filters | Filters by property ([filters.md](filters.md)): the list and the editor | left side bar (tab, behind Coordination) |
 | Clash | The Clash tab's body | right side bar |
 | Plan | `PlanPanel` or `ContextPlan` | right side bar (tab) |
 | Chat | `ChatPanel` | right side bar (tab) |
@@ -72,17 +73,49 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
   `sightline.dock.properties`, and the next selection after a close or a reload opens it there. Docked, a selection
   brings its tab to the front.
 - **Four tabs in a bar:** they and the bar's buttons don't fit its width (dockview would put some behind a menu), so
-  with more than three tabs the ones behind the front tab show their icon only, with their name as a tooltip. A
+  with more than three tabs the ones behind the front tab show their icon only, with their name as a tooltip. The left
+  bar is narrower: there two are enough (Coordination and Filters). "Behind" means not the tab shown in its bar
+  (`isVisible`; dockview's `isActive` also needs the bar to have the focus, so it shortened the front tab too). A
   collapsed strip keeps the names.
 - **Classic layout, tablets and phones** keep the card over the model, with an **All properties** section.
-- **What it shows:** the card as before (class, name, GlobalId, tag, level, file, links, Set as A / B, Zoom, Hide,
-  Isolate, Section box, Hide / Isolate the class), then the element's type, materials, size (mm, from the scene's
-  box), attributes, every property set (with what its type gives it) and every quantity set in SI with its unit. A
-  filter narrows the rows; a click on a value copies it.
+- **The card** (`ElementCard.tsx`, owner request Oct 31: a better layout, icon buttons, breadcrumbs):
+  - **Header:** the element's name, its class and type.
+  - **Breadcrumbs:** where it sits, Project › Site › Building › Level, each opening that object's own properties
+    (a storey's elevation and `Pset_BuildingStoreyCommon`, a building's address…) with a back arrow to the element;
+    a storey adds **Isolate this level**, **Hide this level** (for now) and **Filter by this level**.
+  - **Icon bar** (tooltips name each): **A** and **B** (set the pair, in their red and green), Zoom to it, Hide it for
+    now, Isolate it for now, Section box round it, Light up what it is linked to, and a **More** menu for every element
+    of its class (hide, isolate, filter by the class).
+  - What it is linked to, by kind (as before).
+  - **Every value's row**, on hover (always on a touch screen): **Copy**, and where the filters' index knows the value
+    **Filter by this value** (a new filter in the editor, shown live), **Colour by this property** (a colour-by-value
+    filter, on top) and **Isolate all with this value** (for now); applying a filter or isolating takes every view
+    to what it acts on ([filters.md](filters.md), "Zoom"). The Storey row opens the storey. **Collapse all** /
+    **Expand all** beside the filter.
+- **What it shows** under the card, **everything the model says** (owner request, Oct 31):
+  - **Element:** its IFC class, every direct attribute (name, description, tag, predefined type, object type, a
+    storey's elevation, a door's overall height…), GlobalId, its storey, its direct container when that is not a
+    storey (a neighbouring building on the Site model), file and size (mm, from the scene's box).
+  - **Type:** the type's class, name and own attributes.
+  - **Materials:** a material, or layers with each thickness and the total, profiles, constituents with their
+    fraction, or a list; each material's own property sets follow the property sets.
+  - **Classification** (system, identification and name), **Systems and groups** (distribution and building systems,
+    zones, groups), **Documents** (a web address opens in a new tab).
+  - **Every property set and quantity set**, on the element or its type: a value only the type gives has a **Type**
+    badge (a set only the type has is badged once), and the element's own value of a name wins. Every kind of
+    property: single, enumerated and list values, a range ("10 °C to 20 °C (set point 18 °C)"), a table
+    ("1000 mm → 2 mm"), a reference (what it points at) and a complex property (its parts as "Connection › Torque").
+  - **Units:** lengths in mm, areas in m², volumes in m³, masses in kg, whatever the file's units; other measures
+    with their own unit (W, °C…).
+
+  A filter narrows the rows; a click on a value copies it.
 - **From the server:** `GET /api/scenes/{sid}/elements/{gid}/properties` (`properties.py`), read from the scene as it is
-  now, so a kept fix's new pieces have theirs. The demo models carry their own notes in a property set named for the
-  tool that generated them: it shows as **Model data**, without the scripting note on the clash host (it says the
-  answer key was planted).
+  now, so a kept fix's new pieces have theirs. The reader walks the model's own relationships rather than a summary of
+  them, so nothing is lost (`evals/properties_complete.py` counts every value Northbank gives each object and checks
+  the reader returns them all). Any object with a GlobalId can be read: `?file=` picks the model when federated files
+  repeat a storey's GlobalId. The demo models carry their own notes in a property set named for the tool that
+  generated them: it shows as **Model data**, without the scripting note on the clash host (it says the answer key was
+  planted); one gate (`properties.shown`) keeps that note out at every depth.
 
 ## How it works
 
@@ -146,7 +179,8 @@ main window.
 
 ## Tests and checks
 
-- `server/tests/test_properties.py` (5) and `web/tests/properties.test.mjs` (4): what the panel reads and shows.
+- `server/tests/test_properties.py` (10), `server/tests/test_properties_complete.py` (1, needs Northbank) and
+  `web/tests/properties.test.mjs` (5): what the panel reads and shows, every kind of value, and nothing dropped.
 - `web/tests/dock.test.mjs` (9): every panel has a home, which saved layouts load (a window split in several groups
   too), the widths the classic panes and the side bars share, what was popped out goes back to its bar, storage and
   versions, what showing a panel takes, and the free-core-only rule.

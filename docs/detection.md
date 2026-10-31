@@ -54,7 +54,15 @@ A test is one question about the models:
 | `rules` | Which "never a clash" rules apply (section 2). All on by default |
 
 A **selection** picks elements by model file, by discipline (the team guessed per file from its contents, as the PDF
-report does), by IFC class (include or exclude) and by system.
+report does), by IFC class (include or exclude), by system, by GlobalId, or by a **filter** (Oct 31, owner request):
+`{when: [conditions], invert}` as the Filters panel writes them, found against the filters' index when the run starts
+(`facets.found`), so a rerun after a kept fix selects by properties again ([filters.md](filters.md), "Checks").
+
+**A check on filters** is one test: side A a filter, side B a filter, everything (`{}`) or itself (`null`). It needs no
+id: `Test.from_dict` gives it `filter:` and a hash of what it compares (its sides and kind, written one way only, so
+the same filter in another order is the same check; not its name or tolerance), and a name from its sides
+("DuctSegment vs Everything", "… (within)", ", 50 mm clearance"). An element on both sides is never paired with itself,
+and each pair is measured once.
 
 **Default tests** for the open models:
 - every pair of model files, hard, 1 mm: "Structure vs MEP", "Architecture vs Structure", …;
@@ -137,10 +145,16 @@ A run is a clash report like an imported one, so every existing feature works on
   number, #N, unique across the whole report and kept across runs (a new clash takes the next number; a resolved one's
   number is never reused). It has a plain name from its two elements at once, and a title Muse writes from its facts
   shortly after ("Cold-water main clips the transfer girder at grid 3, level 02"; `server/sightline/titles.py`).
+- **The same clash in another check.** A clash takes the id the last run gave the same pair of the same kind under
+  another test (a check on filters finding a pair the full check found), so its #N, title, views, sign-offs and marks
+  follow it between the full check and checks on filters.
 - **Run diff.** ORCA keeps the last run per set of open models. On the next run each clash is `new` or `active`,
   and a clash that has gone is listed as **resolved** only if both elements were still checked against each other in
   a complete test. If one left the selection (deleted, or the test changed) it is **no longer checked**, which is not
-  the same as resolved.
+  the same as resolved. **Only like with like:** when the run shares no test with the last one (the full check after a
+  check on filters, or the other way round), it says nothing about resolved or no longer checked, and a clash is new
+  only if these models never gave it a number (going back to the full check brings its clashes back, not anew).
+- **Title.** A run of one check on filters is titled with it: "Coordination · DuctSegment vs Everything".
 - **Coverage.** Per test it reports:
   - elements on each side;
   - candidate pairs checked;

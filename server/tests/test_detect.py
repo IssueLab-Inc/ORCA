@@ -145,6 +145,91 @@ def test_ids_are_stable_and_a_rerun_tells_new_from_resolved(paths):
     assert any(r["test"] == "MEP vs Structure" for r in unchecked.diff["no_longer_checked"])
 
 
+DUCTS = {"when": [{"facet": "class", "op": "is", "values": ["IfcDuctSegment"]}], "invert": False}
+
+
+def test_a_check_on_filters_compares_what_a_filter_finds(paths):
+    """docs/filters.md, "Checks": side A a filter, side B Everything or itself."""
+    scene = IfcScene(paths)
+    vs_all = detect.Test.from_dict({"a": {"filter": DUCTS}, "b": {}})
+    run = detect.run(scene, [vs_all])
+    assert vs_all.id.startswith("filter:") and vs_all.name == "DuctSegment vs Everything"
+    assert ("Beam B1", "Duct D1") in names(run) and all("Duct" in a + b for a, b in names(run))
+    assert all(c.a.global_id != c.b.global_id for c in run.report.clashes), "never an element with itself"
+    pairs = [frozenset((c.a.global_id, c.b.global_id)) for c in run.report.clashes]
+    assert len(pairs) == len(set(pairs)), "each pair once, though ducts are on both sides"
+    assert run.report.title == "Coordination · DuctSegment vs Everything"
+    within = detect.run(scene, [detect.Test.from_dict({"a": {"filter": DUCTS}, "b": None})])
+    assert all(c.a.ifc_class == c.b.ifc_class == "IfcDuctSegment" for c in within.report.clashes)
+    assert within.report.title == "Coordination · DuctSegment (within)"
+
+
+def test_a_checks_id_comes_from_what_it_compares(paths):
+    two = [{"facet": "class", "op": "is", "values": ["IfcDuctSegment", "IfcPipeSegment"]},
+           {"facet": "storey", "op": "is", "values": ["Level 01"]}]
+    t1 = detect.Test.from_dict({"a": {"filter": {"when": two}}, "b": {}})
+    t2 = detect.Test.from_dict({"a": {"filter": {"when": [two[1], {**two[0], "values": two[0]["values"][::-1]}]}}, "b": {},
+                                "name": "Mine"})
+    assert t1.id == t2.id and t2.name == "Mine", "the same filter, written another way, is the same check"
+    assert detect.Test.from_dict({"a": {"filter": {"when": two}}, "b": {}, "kind": "clearance", "clearance_m": 0.05}).id != t1.id
+    assert detect.Test.from_dict({"a": {"filter": {"when": two}}, "b": None}).id != t1.id
+    with pytest.raises(ValueError):
+        detect.Test.from_dict({"a": {"filter": {"when": [{"facet": "class", "op": "explode"}]}}})
+    with pytest.raises(ValueError):
+        detect.Test.from_dict({"a": {"filter": {"when": [{"op": "is"}]}}})
+
+
+def test_a_clash_keeps_its_id_and_number_across_the_full_check_and_a_check_on_filters(paths, tmp_path):
+    for p in paths:
+        (tmp_path / p.name).write_bytes(p.read_bytes())
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open([p.name for p in paths])
+    pair = lambda out: next(c for c in out["report"]["clashes"] if {c["a"]["name"], c["b"]["name"]} == {"Duct D1", "Beam B1"})
+    full = ws.detect(sid)
+    assert full["tests"] is None
+    check = ws.detect(sid, [{"a": {"filter": DUCTS}, "b": {}}])
+    assert (pair(check)["id"], pair(check)["number"]) == (pair(full)["id"], pair(full)["number"])
+    assert check["report"]["title"] == "Coordination · DuctSegment vs Everything"
+    assert check["diff"]["resolved"] == [] and check["diff"]["no_longer_checked"] == [], "not like with like: no noise"
+    assert check["tests"][0]["id"].startswith("filter:") and ws.detections[sid]["tests"] == check["tests"]
+    back = ws.detect(sid)
+    assert pair(back)["id"] == pair(full)["id"] and back["diff"]["no_longer_checked"] == []
+    assert back["diff"]["new"] == [], "the full check's clashes come back, not anew"
+    assert {c["status"] for c in back["report"]["clashes"]} == {"active"}
+    # Detect again on the same check still says what was fixed.
+    ws.detect(sid, check["tests"])
+    scene = ws.scene(sid)
+    scene.translate([pair(full)["a"]["global_id"] if pair(full)["a"]["name"] == "Duct D1" else pair(full)["b"]["global_id"]],
+                    (0.0, 0.0, -0.6))
+    moved = ws.detect(sid, check["tests"])
+    assert any({r["a"], r["b"]} >= {pair(full)["a"]["global_id"]} for r in moved["diff"]["resolved"])
+
+
+def test_the_tests_and_their_defaults_for_a_check(paths, tmp_path):
+    import json
+    from fastapi.testclient import TestClient
+    from sightline import app as app_module
+    import pytest as _pytest
+
+    for p in paths:
+        (tmp_path / p.name).write_bytes(p.read_bytes())
+    mp = _pytest.MonkeyPatch()
+    try:
+        mp.setattr(app_module, "ws", Workspace(samples=tmp_path))
+        c = TestClient(app_module.app)
+        sid = c.post("/api/scenes", json={"samples": [p.name for p in paths]}).json()["id"]
+        check = c.get(f"/api/scenes/{sid}/detect/tests").json()["check"]
+        assert check["tolerance_m"] == 0.001 and check["clearance_m"] == 0.025 and all(check["rules"].values())
+        r = c.post(f"/api/scenes/{sid}/detect/stream", json={"tests": [{"id": "", "a": {"filter": DUCTS}, "b": {}}]})
+        done = [json.loads(line) for line in r.text.splitlines()][-1]
+        assert done["type"] == "done" and done["tests"][0]["id"].startswith("filter:")
+        assert done["report"]["title"] == "Coordination · DuctSegment vs Everything"
+        bad = c.post(f"/api/scenes/{sid}/detect/stream", json={"tests": [{"a": {"filter": {"when": [{"facet": "class", "op": "x"}]}}}]})
+        assert bad.status_code == 422
+    finally:
+        mp.undo()
+
+
 def test_a_test_over_the_cap_is_partial(paths):
     run = detect.run(IfcScene(paths), cap=1)
     s = cov(run, "Structure (within)")
@@ -272,6 +357,69 @@ def test_chat_can_run_detection_and_then_work_on_its_report(paths, tmp_path):
     opened = next(e for e in events if e.get("action") == "open_report")
     assert ws.report(opened["report_id"]).origin == "sightline"
     assert opened["detection"]["coverage"] and any(e["type"] == "detect_event" for e in events)
+
+
+def _workspace(paths, tmp_path):
+    for p in paths:
+        (tmp_path / p.name).write_bytes(p.read_bytes())
+    ws = Workspace(samples=tmp_path)
+    return ws, ws.open([p.name for p in paths])
+
+
+class _Scripted:
+    """Muse Spark's stand-in: tool calls in order, then an answer; keeps what it was sent."""
+
+    def __init__(self, steps):
+        self.steps, self.seen = list(steps), []
+
+    def chat(self, messages, tools):
+        import json
+        self.seen.append(messages[-1])
+        step = self.steps.pop(0)
+        if isinstance(step, str):
+            return {"role": "assistant", "content": step}
+        return {"role": "assistant", "content": None, "tool_calls": [
+            {"id": f"c{i}", "type": "function", "function": {"name": n, "arguments": json.dumps(a)}}
+            for i, (n, a) in enumerate(step)]}
+
+
+MINE = [{"id": "u1", "name": "Ducts", "when": DUCTS["when"], "invert": False, "on": True}]
+
+
+def test_chat_checks_a_users_filter_by_name_or_what_it_describes(paths, tmp_path):
+    import json
+    from sightline.chat import Chat, Context
+
+    ws, sid = _workspace(paths, tmp_path)
+    model = _Scripted([[("detect_clashes", {"a": {"filter": "ducts"}})],
+                       [("detect_clashes", {"a": {"classes": ["DuctSegment"]}, "b": {"itself": True}})], "Done."])
+    events = []
+    chat = Chat(ws, model)
+    chat.turn(chat.session(None), "What do my ducts hit?", Context(sid, None, None, [], MINE), events.append)
+    assert 'the user\'s filters: "Ducts"' in model.seen[0]["content"]
+    opened = [e for e in events if e.get("action") == "open_report"]
+    first, second = (o["detection"]["tests"][0] for o in opened)
+    assert first["name"] == "Ducts vs Everything" and first["id"].startswith("filter:") and first["b"] == {
+        k: [] for k in ("files", "teams", "classes", "exclude_classes", "systems", "ids")} | {"filter": None}
+    assert second["name"] == "DuctSegment (within)" and second["b"] is None
+    told = json.loads(model.seen[1]["content"])
+    ducts = sum(1 for g in ws.scene(sid).bounds() if ws.scene(sid).element(g).ifc_class == "IfcDuctSegment")
+    assert told["check"]["a"] == {"name": "Ducts", "elements": ducts} and told["check"]["b"]["name"] == "everything"
+    assert any(c["test"] == "Ducts vs Everything" and c["clashes"] >= 1 for c in told["tests"])
+
+
+def test_a_check_on_what_the_models_lack_is_refused_before_a_run_is_spent(paths, tmp_path):
+    from sightline.chat import Chat, Context
+
+    ws, sid = _workspace(paths, tmp_path)
+    for a, said in (({"filter": "Pipes"}, "Its filters: Ducts"), ({"classes": ["Ductt"]}, "Closest: IfcDuctSegment"),
+                    ({"itself": True}, "Side A cannot be itself")):
+        model = _Scripted([[("detect_clashes", {"a": a})], "Sorry."])
+        events = []
+        chat = Chat(ws, model)
+        chat.turn(chat.session(None), "Check", Context(sid, None, None, [], MINE), events.append, detect_allowed=lambda: "spent")
+        assert not [e for e in events if e.get("action") == "open_report"]
+        assert said in model.seen[1]["content"] and "spent" not in model.seen[1]["content"]
 
 
 def test_one_model_on_its_own_is_named_after_its_file(paths):

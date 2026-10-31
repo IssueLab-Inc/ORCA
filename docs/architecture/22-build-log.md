@@ -1500,3 +1500,154 @@ Design tools and site data on the roadmap (Oct 31; owner direction; no code chan
   "Later".
 - **Checked:** SAM 3.1 against Meta's release notes and model page (released March 27, 2026, open weights). The design
   tools' ways in are their makers' published SDKs and APIs; none was built or tried.
+
+Every property of an object (Oct 31; owner request, "ensure we are retrieving all properties of an element"; code
+`server/sightline/properties.py` `Reader`, `web/src/Properties.tsx`; panel in [docs/panels.md](../panels.md)):
+- **What was missing:** five attributes and the type's name only; ranges, tables and complex properties came out as
+  text and reference values were dropped; no units; the type's quantities, material layers, classifications, groups,
+  documents and where the object sits were never read; an IFC4 set of property sets failed the route (500).
+- **What changed:** one reader walks the model's own relationships: every attribute (with its unit), the type and its
+  attributes, every set on the object or its type (a type-only value marked `from_type`, the object's own winning),
+  every kind of property, units (lengths, areas, volumes, masses in SI), materials with layers and thicknesses,
+  profiles, constituents and their own sets, classifications, groups, documents, storey, container and the path to
+  the project. Any object with a GlobalId can be read (`?file=` picks the model), ready for the breadcrumbs. One gate,
+  `properties.shown`, keeps the demo models' hidden note out at every depth. The panel shows it all, lengths in mm,
+  with Type badges. The filters' index reuses the reader.
+- **Checked:** `evals/properties_complete.py` on all six Northbank files: 5,666 objects, 16,303 values, every count
+  equal to an independent count from the raw relationships, 2.2 s; `tests/test_properties.py` (10),
+  `tests/test_properties_complete.py`; 649 server tests; `web/tests/properties.test.mjs` (5), 151 web tests, build.
+
+The filters' index (Oct 31; owner request, "full filtering capabilities"; code `server/sightline/facets.py`,
+`Workspace.facets`, `GET /api/scenes/{id}/facets`; design [docs/filters.md](../filters.md)):
+- **What:** every value the Properties panel shows a drawn element with that a filter can match (file, class, storey,
+  type, material, attributes, every property and quantity, classifications, groups), turned round so each value lists
+  its elements. Read with the panel's own reader, so they never disagree and the hidden demo note never reaches a
+  filter. Kept on the scene until a kept edit. `facets.matching` reads conditions as the page will, for chat and MCP.
+- **Measured:** Northbank (four files): 1,997 elements, 46 facets (System, Service, Size, Discipline, Level, Length,
+  materials, systems and zones among them), 0.8 s after the boxes, about 240 KB.
+- **Checked:** `tests/test_facets.py` (7), docs map.
+
+The Filters panel (Oct 31; owner request, "full filtering capabilities"; code `web/src/filters.ts`,
+`web/src/FiltersPanel.tsx`, `Viewer.setRules`; design [docs/filters.md](../filters.md)):
+- **What:** a Filters panel (left side bar, a tab behind Coordination; a sheet where there is no dock; "Filters by
+  property" in the Visibility menu). Each filter finds elements by models, classes, floors and any number of property
+  conditions (is, is not, contains, has, has none, between, less, more; lengths typed in mm), then colours them,
+  colours them by value (a Value | Items | Colour table, as in the owner's reference), hides or isolates them, or the
+  inverse. Several are on at once: the top colour wins, hides add up, isolates show what any finds; Show colours and
+  Grey the rest; Colour by… starts one in a click; Zoom to them; counts everywhere. The filter being edited shows live.
+  Kept per set of models, and in saved views. Viewing only: captures drop them.
+- **Viewer:** `applyMode` takes the rules' hides, isolates and colours (one scratch `Vector4`), the selection and lit
+  links leave out what is hidden, and a filter that hides the selection clears it (both gaps found in review).
+- **Palette:** ten colours, each at least ΔE 22 from every colour another role draws (pair, selection, hits, links,
+  previews, section, measure, greys).
+- **Also:** in the narrower left bar a tab behind the front one shows its icon only; "behind" is now `isVisible`, as
+  dockview's `isActive` also needs the bar to have the focus.
+- **Checked:** `web/tests/filters.test.mjs` (7), `viewer-filters.test.mjs` (3), `dock.test.mjs`; in Chromium on
+  Northbank: Colour by System (11 systems, 844 elements), ducts, pipes and trays isolated and coloured by system,
+  Level 02 Mechanical coloured with Grey the rest and Zoom to them; no console errors.
+
+Filter colours in drawings, and what drawings show (Oct 31; owner decision: shared filters with a drawing opt-out;
+code `Viewer.setDrawingsShow`, `useDrawingPaint`, `DrawingStyle.paintFill`; [docs/filters.md](../filters.md)):
+- **What:** the drawings' toggle is now three settings: what the filters leave (the default), what the 3D view shows,
+  or the whole model (no filters). Plans, sections and elevations fill each coloured element in its colour on paper.
+  A key over the 3D view says what each colour means and opens Filters. Without the dock, Filters is a sheet over the
+  model (Tools on a phone); it had been hidden under the phone's bottom sheet in the first version.
+- **Checked:** `web/tests/viewer-filters.test.mjs` (5); in Chromium on Northbank, two views: the south elevation with
+  MEP isolated and coloured by System shows each system in its colour, and The whole model brings back everything
+  uncoloured; on a 390 px phone, Tools → Filters by property → Colour by Discipline colours the model, with its key.
+
+The Properties panel, redesigned (Oct 31; owner request: "better layout and controls, icon buttons where possible,
+filter based on properties directly from the properties panel", and breadcrumbs to the selected element's parents;
+code `web/src/ElementCard.tsx`, `Properties.tsx` `PropertySets`; [docs/panels.md](../panels.md)):
+- **What:** the card moved out of `App.tsx` into `ElementCard`: a header (name, class · type), breadcrumbs (Project ›
+  Site › Building › Level, each opening that object's own properties, a storey with isolate, hide and filter by this
+  level), an icon bar (A, B, zoom, hide, isolate, section box, light links, More for the class), the links, then every
+  set. Each value's row has Copy and, where the filters' index knows it, Filter by this value, Colour by this property
+  and Isolate all with this value; Collapse all / Expand all. The card over the model folds the sets as before.
+- **Checked:** web tests and build; in Chromium on Northbank, #1's duct: Northbank › Northbank site › Northbank ›
+  Level 02; Level 02 shows its elevation (4000 mm) and `Pset_BuildingStoreyCommon`; back; the System row's Filter by
+  this value opens a filter finding 271 elements (Supply air), shown live, added; no console errors.
+
+Filters by chat, voice and agents (Oct 31; owner decision: chat and voice drive the filters; code `facets.resolve`,
+`chat.py` and `mcp_server.py` `set_filters` / `clear_filters`, `App.onChatEvent`; [docs/filters.md](../filters.md)):
+- **What:** "colour the services by system", "isolate the ducts on Level 02": `set_filters` takes filters by class,
+  level, model and property conditions, resolved on the server against the filters' index (a name the models lack
+  fails with the closest, so the model can try again; the hidden demo note is never suggested), and sends them to the
+  page as `ui filters`. Chat's own replace its last; the user's pause while they show and come back on
+  `clear_filters`. The same tools on MCP (34 tools; chat has 26). Voice goes through chat. One prompt line.
+- **Checked:** `tests/test_chat.py` (9), `test_facets.py` (9), `test_mcp.py`; `web/tests/filters-chat.test.mjs`.
+- **After a live run** (Muse Spark, "Isolate the MEP model and colour the services by system."): the first reply named a
+  system the model does not have, as `set_filters` only said how many elements each filter found. It now also says
+  each value a colour-by-value filter colours, with its count, and the page frames what chat isolated. The second run
+  listed the nine systems and their counts, and showed the services framed and coloured.
+- **Demo shots** (`docs/demo-video.md`, "Proposed"): testing Colour by Discipline with the walls and site hidden showed
+  Zoom to them framing hidden elements too, and the key listing colours no longer on screen. Zoom to them now frames
+  only what is shown, and the key lists a colour only when an element on screen has it (`filters.legend`, a test).
+
+Applying a filter zooms every view (Oct 31; owner request, "when we apply a filter, either directly, via MCP, chat,
+etc., automatically zoom into the objects in the viewer(s)"; code `filters.applied` / `zoomTarget`,
+`Viewer.frameEverywhere`, App's `ruleView` effect; [docs/filters.md](../filters.md), "Zoom"):
+- **What:** one trigger for every way in. When the filters change, App compares them with what they were: a filter
+  added, switched on or changed is applied, and once the viewer shows it the 3D view flies to what it acts on and each
+  unpinned drawing pans and zooms there (a hide-only filter frames what is left). Restoring a project's or a saved
+  view's filters does not move the camera. Chat's own framing code went: chat and MCP filters arrive as any other.
+  The card's isolates frame what they isolate; Zoom to them works in every view.
+- **Checked:** `web/tests/filters.test.mjs` (10), `viewer-filters.test.mjs` (6), 168 web tests, build; in Chromium on
+  Northbank with 3D and the south elevation: hiding the site closed both views in on the building, isolating MEP
+  coloured by System closed them in on the services, with no zoom button pressed; chat's "Isolate the MEP model and
+  colour the services by system" framed the services the same way.
+
+The review of the filters PR (Oct 31; [IssueLab-Inc/ORCA#75](https://github.com/IssueLab-Inc/ORCA/pull/75), 15 comments; the work moved to
+`feature/filters`, per AGENTS.md):
+- **Fixed:** chat's conditions with no bound or value are refused (a lone number taken as the bound), as the page
+  leaves them out; a By value filter saved before its property was picked colours by its last condition's
+  (`filters.withBy`); twenty palette colours, then Other in the key and chat's reply; level actions use the viewer's
+  own storeys and an empty isolate does nothing (no blank model before the index); a failed index request shows Try
+  again, and an unreadable element is skipped, not the index; condition rows keep their set after a removal;
+  `Viewer.isShown` builds its test once per change; a filter's name no longer redraws; the index is built outside the
+  workspace lock; a guarded quantity unit; one name for an unnamed storey (`datums.storey_name`); a complex property's
+  part by name; yes kept apart from 1 in the index; `facets.resolve` returns what it found.
+- **Checked:** `tests/test_facets.py` (13), `test_properties.py` (11), `web/tests/filters.test.mjs` (12),
+  `viewer-filters.test.mjs` (7); server and web suites; build.
+
+Checks on filters, on the server (Oct 31; owner request, "run a clash detection based on filtered elements, also via
+the MCP tools"; owner decisions: side A a filter, side B a filter, everything or itself; results replace the open list;
+code `detect.Selection.filter`, `check_id`, `check_name`, `facets.found` / `name_for`, `Workspace.check_defaults`;
+[docs/detection.md](../../docs/detection.md)):
+- **What:** a detection test's side can be a filter, found against the filters' index when the run starts. A check
+  with no id gets one from what it compares, so Detect again and a filter written another way give the same ids, and a
+  name ("DuctSegment vs Everything") that titles the run. A clash keeps its id, #N, title, views and sign-offs when
+  another check finds the same pair; runs that share no test report no resolved or no-longer-checked noise; an
+  element on both sides is never paired with itself. `detect_tests` gives a check's defaults; a run returns the tests
+  it ran so they can be repeated.
+- **Checked:** `tests/test_detect.py` (26), `test_facets.py` (14).
+- **Chat and MCP** (`chat.Chat._check` / `_side`, `PageFilter` in `ChatTurn` and `LinkContext`, `get_session`): the
+  page shares the user's filters with chat and the agent link; `detect_clashes` takes sides `a` and `b` (a filter by
+  name, or elements described as for `set_filters`; B also everything or itself), resolved and counted before a run
+  is spent, and named as the user knows them ("Ducts vs Everything"). Checked: `tests/test_detect.py` (28),
+  `test_chat.py` (12), `test_mcp.py`.
+
+Checks on filters, on the page (Oct 31; same request and decisions; code `web/src/checks.ts`, `FiltersPanel`'s
+`check`, `DetectSummary`'s `onWhole`, App's `filterCheck` and `sharedFilters`, `filters.shareable`;
+[docs/filters.md](../../docs/filters.md), "Checks"):
+- **What:** each filter's row has What do these hit? (it against everything), and Check clashes under the list picks
+  side A, side B (Everything, Itself or another filter), hard or clearance and the millimetres. The clashes replace the
+  open list; the summary says "Only <check>" with Check the open models; Detect again repeats the check, also one chat
+  or an agent ran (the run returns its tests). The page shares its filters by name with chat turns and the agent link.
+- **Checked:** `web/tests/filters-check.test.mjs` (8); web build and 179 web tests; `tests/test_docs_map.py`.
+- **Checked in Chromium on Northbank** (local server, Oct 31): a filter "Supply air ducts on Level 02" → What do these
+  hit? → 5.3 s, one clash, the supply air main × the transfer girder under the same id and #1 as in the full check,
+  titled "Coordination · Supply air ducts on Level 02 vs Everything", no diff noise; Detect again repeated it; Check
+  the open models brought back 464; the ducts vs a Structure filter from Check clashes found the same one clash.
+  Found there and fixed: going back to the full check called its 463 other clashes new; a run that shares no test
+  with the last now calls new only a clash with no number yet (`tests/test_detect.py`).
+- **The filters' index no longer waits for the opening check:** `Workspace.facets` reads its cache outside the lock too
+  (it only reads, as the requirements' inventory does). Measured on Northbank: built alone 0.9 s, during the opening
+  check 2.9 s (sharing the CPU, not waiting for it); in the browser about 7 s after the page asks, while the check,
+  four model downloads and the other first requests run.
+- **Chat, live on Muse Spark** (Chromium, Northbank): "Check the ducts on level 2 against the structure." → Muse Spark
+  took the user's filter "Supply air ducts on Level 02" as side A by name and the structural classes as side B, found
+  one clash (#1, the supply air main × the transfer girder, the full check's id), and showed it; "check my filter …
+  against everything" → one clash; Detect again then repeated chat's check under the same test id as the page's own.
+  Fixed there: chat's run in Workings is titled as chat named the check and ends with the tool (chat's runs send no
+  done event, so they showed as running).

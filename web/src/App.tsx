@@ -12,7 +12,7 @@ import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } fro
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
 import { localFile, uploadRefusal, uploadStatus } from "./uploads";
-import { countsText, highlightGroups, indexGraph, LINK_COLOURS, LINK_ORDER, LINK_WORDS, type LinkIndex, type LinkKind } from "./links";
+import { countsText, highlightGroups, indexGraph, LINK_COLOURS, type LinkIndex } from "./links";
 import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setGoneHandler, setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
@@ -33,7 +33,7 @@ import { Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode, type VisualStyle } from "./viewer/Viewer";
 import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./ViewerToolbar";
-import { escStep, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
+import { escStep, type DrawingsShow, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
 import { ViewPanes } from "./ViewPanes";
 import { MeasurePanel } from "./MeasurePanel";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
@@ -43,8 +43,10 @@ import { shortNames } from "./names";
 import { DEFAULT_AI_NAMES, setAiNames, type AiNames } from "./aiNames";
 import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type NotchStatus } from "./Brand";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
+import { FiltersPanel, blankRule } from "./FiltersPanel";
+import { ElementCard, type CardActions } from "./ElementCard";
+import { EMPTY as NO_FILTERS, applied, complete, evaluate, legend, matching, migrate, prepare, shareable, withBy, zoomTarget, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
-import { PropertySets } from "./Properties";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type { Peek } from "./workingsGraph";
 import type * as THREE from "three";
@@ -64,9 +66,11 @@ function readWorkings(): WorkingsSetting {
 const WORKINGS_HEIGHT = 380, WORKINGS_SHORT = 240;
 /** A saved view (docs/views.md): camera, projection, style, mode, visibility and section box. */
 type SavedView = { name: string; pose: Pose; ortho: boolean; style: VisualStyle; mode: ViewMode; filters: Filters;
-  section: [number[], number[]] | null };
+  section: [number[], number[]] | null; rules?: FilterState };
 type ViewsStore = { home: Pose | null; saved: SavedView[] };
 const viewsKey = (files: string[]) => `sightline.views.${projectName(files)}`;
+/** Each set of models keeps its filters (docs/filters.md). */
+const filtersKey = (files: string[]) => `sightline.filters.${projectName(files)}`;
 function loadViews(files: string[]): ViewsStore {
   try { return { home: null, saved: [], ...JSON.parse(localStorage.getItem(viewsKey(files)) ?? "{}") }; } catch { return { home: null, saved: [] }; }
 }
@@ -130,6 +134,13 @@ export function App() {
   const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
   const [filters, setFilters] = useState<Filters>({ classes: [], levels: [] });
   const [temporary, setTemporary] = useState<Temporary>({ hidden: [], isolated: null });
+  // Filters (docs/filters.md): the server's index of what each element is, the filters, and the one being edited.
+  const [facetIndex, setFacetIndex] = useState<FacetIndex | null>(null);
+  const [filterState, setFilterState] = useState<FilterState>(NO_FILTERS);
+  const [filterDraft, setFilterDraft] = useState<Rule | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);   // the Filters sheet, where there is no dock
+  const [facetsError, setFacetsError] = useState<string | null>(null);
+  const [facetsTry, setFacetsTry] = useState(0);            // Try again, after the index failed to arrive
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [viewsTick, setViewsTick] = useState(0);
   const [infoRev, setInfoRev] = useState(0);
@@ -145,7 +156,7 @@ export function App() {
   const sectionTo = useRef<THREE.Box3 | null>(null);
   // Views beside the 3D one (docs/views.md): Single, Two or Quad, kept per browser; a phone shows one, a tablet two.
   const [viewLayout, setViewLayout] = useState<Layout>(() => { try { return (localStorage.getItem("sightline.views.layout") as Layout) || "single"; } catch { return "single"; } });
-  const [drawingsFollow, setDrawingsFollow] = useState(false);
+  const [drawingsShow, setDrawingsShow] = useState<DrawingsShow>("filtered");
   const [modelNames, setModelNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
   // What the model says about the selected element (properties.py): the Properties panel, or the card's All properties.
@@ -453,6 +464,48 @@ export function App() {
     return () => { live = false; };
   }, [selected?.globalId, sceneId]);
   useEffect(() => { viewer.current?.setFilters(filters); }, [filters]);
+  // The filters, with the one being edited shown live (in its place, or on top while new), drawn in every view.
+  const prepared = useMemo(() => (facetIndex ? prepare(facetIndex) : null), [facetIndex]);
+  const facetKeys = useMemo(() => new Set(prepared?.byKey.keys() ?? []), [prepared]);
+  // The page's filters as chat and an agent know them, by name (docs/filters.md, "Checks").
+  const sharedFilters = useMemo(() => shareable(filterState.rules), [filterState]);
+  // A check on filters from the Filters panel: its clashes replace the open list (docs/filters.md, "Checks").
+  const filterCheck = { defaults: detectSetup?.check ?? null, busy: !!busy || !!detecting,
+    onCheck: (t: DetectTest) => { setFiltersOpen(false); void runDetect([t]); } };
+  // The filter being edited counts by what it does, not its name: typing a name redraws nothing.
+  const draftKey = filterDraft ? JSON.stringify({ ...filterDraft, name: "" }) : "";
+  const ruleView = useMemo(() => {
+    const d = filterDraft, shown = d && (d.when.some(complete) || d.invert || d.action === "byValue") ? { ...withBy(d), on: true } : null;
+    const rules = !d ? filterState.rules : filterState.rules.some((r) => r.id === d.id)
+      ? filterState.rules.map((r) => (r.id === d.id ? shown ?? { ...r, on: false } : r)) : shown ? [shown, ...filterState.rules] : filterState.rules;
+    return evaluate({ ...filterState, rules }, prepared);
+  }, [filterState, draftKey, prepared]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // Applying a filter (the panel, Colour by…, a value's row, chat or an agent) frames what it acts on in every view,
+  // once the viewer shows it (docs/filters.md, "Zoom"). Filters read back with a project or a saved view do not.
+  const lastFilters = useRef<FilterState>(NO_FILTERS);
+  const restoredFilters = useRef<FilterState | null>(null);
+  useEffect(() => {
+    viewer.current?.setRules(ruleView);
+    const prev = lastFilters.current;
+    if (prev === filterState) return;
+    lastFilters.current = filterState;
+    if (restoredFilters.current === filterState) return;
+    const v = viewer.current, rules = applied(prev, filterState);
+    if (!v || !prepared || !rules.length) return;
+    const ids = zoomTarget(prepared, rules, (g) => v.isShown(g));
+    if (ids.length) v.frameEverywhere(ids);
+  }, [ruleView]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // The key to the colours on screen, over the model.
+  const filterKey = useMemo(() => legend(filterState, prepared), [filterState, prepared]);
+  // A filter that takes the selected element off screen clears the selection, as a hide does.
+  useEffect(() => {
+    const gid = selected?.globalId;
+    if (gid && viewer.current?.isShown(gid) === false) setSelected(null);
+  }, [ruleView]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!modelNames.length) return;
+    try { localStorage.setItem(filtersKey(modelNames), JSON.stringify(filterState)); } catch { /* kept for this visit */ }
+  }, [filterState]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { viewer.current?.setTemporary(temporary); }, [temporary]);
   useEffect(() => { try { localStorage.setItem("sightline.views.fly", fly ? "1" : "0"); } catch { /* kept for this visit */ } }, [fly]);
   const shownLayout: Layout = layout === "phone" ? "single" : layout === "tablet" && viewLayout === "quad" ? "two" : viewLayout;
@@ -463,17 +516,23 @@ export function App() {
   useEffect(() => { try { localStorage.setItem(WORKINGS_KEY, JSON.stringify(workings)); } catch { /* kept for this visit */ } }, [workings]);
   // The tour reads the main page: panels in their own windows come back for it.
   useEffect(() => { if (touring) dock.current?.gather(); }, [touring]);
-  useEffect(() => { viewer.current?.setDrawingsFollow(drawingsFollow); }, [drawingsFollow]);
+  useEffect(() => { viewer.current?.setDrawingsShow(drawingsShow); }, [drawingsShow]);
   // Each set of models has its own Home and saved views.
   useEffect(() => {
     if (!modelNames.length) return;
     const store = loadViews(modelNames);
     setSavedViews(store.saved);
     viewer.current?.setHome(store.home);
+    let kept: unknown = null;
+    try { kept = JSON.parse(localStorage.getItem(filtersKey(modelNames)) ?? "null"); } catch { /* none kept */ }
+    const restored = migrate(kept);
+    restoredFilters.current = restored;
+    setFilterState(restored);
+    setFilterDraft(null);
   }, [modelNames]);
   // What the filters read: each element's class (the server's) and storey (datums). Read again after a kept fix (same
   // scene, new elements: `infoRev`); filters and hides start clean only with a new scene.
-  useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); }, [sceneId]);
+  useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); setFacetIndex(null); }, [sceneId]);
   useEffect(() => {
     if (!sceneId) return;
     let live = true;
@@ -492,6 +551,15 @@ export function App() {
     }).catch(() => undefined);
     return () => { live = false; };
   }, [sceneId, infoRev]);
+  // The filters' index, read again after a kept fix; a failure says so in the panel, with Try again.
+  useEffect(() => {
+    if (!sceneId) return;
+    let live = true;
+    setFacetsError(null);
+    void api.facets(sceneId).then((index) => { if (live) setFacetIndex(index); })
+      .catch((e: unknown) => { if (live) setFacetsError(e instanceof Error ? e.message : "The server did not answer."); });
+    return () => { live = false; };
+  }, [sceneId, infoRev, facetsTry]);
   useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
   // A section box follows the focus: re-cut it when the pair changes, drop it when there is none.
   useEffect(() => {
@@ -1245,14 +1313,16 @@ export function App() {
     const keep = report?.origin === "sightline" ? reviewed : {};
     const selected = report?.origin === "sightline" ? clash?.id : undefined;
     lastTests.current = tests;
-    traceStart("detect", "you", "The open models");
+    // A check on filters is one test of its own (docs/filters.md, "Checks"): its name says what was checked.
+    traceStart("detect", "you", tests?.length === 1 && (tests[0].a.filter || tests[0].b?.filter) ? tests[0].name : "The open models");
     setDetecting({ phase: "Starting…", tests: [] }); setError(null);
     try {
       const done = await api.detect(sid, tests, onDetectEvent);
       if (sceneEpoch.current !== epoch) return;
       const r = await loadReport(async () => done.report, "the clashes ORCA found");
       if (!r) return;
-      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds, requirements: done.requirements ?? null });
+      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds, requirements: done.requirements ?? null,
+        tests: done.tests ?? null });
       const ids = new Set(r.clashes.map((c) => c.id));
       setReviewed(Object.fromEntries(Object.entries(keep).filter(([id]) => ids.has(id))));
       const still = selected && r.clashes.find((c) => c.id === selected);
@@ -1269,6 +1339,8 @@ export function App() {
       if (workspaceEpoch.current !== workspace) return;
       setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({});
       setVerdicts(null); setViews({}); captures.current.clear(); setDetection(found);
+      // Detect again repeats what chat or the agent ran: a check on filters stays that check.
+      lastTests.current = found.tests ?? null;
     } catch (e) { setError((e as Error).message); }
     finally { setDetecting(null); }
   }
@@ -1514,7 +1586,7 @@ export function App() {
     if (!v) return;
     const box = v.section;
     const view: SavedView = { name, pose: v.pose(), ortho: tool.ortho, style: tool.style, mode: tool.mode, filters,
-      section: box ? [box.min.toArray(), box.max.toArray()] : null };
+      section: box ? [box.min.toArray(), box.max.toArray()] : null, rules: filterState };
     storeViews({ saved: [...savedViews, view] });
   }
   function applyView(view: SavedView) {
@@ -1522,6 +1594,7 @@ export function App() {
     if (!v) return;
     v.applyPose(view.pose);
     setFilters(view.filters);
+    if (view.rules) { const restored = migrate(view.rules); restoredFilters.current = restored; setFilterState(restored); setFilterDraft(null); }
     setTool((t) => ({ ...t, ortho: view.ortho, style: view.style, mode: view.mode, section: !!view.section }));
     if (view.section) {
       const box = v.boxOf([]);
@@ -1548,9 +1621,16 @@ export function App() {
     onDelete: (i) => storeViews({ saved: savedViews.filter((_, k) => k !== i) }),
     levels: counts.levels, classes: counts.classes, filters, onFilters: setFilters,
     temporary: temporaryCount, onResetTemporary: () => setTemporary({ hidden: [], isolated: null }),
+    rulesOn: filterState.rules.filter((r) => r.on).length, onOpenFilters: () => openFilters(),
     layout: shownLayout, layouts: layout === "phone" ? ["single"] : layout === "tablet" ? ["single", "two"] : ["single", "two", "quad"],
-    onLayout: setViewLayout, follow: drawingsFollow, onFollow: setDrawingsFollow,
+    onLayout: setViewLayout, drawings: drawingsShow, onDrawings: setDrawingsShow,
   };
+
+  /** The Filters panel, with a new filter in the editor when one is given (from a property, or chat). */
+  function openFilters(start?: Rule) {
+    if (start) setFilterDraft(start);
+    if (dockedNow.current) dock.current?.show("filters"); else setFiltersOpen(true);
+  }
 
   function setModelVisible(i: number, visible: boolean) {
     viewer.current?.setModelVisible(i, visible);
@@ -2138,12 +2218,28 @@ export function App() {
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
       if (c) selectClash(c, planThisTurn.current);
     }
-    if (e.type === "tool" && e.name === "detect_clashes") { traceStart("detect", origin, "The open models"); setDetecting({ phase: "Starting…", tests: [] }); }
+    // Chat's check is titled as chat named it (a check on filters), and ends with the tool: chat's run sends no done.
+    if (e.type === "tool" && e.name === "detect_clashes") {
+      const named = typeof e.args?.name === "string" && e.args.name ? e.args.name : e.args?.a ? "A check on filters" : "The open models";
+      traceStart("detect", origin, named); setDetecting({ phase: "Starting…", tests: [] });
+    }
     if (e.type === "detect_event") onDetectEvent(e.event);
-    if (e.type === "tool_result" && e.name === "detect_clashes") setDetecting(null);
+    if (e.type === "tool_result" && e.name === "detect_clashes") { traces.current.detect?.end(null); setDetecting(null); }
     if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
     // After select_clash has had a render to land (the chat names a clash, then asks for its picture).
     if (e.type === "ui" && e.action === "show_it_built") { const id = e.clash_id; setTimeout(() => builtFromChat(id), 80); }
+    if (e.type === "ui" && e.action === "filters") {
+      // Chat's filters replace its own; the user's that were on pause while they show, and come back when it clears.
+      setFilterState((st) => {
+        const mine = st.rules.filter((r) => r.origin !== "chat");
+        if (e.mode === "clear") return { ...st, rules: mine.map((r) => (r.paused ? { ...r, on: true, paused: undefined } : r)) };
+        const paused = mine.map((r) => (r.on ? { ...r, on: false, paused: true } : r));
+        return { ...st, colours: true, ...(e.grey_rest != null ? { greyRest: e.grey_rest } : {}),
+          rules: [...(e.filters ?? []).map((r) => ({ ...r, origin: "chat" as const })), ...paused] };
+      });
+      setFilterDraft(null);
+      if (e.mode === "replace") openFilters();   // the views go to what they act on, as any filter applied
+    }
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
     }
@@ -2187,7 +2283,7 @@ export function App() {
   async function connectAgent() {
     setAgentBusy(true); setAgentError(null);
     try {
-      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved }));
+      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters }));
       setAgentLog([]);
     } catch (e) { setAgentError((e as Error).message); } finally { setAgentBusy(false); }
   }
@@ -2199,12 +2295,12 @@ export function App() {
   useEffect(() => {
     if (!agentLink) return;
     const t = setTimeout(() => {
-      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })
+      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters })
         .catch((e) => { if (e instanceof ApiError && e.status === 404) setAgentLink(null); });
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId]);
+  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId, sharedFilters]);
   /** What the agent does, carried out here: the chat's ui events, opened models, applied fixes, pictures. */
   async function onAgentEvent(e: LinkEvent) {
     if (!agentLink) return;
@@ -2349,7 +2445,7 @@ export function App() {
         setFixes(saved.fixes ?? {});
         if (info.detection && info.detection.report_id === rep.id) {
           const { report_id: _r, ...d } = info.detection;
-          setDetection(d);
+          setDetection(d); lastTests.current = d.tests ?? null;
         }
       }
     }
@@ -2688,7 +2784,9 @@ export function App() {
   const planBadge = planning || contextWorking ? <i className="spinner" aria-hidden />
     : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
     : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null;
-  const dockTabs: Partial<Record<PanelId, React.ReactNode>> = { clash: clashBadge, plan: planBadge };
+  const rulesOn = filterState.rules.filter((r) => r.on).length;
+  const dockTabs: Partial<Record<PanelId, React.ReactNode>> = { clash: clashBadge, plan: planBadge,
+    filters: rulesOn ? <span className="badge-n">{rulesOn}</span> : null };
   const raise = () => { if (snap === "peek") setSnap("half"); };
   // The next clash still open after the selected one (the report's order), for "Next clash" once one is done.
   const nextClash = (() => {
@@ -2810,44 +2908,66 @@ export function App() {
     <label className="pop-item check"><input type="checkbox" checked={classic} onChange={(e) => { close(); setClassic(e.target.checked); }} /> Classic layout (fixed panels)</label>
   </>);
 
-  // The selected element's card: what it is, its links, Set as A / B and what to do with it. The classic card over the
-  // model and the dock's Properties panel both show it (docs/panels.md).
-  const elementCard = selected && (<>
-      <div className="row"><b>{String(selected.info?.ifc_class ?? "Element").replace(/^Ifc/, "")}</b>
-        <button className="ibtn" onClick={() => setSelected(null)} aria-label="Close" data-tip="Close" data-tip-side="left"><X size={15} aria-hidden /></button></div>
-      <div>{String(selected.info?.name ?? "")}</div>
-      <dl className="kv">
-        <dt>GlobalId</dt><dd className="mono">{selected.globalId}</dd>
-        {selected.info?.tag ? <><dt>Tag</dt><dd>{String(selected.info.tag)}</dd></> : null}
-        {selected.info?.storey ? <><dt>Level</dt><dd>{String(selected.info.storey)}</dd></> : null}
-        {selected.info?.source ? <><dt>File</dt><dd>{String(selected.info.source)}</dd></> : null}
-      </dl>
-      <Links info={selected.info} onPick={(gid) => {
+  // The selected element's card (ElementCard.tsx): what it is, where it sits, what to do with it, its links and everything
+  // its model says. The classic card over the model and the dock's Properties panel both show it (docs/panels.md).
+  const idsWith = (facet: string, value: string | number | boolean) => {
+    if (!prepared) return [];
+    return [...matching(prepared, { facet, op: "is", values: [value] })].map((i) => prepared.index.elements[i]);
+  };
+  /** Isolate these for now and take every view to them; an empty list does nothing (isolating nothing would blank the
+   * model). */
+  const isolateNow = (ids: string[]) => {
+    if (!ids.length) return;
+    setTemporary({ hidden: [], isolated: ids });
+    viewer.current?.frameEverywhere(ids);
+  };
+  const cardActions = (gid: string): CardActions => {
+    const cls = String(selected?.info?.ifc_class ?? elementProps?.data?.ifc_class ?? "");
+    return {
+      onPick: (other) => {
         const epoch = sceneEpoch.current;
-        setSelected({ globalId: gid, info: null });
-        viewer.current?.frame([gid]);
-        if (sceneId) api.element(sceneId, gid)
-          .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === gid ? { ...s, info } : s)); })
+        setSelected({ globalId: other, info: null });
+        viewer.current?.frame([other]);
+        if (sceneId) api.element(sceneId, other)
+          .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === other ? { ...s, info } : s)); })
           .catch(() => undefined);
-      }} onShow={() => void pinLinks(selected.globalId, false)} />
-      <div className="row">
-        <button className="btn small" onClick={() => pickSide(selected.globalId, "a")}><i className="sw red" />Set as A</button>
-        <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => pickSide(selected.globalId, "b")}><i className="sw green" />Set as B</button>
-      </div>
-      <div className="card-actions">
-        <button className="btn small ghost" onClick={() => viewer.current?.frame([selected.globalId])}>Zoom to it</button>
-        <button className="btn small ghost" onClick={() => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, selected.globalId] })); setSelected(null); }}>Hide</button>
-        <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: [selected.globalId] })}>Isolate</button>
-        <button className="btn small ghost" onClick={() => sectionRound(selected.globalId)}>Section box</button>
-        {selected.info?.ifc_class ? <>
-          <button className="btn small ghost" onClick={() => { const ids = viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [];
-            setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); }}>Hide all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
-          <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [] })}>Isolate all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
-        </> : null}
-      </div>
-  </>);
-  const elementSets = selected && <PropertySets data={elementProps?.gid === selected.globalId ? elementProps.data : null}
-    loading={elementProps?.gid !== selected.globalId || elementProps.loading} />;
+      },
+      onShowLinks: () => void pinLinks(gid, false),
+      onSide: (side) => pickSide(gid, side),
+      canB: !!a && a !== gid,
+      onZoom: () => viewer.current?.frame([gid]),
+      onHide: () => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, gid] })); setSelected(null); },
+      onIsolate: () => setTemporary({ hidden: [], isolated: [gid] }),
+      onSection: () => sectionRound(gid),
+      onHideClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); },
+      onIsolateClass: () => isolateNow(viewer.current?.ofClass(cls) ?? []),
+      onFilterClass: () => openFilters(blankRule([{ facet: "class", op: "is", values: [cls] }], "isolate")),
+      onLevel: (name, how) => {
+        if (how === "filter") { openFilters(blankRule([{ facet: "storey", op: "is", values: [name] }], "isolate")); return; }
+        // The viewer's own storeys (the datums), so this works before the filters' index arrives; nothing found, nothing done.
+        const level = viewer.current?.ofLevel(name) ?? [];
+        const ids = level.length ? level : idsWith("storey", name);
+        if (!ids.length) return;
+        if (how === "isolate") isolateNow(ids);
+        else { setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
+      },
+      load: (ref) => (sceneId && ref.global_id ? api.properties(sceneId, ref.global_id, ref.file) : Promise.reject(new Error("No scene"))),
+      rows: prepared ? {
+        facets: facetKeys,
+        onFilter: (row) => openFilters(blankRule([{ facet: row.facet!, op: "is", values: [row.raw!] }], "colour")),
+        onColourBy: (row) => {
+          setFilterState((st) => ({ ...st, colours: true, rules: [{ ...blankRule([], "byValue"), by: { facet: row.facet! }, name: `By ${row.name}` }, ...st.rules] }));
+          openFilters();
+        },
+        onIsolate: (row) => isolateNow(idsWith(row.facet!, row.raw!)),
+      } : undefined,
+    };
+  };
+  const elementCard = (fold: boolean, closable: boolean) => selected && (
+    <ElementCard key={selected.globalId} gid={selected.globalId} info={selected.info}
+      props={elementProps?.gid === selected.globalId ? elementProps.data : null}
+      loading={elementProps?.gid !== selected.globalId || !!elementProps?.loading} fold={fold}
+      actions={{ ...cardActions(selected.globalId), ...(closable ? { onClose: () => setSelected(null) } : {}) }} />);
 
   return (
     <div className={`app ${compact ? "" : "notched"} ${docked ? "docked" : ""} ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${starting ? "starting" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
@@ -2896,7 +3016,7 @@ export function App() {
                 requirements={reqLabel} stale={triageStale} onRequirements={() => setReqOpen(true)} />}
               insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
                 detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
-                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)}
+                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} onWhole={() => void runDetect(null)}
                 requirementsId={reqSaved?.enabled ? reqId : null} onRequirements={() => setReqOpen(true)} />}
                 <Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
                 resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={(f) => { setListFocus(f); if (f) setLeftView("clashes"); }}
@@ -2929,6 +3049,20 @@ export function App() {
             <span className="clash-chip-text">{clashBusy ? `ORCA is working on ${clash ? `#${clash.number}` : "this pair"}` : clash ? clashLabel(clash) : "Your pair"}</span>
             <button className="ibtn" disabled={clashBusy} onClick={leaveClash} aria-label="Leave this clash" data-tip={clashBusy ? "ORCA is working on it" : "Leave this clash  ·  Esc"} data-tip-side="bottom"><X size={14} aria-hidden /></button>
           </div>) : null} />}
+        {!docked && filtersOpen && stats && (
+          <div className="filters-sheet" role="dialog" aria-label="Filters" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+            <div className="filters-sheet-head"><b>Filters</b>
+              <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
+            <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex && !facetsError} error={facetIndex ? null : facetsError} onRetry={() => setFacetsTry((n) => n + 1)} state={filterState} onState={setFilterState}
+              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }} check={filterCheck}
+            drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
+          </div>)}
+        {stats && filterKey.length > 0 && (
+          <button type="button" className="filter-chip" onClick={(e) => { e.stopPropagation(); openFilters(); }} onPointerDown={(e) => e.stopPropagation()}
+            data-tip="Filters by property: open them" data-tip-side="top">
+            {filterKey.slice(0, 6).map((k) => <span key={k.colour}><i className="fswatch" style={{ background: k.colour }} aria-hidden />{k.label}</span>)}
+            {filterKey.length > 6 && <span className="why">and more</span>}
+          </button>)}
         {stats && temporaryCount > 0 && (
           <div className="temp-chip" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             {temporary.isolated ? "Isolated for now" : `${temporary.hidden.length} hidden for now`}
@@ -2964,8 +3098,7 @@ export function App() {
           onRemove={(id) => viewer.current?.removeMeasurement(id)} onClear={() => viewer.current?.clearMeasurements()} onClose={() => toggle("measure")} />}
         {!docked && selected && !tool.measure && (
           <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-            {elementCard}
-            <details className="all-props"><summary>All properties</summary>{elementSets}</details>
+            {elementCard(true, true)}
           </div>
         )}
         {!compact && <Notch status={notchStatus} onLogo={() => openAbout()} />}
@@ -3044,7 +3177,7 @@ export function App() {
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${chatReport}`} voiceModel={labels.voice} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
-            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters })} />
         </div>)}
       {inSlot(slots.plan, <div className="plan-slot" hidden={!docked && tab !== "plan"}>
         {(docked || tab === "plan") && <>
@@ -3232,8 +3365,13 @@ export function App() {
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
           )}
         </div>)}
+      {docked && inSlot(slots.filters, <div className="filters-slot">
+        <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex && !facetsError} error={facetIndex ? null : facetsError} onRetry={() => setFacetsTry((n) => n + 1)} state={filterState} onState={setFilterState}
+          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }} check={filterCheck}
+          drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
+      </div>)}
       {docked && inSlot(slots.properties, <div className="props in-panel">
-        {selected ? <>{elementCard}{elementSets}</> : <p className="hint">Click any element in the model to see its properties.</p>}
+        {selected ? elementCard(false, false) : <p className="hint">Click any element in the model to see its properties.</p>}
       </div>)}
       {!compact && inSlot(slots.activity, <footer className={`dock${workings.on && workings.view === "work" ? " working" : ""}`}>
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} workings={workings.on} view={workings.view}
@@ -3468,34 +3606,4 @@ function keepPlaces(prev: RootCause[] | null, next: RootCause[]): RootCause[] {
   const out = prev.map((r) => now.get(r.hub.global_id) ?? { ...r, done: true });
   const seen = new Set(prev.map((r) => r.hub.global_id));
   return [...out, ...next.filter((r) => !seen.has(r.hub.global_id))];
-}
-
-
-type LinkEntry = { global_id: string; name: string | null; ifc_class: string };
-
-/** The properties card's links: what the element is joined to, hosts, rests on, supports or touches, by kind, each
- *  clickable; its systems and the assembly it is part of. */
-function Links({ info, onPick, onShow }: { info: Record<string, unknown> | null; onPick: (gid: string) => void; onShow: () => void }) {
-  const links = (info?.links ?? {}) as Partial<Record<LinkKind, LinkEntry[]>>;
-  const kinds = LINK_ORDER.filter((k) => links[k]?.length);
-  const systems = (info?.systems ?? []) as string[];
-  const partOf = info?.part_of as { name: string; parts: number } | null | undefined;
-  if (!info || (!kinds.length && !systems.length && !partOf)) return null;
-  return (
-    <div className="links">
-      {kinds.map((k) => (
-        <div key={k} className="link-kind">
-          <span className="link-head"><i className="sw" style={{ background: LINK_COLOURS[k] }} />{LINK_WORDS[k]} · {links[k]!.length}</span>
-          <ul>
-            {links[k]!.slice(0, 6).map((l) => (
-              <li key={l.global_id}><button type="button" className="link" onClick={() => onPick(l.global_id)}
-                data-tip={`${l.ifc_class.replace(/^Ifc/, "")}: select and go to it`}>{l.name || l.ifc_class.replace(/^Ifc/, "")}</button></li>))}
-            {links[k]!.length > 6 && <li className="hint">and {links[k]!.length - 6} more</li>}
-          </ul>
-        </div>))}
-      {partOf && <p className="hint">Part of {partOf.name} ({partOf.parts} parts)</p>}
-      {systems.length > 0 && <p className="hint">System: {systems.join(", ")}</p>}
-      {kinds.length > 0 && <button type="button" className="btn small" onClick={onShow}>Light them up</button>}
-    </div>
-  );
 }

@@ -99,12 +99,13 @@ Three edges go "up" and are worth knowing before you add an import:
 | `app.py` | Entry points | The FastAPI app: every `/api` route and stream, the owner and requirements middleware, the caps, `/mcp`, static files |
 | `built.py` | Report jobs | Show it built: outline, Muse Image restyles, pixel gate, judges, the picture cache |
 | `chat.py` | Workflows | Chat with Muse Spark through tools; `Chat._run` is also the MCP server's tool layer |
-| `properties.py` | Geometry | One element's properties for the page's Properties panel: attributes, type, materials, property sets (with what its type gives), quantities in SI, size from the scene's box; the demo models' own set shown as "Model data" without its scripting note ([docs/panels.md](../panels.md)) |
+| `properties.py` | Geometry | Everything the model says about one object, for the Properties panel and the filters' index (`Reader`): every attribute, its type, every property and quantity set on it or its type (`from_type`), every kind of property with its unit (lengths, areas, volumes, masses in SI), materials (layers, profiles, constituents), classifications, groups, documents, its storey, container and path up to the project; the demo models' own set shown as "Model data", the hidden note kept out by `shown` ([docs/panels.md](../panels.md)) |
+| `facets.py` | Geometry | The filters' index: every value the Properties panel shows each drawn element with that a filter can match (file, class, storey, type, material, attributes, property and quantity sets, classifications, groups), value → elements, kept on the scene until an edit; `matching` and `suggest` for chat and MCP ([docs/filters.md](../filters.md)) |
 | `datums.py` | Geometry | Levels, grid axes and each element's storey for the viewer's drawing views and level filter; a sample scene with no grid reads its project's `<prefix>-Grids.ifc` as context ([docs/views.md](../views.md)) |
 | `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, `plan_move` (moves that keep their joints: carry fittings, stretch segments, or are refused) and the connection graph |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
-| `detect.py` | Geometry | ORCA's own clash detection: tests, sort and sweep, triangle tree, exact box depth, stable ids, rerun diff |
+| `detect.py` | Geometry | ORCA's own clash detection: tests (sides by file, team, class, system, id or a filter), sort and sweep, triangle tree, exact box depth, stable ids (a clash keeps its id across checks), rerun diff |
 | `demos.py` | Policy | The demo projects in one place: their sample files, start labels, tours, default requirements (`demos/*.json`), and what only the demo models need (their property set, their Navisworks smart tags) |
 | `domains.py` | Policy | Which domain a scene is in (`of`: the effective requirements' `domain`, else opened wholly from STEP is `machines`), the classes that stay in place by default (`STAYS`), who reviews a seat (`SEAT_REVIEW`), voice words, and the shared prompts in that domain's voice (`prompt` fills `{role}`, `{meeting}`, `{teams}`, `{examples}`) |
 | `document.py` | Documents | Coordination reports: PDF (combined, per team, per model) and BCF 2.1, team guessing, who acts and reviews |
@@ -208,7 +209,7 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
 
 ### `mcp_server.py`: ORCA for agents
 
-`build(ws | getter, hooks, local=)` returns an `MCPServer("orca")` with 32 tools (inventory in
+`build(ws | getter, hooks, local=)` returns an `MCPServer("orca")` with 34 tools (inventory in
 [11](11-mcp-and-agent-links.md)). Most tools call `chat.Chat._run`, so chat and MCP share one tool layer; the rest
 (session, pictures, jobs, `apply_fix` / `apply_plan`, triage, report, export) are MCP's own. Deeper design:
 [docs/mcp.md](../mcp.md).
@@ -267,7 +268,7 @@ Fix together (`build_batch`), root causes (`root_causes`, `build_root_cause`), p
 ### `chat.py`: chat through tools
 
 Muse Spark answers a message in at most `MAX_STEPS` (8) model calls, calling tools over the `Workspace`. Two tools
-(`show_clash`, `set_view`) and parts of others come back as `ui` events for the page.
+(`show_clash`, `set_view`, `set_filters`, `clear_filters`) and parts of others come back as `ui` events for the page.
 
 - **Main symbols:** `Chat` (`session`, `turn`, `_run`), `Session`, `Context`, `TOOLS` (23 functions, including
   `explore_wider_fix`, `propose_fixes`, `plan_root_cause`, `show_it_built`), `MAX_SESSIONS` (200), `MAX_HISTORY` (40).
@@ -301,7 +302,8 @@ lower by `SIGHTLINE_CONTEXT_*`) over complete arrangements of up to three edit g
 plus the STEP export helpers.
 
 - **Main symbols:** `Workspace` with
-  - scenes: `open`, `open_paths`, `_evict`, `scene`, `scene_info`, `classes`, `describe`, `step_files`, `step_cache`,
+  - scenes: `open`, `open_paths`, `_evict`, `scene`, `scene_info`, `classes`, `describe`, `properties`, `facets`,
+    `step_files`, `step_cache`,
     `list_samples`;
   - checks: `verify_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`;
   - keeps: `apply`, `apply_offset`, `apply_route`, `apply_resize`, `apply_penetration`, `apply_trim`,
@@ -314,7 +316,7 @@ plus the STEP export helpers.
 
   Module level: `step_changes`, `_spec`, `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,
   `SCENE_BUDGET_MB`, `LAST_KEPT` (200), `SAMPLE_EXCLUDE`, `HOSTS_TIMEOUT_S`.
-- **Imports:** `agent.py`, `detect.py`, `domains.py`, `edits.py`, `escalation.py`, `hosts.py`, `limits.py`,
+- **Imports:** `agent.py`, `detect.py`, `domains.py`, `edits.py`, `escalation.py`, `facets.py`, `hosts.py`, `limits.py`,
   `meta_client.py`, `reports.py`, `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
   **Imported by:** `app.py`, `chat.py`, `mcp_server.py`, `plans.py`.
 - **Rules:** `Workspace.lock` (an RLock) is held by everything that touches a scene's geometry; every kept edit calls
@@ -517,10 +519,11 @@ What is joined to what, so a fix that moves something never leaves a joint apart
 Finds the clashes in the open models and returns them as a `reports.Report` (origin `"sightline"`) that the rest of
 ORCA reads unchanged. Deeper design: [docs/detection.md](../detection.md).
 
-- **Main symbols:** `run`, `Run`, `Test`, `Selection`, `Coverage`, `default_tests`, `presets`, `measure_pair`,
+- **Main symbols:** `run`, `Run`, `Test`, `Selection` (`from_dict`, `describe`, `filter`), `check_id`, `check_name`, `Coverage`, `default_tests`, `presets`, `measure_pair`,
   `clash_id`, `_Index`, `_Solids`, `_candidates`, `_measure`, `_diff`, `RULES`, `RULE_LABEL`, `TOLERANCE_M`,
   `DUPLICATE_M`, `FAR_M`, `CAP`.
-- **Imports:** `document.py` (`guess_team`), `reports.py`, `scene.py`, `verify.py`; lazily `edits.py`.
+- **Imports:** `facets.py` (filter sides), `limits.py`, `reports.py`, `requirements.py` (teams per file), `scene.py`,
+  `verify.py`; lazily `edits.py`.
   **Imported by:** `app.py`, `requirements.py` (lazily), `service.py`.
 
 ### `step.py`: STEP models

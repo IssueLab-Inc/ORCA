@@ -177,8 +177,9 @@ classes in `app.py`.
 | `GET` | `/api/scenes/{scene_id}` | A scene the page had open, to resume it (`Workspace.scene_info`) | none | `{id, files, step, detection, revision}` | free; 404 once evicted |
 | `GET` | `/api/scenes/{scene_id}/files/{index}` | One model file as it is now: the original, or the edited model written out (`Workspace.file`); tidies exports older than an hour | none | IFC bytes, `no-store` | free; 404 |
 | `GET` | `/api/scenes/{scene_id}/elements/{global_id}` | One element's class, name, level, file, and its links by kind with names, systems and assembly (`Workspace.describe`) | none | element dict | free |
-| `GET` | `/api/scenes/{scene_id}/elements/{global_id}/properties` | Everything the model says about one element, for the Properties panel: attributes, type, materials, property sets, quantities in SI with their units, size in metres, file (`Workspace.properties`, `properties.properties`); 404 for an element the scene doesn't have | none | `{global_id, ifc_class, attributes, type, materials, psets, quantities: {set: {name: {value, unit}}}, size_m, source}` | free |
+| `GET` | `/api/scenes/{scene_id}/elements/{global_id}/properties` | Everything the model says about one object (an element, or a storey, building, site or project from a breadcrumb), for the Properties panel: every attribute, its type, every set (the type's marked), units, materials, classifications, groups, documents, storey, container and path (`Workspace.properties`, `properties.properties`); 404 for an object the scene doesn't have or a file it hasn't | `?file=` (optional): the model's index, when federated files repeat a GlobalId | `{global_id, ifc_class, name, source, file, size_m, attributes: [Prop], type: {global_id, ifc_class, name, attributes} \| null, storey, container: Ref \| null, path: [Ref], materials: [{usage, name, from_type, items, total_m?, sets}], classifications, groups, documents, sets: [{name, kind: pset\|qto, props: [Prop], from_type?}]}`; `Prop = {name, value, unit?, from_type?, kind?, rows?, table?, of?}`, `Ref = {global_id, ifc_class, name, file}` | free |
 | `GET` | `/api/scenes/{scene_id}/datums` | Levels (storeys merged across files, world z), grid axes (a sample scene with no grid reads `<prefix>-Grids.ifc` as context) and each element's storey, for the drawing views and the level filter (`Workspace.datums`, `datums.read`) | none | `{levels: [{name, elevation_m, height_m}], grids: [{tag, grid, start, end}], storeys: {GlobalId: name}, sources: {grids}}` | free |
+| `GET` | `/api/scenes/{scene_id}/facets` | The filters' index: each facet (file, class, storey, type, material, `attr:`, `pset:`, `qto:`, `classif:`, `group:`) with its values and, per value, the elements that have it; kept on the scene until a kept edit (`Workspace.facets`, `facets.index`, [docs/filters.md](../filters.md)) | none | `{revision, files, elements: [GlobalId], file: [index], facets: [{key, kind: text\|number\|bool, unit?, values, items: [[element index]]}]}` | free; 404 |
 | `GET` | `/api/scenes/{scene_id}/classes` | Every physical element's class and name, for a built view's cutaway (`Workspace.classes`) | none | `{GlobalId: [class, name]}` | free |
 | `GET` | `/api/scenes/{scene_id}/connections` | What is linked to what, for the connection highlight (`Workspace.connections` → `connections.graph`; contacts from the scene's last check; cached until the scene changes) | none | `{revision, edges: [[a, b, kind, source]], stops, systems, assemblies, names, kinds}` | free |
 
@@ -224,8 +225,8 @@ update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `GET` | `/api/scenes/{scene_id}/detect/tests` | The tests a run would use (defaults and presets, or what the requirements compile to) (`Workspace.detect_tests`) | none | `{tests, teams, elements, file_elements, rules, requirements}` | free |
-| `POST` | `/api/scenes/{scene_id}/detect/stream` | Runs detection (`Workspace.detect` → `detect.run`), opening the result as a report | `DetectRequest {tests: [...] or null}` | NDJSON | `detect_limit` (`SIGHTLINE_DETECT_PER_HOUR`/`_DAY`); 422 bad tests |
+| `GET` | `/api/scenes/{scene_id}/detect/tests` | The tests a run would use (defaults and presets, or what the requirements compile to) (`Workspace.detect_tests`) | none | `{tests, teams, elements, file_elements, rules, requirements, check: {tolerance_m, clearance_m, rules, min_size_m}}` (`check`: a check on filters' defaults, `Workspace.check_defaults`) | free |
+| `POST` | `/api/scenes/{scene_id}/detect/stream` | Runs detection (`Workspace.detect` → `detect.run`), opening the result as a report | `DetectRequest {tests: [...] or null}`; a test with no id and a side with a `filter` is a check on filters ([docs/filters.md](../filters.md)); `done` carries `tests` (as run, or null) | NDJSON | `detect_limit` (`SIGHTLINE_DETECT_PER_HOUR`/`_DAY`); 422 bad tests |
 
 ### Requirements
 
@@ -269,7 +270,7 @@ triage jobs (`_triage_jobs`) and 32 titling jobs (`_title_jobs`).
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `POST` | `/api/chat` | One chat message, answered by Muse Spark with tools (`chat.Chat.turn`); the message is cut to 4,000 characters | `ChatTurn {message, session_id?, scene_id?, report_id?, clash_id?, fixed=[]}` | NDJSON | `chat_limit` (`SIGHTLINE_CHAT_PER_HOUR`/`_DAY`) per message; the tools charge proposals and second tries as the page's own buttons do; 422 on an empty message |
+| `POST` | `/api/chat` | One chat message, answered by Muse Spark with tools (`chat.Chat.turn`); the message is cut to 4,000 characters | `ChatTurn {message, session_id?, scene_id?, report_id?, clash_id?, fixed=[], filters=[]}` (`filters`: the user's own, `PageFilter {id, name, when, invert, on, origin}`, at most 100, for `detect_clashes` by name) | NDJSON | `chat_limit` (`SIGHTLINE_CHAT_PER_HOUR`/`_DAY`) per message; the tools charge proposals and second tries as the page's own buttons do; 422 on an empty message |
 | `POST` | `/api/transcribe` | A recorded clip to text with Muse Voice Transcribe (`meta_client.transcribe`), biased to coordination words, the domain's (`domains.VOICE`), the open models' levels and systems and the open report's element names and titles (`_voice_words`) | multipart `audio` (WAV, mono 16-bit, 16 or 24 kHz, at most 3 MB), optional `report_id`, `scene_id` | `{transcript, duration_ms}` | `voice_limit` (`SIGHTLINE_VOICE_PER_HOUR`/`_DAY`); 413, 422, 502 |
 | `WEBSOCKET` | `/api/voice/live` | Live voice: the microphone relayed to Meta's realtime recognition and the words back as they are said (below) | JSON first frame (`mode`, `report_id`, `scene_id`), then PCM | JSON frames | one `voice_limit` use per session; same origin only |
 
@@ -285,7 +286,7 @@ triage jobs (`_triage_jobs`) and 32 titling jobs (`_title_jobs`).
 
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
-| `POST` | `/api/links` | Makes an agent link for what this visitor has open (`agents.Links.create`); the token is shown once | `LinkContext {scene_id?, report_id?, clash_id?, fixed=[]}` | `{token, mcp_url, id, expires_at, max_expires_at, server_time, calls, last_call, browser, context, applied}` | `link_limit` (`SIGHTLINE_LINKS_PER_HOUR`/`_DAY`) |
+| `POST` | `/api/links` | Makes an agent link for what this visitor has open (`agents.Links.create`); the token is shown once | `LinkContext {scene_id?, report_id?, clash_id?, fixed=[], filters=[]}` (`filters` as `ChatTurn`'s) | `{token, mcp_url, id, expires_at, max_expires_at, server_time, calls, last_call, browser, context, applied}` | `link_limit` (`SIGHTLINE_LINKS_PER_HOUR`/`_DAY`) |
 | `GET` | `/api/links/{token}` | The link's state (`Link.public`); does **not** renew it | none | as above, without `token` and `mcp_url` | 404 expired or revoked |
 | `PUT` | `/api/links/{token}/context` | The page keeps the link's view current (what is open, selected, fixed, and its requirements id); renews the link | `LinkContext` | `Link.public()` | 404 |
 | `GET` | `/api/links/{token}/events` | What the agent does, for the page to follow (below); renews the link | none | NDJSON | 404 |
@@ -450,7 +451,7 @@ model_calls, blockers}`, or `error {detail}`.
 | `thinking` | a model call starts |
 | `tool` | `name`, `args` |
 | `tool_result` | `name`, `summary` |
-| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `open_report {report_id, detection}`, `show_it_built {clash_id}` |
+| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `filters {mode: replace\|clear, filters?: [Rule], grey_rest?}` ([docs/filters.md](../filters.md)), `open_report {report_id, detection}`, `show_it_built {clash_id}` |
 | `detect_event` | `event` (a detection event, above) |
 | `agent` | `event` (a proposal event, above, `escalating` included) |
 | `proposal` | `clash_id`, `element_a`, `element_b`, the whole proposal |
@@ -487,7 +488,7 @@ model_calls, blockers}`, or `error {detail}`.
 | `capture_request` | `id`, `what` (view or clash), `report_id?`, `clash_id?`, `a?`, `b?` |
 | `ui` | `open_models {names}`, `applied {files, pieces, pairs, titles, clash_ids, scene_id, revision_before, revision, meshes, history}`, `follow_triage` |
 | `revoked` | published by `Links.revoke`; the stream usually closes first (it stops as soon as the link is gone), so the page mostly learns from the 404 when it reconnects |
-| the chat's events | `ui select_clash`, `ui set_view`, `ui open_report`, `detect_event`, `agent`, `proposal`, `plan_started`, `plan_event`, `plan`: the same tools, run by the agent |
+| the chat's events | `ui select_clash`, `ui set_view`, `ui filters`, `ui open_report`, `detect_event`, `agent`, `proposal`, `plan_started`, `plan_event`, `plan`: the same tools, run by the agent |
 
 An internal `bye` (from `Link.leave`) ends the stream and is never sent. What the page does with each is in
 [11](11-mcp-and-agent-links.md).

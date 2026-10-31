@@ -171,3 +171,18 @@ Oct 30, the cell after C6-C8 were added (`runs/2026-10-30-cell-detection/`): Rev
 The per-discipline counts in `summary.md` are context, not a score. Navisworks stores ports, spaces, sub-objects of one
 element and repeated pairs, and 3,100 of its 7,668 stored results are tests of a space, port or opening.
 
+## Properties: nothing dropped
+
+`properties_complete.py` (Oct 31, owner request: "ensure we are retrieving all properties of an element"). For every
+object with a GlobalId in the given files it counts the property values the file gives it straight from the
+relationships (sets on the object and on its type, IFC4 sets of sets, complex parts, predefined sets; one value per set
+and property name, the object's own winning) and checks `properties.Reader.read` returns as many, and never the hidden
+demo note. No model calls.
+
+| Date | Models | Objects | Values | Seconds | Result |
+|---|---|---|---|---|---|
+| Oct 31 | Northbank: Structure, MEP, Architecture, Site, Grids, MEP Rev04 | 5,666 | 16,303 | 2.2 | complete, 0 differ |
+
+Before this reader the panel missed reference values, garbled ranges, tables and complex properties into text, read
+only five attributes and the type's name, gave no units, read no type quantities, no material layers, no
+classifications, groups or documents, and failed (500) on an IFC4 set of property sets.

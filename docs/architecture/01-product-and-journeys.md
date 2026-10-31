@@ -174,7 +174,7 @@ regenerated for its original objective. When a batch plan exists too, a switch c
 The right pane's **Chat** tab (`Chat.tsx`): Muse Spark with tools over the open report and models. It can summarise,
 list and open clashes, look at a clash's pictures, measure, describe and find elements, find openings, check a move,
 offset, route, resize or opening, propose (counted as a proposal), find root causes and patterns, plan, explore a wider
-fix, detect, show it built, and drive the page (`show_clash`, `set_view`). Its proposals and plans fill the same
+fix, detect, show it built, and drive the page (`show_clash`, `set_view`, `set_filters`). Its proposals and plans fill the same
 panels; a chat-run check adopts its report without remounting the chat. The mic: **Hold to talk** (captions while held, sent on release; a quick tap latches), or
 **Hands-free** (each sentence sent at the pause, `sightline.voice.handsfree`). Live recognition streams to Muse Voice
 Transcribe through the server; an upload is the fallback ([docs/voice.md](../voice.md)).
