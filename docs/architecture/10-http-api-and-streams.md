@@ -451,7 +451,7 @@ model_calls, blockers}`, or `error {detail}`.
 | `thinking` | a model call starts |
 | `tool` | `name`, `args` |
 | `tool_result` | `name`, `summary` |
-| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `open_report {report_id, detection}`, `show_it_built {clash_id}` |
+| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `filters {mode: replace\|clear, filters?: [Rule], grey_rest?}` ([docs/filters.md](../filters.md)), `open_report {report_id, detection}`, `show_it_built {clash_id}` |
 | `detect_event` | `event` (a detection event, above) |
 | `agent` | `event` (a proposal event, above, `escalating` included) |
 | `proposal` | `clash_id`, `element_a`, `element_b`, the whole proposal |
@@ -488,7 +488,7 @@ model_calls, blockers}`, or `error {detail}`.
 | `capture_request` | `id`, `what` (view or clash), `report_id?`, `clash_id?`, `a?`, `b?` |
 | `ui` | `open_models {names}`, `applied {files, pieces, pairs, titles, clash_ids, scene_id, revision_before, revision, meshes, history}`, `follow_triage` |
 | `revoked` | published by `Links.revoke`; the stream usually closes first (it stops as soon as the link is gone), so the page mostly learns from the 404 when it reconnects |
-| the chat's events | `ui select_clash`, `ui set_view`, `ui open_report`, `detect_event`, `agent`, `proposal`, `plan_started`, `plan_event`, `plan`: the same tools, run by the agent |
+| the chat's events | `ui select_clash`, `ui set_view`, `ui filters`, `ui open_report`, `detect_event`, `agent`, `proposal`, `plan_started`, `plan_event`, `plan`: the same tools, run by the agent |
 
 An internal `bye` (from `Link.leave`) ends the stream and is never sent. What the page does with each is in
 [11](11-mcp-and-agent-links.md).

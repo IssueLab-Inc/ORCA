@@ -120,9 +120,21 @@ shown live), **Colour by this property** (a colour-by-value filter on top of the
 value** (a temporary isolate). A storey's breadcrumb offers **Filter by this level**, and the card's **More** menu
 **Filter by this class** ([panels.md](panels.md), "Properties").
 
-## Still to come
+## Chat, voice and agents (built)
 
-Chat and voice.
+- **`set_filters`** (chat and MCP): a list of filters, each with `classes`, `levels`, `models` (lists), `where`
+  (`{property, set?, op: is|is_not|contains|has|missing|less|more|between, values?, min?, max?}`, lengths in metres),
+  `action` (`colour`, `colour_by_value`, `hide`, `isolate`), `colour` (#rrggbb), `by` (the property to colour by:
+  System, class, level, model…), `invert`, `name`; and `grey_rest`. Voice goes through chat, so it works by voice too.
+- **Resolved on the server** against the same index (`facets.resolve`): a class with or without its `Ifc` prefix, a
+  level as the storey, a model by part of its file name, a property by name (or `set/name`; a property set wins over
+  an attribute or quantity of the same name), values in any case. A name the models lack fails back to the model with
+  the closest ones (`facets.Unresolved`), so it can try again; the hidden demo note can never be suggested. The reply
+  says how many elements each filter finds.
+- **On the page** (`ui filters`): chat's filters (`origin: "chat"`) replace its own; the user's that were on are
+  paused (`Rule.paused`) while they show, and come back with **`clear_filters`**. They show in the Filters panel like
+  any other, so the user can edit, keep or delete them.
+- One line in `domain_packs/chat.md` says when to use them (kinds of element by class, level, model or property).
 
 ## Tests
 
@@ -133,7 +145,12 @@ Chat and voice.
 - `web/tests/viewer-filters.test.mjs` (5): hides, isolates and colours reach the batch, with grey for the rest;
   captures never see them; lit links leave out what a filter hides; what drawings show for each setting; a drawing's
   fill pass takes the colours on paper and gives the 3D ones back.
-- `server/tests/test_facets.py` (7): every element with its file, class, storey (as `datums.storeys`), type and
+- `server/tests/test_facets.py` (9): every element with its file, class, storey (as `datums.storeys`), type and
   material; numbers kept as numbers in SI from a millimetre file; the hidden note never in the index; every kind of
   value (classification, group, layers, enumerated, list, complex parts, what the type gives; no ranges or tables);
   conditions matched as the page does and close-match suggestions; kept until an edit; the route and its 404.
+  `facets.resolve` turns what chat asks for into the page's rule, and fails with the closest names (never the hidden
+  note).
+- `server/tests/test_chat.py`, `test_mcp.py`: `set_filters` and `clear_filters` reach the page; an unknown class is
+  refused with the closest. `web/tests/filters-chat.test.mjs`: chat's filters replace its own, pause the user's and
+  give them back.

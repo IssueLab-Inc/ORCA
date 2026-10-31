@@ -3,7 +3,7 @@
 The tools are the same operations the web API and the MCP server use (`service.Workspace`), so the chat can do
 what the UI can: list and read clashes, look at their Navisworks images, describe and find elements, measure, find
 openings, check a move or an offset, and propose verified fixes. Two tools act on the browser instead
-(`show_clash`, `set_view`): they come back as "ui" events for the page to carry out.
+(`show_clash`, `set_view`, `set_filters`, `clear_filters`): they come back as "ui" events for the page to carry out.
 
 Every step is reported through `emit` as it happens, so the UI can show the agent working:
     {"type": "thinking"}                          a model call started
@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import context_planner, domains, edits, plans, settings
+from . import context_planner, domains, edits, facets, plans, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 from .limits import env_int
@@ -139,6 +139,27 @@ TOOLS = [
     _fn("set_view", "Change the user's 3D view.", {
         "mode": {"type": "string", "enum": ["shaded", "xray", "context", "isolate"]},
         "section_box": {"type": "boolean"}}),
+    _fn("set_filters", "Find elements by what the model says about them (class, level, model, any property) and "
+        "colour them, colour them by value, hide or isolate them in every view, until clear_filters. Replaces the "
+        "filters you set before; the user's own are paused while yours show. Returns how many elements each finds. "
+        "Viewing only: checks and fixes never see filters.", {
+            "filters": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "classes": {"type": "array", "items": {"type": "string"}, "description": "IFC classes"},
+                "levels": {"type": "array", "items": {"type": "string"}, "description": "storey names"},
+                "models": {"type": "array", "items": {"type": "string"}, "description": "model files, or part of their names"},
+                "where": {"type": "array", "items": {"type": "object", "properties": {
+                    "property": {"type": "string"}, "set": {"type": "string", "description": "its property set, when the name is in several"},
+                    "op": {"type": "string", "enum": ["is", "is_not", "contains", "has", "missing", "less", "more", "between"]},
+                    "values": {"type": "array", "items": {"type": "string"}, "description": "any of these (numbers as text)"},
+                    "min": {"type": "number"}, "max": {"type": "number", "description": "lengths in metres"}},
+                    "required": ["property"]}},
+                "action": {"type": "string", "enum": ["colour", "colour_by_value", "hide", "isolate"]},
+                "colour": {"type": "string", "description": "#rrggbb, for colour"},
+                "by": {"type": "string", "description": "the property to colour by (System, class, level, model…)"},
+                "invert": {"type": "boolean"}}, "required": ["action"]}},
+            "grey_rest": {"type": "boolean", "description": "grey what no filter colours"}}, ["filters"]),
+    _fn("clear_filters", "Remove the filters you set; the user's own come back."),
 ]
 
 
@@ -579,4 +600,17 @@ class Chat:
         if name == "set_view":
             emit({"type": "ui", "action": "set_view", **{k: args[k] for k in ("mode", "section_box") if k in args}})
             return {"done": True}, "view changed", []
+        if name == "set_filters":
+            idx = ws.facets(self._scene(ctx))
+            try:
+                made = [facets.resolve(idx, dict(spec), i) for i, spec in enumerate(args.get("filters") or [])]
+            except facets.Unresolved as e:
+                return {"error": str(e)}, "refused: not in the model", []
+            emit({"type": "ui", "action": "filters", "mode": "replace", "filters": [r for r, _ in made],
+                  **({"grey_rest": bool(args["grey_rest"])} if "grey_rest" in args else {})})
+            found = [{"filter": r["name"] or r["action"], "elements": n} for r, n in made]
+            return {"filters": found}, ", ".join(f"{n} elements" for _, n in made) or "no filters", []
+        if name == "clear_filters":
+            emit({"type": "ui", "action": "filters", "mode": "clear"})
+            return {"done": True}, "filters cleared", []
         raise KeyError(f"unknown tool {name}")

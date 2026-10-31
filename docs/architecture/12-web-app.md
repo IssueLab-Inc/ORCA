@@ -372,7 +372,7 @@ built-picture events into `builtRuns[key].step`. Event types are listed in [10](
   (`agent` events start `trackAgent` on round 1, `plan_started` starts `trackPlan`, `explore_wider_fix` or a
   `context_event` starts `trackContext`), feeds them (`agent`, `plan_event`, `context_event`) and finishes them
   (`proposal`, `plan`). It also carries out `ui` actions: `select_clash` (keeping a plan on screen if this turn built
-  one: `planThisTurn`), `set_view`, `open_report` (`adoptChatReport`), `show_it_built`, and detection progress.
+  one: `planThisTurn`), `set_view`, `filters` (chat's or an agent's filters replace their own; the user's that were on pause, `Rule.paused`, and come back on clear), `open_report` (`adoptChatReport`), `show_it_built`, and detection progress.
 - **Agent link:** `api.linkEvents` (a GET stream that the server ends every few minutes; the effect reconnects with
   back-off up to 15 s) calls `agentHandler.current`, which is always the latest `onAgentEvent`. It handles `hello`,
   `revoked`, `agent_call` / `agent_result` (the log), `capture_request` (a view PNG or a clash's A/B/C views, posted

@@ -532,12 +532,13 @@ take proposals as their routes do, `find_patterns` the pattern route's one propo
 | `detect_clashes` (`tolerance_mm`) | `Workspace.detect`; the result becomes the open report for the rest of the answer | one detection run (`detect_limit`, as `/detect/stream`) | `detect_event`, `ui` `open_report` |
 | `explore_wider_fix` | `context_planner.build` for one clash | three proposals | `context_event` |
 | `show_clash`, `set_view` | Select a clash and fly to it; change the view mode or section box | none | `ui` `select_clash`, `ui` `set_view` |
+| `set_filters`, `clear_filters` | Filters by property on the page: `facets.resolve` turns each (classes, levels, models, `where`, action, colour, `by`, invert) into the page's rule against the index, says how many it finds, and fails with the closest names when the models lack one; clear removes chat's own ([docs/filters.md](../filters.md)) | none | `ui` `filters` |
 | `show_it_built` | Asks the page to draw the chosen or kept fix (the page's request pays) | the page's built-view caps | `ui` `select_clash`, `ui` `show_it_built` |
 
 ### Events
 
 `session` (`id`, from the route) · `thinking` · `tool` (`name`, `args`) · `tool_result` (`name`, `summary`) · `ui`
-(`action`: `select_clash`, `open_report`, `set_view`, `show_it_built`) · `agent` (`event`: an `agent.resolve` event)
+(`action`: `select_clash`, `open_report`, `set_view`, `filters`, `show_it_built`) · `agent` (`event`: an `agent.resolve` event)
 · `proposal` (`clash_id`, `element_a`, `element_b` and the whole result) · `plan_started` (`kind`) · `plan_event`
 (`event`) · `plan` · `detect_event` (`event`) · `context_event` (`event`) · `message` (`text`) · `done` · `error`
 (`detail`). The `chat.py` docstring lists only the first six of its own.

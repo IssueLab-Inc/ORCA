@@ -103,3 +103,36 @@ def test_the_route(tmp_path, monkeypatch):
     r = c.get(f"/api/scenes/{sid}/facets")
     assert r.status_code == 200 and r.json()["facets"][0]["key"] == "file"
     assert c.get("/api/scenes/nope/facets").status_code == 404
+
+
+def test_what_chat_asks_for_resolves_to_the_pages_rule(tmp_path):
+    beam = _annotated(tmp_path / "beam.ifc")
+    idx = facets.index(IfcScene(tmp_path / "beam.ifc"))
+    rule, n = facets.resolve(idx, {"classes": ["beam"], "where": [{"property": "Span", "op": "between", "min": 5, "max": 7}],
+                                   "action": "isolate", "name": "Long beams"}, 3)
+    assert rule == {"id": "chat3", "name": "Long beams", "on": True, "action": "isolate", "origin": "chat", "when": [
+        {"facet": "class", "op": "is", "values": ["IfcBeam"]},
+        {"facet": "pset:Pset_BeamCommon/Span", "op": "between", "min": 5.0, "max": 7.0}]}
+    assert n == 1 and beam in idx["elements"]
+    assert facets.property_key(idx, "level") == "storey"
+    assert facets.property_key(idx, "Model data/Level") == "pset:Model data/Level"
+    assert facets.property_key(idx, "loadbearing") == "pset:Pset_BeamCommon/LoadBearing"
+    rule, _ = facets.resolve(idx, {"models": ["beam"], "action": "colour_by_value", "by": "Level"})
+    assert rule["when"] == [{"facet": "file", "op": "is", "values": ["beam.ifc"]}] and rule["by"] == {"facet": "storey"}, "a level is the storey"
+
+
+def test_what_the_models_lack_fails_with_the_closest_and_never_the_hidden_note(tmp_path):
+    _annotated(tmp_path / "beam.ifc")
+    idx = facets.index(IfcScene(tmp_path / "beam.ifc"))
+    import pytest
+    with pytest.raises(facets.Unresolved, match="Closest: Span"):
+        facets.property_key(idx, "Spam")
+    with pytest.raises(facets.Unresolved) as e:
+        facets.property_key(idx, "ClashRol")
+    assert "ClashRole" not in str(e.value).split("Closest")[-1]
+    with pytest.raises(facets.Unresolved, match="IfcBeam"):
+        facets.resolve(idx, {"classes": ["Beem"], "action": "hide"})
+    with pytest.raises(facets.Unresolved, match="#rrggbb"):
+        facets.resolve(idx, {"action": "colour", "colour": "teal"})
+    with pytest.raises(facets.Unresolved, match="colour by"):
+        facets.resolve(idx, {"action": "colour_by_value"})

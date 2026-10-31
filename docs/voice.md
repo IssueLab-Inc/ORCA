@@ -1,6 +1,7 @@
 # Talking to ORCA (voice)
 
-The Chat panel's mic sends what you say to ORCA as a chat message, so voice can do anything chat can. Recognition is
+The Chat panel's mic sends what you say to ORCA as a chat message, so voice can do anything chat can, filters
+included ("colour the services by system", "isolate the ducts on Level 02": [filters.md](filters.md)). Recognition is
 Muse Voice Transcribe (`muse-voice-transcribe-1.0`). Muse has no text-to-speech (checked Oct 28: no such model in
 `/v1/models`, and chat completions refuse `audio`), so ORCA answers in text.
 

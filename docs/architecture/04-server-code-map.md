@@ -209,7 +209,7 @@ built web app from `web/dist` (`SIGHTLINE_WEB_DIST`) last, so `/api` wins.
 
 ### `mcp_server.py`: ORCA for agents
 
-`build(ws | getter, hooks, local=)` returns an `MCPServer("orca")` with 32 tools (inventory in
+`build(ws | getter, hooks, local=)` returns an `MCPServer("orca")` with 34 tools (inventory in
 [11](11-mcp-and-agent-links.md)). Most tools call `chat.Chat._run`, so chat and MCP share one tool layer; the rest
 (session, pictures, jobs, `apply_fix` / `apply_plan`, triage, report, export) are MCP's own. Deeper design:
 [docs/mcp.md](../mcp.md).
@@ -268,7 +268,7 @@ Fix together (`build_batch`), root causes (`root_causes`, `build_root_cause`), p
 ### `chat.py`: chat through tools
 
 Muse Spark answers a message in at most `MAX_STEPS` (8) model calls, calling tools over the `Workspace`. Two tools
-(`show_clash`, `set_view`) and parts of others come back as `ui` events for the page.
+(`show_clash`, `set_view`, `set_filters`, `clear_filters`) and parts of others come back as `ui` events for the page.
 
 - **Main symbols:** `Chat` (`session`, `turn`, `_run`), `Session`, `Context`, `TOOLS` (23 functions, including
   `explore_wider_fix`, `propose_fixes`, `plan_root_cause`, `show_it_built`), `MAX_SESSIONS` (200), `MAX_HISTORY` (40).

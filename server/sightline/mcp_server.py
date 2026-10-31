@@ -43,7 +43,7 @@ anyone sees it. Start with get_session to see what is open. Then report_summary 
 get_clash_images to understand a clash, and check_move / check_offset / check_route / check_resize / check_penetration /
 check_seat to test your own idea, or propose_fixes to run
 ORCA's fix agent. Nothing changes the model until apply_fix or apply_plan. Distances are metres, Z up; a negative
-distance is an overlap. When a person has ORCA open with this link, show_clash and set_view move their view and
+distance is an overlap. When a person has ORCA open with this link, show_clash, set_view and set_filters move their view and
 capture_view shows you what they see."""
 
 
@@ -311,6 +311,24 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         box around the clash."""
         args = {k: v for k, v in (("mode", mode), ("section_box", section_box)) if v is not None}
         return run(ctx, "set_view", args)
+
+    @tool(read_only=True)
+    def set_filters(ctx: Context, filters: list[dict], grey_rest: bool | None = None) -> dict:
+        """Find elements by what the model says about them and colour, colour by value, hide or isolate them in every
+        view of the person's page, until clear_filters (docs/filters.md). Each filter: classes, levels, models (lists),
+        where (a list of {property, set?, op: is|is_not|contains|has|missing|less|more|between, values?, min?, max?};
+        lengths in metres), action (colour|colour_by_value|hide|isolate), colour (#rrggbb), by (the property to colour
+        by: System, class, level, model…), invert, name. Replaces the filters set before; the person's own are paused.
+        Returns how many elements each finds; a name the models lack fails with the closest ones."""
+        args: dict = {"filters": filters}
+        if grey_rest is not None:
+            args["grey_rest"] = grey_rest
+        return run(ctx, "set_filters", args)
+
+    @tool(read_only=True)
+    def clear_filters(ctx: Context) -> dict:
+        """Remove the filters set with set_filters; the person's own come back."""
+        return run(ctx, "clear_filters", {})
 
     @tool(read_only=True, structured_output=False)
     def capture_view(ctx: Context) -> list:

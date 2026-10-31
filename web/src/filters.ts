@@ -23,6 +23,8 @@ export interface Rule {
   by?: { facet: string; colours?: Record<string, string>; off?: string[] };
   /** Who made it: chat's own filters are replaced by its next ones. */
   origin?: "user" | "chat";
+  /** A user's filter switched off while chat's show; back on when chat clears its own. */
+  paused?: boolean;
 }
 export interface FilterState { v: 1; rules: Rule[]; colours: boolean; greyRest: boolean }
 /** What the viewer draws: elements hidden, the only ones shown (null: every one), colours by GlobalId. */

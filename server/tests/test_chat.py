@@ -86,6 +86,41 @@ def test_chat_endpoint_streams_a_session_then_the_answer(tmp_path, monkeypatch):
     assert any(e == {"type": "message", "text": "Done."} for e in events)
 
 
+def test_chat_sets_and_clears_filters_by_what_the_model_says(tmp_path):
+    ws, sid, rid = _setup(tmp_path)
+    model = Scripted([[("set_filters", {"filters": [
+        {"classes": ["DuctSegment"], "levels": ["level 02"], "action": "colour", "colour": "#318181"},
+        {"action": "colour_by_value", "by": "class"},
+        {"where": [{"property": "Name", "op": "contains", "values": ["beam"]}], "action": "hide", "invert": True}],
+        "grey_rest": True})], [("clear_filters", {})], "Done."])
+    events = []
+    chat = Chat(ws, model)
+    chat.turn(chat.session(None), "Colour the ducts on level 2", Context(sid, rid), events.append)
+    ui = [e for e in events if e.get("type") == "ui" and e.get("action") == "filters"]
+    assert ui[0]["mode"] == "replace" and ui[0]["grey_rest"] is True
+    ducts, by_class, rest = ui[0]["filters"]
+    assert ducts["when"] == [{"facet": "class", "op": "is", "values": ["IfcDuctSegment"]},
+                             {"facet": "storey", "op": "is", "values": ["Level 02"]}]
+    assert ducts["origin"] == "chat" and ducts["colour"] == "#318181" and ducts["action"] == "colour"
+    assert by_class["action"] == "byValue" and by_class["by"] == {"facet": "class"}
+    assert rest["invert"] is True and rest["when"][0] == {"facet": "attr:Name", "op": "contains", "values": ["beam"]}
+    assert ui[1] == {"type": "ui", "action": "filters", "mode": "clear"}
+    found = next(e for e in events if e["type"] == "tool_result" and e["name"] == "set_filters")["summary"]
+    n = len(ws.facets(sid)["elements"])
+    beams = sum(1 for g in ws.facets(sid)["elements"] if ws.scene(sid).element(g).ifc_class == "IfcBeam")
+    assert found == f"{n - beams} elements, {n} elements, {n - beams} elements" or found.count("elements") == 3
+
+
+def test_a_filter_on_what_the_models_lack_says_what_is_there(tmp_path):
+    ws, sid, rid = _setup(tmp_path)
+    model = Scripted([[("set_filters", {"filters": [{"classes": ["DuctSegmnt"], "action": "hide"}]})], "Sorry."])
+    events = []
+    chat = Chat(ws, model)
+    chat.turn(chat.session(None), "Hide the ducts", Context(sid, rid), events.append)
+    assert not [e for e in events if e.get("action") == "filters"], "nothing reaches the page"
+    assert "Closest: IfcDuctSegment" in model.seen[1]["content"]
+
+
 def test_chat_finds_root_causes_and_builds_a_plan(tmp_path):
     from test_plans import _setup as plan_setup
 

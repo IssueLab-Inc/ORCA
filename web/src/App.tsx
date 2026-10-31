@@ -2187,6 +2187,18 @@ export function App() {
     if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
     // After select_clash has had a render to land (the chat names a clash, then asks for its picture).
     if (e.type === "ui" && e.action === "show_it_built") { const id = e.clash_id; setTimeout(() => builtFromChat(id), 80); }
+    if (e.type === "ui" && e.action === "filters") {
+      // Chat's filters replace its own; the user's that were on pause while they show, and come back when it clears.
+      setFilterState((st) => {
+        const mine = st.rules.filter((r) => r.origin !== "chat");
+        if (e.mode === "clear") return { ...st, rules: mine.map((r) => (r.paused ? { ...r, on: true, paused: undefined } : r)) };
+        const paused = mine.map((r) => (r.on ? { ...r, on: false, paused: true } : r));
+        return { ...st, colours: true, ...(e.grey_rest != null ? { greyRest: e.grey_rest } : {}),
+          rules: [...(e.filters ?? []).map((r) => ({ ...r, origin: "chat" as const })), ...paused] };
+      });
+      setFilterDraft(null);
+      if (e.mode === "replace") openFilters();
+    }
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
     }

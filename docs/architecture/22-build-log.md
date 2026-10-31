@@ -1547,3 +1547,12 @@ code `web/src/ElementCard.tsx`, `Properties.tsx` `PropertySets`; [docs/panels.md
 - **Checked:** web tests and build; in Chromium on Northbank, #1's duct: Northbank › Northbank site › Northbank ›
   Level 02; Level 02 shows its elevation (4000 mm) and `Pset_BuildingStoreyCommon`; back; the System row's Filter by
   this value opens a filter finding 271 elements (Supply air), shown live, added; no console errors.
+
+Filters by chat, voice and agents (Oct 31; owner decision: chat and voice drive the filters; code `facets.resolve`,
+`chat.py` and `mcp_server.py` `set_filters` / `clear_filters`, `App.onChatEvent`; [docs/filters.md](../filters.md)):
+- **What:** "colour the services by system", "isolate the ducts on Level 02": `set_filters` takes filters by class,
+  level, model and property conditions, resolved on the server against the filters' index (a name the models lack
+  fails with the closest, so the model can try again; the hidden demo note is never suggested), and sends them to the
+  page as `ui filters`. Chat's own replace its last; the user's pause while they show and come back on
+  `clear_filters`. The same tools on MCP (34 tools; chat has 26). Voice goes through chat. One prompt line.
+- **Checked:** `tests/test_chat.py` (9), `test_facets.py` (9), `test_mcp.py`; `web/tests/filters-chat.test.mjs`.

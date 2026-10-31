@@ -1,4 +1,4 @@
-import type { FacetIndex } from "./filters";
+import type { FacetIndex, Rule } from "./filters";
 import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
 import type { Datums } from "./viewer/views";
@@ -477,6 +477,8 @@ export type ChatEvent =
   | { type: "ui"; action: "select_clash"; clash_id: string }
   | { type: "ui"; action: "show_it_built"; clash_id: string }   // draw the chosen or kept fix (docs/show-it-built.md)
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
+  /** Chat's or an agent's filters (docs/filters.md): replace its own (the user's paused), or clear them. */
+  | { type: "ui"; action: "filters"; mode: "replace" | "clear"; filters?: Rule[]; grey_rest?: boolean }
   | { type: "ui"; action: "open_report"; report_id: string; detection: Detection }
   | { type: "detect_event"; event: DetectEvent }
   | { type: "agent"; event: AgentEvent }

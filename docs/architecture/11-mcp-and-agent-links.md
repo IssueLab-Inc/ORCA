@@ -28,7 +28,7 @@ flowchart LR
         links["agents.Links: Link per token hash"]
         gate["_McpGate at /mcp"]
         transport["streamable HTTP app, stateless JSON"]
-        tools["mcp_server.build: 32 tools"]
+        tools["mcp_server.build: 34 tools"]
         chatRun["chat.Chat._run: the shared tool layer"]
         ws["service.Workspace"]
         hooks["mcp_hooks: caps, triage, report"]
@@ -156,7 +156,7 @@ address is written into the code.
   (stdio): every call works on `local`.
 - **`INSTRUCTIONS`** tell the agent to start with `get_session`, read clashes, test its own ideas with the `check_*`
   tools or run `propose_fixes`, that nothing changes until `apply_fix` or `apply_plan`, that distances are metres
-  with Z up (negative is overlap), and that `show_clash`, `set_view` and `capture_view` act on the person's page.
+  with Z up (negative is overlap), and that `show_clash`, `set_view`, `set_filters` and `capture_view` act on the person's page.
 
 `Hooks` is what the hosting server lends the tools (`None` parts are not available):
 
@@ -224,6 +224,8 @@ call goes through `chat.Chat._run` under the same name.
 | `measure_clash` | yes | ORCA's signed distance for one clash | chat → `Workspace.measure` | none |
 | `show_clash` | yes | Selects a clash in the page and flies the camera to it | chat | `ui select_clash` |
 | `set_view` | yes | Shaded, x-ray, context or isolate, and the section box | chat | `ui set_view` |
+| `set_filters` | yes | Filters by property on the page ([docs/filters.md](../filters.md)): each finds elements by classes, levels, models and `where` conditions and colours, colours by value, hides or isolates them; replaces the agent's own filters, pauses the person's; names the models lack fail with the closest | chat → `facets.resolve` | `ui filters {mode: replace, filters, grey_rest?}` |
+| `clear_filters` | yes | Removes the agent's filters; the person's come back | chat | `ui filters {mode: clear}` |
 | `capture_view` | yes | A picture of the person's current view | `Link.capture("view")`, `Image` | `capture_request {what: "view"}` |
 | `describe_element` | yes | An element's class, name, tag, level, file, connections, and a straight segment's run | chat → `Workspace.describe`, `edits.run_of` | none |
 | `find_elements` | yes | Search elements by name, tag or class | chat | none |
@@ -248,7 +250,7 @@ call goes through `chat.Chat._run` under the same name.
 
 Notes on the table:
 
-- **Read-only is declared, not inferred:** `show_clash`, `set_view` and `capture_view` are read-only (they change
+- **Read-only is declared, not inferred:** `show_clash`, `set_view`, `set_filters`, `clear_filters` and `capture_view` are read-only (they change
   only the person's view), while `find_patterns` is not (it spends a model call).
 - **A report built by an agent** carries none of the page's evidence, reviews or marks (`build_document` passes only
   the scope), so its pages say what the server knows: the triage, not the fixes the person reviewed.
@@ -382,7 +384,7 @@ link change.
 3. **Start fresh** (`startFresh`) forgets the saved session and revokes its link.
 
 When the tab is closed the agent keeps working: the link and the models live on the server. Only the page tools
-stop (`capture_view`, pictures of detected clashes, `show_clash`, `set_view`), and `get_session` says so in its
+stop (`capture_view`, pictures of detected clashes, `show_clash`, `set_view`, `set_filters`, `clear_filters`), and `get_session` says so in its
 `note`.
 
 ## How it differs from the chat
