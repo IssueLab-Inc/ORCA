@@ -1435,3 +1435,17 @@ Filter the clash list by status (Oct 31; owner request; code `web/src/ReportList
   To fix 463 (none fixed among them), Fixed 1 (#1); the "1 fixed" chip turns the filter on and off with the select
   following; 145 web tests, build clean.
 
+
+The Triage card and the top of the clash list, laid out again (Oct 31; owner request; code `web/src/Triage.tsx`,
+`web/src/ReportList.tsx`, `web/src/index.css`):
+- **What:** before a run the card's head is "Triage" with a Step 1 pill and one line, "Find the few that need a fix",
+  and **Triage all n clashes** fills the card's width under it, folded or not (it used to share the head's line, the
+  subtitle wrapping to three); the fold now opens how triage works there too. The report's line keeps to one line:
+  "Muse Spark is naming n…" became a "Naming n…" pill whose tip names the model. The search has its own row, so its
+  hint reads whole; the filters go under it only when they change something ("In the model" when some clashes are not
+  in the open models, so not on Northbank; the status picker once anything is fixed or reviewed; "n shown" at the
+  end). Set aside and Flag share the card's width. The card lines up with the list's edges (12 px).
+- **Checked** in Chromium at 1600×1000, 1366×768 and a 390 px phone, every card state (idle folded and open, running,
+  done folded and open, with the triage answer stubbed): no wrapped subtitle or truncated search hint; no filter row on
+  a fresh report, then "228 reviewed", the status picker and "236 shown" after Set aside and To fix; the Insights
+  tab's Detect card unchanged; 145 web tests, build clean.

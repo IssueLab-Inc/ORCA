@@ -1136,7 +1136,12 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .detect-coverage .hint { margin-top: 6px; }
 .clash-pair.titled { color: var(--ink); }
 .clash-name { font-variant-numeric: tabular-nums; }
-.report-head .naming { color: var(--accent); }
+.report-meta { display: flex; align-items: center; gap: 8px; margin: 0; }
+.report-meta > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-head .naming { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-ink); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.report-head .naming svg { animation: tour-pulse-op 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .report-head .naming svg { animation: none; } }
 .clash-panel h2 .num { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* Connect an agent (Agent.tsx): the link's settings for each client, its status, what the agent did */
@@ -1895,24 +1900,29 @@ a.pop-item { color: inherit; }
 .left-view > .report-head:first-child { border-bottom: 0; padding-bottom: 2px; }
 .left-view > .report-head .live-line { font-size: 12.5px; }
 .left-view > .list-head { padding-top: 10px; }
-.left-view[data-left-view="clashes"] > .triage { margin-top: 6px; }
+.left-view[data-left-view="clashes"] > .triage { margin: 6px 12px 0; }
 .left-view[data-left-view="clashes"] > .groups { min-height: 200px; }
 .left-view[data-left-view="insights"] { padding-bottom: 14px; }
 .left-view[data-left-view="insights"] > .report-head { border-bottom: 0; }
 @media (pointer: coarse) { .left-tabs button { min-height: 44px; } }
-/* Triage folded is one line (the count is its subtitle, the button sits in the head) and its bar */
-.triage-head .triage-go { flex: none; padding: 5px 10px; font-size: 12.5px; }
+/* Triage folded: its head (the count is the subtitle once it has run) and the bar, or, before it runs, the one button */
+.triage h3 { display: flex; align-items: center; gap: 6px; }
+.triage-step { padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-size: 10.5px;
+  font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.triage:not(.detect) .triage-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.triage.idle:not(.detect) .triage-sub { color: var(--muted); font-weight: 400; }  /* the Step 1 pill and the button carry it */
+.triage > .triage-go { width: 100%; padding: 9px 14px; font-size: 13.5px; }
+.triage-actions .btn { flex: 1 1 auto; }
 .triage-sub.count-sub { color: #33414f; display: inline-flex; align-items: center; gap: 3px; flex-wrap: wrap; }
 .triage-sub.count-sub b { font-size: 13px; }
 .triage-sub.count-sub b.bad { color: var(--fail); } .triage-sub.count-sub b.ok { color: var(--ok); }
 .triage.compact .triage-head { margin-bottom: 0; }
 .triage.compact:not(.idle) .triage-head { margin-bottom: 8px; }
-.triage.compact.idle .triage-head .triage-fold { display: none; }  /* nothing to unfold but the reasons; the button says it */
-/* The search and its filters share a row when there is room */
-.list-head { flex-direction: row !important; flex-wrap: wrap; align-items: center; gap: 6px 10px !important; }
-.list-head .search-box { flex: 1 1 170px; min-width: 0; }
-.list-head .filters { flex: 0 1 auto; }
-.list-head .list-focus { flex: 1 1 100%; margin-top: 0; }
+/* The search has its own row, so its hint reads whole; the filters sit under it, the count of what shows at the end */
+.list-head { gap: 8px !important; }
+.list-head .filters { gap: 6px 12px; }
+.list-head .filters .shown { margin-left: auto; }
+.list-head .list-focus { margin-top: 0; }
 /* Phone: the tabs already name the report, and a status line with nothing to press gives way when the sheet is full */
 .app.phone .left-view[data-left-view="clashes"] > .report-head:first-child > :not(.live-line) { display: none; }
 .app.phone .left-view[data-left-view="clashes"] > .report-head:first-child:not(:has(.live-line)) { display: none; }
