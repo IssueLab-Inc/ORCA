@@ -123,7 +123,8 @@ each feature see [01](01-product-and-journeys.md).
 | **Facet** | One thing a filter can match by, with its values and the elements that have each: `class`, `storey`, `pset:<Set>/<Prop>`… | `facets.py`, `filters.Facet` |
 | **Colour by value** | A filter that gives each value of one property its own colour (System, Floor, Model…), with a key under it. | `Rule.action` `byValue` |
 | **Breadcrumbs** | Where the selected element sits, from the project down (Project › Site › Building › Level), each opening that object's own properties. | `properties.Reader.path`, `ElementCard.tsx` |
-| **Check on filters** | One clash test of what side A takes (a filter) against side B (a filter, everything or itself), from the Filters panel, chat or MCP; its clashes replace the open list. | `detect.Selection.filter`, `check_id`; [docs/filters.md](../filters.md) |
+| **What the filters show** | Every filter that is on, together, as on screen (hide, isolate, Hide the rest, Show colours): a side of a check on filters, found again on every run ("the filtered items"). | `detect.Selection.view`, `facets.shown`, `checks.viewOf` |
+| **Check on filters** | One clash test of what side A takes (a filter, or what the filters show) against side B (a filter, what the filters show, everything the full check covers, or itself), from the Filters panel, chat or MCP; its clashes replace the open list. | `detect.Selection.filter`, `check_id`; [docs/filters.md](../filters.md) |
 | **Grey the rest** | With any filter colouring, what none colours turns grey. | `FilterState.greyRest` |
 | **Hide the rest** | With any filter colouring or isolating, everything none colours or isolates is hidden; the rest keep their colours. The panel's "The rest: Show · Grey · Hide". | `FilterState.hideRest` |
 

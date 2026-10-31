@@ -1734,3 +1734,23 @@ in Workings; `web/src/workingsGraph.ts`, `App.tsx`, `Chat.tsx`, `runlog.ts`, `ap
   Reads the question → Set filters (colour by System, the rest greyed, 844 elements) → Reads what the tools said →
   Answers, in about 8 s. No page errors.
 
+
+Checks take what the filters show (Oct 31; owner report: "run a clash test on the filtered items" with a Colour by…
+filter on Distribution system and By Model with Site ticked off, the rest hidden, took the Site model and all 1,961
+elements, 633 clashes; code `facets.acted` / `shown`, `detect.Selection.filter.by` / `view`, `detect.everything`,
+`chat.page_view`, `checks.viewOf` / `shownCount`, `FilterView` in `ChatTurn` and `LinkContext`;
+[docs/filters.md](../../docs/filters.md), "Checks"):
+- **What:** a filter as a check's side is what it acts on (a Colour by… filter: what it colours, values ticked off
+  left out); Everything is what the full check covers (a site model left out, as the default tests do); What the
+  filters show (every filter that is on, together, as on screen) is a side in Check clashes and for chat and MCP
+  (`{"shown": true}`), found again on every run. Chat's `[context]` and `get_session` say how many the filters show.
+- **Checked:** `tests/test_facets.py` (16), `test_detect.py` (32, the owner's case from chat with no site element),
+  `test_mcp.py`; `web/tests/filters-check.test.mjs` (11).
+- **In Chromium on Northbank**, the owner's own filters (colour by distribution system; by model with Site ticked off;
+  Hide): Check clashes offered Distribution system (844) and What the filters show (1,732, spaces aside), Check on. Distribution
+  system vs Everything: 3 clashes (the girder's three), none with the Site model (633 before); What the filters show
+  (within): 464, none with Site. Chat on Muse Spark: "run a clash test on the filtered items" → `{"shown": true}`
+  within; "check the distribution system against everything" → the filter vs Everything without Site.
+- **Check clashes laid out again** (owner: "the check button placement needs to be better", "no gaps"): the
+  tolerance or clearance on its own row, a full-width Check clashes button at the end with why it is off right under
+  it, and the block's body spaced in its own box (a `details` element takes no flex gap in Chromium).

@@ -340,6 +340,58 @@ def found(idx: dict, when: list[dict], invert: bool = False) -> set[int]:
     return everyone - hit if invert else hit
 
 
+def _page_text(v) -> str:
+    """A value as the page's `String(v)` writes it (a by-value filter's ticked-off values are kept that way)."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def acted(idx: dict, f: dict) -> set[int]:
+    """The elements (by index) a filter acts on, as the page's `actedOn`: what it finds, and for one that colours by a
+    property's values (`by`: {facet, off}) only what has a value of it not ticked off (docs/filters.md, "Checks")."""
+    hit = found(idx, f.get("when") or [], bool(f.get("invert")))
+    by = f.get("by")
+    if not by:
+        return hit
+    fc = facet(idx, by.get("facet") or "")
+    if fc is None:
+        return set()
+    off = {str(x) for x in by.get("off") or []}
+    coloured: set[int] = set()
+    for v, items in zip(fc["values"], fc["items"]):
+        if _page_text(v) not in off:
+            coloured.update(items)
+    return hit & coloured
+
+
+def shown(idx: dict, view: dict) -> set[int]:
+    """What the page's filters leave on screen together (`view`: the filters that are on, with `hide_rest` and
+    `colours`), as the page's `evaluate`: hide filters hide; isolate filters show only what they find; with Hide the
+    rest, only what a filter colours or isolates stays (colour filters count only while colours show)."""
+    hidden: set[int] = set()
+    only: set[int] | None = None
+    painted: set[int] = set()
+    colours = view.get("colours", True) is not False
+    for f in view.get("filters") or []:
+        action = f.get("action") or "colour"
+        if action in ("colour", "byValue") and not colours:
+            continue
+        hit = acted(idx, f)
+        if action == "hide":
+            hidden |= hit
+        elif action == "isolate":
+            only = (only or set()) | hit
+        else:
+            painted |= hit
+    if view.get("hide_rest") and (painted or only is not None):
+        only = (only or set()) | painted
+    everyone = set(range(len(idx["elements"])))
+    return (everyone if only is None else only) - hidden
+
+
 def _shown(v) -> str:
     return v.removeprefix("Ifc") if isinstance(v, str) else "yes" if v is True else "no" if v is False else str(v)
 

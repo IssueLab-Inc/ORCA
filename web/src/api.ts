@@ -1,4 +1,4 @@
-import type { Condition, FacetIndex, Rule } from "./filters";
+import type { Action, Condition, FacetIndex, Rule } from "./filters";
 import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
 import type { Datums } from "./viewer/views";
@@ -195,13 +195,22 @@ export interface Report {
 }
 
 /** ORCA detection (server: detect.py; design in docs/detection.md). */
+/** A filter as a check's side (docs/filters.md, "Checks"): what it finds, and colouring by value, only what it colours. */
+export interface SideFilter { when: Condition[]; invert: boolean; by?: { facet: string; off: string[] } }
+/** What the page's filters show together, as a check's side (server: detect.Selection.view, facets.shown). */
+export interface CheckView { filters: (SideFilter & { action: Action })[]; hide_rest: boolean; colours: boolean }
 export interface DetectSelection { files: string[]; teams: string[]; classes: string[]; exclude_classes: string[]; systems: string[]; ids: string[];
-  /** A side found by a filter (docs/filters.md, "Checks"). */
-  filter?: { when: Condition[]; invert: boolean } | null }
-/** What a check on filters takes when it says nothing else (server: Workspace.check_defaults). */
-export interface CheckDefaults { tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; min_size_m: number }
+  /** A side found by a filter, or by what the filters show (docs/filters.md, "Checks"). */
+  filter?: SideFilter | null; view?: CheckView | null }
+/** What a check on filters takes when it says nothing else (server: Workspace.check_defaults); `everything`: what its
+ * Everything takes, the models the full check covers (a site model left out). */
+export interface CheckDefaults { tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; min_size_m: number;
+  everything?: DetectSelection }
 /** One of the user's filters as the page shares it with chat and an agent link (server: PageFilter). */
-export interface SharedFilter { id: string; name: string; when: Condition[]; invert: boolean; on: boolean; origin?: string | null }
+export interface SharedFilter { id: string; name: string; when: Condition[]; invert: boolean; on: boolean; origin?: string | null;
+  action?: Action; by?: { facet: string; off: string[] } | null }
+/** How the page's filters show together (server: FilterView). */
+export interface FilterView { hide_rest: boolean; colours: boolean }
 export interface DetectTest {
   id: string; name: string; a: DetectSelection; b: DetectSelection | null; kind: "hard" | "clearance" | "duplicate";
   tolerance_m: number; clearance_m: number; rules: Record<string, boolean>; enabled: boolean; min_size_m?: number;
@@ -562,7 +571,7 @@ export interface SavedSession {
   link: AgentLink | null; clock_offset?: number; saved_at: number;
 }
 export interface LinkContext { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[];
-  filters?: SharedFilter[] }
+  filters?: SharedFilter[]; filter_view?: FilterView }
 /** What the agent does, for the page to follow: its calls, requests for pictures, and the chat's ui events. */
 export type LinkEvent =
   | { type: "hello"; stream: string; calls: number; last_call: AgentLink["last_call"]; expires_at: number; max_expires_at: number; server_time: number }
@@ -663,7 +672,7 @@ export const api = {
   applyPlan: (sceneId: string, options: Option[]) =>
     call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
-                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
+                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   /** The sample models, and the demos among them (server: demos.py). */
   samples: () => call<{ files: string[]; demos: Demo[] }>("/samples"),

@@ -141,10 +141,16 @@ export function withBy(rule: Rule): Rule {
 
 /** The user's filters as the page shares them with chat and an agent link (docs/filters.md, "Checks"): each by its
  * name (or what it finds), with only its complete conditions, within what the server takes (`app.PageFilter`: 100
- * filters, a name of 200 characters, 30 conditions), so a long name never refuses the chat turn. */
-export function shareable(rules: Rule[]): { id: string; name: string; when: Condition[]; invert: boolean; on: boolean; origin: string | null }[] {
-  return rules.slice(0, 100).map((r) => ({ id: r.id.slice(0, 100), name: (r.name || nameFor(r.when.filter(complete))).slice(0, 200),
-    when: r.when.filter(complete).slice(0, 30), invert: !!r.invert, on: r.on, origin: r.origin ?? null }));
+ * filters, a name of 200 characters, 30 conditions), so a long name never refuses the chat turn; with what each does and,
+ * colouring by value, by what (a check on it takes what it colours, and together they say what the page shows). */
+export function shareable(rules: Rule[]): { id: string; name: string; when: Condition[]; invert: boolean; on: boolean; origin: string | null;
+  action: Action; by: { facet: string; off: string[] } | null }[] {
+  return rules.slice(0, 100).map((r) => {
+    const by = r.action === "byValue" ? withBy(r).by : undefined;   // what it colours, for a check on it
+    return { id: r.id.slice(0, 100), name: (r.name || nameFor(r.when.filter(complete))).slice(0, 200),
+      when: r.when.filter(complete).slice(0, 30), invert: !!r.invert, on: r.on, origin: r.origin ?? null, action: r.action,
+      by: by ? { facet: by.facet, off: [...(by.off ?? [])] } : null };
+  });
 }
 
 /** The first palette colour no other filter uses, for a new colour filter (it keeps it when the list is reordered). */
