@@ -72,6 +72,8 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .psets dt { color: var(--muted); }
 .pset-value { all: unset; cursor: copy; overflow-wrap: anywhere; }
 .pset-value:hover, .pset-value:focus-visible { text-decoration: underline; text-decoration-color: var(--line); }
+.from-type { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+.psets dd a { color: var(--accent); overflow-wrap: anywhere; }
 .props .all-props { border-top: 1px solid var(--line); padding-top: 6px; }
 .props .all-props > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 .props .all-props .psets { border-top: 0; padding-top: 6px; max-height: 40vh; overflow: auto; }

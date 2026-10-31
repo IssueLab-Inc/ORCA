@@ -1480,3 +1480,19 @@ No layout patches behind the load card (Oct 31; owner report; code `web/src/view
 - **Checked:** `web/tests/viewer-empty-stage.test.mjs` (2; the first fails on the old code); in Chromium at 1600×1000,
   loading Northbank from the start page in the four-view layout now shows the same even stage as the single layout,
   and the four views (two in the two-view layout) are back once it is drawn; web tests and build.
+
+Every property of an object (Oct 31; owner request, "ensure we are retrieving all properties of an element"; code
+`server/sightline/properties.py` `Reader`, `web/src/Properties.tsx`; panel in [docs/panels.md](../panels.md)):
+- **What was missing:** five attributes and the type's name only; ranges, tables and complex properties came out as
+  text and reference values were dropped; no units; the type's quantities, material layers, classifications, groups,
+  documents and where the object sits were never read; an IFC4 set of property sets failed the route (500).
+- **What changed:** one reader walks the model's own relationships: every attribute (with its unit), the type and its
+  attributes, every set on the object or its type (a type-only value marked `from_type`, the object's own winning),
+  every kind of property, units (lengths, areas, volumes, masses in SI), materials with layers and thicknesses,
+  profiles, constituents and their own sets, classifications, groups, documents, storey, container and the path to
+  the project. Any object with a GlobalId can be read (`?file=` picks the model), ready for the breadcrumbs. One gate,
+  `properties.shown`, keeps the demo models' hidden note out at every depth. The panel shows it all, lengths in mm,
+  with Type badges. The filters' index reuses the reader.
+- **Checked:** `evals/properties_complete.py` on all six Northbank files: 5,666 objects, 16,303 values, every count
+  equal to an independent count from the raw relationships, 2.2 s; `tests/test_properties.py` (10),
+  `tests/test_properties_complete.py`; 649 server tests; `web/tests/properties.test.mjs` (5), 151 web tests, build.

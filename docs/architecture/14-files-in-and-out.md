@@ -70,6 +70,11 @@ flowchart LR
   class checks use `is_a`, so IFC2X3's `IfcWallStandardCase` counts as a wall (`agent.STAYS`), and `fixtures.py`
   builds IFC2X3 test models (`tests/test_penetration.py`). Other schemas IfcOpenShell reads will open; nothing tests
   them. STEP conversions are always written as IFC4.
+- **What the model says.** `properties.Reader` reads any object's attributes, type, property and quantity sets (its
+  type's too), every kind of property, units, materials, classifications, groups, documents and spatial path from the
+  file's own relationships, IFC4's sets of sets included; lengths, areas, volumes and masses come in SI whatever the
+  file's units (each kind of unit from the project's own assignment, else the length unit to its power). The
+  Properties panel and the filters' index share it ([docs/panels.md](../panels.md), `evals/properties_complete.py`).
 - **What counts.** `IfcScene.products()` and `bounds()` take every `IfcElement` with a body that is physical
   (`scene.not_physical`: not an `IfcFeatureElement`, not virtual, not a provision for void). Boxes are measured once
   at open (`IfcScene.bounds`, in batches of `BOUNDS_BATCH`, meshes through CGAL; from `SIGHTLINE_BIG_MODEL_MB`

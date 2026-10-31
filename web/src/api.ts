@@ -91,12 +91,38 @@ export type BuiltEvent =
 export interface EscalationInfo { model: string; label: string; mode: "off" | "button" | "auto"; available: boolean }
 /** Revision-pinned context proposals are accepted by server-held ID, as a complete arrangement. */
 export interface ContextObjective { element_a: string; element_b: string; report_id?: string; clash_id?: string }
-/** What the model says about one element (properties.py): quantities in SI with their unit, size in metres (IFC axes). */
+/** One value the model gives (properties.py): lengths, areas, volumes and masses in SI with their unit, others as
+ * authored with theirs; `from_type` when the object's type gives it. Kinds other than a single value say so: an
+ * enumerated or list value is a list, a bounded one {lower, upper, set_point}, a table has `table`, a complex
+ * property nests `rows`, a reference names what it points at. */
+export interface PropRow {
+  name: string; value: unknown; unit?: string; from_type?: boolean;
+  kind?: "enumerated" | "list" | "bounded" | "table" | "reference" | "complex" | string;
+  rows?: PropRow[]; of?: string;
+  table?: { defining: unknown[]; defined: unknown[]; defining_unit: string | null; defined_unit: string | null; expression: string | null };
+}
+/** A property set, quantity set or a material's own set. */
+export interface PropSet { name: string; kind: "pset" | "qto"; props: PropRow[]; from_type?: boolean; material?: string }
+/** An object one points at (a breadcrumb, a container): enough to read its own properties (`file` picks the model). */
+export interface ObjectRef { global_id: string | null; ifc_class: string; name: string; file: number }
+export interface MaterialUse {
+  usage: "single" | "layers" | "profiles" | "constituents" | "list" | string; name: string; from_type: boolean;
+  items: { material: string | null; name?: string; thickness_m?: number; fraction?: number; profile?: string; category?: string }[];
+  total_m?: number; sets: PropSet[];
+}
+/** Everything the model says about one object (properties.py): every attribute, its type, every set (the type's
+ * marked), materials, classifications, groups, documents, where it sits and the path up to the project; size in
+ * metres (IFC axes), none for a storey or a building. */
 export interface ElementProperties {
-  global_id: string; ifc_class: string; attributes: Record<string, unknown>;
-  type: { ifc_class: string; name: string | null } | null; materials: string[];
-  psets: Record<string, Record<string, unknown>>; quantities: Record<string, Record<string, { value: unknown; unit: string }>>;
-  size_m: number[] | null; source: string;
+  global_id: string; ifc_class: string; name: string | null; source: string; file: number; size_m: number[] | null;
+  attributes: PropRow[];
+  type: { global_id: string | null; ifc_class: string; name: string | null; attributes: PropRow[] } | null;
+  storey: ObjectRef | null; container: ObjectRef | null; path: ObjectRef[];
+  materials: MaterialUse[];
+  classifications: { system: string | null; identification: string | null; name: string | null; location: string | null }[];
+  groups: { global_id: string | null; ifc_class: string; name: string }[];
+  documents: { identification: string | null; name: string | null; location: string | null }[];
+  sets: PropSet[];
 }
 export interface ContextHit { element: string; other: string; kind: string; distance_m: number }
 export interface ContextChecks {
@@ -729,7 +755,8 @@ export const api = {
   exportUrl: (id: string) => `/api/scenes/${id}/export`,
   element: (id: string, globalId: string) => call<Record<string, unknown>>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}`),
   /** Everything the model says about one element, for the Properties panel (properties.py). */
-  properties: (id: string, globalId: string) => call<ElementProperties>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties`),
+  properties: (id: string, globalId: string, file?: number) =>
+    call<ElementProperties>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties${file === undefined ? "" : `?file=${file}`}`),
   /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
    *  check): the connection highlight's graph (docs/connections.md). */
   connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),

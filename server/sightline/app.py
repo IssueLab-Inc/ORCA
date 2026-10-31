@@ -597,10 +597,11 @@ def scene_datums(scene_id: str):
 
 
 @app.get("/api/scenes/{scene_id}/elements/{global_id}/properties")
-def element_properties(scene_id: str, global_id: str):
-    """Everything the model says about one element, for the Properties panel (properties.py)."""
+def element_properties(scene_id: str, global_id: str, file: int | None = None):
+    """Everything the model says about one object, for the Properties panel (properties.py). `file` (the model's
+    index) picks the file when federated files repeat a GlobalId, as a breadcrumb's storey may."""
     try:
-        return ws.properties(_scene(scene_id), global_id)
+        return ws.properties(_scene(scene_id), global_id, file)
     except KeyError:
         raise HTTPException(404, "No such element in these models.")
 

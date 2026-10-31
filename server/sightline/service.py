@@ -240,12 +240,14 @@ class Workspace:
         return {**asdict(s.element(global_id)), "links": named, "systems": g["systems"].get(global_id, []),
                 "part_of": part_of}
 
-    def properties(self, scene_id: str, global_id: str) -> dict:
-        """Everything the model says about one element (properties.py): attributes, type, materials, property sets,
-        quantities in SI and size. KeyError for an element the scene doesn't have."""
+    def properties(self, scene_id: str, global_id: str, file: int | None = None) -> dict:
+        """Everything the model says about one object (properties.py): every attribute, its type, every property and
+        quantity set (the type's marked), units, materials, classifications, groups, documents, its storey and path.
+        `file` picks the model when federated files repeat a GlobalId (a breadcrumb's storey). KeyError for an object
+        the scene doesn't have."""
         s = self.scene(scene_id)
         with self.lock:
-            return properties.properties(s, global_id)
+            return properties.properties(s, global_id, file)
 
     def _contacts(self, scene_id: str) -> list:
         return (self._runs.get(scene_id) or {}).get("contacts", [])
