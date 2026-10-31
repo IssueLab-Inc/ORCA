@@ -141,6 +141,12 @@ function proposal(run: Run, at: number): Graph {
     { id: "orca", label: "ORCA", sub: "checks the geometry", actor: "orca", h: 146 }];
   const steps: Step[] = [], edges: Edge[] = [], bars: Bar[] = [], ticks: Tick[] = [{ lane: "you", at: 0, tone: "you" }];
   const add = (s: Step) => { steps.push(s); return s; };
+  // A second try on Muse Wonder gets a lane of its own under the first model's, so the drawing says who is working.
+  const museLane = (m: string) => {
+    if (actorOf(m) !== "wonder") return "muse";
+    if (!lanes.some((l) => l.id === "wonder")) lanes.splice(2, 0, { id: "wonder", label: aiName("escalation"), sub: "takes a second look", actor: "wonder", h: 200 });
+    return "wonder";
+  };
   add(startStep(run, "propose fixes", run.origin === "replay" ? "the tour's recording" : "POST /propose/stream", cols.next()));
   let prev = "start", tryNo = 0, model = aiName("proposal"), offset = 0, seen = 0, inTry = 0, firstIdea = true;
   // Ideas named before they are checked (the server sends their titles with `ideas`), by their index in the try.
@@ -161,7 +167,7 @@ function proposal(run: Run, at: number): Graph {
       model = String(e.model ?? aiName("escalation"));
       const passed = (first?.attempts ?? []).filter((a) => a.passed).length;
       const id = `try${tryNo}`;
-      add({ id, lane: "muse", col: cols.next(), dy: 10, actor: actorOf(model), model, status: "done", t0: t, ev: "escalating",
+      add({ id, lane: museLane(model), col: cols.next(), dy: 10, actor: actorOf(model), model, status: "done", t0: t, ev: "escalating",
         title: "A second, longer try",
         body: [text(first?.attempts?.length ? `Starts from the first try: ${first.attempts.length} ideas, ${passed} passed` : "Starts with nothing to read")],
         detail: first?.advice ? [{ kind: "quote", text: first.advice }] : [] });
@@ -174,7 +180,7 @@ function proposal(run: Run, at: number): Graph {
         body: [text(r === 1 ? "The pair in words and numbers: classes, levels, how far they overlap, openings it could use, and pictures A, B and C"
           : "The same brief, with every idea tried so far and why each failed")], detail: [] });
       edges.push(r > 1 ? { from: prev, to: brief.id, kind: "feedback", label: "what failed, and why" } : { from: prev, to: brief.id });
-      const step = add({ id: `r${key}`, lane: "muse", col: cols.next(300), dy: 10, actor: actorOf(model), model, status: "run", t0: t,
+      const step = add({ id: `r${key}`, lane: museLane(model), col: cols.next(300), dy: 10, actor: actorOf(model), model, status: "run", t0: t,
         title: tryNo ? `${model}, round ${r}` : `Round ${r}`, body: [], detail: [], ev: "thinking · reasoning · ideas" });
       edges.push({ from: brief.id, to: step.id });
       round = { step, thoughts: [], notes: [] }; rounds.push(round);
@@ -185,11 +191,11 @@ function proposal(run: Run, at: number): Graph {
       (round ?? rounds[rounds.length - 1])?.notes.push(String(e.text ?? ""));
     } else if (e.type === "ideas" && round) {
       round.ideas = { t, seconds: Number(e.seconds ?? t - round.step.t0), understanding: String(e.understanding ?? ""), count: Number(e.count ?? 0) };
-      bars.push({ lane: "muse", a: round.step.t0, b: t, tone: actorOf(model) });
+      bars.push({ lane: round.step.lane, a: round.step.t0, b: t, tone: actorOf(model) });
       const from = round.step.id;
       (e.candidates as { title: string; kind: string }[] | undefined)?.forEach((c, k) => {
         const index = inTry + k, key = `${tryNo}-${index}`;
-        const idea = add({ id: `i${key}`, lane: "muse", col: cols.next(252), dy: 62, actor: actorOf(model), model, status: "done", t0: t,
+        const idea = add({ id: `i${key}`, lane: museLane(model), col: cols.next(252), dy: 62, actor: actorOf(model), model, status: "done", t0: t,
           title: c.title, fix: c.kind, time: `idea ${offset + index + 1}`, body: [text("waiting its turn", { tone: "muted" })], detail: [], ev: "ideas" });
         edges.push(k === 0 ? { from, to: idea.id, win: true } : { from, to: idea.id, fa: "tr", ta: "t" });
         named.set(key, idea);
@@ -197,7 +203,7 @@ function proposal(run: Run, at: number): Graph {
     } else if (e.type === "checking") {
       const index = Number(e.index ?? 0), key = `${tryNo}-${index}`, n = offset + index, early = named.get(key);
       const col = early ? early.col : cols.next(252);
-      const idea = early ?? add({ id: `i${key}`, lane: "muse", col, dy: 62, actor: actorOf(model), model, status: "done", t0: t,
+      const idea = early ?? add({ id: `i${key}`, lane: museLane(model), col, dy: 62, actor: actorOf(model), model, status: "done", t0: t,
         title: String(e.title ?? ""), fix: String(e.kind ?? ""), time: `idea ${n + 1}`, body: [], detail: [], ev: "checking" });
       inTry = Math.max(inTry, index + 1);
       const check = add({ id: `k${key}`, lane: "orca", col, actor: "orca", status: "run", t0: t, title: "Geometry check", seq: n,
@@ -315,7 +321,7 @@ function proposal(run: Run, at: number): Graph {
   }
   const duration = Math.min(at, run.ended ?? at);
   return { lanes, cols: cols.widths, steps, edges, bars, ticks, flows: [], duration, done,
-    rows: [{ id: "you", label: lanes[0].label }, { id: "muse", label: aiName("proposal") }, { id: "orca", label: "ORCA" }] };
+    rows: lanes.map((l) => ({ id: l.id, label: l.label })) };
 }
 
 /** How a run that ended early ends its drawing: a step in your lane saying why. */
