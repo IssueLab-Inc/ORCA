@@ -639,6 +639,10 @@ No `sessionStorage` or IndexedDB is used.
   `http://localhost:8765`), waits for the check, picks a view, saves the viewer's screenshot and writes
   `web/public/demos/northbank.webp` and `cell.webp` (cropped to 16:10 with Pillow). Recapture after visual changes;
   the landing's demo cards and the README use these pictures.
+- **`web/scripts/capture-proposals.cjs`** (with **`timelapse.py`**): records live proposal runs in the app (a clash,
+  Propose fixes, the verified options, Before / After, then the run's Workings replayed in Activity's own window) from
+  the browser's screencast and writes animated WebP time-lapses to `docs/media/proposals/` for the README's "See it
+  work". Needs `META_API_KEY` on the server: every capture is a real proposal. Not served by the app.
 - **`web/public/`:** `favicon.svg`, `brand/` (above), `popout.html` (the page a panel's own window opens: dockview moves the panel in
   and copies the styles), `demos/*.webp`, `tour/*.json` (the five recordings), and the generated `wasm/`.
 - **`web/index.html`:** the shell (`#root`, `viewport-fit=cover`, the IBM Plex fonts from Google Fonts, title "ORCA ·
@@ -669,5 +673,5 @@ No `sessionStorage` or IndexedDB is used.
 - A new or renamed panel, a change to the default layout, the side bars' buttons, what is saved, or how `setTab` and
   the dock follow each other (also [docs/panels.md](../panels.md)).
 - A new tour, act, `TourState` field, `TourActions` action or recording in `web/public/tour/`.
-- A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `web/public/`.
+- A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `capture-proposals.cjs`, `web/public/`.
 - The identity or motion library in `assets/brand/orca/`, or its adoption by the app.
