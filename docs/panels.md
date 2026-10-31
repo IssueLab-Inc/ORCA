@@ -24,6 +24,7 @@ It is new work, written for ORCA during the event. No code from other products.
 |---|---|---|
 | Model | The stage: the canvas, PR 49's view panes, the rail, the element card, the pilot pill, toasts | the middle; never moves, floats or pops out |
 | Coordination | The left pane: the clash list and Insights (their own tabs), or the check's set-up card | left side bar |
+| Filters | Filters by property ([filters.md](filters.md)): the list and the editor | left side bar (tab, behind Coordination) |
 | Clash | The Clash tab's body | right side bar |
 | Plan | `PlanPanel` or `ContextPlan` | right side bar (tab) |
 | Chat | `ChatPanel` | right side bar (tab) |
@@ -72,7 +73,9 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
   `sightline.dock.properties`, and the next selection after a close or a reload opens it there. Docked, a selection
   brings its tab to the front.
 - **Four tabs in a bar:** they and the bar's buttons don't fit its width (dockview would put some behind a menu), so
-  with more than three tabs the ones behind the front tab show their icon only, with their name as a tooltip. A
+  with more than three tabs the ones behind the front tab show their icon only, with their name as a tooltip. The left
+  bar is narrower: there two are enough (Coordination and Filters). "Behind" means not the tab shown in its bar
+  (`isVisible`; dockview's `isActive` also needs the bar to have the focus, so it shortened the front tab too). A
   collapsed strip keeps the names.
 - **Classic layout, tablets and phones** keep the card over the model, with an **All properties** section.
 - **What it shows:** the card (class, name, GlobalId, tag, level, file, links, Set as A / B, Zoom, Hide,

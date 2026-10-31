@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bookmark, Box, Camera, Columns2, Compass, Crop, Home, Layers, LayoutGrid, LocateFixed, Maximize, Palette, Radar, Ruler, ScanEye, Shapes, SlidersHorizontal, Square, Target, Trash2, Waypoints } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, Box, Camera, Columns2, Compass, Crop, Home, Layers, LayoutGrid, ListFilter, LocateFixed, Maximize, Palette, Radar, Ruler, ScanEye, Shapes, SlidersHorizontal, Square, Target, Trash2, Waypoints } from "lucide-react";
 import { useState } from "react";
 import { IconButton, Popover } from "./ui";
 import type { Preset, ViewMode, VisualStyle } from "./viewer/Viewer";
@@ -50,6 +50,8 @@ export interface ViewsControls {
   saved: string[]; onSave: (name: string) => void; onApply: (i: number) => void; onDelete: (i: number) => void;
   levels: [string, number][]; classes: [string, number][]; filters: Filters; onFilters: (f: Filters) => void;
   temporary: number; onResetTemporary: () => void;
+  /** Filters on (docs/filters.md), and opening their panel. */
+  rulesOn?: number; onOpenFilters?: () => void;
   layout: Layout; layouts: Layout[]; onLayout: (l: Layout) => void; follow: boolean; onFollow: (on: boolean) => void;
 }
 
@@ -277,5 +279,7 @@ function VisibilityItems({ models, state, views, onModel }: { models: string[]; 
       </div>
     </>}
     {any && <button className="pop-item" onClick={() => onFilters({ classes: [], levels: [] })}>Show all levels and classes</button>}
+    {views.onOpenFilters && <button className="pop-item" onClick={views.onOpenFilters}>
+      <ListFilter size={15} aria-hidden /> Filters by property{views.rulesOn ? ` (${views.rulesOn} on)` : ""}…</button>}
   </>);
 }

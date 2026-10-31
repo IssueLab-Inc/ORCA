@@ -140,7 +140,7 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 | Loading | `load(files, names, isCurrent)`, `replace(index, bytes, isCurrent)`, `patch(meshes, origin)`, `dispose()`; fields `models`, `names` |
 | Visibility per model | `setModelVisible(index, visible)` (the toolbar's Models list; `App` keeps `tool.hiddenModels`) |
 | Modes and focus | `setMode(mode)`, `setFocus({ a, b, group })`, `setEdges(on)`, `setHits(ids)`, `setLinks(groups)`; private `applyMode`, `aroundIds`, `drawFocus`, `nearFocus`, `focusSide` |
-| Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(classes, storeys)` (either may be null to keep what it had), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `infoCounts()` (cached until the models or the info change), `ofClass(cls)`; private `filterTest`, `drawSelection` |
+| Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(classes, storeys)` (either may be null to keep what it had), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `setRules(view)` and `isShown(gid)` (the filters' rules, [docs/filters.md](../filters.md)), `infoCounts()` (cached until the models or the info change), `ofClass(cls)`; private `filterTest`, `drawSelection` |
 | Previews | `preview(moves)`, `showOption(shape, mode, colour)`, `showOptions(shapes, mode)` |
 | Camera | `focusClash(ids, point, label, fly)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, `orbitAround(pivot, dx, dy)`, `setOrbitClash(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
 | Navigation | `activeCamera()`, `setProjection(p)`, `pose()`, `applyPose(p)`, `back()`, `forward()`, getters `canBack`, `canForward`, `setHome(p)`, getter `homeView`, `home()`, `lookFrom(dir)`, callback `onChange` (history, Home, layout or hides changed); private `press` (pivot or grip), `turn` (cube drag), `syncOrtho` |
@@ -193,10 +193,16 @@ every style.
   in every pane (`selectionLayer`; the outline on layer 1). `App` sets it from a single click.
 - **Visibility:** what wins is a hidden model (`setModelVisible`), then a temporary hide or isolate
   (`setTemporary({ hidden, isolated })`), then the filters (`setFilters({ classes, levels })`: classes and storeys
-  left out, `views.shownBy`), then the mode round the focus. The focus is drawn by its own layer, so the pair, previews
+  left out, `views.shownBy`), then the filters' rules (`setRules`: what hide rules find is hidden; while an isolate
+  rule is on, only what isolate rules find shows), then the mode round the focus. `isShown(gid)` answers for the card
+  and App (a filter that hides the selection clears it); the selection and lit links leave out what is hidden.
+- **Colour:** `applyMode` sets each element's colour: a filter's colour (`setRules`' `paint`, the top rule winning),
+  else the ghost, else grey (the grey context round a focus, or Grey the rest), else its own. One scratch `Vector4`
+  for every element. The pair, selection, hits, links, previews and measure are their own layers over the batches,
+  so they keep their colours over any filter's. The focus is drawn by its own layer, so the pair, previews
   and trials always show. `setInfo` takes each element's class (`api.classes`) and storey (`api.datums`); `infoCounts()` gives
   the toolbar its per-class and per-level counts, `ofClass(cls)` the GlobalIds for "Hide all / Isolate all".
-- **Lifted:** while a capture shoots, `lifted` puts the style back to shaded and drops filters, temporary hides and the
+- **Lifted:** while a capture shoots, `lifted` puts the style back to shaded and drops filters, the filters' rules and colours, temporary hides and the
   selection, so the pictures the server reads do not depend on how the user is looking (Captures, below).
 - **The section box in Shaded with edges and Hidden line:** the drawings' fills, pair colours, selection and normals
   materials share the section box's planes, so it cuts those styles too (a drawing view empties the planes while it

@@ -1506,3 +1506,22 @@ The filters' index (Oct 31; owner request, "full filtering capabilities"; code `
 - **Measured:** Northbank (four files): 1,997 elements, 46 facets (System, Service, Size, Discipline, Level, Length,
   materials, systems and zones among them), 0.8 s after the boxes, about 240 KB.
 - **Checked:** `tests/test_facets.py` (7), docs map.
+
+The Filters panel (Oct 31; owner request, "full filtering capabilities"; code `web/src/filters.ts`,
+`web/src/FiltersPanel.tsx`, `Viewer.setRules`; design [docs/filters.md](../filters.md)):
+- **What:** a Filters panel (left side bar, a tab behind Coordination; a sheet where there is no dock; "Filters by
+  property" in the Visibility menu). Each filter finds elements by models, classes, floors and any number of property
+  conditions (is, is not, contains, has, has none, between, less, more; lengths typed in mm), then colours them,
+  colours them by value (a Value | Items | Colour table, as in the owner's reference), hides or isolates them, or the
+  inverse. Several are on at once: the top colour wins, hides add up, isolates show what any finds; Show colours and
+  Grey the rest; Colour by… starts one in a click; Zoom to them; counts everywhere. The filter being edited shows live.
+  Kept per set of models, and in saved views. Viewing only: captures drop them.
+- **Viewer:** `applyMode` takes the rules' hides, isolates and colours (one scratch `Vector4`), the selection and lit
+  links leave out what is hidden, and a filter that hides the selection clears it (both gaps found in review).
+- **Palette:** ten colours, each at least ΔE 22 from every colour another role draws (pair, selection, hits, links,
+  previews, section, measure, greys).
+- **Also:** in the narrower left bar a tab behind the front one shows its icon only; "behind" is now `isVisible`, as
+  dockview's `isActive` also needs the bar to have the focus.
+- **Checked:** `web/tests/filters.test.mjs` (7), `viewer-filters.test.mjs` (3), `dock.test.mjs`; in Chromium on
+  Northbank: Colour by System (11 systems, 844 elements), ducts, pipes and trays isolated and coloured by system,
+  Level 02 Mechanical coloured with Grey the rest and Zoom to them; no console errors.

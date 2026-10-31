@@ -248,6 +248,8 @@ flowchart LR
 | `viewer-orbit.test.mjs` | 2 | `compiled` | `Viewer.orbitAround`: orbiting round a pivot (the selection, the clash) keeps it at the same place on screen and as far away, with no roll; a sideways drag keeps the camera's height; a long drag down stops short of straight down |
 | `viewer-empty-stage.test.mjs` | 2 | `compiled` | `Viewer.drawFrame` in the four-view layout: with nothing open, one empty 3D view over the whole stage and the layout kept; with models, each view in its own pane |
 | `viewer-links.test.mjs` | 1 | `compiled` | The connection highlight never shows in a captured picture and is back on screen afterwards |
+| `filters.test.mjs` | 7 | `compiled` | `filters.ts`: conditions as the server's `facets.matching`; every condition, unfinished ones left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); colour by value and its count; counts, names, sets, a new filter's colour; `migrate`; the palette clear of every reserved colour |
+| `viewer-filters.test.mjs` | 3 | `viewerModule` | `Viewer.setRules`: hides, isolates and colours reach the batch (grey for the rest); captures never see them; lit links leave out what a filter hides |
 | `tour.test.mjs` | 5 | `compiled` (React and icons stubbed) | `Tour.tsx`: the cell tour's numbers, the ladder's copy per option kind, accepting without a reload, the recorded-run offer when a live proposal fails or finds nothing, a failed plan moving on |
 
 ## Evals

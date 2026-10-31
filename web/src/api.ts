@@ -1,3 +1,4 @@
+import type { FacetIndex } from "./filters";
 import type { Graph } from "./links";
 import type { ElementMesh } from "./viewer/patch";
 import type { Datums } from "./viewer/views";
@@ -599,6 +600,8 @@ export const api = {
   classes: (sceneId: string) => call<Record<string, [string, string]>>(`/scenes/${sceneId}/classes`),
   /** Levels, grid axes and each element's storey (docs/views.md, "Datums from the server"). */
   datums: (sceneId: string) => call<Datums>(`/scenes/${sceneId}/datums`),
+  /** The filters' index (docs/filters.md): each facet's values and, per value, the elements that have it. */
+  facets: (sceneId: string) => call<FacetIndex>(`/scenes/${sceneId}/facets`),
   /** Show it built: the passes of one view (Viewer.captureBuilt) → a checked restyle, or why not. */
   built: async (sceneId: string, passes: { look: string; ids: string; normals: string }, fixKind: string,
                 onEvent: (e: BuiltEvent) => void, signal?: AbortSignal): Promise<BuiltResult> => {

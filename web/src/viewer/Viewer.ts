@@ -6,6 +6,7 @@ import { patchModel, ROOM, type ElementMesh } from "./patch";
 import { ViewCube } from "./cube";
 import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
 import { annotate, type Handle } from "./annotate";
+import type { RuleView } from "../filters";
 import { candidatesOf, clipSegment, cutSegments, measureText, mergeRuns, pickSnap, type Candidates, type Measurement, type Segment,
   type SnapKind } from "./measure";
 import { CameraHistory, defaultKinds, facingFor, levelsOrModel, paneRects, planThrough, sectionFrame, sectionThrough, shownBy,
@@ -168,6 +169,11 @@ export class Viewer {
   private info = new Map<string, { cls?: string; level?: string }>();
   private filters: Filters = { classes: [], levels: [] };
   private temp: Temporary = { hidden: [], isolated: null };
+  /** The filters' rules (docs/filters.md): what they hide, the only ones they show, their colours (filters.ts). */
+  private rules: RuleView | null = null;
+  private paints = new Map<string, THREE.Color>();
+  private scratch = new THREE.Vector4();
+  private linkGroups: { color: string; ids: string[] }[] = [];
   /** While a picture is taken: the user's style, filters, hides and selection are lifted (they never reach a picture). */
   private lifted = false;
   private history = new CameraHistory();
@@ -423,6 +429,9 @@ export class Viewer {
     const ghostAll = !ghostly && style === "xray";   // X-ray as a style: everything see-through, in its own colours
     const shown = this.lifted ? null : this.filterTest();
     const solid = style === "consistent" ? this.consistent : this.solid;
+    // The filters' colours, and grey for the rest when asked; never in a captured picture.
+    const paint = this.lifted ? null : this.rules?.paint ?? null;
+    const greyRest = !!paint && !!this.rules?.greyRest;
     this.models.forEach((model, mi) => {
       model.mesh.visible = !this.hiddenModels.has(mi);
       model.mesh.material = ghostly ? this.ghost : ghostAll ? this.xrayAll : solid;
@@ -439,25 +448,52 @@ export class Viewer {
         if (visible && near) visible = near.has(el.globalId);
         if (visible !== base && this.panes.length > 1) this.drawVis.push({ el, v3d: visible, vDraw: base });
         el.mesh.setVisibleAt(el.instanceId, visible);
-        const c = ghostly ? GHOST : hasFocus && this.mode === "shaded" && this.greyContext ? GREY : el.baseColor;
-        el.mesh.setColorAt(el.instanceId, new THREE.Vector4(c.r, c.g, c.b, ghostly ? 1 : el.baseAlpha));
+        const p = paint?.get(el.globalId);
+        const c = p ? this.paintColour(p) : ghostly ? GHOST
+          : (hasFocus && this.mode === "shaded" && this.greyContext) || greyRest ? GREY : el.baseColor;
+        el.mesh.setColorAt(el.instanceId, this.scratch.set(c.r, c.g, c.b, ghostly ? 1 : el.baseAlpha));
         el.mesh.setMatrixAt(el.instanceId, this.matrixOf(el));
       }
     });
     this.drawFocus(ids);
     this.drawSelection();
+    if (this.linkGroups.length) this.drawLinks();
   }
 
-  /** The filters' and temporary hides' test for an element, or null when none is on. */
+  /** The filters' and temporary hides' test for an element, or null when none is on: the temporary hide and isolate,
+   * the quick class and level checkboxes, then the filters' rules (docs/filters.md, "What wins"). */
   private filterTest(): ((gid: string) => boolean) | null {
-    const f = this.filters, t = this.temp;
-    if (!f.classes.length && !f.levels.length && !t.hidden.length && !t.isolated) return null;
+    const f = this.filters, t = this.temp, r = this.rules;
+    const ruled = !!(r?.hide?.size || r?.only);
+    if (!f.classes.length && !f.levels.length && !t.hidden.length && !t.isolated && !ruled) return null;
     const classes = new Set(f.classes), levels = new Set(f.levels), hidden = new Set(t.hidden);
     const isolated = t.isolated ? new Set(t.isolated) : null;
     return (gid) => {
       const i = this.info.get(gid);
-      return shownBy(gid, i?.cls, i?.level, f, t, classes, levels, hidden, isolated);
+      if (!shownBy(gid, i?.cls, i?.level, f, t, classes, levels, hidden, isolated)) return false;
+      if (r?.hide?.has(gid)) return false;
+      return !r?.only || r.only.has(gid);
     };
+  }
+
+  /** Whether the filters and the temporary hide leave an element on screen (its model shown too). */
+  isShown(gid: string): boolean {
+    const f = this.find(gid);
+    if (!f || this.hiddenModels.has(this.models.indexOf(f.model))) return false;
+    return this.lifted ? true : this.filterTest()?.(gid) ?? true;
+  }
+
+  /** The filters' rules (filters.ts `evaluate`): hidden, the only ones shown, colours. Null: none. */
+  setRules(v: RuleView | null) {
+    this.rules = v && (v.hide?.size || v.only || v.paint?.size) ? v : null;
+    this.applyMode();
+    this.onChange?.();
+  }
+
+  private paintColour(hex: string): THREE.Color {
+    let c = this.paints.get(hex);
+    if (!c) { c = new THREE.Color(hex); this.paints.set(hex, c); }
+    return c;
   }
 
   // ---------------------------------------------------------------- style, selection, visibility
@@ -503,7 +539,7 @@ export class Viewer {
     this.selectionLayer.clear();
     const gid = this.selection;
     const f = gid && !this.lifted ? this.find(gid) : null;
-    if (!f || this.hidden.has(gid!) || this.hiddenModels.has(this.models.indexOf(f.model))) return;
+    if (!f || this.hidden.has(gid!) || this.hiddenModels.has(this.models.indexOf(f.model)) || !this.isShown(gid!)) return;
     const mesh = new THREE.Mesh(this.geometryOf(f), this.selectionMaterial);
     const line = new THREE.LineSegments(this.edgeGeometryOf(gid!, f), this.selectionEdges);
     for (const o of [mesh, line]) {
@@ -645,13 +681,20 @@ export class Viewer {
   /** Light elements by group, each group in its colour (an element's connections by kind). At most LINK_MAX are
    *  drawn, and outlines only for the first LINK_EDGES of each group: a slab can support hundreds of things. */
   setLinks(groups: { color: string; ids: string[] }[]) {
+    this.linkGroups = groups;
+    this.drawLinks();
+  }
+
+  /** The lit links, leaving out what the filters or a temporary hide take off screen. */
+  private drawLinks() {
     this.version++;
     this.linkLayer.clear();
-    for (const group of groups) {
+    const shown = this.lifted ? null : this.filterTest();
+    for (const group of this.linkGroups) {
       const mats = this.linkMats(group.color);
       group.ids.slice(0, LINK_MAX).forEach((gid, k) => {
         const f = this.find(gid);
-        if (!f || this.hidden.has(gid) || this.hiddenModels.has(this.models.indexOf(f.model))) return;
+        if (!f || this.hidden.has(gid) || this.hiddenModels.has(this.models.indexOf(f.model)) || (shown && !shown(gid))) return;
         const parts: THREE.Object3D[] = [new THREE.Mesh(this.geometryOf(f), mats.mesh)];
         if (k < LINK_EDGES) { const l = new THREE.LineSegments(this.edgeGeometryOf(gid, f), mats.edges); l.layers.set(1); parts.push(l); }
         for (const o of parts) {

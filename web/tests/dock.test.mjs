@@ -19,7 +19,7 @@ function layout({ grid = ["model"], left = ["clashes"], right = ["clash", "plan"
 }
 
 test("every panel has a home, and only the model lives in the middle", () => {
-  assert.deepEqual(dock.PANEL_IDS, ["model", "clashes", "clash", "plan", "chat", "activity", "properties"]);
+  assert.deepEqual(dock.PANEL_IDS, ["model", "clashes", "filters", "clash", "plan", "chat", "activity", "properties"]);
   assert.equal(dock.homeOf("properties"), "float", "Properties floats, and appears on a selection");
   assert.equal(dock.homeOf("model"), "centre");
   assert.equal(dock.homeOf("clashes"), "left");

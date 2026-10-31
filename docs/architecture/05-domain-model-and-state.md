@@ -574,7 +574,8 @@ does without.
 | `sightline.workings` | `App.tsx` | Workings on or off in the Activity panel (`"0"` / `"1"`, default on) and the view it shows ([docs/workings.md](../workings.md)) |
 | `sightline.dock.properties` | `dock.tsx` (`setPropsHome`) | Where the Properties panel opens: floating or the right side bar ([docs/panels.md](../panels.md)) |
 | `sightline.dock.v1`, `sightline.dock.classic` | `dockLayout.ts` (`saveLayout`, called by `dock.tsx`) | The desktop's panel layout (dockview's `toJSON`) and whether the Classic layout is on ([docs/panels.md](../panels.md)) |
-| `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box) for a set of models, keyed by `About.projectName` |
+| `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box, and the filter rules as `rules`) for a set of models, keyed by `About.projectName` |
+| `sightline.filters.<project>` | `App.tsx` (`filtersKey`) | `{v: 1, rules, colours, greyRest}`: the filters for a set of models ([docs/filters.md](../filters.md)) |
 
 The browser also holds the `sightline_owner` cookie (HttpOnly, Secure, SameSite=Strict, path `/api`, 30 days),
 which scripts cannot read. Everything else on the page (the open report, verdicts, `reviewed` marks, plans, clash views,

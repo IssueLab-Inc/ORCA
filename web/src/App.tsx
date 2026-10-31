@@ -43,6 +43,8 @@ import { shortNames } from "./names";
 import { DEFAULT_AI_NAMES, setAiNames, type AiNames } from "./aiNames";
 import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type NotchStatus } from "./Brand";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
+import { FiltersPanel } from "./FiltersPanel";
+import { EMPTY as NO_FILTERS, complete, evaluate, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { PropertySets } from "./Properties";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
@@ -64,9 +66,11 @@ function readWorkings(): WorkingsSetting {
 const WORKINGS_HEIGHT = 380, WORKINGS_SHORT = 240;
 /** A saved view (docs/views.md): camera, projection, style, mode, visibility and section box. */
 type SavedView = { name: string; pose: Pose; ortho: boolean; style: VisualStyle; mode: ViewMode; filters: Filters;
-  section: [number[], number[]] | null };
+  section: [number[], number[]] | null; rules?: FilterState };
 type ViewsStore = { home: Pose | null; saved: SavedView[] };
 const viewsKey = (files: string[]) => `sightline.views.${projectName(files)}`;
+/** Each set of models keeps its filters (docs/filters.md). */
+const filtersKey = (files: string[]) => `sightline.filters.${projectName(files)}`;
 function loadViews(files: string[]): ViewsStore {
   try { return { home: null, saved: [], ...JSON.parse(localStorage.getItem(viewsKey(files)) ?? "{}") }; } catch { return { home: null, saved: [] }; }
 }
@@ -130,6 +134,11 @@ export function App() {
   const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
   const [filters, setFilters] = useState<Filters>({ classes: [], levels: [] });
   const [temporary, setTemporary] = useState<Temporary>({ hidden: [], isolated: null });
+  // Filters (docs/filters.md): the server's index of what each element is, the filters, and the one being edited.
+  const [facetIndex, setFacetIndex] = useState<FacetIndex | null>(null);
+  const [filterState, setFilterState] = useState<FilterState>(NO_FILTERS);
+  const [filterDraft, setFilterDraft] = useState<Rule | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);   // the Filters sheet, where there is no dock
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [viewsTick, setViewsTick] = useState(0);
   const [infoRev, setInfoRev] = useState(0);
@@ -453,6 +462,24 @@ export function App() {
     return () => { live = false; };
   }, [selected?.globalId, sceneId]);
   useEffect(() => { viewer.current?.setFilters(filters); }, [filters]);
+  // The filters, with the one being edited shown live (in its place, or on top while new), drawn in every view.
+  const prepared = useMemo(() => (facetIndex ? prepare(facetIndex) : null), [facetIndex]);
+  const ruleView = useMemo(() => {
+    const d = filterDraft, shown = d && (d.when.some(complete) || d.invert || d.action === "byValue") ? { ...d, on: true } : null;
+    const rules = !d ? filterState.rules : filterState.rules.some((r) => r.id === d.id)
+      ? filterState.rules.map((r) => (r.id === d.id ? shown ?? { ...r, on: false } : r)) : shown ? [shown, ...filterState.rules] : filterState.rules;
+    return evaluate({ ...filterState, rules }, prepared);
+  }, [filterState, filterDraft, prepared]);
+  useEffect(() => { viewer.current?.setRules(ruleView); }, [ruleView]);
+  // A filter that takes the selected element off screen clears the selection, as a hide does.
+  useEffect(() => {
+    const gid = selected?.globalId;
+    if (gid && viewer.current?.isShown(gid) === false) setSelected(null);
+  }, [ruleView]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!modelNames.length) return;
+    try { localStorage.setItem(filtersKey(modelNames), JSON.stringify(filterState)); } catch { /* kept for this visit */ }
+  }, [filterState]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { viewer.current?.setTemporary(temporary); }, [temporary]);
   useEffect(() => { try { localStorage.setItem("sightline.views.fly", fly ? "1" : "0"); } catch { /* kept for this visit */ } }, [fly]);
   const shownLayout: Layout = layout === "phone" ? "single" : layout === "tablet" && viewLayout === "quad" ? "two" : viewLayout;
@@ -470,10 +497,14 @@ export function App() {
     const store = loadViews(modelNames);
     setSavedViews(store.saved);
     viewer.current?.setHome(store.home);
+    let kept: unknown = null;
+    try { kept = JSON.parse(localStorage.getItem(filtersKey(modelNames)) ?? "null"); } catch { /* none kept */ }
+    setFilterState(migrate(kept));
+    setFilterDraft(null);
   }, [modelNames]);
   // What the filters read: each element's class (the server's) and storey (datums). Read again after a kept fix (same
   // scene, new elements: `infoRev`); filters and hides start clean only with a new scene.
-  useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); }, [sceneId]);
+  useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); setFacetIndex(null); }, [sceneId]);
   useEffect(() => {
     if (!sceneId) return;
     let live = true;
@@ -490,6 +521,7 @@ export function App() {
       viewer.current?.setDatums(datums);
       viewsChanged();
     }).catch(() => undefined);
+    void api.facets(sceneId).then((index) => { if (live) setFacetIndex(index); }).catch(() => undefined);
     return () => { live = false; };
   }, [sceneId, infoRev]);
   useEffect(() => { viewer.current?.setEdges(tool.edges); }, [tool.edges]);
@@ -1514,7 +1546,7 @@ export function App() {
     if (!v) return;
     const box = v.section;
     const view: SavedView = { name, pose: v.pose(), ortho: tool.ortho, style: tool.style, mode: tool.mode, filters,
-      section: box ? [box.min.toArray(), box.max.toArray()] : null };
+      section: box ? [box.min.toArray(), box.max.toArray()] : null, rules: filterState };
     storeViews({ saved: [...savedViews, view] });
   }
   function applyView(view: SavedView) {
@@ -1522,6 +1554,7 @@ export function App() {
     if (!v) return;
     v.applyPose(view.pose);
     setFilters(view.filters);
+    if (view.rules) { setFilterState(migrate(view.rules)); setFilterDraft(null); }
     setTool((t) => ({ ...t, ortho: view.ortho, style: view.style, mode: view.mode, section: !!view.section }));
     if (view.section) {
       const box = v.boxOf([]);
@@ -1548,9 +1581,16 @@ export function App() {
     onDelete: (i) => storeViews({ saved: savedViews.filter((_, k) => k !== i) }),
     levels: counts.levels, classes: counts.classes, filters, onFilters: setFilters,
     temporary: temporaryCount, onResetTemporary: () => setTemporary({ hidden: [], isolated: null }),
+    rulesOn: filterState.rules.filter((r) => r.on).length, onOpenFilters: () => openFilters(),
     layout: shownLayout, layouts: layout === "phone" ? ["single"] : layout === "tablet" ? ["single", "two"] : ["single", "two", "quad"],
     onLayout: setViewLayout, follow: drawingsFollow, onFollow: setDrawingsFollow,
   };
+
+  /** The Filters panel, with a new filter in the editor when one is given (from a property, or chat). */
+  function openFilters(start?: Rule) {
+    if (start) setFilterDraft(start);
+    if (dockedNow.current) dock.current?.show("filters"); else setFiltersOpen(true);
+  }
 
   function setModelVisible(i: number, visible: boolean) {
     viewer.current?.setModelVisible(i, visible);
@@ -2688,7 +2728,9 @@ export function App() {
   const planBadge = planning || contextWorking ? <i className="spinner" aria-hidden />
     : planKind === "context" && context?.result?.proposals.length ? <span className="badge-n">{context.result.proposals.length}</span>
     : planOptions.length ? <span className="badge-n">{planOptions.length}</span> : null;
-  const dockTabs: Partial<Record<PanelId, React.ReactNode>> = { clash: clashBadge, plan: planBadge };
+  const rulesOn = filterState.rules.filter((r) => r.on).length;
+  const dockTabs: Partial<Record<PanelId, React.ReactNode>> = { clash: clashBadge, plan: planBadge,
+    filters: rulesOn ? <span className="badge-n">{rulesOn}</span> : null };
   const raise = () => { if (snap === "peek") setSnap("half"); };
   // The next clash still open after the selected one (the report's order), for "Next clash" once one is done.
   const nextClash = (() => {
@@ -3232,6 +3274,17 @@ export function App() {
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
           )}
         </div>)}
+      {!docked && filtersOpen && stats && (
+        <div className="filters-sheet" role="dialog" aria-label="Filters">
+          <div className="filters-sheet-head"><b>Filters</b>
+            <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
+          <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
+            draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)} />
+        </div>)}
+      {docked && inSlot(slots.filters, <div className="filters-slot">
+        <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
+          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)} />
+      </div>)}
       {docked && inSlot(slots.properties, <div className="props in-panel">
         {selected ? <>{elementCard}{elementSets}</> : <p className="hint">Click any element in the model to see its properties.</p>}
       </div>)}

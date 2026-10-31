@@ -65,6 +65,71 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .props.in-panel { position: static; width: auto; box-shadow: none; border-radius: 0; background: none; padding: 0; }
 .props.in-panel > .row:first-child .ibtn { display: none; }  /* the panel's own ✕ closes it; Esc clears the selection */
 .slot-properties.in-dock { padding: 10px 12px; }
+/* Filters (docs/filters.md): the list, the editor, the value picker and the colour-by-value table. */
+.slot-filters.in-dock { padding: 10px 12px; }
+.fpanel { display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; }
+.fpanel-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fpanel-switches { display: flex; flex-direction: column; gap: 4px; }
+.fpanel .check { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.fselect, .ftext, .fnum, .fname-input { font: inherit; font-size: 12.5px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); min-width: 0; }
+.fname-input { width: 100%; box-sizing: border-box; }
+.fnum { width: 84px; }
+.filter-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.frule { border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; background: var(--surface); }
+.frule.off { opacity: .6; }
+.frule-row { display: flex; align-items: center; gap: 6px; }
+.frule-name { all: unset; flex: 1; min-width: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.frule-name:hover, .frule-name:focus-visible { text-decoration: underline; }
+.frule-tools { display: none; gap: 0; }
+.frule:hover .frule-tools, .frule:focus-within .frule-tools { display: flex; }
+.frule:hover .frule-row > .why, .frule:focus-within .frule-row > .why { display: none; }
+@media (pointer: coarse) { .frule-tools { display: flex; } .frule-row > .why { display: inline !important; } }
+.frule-tools .ibtn { width: 26px; height: 26px; }
+.fswatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.18); flex: none; }
+.fswatch.big { width: 20px; height: 20px; border-radius: 5px; cursor: pointer; padding: 0; }
+.fswatch.big.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.faction { display: inline-flex; color: var(--muted); }
+.flegend { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 4px 0 2px 24px; }
+.flegend span { display: inline-flex; align-items: center; gap: 4px; }
+.feditor { display: flex; flex-direction: column; gap: 8px; }
+.feditor-head { display: flex; align-items: center; justify-content: space-between; }
+.feditor-foot { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn.danger { color: var(--fail); }
+.fgrid { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
+.flabel { color: var(--muted); }
+.fcontrol { min-width: 0; display: flex; gap: 6px; align-items: center; }
+.fcontrol > .fselect, .fcontrol > .pick { flex: 1; }
+.fcond-head .fselect { flex: 1; }
+.fvalue { flex-wrap: wrap; }
+.fop { flex: 0 0 auto !important; }
+.pick { position: relative; flex: 1; min-width: 0; }
+.pick > summary { list-style: none; cursor: pointer; padding: 4px 22px 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; }
+.pick > summary::-webkit-details-marker { display: none; }
+.pick > summary::after { content: "▾"; position: absolute; right: 7px; top: 3px; color: var(--muted); }
+.pick[open] > summary { border-color: var(--accent); }
+.pick-list { margin-top: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); max-height: 240px; overflow: auto; padding: 4px; display: flex; flex-direction: column; gap: 1px; }
+.pick-search { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; margin-bottom: 2px; }
+.pick-item { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.pick-item:hover { background: var(--accent-soft); }
+.pick-item span { overflow-wrap: anywhere; }
+.pick-clear { all: unset; cursor: pointer; color: var(--accent); font-size: 12px; padding: 2px 4px; align-self: flex-end; }
+.fact { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.fact .seg { all: unset; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; justify-content: center; padding: 6px 9px; background: var(--surface); }
+.fact .seg.on { background: var(--accent); color: #fff; }
+.fact .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fswatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fswatches input[type="color"], .ftable input[type="color"] { width: 28px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; }
+.fbyvalue { display: flex; flex-direction: column; gap: 6px; }
+.fbyvalue-pick { display: flex; align-items: center; gap: 8px; }
+.fbyvalue-pick .fselect { flex: 1; }
+.ftable { border-collapse: collapse; width: 100%; }
+.ftable th { text-align: left; font-weight: 600; color: var(--muted); padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.ftable td { padding: 2px 4px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.ftable tr.off td:not(:first-child) { opacity: .45; }
+.fcount { margin: 0; }
+.filters-sheet { position: absolute; top: 12px; right: 12px; width: 320px; max-height: calc(100% - 24px); overflow: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 12px; z-index: 8; }
+.filters-sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.app.phone .filters-sheet { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 70px); }
 .psets { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
 .pset-filter { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .psets details summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
@@ -1943,3 +2008,4 @@ a.pop-item { color: inherit; }
 .project-alt > svg { flex: none; color: var(--muted); }
 .project-alt > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 @media (max-width: 560px) { .project-alt { flex-wrap: wrap; } .project-start { padding: 24px 16px; } }
+.fpanel > .btn { align-self: flex-start; }

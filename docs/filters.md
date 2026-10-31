@@ -48,13 +48,62 @@ element is: `GET /api/scenes/{id}/facets` (`facets.py`, `Workspace.facets`).
   facets, 0.8 s to build after the boxes, about 240 KB of JSON.
 - **Matching on the server** (`facets.matching`, `facets.suggest`): the same conditions as the page, for chat and MCP.
 
-## Later slices
+## Filters (built)
 
-The panel, the viewer's paint, colours in drawings, the Properties panel's row actions and chat follow; each part of
-this doc is written as it is built.
+A filter (`filters.Rule`) finds elements, then does one thing with them.
+
+- **Finding:** models, classes and floors (each a list of values with counts), then any number of property
+  conditions: a property set (Element, Attributes, a property set, a quantity set, Classification, Systems and groups),
+  a property, and a test: is / is not (any of several values, any case), contains, has any value, has none, between,
+  less than, more than (lengths typed in mm, kept in metres). Every condition holds; one still being written is left
+  out. No condition finds everything. **Invert** takes what it does not find.
+- **Doing:** **Colour** (a palette colour, or any), **By value** (each value of one property its own colour: the
+  Value | Items | Colour table, values ticked off left uncoloured), **Hide**, **Isolate**.
+- **Several at once** (`filters.evaluate`): hide rules hide what they find; while any isolate rule is on, only what
+  some isolate rule finds shows (several add up: "Ducts" and "Pipes" shows both); colour rules colour, the top one
+  winning, and a value ticked off lets a lower rule colour it. **Show colours** turns every colour off at once;
+  **Grey the rest** greys what no rule colours (only while something is coloured). Rules reorder with up and down.
+- **Counts** are live: each list says how many each value would leave among what the other conditions find, the
+  editor how many the filter finds, the list how many each filter acts on (by value: how many it colours).
+- **The panel** (`FiltersPanel.tsx`): a tab behind Coordination in the left side bar; where there is no dock (the
+  classic layout, tablets, phones) a sheet over the model, from the Visibility menu's **Filters by property**. **New
+  filter** opens the editor; **Colour by…** adds a colour-by-value filter for a property most elements have in one
+  click; a filter's name opens it again; on hover: up, down, **Zoom to them**, delete. The filter being edited shows in
+  the model as it is built (in its place; on top while new), and Cancel puts things back.
+- **Kept** per set of models (`sightline.filters.<project>`), and in a saved view (its `rules`). Old saved views,
+  without them, leave the filters as they are. `filters.migrate` reads either back, and anything unreadable gives way.
+
+## What wins
+
+Shown: a hidden model hides; the clash pair, previews and trials always show; then the temporary hide or isolate; the
+quick class and level checkboxes; the filters (hide, then isolate); the mode round the focus
+([views.md](views.md), "Visibility").
+
+Colour, under the pair, selection, hits, links, previews and measure (their own layers): the top filter's colour, else
+the ghost, else grey (the grey context round a clash, or Grey the rest), else the element's own.
+
+Captures (A/B/C, built views, the MCP's pictures) lift the style, filters and colours, so what the models read never
+depends on how the user is looking.
+
+## The palette
+
+`filters.PALETTE`: ten colours chosen clear of every colour another role draws (`filters.RESERVED`: the pair's red,
+green and purple and their outlines, the selection's blue, hits' magenta, the six link colours, the "before" ghost's
+orange, the section box and measure, the clash overlap's amber, the greys). Each is at least ΔE 22 from all of them
+and 25 from each other (CIE76; `web/tests/filters.test.mjs`).
+
+## Still to come
+
+Colours in the drawing views and the drawings' own setting, the Properties panel's row actions, and chat.
 
 ## Tests
 
+- `web/tests/filters.test.mjs` (7): conditions as the server matches them; every condition holding, unfinished ones
+  left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); colour by
+  value (chosen colours, palette by place, values ticked off, what it counts); counts among the other conditions,
+  names, sets, a new filter's colour; `migrate`; the palette against the reserved colours.
+- `web/tests/viewer-filters.test.mjs` (3): hides, isolates and colours reach the batch, with grey for the rest;
+  captures never see them; lit links leave out what a filter hides.
 - `server/tests/test_facets.py` (7): every element with its file, class, storey (as `datums.storeys`), type and
   material; numbers kept as numbers in SI from a millimetre file; the hidden note never in the index; every kind of
   value (classification, group, layers, enumerated, list, complex parts, what the type gives; no ranges or tables);

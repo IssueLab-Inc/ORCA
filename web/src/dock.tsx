@@ -4,7 +4,7 @@ import { DockviewReact, type DockviewApi, type DockviewGroupPanelApi, type Dockv
   type IDockviewHeaderActionsProps, type IDockviewPanel, type IDockviewPanelHeaderProps, type IDockviewPanelProps,
   type SerializedDockview } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { Activity as Pulse, AppWindow, Box, Info, List, LocateFixed, MessageSquare, Network, PanelBottomClose, PanelBottomOpen,
+import { Activity as Pulse, AppWindow, Box, Info, List, ListFilter, LocateFixed, MessageSquare, Network, PanelBottomClose, PanelBottomOpen,
   PanelLeftClose, PanelRight, PanelRightClose, PictureInPicture2, Undo2, X, type LucideIcon } from "lucide-react";
 import { EDGE_GROUP, EDGE_SIZE, PANELS, PANEL_IDS, PROPS_KEY, homeOf as defaultHome, readPropsHome, isPanel, readLayout, showSteps, titleOf, writeLayout,
   type Edge, type PanelId, type PropsHome, type SavedLayout, type Where } from "./dockLayout";
@@ -94,7 +94,7 @@ type Tabs = Partial<Record<PanelId, ReactNode>>;
 interface Context { slots: Slots; tabs: Tabs; onTab: (id: PanelId) => void }
 const DockContext = createContext<Context | null>(null);
 
-const ICONS: Record<PanelId, LucideIcon> = { model: Box, clashes: List, clash: LocateFixed, plan: Network, chat: MessageSquare,
+const ICONS: Record<PanelId, LucideIcon> = { model: Box, clashes: List, filters: ListFilter, clash: LocateFixed, plan: Network, chat: MessageSquare,
   activity: Pulse, properties: Info };
 const TOUR_TAG: Partial<Record<PanelId, string>> = { plan: "tab-plan", chat: "tab-chat" };
 const THEME: DockviewTheme = { name: "orca", className: "dockview-theme-orca", colorScheme: "light" };
@@ -138,16 +138,20 @@ function Tab({ api, containerApi }: IDockviewPanelHeaderProps) {
   const group = api.group;
   useEffect(() => {
     const again = () => redraw((n) => n + 1);
-    const subs = [api.onDidActiveChange(again), api.onDidGroupChange(again), group.api.onDidCollapsedChange(again),
+    const subs = [api.onDidActiveChange(again), api.onDidVisibilityChange(again), api.onDidGroupChange(again), group.api.onDidCollapsedChange(again),
       containerApi.onDidAddPanel(again), containerApi.onDidRemovePanel(again), containerApi.onDidMovePanel(again)];
     return () => { for (const s of subs) s.dispose(); };
   }, [api, containerApi, group]);
   // Four tabs and the bar's buttons don't fit a side bar's width (dockview would hide some behind a menu): with more
-  // than three, the tabs behind the one in front show their icon only, and their name as a tooltip. A collapsed strip
-  // runs down the window's height, so it keeps the names.
-  const strip = group.api.location.type === "edge" && group.api.isCollapsed();
+  // than three, the tabs behind the one in front show their icon only, and their name as a tooltip. The left bar is
+  // narrower: there two are enough (Coordination and Filters). A collapsed strip runs down the window's height, so it
+  // keeps the names.
+  const where = group.api.location;
+  const strip = where.type === "edge" && group.api.isCollapsed();
+  const left = where.type === "edge" && where.position === "left";
   const title = api.title ?? titleOf(id);
-  const short = group.panels.length > 3 && !api.isActive && !strip;
+  // "Behind" is not the tab shown in its group (dockview's isActive also needs the group to have the focus).
+  const short = (group.panels.length > 3 || (left && group.panels.length > 1)) && !api.isVisible && !strip;
   const click = (e: React.MouseEvent) => {
     const g = api.group.api;
     if (g.location.type === "edge") {
@@ -314,7 +318,7 @@ function build(api: DockviewApi, sizes: { left: number; right: number }) {
     if (p.home === "centre" || p.home === "float") continue;  // a floating panel appears when it is needed
     // "always": a panel behind another tab stays in the page, hidden, so the tour finds what it points at and shows it.
     api.addPanel({ id: p.id, component: "panel", title: p.title, position: { referenceGroup: EDGE_GROUP[p.home] },
-      inactive: p.id === "plan" || p.id === "chat", renderer: "always" });
+      inactive: p.id === "plan" || p.id === "chat" || p.id === "filters", renderer: "always" });
   }
   api.getPanel("clash")?.api.setActive();
   model.api.setActive();
