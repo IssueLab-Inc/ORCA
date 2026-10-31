@@ -348,6 +348,12 @@ to port 8000), or build the web app and let the server serve `web/dist` on one p
   16:10 and writes `web/public/demos/northbank.webp` and `cell.webp` with Pillow from the server's env. Run against a
   server with the demo models (`--url`, default `http://localhost:8765`). Recapture after the viewer's look or the demo
   models change; the landing cards and the README's "Two demos" table share these pictures and numbers.
+- **`web/scripts/capture-proposals.cjs`** records the README's proposal clips: for each run (Northbank #1, #2, #3 and
+  the cell's #66) it opens the demo, picks the clash, chooses Propose fixes (a live Muse Spark call), waits for the
+  verified options, flips Before / After, and for #1 and #66 opens Activity in its own window and replays the
+  Workings there. Frames come from Chromium's screencast (Playwright's own video recording starved the page of CPU
+  under SwiftShader and the proposal never finished); `web/scripts/timelapse.py` (Pillow, server env) speeds the waits
+  up 2-6× and stamps the speed on each frame. Writes `docs/media/proposals/*.webp`. Each capture is a fresh proposal.
 - **`evals/big_models_browser.cjs`**: the timed upload above (start the server with `SIGHTLINE_MODEL_UPLOAD_MAX_MB`
   raised).
 - **Phones and tablets** ([docs/mobile.md](../mobile.md), Oct 29): Playwright device profiles iPhone 13, iPhone SE,
@@ -405,6 +411,7 @@ flowchart TD
 | A stream or a route behind Modal | The `Accept-Encoding` curl check, on the live URL after deploy |
 | App's imports | Both stub lists (`app-host.mjs`, `app-replacement.test.mjs`) |
 | The viewer's look, the demo models | `capture-demos.cjs`; then the landing, the README's "Two demos" table and the demo cards together |
+| The proposal flow's look, the Workings graph | `capture-proposals.cjs`; then the README's "See it work" captions from that run |
 | Numbers people see (landing, README, tour) | Only from a measured run, and say where it was measured |
 | Any core part | The matching doc in `docs/architecture/` in the same PR, and a dated entry at the end of [22](22-build-log.md) |
 
