@@ -1380,3 +1380,8 @@ behind the front one show as icons with a tooltip, so nothing goes behind dockvi
 (`dock.test.mjs`: the stored place); in Chromium on Northbank, float → dock right → select with Clash in front → close
 and select → reload and select (all in the right bar, no overflow) → Float → close and select (floating); the tabs get
 their names back when Properties closes.
+
+The repo is `IssueLab-Inc/ORCA` (Oct 31; owner decision; `docs/repo-name`): renamed on GitHub so the link on the
+application and the submission says ORCA. Repo only: the code's internal `sightline` names stay
+([21](21-glossary-and-naming.md), "Internal names kept on purpose"). Nothing in the code or docs used the old name;
+README's "Run it" now starts with the clone. Checked: `git fetch` on the new remote, `test_docs_map.py`.

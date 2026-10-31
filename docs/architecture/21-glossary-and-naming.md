@@ -196,6 +196,7 @@ phase indicator follows actual events. Identity inventory checked 2026-10-30 aga
 | Agent link tokens | `orca_…` | `agents.Links` |
 | A screenshot | `orca-clash-<n>.png` / `orca-view.png` | `screenshot` in `App.tsx` |
 | The Modal app | `orca` | `deploy/modal_app.py` |
+| The GitHub repo | `ORCA`: `github.com/IssueLab-Inc/ORCA` (renamed Oct 31, owner decision; GitHub redirects the old URL) | `README.md` ("Run it") |
 
 ### Internal names kept on purpose
 
