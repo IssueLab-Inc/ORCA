@@ -55,7 +55,9 @@ test("returning to a completed wider plan replaces manual ownership instead of r
   host.button("Plan").props.onClick(); host.render();
   assert.equal(host.state.manual, null); assert.equal(host.state.manualPreview, null); assert.equal(host.state.viewContext, true);
   host.button("Clash").props.onClick(); host.render();
-  assert.deepEqual(host.actions.at(-1), ["preview", []]); host.unmount();
+  // The manual preview stays gone; back on the clash, a drag orbits round it again (the viewer is told after).
+  assert.deepEqual(host.actions.filter(([k]) => k === "preview").at(-1), ["preview", []]);
+  assert.deepEqual(host.actions.filter(([k]) => k === "setOrbitClash").at(-1), ["setOrbitClash", true]); host.unmount();
 });
 
 test("an actual accept invalidates a pending manual result before API completion", async () => {

@@ -749,7 +749,8 @@ export class Viewer {
     this.controls.autoRotate = on;
   }
 
-  /** While ORCA works on a clash (a proposal, a plan, a wider fix), a drag with nothing selected orbits round it. */
+  /** A clash in focus, or one ORCA works on (a proposal, a plan, a wider fix): a drag with nothing selected orbits
+   * round it. */
   setOrbitClash(on: boolean) { this.orbitClash = on; }
   private orbitClash = false;
 
@@ -1445,7 +1446,7 @@ export class Viewer {
   }
 
   /** What a drag in the 3D view orbits round (docs/views.md, "Navigate like a CAD tool"): the selected element, else the
-   * clash while ORCA works on it; null: the point under the pointer. */
+   * clash in focus or the one ORCA works on; null: the point under the pointer. */
   private pivotFor(): THREE.Vector3 | null {
     if (this.selection && this.has(this.selection)) {
       const b = this.boxOf([this.selection]);
@@ -1495,7 +1496,10 @@ export class Viewer {
       this.controls.enabled = false;
       return;
     }
-    if (e.shiftKey || e.ctrlKey || e.metaKey || this.flight) return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+    // The user takes the view: a flight under way stops here (the pilot frames each idea and glides to the clash before
+    // its slow turn), so the drag turns round the pivot from where the camera is, not wherever the flight was going.
+    this.flight = null;
     const pivot = e.pointerType === "touch" ? null : this.pivotFor();
     if (pivot) {
       this.spin = { id: e.pointerId, x: e.clientX, y: e.clientY, pivot };
