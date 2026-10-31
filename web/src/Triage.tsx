@@ -46,6 +46,8 @@ function storedCompact(): boolean | null {
 export interface TriageRun extends Omit<TriageModel, "requirements"> {
   total: number; started: number; done: boolean; seconds?: number; error?: string;
   requirements?: string | null;  // the requirements it was read under ("L3 · Strict"), when there were some
+  queued?: boolean;              // waits for the triage already under way (ORCA's checks)
+  following?: string | null;     // following the triage of an earlier list of the same checks
 }
 
 /** Bulk triage of the whole report, the first step: run it, watch it land, filter by verdict, set the noise aside. */
@@ -151,6 +153,8 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
       </>}
 
       {state === "running" && run && <>
+        {run.queued ? <p className="hint small">Waits for the triage already under way, then reads what it leaves.</p>
+          : run.following && <p className="hint small">Following the triage of an earlier list of these checks.</p>}
         <div className="triage-stage done">
           <CircleCheck size={15} aria-hidden />
           <div>

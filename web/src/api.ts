@@ -186,7 +186,7 @@ export interface ReportClash {
 }
 /** Muse titling a report's clashes (server: titles.py). */
 export type TitleEvent =
-  | { type: "start"; total: number; missing: number; model: string }
+  | { type: "start"; total: number; missing: number; model: string; report_id?: string }   // the list the run titles
   | { type: "titles"; items: Record<string, string> }
   | { type: "batch_error"; detail: string }
   | { type: "ping" }
@@ -280,7 +280,11 @@ export interface TriageModel { model: string; open_weights: boolean; images?: bo
 /** Muse Spark's check of a by-design rule on the clashes it set aside (server: triage.audit_rules). */
 export interface RuleAudit { answer: "consistent" | "looks_real" | "unsure"; note: string; rule: string; samples: string[]; settled: string[] }
 export type TriageEvent =
-  | ({ type: "start"; total: number; asking?: number; scope?: string | null } & TriageModel)
+  | ({ type: "start"; total: number; asking?: number; scope?: string | null;
+       queued?: boolean;          // waits for the run under way, then reads what it leaves
+       following?: string | null  // the run under way is over an earlier list of the same checks: only unchanged clashes
+     } & TriageModel)
+  | { type: "asking"; asking: number | null }   // a queued run starts: how many it asks about
   | ({ type: "clash"; id: string } & TriageVerdict)
   | { type: "reasoning"; id: string; text: string }
   | { type: "audit"; rules: Record<string, RuleAudit> }

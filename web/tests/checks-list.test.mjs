@@ -161,3 +161,26 @@ test("from an imported report, back to ORCA's checks", async () => {
   assert.deepEqual(host.state.checks.map((c) => c.key), ["models", "filter:abc"]);
   host.unmount();
 });
+
+test("a verdict holds only for a clash that did not change; a titling run of an earlier list is followed, then asked again", async () => {
+  const moved = (c, d) => ({ ...c, distance_m: d, a: { global_id: "ga" }, b: { global_id: `gb-${c.id}` } });
+  const was = list("r1", 1, [MODELS], [moved(BOTH, -0.1), moved(ONLY_MODELS, -0.2)]);
+  const now = list("r2", 2, [MODELS], [moved(BOTH, -0.1005), moved(ONLY_MODELS, -0.25)]);
+  assert.equal(checks.sameClash(was.clashes[0], now.clashes[0]), true, "half a millimetre: the same clash");
+  assert.equal(checks.sameClash(was.clashes[1], now.clashes[1]), false, "50 mm: read again");
+  const titled = [];
+  const host = await appHost({
+    initial: { sceneFiles: ["model.ifc"], report: was, checks: was.checks },
+    api: { detect: async () => done(now, "models", now.checks), triage: () => new Promise(() => {}),
+      titles: async (rid, on) => { titled.push(rid); on({ type: "start", total: 2, missing: 2, model: "m", report_id: titled.length === 1 ? "r1" : rid }); on({ type: "done", titled: 2, seconds: 1 }); } } });
+  await host.settle();
+  titled.length = 0;
+  host.state.triage = { c1: { verdict: "real_clash", source: "model" }, c2: { verdict: "real_clash", source: "model" } };
+  host.render();
+  find(host.menu(), (n) => n.type === "button" && hasText(n, "Check the open models")).props.onClick();
+  await host.settle(); await host.settle();
+  assert.equal(host.state.report.id, "r2");
+  assert.deepEqual(Object.keys(host.state.triage), ["c1"], "the moved clash's verdict is dropped");
+  assert.deepEqual(titled, ["r2", "r2"], "it followed the earlier list's titling, then asked for this list's");
+  host.unmount();
+});

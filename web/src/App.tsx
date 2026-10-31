@@ -27,7 +27,7 @@ import { ContextPlan, contextStep, type ContextRun } from "./ContextPlan";
 import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
 import { CheckPicker, DetectSetupCard, DetectSummary, type DetectProgress } from "./Detect";
-import { narrow, pruneFixes } from "./checks";
+import { narrow, pruneFixes, sameClash } from "./checks";
 import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
 import { Tooltips } from "./ui";
@@ -661,7 +661,9 @@ export function App() {
       await api.triageStream(rid, sceneId, (e) => {
         if (e.type !== "ping") trace.add(e);
         if (e.type === "done") trace.end(e.error ?? null);
-        if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false, requirements: e.requirements?.label ?? null });
+        if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false, requirements: e.requirements?.label ?? null,
+          queued: !!e.queued, following: e.following ?? null });
+        else if (e.type === "asking") setTriageRun((r) => r && { ...r, queued: false });
         else if (e.type === "audit") setTriageAudit(e.rules);
         else if (e.type === "clash") {
           const { type: _t, id, ...v } = e;
@@ -730,9 +732,10 @@ export function App() {
     const was = triageFor.current;
     triageFor.current = report;
     const same = !!report && !!was && report.origin === "sightline" && was.origin === "sightline" && report.scene_id === was.scene_id;
-    if (same) {
-      const ids = new Set(report.clashes.map((c) => c.id));
-      setTriage((t) => Object.fromEntries(Object.entries(t).filter(([id]) => ids.has(id))));
+    if (same) {   // a verdict holds only for a clash that did not change (same pair, depth within 1 mm)
+      const before = new Map(was.clashes.map((c) => [c.id, c] as const));
+      const held = new Set(report.clashes.filter((c) => { const o = before.get(c.id); return !!o && sameClash(o, c); }).map((c) => c.id));
+      setTriage((t) => Object.fromEntries(Object.entries(t).filter(([id]) => held.has(id))));
     } else { setTriage({}); setTriageRun(null); setTriageFilter(null); }
     setTriageAudit({}); setTriageStale(false);
     if (!report) return;
@@ -1300,16 +1303,22 @@ export function App() {
     if (!report) return;
     const missing = report.clashes.filter((c) => !c.title).length;
     if (!missing) return;
-    let live = true;
+    let live = true, other = false;
     setNaming(missing);
-    api.titles(report.id, (e) => {
+    const rid = report.id;
+    const ask = () => api.titles(rid, (e) => {
       if (!live) return;
+      if (e.type === "start") other = !!e.report_id && e.report_id !== rid;
       if (e.type === "titles") {
         setTitles((t) => ({ ...t, ...e.items }));
         setNaming((n) => Math.max(0, n - Object.keys(e.items).length));
       }
       if (e.type === "done") setNaming(0);
-    }, sceneId).catch(() => { if (live) setNaming(0); });  // no titles (no key, cap reached): the plain names stay
+    }, sceneId);
+    // A run titling an earlier list of the same checks is followed, not repeated; once it ends, what this list adds
+    // is titled (asked once more).
+    ask().then(() => { if (live && other) { other = false; return ask(); } })
+      .catch(() => { if (live) setNaming(0); });  // no titles (no key, cap reached): the plain names stay
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report?.id]);
@@ -2738,7 +2747,8 @@ export function App() {
     const ids = new Set(listReport.clashes.map((c) => c.id));
     return Object.fromEntries(Object.entries(shownTriage).filter(([id]) => ids.has(id)));
   }, [listReport, shownReport, shownTriage]);
-  const unread = listReport && report?.origin === "sightline" ? listReport.clashes.filter((c) => !listTriage[c.id]).length : 0;
+  // Not read yet, or a read that failed (asked again): what "Triage N unread" reads.
+  const unread = listReport && report?.origin === "sightline" ? listReport.clashes.filter((c) => !listTriage[c.id] || listTriage[c.id].error).length : 0;
   // Until a report or the models are open, the page is the landing: no panels, just what ORCA is and the demo.
   const landing = !stats && !report && !blank;
   // A blank project before anything opens: the drop zone has the whole stage (no sheet on a phone).

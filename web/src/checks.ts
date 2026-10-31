@@ -1,4 +1,4 @@
-import type { CheckDefaults, CheckSummary, CheckView, DetectSelection, DetectTest, Report, SideFilter } from "./api";
+import type { CheckDefaults, CheckSummary, CheckView, DetectSelection, DetectTest, Report, ReportClash, SideFilter } from "./api";
 import { actedOn, complete, evaluate, nameFor, withBy, type FilterState, type Prepared, type Rule } from "./filters";
 
 /** Checks on filters (docs/filters.md, "Checks"): one clash test of what side A takes (a filter, or what the filters
@@ -100,6 +100,14 @@ export function checkOf(tests: DetectTest[] | null | undefined): string | null {
 export function narrow(report: Report, key: string | null): Report {
   if (!key || report.origin !== "sightline") return report;
   return { ...report, clashes: report.clashes.filter((c) => c.checks && key in c.checks).map((c) => ({ ...c, test: c.checks![key] })) };
+}
+
+/** Whether two rows are the same clash, unchanged: the same pair of elements, the depth moved no more than 1 mm (the
+ * server's `checks.same_clash`). A triage verdict holds only while this is so. */
+export function sameClash(a: ReportClash, b: ReportClash): boolean {
+  const pair = (c: ReportClash) => [c.a.global_id ?? "", c.b.global_id ?? ""].sort().join("|");
+  if (pair(a) !== pair(b) || (a.distance_m == null) !== (b.distance_m == null)) return false;
+  return a.distance_m == null || Math.abs(a.distance_m - (b.distance_m as number)) <= 0.001;
 }
 
 /** The fixes to show after `ran` (check keys) ran again: a clash a check that ran still finds was not fixed, and one no
