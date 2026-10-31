@@ -2,8 +2,8 @@
 
 > **Covers:** `deploy/modal_app.py`, `server/sightline/app.py` (static files, streams, exports), `server/sightline/meta_client.py`
 > (`load_env`), `server/sightline/settings.py` (the Modal Dict), `server/sightline/service.py` (eviction),
-> `.env.example`, `README.md` ("Run it", "Deploy"), `samples/README.md`, `web/vite.config.ts`,
-> `web/scripts/copy-wasm.mjs` · **Checked against code:** 2026-10-30 (`104fda9`) ·
+> `.env.example`, `README.md` ("Run locally", "Deploy"), `samples/README.md`, `web/vite.config.ts`,
+> `web/scripts/copy-wasm.mjs` · **Checked against code:** 2026-10-31 (local setup and samples; deploy code at `104fda9`) ·
 > **Deeper design:** [docs/uploads.md](../uploads.md) (memory on Modal), [docs/mcp.md](../mcp.md) ("On Modal"),
 > [docs/voice.md](../voice.md) (the socket on Modal)
 
@@ -154,7 +154,7 @@ resolves to `/app/samples` the same way. The app is `modal.App("orca")` and the 
 flowchart TD
   creds["Modal credentials in the environment"] --> proxy{"Behind the cloud session's proxy?"}
   proxy -->|"yes"| tool["uv tool install modal with api-proxy-support"]
-  proxy -->|"no"| copy["Copy the demo models and reports into samples/"]
+  proxy -->|"no"| copy["Check bundled models and optional reports/cache in samples/"]
   tool --> copy
   copy --> build["cd web, npm ci, npm run build"]
   build --> secretQ{"Secret holds every key it should?"}
@@ -169,12 +169,12 @@ flowchart TD
 
 1. **Credentials.** `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` come from the environment, never chat. Behind the cloud
    session's proxy the Modal CLI needs `uv tool install 'modal[api-proxy-support]'`.
-2. **Samples** (`samples/` is gitignored; `samples/README.md`):
-   - the Northbank IFCs (`Northbank-Structure.ifc`, `-MEP`, `-Architecture`, `-Site`) from IssueLab's private
-     demo-models repo;
-   - the cell's `PC-03-Palletising-Cell-RevA.step` and `-RevB.step`, and `samples/step-cache/` (open each STEP once
-     with the server running locally to fill it);
-   - sample Navisworks reports in `samples/reports/<name>/` (the XML at the top, with the images it links to).
+2. **Samples** ([samples/README.md](../../samples/README.md)):
+   - six Northbank IFCs and the cell's `PC-03-Palletising-Cell-RevA.step` and `-RevB.step` are bundled under MIT;
+     no private-repository access is needed for the two demo cards;
+   - optional `samples/step-cache/` stays gitignored (create the directory and open each STEP once with a model key
+     and the server running locally to fill it);
+   - optional Navisworks reports in `samples/reports/<name>/` stay gitignored (XML at the top, with linked images).
 3. **Build the web app:** `cd web && npm ci && npm run build && cd ..`. `npm ci` runs `postinstall`
    (`scripts/copy-wasm.mjs`: web-ifc's `.wasm` into `public/wasm/`, which is gitignored and shipped in `dist`);
    `npm run build` is `tsc --noEmit && vite build`.
@@ -217,21 +217,12 @@ runtime checks), as `AGENTS.md` asks.
 
 ## Running locally
 
-From the README ("Run it"); Python 3.13+, uv, Node 22+:
-
-```bash
-# server
-cd server
-uv sync
-uv run python -m sightline.fixtures ../samples/fixture-clash.ifc   # a small test model
-cp ../.env.example ../.env   # then fill in the Meta settings (needed for anything that asks a model)
-uv run uvicorn sightline.app:app --reload --port 8000
-
-# web, in a second terminal
-cd web
-npm install
-npm run dev     # http://localhost:5173
-```
+Follow [README: Run locally](../../README.md#run-locally), the canonical setup path. It specifies Git, uv-managed
+Python 3.13, Node 22.12+ or 24 LTS with npm, `uv sync --project server --locked --python 3.13`, `npm ci --prefix web`,
+safe root `.env` creation for PowerShell/bash, two terminals with explicit working directories, API/browser URLs,
+and a key-free fixture walkthrough. Eight MIT demo models are bundled; private eval inputs and STEP caches are not.
+The README also lists native Linux GL and cross-platform PDF libraries, AI credential requirements, troubleshooting,
+and the outstanding API-access link and clean-install verification. No new runtime scripts or settings are introduced.
 
 - **`.env` loading.** `meta_client.load_env()` reads `KEY=value` lines from the repo root's `.env` (`ENV_FILE`) into
   the environment with `os.environ.setdefault`, so real environment variables win. Lines starting with `#` are skipped;

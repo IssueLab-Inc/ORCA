@@ -10,8 +10,169 @@ You review the options in 3D and export the edited IFC.
 ORCA stands for its loop: **Observe** the clash, **Resolve** it with a proposed fix, **Check** the fix with geometry,
 **Apply** it to the model.
 
-Built for the Meta Global AI Developer Hackathon (Oct 27 – Nov 4, 2026) by IssueLab. See
-[BUILT_DURING_HACKATHON.md](BUILT_DURING_HACKATHON.md) for what was built during the event.
+Built for the Meta Global AI Developer Hackathon (Oct 27 – Nov 4, 2026) by IssueLab. **Northbank is a pre-existing
+synthetic baseline asset used to demonstrate and evaluate ORCA; it was not created during the challenge.**
+ORCA's application code was written during the event. See [BUILT_DURING_HACKATHON.md](BUILT_DURING_HACKATHON.md)
+for the full distinction between new work, baseline data and third-party dependencies.
+
+## Try it (judges)
+
+**[Open the live ORCA demo](https://dodzikojo--orca-web.us-east.modal.run)** — no installation or personal API key needed.
+
+1. Choose **Open the Northbank demo**. Four models open and ORCA checks them for clashes.
+2. Select the clash between **Supply air main `SA-MAIN-L02-5`** and **Transfer girder `TB-L02-01`**.
+3. Choose **Propose fixes**, review a verified option with **Before / After / Both**, then **Accept this fix**.
+4. Choose **Export IFC** to download the edited model. The hosted demo has shared usage limits; a guided tour also
+   offers labelled recordings when a live proposal is unavailable.
+
+The machine demo is on the same landing page. See [Two demos](#two-demos) for what each demonstrates.
+
+## Run locally
+
+### 1. Prerequisites
+
+- [Git](https://git-scm.com/downloads).
+- [Node.js](https://nodejs.org/en/download) **22.12+ or 24 LTS**, including npm.
+- [uv](https://docs.astral.sh/uv/getting-started/installation/). It installs **Python 3.13** for this project;
+  you do not need to install Python separately.
+- A current desktop browser with WebGL enabled. Internet access is needed to install dependencies and use AI features.
+
+Open a new terminal after installing the tools and check `git --version`, `node --version`, `npm --version` and
+`uv --version`. On Windows, use PowerShell; if its execution policy blocks `npm.ps1`, use `npm.cmd` in the commands below.
+
+**Linux:** install the OpenCASCADE runtime library before starting the server: `sudo apt install libgl1` on
+Ubuntu/Debian. [PDF reports need additional system libraries](#pdf-system-libraries) on every platform; you can
+skip those initially if you only want to view models, check clashes and try fixes.
+
+### 2. Clone and install
+
+Run from the directory where you keep your projects (these commands work in PowerShell and bash):
+
+```text
+git clone https://github.com/IssueLab-Inc/ORCA.git
+cd ORCA
+uv python install 3.13
+uv sync --project server --locked --python 3.13
+npm ci --prefix web
+```
+
+`npm ci` also copies the viewer's WebAssembly files into `web/public/wasm/`. The Python environment lives in
+`server/.venv/`; no manual activation is needed. The server package is still named `sightline`, as are its
+`SIGHTLINE_*` settings.
+
+Create the local configuration **at the repo root**, keeping an existing `.env` if you have one:
+
+```powershell
+# Windows PowerShell, from ORCA/
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+```bash
+# macOS / Linux, from ORCA/
+test -f .env || cp .env.example .env
+```
+
+You can leave the API keys empty for the first geometry check. See [Enable AI features](#enable-ai-features)
+when you want ORCA to propose fixes.
+
+### 3. Start both servers
+
+**Terminal 1 — start in `ORCA/`:**
+
+```text
+cd server
+uv run --locked uvicorn sightline.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+**Terminal 2 — open a new terminal in `ORCA/`:**
+
+```text
+cd web
+npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+```
+
+Keep both terminals running and open **[http://127.0.0.1:5173](http://127.0.0.1:5173)**.
+Vite forwards `/api` requests to the Python server on port 8000. To check the API separately, open
+[http://127.0.0.1:8000/api/samples](http://127.0.0.1:8000/api/samples); it should return JSON with `files` and `demos`.
+Stop either server with **Ctrl+C**. Server reloads discard open scenes and unexported edits; export anything you
+want to keep before restarting or editing Python files.
+
+### 4. First check, without an API key
+
+Generate a small synthetic model in a third terminal, starting in `ORCA/`:
+
+```text
+uv run --directory server --locked python -m sightline.fixtures ../samples/fixture-clash.ifc
+```
+
+1. Refresh the page. In **Models**, select only `fixture-clash.ifc` and choose **Open 1 model**
+   (on a small screen, **Models** is inside **Menu**).
+2. Double-click **Supply duct 400x300** as element A, then **UB 406x178 beam** as element B.
+3. Expand **Try a move yourself**, enter **-0.80** in **Move A vertically (m)**, and choose **Check this move**.
+4. Expect **Clear**. A **-0.40** move clears the beam but hits the pipe. These checks preview moves; they do not
+   change the saved source file.
+
+### Demo models for local use
+
+**Both demo model sets are included in [samples/](samples/README.md), under this repository's [MIT licence](LICENSE)**
+(eight IFC/STEP files, about 15 MB total). A normal clone is enough: no separate download, Git LFS or private-repository
+access is needed. Open the Northbank card to follow the judge walkthrough above. The machine card opens PC-03 from
+STEP; its first conversion takes longer, and AI part classification requires credentials as described below.
+
+Northbank's six IFC files include the original coordination set, grids and the designer's fixed MEP revision.
+PC-03 includes the original Rev A and fixed Rev B STEP files. Northbank predates the hackathon and is baseline data;
+the PC-03 models were generated during it. Both are synthetic IssueLab assets, with no customer data. Generator source
+code, Revit files and optional Navisworks evaluation packages are not included. See [samples/README.md](samples/README.md)
+for provenance and optional evaluation inputs.
+
+### Enable AI features
+
+Edit the root `.env` and set **`META_API_KEY`** to a key with access to the configured Meta models. The template
+already sets the API URL, model and reasoning effort. Write values **without quotes or inline comments**, keep
+`.env` out of git, and restart the Python server after changes. Existing process environment variables override `.env`.
+
+| Feature | Credentials |
+|---|---|
+| IFC viewing, geometry detection, measuring, manual move checks | None |
+| Proposals, chat, AI triage/titles, coordinated plans and report text | `META_API_KEY` |
+| STEP conversion | None for geometry; AI part classification needs a model key. Without classification, parts use generic IFC classes |
+| Optional open-weights triage, titles and STEP classification | `TRIAGE_API_KEY` (or `BASETEN_API_KEY`) **and** `SIGHTLINE_OPEN_WEIGHTS=1`; proposals still need the Meta key |
+
+The open-weights host is optional; leave its key empty for the simplest setup. Owner settings are optional too.
+Live AI calls need provider access and may incur charges; local proposal/chat caps are off unless configured.
+**Before submission: add the verified Meta API access/key-creation link and any contributor-access requirements.**
+Until then, the hosted demo is the way to evaluate the AI flow without arranging your own credentials.
+All settings are documented in [the configuration reference](docs/architecture/15-requirements-settings-and-config.md).
+
+### PDF system libraries
+
+Install these before generating PDF reports or running the full server test suite. Python dependencies alone do
+not install Pango and its native libraries. See [WeasyPrint's platform instructions](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation).
+
+- **Ubuntu/Debian:** `sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libharfbuzz-subset0 fonts-dejavu-core`
+  (plus `libgl1` from the prerequisites).
+- **macOS with Homebrew:** `brew install pango libffi`.
+- **Windows:** install [MSYS2](https://www.msys2.org/), then run `pacman -S mingw-w64-ucrt-x86_64-pango` in its
+  **UCRT64** shell. If Python cannot find the DLLs, set `$env:WEASYPRINT_DLL_DIRECTORIES = 'C:\msys64\ucrt64\bin'`
+  in the PowerShell terminal used to start the server/tests (adjust for your MSYS2 installation).
+
+From `ORCA/`, check discovery with `uv run --directory server --locked python -m weasyprint --info`.
+
+### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| `uv`, `node` or `npm` is missing | Install the prerequisites and reopen the terminal. `python` opening the Windows Store is avoidable: use the documented `uv` commands |
+| Port 8000 or 5173 is busy | Stop the process already using it, then restart. Keep port 8000 unless you also change Vite's API proxy in `web/vite.config.ts` |
+| Page loads but API requests fail | Confirm both terminals are running; check `/api/samples` on port 8000 and read the Python terminal's error |
+| Demo cards or files are missing | Confirm the eight bundled model files exist in `samples/` and `/api/samples` lists them; restart the server if you just restored files |
+| Viewer reports missing `.wasm` files | From `ORCA/`, run `npm run copy-wasm --prefix web`, then refresh; check that WebGL is enabled |
+| AI request fails | Check the root `.env`, model access and quota, then restart the server. Empty keys allow geometry checks, not AI calls |
+| PDF reports fail with a missing-library error | Install the PDF system libraries and check DLL discovery on Windows |
+| MCP client cannot connect through port 5173 | Use `http://127.0.0.1:8000/mcp` with the app's pairing token; Vite proxies `/api`, not `/mcp` |
+
+The command paths and requirements above have been checked against the code. **Still to verify before submission:**
+a clean installation on Windows, macOS and Ubuntu, including a browser geometry check, a live AI proposal and PDF export.
 
 ## Two demos
 
@@ -51,7 +212,8 @@ problems.
 </table>
 
 Open either from the landing page's cards, or take its guided tour there. Both model sets are generated by IssueLab's
-own scripts (in a private repo), each with an answer key; the public demo ships them. The pictures
+own scripts, each with an answer key; the models ship in this repo and the live demo. Northbank is pre-existing baseline
+data, as disclosed above; the generator source remains private. The pictures
 are captured in ORCA's own viewer by `web/scripts/capture-demos.cjs`.
 
 ## How it works
@@ -118,34 +280,6 @@ marks only confirmed resolved pairs fixed. If the model changed, regenerate for 
 Chat can also explore wider fixes; the same review appears in Plan while the conversation stays open. Search is
 bounded, so an empty result does not prove no solution exists. These are geometry and model checks with designer
 review conditions, not a claim of engineering adequacy or full IFC conformance. **Export IFC** includes all edited files.
-
-## Run it
-
-Requirements: Python 3.13+, [uv](https://docs.astral.sh/uv/), Node 22+.
-
-```bash
-git clone https://github.com/IssueLab-Inc/ORCA.git
-cd ORCA
-```
-
-The server's Python package is still called `sightline` (ORCA's earlier name), as are its `SIGHTLINE_*` settings.
-
-```bash
-# server
-cd server
-uv sync
-uv run python -m sightline.fixtures ../samples/fixture-clash.ifc   # small test model
-cp ../.env.example ../.env   # then fill in the Meta Model API settings (only needed for "Propose fixes")
-uv run uvicorn sightline.app:app --reload --port 8000
-
-# web (second terminal)
-cd web
-npm install
-npm run dev     # http://localhost:5173
-```
-
-Open a model, double-click element A then element B, and choose **Propose fixes**. **Check this move**
-tries a vertical move by hand and works without any API key.
 
 While the agent works it drives the viewer ([`web/src/pilot.ts`](web/src/pilot.ts)): each idea appears in place as
 the geometry check runs (amber), then turns teal when it is clear or lights up what it hit in magenta, and the camera
@@ -317,8 +451,10 @@ cd server && uv run python -m sightline.mcp_server
 ## Deploy (public demo on Modal)
 
 One container serves the built web app and the API from the same origin
-([`deploy/modal_app.py`](deploy/modal_app.py)). Put the demo `*.ifc` files in `samples/` and any sample clash
-reports in `samples/reports/<name>/` first.
+([`deploy/modal_app.py`](deploy/modal_app.py)). This is optional: local development needs no Modal account.
+The bundled IFC/STEP files are ready in `samples/`; optional sample clash reports go in `samples/reports/<name>/`.
+For the Modal CLI installation, authentication and STEP conversion cache, follow
+[the deployment guide](docs/architecture/17-deployment-and-operations.md).
 
 ```bash
 cd web && npm ci && npm run build && cd ..
@@ -346,11 +482,16 @@ default `0`): off, titles and triage use Muse Spark.
 
 ## Tests
 
-```bash
-cd server && uv run pytest -q      # geometry check, detection, agent loop, web API, MCP tools
-cd web && npm run build            # type-check + production build
-cd web && npm test                 # web unit tests (node --test)
+Run all three from `ORCA/` after installing dependencies (and the PDF system libraries for the server suite):
+
+```text
+uv run --directory server --locked pytest -q
+npm run build --prefix web
+npm test --prefix web
 ```
+
+The unit tests use synthetic models and scripted AI responses; they need no API keys or private demo files.
+Real-model [evals](evals/README.md) are separate and may need additional data and paid model calls.
 
 ## How it is built
 
@@ -371,3 +512,6 @@ See [spikes/README.md](spikes/README.md).
 
 ORCA's own code: MIT (see LICENSE). Dependencies keep their own licences: IfcOpenShell (LGPL-3.0),
 web-ifc (MPL-2.0), three.js (MIT), React (MIT).
+
+The eight bundled synthetic demo models in `samples/` are also MIT, copyright IssueLab Inc.; their provenance and
+creation periods are recorded in [samples/README.md](samples/README.md) and [BUILT_DURING_HACKATHON.md](BUILT_DURING_HACKATHON.md).

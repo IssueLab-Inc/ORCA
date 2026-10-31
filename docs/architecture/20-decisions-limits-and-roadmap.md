@@ -3,7 +3,7 @@
 > **Covers:** `CLAUDE.md` ("Rules", "Stack and why", "Status and next steps"), `AGENTS.md`, `BUILT_DURING_HACKATHON.md`,
 > the "Not yet" sections of the feature designs, and the code that enforces each limit (`server/sightline/edits.py`,
 > `context_eval.py`, `hosts.py`, `document.py`, `service.py`, `deploy/modal_app.py`) · **Checked against code:**
-> 2026-10-30 (`feature/brand-assets`, based on `0390a12`) · **Deeper design:** [docs/edits.md](../edits.md), [docs/escalation.md](../escalation.md),
+> 2026-10-31 (public demo asset decision; remaining decisions at `0390a12`) · **Deeper design:** [docs/edits.md](../edits.md), [docs/escalation.md](../escalation.md),
 > [docs/show-it-built.md](../show-it-built.md), [docs/uploads.md](../uploads.md), [docs/mcp.md](../mcp.md)
 
 ORCA was built in nine days for a hackathon, so many choices were made fast and on purpose: some by the owner,
@@ -57,6 +57,7 @@ carries the decision today.
 
 | Date | Decision | Where it shows |
 |---|---|---|
+| Oct 31 | Bundle six Northbank IFCs and two PC-03 STEP revisions under ORCA's MIT licence, so judges need no private access or separate model download. Disclose Northbank as a pre-existing synthetic baseline asset; ORCA application code was written during the challenge. No generator source is copied | `samples/README.md`, `.gitignore` filename allowlist, `.gitattributes` byte preservation, `README.md`, `BUILT_DURING_HACKATHON.md`; [19](19-demo-data.md) |
 | Oct 27 | Deploy on Modal, public, with proposal caps (each proposal is a paid model call) | `deploy/modal_app.py` (one container), `limits.ProposeLimit`, `SIGHTLINE_PROPOSE_PER_HOUR` 20 / `_PER_DAY` 300 on Modal; [16](16-security-caps-and-cost.md), [17](17-deployment-and-operations.md) |
 | Oct 28 | A site model is context: its tests are listed but off by default, and duplicates cover the building models only | `detect.default_tests`; [docs/detection.md](../detection.md) |
 | Oct 28 | Coordination first: ORCA's own check is the golden path, a Navisworks report the second way in; the job is "design coordination", one item a "clash" | `openDemo` → `runDetect` in `App.tsx`; the header's **Coordinate** menu; [01](01-product-and-journeys.md), [21](21-glossary-and-naming.md) |

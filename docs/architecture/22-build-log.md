@@ -1651,3 +1651,19 @@ Checks on filters, on the page (Oct 31; same request and decisions; code `web/sr
   against everything" → one clash; Detect again then repeated chat's check under the same test id as the page's own.
   Fixed there: chat's run in Workings is titled as chat named the check and ends with the tool (chat's runs send no
   done event, so they showed as running).
+
+Public local setup and bundled demo data (Oct 31; owner request and licence decision):
+- **What changed:** the README now leads with the live judge walkthrough, then an explicit two-terminal local setup
+  with locked installs, uv-managed Python 3.13, Node/npm requirements, safe root `.env` creation, a key-free fixture
+  check, native PDF/GL dependencies, credential requirements, troubleshooting and root-relative test commands.
+- **Models:** six Northbank IFCs and PC-03 Rev A/B STEP files (15,443,510 bytes total) are bundled under MIT, with an
+  exact filename allowlist in `.gitignore` and newline conversion disabled in `.gitattributes`. The owner approved
+  public MIT distribution. Northbank is prominently disclosed as pre-existing synthetic baseline data, not work
+  created during the challenge; no private generator or earlier application code is copied. `samples/README.md`,
+  `BUILT_DURING_HACKATHON.md`, CLAUDE.md and map docs 17/19/20 describe the final arrangement.
+- **Checked:** all eight models match the source bytes and SHA-256 hashes; the demo registry discovers both cards;
+  unrelated samples, reports, caches and `.env` remain ignored; updated local Markdown links and all nine existing
+  architecture-map checks pass (called directly with the bundled Python runtime, without pytest). `git diff --check`
+  passes. No application behavior changed; the full server/web suites and a local browser run were not performed
+  because the project dependencies are not installed. The README explicitly leaves clean OS installs/live AI/PDF
+  checks and a verified Meta API onboarding link outstanding rather than claiming they passed.
