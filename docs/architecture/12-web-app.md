@@ -394,6 +394,10 @@ built-picture events into `builtRuns[key].step`. Event types are listed in [10](
   `OwnerSettingsMenu` through `setOwnerSettings` only once the owner is unlocked) and `X-Sightline-Requirements`
   (the registered requirements id, set by `App` through `setRequirements`). Every `call`, `ndjson`, `proposeStream`,
   `uploadModels`, `uploadModelsStream` and `transcribe` sends them.
+- **Gateway failures.** `callAgain` (for `triagePatterns`, a reading the server makes once and keeps) asks again after a
+  502, 503, 504 or no answer, after 1.5 s and then 4 s (`GATEWAY_WAITS`); a refusal or a server error stands. Those come
+  from the edge in front of the server, not from it, and asking again never charges twice: the server keeps the
+  reading, and a caller who comes while it is being made waits for it.
 - **Re-register.** `send(url, init)` retries once when the server answers 409 with detail `requirements_unknown` (it
   forgot the id, e.g. after a restart): `reRegister()` posts the kept document to `/api/requirements` and the request
   goes again with the new id. `uploadModelsStream` does the same by hand.

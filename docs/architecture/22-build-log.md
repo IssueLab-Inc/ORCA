@@ -1415,3 +1415,15 @@ Orbit round the selection and the clash (Oct 31; owner request; code `web/src/vi
   the duct at the same pixel; a proposal with the target first panned 6.4 m off the clash: autoRotate on, the target
   glided to the clash (9 mm off) and the orbit flag on while ORCA worked; 145 web tests, build clean.
 
+A patterns reading's 502 (Oct 31; owner request to look into it; code `web/src/api.ts`):
+- **What happened:** in a live check, the automatic Insights patterns reading (`POST /api/reports/{id}/patterns/{scene}/
+  triage`) came back 502. It never reached the server: Modal's request log has every other call of that visit, and none
+  for it; the server returns 502 only for a failed requirements draft or transcription. So the gateway in front of the
+  server answered it (Modal's edge, or the cloud session's own proxy the test browser went through). The same reading
+  run again with the page left open came back 200 in 21.7 s; it is a slow, silent request (one model call, no bytes
+  until the end), and the quiet automatic reading then left the patterns unread with no word until Explain was pressed.
+- **What changed:** `api.triagePatterns` asks again after a 502, 503, 504 or no answer (twice, after 1.5 s and 4 s). It
+  cannot charge twice: `plans.read_patterns` keeps the reading per report, scene and patterns, and a caller who comes
+  while it is being made waits for it and gets the same reading.
+- **Checked:** `web/tests/gateway-retry.test.mjs` (2); web tests and build.
+
