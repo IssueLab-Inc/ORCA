@@ -213,10 +213,10 @@ call goes through `chat.Chat._run` under the same name.
 
 | Tool | Read-only | What it does | Reuses | Page events |
 |---|---|---|---|---|
-| `get_session` | yes | What is open: model files and element count, the report (title, clashes, found by ORCA or Navisworks), triage state, the selected clash, what is fixed, whether a browser follows; a `next` step or a `note` that the page is closed | `Workspace` scenes and reports, `hooks.triage_state` | none |
+| `get_session` | yes | What is open: model files and element count, the report (title, clashes, found by ORCA or Navisworks), triage state, the selected clash, what is fixed, the person's filters by name (the page shares them with the link: `LinkContext.filters`), whether a browser follows; a `next` step or a `note` that the page is closed | `Workspace` scenes and reports, `hooks.triage_state` | none |
 | `list_models` | yes | The models ORCA can open (IFC, STEP) | `Workspace.list_samples` | none; no `agent_result` |
 | `open_models` | no | Opens sample models that share coordinates and checks them | with a browser: the page's own open and check (waits up to 60 s for the page's context to show the new report, else returns `opening`); without: `Workspace.open` then chat `detect_clashes`, one detection run (refused: open, with a `note` "Opened, not checked: …") | `ui open_models {names}` when a browser follows |
-| `detect_clashes` | no | ORCA's own detection on the open models; the result becomes the open report; a rerun says what was resolved. One detection run (`hooks.detect`) | chat → `Workspace.detect` | `detect_event` per step, `ui open_report` |
+| `detect_clashes` | no | ORCA's own detection on the open models; the result becomes the open report; a rerun says what was resolved. With `a` (and `b`, `kind`, `clearance_mm`, `name`): one check of what side A takes against B, a side being one of the person's filters by name or elements described as for `set_filters`, B also everything or itself ([docs/filters.md](../filters.md)). One detection run (`hooks.detect`); a refused check spends none | chat → `Workspace.detect` | `detect_event` per step, `ui open_report` |
 | `report_summary` | yes | Counts per test and per class pair: deepest overlap, touches, non-physical sides, how many fixed | chat | none |
 | `list_clashes` | yes | Clashes filtered by words, test or in-model only | chat | none |
 | `get_clash` | yes | One clash by id or `#N`: both elements, depth, point, model ids, fixed, pictures | chat | none |

@@ -40,6 +40,20 @@ def _fn(name: str, description: str, properties: dict | None = None, required: l
         "type": "object", "properties": properties or {}, "required": required or []}}}
 
 
+_SIDE = {"type": "object", "description": "what one side takes: a filter the user made, by name ({\"filter\": name}), or "
+         "elements described as in set_filters (classes, levels, models, where, invert); b may instead be "
+         "{\"everything\": true} (the default) or {\"itself\": true}", "properties": {
+    "filter": {"type": "string", "description": "one of the user's filters, by the name [context] gives"},
+    "classes": {"type": "array", "items": {"type": "string"}}, "levels": {"type": "array", "items": {"type": "string"}},
+    "models": {"type": "array", "items": {"type": "string"}},
+    "where": {"type": "array", "items": {"type": "object", "properties": {
+        "property": {"type": "string"}, "set": {"type": "string"},
+        "op": {"type": "string", "enum": ["is", "is_not", "contains", "has", "missing", "less", "more", "between"]},
+        "values": {"type": "array", "items": {"type": "string"}}, "min": {"type": "number"}, "max": {"type": "number"}},
+        "required": ["property"]}},
+    "invert": {"type": "boolean"}, "everything": {"type": "boolean"}, "itself": {"type": "boolean"}}}
+
+
 TOOLS = [
     _fn('explore_wider_fix', 'Explore a complete coordinated arrangement for one clash, including surrounding '
         'elements when needed. Use when the user asks to move other objects or a single-element fix is blocked. '
@@ -50,8 +64,13 @@ TOOLS = [
         "default) and duplicates. Pairs meant to meet (joined by ports, one assembly, a door in its wall) and touches "
         "are counted, not reported. Takes about 10 s and opens the result as the user's clash report, replacing the open "
         "one; running it again after fixes says which clashes were resolved. Each run counts against the demo's "
-        "detection runs.",
-        {"tolerance_mm": {"type": "number", "description": "hard clash tolerance in mm (default 1)"}}),
+        "detection runs. To check only some elements, give a (and b): one check of what A takes against what B takes "
+        "(everything, by default, or itself).",
+        {"tolerance_mm": {"type": "number", "description": "hard clash tolerance in mm (default 1)"},
+         "a": _SIDE, "b": _SIDE,
+         "kind": {"type": "string", "enum": ["hard", "clearance", "duplicate"], "description": "with a: the kind of check"},
+         "clearance_mm": {"type": "number", "description": "for a clearance check: report gaps under this"},
+         "name": {"type": "string", "description": "a name for the check"}}),
     _fn("report_summary", "Counts for the open clash report: clashes per test and per element class pair, how many "
         "are found in the open model, how many are fixed. Start here for questions about the whole report."),
     _fn("list_clashes", "List clashes in the report, optionally filtered. Returns at most `limit` rows.", {
@@ -142,7 +161,7 @@ TOOLS = [
     _fn("set_filters", "Find elements by what the model says about them (class, level, model, any property) and "
         "colour them, colour them by value, hide or isolate them in every view, until clear_filters. Replaces the "
         "filters you set before; the user's own are paused while yours show. Returns how many elements each finds. "
-        "Viewing only: checks and fixes never see filters.", {
+        "Fixes never see filters; detect_clashes can check what a filter finds.", {
             "filters": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"},
                 "classes": {"type": "array", "items": {"type": "string"}, "description": "IFC classes"},
@@ -193,6 +212,8 @@ class Context:
     report_id: str | None = None
     clash_id: str | None = None
     fixed: list[str] = field(default_factory=list)
+    # The user's own filters on the page (docs/filters.md): [{id, name, when, invert, on}], for detect_clashes by name.
+    filters: list[dict] = field(default_factory=list)
 
 
 class Chat:
@@ -317,6 +338,65 @@ class Chat:
                 target._published_turn = turn_number
         return answer
 
+    def _side(self, idx: dict, ctx: Context, spec: dict | None, b: bool) -> tuple[dict | None, str]:
+        """One side of a check as the detection test takes it ({} everything, None itself, else a filter), and what it is
+        called. Raises facets.Unresolved, naming what there is."""
+        spec = spec or {"everything": True}
+        if spec.get("itself"):
+            if not b:
+                raise facets.Unresolved("Side A cannot be itself: give A a filter or describe its elements.")
+            return None, "itself"
+        if spec.get("filter"):
+            want = str(spec["filter"]).strip().lower()
+            mine = {str(f.get("name") or "").lower(): f for f in ctx.filters}
+            f = mine.get(want)
+            if f is None:
+                if not ctx.filters:
+                    raise facets.Unresolved("The user has no filters on the page: describe the elements instead.")
+                close = facets.suggest(idx, spec["filter"], among=[str(x.get("name")) for x in ctx.filters], n=4)
+                raise facets.Unresolved(f"No filter {spec['filter']!r} on the page. Its filters: "
+                                        + ", ".join(close or [str(x.get("name")) for x in ctx.filters][:12]) + ".")
+            return {"filter": {"when": list(f.get("when") or []), "invert": bool(f.get("invert"))}}, str(f.get("name"))
+        described = {k: v for k, v in spec.items() if k in ("classes", "levels", "models", "where", "invert")}
+        if spec.get("everything") or not described:
+            return {}, "everything"
+        rule, _ = facets.resolve(idx, {**described, "action": "isolate"})
+        return {"filter": {"when": rule["when"], "invert": bool(rule.get("invert"))}}, facets.name_for(rule["when"], bool(rule.get("invert")))
+
+    def _check(self, sid: str, ctx: Context, args: dict) -> tuple[dict, dict]:
+        """detect_clashes with sides: the one test it runs, and what each side takes."""
+        ws = self.ws
+        idx = ws.facets(sid)
+        a, a_name = self._side(idx, ctx, args.get("a"), False)
+        b, b_name = self._side(idx, ctx, args.get("b"), True)
+        drawn = set(ws.scene(sid).bounds())
+
+        def count(side):
+            if side is None:
+                return None
+            if "filter" not in side:
+                return len(drawn)
+            f = side["filter"]
+            return len({idx["elements"][i] for i in facets.found(idx, f["when"], f["invert"])} & drawn)
+        n_a = count(a)
+        if not n_a:
+            raise facets.Unresolved(f"Side A ({a_name}) finds no element the check can test.")
+        kind = str(args.get("kind") or "hard")
+        if kind not in ("hard", "clearance", "duplicate"):
+            raise facets.Unresolved(f"Unknown kind {kind!r}: hard, clearance or duplicate.")
+        d = ws.check_defaults(sid)
+        # Named as the user knows its sides (their filter's own name), as detect.check_name does otherwise.
+        name = str(args.get("name") or "") or (f"{a_name} (within)" if b is None else f"{a_name} vs "
+                                              f"{'Everything' if b == {} else b_name}")
+        if kind == "clearance" and not args.get("name"):
+            mm = d["clearance_m"] if args.get("clearance_mm") is None else float(args["clearance_mm"]) / 1000
+            name += f", {round(mm * 1000)} mm clearance"
+        test = {"id": "", "name": name, "a": a, "b": b, "kind": kind, "rules": d["rules"],
+                "min_size_m": d["min_size_m"],
+                "tolerance_m": d["tolerance_m"] if args.get("tolerance_mm") is None else max(0.0, float(args["tolerance_mm"])) / 1000,
+                "clearance_m": d["clearance_m"] if args.get("clearance_mm") is None else max(0.0, float(args["clearance_mm"])) / 1000}
+        return test, {"a": {"name": a_name, "elements": n_a}, "b": {"name": b_name, "elements": count(b)}}
+
     def _context_line(self, ctx: Context) -> str:
         parts = ["[context]"]
         parts.append("a model is open" if ctx.scene_id in self.ws.scenes else "no model is open")
@@ -330,6 +410,10 @@ class Chat:
             parts.append(f"the user has clash {ctx.clash_id} selected")
         if ctx.fixed:
             parts.append(f"fixed so far: {', '.join(ctx.fixed[:30])}")
+        if ctx.filters:
+            names = [f'"{f.get("name")}"' for f in ctx.filters if f.get("name")]
+            more = f" (+{len(names) - 12} more)" if len(names) > 12 else ""
+            parts.append(f"the user's filters: {', '.join(names[:12])}{more}")
         return "; ".join(parts)
 
     def _trim(self, session: Session) -> None:
@@ -388,7 +472,16 @@ class Chat:
         if name == "detect_clashes":
             sid = self._scene(ctx)
             tests = None
-            if args.get("tolerance_mm") is not None:
+            check = None
+            if args.get("a") or args.get("b"):
+                # One check of what A takes against what B takes (docs/filters.md, "Checks"), resolved and counted
+                # before a detection run is spent: a name the models lack, or an A that finds nothing, costs none.
+                try:
+                    test, check = self._check(sid, ctx, args)
+                except facets.Unresolved as e:
+                    return {"error": str(e)}, "refused: not in the model", []
+                tests = [test]
+            elif args.get("tolerance_mm") is not None:
                 tol = max(0.0, float(args["tolerance_mm"])) / 1000
                 tests = [{**t, "tolerance_m": tol if t["kind"] == "hard" else t["tolerance_m"]}
                          for t in ws.detect_tests(sid)["tests"] if t["enabled"]]
@@ -398,7 +491,7 @@ class Chat:
             out = ws.detect(sid, tests, on_event=lambda e: emit({"type": "detect_event", "event": e}))
             rid = out["report"]["id"]
             ctx.report_id = rid  # the rest of this answer works on the new report
-            detection = {k: out[k] for k in ("coverage", "diff", "elements", "seconds")}
+            detection = {k: out[k] for k in ("coverage", "diff", "elements", "seconds", "tests")}
             emit({"type": "ui", "action": "open_report", "report_id": rid, "detection": detection})
             n = len(out["report"]["clashes"])
             diff = out["diff"]
@@ -409,6 +502,10 @@ class Chat:
                            "new": len(diff["new"]), "resolved": len(diff["resolved"]),
                            "no_longer_checked": len(diff["no_longer_checked"])},
                        "note": "The result is now the open clash report. Triage sorts real problems from noise."}
+            if check is not None:
+                summary["check"] = {**check, "name": out["tests"][0]["name"]}
+                summary["note"] = ("The check's clashes are now the open clash report; the full check comes back with "
+                                   "detect_clashes and no sides.")
             return summary, f"{n} clashes found by ORCA in {out['seconds']} s", []
         if name == "report_summary":
             r, matches = self._report(ctx), self._matches(ctx)

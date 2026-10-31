@@ -189,6 +189,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         c = link.ctx
         out: dict[str, Any] = {"browser_connected": link.browser, "models": None, "report": None,
                                "selected_clash": c.clash_id, "fixed": list(c.fixed)}
+        if c.filters:   # the person's own filters: detect_clashes can check one by name (a={"filter": name})
+            out["filters"] = [{"name": f.get("name"), "on": f.get("on", True)} for f in c.filters]
         if c.scene_id in W().scenes:
             scene = W().scene(c.scene_id)
             out["models"] = {"files": [p.name for p in scene.paths], "elements": len(scene.bounds())}
@@ -249,11 +251,21 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
     # ------------------------------------------------------------------ clashes
 
     @tool()
-    def detect_clashes(ctx: Context, tolerance_mm: float | None = None) -> dict:
+    def detect_clashes(ctx: Context, tolerance_mm: float | None = None, a: dict | None = None, b: dict | None = None,
+                       kind: Literal["hard", "clearance", "duplicate"] | None = None, clearance_mm: float | None = None,
+                       name: str | None = None) -> dict:
         """Check the open models for clashes with ORCA's own detection: every pair of models and each model against
         itself. Opens the result as the clash report (in the person's page too). Running it again after fixes says
-        which clashes were resolved. Each run is one of the demo's detection runs."""
-        return run(ctx, "detect_clashes", {} if tolerance_mm is None else {"tolerance_mm": tolerance_mm})
+        which clashes were resolved. Each run is one of the demo's detection runs.
+
+        To check only some elements (docs/filters.md, "Checks"), give side `a` and optionally `b`: each either one of
+        the person's filters by name ({"filter": "<name>"}, as get_session lists them) or elements described as in
+        set_filters ({classes, levels, models, where, invert}); `b` may instead be {"everything": true} (the default)
+        or {"itself": true}. `kind` hard (default), clearance (with `clearance_mm`) or duplicate; `name` names the
+        check. A name the models lack, or an A that finds nothing, is refused before a run is spent."""
+        args: dict = {k: v for k, v in (("tolerance_mm", tolerance_mm), ("a", a), ("b", b), ("kind", kind),
+                                        ("clearance_mm", clearance_mm), ("name", name)) if v is not None}
+        return run(ctx, "detect_clashes", args)
 
     @tool(read_only=True)
     def report_summary(ctx: Context) -> dict:

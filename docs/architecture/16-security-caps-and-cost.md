@@ -166,7 +166,7 @@ not counted. The state is per process, which is why the deploy pins one containe
 | Chat messages | `SIGHTLINE_CHAT_PER_HOUR` / `SIGHTLINE_CHAT_PER_DAY` | 0 / 0 | 40 / 1500 | 1 per message; its tool calls take their own caps, as their routes do |
 | Built views | `SIGHTLINE_BUILT_PER_HOUR` / `SIGHTLINE_BUILT_PER_DAY` | 0 / 0 | 6 / 60 | 1 per Show it built request that is neither cached nor being drawn already |
 | Titling runs | `SIGHTLINE_TITLES_PER_HOUR` / `SIGHTLINE_TITLES_PER_DAY` | 0 / 0 | off | 1 per titling run started (one shared run per report) |
-| Detection runs | `SIGHTLINE_DETECT_PER_HOUR` / `SIGHTLINE_DETECT_PER_DAY` | 0 / 0 | off | 1 per `/detect/stream`, chat or MCP `detect_clashes`, and MCP `open_models` when it checks on the server (no page following the link: the page's check is its own request) |
+| Detection runs | `SIGHTLINE_DETECT_PER_HOUR` / `SIGHTLINE_DETECT_PER_DAY` | 0 / 0 | off | 1 per `/detect/stream`, chat or MCP `detect_clashes` (a check on filters refused for a name the models lack or an empty side A costs none), and MCP `open_models` when it checks on the server (no page following the link: the page's check is its own request) |
 | Voice | `SIGHTLINE_VOICE_PER_HOUR` / `SIGHTLINE_VOICE_PER_DAY` | 0 / 0 | 60 / 2000 | 1 per clip (`/api/transcribe`) or live session, hands-free included |
 | Model uploads | `SIGHTLINE_MODEL_UPLOADS_PER_HOUR` / `SIGHTLINE_MODEL_UPLOADS_PER_DAY` | 0 / 0 | 10 / 200 | 1 per upload, after the size and type checks |
 | Requirements files | `SIGHTLINE_REQUIREMENTS_PER_HOUR` / `SIGHTLINE_REQUIREMENTS_PER_DAY` | **120** / 0 | default | 1 per file the server does not know yet |

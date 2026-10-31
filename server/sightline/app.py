@@ -260,6 +260,17 @@ class Offset(BaseModel):
     clearance_m: float | None = None   # None: the pair's (Workspace.clearance)
 
 
+class PageFilter(BaseModel):
+    """One of the user's filters, as the page shares it with chat and an agent link (docs/filters.md): what it finds,
+    by name, for a check on it (detect_clashes)."""
+    id: str = Field("", max_length=100)
+    name: str = Field("", max_length=200)
+    when: list[dict] = Field(default_factory=list, max_length=30)
+    invert: bool = False
+    on: bool = True
+    origin: str | None = Field(None, max_length=20)
+
+
 class ChatTurn(BaseModel):
     message: str
     session_id: str | None = None
@@ -267,6 +278,7 @@ class ChatTurn(BaseModel):
     report_id: str | None = None
     clash_id: str | None = None
     fixed: list[str] = []
+    filters: list[PageFilter] = Field(default_factory=list, max_length=100)
 
 
 class PlanRequest(BaseModel):
@@ -1474,7 +1486,7 @@ def chat_turn(body: ChatTurn, request: Request):
     escalate_allowed = _escalation_check(request)
     detect_allowed = lambda: None if no_caps else detect_limit.take(who)
     session = c.session(body.session_id)
-    ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed)
+    ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed, [f.model_dump() for f in body.filters])
     events = _RequestEvents(request)
     events.put({"type": "session", "id": session.id})
 
@@ -1672,6 +1684,7 @@ class LinkContext(BaseModel):
     report_id: str | None = None
     clash_id: str | None = None
     fixed: list[str] = []
+    filters: list[PageFilter] = Field(default_factory=list, max_length=100)
 
 
 def _link(token: str, touch: bool = True) -> agents.Link:
@@ -1690,7 +1703,7 @@ def create_link(body: LinkContext, request: Request):
         raise HTTPException(429, refused)
     who = client_id(request.headers, request.client.host if request.client else None)
     token, link = links.create(who, owner.no_caps(), chat.Context(body.scene_id, body.report_id, body.clash_id,
-                                                                  list(body.fixed)))
+                                                                  list(body.fixed), [f.model_dump() for f in body.filters]))
     link.requirements = requirements.current_id()
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
@@ -1708,6 +1721,7 @@ def link_context(token: str, body: LinkContext):
     link = _link(token)
     link.ctx.scene_id, link.ctx.report_id, link.ctx.clash_id = body.scene_id, body.report_id, body.clash_id
     link.ctx.fixed = list(body.fixed)
+    link.ctx.filters = [f.model_dump() for f in body.filters]
     link.requirements = requirements.current_id()  # the page sends its requirements with every call, this one too
     return link.public()
 

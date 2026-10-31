@@ -184,7 +184,8 @@ class Link:
         return {"id": self.id, "expires_at": self.expires, "max_expires_at": self.created + MAX_AGE,
                 "server_time": time.time(), "calls": self.calls, "last_call": self.last_call,
                 "browser": self.browser, "context": {"scene_id": self.ctx.scene_id, "report_id": self.ctx.report_id,
-                                                     "clash_id": self.ctx.clash_id, "fixed": len(self.ctx.fixed)},
+                                                     "clash_id": self.ctx.clash_id, "fixed": len(self.ctx.fixed),
+                                                     "filters": len(self.ctx.filters)},
                 "applied": self.applied}
 
 

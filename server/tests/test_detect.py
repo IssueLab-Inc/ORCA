@@ -357,6 +357,69 @@ def test_chat_can_run_detection_and_then_work_on_its_report(paths, tmp_path):
     assert opened["detection"]["coverage"] and any(e["type"] == "detect_event" for e in events)
 
 
+def _workspace(paths, tmp_path):
+    for p in paths:
+        (tmp_path / p.name).write_bytes(p.read_bytes())
+    ws = Workspace(samples=tmp_path)
+    return ws, ws.open([p.name for p in paths])
+
+
+class _Scripted:
+    """Muse Spark's stand-in: tool calls in order, then an answer; keeps what it was sent."""
+
+    def __init__(self, steps):
+        self.steps, self.seen = list(steps), []
+
+    def chat(self, messages, tools):
+        import json
+        self.seen.append(messages[-1])
+        step = self.steps.pop(0)
+        if isinstance(step, str):
+            return {"role": "assistant", "content": step}
+        return {"role": "assistant", "content": None, "tool_calls": [
+            {"id": f"c{i}", "type": "function", "function": {"name": n, "arguments": json.dumps(a)}}
+            for i, (n, a) in enumerate(step)]}
+
+
+MINE = [{"id": "u1", "name": "Ducts", "when": DUCTS["when"], "invert": False, "on": True}]
+
+
+def test_chat_checks_a_users_filter_by_name_or_what_it_describes(paths, tmp_path):
+    import json
+    from sightline.chat import Chat, Context
+
+    ws, sid = _workspace(paths, tmp_path)
+    model = _Scripted([[("detect_clashes", {"a": {"filter": "ducts"}})],
+                       [("detect_clashes", {"a": {"classes": ["DuctSegment"]}, "b": {"itself": True}})], "Done."])
+    events = []
+    chat = Chat(ws, model)
+    chat.turn(chat.session(None), "What do my ducts hit?", Context(sid, None, None, [], MINE), events.append)
+    assert 'the user\'s filters: "Ducts"' in model.seen[0]["content"]
+    opened = [e for e in events if e.get("action") == "open_report"]
+    first, second = (o["detection"]["tests"][0] for o in opened)
+    assert first["name"] == "Ducts vs Everything" and first["id"].startswith("filter:") and first["b"] == {
+        k: [] for k in ("files", "teams", "classes", "exclude_classes", "systems", "ids")} | {"filter": None}
+    assert second["name"] == "DuctSegment (within)" and second["b"] is None
+    told = json.loads(model.seen[1]["content"])
+    ducts = sum(1 for g in ws.scene(sid).bounds() if ws.scene(sid).element(g).ifc_class == "IfcDuctSegment")
+    assert told["check"]["a"] == {"name": "Ducts", "elements": ducts} and told["check"]["b"]["name"] == "everything"
+    assert any(c["test"] == "Ducts vs Everything" and c["clashes"] >= 1 for c in told["tests"])
+
+
+def test_a_check_on_what_the_models_lack_is_refused_before_a_run_is_spent(paths, tmp_path):
+    from sightline.chat import Chat, Context
+
+    ws, sid = _workspace(paths, tmp_path)
+    for a, said in (({"filter": "Pipes"}, "Its filters: Ducts"), ({"classes": ["Ductt"]}, "Closest: IfcDuctSegment"),
+                    ({"itself": True}, "Side A cannot be itself")):
+        model = _Scripted([[("detect_clashes", {"a": a})], "Sorry."])
+        events = []
+        chat = Chat(ws, model)
+        chat.turn(chat.session(None), "Check", Context(sid, None, None, [], MINE), events.append, detect_allowed=lambda: "spent")
+        assert not [e for e in events if e.get("action") == "open_report"]
+        assert said in model.seen[1]["content"] and "spent" not in model.seen[1]["content"]
+
+
 def test_one_model_on_its_own_is_named_after_its_file(paths):
     names = [t.name for t in detect.default_tests(IfcScene(paths[0]))]
     assert names == ["Fixture-Structure (within)", "Duplicates (all models)"]

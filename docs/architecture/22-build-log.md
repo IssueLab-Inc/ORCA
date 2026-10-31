@@ -1621,3 +1621,8 @@ code `detect.Selection.filter`, `check_id`, `check_name`, `facets.found` / `name
   element on both sides is never paired with itself. `detect_tests` gives a check's defaults; a run returns the tests
   it ran so they can be repeated.
 - **Checked:** `tests/test_detect.py` (26), `test_facets.py` (14).
+- **Chat and MCP** (`chat.Chat._check` / `_side`, `PageFilter` in `ChatTurn` and `LinkContext`, `get_session`): the
+  page shares the user's filters with chat and the agent link; `detect_clashes` takes sides `a` and `b` (a filter by
+  name, or elements described as for `set_filters`; B also everything or itself), resolved and counted before a run
+  is spent, and named as the user knows them ("Ducts vs Everything"). Checked: `tests/test_detect.py` (28),
+  `test_chat.py` (12), `test_mcp.py`.

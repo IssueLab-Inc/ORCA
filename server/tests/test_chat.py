@@ -86,6 +86,20 @@ def test_chat_endpoint_streams_a_session_then_the_answer(tmp_path, monkeypatch):
     assert any(e == {"type": "message", "text": "Done."} for e in events)
 
 
+def test_the_pages_filters_reach_chat_by_name(tmp_path, monkeypatch):
+    ws, sid, rid = _setup(tmp_path)
+    model = Scripted(["Noted."])
+    monkeypatch.setattr(app_module, "ws", ws)
+    monkeypatch.setattr(app_module, "_chat", Chat(ws, model))
+    c = TestClient(app_module.app)
+    mine = [{"id": "u1", "name": "Ducts on L2", "when": [{"facet": "class", "op": "is", "values": ["IfcDuctSegment"]}]}]
+    r = c.post("/api/chat", json={"message": "hi", "scene_id": sid, "report_id": rid, "filters": mine})
+    assert r.status_code == 200
+    assert 'the user\'s filters: "Ducts on L2"' in model.seen[0]["content"]
+    too_many = c.post("/api/chat", json={"message": "hi", "scene_id": sid, "filters": [{"name": "x"}] * 101})
+    assert too_many.status_code == 422
+
+
 def test_chat_sets_and_clears_filters_by_what_the_model_says(tmp_path):
     ws, sid, rid = _setup(tmp_path)
     model = Scripted([[("set_filters", {"filters": [
