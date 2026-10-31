@@ -1415,3 +1415,11 @@ Orbit round the selection and the clash (Oct 31; owner request; code `web/src/vi
   the duct at the same pixel; a proposal with the target first panned 6.4 m off the clash: autoRotate on, the target
   glided to the clash (9 mm off) and the orbit flag on while ORCA worked; 145 web tests, build clean.
 
+Filter the clash list by status (Oct 31; owner request; code `web/src/ReportList.tsx`):
+- **What:** once a clash is fixed or reviewed, the list's filters offer All, To fix, Fixed and Reviewed, each with its
+  count (To fix is the old "Hide resolved" checkbox, which it replaces). The header's "N fixed" and "N reviewed" chips
+  are buttons for the same filter; with nothing fixed or reviewed the filter is off. A filter opens every group.
+- **Checked** in Chromium on Northbank: no filter before a fix; #1 fixed by a real proposal and accepted, then All 464,
+  To fix 463 (none fixed among them), Fixed 1 (#1); the "1 fixed" chip turns the filter on and off with the select
+  following; 145 web tests, build clean.
+

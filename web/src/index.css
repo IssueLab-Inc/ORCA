@@ -366,6 +366,10 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .search-box input { border: 0; outline: 0; font: inherit; padding: 6px 0; flex: 1; min-width: 0; background: transparent; }
 .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .filters .check { font-size: 12.5px; }
+.filters .status-pick { font: inherit; font-size: 12.5px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink, inherit); }
+.chip.as-filter { border: 1px solid transparent; cursor: pointer; font-family: inherit; }
+.chip.as-filter:hover { border-color: currentColor; }
+.chip.as-filter.on { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
 .roots { margin: 10px 10px 0; padding: 10px; border-radius: var(--radius); background: var(--warn-soft); display: flex; flex-direction: column; gap: 8px; }
 .roots h3 { color: var(--warn); }
 .root { display: flex; align-items: center; gap: 8px; background: var(--surface); border-radius: 7px; padding: 7px 8px; }
