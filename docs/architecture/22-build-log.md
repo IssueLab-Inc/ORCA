@@ -1626,3 +1626,12 @@ code `detect.Selection.filter`, `check_id`, `check_name`, `facets.found` / `name
   name, or elements described as for `set_filters`; B also everything or itself), resolved and counted before a run
   is spent, and named as the user knows them ("Ducts vs Everything"). Checked: `tests/test_detect.py` (28),
   `test_chat.py` (12), `test_mcp.py`.
+
+Checks on filters, on the page (Oct 31; same request and decisions; code `web/src/checks.ts`, `FiltersPanel`'s
+`check`, `DetectSummary`'s `onWhole`, App's `filterCheck` and `sharedFilters`, `filters.shareable`;
+[docs/filters.md](../../docs/filters.md), "Checks"):
+- **What:** each filter's row has What do these hit? (it against everything), and Check clashes under the list picks
+  side A, side B (Everything, Itself or another filter), hard or clearance and the millimetres. The clashes replace the
+  open list; the summary says "Only <check>" with Check the open models; Detect again repeats the check, also one chat
+  or an agent ran (the run returns its tests). The page shares its filters by name with chat turns and the agent link.
+- **Checked:** `web/tests/filters-check.test.mjs` (8); web build and 179 web tests; `tests/test_docs_map.py`.

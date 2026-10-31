@@ -171,7 +171,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 cd web
 npm install            # once; postinstall copies web-ifc's wasm into public/wasm
 npm run build          # tsc --noEmit (type-check src/ and vite.config.ts), then vite build
-npm test               # node --test tests/*.test.mjs (139 tests on Oct 30)
+npm test               # node --test tests/*.test.mjs (179 tests on Oct 31)
 ```
 
 There is no test framework beyond Node's own runner: the tests use `node:test` and `node:assert`, and the
@@ -248,6 +248,7 @@ flowchart LR
 | `viewer-orbit.test.mjs` | 2 | `compiled` | `Viewer.orbitAround`: orbiting round a pivot (the selection, the clash) keeps it at the same place on screen and as far away, with no roll; a sideways drag keeps the camera's height; a long drag down stops short of straight down |
 | `viewer-empty-stage.test.mjs` | 2 | `compiled` | `Viewer.drawFrame` in the four-view layout: with nothing open, one empty 3D view over the whole stage and the layout kept; with models, each view in its own pane |
 | `viewer-links.test.mjs` | 1 | `compiled` | The connection highlight never shows in a captured picture and is back on screen afterwards |
+| `filters-check.test.mjs` | 8 | `compiled` (React stubbed) + `appHost` | Checks on filters: `checks.ts` (sides, names, the test with no id and the defaults, what a side can test, whether a run was a check), `filters.shareable`; What do these hit? and Check clashes in `FiltersPanel`; App runs a check, Detect again repeats it, Check the open models sends every test; chat's context carries the filters, and Detect again repeats a check chat ran |
 | `filters-chat.test.mjs` | 1 | `appHost` | Chat's filters replace its own, pause the user's that were on, and give them back when it clears |
 | `filters.test.mjs` | 12 | `compiled` | `filters.ts`: conditions as the server's `facets.matching`; every condition, unfinished ones left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); colour by value and its count; counts, names, sets, a new filter's colour; the key (only colours on screen); `applied` (what counts as applying) and `zoomTarget` (what it frames); `migrate`; the palette of twenty and Other clear of every reserved colour; past twenty values, Other in the key; `withBy` |
 | `viewer-filters.test.mjs` | 7 | `viewerModule` | `Viewer.setRules`: hides, isolates and colours reach the batch (grey for the rest); captures never see them; lit links leave out what a filter hides; `setDrawingsShow` (filtered, whole, follow); `useDrawingPaint` colours a drawing's fill pass and gives the 3D colours back; `frameEverywhere` moves the 3D view and every unpinned drawing; `ofLevel`, and `isShown` built once per change |

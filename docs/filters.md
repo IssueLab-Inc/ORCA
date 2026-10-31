@@ -13,8 +13,9 @@ Owner decisions (Oct 31):
 - **All before the Nov 3 freeze.**
 
 The existing quick checkboxes (the toolbar's Visibility menu: models, levels, classes) and the temporary hide and
-isolate stay as they are ([views.md](views.md), "Visibility"). Filters are for viewing only: the check, triage, fixes
-and the pictures sent to the model never see them.
+isolate stay as they are ([views.md](views.md), "Visibility"). Filters are for viewing: triage, fixes and the pictures
+sent to the model never see them, and the opening check ignores them. A **check on filters** ("Checks", below) takes a
+filter's conditions as what one side of a clash test compares; that is the only way a filter reaches detection.
 
 ## The index (built)
 
@@ -169,24 +170,59 @@ value** (a temporary isolate). A storey's breadcrumb offers **Filter by this lev
   two filters (the MEP model isolated, coloured by System), the views framed on the services, and a reply listing the
   nine systems with their counts.
 
+## Checks (built)
+
+Owner request (Oct 31): run ORCA's clash detection on filtered elements, from the page and over MCP and chat. Owner
+decisions: side A is a filter; side B is a filter, **Everything** or **Itself** (as selection sets in a clash test);
+each filter gets a one-click **What do these hit?**; chat and agents use both the elements they describe and the user's
+own filters by name; the clashes **replace the open list**, as detection does, titled with the check.
+
+- **A check is one detection test** (`detect.Test`) whose sides carry the filter's complete conditions
+  (`Selection.filter`), found against the index when the run starts, so a rerun after a kept fix selects by properties
+  again. Design and ids: [detection.md](detection.md) ("A check on filters"; numbers and diffs in "Reruns").
+- **On the page** (`web/src/checks.ts`, `FiltersPanel`'s `check`): each filter's row has **What do these hit?** (that
+  filter against everything, hard clashes at the check's tolerance); it is off while a check runs, before the models
+  are read, and for a filter that finds nothing a check can test (spaces have no body) or everything (Check the open
+  models does that). Under the list, **Check clashes** picks side A (a filter), side B (Everything, Itself: those
+  elements against each other, or another filter), hard clashes deeper than … mm or elements closer than … mm (blank:
+  the defaults, `Workspace.check_defaults`, also `detect_tests`' `check`), with each filter's count, and says "The
+  clashes replace the open list; Detect again repeats this check." A filter that is switched off can still be a side:
+  a check reads its conditions, not what is on screen.
+- **Afterwards** the run summary says "Only <check>" and offers **Check the open models** (every test again). Detect
+  again repeats the check, also one chat or an agent ran (the run returns the tests it ran, `Detection.tests`). A clash
+  the full check also finds keeps its #N, title, views and sign-offs between the two.
+- **Chat and agents** (`detect_clashes` with `a`, `b`, `kind`, `clearance_mm`, `name`): a side is elements described
+  as for `set_filters`, or one of the user's filters by name. The page shares its filters (`filters.shareable`: each
+  by its name, with only its complete conditions) with every chat turn and the agent link's context, and `get_session`
+  lists them. Sides are resolved and counted before a run is spent, so a misspelt filter costs no detection run.
+- **Limits:** a side takes at most 30 conditions of 500 values each; an element whose
+  GlobalId two open files share is read from the first file by the index and the last by detection
+  ([20](architecture/20-decisions-limits-and-roadmap.md)).
+
 ## Tests
 
-- `web/tests/filters.test.mjs` (10): conditions as the server matches them; every condition holding, unfinished ones
+- `web/tests/filters.test.mjs` (12): conditions as the server matches them; every condition holding, unfinished ones
   left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); colour by
   value (chosen colours, palette by place, values ticked off, what it counts); counts among the other conditions,
   names, sets, a new filter's colour; the key (only colours on screen); what counts as applying a filter and what it
-  frames; `migrate`; the palette against the reserved
-  colours.
-- `web/tests/viewer-filters.test.mjs` (6): hides, isolates and colours reach the batch, with grey for the rest;
+  frames; `migrate`; the palette against the reserved colours, twenty of them, then Other.
+- `web/tests/filters-check.test.mjs` (8): a check's sides, name and test (no id, the defaults, Everything as an open
+  selection, Itself as none); what a side can test; `shareable`; What do these hit? and Check clashes in the panel; a
+  check from the panel replaces the list, Detect again repeats it, Check the open models sends every test; chat sees
+  the filters, and Detect again repeats a check chat ran.
+- `web/tests/viewer-filters.test.mjs` (7): hides, isolates and colours reach the batch, with grey for the rest;
   captures never see them; lit links leave out what a filter hides; what drawings show for each setting; a drawing's
   fill pass takes the colours on paper and gives the 3D ones back; framing takes the 3D view and every unpinned
-  drawing there, not a pinned one.
-- `server/tests/test_facets.py` (9): every element with its file, class, storey (as `datums.storeys`), type and
+  drawing there, not a pinned one; a level's elements from the viewer's storeys; what is shown tested once per change.
+- `server/tests/test_facets.py` (14): every element with its file, class, storey (as `datums.storeys`), type and
   material; numbers kept as numbers in SI from a millimetre file; the hidden note never in the index; every kind of
   value (classification, group, layers, enumerated, list, complex parts, what the type gives; no ranges or tables);
   conditions matched as the page does and close-match suggestions; kept until an edit; the route and its 404.
   `facets.resolve` turns what chat asks for into the page's rule, and fails with the closest names (never the hidden
-  note).
+  note). `found` and `name_for`, as the page's `found` and `nameFor`, for checks.
+- `server/tests/test_detect.py`: a filter as a check's side (vs everything, itself), its id and name, ids that follow
+  a pair between checks, no diff noise between unlike runs, bad filters refused; chat's checks on described elements
+  and on the user's filters by name, refused before a run is spent.
 - `server/tests/test_chat.py`, `test_mcp.py`: `set_filters` and `clear_filters` reach the page; an unknown class is
   refused with the closest. `web/tests/filters-chat.test.mjs`: chat's filters replace its own, pause the user's and
   give them back.

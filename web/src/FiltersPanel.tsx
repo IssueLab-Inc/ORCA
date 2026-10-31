@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Check, EyeOff, Focus, LocateFixed, Palette, Plus, Rows3, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, EyeOff, Focus, LocateFixed, Palette, Plus, Radar, Rows3, Trash2, X } from "lucide-react";
+import type { CheckDefaults, DetectTest } from "./api";
+import { checkTest, sideCount, type CheckKind, type Side } from "./checks";
 import {
   actedOn, complete, count, describe, ELEMENT, found, nameFor, newId, nextColour, PALETTE, ruleColour, sets, shownValue, valueColours, valueCounts,
   withBy, OTHER,
@@ -41,13 +43,16 @@ export interface FiltersPanelProps {
   onZoom?: (ids: string[]) => void;
   /** Why the index did not arrive, and asking for it again. */
   error?: string | null; onRetry?: () => void;
+  /** Checks on filters (docs/filters.md, "Checks"): the defaults a check takes, whether one can run now, and running
+   * one (its clashes replace the open list). */
+  check?: { defaults: CheckDefaults | null; busy: boolean; onCheck: (t: DetectTest) => void };
 }
 
 /** A blank filter for the editor. */
 export const blankRule = (when: Condition[] = [], action: Action = "colour"): Rule =>
   ({ id: newId(), name: "", on: true, when, action });
 
-export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft, drawingsWhole, onDrawingsWhole, onZoom, error, onRetry }: FiltersPanelProps) {
+export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft, drawingsWhole, onDrawingsWhole, onZoom, error, onRetry, check }: FiltersPanelProps) {
   if (!p && error) return (
     <div className="fpanel"><p className="hint">Could not read what the models say: {error}</p>
       {onRetry && <button type="button" className="btn small" onClick={onRetry}>Try again</button>}</div>);
@@ -88,6 +93,7 @@ export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft
                 <button type="button" className="ibtn" disabled={i === 0} aria-label="Up" data-tip="Up: wins over those below" onClick={() => move(i, -1)}><ArrowUp size={14} aria-hidden /></button>
                 <button type="button" className="ibtn" disabled={i === rules.length - 1} aria-label="Down" data-tip="Down" onClick={() => move(i, 1)}><ArrowDown size={14} aria-hidden /></button>
                 {onZoom && <button type="button" className="ibtn" aria-label="Zoom to them" data-tip="Zoom to them" onClick={() => onZoom(actedOn(p, r))}><LocateFixed size={14} aria-hidden /></button>}
+                {check && <HitButton p={p} rule={r} check={check} />}
                 <button type="button" className="ibtn" aria-label="Delete" data-tip="Delete" onClick={() => set(rules.filter((x) => x.id !== r.id))}><Trash2 size={14} aria-hidden /></button>
               </span>
             </div>
@@ -96,7 +102,75 @@ export function FiltersPanel({ index: p, loading, state, onState, draft, onDraft
         ))}
       </ul>
       {rules.length > 0 && <button type="button" className="btn small ghost" onClick={() => set([])}>Clear all</button>}
+      {check && rules.length > 0 && <CheckClashes p={p} rules={rules} check={check} />}
     </div>
+  );
+}
+
+type CheckProps = NonNullable<FiltersPanelProps["check"]>;
+
+/** Why a filter cannot be a check's side now, or null when it can. */
+function cannot(p: Prepared, r: Rule, check: CheckProps): string | null {
+  if (!check.defaults) return "Reading the models…";
+  if (check.busy) return "Wait for the check that is running";
+  const n = sideCount(p, r);
+  if (!n) return "It finds nothing to check";
+  if (found(p, r).size >= p.n) return "It finds everything: Check the open models instead";
+  return null;
+}
+
+/** A filter's row tool: what it finds against everything, in one click. */
+function HitButton({ p, rule, check }: { p: Prepared; rule: Rule; check: CheckProps }) {
+  const why = cannot(p, rule, check);
+  return <button type="button" className="ibtn" aria-label="What do these hit?" disabled={!!why}
+    data-tip={why ?? "What do these hit? Check them against everything"}
+    onClick={() => check.defaults && check.onCheck(checkTest(rule, "everything", "hard", null, check.defaults))}><Radar size={14} aria-hidden /></button>;
+}
+
+/** A check of one filter against everything, itself or another filter: hard clashes deeper than a tolerance, or
+ * elements closer than a clearance. */
+function CheckClashes({ p, rules, check }: { p: Prepared; rules: Rule[]; check: CheckProps }) {
+  const [aId, setA] = useState(rules[0].id);
+  const [bId, setB] = useState<string>("everything");
+  const [kind, setKind] = useState<CheckKind>("hard");
+  const [mm, setMm] = useState("");
+  const a = rules.find((r) => r.id === aId) ?? rules[0];
+  const others = rules.filter((r) => r.id !== a.id);
+  const b: Side = bId === "everything" || bId === "itself" ? bId : others.find((r) => r.id === bId) ?? "everything";
+  const d = check.defaults;
+  const fallback = d ? Math.round((kind === "hard" ? d.tolerance_m : d.clearance_m) * 1000) : null;
+  const typed = mm.trim() === "" || !Number.isFinite(Number(mm)) ? null : Number(mm);
+  const why = cannot(p, a, check) ?? (typeof b === "object" && !sideCount(p, b) ? `${b.name || "Side B"} finds nothing to check` : null)
+    ?? (kind === "clearance" && typed !== null && typed <= 0 ? "A clearance is more than 0 mm" : null);
+  const label = (r: Rule) => `${r.name || nameFor(r.when.filter(complete))} (${sideCount(p, r)})`;
+  return (
+    <details className="fcheck">
+      <summary><Radar size={14} aria-hidden /> Check clashes</summary>
+      <div className="fgrid">
+        <span className="flabel">Check</span>
+        <div className="fcontrol"><select className="fselect" aria-label="Side A" value={a.id} onChange={(e) => setA(e.target.value)}>
+          {rules.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}</select></div>
+        <span className="flabel">Against</span>
+        <div className="fcontrol"><select className="fselect" aria-label="Side B" value={typeof b === "object" ? b.id : b} onChange={(e) => setB(e.target.value)}>
+          <option value="everything">Everything</option>
+          <option value="itself">Itself: these against each other</option>
+          {others.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}</select></div>
+        <span className="flabel">Find</span>
+        <div className="fcontrol fvalue">
+          <select className="fselect fop" aria-label="Kind" value={kind} onChange={(e) => { setKind(e.target.value as CheckKind); setMm(""); }}>
+            <option value="hard">Hard clashes deeper than</option>
+            <option value="clearance">Elements closer than</option>
+          </select>
+          <input className="fnum" type="number" min={0} aria-label="Millimetres" placeholder={fallback === null ? "" : String(fallback)} value={mm}
+            onChange={(e) => setMm(e.target.value)} /> mm
+        </div>
+      </div>
+      <div className="feditor-foot">
+        <button type="button" className="btn small" disabled={!!why} data-tip={why ?? undefined}
+          onClick={() => d && check.onCheck(checkTest(a, b, kind, typed, d))}><Radar size={14} aria-hidden /> Check</button>
+      </div>
+      <p className="hint small">{why && why !== "Wait for the check that is running" ? `${why}. ` : ""}The clashes replace the open list; Detect again repeats this check.</p>
+    </details>
   );
 }
 

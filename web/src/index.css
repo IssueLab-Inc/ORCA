@@ -130,6 +130,10 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .fcond-head .fselect { flex: 1; }
 .fvalue { flex-wrap: wrap; }
 .fop { flex: 0 0 auto !important; }
+.fcheck { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.fcheck > summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.fcheck:not([open]) { gap: 0; }
+.fcheck .hint { margin: 0; }
 .pick { position: relative; flex: 1; min-width: 0; }
 .pick > summary { list-style: none; cursor: pointer; padding: 4px 22px 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; }
 .pick > summary::-webkit-details-marker { display: none; }
@@ -1224,6 +1228,8 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .detect-count { margin: 0; font-size: 13px; color: #33414f; }
 .detect-count b { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
 .detect-diff { display: flex; flex-wrap: wrap; gap: 6px; }
+.detect-check { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; color: #33414f; }
+.detect-check b { font-weight: 600; }
 .detect-coverage summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .detect-coverage table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11.5px; }
 .detect-coverage th, .detect-coverage td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }

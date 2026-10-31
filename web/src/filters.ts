@@ -1,7 +1,8 @@
 /** Filters (docs/filters.md): named rules over the server's index (`GET /api/scenes/{id}/facets`), each finding
  * elements by what the model says about them and then colouring, colouring by value, hiding or isolating them. Several
  * are on at once; the top one wins where two colour the same element. Pure: App keeps the state, the viewer draws the
- * result (`Viewer.setRules`), FiltersPanel edits it. Viewing only: the check, triage, fixes and captures never see it. */
+ * result (`Viewer.setRules`), FiltersPanel edits it. Viewing only: triage, fixes and captures never see it, and the
+ * opening check ignores it; a check on filters takes a filter's conditions as one of its sides (checks.ts). */
 
 export type Value = string | number | boolean;
 /** One facet of the index: its key (`class`, `storey`, `pset:<Set>/<Prop>`…), its values and, per value, the
@@ -134,6 +135,14 @@ export function withBy(rule: Rule): Rule {
   if (rule.action !== "byValue" || rule.by?.facet) return rule;
   const facet = [...rule.when].reverse().find((c) => complete(c))?.facet;
   return facet ? { ...rule, by: { ...rule.by, facet } } : rule;
+}
+
+/** The user's filters as the page shares them with chat and an agent link (docs/filters.md, "Checks"): each by its
+ * name (or what it finds), with only its complete conditions, within what the server takes (`app.PageFilter`: 100
+ * filters, a name of 200 characters, 30 conditions), so a long name never refuses the chat turn. */
+export function shareable(rules: Rule[]): { id: string; name: string; when: Condition[]; invert: boolean; on: boolean; origin: string | null }[] {
+  return rules.slice(0, 100).map((r) => ({ id: r.id.slice(0, 100), name: (r.name || nameFor(r.when.filter(complete))).slice(0, 200),
+    when: r.when.filter(complete).slice(0, 30), invert: !!r.invert, on: r.on, origin: r.origin ?? null }));
 }
 
 /** The first palette colour no other filter uses, for a new colour filter (it keeps it when the list is reordered). */

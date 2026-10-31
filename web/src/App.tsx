@@ -45,7 +45,7 @@ import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type 
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { FiltersPanel, blankRule } from "./FiltersPanel";
 import { ElementCard, type CardActions } from "./ElementCard";
-import { EMPTY as NO_FILTERS, applied, complete, evaluate, legend, matching, migrate, prepare, withBy, zoomTarget, type FacetIndex, type FilterState, type Rule } from "./filters";
+import { EMPTY as NO_FILTERS, applied, complete, evaluate, legend, matching, migrate, prepare, shareable, withBy, zoomTarget, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type { Peek } from "./workingsGraph";
@@ -467,6 +467,11 @@ export function App() {
   // The filters, with the one being edited shown live (in its place, or on top while new), drawn in every view.
   const prepared = useMemo(() => (facetIndex ? prepare(facetIndex) : null), [facetIndex]);
   const facetKeys = useMemo(() => new Set(prepared?.byKey.keys() ?? []), [prepared]);
+  // The page's filters as chat and an agent know them, by name (docs/filters.md, "Checks").
+  const sharedFilters = useMemo(() => shareable(filterState.rules), [filterState]);
+  // A check on filters from the Filters panel: its clashes replace the open list (docs/filters.md, "Checks").
+  const filterCheck = { defaults: detectSetup?.check ?? null, busy: !!busy || !!detecting,
+    onCheck: (t: DetectTest) => { setFiltersOpen(false); void runDetect([t]); } };
   // The filter being edited counts by what it does, not its name: typing a name redraws nothing.
   const draftKey = filterDraft ? JSON.stringify({ ...filterDraft, name: "" }) : "";
   const ruleView = useMemo(() => {
@@ -1308,14 +1313,16 @@ export function App() {
     const keep = report?.origin === "sightline" ? reviewed : {};
     const selected = report?.origin === "sightline" ? clash?.id : undefined;
     lastTests.current = tests;
-    traceStart("detect", "you", "The open models");
+    // A check on filters is one test of its own (docs/filters.md, "Checks"): its name says what was checked.
+    traceStart("detect", "you", tests?.length === 1 && (tests[0].a.filter || tests[0].b?.filter) ? tests[0].name : "The open models");
     setDetecting({ phase: "Starting…", tests: [] }); setError(null);
     try {
       const done = await api.detect(sid, tests, onDetectEvent);
       if (sceneEpoch.current !== epoch) return;
       const r = await loadReport(async () => done.report, "the clashes ORCA found");
       if (!r) return;
-      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds, requirements: done.requirements ?? null });
+      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds, requirements: done.requirements ?? null,
+        tests: done.tests ?? null });
       const ids = new Set(r.clashes.map((c) => c.id));
       setReviewed(Object.fromEntries(Object.entries(keep).filter(([id]) => ids.has(id))));
       const still = selected && r.clashes.find((c) => c.id === selected);
@@ -1332,6 +1339,8 @@ export function App() {
       if (workspaceEpoch.current !== workspace) return;
       setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({});
       setVerdicts(null); setViews({}); captures.current.clear(); setDetection(found);
+      // Detect again repeats what chat or the agent ran: a check on filters stays that check.
+      lastTests.current = found.tests ?? null;
     } catch (e) { setError((e as Error).message); }
     finally { setDetecting(null); }
   }
@@ -2270,7 +2279,7 @@ export function App() {
   async function connectAgent() {
     setAgentBusy(true); setAgentError(null);
     try {
-      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved }));
+      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters }));
       setAgentLog([]);
     } catch (e) { setAgentError((e as Error).message); } finally { setAgentBusy(false); }
   }
@@ -2282,12 +2291,12 @@ export function App() {
   useEffect(() => {
     if (!agentLink) return;
     const t = setTimeout(() => {
-      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })
+      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters })
         .catch((e) => { if (e instanceof ApiError && e.status === 404) setAgentLink(null); });
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId]);
+  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId, sharedFilters]);
   /** What the agent does, carried out here: the chat's ui events, opened models, applied fixes, pictures. */
   async function onAgentEvent(e: LinkEvent) {
     if (!agentLink) return;
@@ -2432,7 +2441,7 @@ export function App() {
         setFixes(saved.fixes ?? {});
         if (info.detection && info.detection.report_id === rep.id) {
           const { report_id: _r, ...d } = info.detection;
-          setDetection(d);
+          setDetection(d); lastTests.current = d.tests ?? null;
         }
       }
     }
@@ -3003,7 +3012,7 @@ export function App() {
                 requirements={reqLabel} stale={triageStale} onRequirements={() => setReqOpen(true)} />}
               insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
                 detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
-                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)}
+                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} onWhole={() => void runDetect(null)}
                 requirementsId={reqSaved?.enabled ? reqId : null} onRequirements={() => setReqOpen(true)} />}
                 <Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
                 resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={(f) => { setListFocus(f); if (f) setLeftView("clashes"); }}
@@ -3041,7 +3050,7 @@ export function App() {
             <div className="filters-sheet-head"><b>Filters</b>
               <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
             <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex && !facetsError} error={facetIndex ? null : facetsError} onRetry={() => setFacetsTry((n) => n + 1)} state={filterState} onState={setFilterState}
-              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }}
+              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }} check={filterCheck}
             drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
           </div>)}
         {stats && filterKey.length > 0 && (
@@ -3164,7 +3173,7 @@ export function App() {
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${chatReport}`} voiceModel={labels.voice} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
-            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved })} />
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters })} />
         </div>)}
       {inSlot(slots.plan, <div className="plan-slot" hidden={!docked && tab !== "plan"}>
         {(docked || tab === "plan") && <>
@@ -3354,7 +3363,7 @@ export function App() {
         </div>)}
       {docked && inSlot(slots.filters, <div className="filters-slot">
         <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex && !facetsError} error={facetIndex ? null : facetsError} onRetry={() => setFacetsTry((n) => n + 1)} state={filterState} onState={setFilterState}
-          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }}
+          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }} check={filterCheck}
           drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}
       {docked && inSlot(slots.properties, <div className="props in-panel">

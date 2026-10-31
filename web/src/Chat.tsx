@@ -1,6 +1,6 @@
 import { AudioLines, Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, type ChatEvent } from "./api";
+import { api, type ChatEvent, type SharedFilter } from "./api";
 import type { ChatRequest, ChatRequestOwner } from "./chatRequest";
 import { LiveVoice, type LiveVoiceError, MAX_SECONDS, type VoiceMode, VoiceRecorder } from "./voice";
 
@@ -67,7 +67,7 @@ const SUGGESTIONS = [
 ];
 
 export function ChatPanel({ context, onEvent, owner, ready, ask, voiceModel = "voice transcription" }: {
-  context: () => { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[] };
+  context: () => { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[]; filters?: SharedFilter[] };
   onEvent: (e: ChatEvent) => void;
   owner: ChatRequestOwner;
   ready: boolean;
