@@ -16,8 +16,9 @@ It is new work, written for ORCA during the event. No code from other products.
 ## Decisions (owner, Oct 29 and 30)
 
 - **Up to four views.** Layouts: Single, Two, Quad.
-- **A toggle** decides whether drawing views follow the 3D view's Near it / Only it (today's Context / Isolate), or
-  always show the full model.
+- **A setting** decides what drawing views show: what the filters and hides leave (the default, colours too), exactly
+  what the 3D view shows (its Near it / Only it, today's Context / Isolate, as well), or the whole model (no filters)
+  ([filters.md](filters.md), "Drawings").
 - **Clip planes are the user's to set**, in plans (cut plane and bottom) and in sections (the line, far clip and crop),
   by typing a value or dragging it in another view (View range and clip planes, below).
 - **Navigate anywhere, with or without a clash** (Oct 30): leaving a clash is one key or one click, the model can be

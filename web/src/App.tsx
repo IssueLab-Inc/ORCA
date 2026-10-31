@@ -33,7 +33,7 @@ import { Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode, type VisualStyle } from "./viewer/Viewer";
 import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./ViewerToolbar";
-import { escStep, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
+import { escStep, type DrawingsShow, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
 import { ViewPanes } from "./ViewPanes";
 import { MeasurePanel } from "./MeasurePanel";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
@@ -44,7 +44,7 @@ import { DEFAULT_AI_NAMES, setAiNames, type AiNames } from "./aiNames";
 import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type NotchStatus } from "./Brand";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { FiltersPanel } from "./FiltersPanel";
-import { EMPTY as NO_FILTERS, complete, evaluate, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
+import { EMPTY as NO_FILTERS, complete, evaluate, legend, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { PropertySets } from "./Properties";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
@@ -154,7 +154,7 @@ export function App() {
   const sectionTo = useRef<THREE.Box3 | null>(null);
   // Views beside the 3D one (docs/views.md): Single, Two or Quad, kept per browser; a phone shows one, a tablet two.
   const [viewLayout, setViewLayout] = useState<Layout>(() => { try { return (localStorage.getItem("sightline.views.layout") as Layout) || "single"; } catch { return "single"; } });
-  const [drawingsFollow, setDrawingsFollow] = useState(false);
+  const [drawingsShow, setDrawingsShow] = useState<DrawingsShow>("filtered");
   const [modelNames, setModelNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
   // What the model says about the selected element (properties.py): the Properties panel, or the card's All properties.
@@ -471,6 +471,8 @@ export function App() {
     return evaluate({ ...filterState, rules }, prepared);
   }, [filterState, filterDraft, prepared]);
   useEffect(() => { viewer.current?.setRules(ruleView); }, [ruleView]);
+  // The key to the colours on screen, over the model.
+  const filterKey = useMemo(() => legend(filterState, prepared), [filterState, prepared]);
   // A filter that takes the selected element off screen clears the selection, as a hide does.
   useEffect(() => {
     const gid = selected?.globalId;
@@ -490,7 +492,7 @@ export function App() {
   useEffect(() => { try { localStorage.setItem(WORKINGS_KEY, JSON.stringify(workings)); } catch { /* kept for this visit */ } }, [workings]);
   // The tour reads the main page: panels in their own windows come back for it.
   useEffect(() => { if (touring) dock.current?.gather(); }, [touring]);
-  useEffect(() => { viewer.current?.setDrawingsFollow(drawingsFollow); }, [drawingsFollow]);
+  useEffect(() => { viewer.current?.setDrawingsShow(drawingsShow); }, [drawingsShow]);
   // Each set of models has its own Home and saved views.
   useEffect(() => {
     if (!modelNames.length) return;
@@ -1583,7 +1585,7 @@ export function App() {
     temporary: temporaryCount, onResetTemporary: () => setTemporary({ hidden: [], isolated: null }),
     rulesOn: filterState.rules.filter((r) => r.on).length, onOpenFilters: () => openFilters(),
     layout: shownLayout, layouts: layout === "phone" ? ["single"] : layout === "tablet" ? ["single", "two"] : ["single", "two", "quad"],
-    onLayout: setViewLayout, follow: drawingsFollow, onFollow: setDrawingsFollow,
+    onLayout: setViewLayout, drawings: drawingsShow, onDrawings: setDrawingsShow,
   };
 
   /** The Filters panel, with a new filter in the editor when one is given (from a property, or chat). */
@@ -2971,6 +2973,20 @@ export function App() {
             <span className="clash-chip-text">{clashBusy ? `ORCA is working on ${clash ? `#${clash.number}` : "this pair"}` : clash ? clashLabel(clash) : "Your pair"}</span>
             <button className="ibtn" disabled={clashBusy} onClick={leaveClash} aria-label="Leave this clash" data-tip={clashBusy ? "ORCA is working on it" : "Leave this clash  ·  Esc"} data-tip-side="bottom"><X size={14} aria-hidden /></button>
           </div>) : null} />}
+        {!docked && filtersOpen && stats && (
+          <div className="filters-sheet" role="dialog" aria-label="Filters" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+            <div className="filters-sheet-head"><b>Filters</b>
+              <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
+            <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
+              draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)}
+            drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
+          </div>)}
+        {stats && filterKey.length > 0 && (
+          <button type="button" className="filter-chip" onClick={(e) => { e.stopPropagation(); openFilters(); }} onPointerDown={(e) => e.stopPropagation()}
+            data-tip="Filters by property: open them" data-tip-side="top">
+            {filterKey.slice(0, 6).map((k) => <span key={k.colour}><i className="fswatch" style={{ background: k.colour }} aria-hidden />{k.label}</span>)}
+            {filterKey.length > 6 && <span className="why">and more</span>}
+          </button>)}
         {stats && temporaryCount > 0 && (
           <div className="temp-chip" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             {temporary.isolated ? "Isolated for now" : `${temporary.hidden.length} hidden for now`}
@@ -3274,16 +3290,10 @@ export function App() {
             <p className="hint tipline"><Wand2 size={13} aria-hidden /> Tick several clashes in the list to fix them together.</p>
           )}
         </div>)}
-      {!docked && filtersOpen && stats && (
-        <div className="filters-sheet" role="dialog" aria-label="Filters">
-          <div className="filters-sheet-head"><b>Filters</b>
-            <button type="button" className="ibtn" aria-label="Close" onClick={() => setFiltersOpen(false)}><X size={15} aria-hidden /></button></div>
-          <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
-            draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)} />
-        </div>)}
       {docked && inSlot(slots.filters, <div className="filters-slot">
         <FiltersPanel index={prepared} loading={!!sceneId && !facetIndex} state={filterState} onState={setFilterState}
-          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)} />
+          draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => viewer.current?.frame(ids)}
+          drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}
       {docked && inSlot(slots.properties, <div className="props in-panel">
         {selected ? <>{elementCard}{elementSets}</> : <p className="hint">Click any element in the model to see its properties.</p>}

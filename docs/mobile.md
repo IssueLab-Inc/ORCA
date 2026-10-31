@@ -56,7 +56,9 @@ way at full height when it has no button: an iPhone 13 at full shows 6 clashes (
   to do next ("A set. Now pick element B"). A long press (half a second, finger still) picks A then B like a double
   click. Hints say tap, not double-click.
 - **Viewer tools:** the rail becomes **Tools** (a sheet with the view modes as labelled cards, section box, outlines,
-  measure, show connections, screenshot, standard views, models shown), **Go to clash** and Fit.
+  measure, show connections, screenshot, standard views, models shown, **Filters by property**), **Go to clash** and
+  Fit. Filters open as a sheet over the model (no dock on a phone or tablet), and the colour key sits above the bottom
+  sheet ([filters.md](filters.md)).
 - **Tooltips:** press and hold any control with a tip to read it without doing it; a tap on an informational element
   (`data-tip-tap`: info icons, chips, requirements cells) shows its tip for a few seconds.
 - **Popovers** open as sheets from the bottom with their name and a close button; they close on `pointerdown` outside.

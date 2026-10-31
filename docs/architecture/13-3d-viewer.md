@@ -144,7 +144,7 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 | Previews | `preview(moves)`, `showOption(shape, mode, colour)`, `showOptions(shapes, mode)` |
 | Camera | `focusClash(ids, point, label, fly)`, `frameFix(meshes, pairs)`, `frame(ids)`, `frameMeshes(meshes, tight)`, `fitAll(animate)`, `view(preset)`, `flyTo(position, target, animate)`, `orbit(on)`, `orbitAround(pivot, dx, dy)`, `setOrbitClash(on)`, callback `onUserCamera`; private `flyToZone`, `zoneCamera`, `zoneCameraFrom`, `viewDirection`, `flyToBox`, `adjustClipRange`, `sceneDiag`, `reach` |
 | Navigation | `activeCamera()`, `setProjection(p)`, `pose()`, `applyPose(p)`, `back()`, `forward()`, getters `canBack`, `canForward`, `setHome(p)`, getter `homeView`, `home()`, `lookFrom(dir)`, callback `onChange` (history, Home, layout or hides changed); private `press` (pivot or grip), `turn` (cube drag), `syncOrtho` |
-| Panes and drawing views | `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)` (shares kept within 0.2–0.8), getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `defaultSpec(kind)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, getter `hasClash`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
+| Panes and drawing views | `setDrawingsShow(show)`, `setLayout(layout)`, `maximise(i)`, getter `maximisedPane`, `setSplit(x, y)` (shares kept within 0.2–0.8), getter `splitShares`, `visiblePanes()`, `rect3d()`, `paneAt(x, y)`, `setPaneSpec(i, spec)`, `defaultSpec(kind)`, `setPinned(i, on)`, `fitPane(i)`, `paneToClash(i)`, getter `hasClash`, `defaultCrop()`, `setDatums(d)`, `setDrawingsFollow(on)`, `modelBox()`; fields `layout`, `panes`, `levels`, `datums`, `drawingsFollow`, `pane3d`; private `layoutPanes`, `configureViews`, `clashViews`, `renderDrawing`, `drawInto`, `render3d`, `annotatePane`, `dragHandle`, `lookHere`, `useDrawingVisibility`, `drawFrame` |
 | Section box and marker | `setSection(on, margin, box)`, getter `section`, `setMarker(point, label)`; private `boxAroundFocus`, `boxInView`, `buildGrips`, `placeGrips`, `gripAt`, `dragGrip` |
 | Picking and measuring | `pickAt(event, { ghosts })`, `pick(event)`, `has(gid)`, `boxOf(ids)`; measuring: getters `measurements`, `measureOpen`, `setMeasuring(on)`, `setSnap(on)`, `measureHover(event)`, `measureClick(event)`, `measureCancel()`, `removeMeasurement(id)`, `clearMeasurements()`; private `snapAt`, `snap3d`, `snapDrawing`, `snapNear`, `edgesFor`, `drawingCandidates`, `drawMeasures` |
 | Captures | `snapshot()`, `capture(side)`, `captureClash(a, b, side)`, `thumbClash(a, b, side)`, `captureBuilt(fix, pair, classOf, radius, side)`; private `posed`, `posedShots`, `builtPasses`, `fullCanvas`, `png` |
@@ -357,9 +357,16 @@ flowchart LR
   (`.view-lost`); when the browser gives it back, every pane is drawn again (three.js re-creates what was on the
   card); not back within 5 s, it offers a reload, which picks the session up. Captures return nothing meanwhile
   (`Viewer.lost`), never black pictures, and `App` holds the thumbnail queue until it is back.
-- **Full model or follow 3D:** `applyMode` records each element whose 3D visibility differs from the drawings' (what
-  Context or Isolate hide) in `drawVis`; `useDrawingVisibility` swaps the drawings' set in around a drawing's passes
-  and picks, unless `setDrawingsFollow(true)`.
+- **What drawings show** (`setDrawingsShow`, [docs/filters.md](../filters.md), "Drawings"): `filtered` (the default:
+  what the filters and hides leave, without the 3D view's Context or Isolate), `follow` (exactly what the 3D view
+  shows) or `whole` (only hidden models stay hidden). `applyMode` records each element whose 3D visibility differs
+  from the drawings' in `drawVis`; `useDrawingVisibility` swaps the drawings' set in around a drawing's passes and
+  picks.
+- **Filter colours in drawings:** while filters colour anything (and drawings don't show the whole model), `drawInto`
+  fills with `DrawingStyle.paintFill` (a fill that keeps each element's colour) and `useDrawingPaint` sets each
+  element's colour for the pass, its filter's a quarter of the way to paper (`DrawingStyle.onPaper`) or its file's
+  tint (`DrawingStyle.tint`), then puts the 3D colours back: 2N colour writes per redraw, and a drawing redraws only
+  when something changes. Cut faces keep their poché; the 3D Hidden line style shows no filter colours.
 - **Annotations** (`annotate.ts`, redrawn when its own key changes): grid lines and bubbles (in sections and
   elevations only the axes within 25° of the look direction, `views.gridShows`), level lines and heads, a revision
   cloud and the `#N` round where the pair meets, in plan each section's line, heads, far clip and crop sides, each

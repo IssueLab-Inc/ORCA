@@ -10,7 +10,7 @@ import type { RuleView } from "../filters";
 import { candidatesOf, clipSegment, cutSegments, measureText, mergeRuns, pickSnap, type Candidates, type Measurement, type Segment,
   type SnapKind } from "./measure";
 import { CameraHistory, defaultKinds, facingFor, levelsOrModel, paneRects, planThrough, sectionFrame, sectionThrough, shownBy,
-  viewTitle, type Datums, type DrawingSpec, type Filters, type Layout, type Level, type Pose, type Rect, type Temporary, type ViewSpec } from "./views";
+  viewTitle, type Datums, type DrawingSpec, type Filters, type Layout, type Level, type Pose, type Rect, type Temporary, type ViewSpec, type DrawingsShow } from "./views";
 
 const RED = new THREE.Color("#d0342c");
 const GREEN = new THREE.Color("#1f9d3a");
@@ -189,7 +189,8 @@ export class Viewer {
   private split = { x: 0.5, y: 0.5 };
   private maximised: number | null = null;
   /** Drawing views hide what Context / Isolate hide (true), or show the whole model (false, the default). */
-  drawingsFollow = false;
+  /** What the drawing views show: what the filters leave, what the 3D view shows, or the whole model. */
+  drawings: DrawingsShow = "filtered";
   /** Levels (sorted) and grids from the server, and a counter every change to what is drawn bumps. */
   datums: Datums | null = null;
   levels: Level[] = [];
@@ -441,12 +442,13 @@ export class Viewer {
       }
       for (const el of model.byGlobalId.values()) {
         const inFocus = !!this.focusSide(el.globalId);
-        let base = !inFocus && !this.hidden.has(el.globalId);  // focus elements are drawn by the focus layer
-        if (base && shown) base = shown(el.globalId);
+        const raw = !inFocus && !this.hidden.has(el.globalId);  // focus elements are drawn by the focus layer
+        const base = raw && shown ? shown(el.globalId) : raw;
         let visible = base;
         if (visible && hasFocus && this.mode === "isolate") visible = keep.has(el.globalId);
         if (visible && near) visible = near.has(el.globalId);
-        if (visible !== base && this.panes.length > 1) this.drawVis.push({ el, v3d: visible, vDraw: base });
+        const vDraw = this.drawings === "follow" ? visible : this.drawings === "whole" ? raw : base;
+        if (visible !== vDraw && this.panes.length > 1) this.drawVis.push({ el, v3d: visible, vDraw });
         el.mesh.setVisibleAt(el.instanceId, visible);
         const p = paint?.get(el.globalId);
         const c = p ? this.paintColour(p) : ghostly ? GHOST
@@ -1594,7 +1596,7 @@ export class Viewer {
   }
 
   /** Drawing views follow the 3D view's Context / Isolate (true), or show the whole model. */
-  setDrawingsFollow(on: boolean) { this.drawingsFollow = on; this.applyMode(); this.onChange?.(); }
+  setDrawingsShow(show: DrawingsShow) { this.drawings = show; this.applyMode(); this.onChange?.(); }
 
   private paneSeq = 0;
   private makePane(kind: DrawingSpec["kind"]): Pane {
@@ -1806,7 +1808,7 @@ export class Viewer {
     // Draw again when what it shows changed. A pan or zoom alone only moves the last picture (the composite's shift)
     // while it goes on, and draws once it rests: a drawing is several passes over the model, too slow for every pointer
     // move. A drag that reshapes the view (a cut, a section line) draws at most five times a second while it goes on.
-    const content = `${this.version}|${view.contentKey(pane.rect)}|${this.drawingsFollow}|${this.hiddenModels.size}`;
+    const content = `${this.version}|${view.contentKey(pane.rect)}|${this.drawings}|${this.hiddenModels.size}`;
     if (view.moved) { view.moved = false; view.quiet = 0; } else view.quiet++;
     // A gesture goes on while a pointer holds the pane or the view moved in the last few frames (frames, not only time:
     // on a slow machine one frame outlasts any delay).
@@ -1856,9 +1858,12 @@ export class Viewer {
     const focusMats = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
     const sel = this.selectionLayer.children.find((o) => (o as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
     const restore = this.useDrawingVisibility();
+    // The filters' colours, on paper: each coloured element in its colour, the rest in its file's tint.
+    const paint = this.drawings !== "whole" && !this.lifted ? this.rules?.paint : null;
+    const unpaint = paint?.size ? this.useDrawingPaint(paint) : null;
     const hiddenForNormals: THREE.Object3D[] = [];
     try {
-      this.models.forEach((m, i) => { m.mesh.material = st.fills[i % st.fills.length]; if (m.glass) m.glass.material = st.glass; });
+      this.models.forEach((m, i) => { m.mesh.material = unpaint ? st.paintFill : st.fills[i % st.fills.length]; if (m.glass) m.glass.material = st.glass; });
       for (const o of this.focusLayer.children) {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh || (mesh.material as THREE.Material).transparent) continue;
@@ -1927,6 +1932,7 @@ export class Viewer {
       scene.background = background;
       this.models.forEach((m, i) => { m.mesh.material = materials[i][0]; if (m.glass && materials[i][1]) m.glass.material = materials[i][1]!; });
       for (const [mesh, mat] of focusMats) mesh.material = mat;
+      unpaint?.();
       restore();
       this.clipping.push(...box);
     }
@@ -2036,8 +2042,27 @@ export class Viewer {
 
   /** Swap in the drawings' visibility (the whole model, where the 3D view's Context or Isolate hide part of it);
    * returns what puts the 3D view's back. */
+  /** The filters' colours for a drawing's fill pass (`DrawingStyle.paintFill` reads each element's colour): coloured
+   * elements in their colour lightened towards paper, the rest in their file's tint; the 3D colours back after. */
+  private useDrawingPaint(paint: Map<string, string>): () => void {
+    const saved: [LoadedElement, THREE.Vector4][] = [];
+    this.models.forEach((m, i) => {
+      const tint = this.drawStyle.tint(i);
+      for (const el of m.byGlobalId.values()) {
+        if (el.mesh !== m.mesh) continue;     // see-through elements keep the glass fill
+        const was = new THREE.Vector4();
+        el.mesh.getColorAt(el.instanceId, was);
+        saved.push([el, was]);
+        const p = paint.get(el.globalId);
+        const c = p ? this.drawStyle.onPaper(p) : tint;
+        el.mesh.setColorAt(el.instanceId, this.scratch.set(c.r, c.g, c.b, 1));
+      }
+    });
+    return () => { for (const [el, was] of saved) el.mesh.setColorAt(el.instanceId, was); };
+  }
+
   private useDrawingVisibility(): () => void {
-    if (this.drawingsFollow || !this.drawVis.length) return () => undefined;
+    if (!this.drawVis.length) return () => undefined;
     for (const d of this.drawVis) d.el.mesh.setVisibleAt(d.el.instanceId, d.vDraw);
     return () => { for (const d of this.drawVis) d.el.mesh.setVisibleAt(d.el.instanceId, d.v3d); };
   }

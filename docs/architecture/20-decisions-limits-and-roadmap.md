@@ -224,6 +224,8 @@ and `deploy` finds none: open work is tracked in the feature docs and here, not 
   ([evals/README.md](../../evals/README.md)).
 - Insights' early "duplicate braces → modelling error" pattern is likely the same misreading as the duplicate titles
   above (build log, Oct 28).
+- Filter colours in drawing views fill each element's paper, but a cut face keeps its poché, and the 3D Hidden line
+  style shows no filter colours (it would cost two colour writes per element every frame) ([docs/filters.md](../filters.md)).
 - The cell's C5 (the HMI vs the panel's working space) has no fix: every direction hits a conveyor, tray or filter.
   That is a real result, not a bug.
 - Muse Image takes no `mask` or `input_fidelity` (400), so there is no strength setting: keeping to the model comes

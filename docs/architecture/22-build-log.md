@@ -1525,3 +1525,13 @@ The Filters panel (Oct 31; owner request, "full filtering capabilities"; code `w
 - **Checked:** `web/tests/filters.test.mjs` (7), `viewer-filters.test.mjs` (3), `dock.test.mjs`; in Chromium on
   Northbank: Colour by System (11 systems, 844 elements), ducts, pipes and trays isolated and coloured by system,
   Level 02 Mechanical coloured with Grey the rest and Zoom to them; no console errors.
+
+Filter colours in drawings, and what drawings show (Oct 31; owner decision: shared filters with a drawing opt-out;
+code `Viewer.setDrawingsShow`, `useDrawingPaint`, `DrawingStyle.paintFill`; [docs/filters.md](../filters.md)):
+- **What:** the drawings' toggle is now three settings: what the filters leave (the default), what the 3D view shows,
+  or the whole model (no filters). Plans, sections and elevations fill each coloured element in its colour on paper.
+  A key over the 3D view says what each colour means and opens Filters. Without the dock, Filters is a sheet over the
+  model (Tools on a phone); it had been hidden under the phone's bottom sheet in the first version.
+- **Checked:** `web/tests/viewer-filters.test.mjs` (5); in Chromium on Northbank, two views: the south elevation with
+  MEP isolated and coloured by System shows each system in its colour, and The whole model brings back everything
+  uncoloured; on a 390 px phone, Tools → Filters by property → Colour by Discipline colours the model, with its key.

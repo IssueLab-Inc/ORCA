@@ -2009,3 +2009,9 @@ a.pop-item { color: inherit; }
 .project-alt > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 @media (max-width: 560px) { .project-alt { flex-wrap: wrap; } .project-start { padding: 24px 16px; } }
 .fpanel > .btn { align-self: flex-start; }
+/* The key to the filters' colours over the model (docs/filters.md). */
+.filter-chip { position: absolute; right: 130px; bottom: 12px; z-index: 4; display: flex; flex-wrap: wrap; gap: 4px 10px; max-width: min(520px, 60%);
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.94); box-shadow: var(--shadow); font: inherit; font-size: 12px; cursor: pointer; text-align: left; color: var(--ink); }
+.filter-chip span { display: inline-flex; align-items: center; gap: 5px; }
+.filter-chip:hover { border-color: var(--accent); }
+.app.phone .filter-chip { right: auto; left: 8px; bottom: 76px; max-width: calc(100% - 16px); }

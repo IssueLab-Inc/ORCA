@@ -92,9 +92,30 @@ green and purple and their outlines, the selection's blue, hits' magenta, the si
 orange, the section box and measure, the clash overlap's amber, the greys). Each is at least ΔE 22 from all of them
 and 25 from each other (CIE76; `web/tests/filters.test.mjs`).
 
+## Drawings (built)
+
+Owner decision: one set of filters for every view, with one setting that lets the drawings show the whole model.
+
+- **What drawings show** (the Views menu's **Drawings show**, or **Drawings show the whole model** in the Filters
+  panel when drawing views are open): **What the filters leave** (the default: filters, hides and colours; not the 3D
+  view's Context or Isolate), **What the 3D view shows** (Context and Isolate too), or **The whole model** (no filters,
+  no colours; only hidden models stay hidden). `Viewer.setDrawingsShow`.
+- **Colours on paper:** each coloured element is filled in its colour a quarter of the way to the paper, so the
+  linework still reads; the rest keep their file's paper tint. Cut faces keep their poché, and the 3D Hidden line style
+  shows no filter colours (doc 20, known limits).
+- Measured in Chromium on Northbank: the south elevation, MEP isolated and coloured by System, shows supply air, return
+  air, cold water, lighting and fire alarm each in its colour; the whole model setting brings back everything, uncoloured.
+
+## The key and small screens (built)
+
+- **The key:** while filters colour anything, a chip over the 3D view lists up to six colours and what each means (a
+  colour filter's name, a colour-by-value filter's values) and opens the Filters panel (`filters.legend`).
+- **Without the dock** (the classic layout, tablets, phones) the Filters panel is a sheet over the model, opened from
+  the Visibility menu (Tools on a phone).
+
 ## Still to come
 
-Colours in the drawing views and the drawings' own setting, the Properties panel's row actions, and chat.
+The Properties panel's row actions, and chat.
 
 ## Tests
 
@@ -102,8 +123,9 @@ Colours in the drawing views and the drawings' own setting, the Properties panel
   left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); colour by
   value (chosen colours, palette by place, values ticked off, what it counts); counts among the other conditions,
   names, sets, a new filter's colour; `migrate`; the palette against the reserved colours.
-- `web/tests/viewer-filters.test.mjs` (3): hides, isolates and colours reach the batch, with grey for the rest;
-  captures never see them; lit links leave out what a filter hides.
+- `web/tests/viewer-filters.test.mjs` (5): hides, isolates and colours reach the batch, with grey for the rest;
+  captures never see them; lit links leave out what a filter hides; what drawings show for each setting; a drawing's
+  fill pass takes the colours on paper and gives the 3D ones back.
 - `server/tests/test_facets.py` (7): every element with its file, class, storey (as `datums.storeys`), type and
   material; numbers kept as numbers in SI from a millimetre file; the hidden note never in the index; every kind of
   value (classification, group, layers, enumerated, list, complex parts, what the type gives; no ranges or tables);

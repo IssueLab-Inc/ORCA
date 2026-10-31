@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, Bookmark, Box, Camera, Columns2, Compass, Crop, 
 import { useState } from "react";
 import { IconButton, Popover } from "./ui";
 import type { Preset, ViewMode, VisualStyle } from "./viewer/Viewer";
-import type { Filters, Layout } from "./viewer/views";
+import type { DrawingsShow, Filters, Layout } from "./viewer/views";
 
 const LAYOUTS: { id: Layout; label: string; hint: string; icon: typeof Square }[] = [
   { id: "single", label: "3D only", hint: "one view", icon: Square },
@@ -52,7 +52,7 @@ export interface ViewsControls {
   temporary: number; onResetTemporary: () => void;
   /** Filters on (docs/filters.md), and opening their panel. */
   rulesOn?: number; onOpenFilters?: () => void;
-  layout: Layout; layouts: Layout[]; onLayout: (l: Layout) => void; follow: boolean; onFollow: (on: boolean) => void;
+  layout: Layout; layouts: Layout[]; onLayout: (l: Layout) => void; drawings: DrawingsShow; onDrawings: (d: DrawingsShow) => void;
 }
 
 type Toggle = "edges" | "section" | "measure" | "links" | "ortho" | "grey";
@@ -102,7 +102,7 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, views,
             {VIEWS.map((v) => <button key={v.id} type="button" className="btn small" onClick={() => { onView(v.id); close(); }}>{v.label}</button>)}
           </div>
           <CameraItems state={state} views={views} onToggle={onToggle} close={close} fly />
-          <VisibilityItems models={models} state={state} views={views} onModel={onModel} />
+          <VisibilityItems models={models} state={state} views={views} onModel={onModel} close={close} />
         </>)}
       </Popover>
       <button type="button" className="btn rail-btn" disabled={!hasFocus} onClick={onFocus}><LocateFixed size={16} aria-hidden /> Go to clash</button>
@@ -174,7 +174,7 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, views,
         </Popover>)}
       {models.length > 0 && (
         <Popover icon={Layers} label="Visibility: models, levels, classes">
-          {() => <VisibilityItems models={models} state={state} views={views} onModel={onModel} />}
+          {(close) => <VisibilityItems models={models} state={state} views={views} onModel={onModel} close={close} />}
         </Popover>
       )}
       <IconButton icon={Camera} label="Save a screenshot" onClick={onShot} />
@@ -209,6 +209,13 @@ function CameraItems({ state, views, onToggle, close, fly = false }: { state: To
   </>);
 }
 
+/** What the drawing views show (docs/filters.md, "Drawings"). */
+const DRAWINGS: { id: DrawingsShow; label: string; hint: string }[] = [
+  { id: "filtered", label: "What the filters leave", hint: "(their colours too)" },
+  { id: "follow", label: "What the 3D view shows", hint: "(Context, Isolate)" },
+  { id: "whole", label: "The whole model", hint: "(no filters)" },
+];
+
 function LayoutItems({ views, close }: { views: ViewsControls; close: () => void }) {
   return (<>
     <p className="pop-title">Views</p>
@@ -216,10 +223,9 @@ function LayoutItems({ views, close }: { views: ViewsControls; close: () => void
       <button key={l.id} role="menuitemradio" aria-checked={views.layout === l.id} className={`pop-item ${views.layout === l.id ? "on" : ""}`}
         onClick={() => { views.onLayout(l.id); close(); }}><l.icon size={15} aria-hidden /><span><b>{l.label}</b> <small className="why">{l.hint}</small></span>{views.layout === l.id && <b className="tick">✓</b>}</button>))}
     <p className="pop-title">Drawings show</p>
-    <button role="menuitemradio" aria-checked={!views.follow} className={`pop-item ${!views.follow ? "on" : ""}`} onClick={() => views.onFollow(false)}>
-      <span>The whole model</span>{!views.follow && <b className="tick">✓</b>}</button>
-    <button role="menuitemradio" aria-checked={views.follow} className={`pop-item ${views.follow ? "on" : ""}`} onClick={() => views.onFollow(true)}>
-      <span>What the 3D view shows <small className="why">(Context, Isolate)</small></span>{views.follow && <b className="tick">✓</b>}</button>
+    {DRAWINGS.map((d) => (
+      <button key={d.id} role="menuitemradio" aria-checked={views.drawings === d.id} className={`pop-item ${views.drawings === d.id ? "on" : ""}`}
+        onClick={() => views.onDrawings(d.id)}><span>{d.label} <small className="why">{d.hint}</small></span>{views.drawings === d.id && <b className="tick">✓</b>}</button>))}
     <p className="pop-title">Picking a clash</p>
     <label className="pop-item check"><input type="checkbox" checked={views.fly} onChange={(e) => views.onFly(e.target.checked)} /> Take every view to the clash I pick</label>
   </>);
@@ -248,8 +254,8 @@ function SavedViews({ views }: { views: ViewsControls }) {
 
 /** Models, levels and classes to show (viewing only: the check, triage and fixes never see these), and what is hidden
  * for now. */
-function VisibilityItems({ models, state, views, onModel }: { models: string[]; state: ToolbarState; views: ViewsControls;
-  onModel: (i: number, visible: boolean) => void }) {
+function VisibilityItems({ models, state, views, onModel, close }: { models: string[]; state: ToolbarState; views: ViewsControls;
+  onModel: (i: number, visible: boolean) => void; close?: () => void }) {
   const { filters, onFilters } = views;
   const flip = (key: keyof Filters, v: string, show: boolean) =>
     onFilters({ ...filters, [key]: show ? filters[key].filter((x) => x !== v) : [...filters[key], v] });
@@ -279,7 +285,7 @@ function VisibilityItems({ models, state, views, onModel }: { models: string[]; 
       </div>
     </>}
     {any && <button className="pop-item" onClick={() => onFilters({ classes: [], levels: [] })}>Show all levels and classes</button>}
-    {views.onOpenFilters && <button className="pop-item" onClick={views.onOpenFilters}>
+    {views.onOpenFilters && <button className="pop-item" onClick={() => { views.onOpenFilters?.(); close?.(); }}>
       <ListFilter size={15} aria-hidden /> Filters by property{views.rulesOn ? ` (${views.rulesOn} on)` : ""}…</button>}
   </>);
 }

@@ -169,6 +169,23 @@ export function count(p: Prepared | null, rule: Rule): number {
   return coloured.size;
 }
 
+/** The key to the colours on screen, top filter first: each colour filter's colour and name, each colour-by-value
+ * filter's values with their colours; one entry a colour, at most `max`. */
+export function legend(state: FilterState, p: Prepared | null, max = 6): { colour: string; label: string }[] {
+  if (!p || !state.colours) return [];
+  const out: { colour: string; label: string }[] = [], seen = new Set<string>();
+  const add = (colour: string, label: string) => { if (!seen.has(colour)) { seen.add(colour); out.push({ colour, label }); } };
+  state.rules.forEach((rule, at) => {
+    if (!rule.on) return;
+    if (rule.action === "colour") { if (count(p, rule)) add(ruleColour(rule, at), rule.name || nameFor(rule.when)); return; }
+    if (rule.action !== "byValue" || !rule.by) return;
+    const facet = p.byKey.get(rule.by.facet), off = new Set(rule.by.off ?? []);
+    if (!facet) return;
+    for (const v of valueCounts(p, facet.key, found(p, rule))) if (!off.has(String(v.value))) add(valueColour(rule, facet, v.value), shownValue(v.value, facet.unit));
+  });
+  return out.slice(0, max + 1);
+}
+
 /** A facet's values with how many elements have each, among `within` (null: all). */
 export function valueCounts(p: Prepared, key: string, within: Set<number> | null = null): { value: Value; count: number }[] {
   const f = p.byKey.get(key);

@@ -67,3 +67,28 @@ test("lit links leave out what a filter takes off screen", () => {
   v.setRules({ hide: new Set(["a"]), only: null, paint: null, greyRest: false });
   assert.equal(lit(), 1);
 });
+
+test("drawings show what the filters leave, what the 3D view shows, or the whole model", () => {
+  const { v, m } = viewer();
+  v.panes = [{}, {}];
+  v.setRules({ hide: new Set(["a"]), only: null, paint: null, greyRest: false });
+  const drawn = () => Object.fromEntries(v.drawVis.map((d) => [d.el.globalId, d.vDraw]));
+  assert.deepEqual(drawn(), {}, "filtered (the default): the drawings show what the 3D view does here");
+  v.setDrawingsShow("whole");
+  assert.deepEqual(drawn(), { a: true }, "the whole model: what a filter hides is drawn");
+  v.setDrawingsShow("follow");
+  assert.deepEqual(drawn(), {});
+  assert.equal(visible(m, "a"), false, "the 3D view keeps the filter whatever the drawings show");
+});
+
+test("a drawing's fill pass takes the filters' colours on paper, the rest its file's tint, and gives the 3D colours back", () => {
+  const { v, m } = viewer();
+  v.setRules({ hide: null, only: null, paint: new Map([["b", "#318181"]]), greyRest: false });
+  const paper = new THREE.Color("#fbfbf8"), tint = new THREE.Color("#eceef0");
+  v.drawStyle = { tint: () => tint, onPaper: (hex) => new THREE.Color(hex).lerp(paper, 0.25) };
+  const back = v.useDrawingPaint(v.rules.paint);
+  assert.equal(hex(m, "b"), `#${new THREE.Color("#318181").lerp(paper, 0.25).getHexString()}`);
+  assert.equal(hex(m, "a"), "#eceef0");
+  back();
+  assert.equal(hex(m, "b"), "#318181"); assert.equal(hex(m, "a"), "#808080");
+});
