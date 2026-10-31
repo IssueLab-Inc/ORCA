@@ -192,11 +192,13 @@ patterns, chat and live voice, the MCP server with pairing links, coordination r
 palletising cell), PDF reports and BCF, IFC/STEP export, accept in place, escalation to Muse Wonder, Show it built,
 phones and tablets, guided tours, free navigation and drawing views (plans, sections, elevations beside 3D, up to
 four), measuring in every view with snapping (`docs/measure.md`), desktop panels that dock, collapse, float and pop
-out (`docs/panels.md`, dockview's free core), properties of any element (a Properties panel: type, material, size,
-property sets, quantities), Workings (the Activity panel draws each run as it happens: `docs/workings.md`). Latest
-validation (Oct 31): 644 server tests, 148 web tests; answer key 3/3 first try at Rev04 heights and
+out (`docs/panels.md`, dockview's free core), everything the model says about any object (a Properties panel with
+breadcrumbs to its storey, building, site and project, icon buttons, and a filter from any value), filters by property
+(colour, colour by value, hide, isolate, in every view, from the panel, chat, voice or MCP: `docs/filters.md`),
+Workings (the Activity panel draws each run as it happens: `docs/workings.md`). Latest
+validation (Oct 31): 661 server tests, 168 web tests (with the filters); answer key 3/3 first try at Rev04 heights and
 `evals/step_cell.py` passing (C1, C2, C3, C6, C7, C8, Rev B 0) with requirements off (with Northbank's own on: Oct
-30). How each part works now: `docs/architecture/`. What was built when, with the numbers measured at the time:
+30), both last run before the filters, which changed nothing in the fix path. How each part works now: `docs/architecture/`. What was built when, with the numbers measured at the time:
 `docs/architecture/22-build-log.md`.
 
 Next, in order.
