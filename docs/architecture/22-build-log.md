@@ -1480,3 +1480,13 @@ No layout patches behind the load card (Oct 31; owner report; code `web/src/view
 - **Checked:** `web/tests/viewer-empty-stage.test.mjs` (2; the first fails on the old code); in Chromium at 1600×1000,
   loading Northbank from the start page in the four-view layout now shows the same even stage as the single layout,
   and the four views (two in the two-view layout) are back once it is drawn; web tests and build.
+
+More model formats on the roadmap (Oct 31; owner decision; no code changed):
+- **What happened:** the owner asked whether ORCA could open the formats a web viewer lists (GLB, glTF, OBJ, STL,
+  PLY, 3DS, FBX, 3MF, DAE, VRML, X3D, SKP, DWG, DXF, DWF, SVG, STEP, IGES, IFC, 3DM; IES recognised only).
+- **What changed:** they wait until after the freeze, and come in only as models ORCA checks, converted to IFC on the
+  server like STEP, never as a view-only viewer; glTF/GLB first. Recorded in
+  [20](20-decisions-limits-and-roadmap.md) (an owner decision, and "Later" with what to build) and CLAUDE.md's "Later".
+- **Checked:** a throwaway script (not committed) wrote `tests/test_step.py`'s cell out as GLB and as IGES with
+  OpenCASCADE and ran each through `step.convert` with only `step._read` swapped. GLB gave the six parts, their
+  groups, metres and the same three clashes as the STEP, as meshes; IGES came in as one part with no clashes.

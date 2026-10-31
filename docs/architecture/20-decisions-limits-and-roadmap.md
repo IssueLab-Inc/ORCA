@@ -89,6 +89,7 @@ carries the decision today.
 | Oct 30 | The demo video goes after both hackathon themes as one story: it opens in our world (Theme 1, a building problem IssueLab knows firsthand) and turns to the frontier (Theme 2, the same loop on a robot cell); a narrator with captions; plain words, no BIM or IFC unless explained; Meta's models named with what each does; numbers only from measured runs | [docs/demo-video.md](../demo-video.md) |
 | Oct 30 | The desktop has no header bar: the ORCA wordmark hangs from the model's top edge in a notch (20 px high, smaller than the brand guide's minimum, to stay out of the model) that grows to show live progress; Export and one menu sit in the model's top right corner; the brand's navy and ink across the app; the favicon and icons from the kit; not a redesign of the landing | `web/src/Brand.tsx`, `App.tsx` (`notchStatus`, `corner`), `AppMenu.tsx`; [docs/brand-assets.md](../brand-assets.md), [12](12-web-app.md) |
 | Oct 30 | Nothing about one project, domain, demo or vendor is fixed in code. The requirements file decides whether a project is a building or a machine (`domain`) and what is fixed in place (`stays`, and groups allowed no edits), fully; the demos get default requirements of their own, checked in and evaluated off and on; team names are typed; the clearance follows the requirements on every check; model names, prices and limits are settings; the MCP website address is the deploy's setting | `requirements.Doc.domain` / `stays`, `IfcScene.stays`, `Workspace.requirements_for`, `demos.py`, `Workspace.clearance`, `meta_client.labels`, doc [15](15-requirements-settings-and-config.md) |
+| Oct 31 | More model formats wait until after the freeze, and come in only as models ORCA checks (converted to IFC on the server, like STEP), never as a view-only viewer; glTF/GLB first | Nothing in code yet; "Later", below |
 
 **Oct 30, owner decision:** approved direction **05 / ORCA Type** (custom wordmark and split-O symbol), then the full
 asset and motion pack, and requested its repository PR and merge for the upcoming application redesign. The approved
@@ -273,6 +274,23 @@ From CLAUDE.md and [docs/mcp.md](../mcp.md):
   `muse mcp login`; claude.ai's custom connectors expect it).
 - **STEP machines placed inside building models.**
 - **Offsets and trims on meshed STEP parts** (tubes, bends, castings).
+- **More model formats, glTF/GLB first** (owner decision, Oct 31: after the freeze, and only as models ORCA checks,
+  never as a view-only viewer). The way in is STEP's: the server converts the file to IFC, so detection, fixes,
+  reports and export work unchanged and the viewer needs nothing new. A throwaway test on Oct 31 (not in the repo)
+  wrote `tests/test_step.py`'s cell out with OpenCASCADE and ran it through `step.convert` with only `step._read`
+  swapped:
+  - **glTF/GLB** (`RWGltf_CafReader`): all six parts with their names and groups, in metres, and the same three
+    clashes as the STEP. Parts arrive as meshes, so they only move, like meshed STEP parts. Group names are the
+    file's node names (OpenCASCADE's own writer gives product names only with `RWMesh_NameFormat_Product`). To
+    build: the reader picked by suffix, the suffix lists (`service.MODEL_SUFFIXES`, the message in
+    `app._receive_models`, `web/src/uploads.ts`), moves written back into the `.glb` on export, tests,
+    [14](14-files-in-and-out.md) and [docs/step.md](../step.md).
+  - **IGES** (`IGESCAFControl_Reader`): opened, but the assembly collapsed into one part, so nothing could clash. It
+    would need splitting by solid.
+  - **Not tested:** STL and VRML (OpenCASCADE reads both; an STL has no part names, so one file is one element);
+    OBJ, 3MF, PLY, DAE, 3DS and FBX need an MIT reader such as trimesh or assimp (this OCP build has no OBJ reader);
+    3DM only when the file keeps its render meshes; DXF, SVG and most DWG are 2D drawings, underlays at most; DWG
+    (ODA is paid, LibreDWG is GPL), SKP and DWF are closed; IES is a light's photometric data, not geometry.
 - **Panels:** drawing views as dock panels of their own (they share one canvas), pop-out windows restored after a
   reload, docking on tablets ([docs/panels.md](../panels.md)).
 

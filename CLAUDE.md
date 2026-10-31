@@ -216,4 +216,5 @@ Next, in order.
 7. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
 Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
-offsets and trims on meshed STEP parts.
+offsets and trims on meshed STEP parts; more model formats, glTF/GLB first, converted to IFC like STEP (Oct 31,
+`docs/architecture/20-decisions-limits-and-roadmap.md`).
