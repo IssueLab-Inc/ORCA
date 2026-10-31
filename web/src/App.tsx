@@ -309,6 +309,7 @@ export function App() {
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings | null>(null);
+  const cornerEl = useRef<HTMLDivElement>(null);
   // Which model titles and triage use now, for the copy (asked again when the owner changes their own settings).
   const [triageModel, setTriageModel] = useState<TriageModel | null>(null);
   // Whether a clash Muse Spark could not fix may go to Muse Wonder for a second try (docs/escalation.md).
@@ -2814,27 +2815,40 @@ export function App() {
     : triageRun && !triageRun.done ? { title: "Triage is sorting the clashes" }
     : null;
   // The model's top right corner (desktop): the one main action, what is connected, and the menu with everything else.
+  // It keeps clear of the notch in the middle (index.css, "The corner"): what is kept counts on Export, the owner's
+  // settings sit on their button, labels give way on a narrow model, and the working notch narrows to the room left.
+  const exportable = !!sceneId && !gone?.scene;
+  const ownerNote = ownerSettings ? `on for you: effort ${ownerSettings.effort ?? "default"}${ownerSettings.no_caps !== false ? " · no caps" : ""}${
+    ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}${
+    ownerSettings.escalation ? ` · second try ${ownerSettings.escalation}` : ""}` : undefined;
+  const exportLabel = stepFiles.length ? "Export STEP + IFC" : "Export IFC";
+  const keptNote = fixedCount > 0 ? ` · ${fixedCount} ${fixedCount === 1 ? "fix" : "fixes"} kept` : "";
   const corner = (
-    <div className="corner" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+    <div className="corner" ref={cornerEl} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
       {landing && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
-      {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
+      {fixedCount > 0 && !exportable && <span className="chip ok">{fixedCount} fixed</span>}
       {reqLabel && !landing && <button className="btn req-pill" onClick={() => setReqOpen(true)} data-tip-side="bottom"
         data-tip={`Checking, triage and fixes follow "${reqSaved!.doc.name}" (${reqLabel})`}><ClipboardCheck size={15} aria-hidden /><span className="req-pill-label"> {reqLabel}</span></button>}
       {agentLink && <button className="btn agent-pill" onClick={() => setAgentOpen(true)} aria-label="Agent connected" data-tip-side="bottom"
         data-tip={`An agent works on this session over MCP · the link has ${timeLeft(agentLink, now)} left`}>
         <Bot size={15} aria-hidden /><span className="lbl"> {agentLink.last_call ? `Agent · ${agentLink.last_call.tool}` : "Agent · waiting"}</span></button>}
-      {ownerSettings && <span className="chip accent" data-tip="Owner settings apply to your requests only" data-tip-side="bottom">
-        owner · effort {ownerSettings.effort ?? "default"}{ownerSettings.no_caps !== false ? " · no caps" : ""}
-        {ownerSettings.open_weights != null ? ` · open weights ${ownerSettings.open_weights ? "on" : "off"}` : ""}
-        {ownerSettings.escalation ? ` · second try ${ownerSettings.escalation}` : ""}</span>}
-      <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} /></span>
-      {sceneId && !gone?.scene && <a className="btn primary" data-tour="export" href={api.exportUrl(sceneId)} data-tip-side="bottom"
-        data-tip={stepFiles.length ? "Download the changed models: the STEP with its fixes, and the IFC" : "Download the changed IFC files"}>
-        <Download size={15} aria-hidden /> {stepFiles.length ? "Export STEP + IFC" : "Export IFC"}</a>}
+      <span className="owner-pop"><OwnerSettingsMenu onChange={setOwnerSettingsState} onEveryone={() => setModelsAsked((n) => n + 1)} note={ownerNote} /></span>
+      {exportable && <a className="btn primary export" data-tour="export" href={api.exportUrl(sceneId!)} data-tip-side="bottom" aria-label={`${exportLabel}${keptNote}`}
+        data-tip={`${stepFiles.length ? "Download the changed models: the STEP with its fixes, and the IFC" : "Download the changed IFC files"}${keptNote}`}>
+        <Download size={15} aria-hidden /><span className="export-label">{exportLabel}</span>
+        {fixedCount > 0 && <span className="export-n"><Check size={11} strokeWidth={3} aria-hidden />{fixedCount}</span>}</a>}
       <button className="btn menu-btn" data-tour="menu" aria-expanded={menuOpen} aria-label="Menu" data-tip="Models, coordinate, requirements, report, agent, help" data-tip-side="bottom"
         onClick={() => setMenuOpen(true)}><Menu size={18} aria-hidden /></button>
     </div>
   );
+  // The working notch narrows to what the corner leaves it: the corner's width, kept on the stage for the CSS.
+  useEffect(() => {
+    const el = cornerEl.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { el.parentElement?.style.setProperty("--corner-w", `${Math.ceil(el.offsetWidth)}px`); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [compact]);
   // The phone sheet's peek line: what is happening now, and the one next step, so the sheet is useful folded down.
   const peekLine: { text: React.ReactNode; live?: boolean; action?: { label: string; run: () => void; disabled?: boolean; tour?: string } } =
     busy ? { text: busy, live: true }

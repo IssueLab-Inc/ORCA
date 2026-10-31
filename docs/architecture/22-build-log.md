@@ -1680,3 +1680,19 @@ in chat and MCP; [docs/filters.md](../../docs/filters.md)):
   system colours, framed; Grey → the rest back in grey; Show → as before. Chat on Muse Spark: "Show only the supply air
   ducts on level 2 in blue and hide everything else." → `set_filters` with `hide_rest` (a first "Level 2" refused with
   the closest name, then "Level 02"): 68 ducts and fittings in blue, everything else hidden, the user's filter paused.
+
+The corner keeps clear of the notch (Oct 31; owner report; code `web/src/App.tsx`, `web/src/index.css`,
+`web/src/ui.tsx`, `web/src/Owner.tsx`):
+- **What happened:** the model's top right corner ran under the ORCA wordmark at the top of the model: with a fix kept
+  and the owner's settings on ("1 fixed" and "owner · effort default · no caps" chips), it reached 62 px into the
+  notch at 1600×1000 and 179–222 px at 1366 and 1280; the working notch (fixed at `100cqw − 420px`) overlapped it even
+  at 1920.
+- **What changed:** the count of fixes kept moves onto Export (✓n; its tip and name say "n fixes kept"); the owner's
+  settings move onto their button, marked while on, with what is set in its tip (`Popover` `note`). The corner never
+  reaches past half the model less the wordmark's half (it wraps first); under a 1180 px model the requirements and
+  agent pills keep their icons only, and under 640 px (760 beside them) Export too; the working notch narrows to the
+  room the corner leaves (App measures it into `--corner-w`).
+- **Checked:** `web/tests/corner.test.mjs` (2; both fail on the old code); in Chromium as the owner with a fix kept, at
+  1280×800, 1366×768, 1600×1000 and 1920×1080, idle and while ORCA checks the models: the corner clears the wordmark
+  by 34–311 px and the working notch by 12–179 px, on one row. With requirements and an agent as well it still clears
+  both; at 1280 and 1366 that crowded corner wraps to a second row rather than reaching the notch. Web tests and build.

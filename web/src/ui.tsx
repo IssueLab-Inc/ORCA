@@ -17,9 +17,10 @@ export function IconButton({ icon: Icon, label, shortcut, active, disabled, onCl
 
 /** A small menu that opens beside its trigger and closes on outside click or Escape. On a phone it opens as a sheet
  * from the bottom of the screen, with its title and a close button (index.css, "Responsive"). */
-export function Popover({ icon, label, shortcut, children, tip = "right", text }: {
+export function Popover({ icon, label, shortcut, children, tip = "right", text, note }: {
   icon: LucideIcon; label: string; shortcut?: string; children: (close: () => void) => React.ReactNode; tip?: "right" | "bottom";
   text?: string;  // show a text label beside the icon (for the few actions people look for by name)
+  note?: string;  // what is set now: added to the trigger's name and tip, and the icon trigger marked `set`
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -68,7 +69,8 @@ export function Popover({ icon, label, shortcut, children, tip = "right", text }
       {text
         ? <button type="button" className={`btn ghost ${open ? "on" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}>
             {(() => { const I = icon; return <I size={16} strokeWidth={1.8} aria-hidden />; })()} {text}</button>
-        : <IconButton icon={icon} label={label} shortcut={shortcut} active={open} onClick={() => setOpen(!open)} tip={tip} />}
+        : <IconButton icon={icon} label={note ? `${label} · ${note}` : label} shortcut={shortcut} active={open} onClick={() => setOpen(!open)}
+            tip={tip} className={note ? "set" : ""} />}
       {body && (sheet ? createPortal(body, document.body) : body)}
     </div>
   );
