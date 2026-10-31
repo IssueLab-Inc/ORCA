@@ -111,7 +111,7 @@ def test_chat_sets_and_clears_filters_by_what_the_model_says(tmp_path):
     chat = Chat(ws, model)
     chat.turn(chat.session(None), "Colour the ducts on level 2", Context(sid, rid), events.append)
     ui = [e for e in events if e.get("type") == "ui" and e.get("action") == "filters"]
-    assert ui[0]["mode"] == "replace" and ui[0]["grey_rest"] is True
+    assert ui[0]["mode"] == "replace" and ui[0]["grey_rest"] is True and "hide_rest" not in ui[0]
     ducts, by_class, rest = ui[0]["filters"]
     assert ducts["when"] == [{"facet": "class", "op": "is", "values": ["IfcDuctSegment"]},
                              {"facet": "storey", "op": "is", "values": ["Level 02"]}]

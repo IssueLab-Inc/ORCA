@@ -27,11 +27,13 @@ export interface Rule {
   /** A user's filter switched off while chat's show; back on when chat clears its own. */
   paused?: boolean;
 }
-export interface FilterState { v: 1; rules: Rule[]; colours: boolean; greyRest: boolean }
+/** The filters and what happens to the rest (what no filter colours or isolates): `greyRest` greys it, `hideRest`
+ * hides it; one at most. */
+export interface FilterState { v: 1; rules: Rule[]; colours: boolean; greyRest: boolean; hideRest?: boolean }
 /** What the viewer draws: elements hidden, the only ones shown (null: every one), colours by GlobalId. */
 export interface RuleView { hide: Set<string> | null; only: Set<string> | null; paint: Map<string, string> | null; greyRest: boolean }
 
-export const EMPTY: FilterState = { v: 1, rules: [], colours: true, greyRest: false };
+export const EMPTY: FilterState = { v: 1, rules: [], colours: true, greyRest: false, hideRest: false };
 
 /** Categorical colours for filters, chosen clear of every colour another role uses (each at least ΔE 21 from them) and
  * of each other: see RESERVED and web/tests/filters.test.mjs. */
@@ -156,7 +158,7 @@ export const ruleColour = (rule: Rule, at: number) => rule.colour ?? PALETTE[at 
 
 /** What every rule that is on does together. Hide rules hide what they find; isolate rules show only what some isolate
  * rule finds (several: what any finds); colour rules colour, the top one winning; Grey the rest greys what is left
- * uncoloured when something is coloured. */
+ * uncoloured when something is coloured; Hide the rest hides what no filter colours or isolates (when one does). */
 export function evaluate(state: FilterState, p: Prepared | null): RuleView {
   const none: RuleView = { hide: null, only: null, paint: null, greyRest: false };
   if (!p) return none;
@@ -183,7 +185,14 @@ export function evaluate(state: FilterState, p: Prepared | null): RuleView {
       for (const i of facet.items[k]) if (hit.has(i) && !paint!.has(gid[i])) paint!.set(gid[i], c);
     });
   });
-  return { hide, only, paint, greyRest: !!state.greyRest && !!(paint as Map<string, string> | null)?.size };
+  // Hide the rest: only what a filter colours or isolates stays (in its colour); hide filters still hide within it.
+  const painted = paint as Map<string, string> | null, isolated = only as Set<string> | null;
+  if (state.hideRest && (painted?.size || isolated)) {
+    const shown = new Set<string>(isolated ?? []);
+    for (const g of painted?.keys() ?? []) shown.add(g);
+    only = shown;
+  }
+  return { hide, only, paint, greyRest: !!state.greyRest && !state.hideRest && !!painted?.size };
 }
 
 /** How many elements a rule acts on now: what it finds, or for colour by value what it colours. */
@@ -243,8 +252,11 @@ export function actedOn(p: Prepared, rule: Rule): string[] {
 }
 
 /** The filters just applied, going from one state to the next: added, switched on, or changed while on (not
- * renamed, nor paused or brought back by chat). Switching one off, deleting, reordering or Show colours applies none. */
+ * renamed, nor paused or brought back by chat). Switching one off, deleting, reordering or Show colours applies none;
+ * switching Hide the rest on applies every filter that is on. */
 export function applied(prev: FilterState, next: FilterState): Rule[] {
+  // Hiding the rest applies every filter that is on: the views go to what is left.
+  if (next.hideRest && !prev.hideRest) return next.rules.filter((r) => r.on);
   const before = new Map(prev.rules.map((r) => [r.id, r]));
   const what = (r: Rule) => JSON.stringify([r.when, r.action, r.invert ?? false, r.colour ?? null, r.by ?? null]);
   return next.rules.filter((r) => {
@@ -340,7 +352,8 @@ export function migrate(raw: unknown): FilterState {
   if (s.v !== 1 || !Array.isArray(s.rules)) return EMPTY;
   const rules = s.rules.filter((r): r is Rule => !!r && typeof r === "object" && typeof (r as Rule).id === "string"
     && Array.isArray((r as Rule).when) && ["colour", "byValue", "hide", "isolate"].includes((r as Rule).action));
-  return { v: 1, rules, colours: s.colours !== false, greyRest: !!s.greyRest };
+  const hideRest = !!s.hideRest;
+  return { v: 1, rules, colours: s.colours !== false, greyRest: !!s.greyRest && !hideRest, hideRest };
 }
 
 /** CIE76 colour difference, for the palette's test. */

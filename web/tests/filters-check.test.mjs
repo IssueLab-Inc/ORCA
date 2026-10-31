@@ -79,9 +79,9 @@ function draw(node) {
   }
   return node.props?.children === undefined ? node : { ...node, props: { ...node.props, children: draw(node.props.children) } };
 }
-function panel(rules, check) {
-  const state = { v: 1, rules, colours: true, greyRest: false };
-  return draw(FiltersPanel({ index: p, loading: false, state, onState() {}, draft: null, onDraft() {}, check }));
+function panel(rules, check, more = {}, onState = () => {}) {
+  const state = { v: 1, rules, colours: true, greyRest: false, ...more };
+  return draw(FiltersPanel({ index: p, loading: false, state, onState, draft: null, onDraft() {}, check }));
 }
 const all = (tree, predicate, out = []) => {
   if (!tree || typeof tree !== "object") return out;
@@ -90,6 +90,20 @@ const all = (tree, predicate, out = []) => {
   for (const c of [tree.props?.children].flat(Infinity)) all(c, predicate, out);
   return out;
 };
+
+test("The rest: show, grey or hide, one at a time", () => {
+  const saved = [];
+  const rest = (more) => find(panel([ducts], undefined, more, (st) => saved.push(st)), (n) => n.props?.role === "radiogroup" && n.props["aria-label"] === "The rest");
+  const buttons = (g) => all(g, (n) => n.type === "button");
+  assert.deepEqual(buttons(rest({})).map((b) => [b.props.children, b.props["aria-checked"]]), [["Show", true], ["Grey", false], ["Hide", false]]);
+  assert.deepEqual(buttons(rest({ hideRest: true })).map((b) => b.props["aria-checked"]), [false, false, true]);
+  buttons(rest({ greyRest: true }))[2].props.onClick();
+  assert.deepEqual([saved[0].greyRest, saved[0].hideRest], [false, true], "hiding the rest stops greying it");
+  buttons(rest({ hideRest: true }))[1].props.onClick();
+  assert.deepEqual([saved[1].greyRest, saved[1].hideRest], [true, false]);
+  buttons(rest({ hideRest: true }))[0].props.onClick();
+  assert.deepEqual([saved[2].greyRest, saved[2].hideRest], [false, false]);
+});
 
 test("What do these hit? checks a filter against everything; off while a check runs, or for nothing or everything", () => {
   const ran = [];

@@ -325,16 +325,19 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         return run(ctx, "set_view", args)
 
     @tool(read_only=True)
-    def set_filters(ctx: Context, filters: list[dict], grey_rest: bool | None = None) -> dict:
+    def set_filters(ctx: Context, filters: list[dict], grey_rest: bool | None = None, hide_rest: bool | None = None) -> dict:
         """Find elements by what the model says about them and colour, colour by value, hide or isolate them in every
         view of the person's page, until clear_filters (docs/filters.md). Each filter: classes, levels, models (lists),
         where (a list of {property, set?, op: is|is_not|contains|has|missing|less|more|between, values?, min?, max?};
         lengths in metres), action (colour|colour_by_value|hide|isolate), colour (#rrggbb), by (the property to colour
-        by: System, class, level, model…), invert, name. Replaces the filters set before; the person's own are paused.
+        by: System, class, level, model…), invert, name. grey_rest greys, hide_rest hides, everything no filter colours
+        or isolates. Replaces the filters set before; the person's own are paused.
         Returns how many elements each finds; a name the models lack fails with the closest ones."""
         args: dict = {"filters": filters}
         if grey_rest is not None:
             args["grey_rest"] = grey_rest
+        if hide_rest is not None:
+            args["hide_rest"] = hide_rest
         return run(ctx, "set_filters", args)
 
     @tool(read_only=True)

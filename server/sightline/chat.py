@@ -177,7 +177,8 @@ TOOLS = [
                 "colour": {"type": "string", "description": "#rrggbb, for colour"},
                 "by": {"type": "string", "description": "the property to colour by (System, class, level, model…)"},
                 "invert": {"type": "boolean"}}, "required": ["action"]}},
-            "grey_rest": {"type": "boolean", "description": "grey what no filter colours"}}, ["filters"]),
+            "grey_rest": {"type": "boolean", "description": "grey what no filter colours"},
+            "hide_rest": {"type": "boolean", "description": "hide everything no filter colours or isolates"}}, ["filters"]),
     _fn("clear_filters", "Remove the filters you set; the user's own come back."),
 ]
 
@@ -718,7 +719,7 @@ class Chat:
             except facets.Unresolved as e:
                 return {"error": str(e)}, "refused: not in the model", []
             emit({"type": "ui", "action": "filters", "mode": "replace", "filters": [r for r, _ in made],
-                  **({"grey_rest": bool(args["grey_rest"])} if "grey_rest" in args else {})})
+                  **{k: bool(args[k]) for k in ("grey_rest", "hide_rest") if k in args}})
             found = [{"filter": r["name"] or r["action"], "elements": len(hit), **_coloured(idx, r, hit)} for r, hit in made]
             return {"filters": found}, ", ".join(f"{len(hit)} elements" for _, hit in made) or "no filters", []
         if name == "clear_filters":
