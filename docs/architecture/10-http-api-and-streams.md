@@ -451,7 +451,7 @@ model_calls, blockers}`, or `error {detail}`.
 | `thinking` | a model call starts |
 | `tool` | `name`, `args` |
 | `tool_result` | `name`, `summary` |
-| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `filters {mode: replace\|clear, filters?: [Rule], grey_rest?}` ([docs/filters.md](../filters.md)), `open_report {report_id, detection}`, `show_it_built {clash_id}` |
+| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `filters {mode: replace\|clear, filters?: [Rule], grey_rest?, hide_rest?}` ([docs/filters.md](../filters.md)), `open_report {report_id, detection}`, `show_it_built {clash_id}` |
 | `detect_event` | `event` (a detection event, above) |
 | `agent` | `event` (a proposal event, above, `escalating` included) |
 | `proposal` | `clash_id`, `element_a`, `element_b`, the whole proposal |

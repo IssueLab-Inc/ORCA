@@ -224,7 +224,7 @@ call goes through `chat.Chat._run` under the same name.
 | `measure_clash` | yes | ORCA's signed distance for one clash | chat → `Workspace.measure` | none |
 | `show_clash` | yes | Selects a clash in the page and flies the camera to it | chat | `ui select_clash` |
 | `set_view` | yes | Shaded, x-ray, context or isolate, and the section box | chat | `ui set_view` |
-| `set_filters` | yes | Filters by property on the page ([docs/filters.md](../filters.md)): each finds elements by classes, levels, models and `where` conditions and colours, colours by value, hides or isolates them; replaces the agent's own filters, pauses the person's; names the models lack fail with the closest | chat → `facets.resolve` | `ui filters {mode: replace, filters, grey_rest?}` |
+| `set_filters` | yes | Filters by property on the page ([docs/filters.md](../filters.md)): each finds elements by classes, levels, models and `where` conditions and colours, colours by value, hides or isolates them, and greys or hides the rest (`grey_rest`, `hide_rest`); replaces the agent's own filters, pauses the person's; names the models lack fail with the closest | chat → `facets.resolve` | `ui filters {mode: replace, filters, grey_rest?, hide_rest?}` |
 | `clear_filters` | yes | Removes the agent's filters; the person's come back | chat | `ui filters {mode: clear}` |
 | `capture_view` | yes | A picture of the person's current view | `Link.capture("view")`, `Image` | `capture_request {what: "view"}` |
 | `describe_element` | yes | An element's class, name, tag, level, file, connections, and a straight segment's run | chat → `Workspace.describe`, `edits.run_of` | none |

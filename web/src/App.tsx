@@ -2234,7 +2234,10 @@ export function App() {
         const mine = st.rules.filter((r) => r.origin !== "chat");
         if (e.mode === "clear") return { ...st, rules: mine.map((r) => (r.paused ? { ...r, on: true, paused: undefined } : r)) };
         const paused = mine.map((r) => (r.on ? { ...r, on: false, paused: true } : r));
-        return { ...st, colours: true, ...(e.grey_rest != null ? { greyRest: e.grey_rest } : {}),
+        // Grey the rest and Hide the rest are one or the other: the one chat asks for turns the other off.
+        const rest = e.hide_rest ? { hideRest: true, greyRest: false } : e.grey_rest ? { greyRest: true, hideRest: false }
+          : { ...(e.grey_rest != null ? { greyRest: false } : {}), ...(e.hide_rest != null ? { hideRest: false } : {}) };
+        return { ...st, colours: true, ...rest,
           rules: [...(e.filters ?? []).map((r) => ({ ...r, origin: "chat" as const })), ...paused] };
       });
       setFilterDraft(null);

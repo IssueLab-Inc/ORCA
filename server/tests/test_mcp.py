@@ -147,14 +147,15 @@ def test_the_page_follows_and_answers_for_pictures(server):
     while not page.empty():
         seen.append(page.get_nowait())
     assert {"type": "ui", "action": "set_view", "mode": "xray", "section_box": True} in seen
-    assert rpc(server, token, "set_filters", {"filters": [{"classes": ["IfcBeam"], "action": "isolate"}]}) == {
-        "filters": [{"filter": "isolate", "elements": 1}]}
+    assert rpc(server, token, "set_filters", {"filters": [{"classes": ["IfcBeam"], "action": "colour"}], "hide_rest": True}) == {
+        "filters": [{"filter": "colour", "elements": 1}]}
     rpc(server, token, "clear_filters")
     seen = []
     while not page.empty():
         seen.append(page.get_nowait())
     sent = [e for e in seen if e.get("action") == "filters"]
     assert sent[0]["filters"][0]["when"] == [{"facet": "class", "op": "is", "values": ["IfcBeam"]}]
+    assert sent[0]["hide_rest"] is True and "grey_rest" not in sent[0], "the agent can hide everything the filter does not colour"
     assert sent[1] == {"type": "ui", "action": "filters", "mode": "clear"}
 
     # The page shares the person's filters with the link; the agent checks one by name.
