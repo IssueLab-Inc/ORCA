@@ -113,9 +113,16 @@ Owner decision: one set of filters for every view, with one setting that lets th
 - **Without the dock** (the classic layout, tablets, phones) the Filters panel is a sheet over the model, opened from
   the Visibility menu (Tools on a phone).
 
+## From the Properties panel (built)
+
+Every value the filters' index knows has, on hover: **Filter by this value** (a new filter finding it, in the editor,
+shown live), **Colour by this property** (a colour-by-value filter on top of the list) and **Isolate all with this
+value** (a temporary isolate). A storey's breadcrumb offers **Filter by this level**, and the card's **More** menu
+**Filter by this class** ([panels.md](panels.md), "Properties").
+
 ## Still to come
 
-The Properties panel's row actions, and chat.
+Chat and voice.
 
 ## Tests
 

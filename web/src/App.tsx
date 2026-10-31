@@ -12,7 +12,7 @@ import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } fro
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
 import { localFile, uploadRefusal, uploadStatus } from "./uploads";
-import { countsText, highlightGroups, indexGraph, LINK_COLOURS, LINK_ORDER, LINK_WORDS, type LinkIndex, type LinkKind } from "./links";
+import { countsText, highlightGroups, indexGraph, LINK_COLOURS, type LinkIndex } from "./links";
 import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setGoneHandler, setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
@@ -43,10 +43,10 @@ import { shortNames } from "./names";
 import { DEFAULT_AI_NAMES, setAiNames, type AiNames } from "./aiNames";
 import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type NotchStatus } from "./Brand";
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
-import { FiltersPanel } from "./FiltersPanel";
-import { EMPTY as NO_FILTERS, complete, evaluate, legend, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
+import { FiltersPanel, blankRule } from "./FiltersPanel";
+import { ElementCard, type CardActions } from "./ElementCard";
+import { EMPTY as NO_FILTERS, complete, evaluate, legend, matching, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
-import { PropertySets } from "./Properties";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type { Peek } from "./workingsGraph";
 import type * as THREE from "three";
@@ -464,6 +464,7 @@ export function App() {
   useEffect(() => { viewer.current?.setFilters(filters); }, [filters]);
   // The filters, with the one being edited shown live (in its place, or on top while new), drawn in every view.
   const prepared = useMemo(() => (facetIndex ? prepare(facetIndex) : null), [facetIndex]);
+  const facetKeys = useMemo(() => new Set(prepared?.byKey.keys() ?? []), [prepared]);
   const ruleView = useMemo(() => {
     const d = filterDraft, shown = d && (d.when.some(complete) || d.invert || d.action === "byValue") ? { ...d, on: true } : null;
     const rules = !d ? filterState.rules : filterState.rules.some((r) => r.id === d.id)
@@ -2854,44 +2855,56 @@ export function App() {
     <label className="pop-item check"><input type="checkbox" checked={classic} onChange={(e) => { close(); setClassic(e.target.checked); }} /> Classic layout (fixed panels)</label>
   </>);
 
-  // The selected element's card: what it is, its links, Set as A / B and what to do with it. The classic card over the
-  // model and the dock's Properties panel both show it (docs/panels.md).
-  const elementCard = selected && (<>
-      <div className="row"><b>{String(selected.info?.ifc_class ?? "Element").replace(/^Ifc/, "")}</b>
-        <button className="ibtn" onClick={() => setSelected(null)} aria-label="Close" data-tip="Close" data-tip-side="left"><X size={15} aria-hidden /></button></div>
-      <div>{String(selected.info?.name ?? "")}</div>
-      <dl className="kv">
-        <dt>GlobalId</dt><dd className="mono">{selected.globalId}</dd>
-        {selected.info?.tag ? <><dt>Tag</dt><dd>{String(selected.info.tag)}</dd></> : null}
-        {selected.info?.storey ? <><dt>Level</dt><dd>{String(selected.info.storey)}</dd></> : null}
-        {selected.info?.source ? <><dt>File</dt><dd>{String(selected.info.source)}</dd></> : null}
-      </dl>
-      <Links info={selected.info} onPick={(gid) => {
+  // The selected element's card (ElementCard.tsx): what it is, where it sits, what to do with it, its links and everything
+  // its model says. The classic card over the model and the dock's Properties panel both show it (docs/panels.md).
+  const idsWith = (facet: string, value: string | number | boolean) => {
+    if (!prepared) return [];
+    return [...matching(prepared, { facet, op: "is", values: [value] })].map((i) => prepared.index.elements[i]);
+  };
+  const cardActions = (gid: string): CardActions => {
+    const cls = String(selected?.info?.ifc_class ?? elementProps?.data?.ifc_class ?? "");
+    return {
+      onPick: (other) => {
         const epoch = sceneEpoch.current;
-        setSelected({ globalId: gid, info: null });
-        viewer.current?.frame([gid]);
-        if (sceneId) api.element(sceneId, gid)
-          .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === gid ? { ...s, info } : s)); })
+        setSelected({ globalId: other, info: null });
+        viewer.current?.frame([other]);
+        if (sceneId) api.element(sceneId, other)
+          .then((info) => { if (sceneEpoch.current === epoch) setSelected((s) => (s?.globalId === other ? { ...s, info } : s)); })
           .catch(() => undefined);
-      }} onShow={() => void pinLinks(selected.globalId, false)} />
-      <div className="row">
-        <button className="btn small" onClick={() => pickSide(selected.globalId, "a")}><i className="sw red" />Set as A</button>
-        <button className="btn small" disabled={!a || a === selected.globalId} onClick={() => pickSide(selected.globalId, "b")}><i className="sw green" />Set as B</button>
-      </div>
-      <div className="card-actions">
-        <button className="btn small ghost" onClick={() => viewer.current?.frame([selected.globalId])}>Zoom to it</button>
-        <button className="btn small ghost" onClick={() => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, selected.globalId] })); setSelected(null); }}>Hide</button>
-        <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: [selected.globalId] })}>Isolate</button>
-        <button className="btn small ghost" onClick={() => sectionRound(selected.globalId)}>Section box</button>
-        {selected.info?.ifc_class ? <>
-          <button className="btn small ghost" onClick={() => { const ids = viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [];
-            setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); }}>Hide all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
-          <button className="btn small ghost" onClick={() => setTemporary({ hidden: [], isolated: viewer.current?.ofClass(String(selected.info!.ifc_class)) ?? [] })}>Isolate all {String(selected.info.ifc_class).replace(/^Ifc/, "")}</button>
-        </> : null}
-      </div>
-  </>);
-  const elementSets = selected && <PropertySets data={elementProps?.gid === selected.globalId ? elementProps.data : null}
-    loading={elementProps?.gid !== selected.globalId || elementProps.loading} />;
+      },
+      onShowLinks: () => void pinLinks(gid, false),
+      onSide: (side) => pickSide(gid, side),
+      canB: !!a && a !== gid,
+      onZoom: () => viewer.current?.frame([gid]),
+      onHide: () => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, gid] })); setSelected(null); },
+      onIsolate: () => setTemporary({ hidden: [], isolated: [gid] }),
+      onSection: () => sectionRound(gid),
+      onHideClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); },
+      onIsolateClass: () => setTemporary({ hidden: [], isolated: viewer.current?.ofClass(cls) ?? [] }),
+      onFilterClass: () => openFilters(blankRule([{ facet: "class", op: "is", values: [cls] }], "isolate")),
+      onLevel: (name, how) => {
+        if (how === "filter") { openFilters(blankRule([{ facet: "storey", op: "is", values: [name] }], "isolate")); return; }
+        const ids = idsWith("storey", name);
+        if (how === "isolate") setTemporary({ hidden: [], isolated: ids });
+        else { setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
+      },
+      load: (ref) => (sceneId && ref.global_id ? api.properties(sceneId, ref.global_id, ref.file) : Promise.reject(new Error("No scene"))),
+      rows: prepared ? {
+        facets: facetKeys,
+        onFilter: (row) => openFilters(blankRule([{ facet: row.facet!, op: "is", values: [row.raw!] }], "colour")),
+        onColourBy: (row) => {
+          setFilterState((st) => ({ ...st, colours: true, rules: [{ ...blankRule([], "byValue"), by: { facet: row.facet! }, name: `By ${row.name}` }, ...st.rules] }));
+          openFilters();
+        },
+        onIsolate: (row) => setTemporary({ hidden: [], isolated: idsWith(row.facet!, row.raw!) }),
+      } : undefined,
+    };
+  };
+  const elementCard = (fold: boolean, closable: boolean) => selected && (
+    <ElementCard key={selected.globalId} gid={selected.globalId} info={selected.info}
+      props={elementProps?.gid === selected.globalId ? elementProps.data : null}
+      loading={elementProps?.gid !== selected.globalId || !!elementProps?.loading} fold={fold}
+      actions={{ ...cardActions(selected.globalId), ...(closable ? { onClose: () => setSelected(null) } : {}) }} />);
 
   return (
     <div className={`app ${compact ? "" : "notched"} ${docked ? "docked" : ""} ${resizing ? "resizing" : ""} ${landing ? "landing" : ""} ${starting ? "starting" : ""} ${compact ? `${layout} snap-${snap}` : ""} ${compact && listOpen ? "list-open" : ""}`}
@@ -3022,8 +3035,7 @@ export function App() {
           onRemove={(id) => viewer.current?.removeMeasurement(id)} onClear={() => viewer.current?.clearMeasurements()} onClose={() => toggle("measure")} />}
         {!docked && selected && !tool.measure && (
           <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-            {elementCard}
-            <details className="all-props"><summary>All properties</summary>{elementSets}</details>
+            {elementCard(true, true)}
           </div>
         )}
         {!compact && <Notch status={notchStatus} onLogo={() => openAbout()} />}
@@ -3296,7 +3308,7 @@ export function App() {
           drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}
       {docked && inSlot(slots.properties, <div className="props in-panel">
-        {selected ? <>{elementCard}{elementSets}</> : <p className="hint">Click any element in the model to see its properties.</p>}
+        {selected ? elementCard(false, false) : <p className="hint">Click any element in the model to see its properties.</p>}
       </div>)}
       {!compact && inSlot(slots.activity, <footer className={`dock${workings.on && workings.view === "work" ? " working" : ""}`}>
         <Activity attempts={proposal?.attempts ?? []} progress={progress} now={now} workings={workings.on} view={workings.view}
@@ -3531,34 +3543,4 @@ function keepPlaces(prev: RootCause[] | null, next: RootCause[]): RootCause[] {
   const out = prev.map((r) => now.get(r.hub.global_id) ?? { ...r, done: true });
   const seen = new Set(prev.map((r) => r.hub.global_id));
   return [...out, ...next.filter((r) => !seen.has(r.hub.global_id))];
-}
-
-
-type LinkEntry = { global_id: string; name: string | null; ifc_class: string };
-
-/** The properties card's links: what the element is joined to, hosts, rests on, supports or touches, by kind, each
- *  clickable; its systems and the assembly it is part of. */
-function Links({ info, onPick, onShow }: { info: Record<string, unknown> | null; onPick: (gid: string) => void; onShow: () => void }) {
-  const links = (info?.links ?? {}) as Partial<Record<LinkKind, LinkEntry[]>>;
-  const kinds = LINK_ORDER.filter((k) => links[k]?.length);
-  const systems = (info?.systems ?? []) as string[];
-  const partOf = info?.part_of as { name: string; parts: number } | null | undefined;
-  if (!info || (!kinds.length && !systems.length && !partOf)) return null;
-  return (
-    <div className="links">
-      {kinds.map((k) => (
-        <div key={k} className="link-kind">
-          <span className="link-head"><i className="sw" style={{ background: LINK_COLOURS[k] }} />{LINK_WORDS[k]} · {links[k]!.length}</span>
-          <ul>
-            {links[k]!.slice(0, 6).map((l) => (
-              <li key={l.global_id}><button type="button" className="link" onClick={() => onPick(l.global_id)}
-                data-tip={`${l.ifc_class.replace(/^Ifc/, "")}: select and go to it`}>{l.name || l.ifc_class.replace(/^Ifc/, "")}</button></li>))}
-            {links[k]!.length > 6 && <li className="hint">and {links[k]!.length - 6} more</li>}
-          </ul>
-        </div>))}
-      {partOf && <p className="hint">Part of {partOf.name} ({partOf.parts} parts)</p>}
-      {systems.length > 0 && <p className="hint">System: {systems.join(", ")}</p>}
-      {kinds.length > 0 && <button type="button" className="btn small" onClick={onShow}>Light them up</button>}
-    </div>
-  );
 }

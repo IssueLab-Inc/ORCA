@@ -1,5 +1,7 @@
 import { Fragment, useState } from "react";
+import { ChevronsDownUp, ChevronsUpDown, Copy, Focus, ListFilter, Palette } from "lucide-react";
 import type { ElementProperties, ObjectRef, PropRow } from "./api";
+import { IconButton } from "./ui";
 
 /** The selected object's properties (docs/panels.md, "Properties"): what it is and where it sits, its type, materials,
  * classifications, groups and documents, then each property set and quantity set as the model has them
@@ -140,31 +142,61 @@ export function filtered(list: Section[], filter: string): Section[] {
     .filter((s) => s.rows.length);
 }
 
-export function PropertySets({ data, loading }: { data: ElementProperties | null; loading: boolean }) {
+/** What a value's row offers when the filters' index knows its facet: filter by it, colour by it, isolate all with it. */
+export interface RowActions {
+  facets: Set<string>;
+  onFilter: (row: Row) => void;
+  onColourBy: (row: Row) => void;
+  onIsolate: (row: Row) => void;
+}
+
+export function PropertySets({ data, loading, rows: acts, onOpen }: { data: ElementProperties | null; loading: boolean;
+  rows?: RowActions; onOpen?: (ref: ObjectRef) => void }) {
   const [filter, setFilter] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [closed, setClosed] = useState<Set<string>>(new Set());
   if (!data) return <p className="hint">{loading ? "Reading its properties…" : "No properties to show."}</p>;
-  const list = filtered(sections(data), filter);
+  const all = sections(data);
+  const list = filtered(all, filter);
   // The panel may be in a window of its own: copy with that window's clipboard.
   const copy = (e: React.MouseEvent<HTMLElement>, text: string, key: string) => {
     const nav = e.currentTarget.ownerDocument.defaultView?.navigator ?? navigator;
     void nav.clipboard?.writeText(text).then(() => { setCopied(key); window.setTimeout(() => setCopied((k) => (k === key ? null : k)), 1200); })
       .catch(() => undefined);
   };
+  const folded = all.length > 0 && all.every((s) => closed.has(s.title));
   return (
     <div className="psets">
-      <input className="pset-filter" type="search" placeholder="Filter properties" aria-label="Filter properties" value={filter}
-        onChange={(e) => setFilter(e.target.value)} />
+      <div className="pset-tools">
+        <input className="pset-filter" type="search" placeholder="Filter properties" aria-label="Filter properties" value={filter}
+          onChange={(e) => setFilter(e.target.value)} />
+        <IconButton icon={folded ? ChevronsUpDown : ChevronsDownUp} label={folded ? "Expand all" : "Collapse all"} tip="left" size={15}
+          onClick={() => setClosed(folded ? new Set() : new Set(all.map((s) => s.title)))} />
+      </div>
       {list.map((s) => (
-        <details key={s.title} open>
+        <details key={s.title} open={!!filter || !closed.has(s.title)}
+          onToggle={(e) => { const open = e.currentTarget.open; if (filter) return;
+            setClosed((c) => { const n = new Set(c); if (open) n.delete(s.title); else n.add(s.title); return n; }); }}>
           <summary>{s.title}{s.fromType && <span className="from-type">Type</span>}<span className="why"> · {s.rows.length}</span></summary>
           <dl className="kv">
             {s.rows.map((r, i) => {
               const key = `${s.title}/${r.name}/${i}`;
-              return <Fragment key={key}><dt>{r.name}{r.fromType && !s.fromType && <span className="from-type" data-tip="Given by its type">Type</span>}</dt><dd>
-                {r.href ? <a href={r.href} target="_blank" rel="noreferrer">{r.value}</a>
-                  : <button type="button" className="pset-value" title="Click to copy" onClick={(e) => copy(e, r.value, key)}>
-                    {copied === key ? "Copied" : r.value}</button>}</dd></Fragment>;
+              const usable = !!acts && !!r.facet && acts.facets.has(r.facet) && r.raw !== undefined;
+              return <Fragment key={key}><dt>{r.name}{r.fromType && !s.fromType && <span className="from-type" data-tip="Given by its type">Type</span>}</dt>
+                <dd className="prow">
+                  {r.link && onOpen ? <button type="button" className="pset-link" onClick={() => onOpen(r.link!)} data-tip="Its own properties">{r.value}</button>
+                    : r.href ? <a href={r.href} target="_blank" rel="noreferrer">{r.value}</a>
+                    : <button type="button" className="pset-value" title="Click to copy" onClick={(e) => copy(e, r.value, key)}>
+                      {copied === key ? "Copied" : r.value}</button>}
+                  <span className="prow-tools">
+                    <button type="button" className="ibtn" aria-label={`Copy ${r.name}`} data-tip="Copy" onClick={(e) => copy(e, r.value, key)}><Copy size={13} aria-hidden /></button>
+                    {usable && <>
+                      <button type="button" className="ibtn" aria-label={`Filter by ${r.name} = ${r.value}`} data-tip="Filter by this value" onClick={() => acts!.onFilter(r)}><ListFilter size={13} aria-hidden /></button>
+                      <button type="button" className="ibtn" aria-label={`Colour by ${r.name}`} data-tip={`Colour by ${r.name}`} onClick={() => acts!.onColourBy(r)}><Palette size={13} aria-hidden /></button>
+                      <button type="button" className="ibtn" aria-label={`Isolate all with ${r.name} = ${r.value}`} data-tip="Isolate all with this value" onClick={() => acts!.onIsolate(r)}><Focus size={13} aria-hidden /></button>
+                    </>}
+                  </span>
+                </dd></Fragment>;
             })}
           </dl>
         </details>

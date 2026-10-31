@@ -78,8 +78,20 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
   (`isVisible`; dockview's `isActive` also needs the bar to have the focus, so it shortened the front tab too). A
   collapsed strip keeps the names.
 - **Classic layout, tablets and phones** keep the card over the model, with an **All properties** section.
-- **What it shows:** the card (class, name, GlobalId, tag, level, file, links, Set as A / B, Zoom, Hide,
-  Isolate, Section box, Hide / Isolate the class), then **everything the model says** (owner request, Oct 31):
+- **The card** (`ElementCard.tsx`, owner request Oct 31: a better layout, icon buttons, breadcrumbs):
+  - **Header:** the element's name, its class and type.
+  - **Breadcrumbs:** where it sits, Project › Site › Building › Level, each opening that object's own properties
+    (a storey's elevation and `Pset_BuildingStoreyCommon`, a building's address…) with a back arrow to the element;
+    a storey adds **Isolate this level**, **Hide this level** (for now) and **Filter by this level**.
+  - **Icon bar** (tooltips name each): **A** and **B** (set the pair, in their red and green), Zoom to it, Hide it for
+    now, Isolate it for now, Section box round it, Light up what it is linked to, and a **More** menu for every element
+    of its class (hide, isolate, filter by the class).
+  - What it is linked to, by kind (as before).
+  - **Every value's row**, on hover (always on a touch screen): **Copy**, and where the filters' index knows the value
+    **Filter by this value** (a new filter in the editor, shown live), **Colour by this property** (a colour-by-value
+    filter, on top) and **Isolate all with this value** (for now). The Storey row opens the storey. **Collapse all** /
+    **Expand all** beside the filter.
+- **What it shows** under the card, **everything the model says** (owner request, Oct 31):
   - **Element:** its IFC class, every direct attribute (name, description, tag, predefined type, object type, a
     storey's elevation, a door's overall height…), GlobalId, its storey, its direct container when that is not a
     storey (a neighbouring building on the Site model), file and size (mm, from the scene's box).

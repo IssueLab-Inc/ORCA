@@ -122,6 +122,7 @@ each feature see [01](01-product-and-journeys.md).
 | **Filter** (by property) | A named rule that finds elements by what the model says about them (model, class, floor, any attribute, property or quantity) and colours, colours by value, hides or isolates them; several on at once, the top one winning a colour. Viewing only. Not the clash list's filters, nor the quick model, level and class checkboxes. | `filters.Rule`, `FiltersPanel.tsx`, `Viewer.setRules`; [docs/filters.md](../filters.md) |
 | **Facet** | One thing a filter can match by, with its values and the elements that have each: `class`, `storey`, `pset:<Set>/<Prop>`… | `facets.py`, `filters.Facet` |
 | **Colour by value** | A filter that gives each value of one property its own colour (System, Floor, Model…), with a key under it. | `Rule.action` `byValue` |
+| **Breadcrumbs** | Where the selected element sits, from the project down (Project › Site › Building › Level), each opening that object's own properties. | `properties.Reader.path`, `ElementCard.tsx` |
 | **Grey the rest** | With any filter colouring, what none colours turns grey. | `FilterState.greyRest` |
 
 ### Sorting and planning

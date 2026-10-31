@@ -3,7 +3,9 @@ import test from "node:test";
 import { compiled } from "./app-host.mjs";
 
 const react = `data:text/javascript;base64,${Buffer.from("export const useState=(v)=>[v,()=>{}];export const Fragment=()=>null;").toString("base64")}`;
-const props = await import(await compiled("../src/Properties.tsx", { react, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime") }));
+const stub = (names) => `data:text/javascript;base64,${Buffer.from(names.map((n) => `export function ${n}(){return null;}`).join("\n")).toString("base64")}`;
+const props = await import(await compiled("../src/Properties.tsx", { react, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+  "lucide-react": stub(["ChevronsDownUp", "ChevronsUpDown", "Copy", "Focus", "ListFilter", "Palette"]), "./ui": stub(["IconButton"]) }));
 
 const storey = { global_id: "3DHpFFi5PGif08WLyvTtOv", ifc_class: "IfcBuildingStorey", name: "Level 02", file: 0 };
 const girder = {

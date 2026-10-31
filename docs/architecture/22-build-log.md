@@ -1535,3 +1535,15 @@ code `Viewer.setDrawingsShow`, `useDrawingPaint`, `DrawingStyle.paintFill`; [doc
 - **Checked:** `web/tests/viewer-filters.test.mjs` (5); in Chromium on Northbank, two views: the south elevation with
   MEP isolated and coloured by System shows each system in its colour, and The whole model brings back everything
   uncoloured; on a 390 px phone, Tools → Filters by property → Colour by Discipline colours the model, with its key.
+
+The Properties panel, redesigned (Oct 31; owner request: "better layout and controls, icon buttons where possible,
+filter based on properties directly from the properties panel", and breadcrumbs to the selected element's parents;
+code `web/src/ElementCard.tsx`, `Properties.tsx` `PropertySets`; [docs/panels.md](../panels.md)):
+- **What:** the card moved out of `App.tsx` into `ElementCard`: a header (name, class · type), breadcrumbs (Project ›
+  Site › Building › Level, each opening that object's own properties, a storey with isolate, hide and filter by this
+  level), an icon bar (A, B, zoom, hide, isolate, section box, light links, More for the class), the links, then every
+  set. Each value's row has Copy and, where the filters' index knows it, Filter by this value, Colour by this property
+  and Isolate all with this value; Collapse all / Expand all. The card over the model folds the sets as before.
+- **Checked:** web tests and build; in Chromium on Northbank, #1's duct: Northbank › Northbank site › Northbank ›
+  Level 02; Level 02 shows its elevation (4000 mm) and `Pset_BuildingStoreyCommon`; back; the System row's Filter by
+  this value opens a filter finding 271 elements (Supply air), shown live, added; no console errors.
