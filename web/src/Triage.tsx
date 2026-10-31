@@ -49,8 +49,10 @@ export interface TriageRun extends Omit<TriageModel, "requirements"> {
 }
 
 /** Bulk triage of the whole report, the first step: run it, watch it land, filter by verdict, set the noise aside. */
-export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, active, workers = null, forceCompact = false, requirements = null, stale = false, onRequirements }: {
+export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, unread = 0, active, workers = null, forceCompact = false, requirements = null, stale = false, onRequirements }: {
   run: TriageRun | null; results: Record<string, TriageVerdict>; now: number; total: number;
+  unread?: number;              // ORCA's checks: clashes on screen no reading holds for (a check run since), to triage
+
   active?: TriageModel | null;  // the model a run would use now (server: /api/models), before one starts
   workers?: number | null;      // how many clashes it reads at a time (server: SIGHTLINE_TRIAGE_WORKERS)
   forceCompact?: boolean;       // the list is filtered to a pattern or root cause: give it the room (unless opened)
@@ -73,7 +75,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   const noiseOpen = noise.filter((id) => !resolved(id));
   const errorsOpen = errors.filter((id) => !resolved(id));
   const byRule = ids.filter((id) => results[id].source === "rule").length;
-  const n = run?.total || total;
+  const n = total || run?.total || 0;
   const seconds = run ? Math.round(run.done ? run.seconds ?? 0 : Math.max(0, now - run.started) / 1000) : 0;
   const model = run?.model ? aiName("triage") : "";
   const state = !run ? "idle" : run.done ? "done" : "running";
@@ -134,6 +136,10 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
       {/* The first step's one button, full width under the head, folded or not */}
       {state === "idle" && <button className="btn primary triage-go" onClick={() => onRun(false)}>
         <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>}
+      {/* Readings follow their clashes from check to check: only the new ones are left to read (one proposal) */}
+      {state === "done" && unread > 0 && <button className="btn small primary triage-unread" onClick={() => onRun(false)}
+        data-tip="Read only the clashes no triage holds for yet" data-tip-side="bottom">
+        <ScanSearch size={13} aria-hidden /> Triage {unread} unread</button>}
       {compact && state !== "idle" && bar}
       {!compact && <>
 

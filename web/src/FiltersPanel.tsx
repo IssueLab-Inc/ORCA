@@ -51,7 +51,7 @@ export interface FiltersPanelProps {
   /** Why the index did not arrive, and asking for it again. */
   error?: string | null; onRetry?: () => void;
   /** Checks on filters (docs/filters.md, "Checks"): the defaults a check takes, whether one can run now, and running
-   * one (its clashes replace the open list). */
+   * one (kept as a check of its own: its clashes join the list). */
   check?: { defaults: CheckDefaults | null; busy: boolean; onCheck: (t: DetectTest) => void };
 }
 
@@ -212,7 +212,7 @@ function CheckClashes({ p, state, check }: { p: Prepared; state: FilterState; ch
       <button type="button" className="btn primary fcheck-go" disabled={!!why}
         onClick={() => d && check.onCheck(checkTest(a, b, kind, typed, d, state))}><Radar size={15} aria-hidden /> Check clashes</button>
       {why && <p className="fcheck-why" role="status">{why}</p>}
-      <p className="hint small">The clashes replace the open list; Detect again repeats this check.</p>
+      <p className="hint small">Kept as a check of its own: its clashes join the list (pick it above the list). Checking it again replaces only its clashes.</p>
       </div>
     </details>
   );

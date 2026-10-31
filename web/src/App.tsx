@@ -16,7 +16,7 @@ import { countsText, highlightGroups, indexGraph, LINK_COLOURS, type LinkIndex }
 import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
 import { setGoneHandler, setRequirements, type Recommendation, type Requirements, type RuleAudit } from "./api";
-import { api, ApiError, type Demo, type ElementProperties, type DetectEvent, type DetectSetup, type DetectTest, type Detection, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
+import { api, ApiError, type Demo, type ElementProperties, type CheckSummary, type DetectEvent, type DetectSetup, type DetectTest, type ContextEvent, type ContextObjective, type ContextProposal, type Evidence, type Signoff, type Team, type AgentEvent, type ChatEvent, type Matches, type Measure, type Option, type Pattern, type PatternVerdict, type Plan, type PlanEvent, type PlanItem, type Proposal, type Report, type ReportClash, type RootCause, type TriageKind, type TriageVerdict, type Verdict } from "./api";
 import { About, projectName } from "./About";
 import { AboutOrca } from "./AboutOrca";
 import { aboutTabFromHash, currentHash, showAboutHash, type AboutTab } from "./aboutRoute";
@@ -26,7 +26,8 @@ import { PlanPanel, type PlanRun } from "./PlanPanel";
 import { ContextPlan, contextStep, type ContextRun } from "./ContextPlan";
 import { Insights } from "./Insights";
 import { TriageCard, type TriageRun } from "./Triage";
-import { DetectSetupCard, DetectSummary, type DetectProgress } from "./Detect";
+import { CheckPicker, DetectSetupCard, DetectSummary, type DetectProgress } from "./Detect";
+import { narrow, pruneFixes } from "./checks";
 import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash } from "./noClash";
 import { Tooltips } from "./ui";
@@ -193,12 +194,23 @@ export function App() {
   const [report, setReport] = useState<Report | null>(null);
   const [matches, setMatches] = useState<Matches | null>(null);
   const [clash, setClash] = useState<ReportClash | null>(null);
+  // The report and clash on screen now, for work that resumes after an await (a run, a chat turn).
+  const reportNow = useRef<Report | null>(null);
+  reportNow.current = report;
+  const clashRef = useRef<ReportClash | null>(null);
+  clashRef.current = clash;
   const [measure, setMeasure] = useState<Measure | null | "busy">(null);
-  // ORCA's own detection (server: detect.py): what it would run on the open models, a run in progress, the last
-  // result, and the A/B/C views taken in the browser of the clashes it found (by clash id).
+  // ORCA's own detection (server: detect.py): what it would run on the open models, a run in progress, the checks it
+  // keeps (each one's latest run; docs/detection.md, "Kept checks"), and the A/B/C views taken in the browser of the
+  // clashes it found (by clash id).
   const [detectSetup, setDetectSetup] = useState<DetectSetup | null>(null);
   const [detecting, setDetecting] = useState<DetectProgress | null>(null);
-  const [detection, setDetection] = useState<Detection | null>(null);
+  // The checks kept for the open models, the one the list shows (null: all of them), and the one that ran last (its
+  // summary shows when the list shows them all). `unionSerial`: the list of their clashes on screen (a later is higher).
+  const [checks, setChecks] = useState<CheckSummary[]>([]);
+  const [viewCheck, setViewCheck] = useState<string | null>(null);
+  const [ranCheck, setRanCheck] = useState<string | null>(null);
+  const unionSerial = useRef(0);
   const [views, setViews] = useState<Record<string, string[]>>({});
   const [capturing, setCapturing] = useState<string | null>(null);
   // Muse's titles for the open report's clashes (server: titles.py), as they stream in, and how many are still coming.
@@ -474,7 +486,8 @@ export function App() {
   const sharedFilters = useMemo(() => shareable(filterState.rules), [filterState]);
   // How they show together (Hide the rest, colours), for a check of what the filters show from chat or an agent.
   const filterView = useMemo(() => ({ hide_rest: !!filterState.hideRest, colours: filterState.colours }), [filterState.hideRest, filterState.colours]);
-  // A check on filters from the Filters panel: its clashes replace the open list (docs/filters.md, "Checks").
+  // A check on filters from the Filters panel: kept as a check of its own, its clashes join the list (docs/filters.md,
+  // "Checks"; docs/detection.md, "Kept checks").
   const filterCheck = { defaults: detectSetup?.check ?? null, busy: !!busy || !!detecting,
     onCheck: (t: DetectTest) => { setFiltersOpen(false); void runDetect([t]); } };
   // The filter being edited counts by what it does, not its name: typing a name redraws nothing.
@@ -642,6 +655,8 @@ export function App() {
     setTriageStale(false);
     setTriageLive({});
     setTriageRun((r) => r ?? { model: "", open_weights: false, total: report.clashes.length, started: Date.now(), done: false });
+    // ORCA's checks: readings follow their clashes, so triage reads only the unread ones in the check on screen.
+    const scope = report.origin === "sightline" ? viewCheck : null;
     try {
       await api.triageStream(rid, sceneId, (e) => {
         if (e.type !== "ping") trace.add(e);
@@ -655,7 +670,7 @@ export function App() {
         }
         else if (e.type === "reasoning") setTriageLive((l) => ({ ...l, [e.id]: ((l[e.id] ?? "") + e.text).slice(-600) }));
         else if (e.type === "done") { setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error }); setTriageLive({}); }
-      }, rerun);
+      }, rerun, scope);
     } catch (e) { setError((e as Error).message); trace.add({ type: "error", detail: (e as Error).message }); trace.end((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
     trace.end("The stream ended before triage finished");   // nothing if it ended with its done event
   }
@@ -708,12 +723,23 @@ export function App() {
   // A newly opened report, or other requirements: pick up a triage that already exists for it (finished, or still
   // running). Under requirements that only changed rules, the server carries the readings over at once; under
   // another level, strictness or guidance it returns the last run marked stale until the triage is run again.
+  // A new list of ORCA's checks keeps what is already shown for the clashes it still lists (the server carries those
+  // readings over too), so nothing flickers while it answers.
+  const triageFor = useRef<Report | null>(null);
   useEffect(() => {
-    setTriage({}); setTriageRun(null); setTriageFilter(null); setTriageAudit({}); setTriageStale(false);
+    const was = triageFor.current;
+    triageFor.current = report;
+    const same = !!report && !!was && report.origin === "sightline" && was.origin === "sightline" && report.scene_id === was.scene_id;
+    if (same) {
+      const ids = new Set(report.clashes.map((c) => c.id));
+      setTriage((t) => Object.fromEntries(Object.entries(t).filter(([id]) => ids.has(id))));
+    } else { setTriage({}); setTriageRun(null); setTriageFilter(null); }
+    setTriageAudit({}); setTriageStale(false);
     if (!report) return;
     let live = true;
     api.triage(report.id, sceneId).then((s) => {
-      if (!live || !s.model) return;
+      if (!live) return;
+      if (!s.model) { if (same) { setTriage({}); setTriageRun(null); } return; }
       setTriageAudit(s.audit ?? {}); setTriageStale(!!s.stale);
       if (s.done || s.stale) {
         setTriage(s.results);
@@ -1214,6 +1240,7 @@ export function App() {
       setModelNames(shortNames(files));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
+      setChecks([]); setViewCheck(null); setRanCheck(null); unionSerial.current = 0;
       openedLoad.current = load;
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
       setStepFiles(Object.values(stepMap ?? {})); setSceneFiles(files); setResumable(null); sceneUploaded.current = upload;
@@ -1261,7 +1288,7 @@ export function App() {
     try {
       const r = await get(); if (workspaceEpoch.current !== workspace) return;
       setReport(r); setChatReport(r.id); setClash(null); resetWork(); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({}); setVerdicts(null);
-      setDetection(null); setViews({}); captures.current.clear();
+      setViews({}); captures.current.clear();
       return r;
     }
     catch (e) { if (workspaceEpoch.current === workspace) setError((e as Error).message); } finally { if (workspaceEpoch.current === workspace) setBusy(null); }
@@ -1313,23 +1340,26 @@ export function App() {
 
   /** Find the clashes in the open models and open them as the report. `tests` null: the server's defaults. Marks on
    * clashes that are still there (by design, for the author) survive a rerun: their ids stay the same. */
-  async function runDetect(tests: DetectTest[] | null, sid: string | null = sceneId) {
+  async function runDetect(tests: DetectTest[] | null, sid: string | null = sceneId, again: { check?: string; all?: boolean } = {}) {
     if (!sid || busy || detecting) return;
     const epoch = sceneEpoch.current;
     const keep = report?.origin === "sightline" ? reviewed : {};
     const selected = report?.origin === "sightline" ? clash?.id : undefined;
-    lastTests.current = tests;
+    const kept = again.check ? checks.find((c) => c.key === again.check) : undefined;
+    if (!again.all) lastTests.current = kept ? kept.tests ?? null : tests;
     // A check on filters is one test of its own (docs/filters.md, "Checks"): its name says what was checked.
     const onFilters = tests?.length === 1 && !!(tests[0].a.filter || tests[0].a.view || tests[0].b?.filter || tests[0].b?.view);
-    traceStart("detect", "you", onFilters && tests ? tests[0].name : "The open models");
+    traceStart("detect", "you", again.all ? "Every kept check" : kept ? kept.name : onFilters && tests ? tests[0].name : "The open models");
     setDetecting({ phase: "Starting…", tests: [] }); setError(null);
     try {
-      const done = await api.detect(sid, tests, onDetectEvent);
+      const done = await api.detect(sid, again.check || again.all ? null : tests, onDetectEvent, again);
       if (sceneEpoch.current !== epoch) return;
-      const r = await loadReport(async () => done.report, "the clashes ORCA found");
-      if (!r) return;
-      setDetection({ coverage: done.coverage, diff: done.diff, elements: done.elements, seconds: done.seconds, requirements: done.requirements ?? null,
-        tests: done.tests ?? null });
+      const now = reportNow.current;
+      const light = now?.origin === "sightline" && !!done.report.scene_id && now.scene_id === done.report.scene_id;
+      const r = await adoptRun(done.report, done.checks, done.check, done.ran);
+      if (!r || light) return;
+      // A list opened afresh: marks on clashes that are still there (by design, for the author) and the selected clash
+      // come back, their ids being the same.
       const ids = new Set(r.clashes.map((c) => c.id));
       setReviewed(Object.fromEntries(Object.entries(keep).filter(([id]) => ids.has(id))));
       const still = selected && r.clashes.find((c) => c.id === selected);
@@ -1338,18 +1368,75 @@ export function App() {
     finally { setDetecting(null); }
   }
 
-  /** The chat ran detection: show its report without ending the chat turn that is still answering about it. */
-  async function adoptChatReport(reportId: string, found: Detection) {
+  /** ORCA's kept checks after a run, or a check removed (docs/detection.md, "Kept checks"): the list of every kept
+   * check's clashes. From an imported report (or none) it opens afresh, as a report does; otherwise the work on the list
+   * stays: the selected clash, marks, plans, views and the chat, and a fix's mark until the check that lists its clash
+   * runs again (`pruneFixes`). An older list arriving late is ignored. Resolves with the list it shows. */
+  async function adoptRun(r: Report | null, kept: CheckSummary[], ran: string | null, ranKeys: string[]): Promise<Report | null> {
+    kept = kept ?? []; ranKeys = ranKeys ?? [];
+    const was = reportNow.current;
+    if (r && r.serial != null && r.serial < unionSerial.current && !!r.scene_id && was?.scene_id === r.scene_id) return was;
+    const light = !!r && !!was && !!r.scene_id && was.origin === "sightline" && was.scene_id === r.scene_id && r.origin === "sightline";
+    if (!r) {   // nothing kept any more: back to the setup card
+      setReport(null); setClash(null); resetWork(); setChecked(new Set()); setFixes({}); setVerdicts(null);
+    } else if (light) {
+      const ids = new Set(r.clashes.map((c) => c.id));
+      setReport(r);
+      setFixes((f) => pruneFixes(f, r, ranKeys));
+      setReviewed((rv) => Object.fromEntries(Object.entries(rv).filter(([id]) => ids.has(id))));
+      setChecked((cs) => new Set([...cs].filter((id) => ids.has(id))));
+      setVerdicts(null);
+      const cur = clashRef.current;
+      if (cur) { const still = r.clashes.find((c) => c.id === cur.id); if (still) setClash(still); else { setClash(null); resetWork(); } }
+    } else if (!await loadReport(async () => r, "the clashes ORCA found")) return null;
+    unionSerial.current = r?.serial ?? 0;
+    setChecks(kept); setRanCheck(ran);
+    // The list shows what just ran (all of them after Run all again, or when it is the only check).
+    setViewCheck(ran && kept.length > 1 ? ran : null);
+    return r;
+  }
+
+  /** The chat or an agent ran a check: show the list without ending the chat turn that is still answering about it. */
+  async function adoptChatReport(reportId: string, kept: CheckSummary[] | undefined, ran: string | null | undefined) {
     const workspace = workspaceEpoch.current;
     try {
       const r = await api.report(reportId);
       if (workspaceEpoch.current !== workspace) return;
-      setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({});
-      setVerdicts(null); setViews({}); captures.current.clear(); setDetection(found);
-      // Detect again repeats what chat or the agent ran: a check on filters stays that check.
-      lastTests.current = found.tests ?? null;
+      const list = kept ?? r.checks ?? [];
+      const ranKeys = ran ? [ran] : list.map((c) => c.key);
+      const now = reportNow.current;
+      if (now?.origin === "sightline" && !!r.scene_id && now.scene_id === r.scene_id) await adoptRun(r, list, ran ?? null, ranKeys);
+      else {   // from an import or nothing: open it without ending the chat's turn
+        setReport(r); setClash(null); setChecked(new Set()); setPlan(null); setPlanRun(null); setPlanError(null); setFixes({}); setReviewed({});
+        setVerdicts(null); setViews({}); captures.current.clear();
+        unionSerial.current = r.serial ?? 0;
+        setChecks(list); setRanCheck(ran ?? null); setViewCheck(ran && list.length > 1 ? ran : null);
+      }
+      // Run again repeats what chat or the agent ran: a check on filters stays that check.
+      const k = list.find((c) => c.key === ran);
+      lastTests.current = k ? k.tests ?? null : null;
     } catch (e) { setError((e as Error).message); }
     finally { setDetecting(null); }
+  }
+
+  /** From an imported report back to the list of ORCA's kept checks (made again if the server let it go). */
+  async function backToChecks() {
+    if (!sceneId) return;
+    try {
+      const info = await api.checks(sceneId);
+      if (!info.report_id) { setChecks([]); return; }
+      const r = await api.report(info.report_id);
+      await adoptRun(r, info.checks, null, []);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  /** Drop a check on filters: its clashes leave the list unless another check found them too. */
+  async function removeCheck(key: string) {
+    if (!sceneId || busy || detecting) return;
+    try {
+      const out = await api.removeCheck(sceneId, key);
+      await adoptRun(out.report, out.checks, null, []);
+    } catch (e) { setError((e as Error).message); }
   }
 
   /** A clash ORCA found has no pictures: take its A/B/C views in the viewer and keep them on the server, where the
@@ -2254,7 +2341,7 @@ export function App() {
     }
     if (e.type === "detect_event") onDetectEvent(e.event);
     if (e.type === "tool_result" && e.name === "detect_clashes") { traces.current.detect?.end(null); setDetecting(null); }
-    if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.detection);
+    if (e.type === "ui" && e.action === "open_report") void adoptChatReport(e.report_id, e.checks, e.check);
     // After select_clash has had a render to land (the chat names a clash, then asks for its picture).
     if (e.type === "ui" && e.action === "show_it_built") { const id = e.clash_id; setTimeout(() => builtFromChat(id), 80); }
     if (e.type === "ui" && e.action === "filters") {
@@ -2315,7 +2402,7 @@ export function App() {
   async function connectAgent() {
     setAgentBusy(true); setAgentError(null);
     try {
-      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView }));
+      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView, check: viewCheck }));
       setAgentLog([]);
     } catch (e) { setAgentError((e as Error).message); } finally { setAgentBusy(false); }
   }
@@ -2327,12 +2414,12 @@ export function App() {
   useEffect(() => {
     if (!agentLink) return;
     const t = setTimeout(() => {
-      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView })
+      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView, check: viewCheck })
         .catch((e) => { if (e instanceof ApiError && e.status === 404) setAgentLink(null); });
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId, sharedFilters, filterView]);
+  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId, sharedFilters, filterView, viewCheck]);
   /** What the agent does, carried out here: the chat's ui events, opened models, applied fixes, pictures. */
   async function onAgentEvent(e: LinkEvent) {
     if (!agentLink) return;
@@ -2445,7 +2532,9 @@ export function App() {
     void (async () => {
       try {
         const info = await api.sceneInfo(s.scene_id);
-        const r = s.report_id ? await api.report(s.report_id).catch(() => null) : null;
+        // The report it had open, else the list of the scene's kept checks (a list the server made since).
+        const r = (s.report_id ? await api.report(s.report_id).catch(() => null) : null)
+          ?? (info.report_id ? await api.report(info.report_id).catch(() => null) : null);
         // The link, if it still lives, and the fixes its agent applied while no page was open.
         const state = s.link ? await api.linkState(s.link.token).catch(() => null) : null;
         const link = state && s.link ? { ...s.link, expires_at: state.expires_at, max_expires_at: state.max_expires_at,
@@ -2459,10 +2548,10 @@ export function App() {
   useEffect(() => {  // keep it current while working
     if (!sceneId) return;
     const s: SavedSession = { scene_id: sceneId, report_id: report?.id ?? null, files: sceneFiles, fixes,
-                              link: agentLink, saved_at: Date.now() / 1000 };
+                              link: agentLink, saved_at: Date.now() / 1000, check: viewCheck };
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* private window: no resume */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneId, report?.id, sceneFiles, fixes, agentLink?.token]);
+  }, [sceneId, report?.id, sceneFiles, fixes, agentLink?.token, viewCheck]);
   /** Reopen the saved session: the same models (with the fixes applied on the server), its clashes, its fixes, and
    * the agent link, which the page follows again. */
   async function resumeSession() {
@@ -2471,14 +2560,19 @@ export function App() {
     const { saved, info } = r;
     const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision });
     if (!id) return;
-    if (saved.report_id) {
-      const rep = await loadReport(() => api.report(saved.report_id!), "your clashes");
+    // An imported report it had open comes back as it was; ORCA's checks as the list they make now, on the check it showed.
+    const imported = saved.report_id ? await api.report(saved.report_id).then((x) => (x.origin === "sightline" ? null : x), () => null) : null;
+    const rid = imported ? imported.id : info.report_id;
+    if (rid) {
+      const rep = await loadReport(() => (imported ? Promise.resolve(imported) : api.report(rid)), "your clashes");
       if (rep) {
         setFixes(saved.fixes ?? {});
-        if (info.detection && info.detection.report_id === rep.id) {
-          const { report_id: _r, ...d } = info.detection;
-          setDetection(d); lastTests.current = d.tests ?? null;
-        }
+        unionSerial.current = rep.serial ?? 0;
+        setChecks(info.checks ?? []);
+        const k = (info.checks ?? []).find((c) => c.key === saved.check);
+        setRanCheck(null); setViewCheck(!imported && k ? k.key : null);
+        const models = (info.checks ?? []).find((c) => c.key === "models");
+        lastTests.current = (k ?? models)?.tests ?? null;
       }
     }
     if (saved.link) setAgentLinkState(saved.link);
@@ -2527,7 +2621,17 @@ export function App() {
       if (!sid) return;
     }
     if (!r) return;
-    if (r.origin === "sightline") { await runDetect(lastTests.current, sid); return; }
+    if (r.origin === "sightline") {
+      // The models are still held: the list of their kept checks is made again, no check is run.
+      const held = !g.scene && sid ? await api.checks(sid).catch(() => null) : null;
+      if (held?.report_id) {
+        const again = await api.report(held.report_id).catch(() => null);
+        if (again) { await adoptRun(again, held.checks, null, []); return; }
+      }
+      const k = checks.find((c) => c.key === viewCheck) ?? checks.find((c) => c.key === "models");
+      await runDetect(k ? k.tests ?? null : lastTests.current, sid);
+      return;
+    }
     // A Navisworks report outlives the models it was matched to unless it was let go of too.
     if (!g.report && await api.report(r.id).then(() => true, () => false)) return;
     const sample = sampleReports.current[r.id];
@@ -2623,6 +2727,18 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [report, views, titles]);
   const shownClash = clash ? shown(clash) : clash;
+  // The list as the check picker shows it: one kept check's clashes, or all of them (docs/detection.md, "Kept checks").
+  const listReport = useMemo(() => (shownReport ? narrow(shownReport, viewCheck) : null), [shownReport, viewCheck]);
+  useEffect(() => { if (viewCheck && !checks.some((c) => c.key === viewCheck)) setViewCheck(null); }, [checks, viewCheck]);
+  // The check whose run the summary shows: the one on screen, else the one that ran last, else the open models.
+  const shownCheck = checks.find((c) => c.key === viewCheck) ?? checks.find((c) => c.key === ranCheck)
+    ?? checks.find((c) => c.key === "models") ?? checks[0] ?? null;
+  const listTriage = useMemo(() => {
+    if (!listReport || listReport === shownReport) return shownTriage;
+    const ids = new Set(listReport.clashes.map((c) => c.id));
+    return Object.fromEntries(Object.entries(shownTriage).filter(([id]) => ids.has(id)));
+  }, [listReport, shownReport, shownTriage]);
+  const unread = listReport && report?.origin === "sightline" ? listReport.clashes.filter((c) => !listTriage[c.id]).length : 0;
   // Until a report or the models are open, the page is the landing: no panels, just what ORCA is and the demo.
   const landing = !stats && !report && !blank;
   // A blank project before anything opens: the drop zone has the whole stage (no sheet on a phone).
@@ -2966,6 +3082,11 @@ export function App() {
     <p className="pop-title">Coordinate the open models</p>
     <button className="pop-item" disabled={!sceneId || !!busy || !!detecting} onClick={() => { close(); void runDetect(null); }}>
       <Radar size={14} aria-hidden /> Check the open models</button>
+    {checks.length > 1 && <button className="pop-item" disabled={!sceneId || !!busy || !!detecting} onClick={() => { close(); void runDetect(null, sceneId, { all: true }); }}>
+      <RotateCcw size={14} aria-hidden /> {`Run all ${checks.length} checks again`}</button>}
+    {checks.length > 0 && report?.origin !== "sightline" && <button className="pop-item" disabled={!sceneId || !!busy || !!detecting}
+      onClick={() => { close(); void backToChecks(); }}>
+      <Radar size={14} aria-hidden /> {`Back to ORCA's checks (${checks.length})`}</button>}
     {!sceneId && <p className="hint">Open the models first.</p>}
     <p className="pop-title">Or import a Navisworks clash report (XML)</p>
     {reportSamples.map((s) => (
@@ -3061,7 +3182,7 @@ export function App() {
         <span className="spacer" />
         {layout === "tablet" && !landing && (report || sceneId) && <button className={`btn ghost ${listOpen ? "on" : ""}`} data-tour="drawer"
           aria-expanded={listOpen} onClick={() => setListOpen(!listOpen)}>
-          <List size={16} aria-hidden /> Clashes{report ? <span className="badge-n">{report.clashes.length}</span> : null}</button>}
+          <List size={16} aria-hidden /> Clashes{report ? <span className="badge-n">{(listReport ?? report).clashes.length}</span> : null}</button>}
         {landing && layout === "tablet" && <button className="btn primary" disabled={!picked.length || !!busy} onClick={startGolden}><Sparkles size={15} aria-hidden /> Watch ORCA fix a clash</button>}
         {fixedCount > 0 && <span className="chip ok">{fixedCount} fixed</span>}
         {agentLink && <button className="btn agent-pill" onClick={() => setAgentOpen(true)} aria-label={`Agent connected · ${timeLeft(agentLink, now)} left`}><Bot size={16} aria-hidden /></button>}
@@ -3081,27 +3202,33 @@ export function App() {
 
       {inSlot(slots.clashes, <aside className="pane left">
         {report
-          ? <ReportList report={shownReport ?? report} naming={naming} matches={matches}
+          ? <ReportList report={listReport ?? shownReport ?? report} naming={naming} matches={matches}
               thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb}
               focus={listFocus} onClearFocus={() => setListFocus(null)} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={(c) => { if (compact && tab === "chat") setTab("clash"); selectClash(c); }} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
-              reviewed={reviewed} checked={checked} busy={planning || proposing} triage={shownTriage} triageFilter={triageFilter}
+              reviewed={reviewed} checked={checked} busy={planning || proposing} triage={listTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
               view={leftView} onView={setLeftView} insightsCount={insightsOpen}
               status={detecting && <p className="live-line"><i className="spinner" aria-hidden /> {detecting.phase}</p>}
-              triageCard={<TriageCard run={triageRun} active={triageModel} workers={triageWorkers} forceCompact={!!listFocus} results={shownTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
+              picker={report.origin === "sightline" && checks.length > 1 && <CheckPicker checks={checks} total={report.clashes.length}
+                value={viewCheck} onPick={setViewCheck} disabled={!!busy || !!detecting || !sceneId}
+                onAgain={(key) => void runDetect(null, sceneId, { check: key })} onAll={() => void runDetect(null, sceneId, { all: true })}
+                onRemove={(key) => void removeCheck(key)} />}
+              triageCard={<TriageCard run={triageRun} active={triageModel} workers={triageWorkers} forceCompact={!!listFocus} results={listTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
-                total={report.clashes.length} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
+                total={(listReport ?? report).clashes.length} unread={unread} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")}
                 requirements={reqLabel} stale={triageStale} onRequirements={() => setReqOpen(true)} />}
-              insights={<>{(detecting || (report.origin === "sightline" && detection)) && <DetectSummary
-                detection={detection ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
-                progress={detecting} disabled={!!busy || !sceneId} onAgain={() => void runDetect(lastTests.current)} onWhole={() => void runDetect(null)}
+              insights={<>{(detecting || (report.origin === "sightline" && shownCheck)) && <DetectSummary
+                detection={shownCheck ?? { coverage: [], diff: { new: [], resolved: [], no_longer_checked: [], first: true }, elements: 0, seconds: 0 }}
+                progress={detecting} disabled={!!busy || !sceneId}
+                onAgain={() => void (shownCheck ? runDetect(null, sceneId, { check: shownCheck.key }) : runDetect(lastTests.current))}
+                onWhole={checks.some((c) => c.key === "models") ? undefined : () => void runDetect(null)}
                 requirementsId={reqSaved?.enabled ? reqId : null} onRequirements={() => setReqOpen(true)} />}
                 <Insights rootCauses={rootCauses} patterns={patterns} verdicts={verdicts} explaining={explaining}
-                resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={(f) => { setListFocus(f); if (f) setLeftView("clashes"); }}
+                resolved={resolvedSet} focus={listFocus?.label ?? null} onFocus={(f) => { setListFocus(f); if (f) { setLeftView("clashes"); setViewCheck(null); } }}
                 busy={planning || proposing} onFixRoot={(hub) => runPlan({ hub })} onExplain={() => void explainPatterns()}
                 onSelect={(ids) => { setChecked((s) => new Set([...s, ...ids.filter((id) => !fixes[id] && !reviewed[id])])); setLeftView("clashes"); }}
                 onReview={review} onFixAll={(ids) => runPlan({ clash_ids: ids })}
@@ -3259,7 +3386,7 @@ export function App() {
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${chatReport}`} voiceModel={labels.voice} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
-            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView })} />
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView, check: viewCheck })} />
         </div>)}
       {inSlot(slots.plan, <div className="plan-slot" hidden={!docked && tab !== "plan"}>
         {(docked || tab === "plan") && <>
@@ -3522,6 +3649,7 @@ export function App() {
       {reqOpen && <RequirementsDialog sceneId={sceneId} initial={reqSaved?.doc ?? null} enabled={!!reqSaved?.enabled}
         audit={triageAudit} canDetectAgain={!!sceneId} onApply={applyRequirements} onClose={() => setReqOpen(false)} />}
       {docOpen && report && <ReportDialog report={report} sceneId={sceneId} triage={shownTriage} triageDone={!!triageRun?.done}
+        check={report.origin === "sightline" ? checks.find((c) => c.key === viewCheck) ?? null : null}
         prepare={builtOn ? prepareReport : undefined}
         teams={modelTeams} onTeams={setModelTeams} evidence={evidence} signoffs={signoffs} reviewed={reviewed}
         triageRunning={!!triageRun && !triageRun.done} onRunTriage={() => runTriage(false)} onClose={() => setDocOpen(false)} onReady={() => setDocReady(true)} />}

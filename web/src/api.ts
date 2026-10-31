@@ -181,6 +181,8 @@ export interface ReportClash {
   a: ReportElement; b: ReportElement; images: string[]; source: string;
   /** #N, unique across the report; Muse's title (null until titled); the source tool's own label ("Clash39"). */
   number: number; title: string | null; ref: string | null;
+  /** A clash ORCA found: the kept checks that found it, check key → its test there (docs/detection.md, "Kept checks"). */
+  checks?: Record<string, string>;
 }
 /** Muse titling a report's clashes (server: titles.py). */
 export type TitleEvent =
@@ -192,6 +194,9 @@ export type TitleEvent =
 export interface Report {
   id: string; title: string; sources: string[]; clashes: ReportClash[]; origin?: "navisworks" | "sightline";
   requirements_id?: string | null;  // a detected run: the requirements it ran under (null: the defaults)
+  /** ORCA's checks (server: checks.Register.union): the scene, which list this is (a later one has a higher serial),
+   * and the checks it holds. */
+  scene_id?: string; serial?: number; checks?: CheckSummary[];
 }
 
 /** ORCA detection (server: detect.py; design in docs/detection.md). */
@@ -226,6 +231,13 @@ export interface RequirementsInfo { id: string; name: string; version: number; l
 export interface Detection { coverage: DetectCoverage[]; diff: DetectDiff; elements: number; seconds: number; requirements?: RequirementsInfo | null;
   /** The tests as run when they were chosen (a check on filters), for Detect again; null: the defaults. */
   tests?: DetectTest[] | null }
+/** A kept check: its latest run (server: checks.Check.summary). `key` "models" is the check of the open models; any
+ * other is one check on filters. `stale`: a fix was kept after it ran. */
+export interface CheckSummary extends Detection {
+  key: string; name: string; title: string; revision: number; stale: boolean; ran_at: number; clashes: number;
+}
+/** The scene's kept checks and the report listing their clashes (null: none kept). */
+export interface ChecksInfo { report_id: string | null; checks: CheckSummary[] }
 export interface DetectSetup {
   tests: DetectTest[]; teams: Record<string, string>; elements: number; rules: Record<string, string>;
   file_elements?: Record<string, number>;  // physical elements per model file
@@ -237,7 +249,9 @@ export type DetectEvent =
   | { type: "start"; elements: number; tests: { id: string; name: string; kind: string }[] }
   | { type: "test"; index: number; id: string; name: string; candidates: number }
   | { type: "test_done"; index: number; coverage: DetectCoverage }
-  | ({ type: "done"; report: Report; offset: number[] } & Detection)
+  | { type: "check"; key: string; name: string; index: number; of: number }   // Run all again: the next check
+  | ({ type: "done"; report: Report; offset: number[] | null; check: string | null; ran: string[]; checks: CheckSummary[] }
+     & Omit<Detection, "diff"> & { diff: DetectDiff | null })
   | { type: "error"; detail: string };
 /** Per clash id: the model elements each side matched, and how. */
 export type Matches = Record<string, { a: string | null; b: string | null; how: (string | null)[]; show?: (string | null)[] }>;
@@ -266,7 +280,7 @@ export interface TriageModel { model: string; open_weights: boolean; images?: bo
 /** Muse Spark's check of a by-design rule on the clashes it set aside (server: triage.audit_rules). */
 export interface RuleAudit { answer: "consistent" | "looks_real" | "unsure"; note: string; rule: string; samples: string[]; settled: string[] }
 export type TriageEvent =
-  | ({ type: "start"; total: number } & TriageModel)
+  | ({ type: "start"; total: number; asking?: number; scope?: string | null } & TriageModel)
   | ({ type: "clash"; id: string } & TriageVerdict)
   | { type: "reasoning"; id: string; text: string }
   | { type: "audit"; rules: Record<string, RuleAudit> }
@@ -278,6 +292,8 @@ export interface TriageState extends Partial<TriageModel> {
   audit?: Record<string, RuleAudit>;
   /** The last run was under other requirements (another level, strictness or guidance): run again to apply these. */
   stale?: boolean;
+  /** ORCA's checks: how many clashes the model has not read (readings follow their clashes from list to list). */
+  unread?: number; scope?: string | null;
 }
 
 /** Coordination requirements (server: requirements.py; docs/requirements.md). */
@@ -499,7 +515,7 @@ export type ChatEvent =
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   /** Chat's or an agent's filters (docs/filters.md): replace its own (the user's paused), or clear them. */
   | { type: "ui"; action: "filters"; mode: "replace" | "clear"; filters?: Rule[]; grey_rest?: boolean; hide_rest?: boolean }
-  | { type: "ui"; action: "open_report"; report_id: string; detection: Detection }
+  | { type: "ui"; action: "open_report"; report_id: string; detection: Detection; check?: string | null; checks?: CheckSummary[] }
   | { type: "detect_event"; event: DetectEvent }
   | { type: "agent"; event: AgentEvent }
   | { type: "context_event"; event: ContextEvent }
@@ -564,14 +580,15 @@ export interface AgentLink {
   clock_offset?: number;  // set by the page: server clock minus this browser's, in seconds
 }
 /** What a page needs to reopen a scene it had open (server: Workspace.scene_info). */
-export interface SceneInfo extends OpenedScene { detection: (Detection & { report_id: string }) | null }
+export interface SceneInfo extends OpenedScene, ChecksInfo {}
 /** This browser's last session, kept so a reload or a closed tab can resume it while the server still holds it. */
 export interface SavedSession {
   scene_id: string; report_id: string | null; files: string[]; fixes: Record<string, string>;
   link: AgentLink | null; clock_offset?: number; saved_at: number;
+  check?: string | null;   // the kept check the list showed (null: all of them)
 }
 export interface LinkContext { scene_id: string | null; report_id: string | null; clash_id: string | null; fixed: string[];
-  filters?: SharedFilter[]; filter_view?: FilterView }
+  filters?: SharedFilter[]; filter_view?: FilterView; check?: string | null }
 /** What the agent does, for the page to follow: its calls, requests for pictures, and the chat's ui events. */
 export type LinkEvent =
   | { type: "hello"; stream: string; calls: number; last_call: AgentLink["last_call"]; expires_at: number; max_expires_at: number; server_time: number }
@@ -642,13 +659,16 @@ export const api = {
     call<{ teams: Team[]; models: ModelTeam[] }>(`/reports/${reportId}/teams${sceneId ? `?scene_id=${sceneId}` : ""}`),
   document: (reportId: string, body: { scene_id: string | null; scope: "combined" | "team" | "model"; teams: Record<string, Team>;
                                       bcf: boolean; evidence: Record<string, Evidence>; reviews: Record<string, Signoff[]>;
-                                      marks: Record<string, string>; triage: Record<string, Omit<TriageVerdict, "reasoning">> }, onEvent: (e: DocEvent) => void) =>
+                                      marks: Record<string, string>; triage: Record<string, Omit<TriageVerdict, "reasoning">>;
+                                      check?: string | null }, onEvent: (e: DocEvent) => void) =>
     ndjson<DocEvent>(`/reports/${reportId}/document/stream`, body, (e) => { onEvent(e); return e.type !== "progress"; }),
   triage: (reportId: string, sceneId: string | null) =>
     call<TriageState>(`/reports/${reportId}/triage${sceneId ? `?scene_id=${sceneId}` : ""}`),
   /** Triage every clash in the report (or follow the run already going), event by event. */
-  triageStream: (reportId: string, sceneId: string | null, onEvent: (e: TriageEvent) => void, rerun = false) => {
-    const q = new URLSearchParams({ ...(rerun ? { rerun: "true" } : {}), ...(sceneId ? { scene_id: sceneId } : {}) }).toString();
+  /** `scope`: a kept check's key, to read only its clashes no reading holds for (ORCA's checks). */
+  triageStream: (reportId: string, sceneId: string | null, onEvent: (e: TriageEvent) => void, rerun = false, scope: string | null = null) => {
+    const q = new URLSearchParams({ ...(rerun ? { rerun: "true" } : {}), ...(sceneId ? { scene_id: sceneId } : {}),
+      ...(scope ? { scope } : {}) }).toString();
     return ndjson<TriageEvent>(`/reports/${reportId}/triage/stream${q ? `?${q}` : ""}`, {}, (e) => { onEvent(e); return e.type === "done"; });
   },
   patterns: (reportId: string, sceneId: string, fixed: string[]) =>
@@ -672,7 +692,8 @@ export const api = {
   applyPlan: (sceneId: string, options: Option[]) =>
     call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
-                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
+                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView; check?: string | null },
+         onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   /** The sample models, and the demos among them (server: demos.py). */
   samples: () => call<{ files: string[]; demos: Demo[] }>("/samples"),
@@ -795,10 +816,12 @@ export const api = {
       body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null } }) }),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
-  /** ORCA's own detection; resolves with the "done" event (the report and its coverage). */
-  detect: async (sceneId: string, tests: DetectTest[] | null, onEvent: (e: DetectEvent) => void) => {
+  /** ORCA's own detection; resolves with the "done" event (the report and its coverage). `again`: run a kept check
+   * again by its key, or every kept check (`all`). */
+  detect: async (sceneId: string, tests: DetectTest[] | null, onEvent: (e: DetectEvent) => void,
+                 again: { check?: string; all?: boolean } = {}) => {
     let done: Extract<DetectEvent, { type: "done" }> | null = null;
-    await ndjson<DetectEvent>(`/scenes/${sceneId}/detect/stream`, { tests }, (e) => {
+    await ndjson<DetectEvent>(`/scenes/${sceneId}/detect/stream`, { tests, ...again }, (e) => {
       onEvent(e);
       if (e.type === "error") throw new Error(e.detail);
       if (e.type === "done") { done = e; return true; }
@@ -807,6 +830,11 @@ export const api = {
     return done as Extract<DetectEvent, { type: "done" }>;
   },
   report: (reportId: string) => call<Report>(`/reports/${reportId}`),
+  /** The scene's kept checks (docs/detection.md, "Kept checks"); a list the server let go is made again. */
+  checks: (sceneId: string) => call<ChecksInfo>(`/scenes/${sceneId}/checks`),
+  /** Drop a check on filters: the list of what is left (report null when nothing is). */
+  removeCheck: (sceneId: string, key: string) =>
+    call<{ report: Report | null; checks: CheckSummary[] }>(`/scenes/${sceneId}/checks/${encodeURIComponent(key)}`, { method: "DELETE" }),
   /** Muse titles the report's clashes; one run per report is shared, so this may join one already going. */
   /** `sceneId`: the open models, whose domain (a building or a machine cell) the titles are written for. */
   titles: (reportId: string, onEvent: (e: TitleEvent) => void, sceneId?: string | null) =>

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { CircleCheck, ClipboardCheck, Loader2, Radar, RotateCcw } from "lucide-react";
-import type { DetectCoverage, DetectSetup, DetectTest, Detection } from "./api";
-import { checkOf } from "./checks";
+import { CircleCheck, ClipboardCheck, Loader2, Radar, RotateCcw, X } from "lucide-react";
+import type { CheckSummary, DetectCoverage, DetectSetup, DetectTest, Detection } from "./api";
+import { checkLabel, checkOf } from "./checks";
 
 /** Live progress of a detection run: the current phase, and each test as it finishes. */
 export interface DetectProgress { phase: string; tests: { name: string; coverage?: DetectCoverage }[]; running?: number }
@@ -147,6 +147,33 @@ export function DetectSummary({ detection, progress, onAgain, disabled, compact 
       </>}
     </section>
   );
+}
+
+/** Over the list: the checks ORCA keeps for the open models (docs/detection.md, "Kept checks"), which one the list
+ * shows (all of them by default), and running one again, all of them again, or dropping a check on filters. */
+export function CheckPicker({ checks, total, value, onPick, onAgain, onAll, onRemove, disabled }: {
+  checks: CheckSummary[]; total: number; value: string | null; onPick: (key: string | null) => void;
+  onAgain: (key: string) => void; onAll: () => void; onRemove: (key: string) => void; disabled: boolean;
+}) {
+  const cur = checks.find((c) => c.key === value) ?? null;
+  const stale = checks.filter((c) => c.stale).length;
+  return (<>
+    <div className="check-pick" data-tour="checks">
+      <select value={value ?? ""} onChange={(e) => onPick(e.target.value || null)} aria-label="Which check the list shows">
+        <option value="">All {checks.length} checks · {total.toLocaleString()}</option>
+        {checks.map((c) => <option key={c.key} value={c.key}>{checkLabel(c)}</option>)}
+      </select>
+      {cur ? <>
+        <button className="ibtn" aria-label={`Run ${cur.name} again`} data-tip={`Run ${cur.name} again: see what your fixes resolved`}
+          data-tip-side="bottom" disabled={disabled} onClick={() => onAgain(cur.key)}><RotateCcw size={14} aria-hidden /></button>
+        {cur.key !== "models" && <button className="ibtn" aria-label={`Remove ${cur.name}`} data-tip={`Remove ${cur.name}: its clashes leave the list unless another check found them`}
+          data-tip-side="bottom" disabled={disabled} onClick={() => onRemove(cur.key)}><X size={14} aria-hidden /></button>}
+      </> : <button className="btn small ghost" disabled={disabled} onClick={onAll} data-tip="Run every kept check again, one after another"
+        data-tip-side="bottom"><RotateCcw size={13} aria-hidden /> Run all again</button>}
+    </div>
+    {stale > 0 && <p className="hint small check-stale">{stale === checks.length ? (stale === 1 ? "The check" : "Every check") : `${stale} of the checks`} ran
+      before a fix you kept: run {stale === 1 ? "it" : "them"} again to see what the fix resolved.</p>}
+  </>);
 }
 
 /** How many elements the chosen tests look at: the files their selections name (an open selection is every file). */
