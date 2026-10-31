@@ -218,11 +218,22 @@ runtime checks), as `AGENTS.md` asks.
 ## Running locally
 
 Follow [README: Run locally](../../README.md#run-locally), the canonical setup path. It specifies Git, uv-managed
-Python 3.13, Node 22.12+ or 24 LTS with npm, `uv sync --project server --locked --python 3.13`, `npm ci --prefix web`,
+Python 3.13, Node LTS 22.12 or newer with npm, `uv sync --project server --locked --python 3.13`, `npm ci --prefix web`,
 safe root `.env` creation for PowerShell/bash, two terminals with explicit working directories, API/browser URLs,
 and a key-free fixture walkthrough. Eight MIT demo models are bundled; private eval inputs and STEP caches are not.
 The README also lists native Linux GL and cross-platform PDF libraries, AI credential requirements, troubleshooting,
 and the outstanding API-access link and clean-install verification. No new runtime scripts or settings are introduced.
+
+The Windows path explicitly installs uv and Node.js with WinGet, reopens PowerShell to refresh PATH, and uses
+`npm.cmd` throughout to avoid the blocked `npm.ps1` wrapper without changing execution policy. The owner confirmed
+Windows startup on Oct 31; this is not a claim that the full browser/AI/PDF checklist or other OS installs passed.
+
+[README: Updating from GitHub](../../README.md#updating-from-github) documents the routine update path: export
+in-memory model edits, stop both dev servers, check local changes, update clean main with `git pull --ff-only`,
+sync the locked Python/npm dependencies, then restart and reopen the models. Source-only edits can hot-reload;
+uvicorn reloads lose the in-memory `Workspace`, and `npm ci` replaces node_modules, so pulls and dependency installs
+are done with servers stopped. `git fetch` is the option for checking upstream commits without changing the running
+checkout. These instructions describe how to update; they do not update a developer's running app automatically.
 
 - **`.env` loading.** `meta_client.load_env()` reads `KEY=value` lines from the repo root's `.env` (`ENV_FILE`) into
   the environment with `os.environ.setdefault`, so real environment variables win. Lines starting with `#` are skipped;
