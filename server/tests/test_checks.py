@@ -339,6 +339,12 @@ def test_a_document_can_hold_one_checks_clashes(opened, monkeypatch):
     report = ws.report(pipes["report"]["id"])
     narrowed = app_module._narrowed(report, pipes["check"])
     assert narrowed.title == "Coordination · PipeSegment vs Everything"
+    ducts = ws.detect(sid, DUCTS)
+    both = ws.report(ducts["report"]["id"])
+    beam = next(c for c in both.clashes if {c.a.name, c.b.name} == {"Duct D1", "Beam B1"})
+    assert beam.test == "MEP vs Structure", "the list's test: the open models' first"
+    assert app_module._narrowed(both, ducts["check"]).clash(beam.id).test == "DuctSegment vs Everything", \
+        "a one-check document says that check's test"
     assert [c.id for c in narrowed.clashes] == [by_pair(pipes, "Pipe P2 half a millimetre in", "Beam B1")["id"]]
     assert app_module._narrowed(report, None) is report
     with pytest.raises(KeyError):
@@ -346,3 +352,198 @@ def test_a_document_can_hold_one_checks_clashes(opened, monkeypatch):
     c = TestClient(app_module.app)
     r = c.post(f"/api/reports/{report.id}/document/stream", json={"scene_id": sid, "check": "filter:none"})
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------- the review of the change (PR #87)
+
+class Gated(Reader):
+    """A triage model that waits at a gate (a run kept under way), answers the rules' audit, and can fail."""
+
+    def __init__(self, fail=False):
+        super().__init__()
+        self.gate, self.fail, self.audits = threading.Event(), fail, 0
+        self.gate.set()
+
+    def complete_json(self, system, text, images=None, schema=None):
+        self.gate.wait(10)
+        if schema and "answer" in schema.get("properties", {}):
+            with self.lock:
+                self.audits += 1
+            return {"answer": "consistent", "note": "As the rule says."}
+        if self.fail:
+            raise RuntimeError("rate limited")
+        return super().complete_json(system, text, images, schema)
+
+
+def _done(job, wait=20.0):
+    for _ in range(int(wait / 0.02)):
+        if job.done:
+            return job
+        threading.Event().wait(0.02)
+    raise AssertionError("the triage run did not end")
+
+
+@pytest.fixture()
+def served(opened, monkeypatch):
+    from sightline import app as app_module
+
+    ws, sid = opened
+    monkeypatch.setattr(app_module, "ws", ws)
+    model = Gated()
+    monkeypatch.setattr(app_module, "triage_model", lambda: (model, {"model": "scripted", "open_weights": False}))
+    return app_module, ws, sid, model
+
+
+def test_a_failed_read_is_not_kept_and_stays_unread(served):
+    app_module, ws, sid, model = served
+    model.fail = True
+    report = ws.union_report(sid) if ws.checks.get(sid) else ws.report(ws.detect(sid)["report"]["id"])
+    charged = []
+    _done(app_module._start_triage(report, sid, lambda: charged.append(1)))
+    assert charged == [1] and not ws.checks[sid].readings.get("", {}), "a failed read is no reading"
+    again = ws.report(ws.detect(sid, DUCTS)["report"]["id"])
+    assert ws.checks[sid].carried(again, "") == {}
+    state = app_module.triage_state(again.id, sid)
+    assert state["unread"] == 6, "Triage N unread counts them, to be asked again"
+
+
+def test_a_run_that_asks_nothing_makes_no_audit_call(served):
+    from sightline import requirements as req
+
+    app_module, ws, sid, model = served
+    doc = req.default_doc(ws.scene(sid))
+    doc.by_design = [req.ByDesign(["IfcDuctSegment"], ["IfcSensor"], "sensors in ducts")]
+    rid = req.register(doc)
+    first = ws.report(ws.detect(sid)["report"]["id"])
+    with req.using(rid):
+        job = _done(app_module._start_triage(first, sid, lambda: None))
+    assert model.audits == 1 and job.audit, "a run that asks the model checks the rules"
+    asked = len(model.asked)
+    second = ws.report(ws.detect(sid, DUCTS)["report"]["id"])
+    with req.using(rid):
+        app_module.triage_state(second.id, sid)
+        carry = _done(app_module._triage_jobs[app_module._triage_key(second, req.current())])
+    assert carry.report is second and carry.only == set()
+    assert model.audits == 1 and len(model.asked) == asked, "carrying readings over asks nothing, the audit neither"
+    assert carry.audit == job.audit, "it keeps the last audit"
+
+
+def test_a_new_list_follows_the_titling_under_way(served, monkeypatch):
+    from tests.test_titles import Titler
+
+    app_module, ws, sid, _ = served
+    gate = threading.Event()
+
+    class Slow(Titler):
+        def complete_json(self, *a, **k):
+            gate.wait(10)
+            return super().complete_json(*a, **k)
+
+    titler = Slow()
+    monkeypatch.setattr(app_module, "triage_model", lambda: (titler, {"model": "scripted", "open_weights": True}))
+    c = TestClient(app_module.app)
+    first = ws.detect(sid)["report"]["id"]
+    events = []
+    reader = threading.Thread(target=lambda: events.append(c.post(f"/api/reports/{first}/titles/stream").text))
+    reader.start()
+    for _ in range(200):
+        if app_module._title_jobs.get(f"scene:{sid}") is not None:
+            break
+        threading.Event().wait(0.02)
+    job = app_module._title_jobs[f"scene:{sid}"]
+    second = ws.detect(sid, NEAR_PIPES)["report"]["id"]
+    follow = threading.Thread(target=lambda: events.append(c.post(f"/api/reports/{second}/titles/stream").text))
+    follow.start()
+    threading.Event().wait(0.2)
+    assert app_module._title_jobs[f"scene:{sid}"] is job, "the new list follows the run under way"
+    gate.set()
+    reader.join(10); follow.join(10)
+    start = json.loads(events[-1].splitlines()[0])
+    assert start["report_id"] == first, "its start names the list it titles"
+    titled = {n for b in titler.batches for n in b}
+    assert titled == {c.number for c in ws.report(first).clashes}, "each clash titled once"
+    # Asked again, the new list's own clashes (none of the first list's) are titled, its titles from the scene's.
+    c.post(f"/api/reports/{second}/titles/stream").read()
+    assert all(x.title for x in ws.report(second).clashes)
+    again = [n for b in titler.batches for n in b]
+    assert len(again) == len(set(again)), "no clash titled twice"
+
+
+def test_a_reading_of_a_clash_that_moved_is_not_shown_on_the_new_list(served):
+    app_module, ws, sid, _ = served
+    first = ws.report(ws.detect(sid)["report"]["id"])
+    job = _done(app_module._start_triage(first, sid, lambda: None))
+    duct = next(x for x in first.clashes if {x.a.name, x.b.name} == {"Duct D1", "Beam B1"})
+    gid = duct.a.global_id if duct.a.name == "Duct D1" else duct.b.global_id
+    ws.scene(sid).translate([gid], (0.0, 0.0, 0.05))
+    second = ws.report(ws.detect(sid)["report"]["id"])
+    moved = second.clash(duct.id)
+    assert abs(moved.distance_m - duct.distance_m) > checks.SAME_DEPTH_M
+    shown = app_module._for_report(job, second)
+    assert duct.id not in shown["results"] and shown["unread"] >= 1
+    assert duct.id not in app_module._same_in(job, second)
+    assert {x.id for x in second.clashes if x.id != duct.id and x.id in shown["results"]}, "the unchanged ones stay"
+
+
+def test_a_scenes_run_is_kept_last_in_line():
+    from sightline import app as app_module
+
+    jobs = {}
+    app_module._keep_job(jobs, "scene:x", "first", 16)
+    for i in range(15):
+        app_module._keep_job(jobs, f"r{i}", i, 16)
+    app_module._keep_job(jobs, "scene:x", "again", 16)
+    app_module._keep_job(jobs, "r15", 15, 16)
+    assert jobs["scene:x"] == "again" and "r0" not in jobs and len(jobs) == 16
+
+
+def test_a_run_under_way_is_followed_or_queued_behind(served):
+    app_module, ws, sid, model = served
+    first = ws.report(ws.detect(sid)["report"]["id"])
+    model.gate.clear()
+    running = app_module._start_triage(first, sid, lambda: None)
+    ducts = ws.report(ws.detect(sid, DUCTS)["report"]["id"])
+    charged = []
+    key = next(k["key"] for k in ducts.checks if k["key"] != "models")
+    followed = app_module._start_triage(ducts, sid, lambda: charged.append(1), scope=key)
+    assert followed is running and charged == [], "the run under way reads the ducts check's clashes: followed, free"
+    pipes = ws.report(ws.detect(sid, NEAR_PIPES)["report"]["id"])
+    pkey = next(k["key"] for k in pipes.checks if k["name"].startswith("PipeSegment"))
+    queued = app_module._start_triage(pipes, sid, lambda: charged.append(1), scope=pkey)
+    assert queued is not running and queued.after is running and charged == [1]
+    assert queued.events[0]["queued"] is True
+    model.gate.set()
+    _done(running); _done(queued)
+    p3 = next(x for x in pipes.clashes if {x.a.name, x.b.name} == {"Pipe P3 under beam", "Beam B1"})
+    assert queued.results[p3.id]["source"] == "model"
+    assert sum("Pipe P3" in t for t in model.asked) == 1 and len(model.asked) <= 7, "only P3 is read after the first run"
+    # Triage again while a run is under way is queued too, not dropped.
+    model.gate.clear()
+    rerun = app_module._start_triage(pipes, sid, lambda: charged.append(1), rerun=True)
+    again = app_module._start_triage(pipes, sid, lambda: charged.append(1), rerun=True)
+    assert again.after is rerun and charged == [1, 1, 1]
+    model.gate.set()
+    _done(rerun); _done(again)
+
+
+def test_check_summaries_can_be_read_while_checks_come_and_go(opened):
+    ws, sid = opened
+    ws.detect(sid)
+    errors, stop = [], threading.Event()
+
+    def read():
+        while not stop.is_set():
+            try:
+                register = ws.checks[sid]
+                register.summaries(); register.contacts(); register.known(); register.find("models")
+                ws.checks_info(sid)
+            except Exception as e:  # pragma: no cover - shown by the assertion
+                errors.append(e)
+
+    t = threading.Thread(target=read)
+    t.start()
+    for _ in range(6):
+        key = ws.detect(sid, PIPES)["check"]
+        ws.remove_check(sid, key)
+    stop.set(); t.join(5)
+    assert not errors

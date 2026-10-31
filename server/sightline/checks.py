@@ -41,6 +41,24 @@ def key_of(tests: list[Test] | None) -> str:
     return MODELS
 
 
+def same_clash(a: ReportClash, b: ReportClash) -> bool:
+    """Whether two rows are the same clash, unchanged: the same pair of elements, the depth moved no more than
+    SAME_DEPTH_M. A triage reading holds only while this is so."""
+    pair = lambda c: sorted((c.a.global_id or "", c.b.global_id or ""))
+    if pair(a) != pair(b) or (a.distance_m is None) != (b.distance_m is None):
+        return False
+    return a.distance_m is None or abs(a.distance_m - b.distance_m) <= SAME_DEPTH_M
+
+
+def pick(items, key_or_name: str):
+    """A kept check by its key, or by its name as people say it (any case), among `Check`s or their summaries."""
+    get = lambda x, f: x[f] if isinstance(x, dict) else getattr(x, f)
+    want = str(key_or_name or "").strip()
+    items = list(items)
+    return (next((x for x in items if get(x, "key") == want), None)
+            or next((x for x in items if str(get(x, "name")).strip().lower() == want.lower()), None))
+
+
 @dataclass
 class Check:
     """One check's latest run."""
@@ -102,7 +120,7 @@ class Register:
         """What `detect.run` reads to keep a clash's id and number: every id issued, the numbers, and the clashes in
         the open list now (a check's first run calls new only what the list does not already hold)."""
         return {"clashes": self.ids, "numbers": self.numbers,
-                "open": {c.id for check in self.checks.values() for c in check.clashes}}
+                "open": {c.id for check in list(self.checks.values()) for c in check.clashes}}
 
     def keep(self, key: str, run: Run, tests: list[dict] | None, requirements: dict | None, revision: int,
              name: str | None = None) -> Check:
@@ -136,22 +154,19 @@ class Register:
         return self.checks.pop(key)
 
     def find(self, key_or_name: str) -> Check | None:
-        """A kept check by its key, or by its name as people say it."""
-        if key_or_name in self.checks:
-            return self.checks[key_or_name]
-        low = key_or_name.strip().lower()
-        return next((c for c in self.checks.values() if c.name.lower() == low), None)
+        """A kept check by its key, or by its name as people say it (`pick`)."""
+        return pick(self.checks.values(), key_or_name)
 
     def contacts(self) -> list:
         """What only touches, from every kept check (what rests on or meets what: `connections.graph`)."""
         seen: dict[tuple, list] = {}
-        for c in self.checks.values():
+        for c in list(self.checks.values()):   # a snapshot: another request may add or drop a check meanwhile
             for p in c.state.get("contacts", []):
                 seen.setdefault(tuple(p), list(p))
         return list(seen.values())
 
     def summaries(self, revision: int | None = None) -> list[dict]:
-        return [c.summary(revision) for c in self.checks.values()]
+        return [c.summary(revision) for c in list(self.checks.values())]
 
     # ------------------------------------------------------------------ what a clash keeps
 
@@ -184,7 +199,9 @@ class Register:
 
     def keep_reading(self, model_key: str, clash: ReportClash, verdict: dict) -> None:
         """A triage verdict the model read, kept with the clash's pair and depth (docs/detection.md, "Kept checks")."""
-        if clash.id not in self.ids or verdict.get("source") != "model":
+        # Only a reading the model made: a failed read (an error, no verdict) stays unread, to be asked again.
+        if (clash.id not in self.ids or verdict.get("source") != "model" or verdict.get("error")
+                or verdict.get("verdict") in (None, "unknown")):
             return
         v = {k: x for k, x in verdict.items() if k not in ("alike", "alike_of", "audit", "audit_note", "carried")}
         with self.lock:
@@ -200,13 +217,12 @@ class Register:
         out = {}
         for c in report.clashes:
             r = held.get(c.id)
-            if r is None or r["pair"] != sorted((c.a.global_id or "", c.b.global_id or "")):
+            if r is None or r["verdict"].get("error") or r["verdict"].get("verdict") in (None, "unknown"):
                 continue
-            if (r["distance_m"] is None) != (c.distance_m is None):
-                continue
-            if c.distance_m is not None and abs(c.distance_m - r["distance_m"]) > SAME_DEPTH_M:
-                continue
-            out[c.id] = {**r["verdict"], "carried": True}
+            read = replace(c, distance_m=r["distance_m"], a=replace(c.a, global_id=r["pair"][0]),
+                           b=replace(c.b, global_id=r["pair"][1]))
+            if same_clash(read, c):
+                out[c.id] = {**r["verdict"], "carried": True}
         return out
 
     # ------------------------------------------------------------------ the one list
@@ -214,9 +230,10 @@ class Register:
     def union(self, report_id: str, sources: list[str], scene_id: str, revision: int | None = None) -> Report | None:
         """Every kept check's clashes as one report (None when no check is kept). A clash two checks found is one row:
         its test as the first check found it (the open models first), its measure from the newest run."""
-        if not self.checks:
+        kept = list(self.checks.values())   # a snapshot, in order: the open models first
+        if not kept:
             return None
-        newest = sorted(self.checks.values(), key=lambda c: c.ran_at, reverse=True)
+        newest = sorted(kept, key=lambda c: c.ran_at, reverse=True)
         latest: dict[str, tuple[ReportClash, set]] = {}
         for check in newest:
             fresh = set(check.diff.get("new", []))
@@ -224,7 +241,7 @@ class Register:
                 latest.setdefault(c.id, (c, fresh))
         rows: dict[str, ReportClash] = {}
         found: dict[str, dict[str, str]] = {}
-        for check in self.checks.values():
+        for check in kept:
             for c in check.clashes:
                 found.setdefault(c.id, {})[check.key] = c.test
                 if c.id in rows:
@@ -238,8 +255,8 @@ class Register:
                 c.title = self.titles.get(cid) or c.title
                 c.images = sorted((label, p) for label, p in self.views.get(cid, {}).items() if p.exists())
                 c.checks = found[cid]
-        models = self.checks.get(MODELS)
-        others = [c for c in self.checks.values() if c.key != MODELS]
+        models = next((c for c in kept if c.key == MODELS), None)
+        others = [c for c in kept if c.key != MODELS]
         if models is not None:
             title = models.title + (f" + {len(others)} check{'s' if len(others) != 1 else ''}" if others else "")
         elif len(others) == 1:

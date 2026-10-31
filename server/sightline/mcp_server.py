@@ -26,7 +26,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
 from mcp_types import ToolAnnotations
 
-from . import agents, chat, edits, escalation, plans, requirements, settings, spend
+from . import agents, chat, checks, edits, escalation, plans, requirements, settings, spend
 from .service import Workspace
 
 
@@ -608,8 +608,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         r = need_report(link)
         key = None
         if check:
-            want = check.strip().lower()
-            key = next((k["key"] for k in r.checks if k["key"] == check or k["name"].lower() == want), None)
+            kept = checks.pick(r.checks, check)
+            key = kept["key"] if kept else None
             if key is None:
                 raise LookupError(f"No kept check {check!r}. Kept: " + (", ".join(k["name"] for k in r.checks) or "none"))
         refused = hooks.charge(link, 1)

@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import context_planner, domains, edits, facets, plans, settings
+from . import checks, context_planner, domains, edits, facets, plans, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 from .limits import env_int
@@ -646,8 +646,8 @@ class Chat:
             rows = []
             only = None
             if args.get("check"):
-                want = str(args["check"]).strip().lower()
-                only = next((c["key"] for c in r.checks if c["key"] == args["check"] or c["name"].lower() == want), None)
+                kept = checks.pick(r.checks, args["check"])
+                only = kept["key"] if kept else None
                 if only is None:
                     return ({"error": f"No kept check {args['check']!r}. Kept: "
                                       + (", ".join(c["name"] for c in r.checks) or "none") + "."}, "no such check", [])

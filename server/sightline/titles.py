@@ -122,7 +122,8 @@ class Job:
 
     def start(self) -> "Job":
         missing = sum(1 for c in self.report.clashes if not c.title)
-        self._emit({"type": "start", "total": len(self.report.clashes), "missing": missing, **self.info})
+        self._emit({"type": "start", "total": len(self.report.clashes), "missing": missing, "report_id": self.report.id,
+                    **self.info})
 
         def work():
             try:

@@ -31,8 +31,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
-from . import (agents, built, chat, context_planner, demos, detect, document, domains, edits, escalation, mcp_server,
-               meta_client, owner, plans, requirements, settings, spend, step, titles, triage, voice_live)
+from . import (agents, built, chat, checks, context_planner, demos, detect, document, domains, edits, escalation,
+               mcp_server, meta_client, owner, plans, requirements, settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
@@ -1282,8 +1282,20 @@ def _triage_key(report, doc=None) -> str:
 
 
 def _title_key(report) -> str:
-    """One titling run per report (ORCA's lists of checks each have their own: titles carry by clash id anyway)."""
-    return report.id if report.origin == "sightline" else _triage_key(report)
+    """One titling run per report, and one per scene for ORCA's lists of checks (as triage): a new list follows the
+    run under way instead of titling the same clashes again."""
+    if report.origin == "sightline" and report.scene_id is not None:
+        return f"scene:{report.scene_id}"
+    return _triage_key(report)
+
+
+def _kept_titles(report) -> None:
+    """A list of ORCA's checks takes every title the scene's checks keep (a run over an earlier list landed them)."""
+    register = _register_of(report)
+    if register is not None:
+        with register.lock:
+            found = dict(register.titles)
+        _with_titles(report, found)
 
 
 def _triage_donor(report, doc) -> triage.Job | None:
@@ -1346,15 +1358,24 @@ def _model_key(doc) -> str:
     return requirements.model_key(doc) if doc is not None else ""
 
 
-def _for_report(job: triage.Job, report) -> dict:
-    """A run's state for this report: a run over an earlier list of the same checks keeps verdicts by clash id, so
-    only the clashes listed here are told, and counted."""
-    state = job.state()
+def _same_in(job: triage.Job, report) -> set[str]:
+    """The clashes of `report` that are the same, unchanged, in the run's own report (`checks.same_clash`): what a run
+    over an earlier list of the same checks may say of them."""
     if job.report is report:
-        results = state["results"]
-    else:
-        results = {c.id: state["results"][c.id] for c in report.clashes if c.id in state["results"]}
-    unread = sum(1 for c in report.clashes if c.id not in results)
+        return {c.id for c in report.clashes}
+    return {c.id for c in report.clashes if (o := job._by_id.get(c.id)) is not None and checks.same_clash(o, c)}
+
+
+def _for_report(job: triage.Job, report) -> dict:
+    """A run's state for this report: a run over an earlier list of the same checks tells only the clashes listed here
+    that are unchanged (same pair, depth within 1 mm), and counts them. A run queued behind another shows that one's
+    readings until its own land."""
+    state = job.state()
+    same = _same_in(job, report)
+    results = {c.id: state["results"][c.id] for c in report.clashes if c.id in state["results"] and c.id in same}
+    if job.after is not None and not job.done:
+        results = {**_for_report(job.after, report)["results"], **results}
+    unread = sum(1 for c in report.clashes if c.id not in results or results[c.id].get("error"))  # a failed read too
     return {**state, "results": results, "summary": triage.summary(results), "total": len(report.clashes),
             "unread": unread, "scope": job.scope}
 
@@ -1366,7 +1387,7 @@ def _unread(report, doc, facts: dict, carried: dict, scope: str | None, rerun: b
     for c in report.clashes:
         if scope is not None and scope not in c.checks:
             continue
-        if c.id in facts or triage.by_rule(c) or (doc is not None and requirements.settle(doc, c)):
+        if triage.settled_by(c, doc, facts)[0]:   # the same test triage_report makes, so the charge matches the run
             continue
         if c.id in carried and not rerun:
             continue
@@ -1424,12 +1445,36 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
         job = _start_triage(report, scene_id, lambda: _take(propose_limit, request), rerun, scope)
     except PermissionError as e:
         raise HTTPException(429, str(e))
+    # Following a run over an earlier list of the same checks: only what it says of clashes unchanged here, and its
+    # start says so (`following`), with this list's count.
+    other = job.report is not report
+    same = _same_in(job, report) if other else None
 
     def stream():
         for event in job.follow():
+            if other:
+                if event.get("type") == "start":
+                    event = {**event, "total": len(report.clashes), "following": job.report.id}
+                elif event.get("type") in ("clash", "reasoning") and event.get("id") not in same:
+                    continue
             yield json.dumps(event, default=str) + "\n"
 
     return _ndjson(stream())
+
+
+def _keep_job(jobs: dict, key: str, job, cap: int) -> None:
+    """A job under its key, last in line: a key used again (a scene's run) moves to the end, so the cap drops the
+    oldest other jobs first, never the one just started."""
+    jobs.pop(key, None)
+    jobs[key] = job
+    while len(jobs) > cap:
+        jobs.pop(next(iter(jobs)))
+
+
+def _reading(job: triage.Job, report) -> set[str]:
+    """The clashes of `report` a run under way will still read itself: those it asks about, unchanged here."""
+    asking = job.only if job.only is not None else set(job._by_id)
+    return (asking - set(job.results)) & _same_in(job, report)
 
 
 def _start_triage(report, scene_id: str | None, charge, rerun: bool = False, scope: str | None = None,
@@ -1449,12 +1494,13 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False, sco
         job = _triage_jobs.get(key)
         if register is not None:
             mk = _model_key(doc)
-            if job is not None and not job.done:
-                job.learn(facts)
-                return job   # one run per scene at a time: follow it (its readings reach this list as they land)
             carried = register.carried(report, mk)
             unread = _unread(report, doc, facts, carried, scope, rerun) if ask else set()
-            if job is not None and job.report is report and not rerun and (not unread or not ask):
+            running = job is not None and not job.done
+            if running and not rerun and not (unread - _reading(job, report)):
+                job.learn(facts)
+                return job   # the run under way reads all of it (or nothing is asked): follow it, free
+            if not running and job is not None and job.report is report and not rerun and not unread:
                 job.learn(facts)
                 return job
             refused = charge() if unread else None   # carrying readings over is free
@@ -1465,13 +1511,22 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False, sco
                 info = {**info, "requirements": ws.requirements_info(doc)}
             in_scope = {c.id for c in report.clashes if scope is None or scope in c.checks}
             seed = {k: v for k, v in carried.items() if not (rerun and k in in_scope)}
+            prepare = None
+            if running:   # queued behind the run under way: what to read is worked out when it ends
+                before = job
+
+                def prepare():
+                    now = register.carried(report, mk)
+                    fresh = {k for k, v in before.results.items() if v.get("source") == "model" and not v.get("error")}
+                    left = _unread(report, doc, facts, now, scope, rerun) - (fresh if rerun else set())
+                    return {k: v for k, v in now.items() if k not in left}, left
             job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", 8), requirements=doc,
-                             seed=seed, domain=domains.of(ws, scene_id), teams=teams, only=unread, scope=scope,
-                             on_reading=lambda c, v: register.keep_reading(mk, c, v))
+                             seed=seed if not running else None, domain=domains.of(ws, scene_id), teams=teams,
+                             only=unread, scope=scope, on_reading=lambda c, v: register.keep_reading(mk, c, v),
+                             prior_audit=job.audit if job is not None and not running else None,
+                             after=job if running else None, prepare=prepare)
             job.learn(facts)
-            _triage_jobs[key] = job.start()
-            while len(_triage_jobs) > 16:
-                _triage_jobs.pop(next(iter(_triage_jobs)))
+            _keep_job(_triage_jobs, key, job.start(), 16)
             return job
         if job is None or (rerun and job.done):
             donor = None if rerun else _triage_donor(report, doc) if doc is not None else None
@@ -1485,9 +1540,7 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False, sco
                              requirements=doc, seed=donor.results if donor is not None else None,
                              domain=domains.of(ws, scene_id), teams=teams)
             job.learn(facts)
-            _triage_jobs[key] = job.start()
-            while len(_triage_jobs) > 16:
-                _triage_jobs.pop(next(iter(_triage_jobs)))
+            _keep_job(_triage_jobs, key, job.start(), 16)
     job.learn(facts)
     return job
 
@@ -1506,6 +1559,7 @@ def _with_titles(report, found: dict[str, str]) -> None:
 @app.get("/api/reports/{report_id}/titles")
 def report_titles(report_id: str):
     report = ws.report(_report(report_id))
+    _kept_titles(report)
     job = _title_jobs.get(_title_key(report))
     if job:
         _with_titles(report, job.titles)
@@ -1527,8 +1581,9 @@ def titles_stream(report_id: str, request: Request, scene_id: str | None = None)
     per batch ({id: title}), done. One run per report is shared; following a run already started is free."""
     report = ws.report(_report(report_id))
     key = _title_key(report)
-    register = ws.checks.get(report.scene_id or "") if report.origin == "sightline" else None
+    register = _register_of(report)
     with _title_lock:
+        _kept_titles(report)
         job = _title_jobs.get(key)
         if job is not None:
             _with_titles(report, job.titles)
@@ -1540,9 +1595,7 @@ def titles_stream(report_id: str, request: Request, scene_id: str | None = None)
             model, info = triage_model()
             job = titles.Job(report, model, info, domains.of(ws, scene_id if scene_id in ws.scenes else None),
                              on_titles=register.keep_titles if register is not None else None)
-            _title_jobs[key] = job.start()
-            while len(_title_jobs) > 32:
-                _title_jobs.pop(next(iter(_title_jobs)))
+            _keep_job(_title_jobs, key, job.start(), 32)
 
     def stream():
         for event in job.follow():
@@ -1669,7 +1722,8 @@ def _narrowed(report, check: str | None):
     kept = next((c for c in report.checks if c["key"] == check), None)
     if kept is None:
         raise KeyError(check)
-    return dataclasses.replace(report, title=kept["title"], clashes=[c for c in report.clashes if check in c.checks])
+    return dataclasses.replace(report, title=kept["title"],
+                               clashes=[dataclasses.replace(c, test=c.checks[check]) for c in report.clashes if check in c.checks])
 
 
 @app.get("/api/reports/{report_id}/teams")

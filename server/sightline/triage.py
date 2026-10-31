@@ -184,6 +184,15 @@ REASONING_KEPT = 6000      # characters of a clash's reasoning kept with its ver
 REASONING_EVERY_S = 0.6    # how often a clash's new reasoning goes to the browser
 
 
+def settled_by(c: ReportClash, doc: "reqs.Doc | None" = None, facts: dict | None = None,
+               rules: bool = True) -> tuple[dict | None, dict | None]:
+    """What settles a clash without the model, if anything: (the verdict, the requirements rule among what settles it).
+    The open model's facts first (one element on both sides), then the sure rules (`by_rule`), then a by-design rule
+    of the requirements. `triage_report` and the route that charges for a run (`app._unread`) both ask this."""
+    rule = reqs.settle(doc, c) if doc is not None and rules else None
+    return (facts or {}).get(c.id) or (by_rule(c) if rules else None) or rule, rule
+
+
 def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
                   workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
                   settled: dict | None = None, reasoning: bool = False, alike: bool = True,
@@ -207,10 +216,9 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
     guidance = reqs.prompt_text(doc, "triage") if doc is not None else ""
     todo: list[ReportClash] = []
     for c in report.clashes:
-        rule = reqs.settle(doc, c) if doc is not None and rules else None
+        known, rule = settled_by(c, doc, settled, rules)
         if c.id in results and not rule:
             continue
-        known = (settled or {}).get(c.id) or (by_rule(c) if rules else None) or rule
         if known:
             prior = results.get(c.id)
             if known is rule and prior and prior.get("source") == "model" and prior.get("understanding"):
@@ -325,23 +333,27 @@ class Job:
                  requirements: "reqs.Doc | None" = None, seed: dict[str, dict] | None = None,
                  domain: str = domains.CONSTRUCTION, teams: list[str] | tuple[str, ...] = (),
                  only: set[str] | None = None, scope: str | None = None,
-                 on_reading: Callable[[ReportClash, dict], None] | None = None):
+                 on_reading: Callable[[ReportClash, dict], None] | None = None,
+                 prior_audit: dict | None = None, after: "Job | None" = None,
+                 prepare: Callable[[], tuple[dict, set[str] | None]] | None = None):
         """`requirements`: the coordination requirements this run reads under. `seed`: model readings from an earlier
         run under the same prompt (only the rules changed, or ORCA's checks carrying readings to a new list of their
         clashes): kept, so only what they no longer settle is asked. `domain`: the scene's (`domains.of`), whose voice
         the triage prompt takes. `teams`: the teams the models belong to (`document.guess_teams`), which "responsible"
         names. `only`: the clashes the model may be asked about (None: all), and `scope` the kept check they are in
-        (shown, not used). `on_reading`: told every reading the model makes, as it lands (the checks keep them)."""
+        (shown, not used). `on_reading`: told every reading the model makes, as it lands (the checks keep them).
+        `prior_audit`: the by-design rules' audit of the run before under the same rules, kept by a run that asks the
+        model nothing (it makes no audit call of its own). `after`: a run under way this one waits for, then
+        `prepare` gives the seed and `only` as they stand then, so nothing the first run read is asked again."""
         self.report, self.model, self.info, self.workers = report, model, info, workers
         self.requirements = requirements
         self.domain = domain
         self.teams = tuple(teams)
         self.only, self.scope, self.on_reading = only, scope, on_reading
-        ids = {c.id for c in report.clashes}
         # A reading kept from another list: only for clashes here, and without its alike group (read again here).
-        self.seed = {k: {x: y for x, y in v.items() if x not in ("alike", "alike_of")}
-                     for k, v in (seed or {}).items() if v.get("source") == "model" and k in ids}
         self._by_id = {c.id: c for c in report.clashes}
+        self.seed = self._seeded(seed)
+        self.prior_audit, self.after, self.prepare = prior_audit, after, prepare
         self.audit: dict[int, dict] = {}
         self.results: dict[str, dict] = {}
         self.events: list[dict] = []
@@ -391,21 +403,44 @@ class Job:
                 and not event.get("carried") and event["id"] in self._by_id):
             self.on_reading(self._by_id[event["id"]], self.results[event["id"]])
 
+    def _seeded(self, seed: dict | None) -> dict:
+        ids = set(self._by_id)
+        return {k: {x: y for x, y in v.items() if x not in ("alike", "alike_of")}
+                for k, v in (seed or {}).items() if v.get("source") == "model" and k in ids}
+
     def start(self) -> "Job":
         self._emit({"type": "start", "total": len(self.report.clashes), **self.info,
-                    **({"asking": len(self.only), "scope": self.scope} if self.only is not None else {})})
+                    **({"asking": len(self.only), "scope": self.scope} if self.only is not None else {}),
+                    **({"queued": True} if self.after is not None else {})})
 
         # Readings kept from an earlier run are in at once, so a page asking right away sees them.
-        for cid, v in self.seed.items():
-            self._emit({"type": "clash", "id": cid, **v})
+        if self.after is None:
+            for cid, v in self.seed.items():
+                self._emit({"type": "clash", "id": cid, **v})
 
         def work():
             try:
+                if self.after is not None:   # queued behind the run under way: read what it leaves, as it stands then
+                    with self.after._cond:
+                        while not self.after.done:
+                            self.after._cond.wait(timeout=15)
+                    if self.prepare is not None:
+                        seed, only = self.prepare()
+                        self.seed, self.only = self._seeded(seed), only
+                    self._emit({"type": "asking", "asking": len(self.only) if self.only is not None else None})
+                    for cid, v in self.seed.items():
+                        self._emit({"type": "clash", "id": cid, **v})
                 triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True),
                               done=dict(self.seed), settled=dict(self.facts), reasoning=True,
                               requirements=self.requirements, domain=self.domain, teams=self.teams, only=self.only)
                 if self.requirements is not None and self.requirements.by_design:
-                    self._audit()
+                    if self.only is None or self.only:   # a run that asks the model also checks the rules
+                        self._audit()
+                    else:                                # one that asks nothing keeps the last audit, free
+                        prior = self.prior_audit if self.prior_audit is not None else (
+                            self.after.audit if self.after is not None else None)
+                        if prior:
+                            self._apply_audit(prior)
             except Exception as e:
                 self.error = f"{type(e).__name__}: {e}"
             self.seconds = round(time.time() - self.started, 1)
@@ -424,15 +459,19 @@ class Job:
             results = dict(self.results)
         found = audit_rules(self.model, self.report, self.requirements, results, self.info.get("images", True),
                             self.domain)
+        self._apply_audit(found)
+
+    def _apply_audit(self, found: dict) -> None:
+        """An audit's answers: the clashes a disputed rule settled are marked (those in this report)."""
         with self._cond:
             self.audit = found
         for i, a in found.items():
             if a["answer"] != "looks_real":
                 continue
-            for cid in a["settled"]:
+            for cid in a.get("settled", []):
                 with self._cond:
                     v = self.results.get(cid)
-                if v is not None:
+                if v is not None and v.get("source") == "rule":
                     self._emit({"type": "clash", "id": cid, **v, "audit": "disputed", "audit_note": a["note"]})
         self._emit({"type": "audit", "rules": {str(k): v for k, v in found.items()}})
 
