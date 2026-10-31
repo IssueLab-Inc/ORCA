@@ -1427,3 +1427,11 @@ A patterns reading's 502 (Oct 31; owner request to look into it; code `web/src/a
   while it is being made waits for it and gets the same reading.
 - **Checked:** `web/tests/gateway-retry.test.mjs` (2); web tests and build.
 
+Filter the clash list by status (Oct 31; owner request; code `web/src/ReportList.tsx`):
+- **What:** once a clash is fixed or reviewed, the list's filters offer All, To fix, Fixed and Reviewed, each with its
+  count (To fix is the old "Hide resolved" checkbox, which it replaces). The header's "N fixed" and "N reviewed" chips
+  are buttons for the same filter; with nothing fixed or reviewed the filter is off. A filter opens every group.
+- **Checked** in Chromium on Northbank: no filter before a fix; #1 fixed by a real proposal and accepted, then All 464,
+  To fix 463 (none fixed among them), Fixed 1 (#1); the "1 fixed" chip turns the filter on and off with the select
+  following; 145 web tests, build clean.
+

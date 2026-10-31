@@ -60,7 +60,12 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
-  const [hideFixed, setHideFixed] = useState(false);
+  // Which clashes by where they stand: all, those still to fix, the fixed, the reviewed (owner request, Oct 31).
+  const [show, setShow] = useState<"all" | "open" | "fixed" | "reviewed">("all");
+  const fixedCount = report.clashes.filter((c) => fixes[c.id]).length;
+  const reviewedCount = report.clashes.filter((c) => !fixes[c.id] && reviewed[c.id]).length;
+  // Nothing fixed or reviewed (another report, a fresh check): the filter has nothing to choose from, so it is off.
+  const by = fixedCount + reviewedCount > 0 ? show : "all";
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -69,14 +74,16 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
     for (const c of report.clashes) {
       if (only && !only.has(c.id)) continue;
       if (onlyLinked && linkState(matches, c.id) !== "both") continue;
-      if (hideFixed && (fixes[c.id] || reviewed[c.id])) continue;
+      if (by === "open" && (fixes[c.id] || reviewed[c.id])) continue;
+      if (by === "fixed" && !fixes[c.id]) continue;
+      if (by === "reviewed" && (fixes[c.id] || !reviewed[c.id])) continue;
       if (triageFilter && triage[c.id]?.verdict !== triageFilter) continue;
       const text = [`#${c.number}`, c.title, c.name, c.ref, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class, c.a.level, c.b.level, c.grid].join(" ").toLowerCase();
       if (q && !q.split(/\s+/).every((w) => text.includes(w))) continue;
       out.set(c.test, [...(out.get(c.test) ?? []), c]);
     }
     return [...out.entries()];
-  }, [report, matches, query, onlyLinked, hideFixed, fixes, reviewed, triage, triageFilter, focus]);
+  }, [report, matches, query, onlyLinked, by, fixes, reviewed, triage, triageFilter, focus]);
 
   const root = useRef<HTMLDivElement>(null);
   // Bring the selected clash into view, also when something else (the chat) selected it.
@@ -89,8 +96,6 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
 
   const shown = groups.reduce((n, [, cs]) => n + cs.length, 0);
   const linked = matches ? report.clashes.filter((c) => linkState(matches, c.id) === "both").length : null;
-  const fixedCount = report.clashes.filter((c) => fixes[c.id]).length;
-  const reviewedCount = report.clashes.filter((c) => !fixes[c.id] && reviewed[c.id]).length;
   const fixable = (c: ReportClash) => linkState(matches, c.id) === "both" && !fixes[c.id] && !reviewed[c.id]
     && !noClash(c, matches?.[c.id], null, triage[c.id]);
 
@@ -116,8 +121,12 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
       <div className="left-view" data-left-view="clashes" hidden={view !== "clashes"}>
       <div className="report-head" data-tour="detected">
         <div className="row"><h2>{report.title}</h2>
-          <span className="chips">{fixedCount > 0 && <span className="chip ok"><CircleCheck size={12} aria-hidden /> {fixedCount} fixed</span>}
-            {reviewedCount > 0 && <span className="chip">{reviewedCount} reviewed</span>}</span></div>
+          <span className="chips">{fixedCount > 0 && <button type="button" className={`chip ok as-filter ${by === "fixed" ? "on" : ""}`} aria-pressed={by === "fixed"}
+              data-tip={by === "fixed" ? "Show every clash" : "Show only the fixed clashes"} data-tip-side="bottom" onClick={() => setShow(by === "fixed" ? "all" : "fixed")}>
+              <CircleCheck size={12} aria-hidden /> {fixedCount} fixed</button>}
+            {reviewedCount > 0 && <button type="button" className={`chip as-filter ${by === "reviewed" ? "on" : ""}`} aria-pressed={by === "reviewed"}
+              data-tip={by === "reviewed" ? "Show every clash" : "Show only the reviewed clashes"} data-tip-side="bottom" onClick={() => setShow(by === "reviewed" ? "all" : "reviewed")}>
+              {reviewedCount} reviewed</button>}</span></div>
         <p className="hint">{new Set(report.clashes.map((c) => c.test)).size} tests
           {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}
           {naming > 0 && <span className="naming"> · {aiName("triage")} is naming {naming}…</span>}</p>
@@ -131,7 +140,13 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
         </div>
         <div className="filters">
           {matches && <label className="check"><input type="checkbox" checked={onlyLinked} onChange={(e) => setOnlyLinked(e.target.checked)} /> In the model</label>}
-          {fixedCount + reviewedCount > 0 && <label className="check"><input type="checkbox" checked={hideFixed} onChange={(e) => setHideFixed(e.target.checked)} /> Hide resolved</label>}
+          {fixedCount + reviewedCount > 0 && (
+            <select className="status-pick" value={by} onChange={(e) => setShow(e.target.value as typeof show)} aria-label="Show clashes by status">
+              <option value="all">All · {report.clashes.length}</option>
+              <option value="open">To fix · {report.clashes.length - fixedCount - reviewedCount}</option>
+              {fixedCount > 0 && <option value="fixed">Fixed · {fixedCount}</option>}
+              {reviewedCount > 0 && <option value="reviewed">Reviewed · {reviewedCount}</option>}
+            </select>)}
           {shown !== report.clashes.length && <span className="hint">{shown} shown</span>}
         </div>
         {focus && <div className="list-focus" role="status">
@@ -146,7 +161,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
           const pick = cs.filter(fixable).map((c) => c.id);
           const all = pick.length > 0 && pick.every((id) => checked.has(id));
           return (
-            <details key={test} open={!!query.trim() || !!focus || groups.length <= 3 || cs.some((c) => c.id === selected)}>
+            <details key={test} open={!!query.trim() || !!focus || by !== "all" || groups.length <= 3 || cs.some((c) => c.id === selected)}>
               <summary>
                 {matches && <input type="checkbox" className="group-check" aria-label={`Select every fixable clash in ${test}`}
                   checked={all} disabled={!pick.length} onClick={(e) => e.stopPropagation()} onChange={(e) => onCheck(pick, e.target.checked)} />}
