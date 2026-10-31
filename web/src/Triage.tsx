@@ -109,36 +109,36 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
     </div>
   );
 
+  // Idle, the fold shows how triage works; once it has run, the verdicts and what to do with them.
+  const foldTip = state === "idle" ? (compact ? "How triage works" : "Hide how it works") : compact ? "Show the details" : "Show only the essentials";
   return (
     <section className={`triage ${state} ${compact ? "compact" : ""}`} data-tour="triage">
       <div className="triage-head">
         <span className="triage-icon"><ScanSearch size={15} aria-hidden /></span>
         <div>
-          <h3>Triage</h3>
+          <h3>Triage{state === "idle" && <span className="triage-step">Step 1</span>}</h3>
           {/* Folded, the count is the subtitle: the card is one line and its bar */}
           {compact && state === "done" ? <span className="triage-sub count-sub">
               <b className={counts.real_clash ? "bad" : "ok"}>{counts.real_clash}</b>{counts.real_clash === 1 ? " needs a fix" : " need a fix"} of {n}
               <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></span>
             : compact && state === "running" ? <span className="triage-sub count-sub"><b>{ids.length}</b> of {n} sorted · {seconds} s
               <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></span>
-            : <span className="triage-sub">{state === "idle" ? "Step 1 · sort the clashes" : state === "running" ? "Sorting the clashes…" : "Every clash has a verdict"}</span>}
+            : <span className="triage-sub">{state === "idle" ? "Find the few that need a fix" : state === "running" ? "Sorting the clashes…" : "Every clash has a verdict"}</span>}
         </div>
-        {compact && state === "idle" && <button className="btn primary small triage-go" onClick={() => onRun(false)}>
-          <ScanSearch size={14} aria-hidden /> Triage all {n}</button>}
         {run?.done && !compact && <button className="ibtn" aria-label="Triage again" data-tip="Triage again" data-tip-side="left" onClick={() => onRun(true)}>
           <RotateCcw size={14} aria-hidden /></button>}
-        <button className="ibtn triage-fold" aria-expanded={!compact} aria-label={compact ? "Show the triage details" : "Show only the essentials"}
-          data-tip={compact ? "Show the details" : "Show only the essentials"} data-tip-side="left" onClick={toggle}>
+        <button className="ibtn triage-fold" aria-expanded={!compact} aria-label={foldTip} data-tip={foldTip} data-tip-side="left" onClick={toggle}>
           <ChevronDown size={15} aria-hidden /></button>
       </div>
 
+      {/* The first step's one button, full width under the head, folded or not */}
+      {state === "idle" && <button className="btn primary triage-go" onClick={() => onRun(false)}>
+        <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>}
       {compact && state !== "idle" && bar}
       {!compact && <>
 
       {state === "idle" && <>
         <p className="triage-lead">Most clash results are noise. Triage gives all <b>{n}</b> a verdict, so you only open the few that need a fix.</p>
-        <button className="btn primary triage-go" onClick={() => onRun(false)}>
-          <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>
         <p className="hint">Sure cases (spaces, ports, touches) are settled by rule at once;{" "}
           {aiName("triage")}{active?.open_weights ? ", an open-weights model," : ""} reads the rest
           {workers ? `, ${workers} at a time,` : ""} and alike clashes once.</p>

@@ -108,7 +108,7 @@ verified fix".
 | 1. Start | **Watch ORCA fix a clash** on the landing. | `startGolden` sets `golden.current` and calls `openDemo()`. |
 | 2. Open | "Loading 4 models…" over the stage; the four Northbank models (Structure, MEP, Architecture, Site) drawn. | `open(picked)`: `api.open` (or the upload stream), then `Viewer.load` with each file's bytes. |
 | 3. Check | The left pane's Detect card ("Coordinate the models"), its phase line ("Checking n elements") and each test's coverage. | `runDetect(null, id)` streams `api.detect` (NDJSON phases) and opens the result as the report (`loadReport`). Site's tests are listed but off by default, so the check covers 1,732 elements: 464 clashes in about 4 s (README). |
-| 4. List | The **Clashes** tab: report title "Coordination · n models", tests as groups, rows `#N` with a plain name, then Muse's title as it lands ("Muse is naming n…"), thumbnails drawn as rows scroll into view. | `api.titles` streams titles; `LazyThumb` queues `Viewer.thumbClash`. |
+| 4. List | The **Clashes** tab: report title "Coordination · n models", tests as groups, rows `#N` with a plain name, then Muse's title as it lands (a "Naming n…" pill on the report's line while they land; its tip names the model), thumbnails drawn as rows scroll into view. | `api.titles` streams titles; `LazyThumb` queues `Viewer.thumbClash`. |
 | 5. Pick | The supply-air main through the Level 02 transfer girder (MEP vs Structure; #1 on a fresh check, per CLAUDE.md) selected; the camera flies to where the two meet; the clash panel shows the pair, "Found by ORCA" and "Now" depths, and "Taking the A/B/C views of this clash…". | The golden effect finds the pair with `clashOfPair(TOUR.duct)` (else the deepest clash) and calls `selectClash` → `goToClash`. A detected clash's views are captured by `captureViews` (`Viewer.captureClash`, saved to the server). |
 | 6. Propose | **Propose fixes** runs by itself: "Understanding", Muse Spark's live reasoning notes, the status line. | `propose()` → `runProposal`: waits up to 4 s for the views, then `api.proposeStream`. |
 | 7. Pilot | The glowing border: ORCA is driving. Each idea appears in place, amber while checked, teal when clear, what it hit in magenta; the camera follows and turns slowly while Muse thinks. **Take the view** / **Let ORCA drive**. The Activity panel draws the run in Workings (each round, idea and check, "in view" on the one the pilot shows), or fills the Steps table. | `trackAgent` feeds every event to `Pilot` (`web/src/pilot.ts`); any user camera move is a takeover (`Viewer.onUserCamera`). |
@@ -120,11 +120,14 @@ verified fix".
 
 ### Triage: sort them all first
 
-The Triage card leads the Clashes tab. Before a run it says "Step 1 · sort the clashes" with **Triage all n clashes**;
+The Triage card leads the Clashes tab. Before a run its head reads "Triage" with a **Step 1** pill and "Find the few that
+need a fix", and **Triage all n clashes** fills the card's width under it (the fold shows how triage works);
 while running it shows the clashes settled by rule (touch, same element, not physical: no model call) and the model's
 progress, with the live reading of the newest few; when done, "n need a fix of N", a bar with a segment per verdict
-(click to filter), a row per verdict, **Set aside n as noise** and **Flag n for their authors**. It folds to one line
-once a run is done (kept in `sightline.triage.compact`). The clash panel shows the verdict, severity, responsible team,
+(click to filter), a row per verdict, **Set aside n as noise** and **Flag n for their authors**. It folds to its head
+and bar once a run is done (kept in `sightline.triage.compact`). Under it, the search has its own row; the filters go
+under the search only when they would change the list ("In the model" when some clashes are not in the open models,
+the status picker once anything is fixed or reviewed, then "n shown"). The clash panel shows the verdict, severity, responsible team,
 the reading, what settled it (`BASIS` in `ClashPanel.tsx`) and "How the triage model reasoned". `runTriage` streams
 `api.triage`; the server side is in [09](09-agent-workflows.md).
 
@@ -283,7 +286,7 @@ remembered in `sightline.left-w` / `sightline.right-w`; defaults 310 px and 380 
 | Area | What it holds |
 |---|---|
 | **Notch and corner** (no header bar) | The panels and the model reach the top of the window. The ORCA wordmark hangs from the model's top edge in a notch (`Notch` in `Brand.tsx`; click: About ORCA). While ORCA works the notch grows to say what is happening (opening models with one bar segment per model, the check, triage, proposing, a plan), from the same live state as the phone's peek line, and folds back after. The model's top right corner holds "n fixed", the requirements pill, the agent pill, the owner chip and gear, **Export IFC** / **Export STEP + IFC** and **Menu** (`MenuSheet`: Models, Coordinate, this session's Requirements, Report, Export and Connect an agent, Panels and layout, Help). |
-| **Left pane** (`.pane.left`) | Over a report, `ReportList` with two tabs: **Clashes** (title and test count, Triage folded to one line, search with filters, the list grouped by test, ticks and the Fix together bar) and **Insights** (impact line, the run's summary with Detect again, root causes, patterns). Models open with no report: the Detect setup card. Nothing open: "Nothing to coordinate yet". |
+| **Left pane** (`.pane.left`) | Over a report, `ReportList` with two tabs: **Clashes** (title and test count, Triage folded to its head and button or bar, search with filters under it, the list grouped by test, ticks and the Fix together bar) and **Insights** (impact line, the run's summary with Detect again, root causes, patterns). Models open with no report: the Detect setup card. Nothing open: "Nothing to coordinate yet". |
 | **Stage** (`main.stage`) | The viewer canvas; the rail (`ViewerToolbar`: Shaded, X-ray, Context, Isolate; section box, outlines, measure; Go to the clash, Fit, standard views, models shown, screenshot); the properties card on single click; the notch and the corner; the loading card while the first models open (`LoadCard`: opened on the server, downloaded n of n, drawing model k of n); the pilot pill and glow; the Before / After / Both bar; the landing (`About`) or the blank project (`ProjectStart`) when nothing is open. |
 | **Right pane** (`.pane.right`) | Tabs **Clash** (the clash panel, Propose fixes, Explore wider fix, Go to the clash, Understanding, reasoning, options, Try a move yourself), **Plan** (Fix together, root cause plan, wider fix) and **Chat**. |
 | **Dock** (`footer.dock`) | "Agent activity": Workings, every run drawn as it happens (proposals, plans, triage, Show it built, ORCA's check; [docs/workings.md](../workings.md)), or Steps, every attempt of the running or last proposal. |

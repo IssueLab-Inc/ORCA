@@ -1,4 +1,4 @@
-import { CircleCheck, Search, Wand2, X } from "lucide-react";
+import { CircleCheck, Search, Sparkles, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Matches, type Report, type ReportClash, type TriageKind, type TriageVerdict } from "./api";
 import { ClashThumb } from "./ClashPanel";
@@ -96,6 +96,8 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
 
   const shown = groups.reduce((n, [, cs]) => n + cs.length, 0);
   const linked = matches ? report.clashes.filter((c) => linkState(matches, c.id) === "both").length : null;
+  // "In the model" only when it would change the list: some clashes are not in the open models (or it is on).
+  const linkFilter = linked != null && (linked < report.clashes.length || onlyLinked);
   const fixable = (c: ReportClash) => linkState(matches, c.id) === "both" && !fixes[c.id] && !reviewed[c.id]
     && !noClash(c, matches?.[c.id], null, triage[c.id]);
 
@@ -127,9 +129,11 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
             {reviewedCount > 0 && <button type="button" className={`chip as-filter ${by === "reviewed" ? "on" : ""}`} aria-pressed={by === "reviewed"}
               data-tip={by === "reviewed" ? "Show every clash" : "Show only the reviewed clashes"} data-tip-side="bottom" onClick={() => setShow(by === "reviewed" ? "all" : "reviewed")}>
               {reviewedCount} reviewed</button>}</span></div>
-        <p className="hint">{new Set(report.clashes.map((c) => c.test)).size} tests
-          {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}
-          {naming > 0 && <span className="naming"> · {aiName("triage")} is naming {naming}…</span>}</p>
+        <p className="hint report-meta"><span>{new Set(report.clashes.map((c) => c.test)).size} tests
+          {linked != null ? ` · ${linked} in the model` : " · open the models to link them"}</span>
+          {/* A short pill, so the line never wraps while the titles land; the tip names the model */}
+          {naming > 0 && <span className="naming" role="status" data-tip={`${aiName("triage")} is giving each clash a short title`} data-tip-side="bottom">
+            <Sparkles size={12} aria-hidden /> Naming {naming}…</span>}</p>
         {status}
       </div>
       {triageCard}
@@ -138,8 +142,9 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
           <Search size={15} aria-hidden />
           <input type="search" placeholder="Filter by #, title, element, level…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter clashes" />
         </div>
-        <div className="filters">
-          {matches && <label className="check"><input type="checkbox" checked={onlyLinked} onChange={(e) => setOnlyLinked(e.target.checked)} /> In the model</label>}
+        {/* The search has the row to itself; the filters, when there are any, go under it */}
+        {(linkFilter || fixedCount + reviewedCount > 0 || shown !== report.clashes.length) && <div className="filters">
+          {linkFilter && <label className="check"><input type="checkbox" checked={onlyLinked} onChange={(e) => setOnlyLinked(e.target.checked)} /> In the model</label>}
           {fixedCount + reviewedCount > 0 && (
             <select className="status-pick" value={by} onChange={(e) => setShow(e.target.value as typeof show)} aria-label="Show clashes by status">
               <option value="all">All · {report.clashes.length}</option>
@@ -147,8 +152,8 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
               {fixedCount > 0 && <option value="fixed">Fixed · {fixedCount}</option>}
               {reviewedCount > 0 && <option value="reviewed">Reviewed · {reviewedCount}</option>}
             </select>)}
-          {shown !== report.clashes.length && <span className="hint">{shown} shown</span>}
-        </div>
+          {shown !== report.clashes.length && <span className="hint shown">{shown} shown</span>}
+        </div>}
         {focus && <div className="list-focus" role="status">
           <span><b>{focus.label}</b> · {shown} of {focus.ids.length} shown</span>
           <button className="ibtn" onClick={onClearFocus} aria-label="Show every clash again" data-tip="Show every clash again" data-tip-side="left">
