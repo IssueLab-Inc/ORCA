@@ -189,3 +189,13 @@ test("a By value filter with no property picked takes its last condition's, so w
   assert.equal(f.withBy({ ...r, when: [] }).by, undefined, "nothing to take");
   assert.equal(f.count(p, f.withBy(r)), 2, "the two ducts, coloured by their system");
 });
+
+test("the filters' styles never reuse another part's class: a fix option's rows are .fact, the filters' choices .fseg", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../src/index.css", import.meta.url), "utf8");
+  const rules = css.split("\n").filter((l) => /^\.fact[\s.{>:]/.test(l));
+  assert.ok(rules.length > 0 && rules.every((l) => !/background|border/.test(l)),
+    "the option rows (.fact) carry no background or border: the grey boxes came from the filters' segmented control");
+  const panel = await readFile(new URL("../src/FiltersPanel.tsx", import.meta.url), "utf8");
+  assert.ok(!/className="fact\b/.test(panel), "the Filters panel uses .fseg");
+});

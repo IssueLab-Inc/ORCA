@@ -171,7 +171,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 cd web
 npm install            # once; postinstall copies web-ifc's wasm into public/wasm
 npm run build          # tsc --noEmit (type-check src/ and vite.config.ts), then vite build
-npm test               # node --test tests/*.test.mjs (190 tests on Oct 31)
+npm test               # node --test tests/*.test.mjs (193 tests on Oct 31)
 ```
 
 There is no test framework beyond Node's own runner: the tests use `node:test` and `node:assert`, and the
@@ -196,10 +196,11 @@ flowchart LR
     imp --> host["appHost renders App, runs its effects, drives its handlers"]
 ```
 
-- `appHost({ initial, api, effects })` runs the production `App` with fake hooks keyed by the labelled names (so a
+- `appHost({ initial, api, effects, layout })` runs the production `App` with fake hooks keyed by the labelled names (so a
   test reads `state.context` or `state.planRun`), real effect bodies with cleanup before replacement, a fake `api`
   whose stream calls hand the test their `onEvent` and `resolve`, and a `Proxy` viewer that records every call. It
-  returns helpers to find buttons and components, feed chat events, run timers, settle and unmount. "Only external
+  returns helpers to find buttons and components, feed chat events, run timers, settle and unmount. The page's layout
+  is none (not desktop, phone or tablet) unless a test passes `layout` (`useLayout` then returns it). "Only external
   IO, the GPU viewer and leaf components are replaced"; the assertions drive App's own handlers.
 - **Why App's imports are stubbed:** App imports the GPU viewer, the network and every pane. A data-URL module cannot
   resolve a relative import, so every `./X` App imports must be in the dependencies map: the leaf panes and helpers map
@@ -247,11 +248,12 @@ flowchart LR
 | `links.test.mjs` | 4 | `compiled` | `links.ts`: direct links by kind (rests on read the other way as supports), an element lit once in its first kind, Shift walking the run to equipment, a whole assembly |
 | `viewer-orbit.test.mjs` | 4 | `compiled` | `Viewer.orbitAround`: orbiting round a pivot (the selection, the clash) keeps it at the same place on screen and as far away, with no roll; a sideways drag keeps the camera's height; a long drag down stops short of straight down. `Viewer.press`: with a clash in focus and nothing selected the drag orbits round the clash, a flight under way stops; with none, it turns about what is under the pointer |
 | `viewer-empty-stage.test.mjs` | 2 | `compiled` | `Viewer.drawFrame` in the four-view layout: with nothing open, one empty 3D view over the whole stage and the layout kept; with models, each view in its own pane |
+| `dock-cover.test.mjs` | 2 | `appHost` (desktop) | Opening the first models from the start page: the loading screen is a cover with the load card (none under it), held after the models open while the model is not in its dock panel, fading after three frames there and then gone; no cover for models opened again over open ones or on a phone |
 | `corner.test.mjs` | 2 | `appHost` | The model's top right corner: a kept fix counts on Export (its name says how many were kept) and no "fixed" chip stands beside the notch; the owner's settings go on their button's tip, not in a chip |
 | `viewer-links.test.mjs` | 1 | `compiled` | The connection highlight never shows in a captured picture and is back on screen afterwards |
 | `filters-check.test.mjs` | 12 | `compiled` (React stubbed) + `appHost` | Checks on filters: `checks.ts` (sides, a colour-by-value filter's side, Everything from the server, What the filters show (`viewOf`, `shownCounts`), the list's numbers and the rooms line, names, the test with no id and the defaults, what a side can test, whether a run was a check), `filters.shareable`; What do these hit? and Check clashes in `FiltersPanel`, and The rest (show, grey or hide, one at a time); App runs a check, Detect again repeats it, Check the open models sends every test; chat's context carries the filters, and Detect again repeats a check chat ran |
 | `filters-chat.test.mjs` | 2 | `appHost` | Chat's filters replace its own, pause the user's that were on, and give them back when it clears; chat's `hide_rest` and `grey_rest` are one or the other |
-| `filters.test.mjs` | 13 | `compiled` | `filters.ts`: conditions as the server's `facets.matching`; every condition, unfinished ones left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); hide the rest (what is kept, in its colour; hide filters within it; nothing coloured, colours off); colour by value and its count; counts, names, sets, a new filter's colour; the key (only colours on screen); `applied` (what counts as applying) and `zoomTarget` (what it frames); `migrate`; the palette of twenty and Other clear of every reserved colour; past twenty values, Other in the key; `withBy` |
+| `filters.test.mjs` | 14 | `compiled` | the filters' styles never reuse another part's class (`.fseg`, not a fix option's `.fact`); `filters.ts`: conditions as the server's `facets.matching`; every condition, unfinished ones left out, invert; hide, isolate and colour together (top colour wins, isolates add up, grey the rest); hide the rest (what is kept, in its colour; hide filters within it; nothing coloured, colours off); colour by value and its count; counts, names, sets, a new filter's colour; the key (only colours on screen); `applied` (what counts as applying) and `zoomTarget` (what it frames); `migrate`; the palette of twenty and Other clear of every reserved colour; past twenty values, Other in the key; `withBy` |
 | `viewer-filters.test.mjs` | 7 | `viewerModule` | `Viewer.setRules`: hides, isolates and colours reach the batch (grey for the rest); captures never see them; lit links leave out what a filter hides; `setDrawingsShow` (filtered, whole, follow); `useDrawingPaint` colours a drawing's fill pass and gives the 3D colours back; `frameEverywhere` moves the 3D view and every unpinned drawing; `ofLevel`, and `isShown` built once per change |
 | `tour.test.mjs` | 5 | `compiled` (React and icons stubbed) | `Tour.tsx`: the cell tour's numbers, the ladder's copy per option kind, accepting without a reload, the recorded-run offer when a live proposal fails or finds nothing, a failed plan moving on |
 

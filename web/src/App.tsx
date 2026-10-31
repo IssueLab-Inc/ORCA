@@ -171,6 +171,8 @@ export function App() {
   const [busy, setBusy] = useState<string | null>(null);
   // Opening models, step by step (Brand.tsx LoadCard and the notch); null when nothing is opening.
   const [loading, setLoading] = useState<LoadProgress | null>(null);
+  // The opening that has just succeeded, as its card ended: the cover keeps it while the dock arrives (App, "dockCover").
+  const openedLoad = useRef<LoadProgress | null>(null);
   // A fix the server kept (markFixed): the mark settles once beside it.
   const [kept, setKept] = useState<{ text: string; detail?: string; n: number } | null>(null);
   const keptTimer = useRef<number | undefined>(undefined);
@@ -1212,6 +1214,7 @@ export function App() {
       setModelNames(shortNames(files));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
+      openedLoad.current = load;
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
       setStepFiles(Object.values(stepMap ?? {})); setSceneFiles(files); setResumable(null); sceneUploaded.current = upload;
       return id;
@@ -2627,6 +2630,41 @@ export function App() {
   // The dock is the desktop's; the landing, phones, tablets and the Classic layout switch use the classic layout.
   const docked = layout === "desktop" && !landing && !classic;
   dockedNow.current = docked;
+  // Into the dock (the first models drawn, a report, the dock chosen again) the page would be blank for a few frames:
+  // dockview lays out its panels in an effect, then each panel takes its slot. A cover holds the loading stage's look
+  // until the model has its panel and has drawn there, then fades. Opening the first models from the start page it is
+  // the loading screen itself, so the new models never show behind the card before the switch either.
+  const [dockWas, setDockWas] = useState(docked);
+  const [dockCover, setDockCover] = useState<"on" | "out" | null>(null);
+  // The card the cover keeps while the dock arrives: the opening that has just ended, if one has (not one long past).
+  const [coverLoad, setCoverLoad] = useState<LoadProgress | null>(null);
+  if (docked !== dockWas) {
+    setDockWas(docked); setDockCover(docked ? "on" : null); setCoverLoad(docked ? openedLoad.current : null);
+  }
+  // Read in the render that switched (or not, in the classic layout): never a card for a later switch.
+  useEffect(() => { openedLoad.current = null; }, [stats]);
+  const coverLoading = layout === "desktop" && !classic && !docked && !!loading && !stats;
+  const coverCard = coverLoading ? loading : coverLoad;
+  useEffect(() => {
+    if (dockCover !== "on") return;
+    if (typeof requestAnimationFrame !== "function") { setDockCover(null); return; }
+    const started = performance.now();
+    let raf = 0, placed = 0;
+    const tick = () => {
+      const stage = host.current;
+      // In its dock panel, laid out, and three frames drawn there (the viewer takes its new size on the first).
+      placed = stage?.isConnected && !!stage.closest(".dock-host") && stage.clientWidth > 0 ? placed + 1 : 0;
+      if (placed >= 3 || performance.now() - started > 6000) { setDockCover("out"); return; }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [dockCover]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (dockCover !== "out") return;
+    const t = window.setTimeout(() => setDockCover(null), 200);
+    return () => window.clearTimeout(t);
+  }, [dockCover]);
   // Selecting an element shows its Properties panel (floating at first, wherever the user put it after).
   useEffect(() => { if (selected?.globalId && docked) dock.current?.show("properties"); }, [selected?.globalId, docked]);
   const pickedDemo = demos.find((d) => d.files.length === picked.length && d.files.every((f) => picked.includes(f)));
@@ -3147,7 +3185,7 @@ export function App() {
         )}
         {!compact && <Notch status={notchStatus} onLogo={() => openAbout()} />}
         {!compact && corner}
-        {loading && !stats && <LoadCard load={loading} now={now} />}
+        {loading && !stats && !coverLoading && <LoadCard load={loading} now={now} />}
         {compact && busy && <div className="overlay live"><i className="spinner" aria-hidden />{busy}</div>}
         {compact && proposing && <div className="overlay live"><i className="spinner" aria-hidden />{statusLine(progress, now, proposal?.attempts ?? [])}</div>}
         <div className={`pilot-glow ${pilotStatus?.driving ? "on" : ""}`} aria-hidden />
@@ -3470,6 +3508,11 @@ export function App() {
         </section>
       </MenuSheet>}
 
+      {(coverLoading || dockCover) && (
+        <div className={`load-cover ${dockCover === "out" ? "out" : ""}`}>
+          <Notch status={notchStatus} onLogo={() => openAbout()} />
+          {coverCard && <LoadCard load={coverCard} now={now} />}
+        </div>)}
       <Tooltips />
       {popouts.map((w, i) => <Tooltips key={i} doc={w.document} />)}
       {aboutTab && <AboutOrca tab={aboutTab} onTab={switchAbout} onClose={closeAbout} triageOpen={!!triageModel?.open_weights} />}

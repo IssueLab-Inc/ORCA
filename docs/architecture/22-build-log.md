@@ -1755,6 +1755,28 @@ elements, 633 clashes; code `facets.acted` / `shown`, `detect.Selection.filter.b
   tolerance or clearance on its own row, a full-width Check clashes button at the end with why it is off right under
   it, and the block's body spaced in its own box (a `details` element takes no flex gap in Chromium).
 
+No blank page as the panels arrive (Oct 31; owner request; code `web/src/App.tsx`, `web/src/index.css`):
+- **What happened:** opening the first models from the start page, the page went blank once they were drawn (2.5 s in
+  a software-rendered test browser; a flash on a real one): the switch into the dock takes the stage, the lists and the
+  notch out of the page, and dockview lays out its panels in an effect, a few frames later. Just before, the new models
+  also showed behind the load card for a frame.
+- **What changed:** a cover over the whole window in the empty 3D view's colour, with the notch and the load card,
+  holds the switch until the stage is in its dock panel and has drawn three frames there (6 s at most), then fades in
+  0.2 s (`dockCover`). Opening from the start page on a desktop it is the loading screen itself (`coverLoading`).
+  Design and limits: `docs/panels.md`, "Into the dock under a cover". `appHost` takes a `layout` for this.
+- **Checked:** `web/tests/dock-cover.test.mjs` (2; the cover test fails on the old code). Recorded in Chromium loading
+  Northbank in the four-view layout and scanned at 10 frames a second: before, 25 blank frames at the switch; after,
+  none: the cover from 0.45 s, the stage in its panel under it at 10.4 s, the fade at 14.3 s (frames are slow in
+  software rendering) and the panels whole on the first frame after it. 189 web tests, build clean.
+
+A fix option's rows lost their grey boxes again (Oct 31; owner: "why is the background of the edit, clearance, also
+needs ... didn't use to be there"): the Filters panel's segmented choices (Colour / By value / Hide / Isolate, The
+rest) were styled as `.fact`, the class a fix option's Edit, Clearance and Also needs rows already had, so those rows
+took its grey background, border and rounded corners. The filters' class is now `.fseg` (`FiltersPanel.tsx`,
+`index.css`). Checked: `web/tests/filters.test.mjs` (14, a guard that `.fact` carries no background or border);
+Chromium on Northbank, a proposal on #1: the option's rows plain again (`.fact` background transparent, no border),
+the filters' segmented choices unchanged.
+
 Counts match between the filter list and Check clashes (Oct 31; owner: "make the counts match between the list and
 check options"; code `checks.sideCounts` / `shownCounts` / `roomsLine`, `chat.side_count`): the list said By Model
 1,768 (rooms included), the check's choices and chat 1,732 (rooms left out: no solid body to clash). Now every place
