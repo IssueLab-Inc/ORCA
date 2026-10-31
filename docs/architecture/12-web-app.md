@@ -179,7 +179,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 | Tour | `touring`, `tourWhich`, `replaying`, `about` | | `tourState`, `tourActions` |
 | Layout and sheet | `widths`, `resizing`, `listOpen`, `snap`, `menuOpen` | `followed` | `layout`, `compact`, `coarse`, `peekLine` |
 | Panels (docs/panels.md) | `tab` (set through `setTab`, which also shows the panel in the dock), `classic`, `popouts` (pop-out windows open now) | `dock` (`DockHandle`), `dockedNow`; `slots` (`usePanelSlots`) | `docked`, `dockTabs`, `showPanel`, `layoutMenu` |
-| Selected element | `selected` (GlobalId and `api.element`'s card data), `elementProps` (`api.properties`, read on each selection) | | `elementCard` (`ElementCard` with `cardActions`: the card, its breadcrumbs, icon bar, links and sets; folded on the card over the model), `idsWith` (a facet value's elements, for isolate all with / this level) (`PropertySets`): over the model in the classic layout (with All properties), in the Properties panel in the dock |
+| Selected element | `selected` (GlobalId and `api.element`'s card data), `elementProps` (`api.properties`, read on each selection) | | `elementCard` (`ElementCard` with `cardActions`: the card, its breadcrumbs, icon bar, links and sets; folded on the card over the model), `idsWith` (a facet value's elements, for isolate all with / this level); the card shows over the model in the classic layout (sets under All properties) and in the dock's Properties panel |
 | Thumbnails queue | `thumbs` | `thumbQueue`, `thumbPaused`, `thumbTimer`, `thumbSource` | |
 | Status | `busy`, `error`, `now` | `sceneEpoch`, `workspaceEpoch` | `working`, `fixing` |
 
