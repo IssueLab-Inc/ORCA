@@ -108,6 +108,7 @@ export function graphOf(run: Run, at = run.ended ?? Infinity): Graph {
     case "triage": return triage(run, at);
     case "built": return built(run, at);
     case "detect": return detect(run, at);
+    case "chat": return chat(run, at);
     default: return empty(run, at);
   }
 }
@@ -698,4 +699,100 @@ function detect(run: Run, at: number): Graph {
   }
   return { lanes, cols: cols.widths, steps, edges, bars, ticks, flows: [], duration: Math.min(at, run.ended ?? at), done,
     rows: [{ id: "you", label: lanes[0].label }, { id: "orca", label: "ORCA" }] };
+}
+
+/* ---------- a chat turn: what was asked, each model call, each tool ORCA ran and what the page did, the answer ---------- */
+
+/** Tools whose work is a run of its own in the picker (a proposal, a plan, a check, a wider fix, a picture). */
+const OWN_RUN: Record<string, string> = {
+  propose_fixes: "Fixes", plan_fixes_together: "Plan", plan_root_cause: "Plan", detect_clashes: "Check",
+  show_it_built: "Show it built", explore_wider_fix: "Plan",
+};
+/** A tool's name as people read it: "set_filters" → "Set filters". */
+export const toolTitle = (name: string) => { const s = name.replace(/_/g, " ").trim(); return s ? s[0].toUpperCase() + s.slice(1) : "A tool"; };
+/** A tool's arguments in one line, for its step. */
+function argsText(args: unknown): string {
+  if (!args || typeof args !== "object") return "";
+  const parts = Object.entries(args as Record<string, unknown>).filter(([, v]) => v != null && v !== "" && !(Array.isArray(v) && !v.length))
+    .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`);
+  const line = parts.join(" · ");
+  return line.length > 160 ? `${line.slice(0, 159)}…` : line;
+}
+/** What the page did for a tool (the chat's `ui` events), in a few words. */
+function uiText(e: RunEvent["e"]): string {
+  const action = String(e.action ?? "");
+  if (action === "filters") {
+    if (e.mode === "clear") return "Filters: chat's cleared";
+    const n = Number(e.count ?? 0), names = (e.names as string[] | undefined) ?? [];
+    const rest = e.hide_rest ? ", the rest hidden" : e.grey_rest ? ", the rest greyed" : "";
+    return `Filters: ${names.length ? names.join(", ") : `${n} rule${n === 1 ? "" : "s"}`}${rest}`;
+  }
+  if (action === "select_clash") return `Selected ${String(e.clash_id ?? "a clash")}`;
+  if (action === "set_view") return `View: ${[e.mode, e.section_box === true ? "section box on" : e.section_box === false ? "section box off" : ""].filter(Boolean).join(", ") || "changed"}`;
+  if (action === "open_report") return "Opened the check's report";
+  if (action === "show_it_built") return "Drawing the fix built";
+  return action ? toolTitle(action) : "The page changed";
+}
+
+function chat(run: Run, at: number): Graph {
+  const events = upTo(run, at), done = finished(run, at), cols = new Columns();
+  const lanes: Lane[] = [youLane(run, 100), { id: "muse", label: aiName("proposal"), sub: "reads and answers", actor: "spark", h: 120 },
+    { id: "orca", label: "ORCA", sub: "runs the tools", actor: "orca", h: 130 }];
+  const steps: Step[] = [], edges: Edge[] = [], bars: Bar[] = [], ticks: Tick[] = [{ lane: "you", at: 0, tone: "you" }];
+  const add = (s: Step) => { steps.push(s); return s; };
+  const asked = events.find((x) => x.e.type === "asked");
+  const start = add(startStep(run, "", "asked", cols.next(262)));
+  start.title = asked?.e.voice ? "You said" : run.origin === "you" || run.origin === "chat" ? "You asked" : start.title;
+  start.body = [{ kind: "quote", text: String(asked?.e.text ?? run.title) }];
+  let prev = "start", calls = 0, answered = false, failure: string | null = null;
+  let thinking: Step | null = null, tool: Step | null = null;
+  // A step that is still running ends when the next event arrives.
+  const close = (t: number) => {
+    if (thinking) { thinking.t1 = t; thinking.status = "done"; thinking.time = sec(t - thinking.t0); bars.push({ lane: "muse", a: thinking.t0, b: t, tone: "spark" }); thinking = null; }
+  };
+  const link = (s: Step, extra: Partial<Edge> = {}) => { edges.push({ from: prev, to: s.id, ...extra }); prev = s.id; };
+  for (const { t, e } of events) {
+    if (e.type === "thinking") {
+      close(t); calls++;
+      thinking = add({ id: `call${calls}`, lane: "muse", col: cols.next(), actor: "spark", model: aiName("proposal"), status: "run", t0: t, ev: "thinking",
+        title: calls === 1 ? "Reads the question" : "Reads what the tools said", body: [], detail: [] });
+      link(thinking);
+    } else if (e.type === "tool") {
+      close(t);
+      const name = String(e.name ?? ""), own = OWN_RUN[name];
+      tool = add({ id: `tool${steps.length}`, lane: "orca", col: cols.next(), actor: "orca", status: "run", t0: t, ev: "tool · tool_result",
+        title: toolTitle(name), body: [text(argsText(e.args) || "No arguments", { mono: true, tone: "muted" })],
+        detail: own ? [text(`Its work is drawn as a run of its own: ${own}, in the run picker`, { tone: "muted" })] : [] });
+      link(tool);
+    } else if (e.type === "tool_result") {
+      const name = String(e.name ?? ""), s = [...steps].reverse().find((x) => x.lane === "orca" && x.status === "run" && x.title === toolTitle(name)) ?? tool;
+      if (s) {
+        const summary = String(e.summary ?? ""), bad = /^(error|refused|failed|no )/i.test(summary);
+        s.status = bad ? "fail" : "ok"; s.t1 = t; s.time = sec(t - s.t0);
+        s.body = [...s.body, text(summary || "Done", { tone: bad ? "bad" : undefined })];
+        bars.push({ lane: "orca", a: s.t0, b: t, tone: bad ? "fail" : "ok" });
+      }
+    } else if (e.type === "ui") {
+      const s = tool ?? start;
+      s.body = [...s.body, { kind: "chips", items: [{ text: uiText(e), tone: "accent" }] }];
+    } else if (e.type === "message") {
+      close(t); answered = true;
+      const reply = add({ id: "answer", lane: "muse", col: cols.next(300), actor: "spark", model: aiName("proposal"), status: "ok", t0: t, time: sec(t), ev: "message",
+        title: "Answers", body: [{ kind: "quote", text: String(e.text ?? "") }], detail: [] });
+      link(reply, { win: true });
+      ticks.push({ lane: "muse", at: t, tone: "ok" });
+    } else if (e.type === "error") failure = String(e.detail ?? "The chat failed");
+  }
+  const live = !done && !failure;
+  if (thinking) { const th = thinking as Step; if (live) { th.time = sec(at - th.t0); th.body = [text("Thinking", { live: true })]; } else close(at); }
+  for (const s of steps) if (s.lane === "orca" && s.status === "run") {
+    if (live) { s.time = sec(at - s.t0); s.body = [...s.body, text("Running", { live: true })]; }
+    else { s.status = "done"; s.body = [...s.body, text("Stopped before its result", { tone: "muted" })]; }
+  }
+  if (!answered) {
+    const s = stoppedStep(run, at, failure, cols.next());
+    if (s) { add(s); edges.push({ from: prev, to: s.id }); } else cols.widths.pop();
+  }
+  return { lanes, cols: cols.widths, steps, edges, bars, ticks, flows: [], duration: Math.min(at, run.ended ?? at), done,
+    rows: [{ id: "you", label: lanes[0].label }, { id: "muse", label: "Muse" }, { id: "orca", label: "ORCA" }] };
 }

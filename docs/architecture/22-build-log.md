@@ -1721,3 +1721,16 @@ The corner keeps clear of the notch (Oct 31; owner report; code `web/src/App.tsx
   1280×800, 1366×768, 1600×1000 and 1920×1080, idle and while ORCA checks the models: the corner clears the wordmark
   by 34–311 px and the working notch by 12–179 px, on one row. With requirements and an agent as well it still clears
   both; at 1280 and 1366 that crowded corner wraps to a second row rather than reaching the notch. Web tests and build.
+
+Chat turns in Workings (Oct 31; owner request: "filter by distribution systems" worked in the chat but showed nothing
+in Workings; `web/src/workingsGraph.ts`, `App.tsx`, `Chat.tsx`, `runlog.ts`, `api.ts`):
+- **What:** each Chat panel turn, typed or spoken, is a run ("Chat: <question>"): what was asked, each call to the
+  chat's model, each tool with its arguments and result and what the page did for it, the answer. Tools whose work is
+  its own run (proposals, plans, checks, Show it built) say so. Agents over MCP are not drawn yet.
+- **How:** `Chat.tsx` sends the page an `asked` event before each request; `traceChat` (App) logs the turn as run kind
+  `chat`; a new builder `chat` in `workingsGraph.ts`.
+- **Checked:** 187 web tests after merging main (one new in `workings.test.mjs`; `async-ownership.test.mjs` now expects the `asked` note);
+  build clean. In Chromium on Northbank against a local server: "filter by distribution systems" drew You asked →
+  Reads the question → Set filters (colour by System, the rest greyed, 844 elements) → Reads what the tools said →
+  Answers, in about 8 s. No page errors.
+

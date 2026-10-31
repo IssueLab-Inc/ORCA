@@ -2198,8 +2198,30 @@ export function App() {
     chatAgent.current?.retire(); chatPlan.current?.retire(); chatContext.current?.retire();
     chatAgent.current = null; chatPlan.current = null; chatContext.current = null; planThisTurn.current = false;
     chatEscalating.current = false;
+    traces.current.chat?.end("Stopped when newer work took over");
+  }
+  /** A chat turn in Workings: the question, each model call, each tool and what the page did for it, the answer. The
+   *  work a tool starts (a proposal, a plan, a check) is a run of its own. */
+  function traceChat(e: ChatEvent) {
+    if (e.type === "asked") {
+      const t = traceStart("chat", "you", e.text.length > 60 ? `${e.text.slice(0, 59)}…` : e.text);
+      t.add(e);
+      return;
+    }
+    const turn = traces.current.chat;
+    if (!turn) return;
+    if (e.type === "thinking" || e.type === "tool" || e.type === "tool_result" || e.type === "message") turn.add(e);
+    else if (e.type === "ui" && e.action === "filters")
+      turn.add({ type: "ui", action: "filters", mode: e.mode, count: e.filters?.length ?? 0, names: (e.filters ?? []).map((r) => r.name || (r.by ? `colour by ${r.by.facet.replace(/^[a-z]+:/, "").split("/").pop()}` : r.action)).filter(Boolean),
+        grey_rest: e.grey_rest, hide_rest: e.hide_rest });
+    else if (e.type === "ui" && e.action === "open_report") turn.add({ type: "ui", action: "open_report" });
+    else if (e.type === "ui") turn.add(e);
+    else if (e.type === "error") { turn.add(e); turn.end(e.detail); }
+    else if (e.type === "done") turn.end(null);
   }
   function onChatEvent(e: ChatEvent, origin: Origin = "chat") {
+    if (origin === "chat") traceChat(e);
+    if (e.type === "asked") return;
     if (e.type === "thinking") directContext.current?.retire();
     if (e.type === "tool" && e.name === "propose_fixes") {
       const c = report?.clashes.find((x) => x.id === e.args.clash_id);
