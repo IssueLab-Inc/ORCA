@@ -233,9 +233,10 @@ A clash ORCA detected has no Navisworks pictures, so the page draws them: `Viewe
 
 - Only PNGs (checked by signature, 415 otherwise), at most `MAX_VIEW_BYTES` (4,000,000), label A, B or C, and only
   for reports with `origin: "sightline"` (`Workspace.save_capture`; 409 otherwise).
-- Saved as `<run folder>/views/<clash id>-<label>.png`, joined to the clash's `images`, so the fix agent, triage and
-  the PDF read them as they read Navisworks views. A rerun of detection copies a clash's views to the new run
-  (`Workspace._carry`).
+- Saved as `<the scene's checks folder>/views/<clash id>-<label>.png` (`checks.Register.save_view`, temp
+  `sightline-checks-*`, deleted with the scene), joined to the clash's `images` on that list and the current one, so
+  the fix agent, triage and the PDF read them as they read Navisworks views, and every later list of the scene's
+  checks has them ([docs/detection.md](../detection.md), "Kept checks"). 409 once the scene is gone.
 - Served back by `GET /api/reports/{rid}/clashes/{cid}/images/{index}`.
 
 ## In: the requirements file
@@ -295,7 +296,7 @@ what it compiles into and how pages send it: [15](15-requirements-settings-and-c
 
 ```mermaid
 flowchart TB
-    page["Page sends scope, teams, evidence, reviews, marks, triage verdicts"]
+    page["Page sends scope, teams, evidence, reviews, marks, triage verdicts, and a kept check (or all)"]
     gate{"At least half the clashes have a verdict, and one proposal left"}
     rows["document.build_rows: model and team per side, teams_for, section"]
     explain["document.explain: Muse Spark per page, 6 at a time, report.md"]
@@ -323,7 +324,9 @@ flowchart TB
 ```
 
 - **What goes in.** The clash report and the verdicts the page shows (`triage` in the request, so the report
-  survives a restart or a rerun of the shared triage; else the server's finished run). Fewer verdicts than half the
+  survives a restart or a rerun of the shared triage; else the server's finished run). For the list of ORCA's kept
+  checks, `check` narrows it to one check's clashes, titled as that check's run (`app._narrowed`; the dialog's "Only
+  <check>" and MCP `generate_report(check=…)`), else every kept check's clashes, each once. Fewer verdicts than half the
   clashes is 409 "Triage the report first". The session's `evidence` per clash (the fix accepted or proposed, its
   edit, clearance, `meets`, and `before_img` / `after_img` pictures the browser captured with `Viewer.capture`,
   plus `built_img` / `built_note`), `reviews` (team, name, decision, note, date: kept per report in the browser),

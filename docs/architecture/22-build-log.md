@@ -1786,3 +1786,31 @@ What is checked is unchanged. Checked: `web/tests/filters-check.test.mjs` (12), 
 Chromium on Northbank with the owner's filters, the list and the choices both say 844 and 1,768, the rooms line shows
 only for a side with rooms, and chat (Muse Spark, "check By Model against everything") said "1,768 elements on each
 side, but 36 on each side are rooms with no solid to clash, so 1,732 checked".
+
+Kept checks: several clash checks at once (Oct 31; owner: "with ORCA's clash detection, at any given point, we only
+have the results of one clash check … implement the ability to have multiple"; owner decisions: the latest result of
+each check, one list with a picker, one #N per clash across every check, triage verdicts follow the clash; code
+`server/sightline/checks.py`, `Workspace.detect` / `detect_all` / `remove_check` / `union_report`, `detect._assign_ids`,
+`triage.Job(only, scope, on_reading)`, `app._narrowed`, `web/src/Detect.tsx` `CheckPicker`, `checks.ts` `narrow` /
+`pruneFixes`, App's `adoptRun`; [docs/detection.md](../detection.md), "Kept checks"):
+- **Before:** the server kept only a scene's last run (`_runs`, `_run_reports`, `detections`), linking ids, numbers,
+  titles and views to the run before; the page held one report and every run wiped fixes, plans and the chat. Full
+  check → check A → check B gave B new ids and numbers for pairs the full check had numbered; full → check → full could
+  never say what was resolved; captured views went with an evicted report; triage was per report, paid again per run.
+- **Now:** each check (the open models, each check on filters) keeps its latest run, diffed against its own last run;
+  one list of every kept check's clashes (a clash two checks found is one row naming both), a new list per change;
+  ids, numbers (no restart under new requirements), titles, views and triage readings kept with the scene, so a list
+  dropped by the report cap is made again with no run. The page keeps its work across runs (a fix's mark until the
+  check listing its clash runs again), shows a picker over the list (All checks or one, Run again, Remove, Run all
+  again, which ran before a fix) and the triage card's "Triage N unread". Triage carries a reading free while the pair
+  is the same and the depth moved no more than 1 mm under the same prompt, and asks only about the unread clashes of
+  the check on screen. Chat and MCP: `detect_clashes(check=…)` (a kept check by name, or "all"), `list_clashes(check=…)`,
+  `get_session` lists the checks, `generate_report(check=…)`. Routes: `GET`/`DELETE /api/scenes/{id}/checks`,
+  `DetectRequest.check` and `all`. `SIGHTLINE_MAX_CHECKS` (12).
+- **Checked:** `tests/test_checks.py` (13), `test_detect.py` (33), `test_api.py`; `web/tests/checks-list.test.mjs` (7),
+  `filters-check.test.mjs` (12); 694 server tests, 200 web tests, build clean. On Northbank against a local server
+  (this container's CPU): the full check 464 clashes in 5.1 s; a ducts check 1 clash in 2.2 s, the supply air main
+  under the full check's id and #1; a beams check 240 clashes in 0.6 s with all 15 transfer-girder clashes under the
+  full check's ids and numbers; 464 rows with unique numbers; Run all again (3 checks) 7.0 s. In Chromium, resuming
+  that session: the picker (All 2 checks · 464, the open models, the ducts check), the ducts check's one clash
+  triaged by Muse Spark, Run again on it keeping the verdict free, and All checks showing "Triage 463 unread".

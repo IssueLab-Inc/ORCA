@@ -158,7 +158,8 @@ The Northbank tour's act "Your standard" (after the patterns, Oct 29):
 - Use these requirements.
 
 The rest of the tour runs under them: the report says it was checked against L4 Production · Strict. The tour does not
-check again, which would renumber the clashes and need triage again.
+check again: since Oct 31 a check under new requirements keeps every clash's #N ([detection.md](detection.md), "Kept
+checks"), but triage under a new triage prompt reads the clashes again.
 
 ## Not yet
 
