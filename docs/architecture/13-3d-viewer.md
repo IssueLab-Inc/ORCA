@@ -225,10 +225,12 @@ every style.
 - **Controls:** `OrbitControls` with damping and `zoomToCursor` (the wheel zooms to what is under the pointer), on the
   3D pane's own element (`pane3d`). Any controls `start` (drag, wheel, touch) and any `pointerdown` call
   `onUserCamera`, which `App` wires to `pilot.takeOver()`.
-- **Pivot** (`press`, capture phase, before the controls see it; not with Shift, Ctrl or Cmd, which pan, or during a
-  flight). What a left drag orbits round (`pivotFor`):
-  - **the selected element** (its box's middle), or, with nothing selected, **the clash while ORCA works on it** (a
-    proposal, a plan, a wider fix, a replay: `App` calls `setOrbitClash(clashBusy)`; `clashCentre` is where the pair
+- **Pivot** (`press`, capture phase, before the controls see it; not with Shift, Ctrl or Cmd, which pan). A press
+  stops a flight under way first (the pilot frames each idea and glides to the clash before its slow turn), so the
+  drag turns from where the camera is. What a left drag orbits round (`pivotFor`):
+  - **the selected element** (its box's middle), or, with nothing selected, **the clash in focus** (its chip shows)
+    **or the one ORCA works on** (a proposal, a plan, a wider fix, a replay: `App` calls `setOrbitClash` with
+    `clashBusy` or a clash or pair on screen outside a plan's or a wider fix's view; `clashCentre` is where the pair
     meets, else the middle of the focus). The drag turns the camera and its target together round that point
     (`orbitAround`: across round the vertical, up and down tilting, never past straight up or down, at the controls'
     speed), so the pivot stays where it is on screen and nothing jumps; the controls' own rotation is off for that
