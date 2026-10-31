@@ -1680,3 +1680,15 @@ in chat and MCP; [docs/filters.md](../../docs/filters.md)):
   system colours, framed; Grey → the rest back in grey; Show → as before. Chat on Muse Spark: "Show only the supply air
   ducts on level 2 in blue and hide everything else." → `set_filters` with `hide_rest` (a first "Level 2" refused with
   the closest name, then "Level 02"): 68 ducts and fittings in blue, everything else hidden, the user's filter paused.
+
+Orbit round the clash in focus (Oct 31; owner report; code `web/src/viewer/Viewer.ts`, `App.tsx`):
+- **What happened:** with a clash in focus and nothing selected, a drag in the 3D view turned about the point under
+  the pointer; only while ORCA worked on the clash did it turn round the clash. And while ORCA worked, a press during
+  one of the pilot's camera flights (each idea framed, the glide to the clash before its slow turn) skipped the pivot,
+  so the drag turned round wherever the flight was going.
+- **What changed:** the clash in focus (its chip shows) is the pivot too, as well as the one ORCA works on
+  (`setOrbitClash`); a press stops a flight under way, then orbits round the pivot. The selected element still comes
+  first; no clash in focus: the point under the pointer, as before.
+- **Checked:** `web/tests/viewer-orbit.test.mjs` (4; the mid-flight one fails on the old code); in Chromium on
+  Northbank with #1 in focus, a 220 px drag starting off the clash kept its marker within 3 px (the old code moved it
+  370 px), and during a proposal (stream held open, no model call) a drag kept it within 3 px; web tests and build.
