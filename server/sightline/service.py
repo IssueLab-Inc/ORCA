@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, connections, datums, demos, detect, domains, edits, escalation, hosts, properties, reports, requirements, settings, spend, step, verify
+from . import agent, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -248,6 +248,13 @@ class Workspace:
         s = self.scene(scene_id)
         with self.lock:
             return properties.properties(s, global_id, file)
+
+    def facets(self, scene_id: str) -> dict:
+        """The filters' index (facets.py): every value a filter can match, with the elements that have it. Kept on the
+        scene until a kept edit changes it."""
+        s = self.scene(scene_id)
+        with self.lock:
+            return facets.index(s)
 
     def _contacts(self, scene_id: str) -> list:
         return (self._runs.get(scene_id) or {}).get("contacts", [])

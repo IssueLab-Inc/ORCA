@@ -606,6 +606,13 @@ def element_properties(scene_id: str, global_id: str, file: int | None = None):
         raise HTTPException(404, "No such element in these models.")
 
 
+@app.get("/api/scenes/{scene_id}/facets")
+def scene_facets(scene_id: str):
+    """The filters' index (facets.py, docs/filters.md): each facet (file, class, storey, type, material, attributes,
+    property and quantity sets, classifications, groups) with its values and, per value, the elements that have it."""
+    return ws.facets(_scene(scene_id))
+
+
 @app.get("/api/scenes/{scene_id}/classes")
 def element_classes(scene_id: str):
     """Every physical element's IFC class and name (GlobalId → [class, name]): what a built view's cutaway may take

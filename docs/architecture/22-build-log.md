@@ -1496,3 +1496,13 @@ Every property of an object (Oct 31; owner request, "ensure we are retrieving al
 - **Checked:** `evals/properties_complete.py` on all six Northbank files: 5,666 objects, 16,303 values, every count
   equal to an independent count from the raw relationships, 2.2 s; `tests/test_properties.py` (10),
   `tests/test_properties_complete.py`; 649 server tests; `web/tests/properties.test.mjs` (5), 151 web tests, build.
+
+The filters' index (Oct 31; owner request, "full filtering capabilities"; code `server/sightline/facets.py`,
+`Workspace.facets`, `GET /api/scenes/{id}/facets`; design [docs/filters.md](../filters.md)):
+- **What:** every value the Properties panel shows a drawn element with that a filter can match (file, class, storey,
+  type, material, attributes, every property and quantity, classifications, groups), turned round so each value lists
+  its elements. Read with the panel's own reader, so they never disagree and the hidden demo note never reaches a
+  filter. Kept on the scene until a kept edit. `facets.matching` reads conditions as the page will, for chat and MCP.
+- **Measured:** Northbank (four files): 1,997 elements, 46 facets (System, Service, Size, Discipline, Level, Length,
+  materials, systems and zones among them), 0.8 s after the boxes, about 240 KB.
+- **Checked:** `tests/test_facets.py` (7), docs map.

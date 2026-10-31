@@ -100,6 +100,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `built.py` | Report jobs | Show it built: outline, Muse Image restyles, pixel gate, judges, the picture cache |
 | `chat.py` | Workflows | Chat with Muse Spark through tools; `Chat._run` is also the MCP server's tool layer |
 | `properties.py` | Geometry | Everything the model says about one object, for the Properties panel and the filters' index (`Reader`): every attribute, its type, every property and quantity set on it or its type (`from_type`), every kind of property with its unit (lengths, areas, volumes, masses in SI), materials (layers, profiles, constituents), classifications, groups, documents, its storey, container and path up to the project; the demo models' own set shown as "Model data", the hidden note kept out by `shown` ([docs/panels.md](../panels.md)) |
+| `facets.py` | Geometry | The filters' index: every value the Properties panel shows each drawn element with that a filter can match (file, class, storey, type, material, attributes, property and quantity sets, classifications, groups), value → elements, kept on the scene until an edit; `matching` and `suggest` for chat and MCP ([docs/filters.md](../filters.md)) |
 | `datums.py` | Geometry | Levels, grid axes and each element's storey for the viewer's drawing views and level filter; a sample scene with no grid reads its project's `<prefix>-Grids.ifc` as context ([docs/views.md](../views.md)) |
 | `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, `plan_move` (moves that keep their joints: carry fittings, stretch segments, or are refused) and the connection graph |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
@@ -301,7 +302,8 @@ lower by `SIGHTLINE_CONTEXT_*`) over complete arrangements of up to three edit g
 plus the STEP export helpers.
 
 - **Main symbols:** `Workspace` with
-  - scenes: `open`, `open_paths`, `_evict`, `scene`, `scene_info`, `classes`, `describe`, `step_files`, `step_cache`,
+  - scenes: `open`, `open_paths`, `_evict`, `scene`, `scene_info`, `classes`, `describe`, `properties`, `facets`,
+    `step_files`, `step_cache`,
     `list_samples`;
   - checks: `verify_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`;
   - keeps: `apply`, `apply_offset`, `apply_route`, `apply_resize`, `apply_penetration`, `apply_trim`,
@@ -314,7 +316,7 @@ plus the STEP export helpers.
 
   Module level: `step_changes`, `_spec`, `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,
   `SCENE_BUDGET_MB`, `LAST_KEPT` (200), `SAMPLE_EXCLUDE`, `HOSTS_TIMEOUT_S`.
-- **Imports:** `agent.py`, `detect.py`, `domains.py`, `edits.py`, `escalation.py`, `hosts.py`, `limits.py`,
+- **Imports:** `agent.py`, `detect.py`, `domains.py`, `edits.py`, `escalation.py`, `facets.py`, `hosts.py`, `limits.py`,
   `meta_client.py`, `reports.py`, `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
   **Imported by:** `app.py`, `chat.py`, `mcp_server.py`, `plans.py`.
 - **Rules:** `Workspace.lock` (an RLock) is held by everything that touches a scene's geometry; every kept edit calls
