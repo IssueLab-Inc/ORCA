@@ -32,13 +32,30 @@ The machine demo is on the same landing page. See [Two demos](#two-demos) for wh
 ### 1. Prerequisites
 
 - [Git](https://git-scm.com/downloads).
-- [Node.js](https://nodejs.org/en/download) **22.12+ or 24 LTS**, including npm.
+- [Node.js](https://nodejs.org/en/download) **LTS, version 22.12 or newer**, including npm.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/). It installs **Python 3.13** for this project;
   you do not need to install Python separately.
 - A current desktop browser with WebGL enabled. Internet access is needed to install dependencies and use AI features.
 
-Open a new terminal after installing the tools and check `git --version`, `node --version`, `npm --version` and
-`uv --version`. On Windows, use PowerShell; if its execution policy blocks `npm.ps1`, use `npm.cmd` in the commands below.
+**Windows PowerShell:** install uv and Node.js (with npm) before running the setup commands:
+
+```powershell
+winget install --id=astral-sh.uv -e
+winget install --id=OpenJS.NodeJS.LTS -e
+```
+
+**Close and reopen PowerShell** so it sees the updated PATH, then check:
+
+```powershell
+git --version
+uv --version
+node --version
+npm.cmd --version
+```
+
+Use **`npm.cmd` in PowerShell**: Windows may block the `npm.ps1` wrapper when scripts are disabled. The commands
+below use `npm.cmd` for Windows; **on macOS/Linux, use `npm` instead**. No execution-policy change is needed.
+On macOS/Linux, install Node.js and uv using the links above and check the same versions with `npm --version`.
 
 **Linux:** install the OpenCASCADE runtime library before starting the server: `sudo apt install libgl1` on
 Ubuntu/Debian. [PDF reports need additional system libraries](#pdf-system-libraries) on every platform; you can
@@ -46,14 +63,14 @@ skip those initially if you only want to view models, check clashes and try fixe
 
 ### 2. Clone and install
 
-Run from the directory where you keep your projects (these commands work in PowerShell and bash):
+Run from the directory where you keep your projects:
 
 ```text
 git clone https://github.com/IssueLab-Inc/ORCA.git
 cd ORCA
 uv python install 3.13
 uv sync --project server --locked --python 3.13
-npm ci --prefix web
+npm.cmd ci --prefix web
 ```
 
 `npm ci` also copies the viewer's WebAssembly files into `web/public/wasm/`. The Python environment lives in
@@ -88,7 +105,7 @@ uv run --locked uvicorn sightline.app:app --reload --host 127.0.0.1 --port 8000
 
 ```text
 cd web
-npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
 Keep both terminals running and open **[http://127.0.0.1:5173](http://127.0.0.1:5173)**.
@@ -158,21 +175,51 @@ not install Pango and its native libraries. See [WeasyPrint's platform instructi
 
 From `ORCA/`, check discovery with `uv run --directory server --locked python -m weasyprint --info`.
 
+### Updating from GitHub
+
+**For routine updates: export your edits, stop both servers, pull, sync dependencies, then restart.**
+Accepted model edits live in the Python process until you export them; a server restart loses that in-memory work.
+
+1. Export any model edits you want to keep, and wait for active proposals/checks to finish.
+2. Press **Ctrl+C** in both server terminals.
+3. In a terminal at `ORCA/`, run `git status --short`. Commit local code/doc changes on a working branch before
+   switching branches or pulling; do not discard changes to make an update pass. `.env` and ignored local data stay local.
+4. For the latest merged application, run these from `ORCA/` **once your working tree is clean**:
+
+   ```powershell
+   git switch main
+   git pull --ff-only origin main
+   uv sync --project server --locked --python 3.13
+   npm.cmd ci --prefix web
+   ```
+
+   `--ff-only` stops if your local main has diverged; resolve that before continuing. If you are developing on a
+   feature branch, update that branch deliberately rather than switching to main with unfinished work.
+5. Restart both servers using the commands above, refresh the browser and reopen your models.
+
+For small edits during development, [Vite hot-reloads web source changes](https://vite.dev/guide/features.html#hot-module-replacement)
+and uvicorn's `--reload` restarts on Python
+changes. A Git pull can change both source and dependencies at once, so use the stopped-server workflow above.
+To check for updates while keeping the app running, `git fetch origin` updates remote references without changing
+your working files; `git log --oneline HEAD..origin/main` shows commits not in your current checkout.
+
 ### Troubleshooting
 
 | Symptom | Check |
 |---|---|
 | `uv`, `node` or `npm` is missing | Install the prerequisites and reopen the terminal. `python` opening the Windows Store is avoidable: use the documented `uv` commands |
+| `npm.ps1 cannot be loaded because running scripts is disabled` | Use `npm.cmd` in PowerShell, including `npm.cmd ci --prefix web` from `ORCA/`, or `npm.cmd ci` if already in `ORCA/web/` |
 | Port 8000 or 5173 is busy | Stop the process already using it, then restart. Keep port 8000 unless you also change Vite's API proxy in `web/vite.config.ts` |
 | Page loads but API requests fail | Confirm both terminals are running; check `/api/samples` on port 8000 and read the Python terminal's error |
 | Demo cards or files are missing | Confirm the eight bundled model files exist in `samples/` and `/api/samples` lists them; restart the server if you just restored files |
-| Viewer reports missing `.wasm` files | From `ORCA/`, run `npm run copy-wasm --prefix web`, then refresh; check that WebGL is enabled |
+| Viewer reports missing `.wasm` files | From `ORCA/`, run `npm.cmd run copy-wasm --prefix web` (macOS/Linux: `npm`), then refresh; check that WebGL is enabled |
 | AI request fails | Check the root `.env`, model access and quota, then restart the server. Empty keys allow geometry checks, not AI calls |
 | PDF reports fail with a missing-library error | Install the PDF system libraries and check DLL discovery on Windows |
 | MCP client cannot connect through port 5173 | Use `http://127.0.0.1:8000/mcp` with the app's pairing token; Vite proxies `/api`, not `/mcp` |
 
-The command paths and requirements above have been checked against the code. **Still to verify before submission:**
-a clean installation on Windows, macOS and Ubuntu, including a browser geometry check, a live AI proposal and PDF export.
+The owner confirmed Windows startup on Oct 31 after installing uv/Node.js and using `npm.cmd`. **Still to verify
+before submission:** complete clean installations on Windows, macOS and Ubuntu, including a browser geometry check,
+a live AI proposal and PDF export.
 
 ## Two demos
 
@@ -486,9 +533,11 @@ Run all three from `ORCA/` after installing dependencies (and the PDF system lib
 
 ```text
 uv run --directory server --locked pytest -q
-npm run build --prefix web
-npm test --prefix web
+npm.cmd run build --prefix web
+npm.cmd test --prefix web
 ```
+
+On macOS/Linux, use `npm` in place of `npm.cmd`.
 
 The unit tests use synthetic models and scripted AI responses; they need no API keys or private demo files.
 Real-model [evals](evals/README.md) are separate and may need additional data and paid model calls.
