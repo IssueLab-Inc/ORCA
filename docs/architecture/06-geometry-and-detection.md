@@ -261,7 +261,10 @@ A `Test` asks one question of two selections, or of one selection against itself
 (at most 30 conditions, 500 values each, known tests); requirements build `Test`s directly. A **check on filters**
 comes with no id: it gets `check_id` (`filter:` and a hash of its sides and kind, written one way only) and a name from
 `check_name` ("A vs Everything", "A (within)"). `_candidates` never pairs an element with itself, and pairs each once,
-when an element is on both sides ([docs/filters.md](../filters.md), "Checks").
+when an element is on both sides ([docs/filters.md](../filters.md), "Checks"). A filter side is what the filter acts on
+(`facets.acted`: with `by`, only what a colour-by-value filter colours); a `view` side is what the page's filters show
+together (`facets.shown`, as `filters.evaluate`), both found by `_Index.filtered` once per run. `detect.everything` is a
+check's Everything: the files without a site model (the `_site` rule `default_tests` uses), unless it is all there is.
 
 **Where the tests come from**, in `Workspace.detect`:
 1. tests in the request body (`POST /api/scenes/{scene_id}/detect/stream`), else
@@ -418,7 +421,8 @@ checked, seconds, the offset and the `state` the next run compares against.
   defaults or the requirements', else the check on filters), so a page that reopens the scene can redraw the summary
   (`scene_info`) and Detect again repeats the same check.
 - `Workspace.check_defaults` (also `detect_tests`' `check`): what a check on filters takes when it says nothing else,
-  the hard tolerance, rules and smallest size of the tests a run would use and the requirements' clearance.
+  the hard tolerance, rules and smallest size of the tests a run would use, the requirements' clearance, and
+  `everything` (`detect.everything`).
 - The whole run holds `Workspace.lock`.
 
 ### `measure_pair` and the clash panel's "Now"

@@ -186,21 +186,34 @@ own filters by name; the clashes **replace the open list**, as detection does, t
 - **A check is one detection test** (`detect.Test`) whose sides carry the filter's complete conditions
   (`Selection.filter`), found against the index when the run starts, so a rerun after a kept fix selects by properties
   again. Design and ids: [detection.md](detection.md) ("A check on filters"; numbers and diffs in "Reruns").
+- **A filter as a side is what it acts on** (as `filters.actedOn`): one that colours by value takes only what it
+  colours, a value ticked off left out (`Selection.filter.by`, `facets.acted`). A Colour by… filter has no
+  conditions; it used to be taken as everything (owner, Oct 31: a check of "Distribution system" with Site ticked off
+  in "By Model" took all 1,961 elements, the Site model too).
+- **Everything is what the full check covers**: a site model is context and left out (`detect.everything`, the rule
+  `default_tests` uses; `check.everything` in `detect_tests` and `Workspace.check_defaults`), unless it is all there
+  is. Site elements are reached through a filter (owner decision, Oct 31).
+- **What the filters show** is a side of its own: every filter that is on, together, as on screen (hide, isolate,
+  Hide the rest, Show colours), found again on every run (`Selection.view`, `facets.shown`, which reads the filters as
+  `filters.evaluate` does), so a kept fix's new pieces are checked. "Run a clash test on the filtered items" is this.
 - **On the page** (`web/src/checks.ts`, `FiltersPanel`'s `check`): each filter's row has **What do these hit?** (that
   filter against everything, hard clashes at the check's tolerance); it is off while a check runs, before the models
   are read, and for a filter that finds nothing a check can test (spaces have no body) or everything (Check the open
-  models does that). Under the list, **Check clashes** picks side A (a filter), side B (Everything, Itself: those
-  elements against each other, or another filter), hard clashes deeper than … mm or elements closer than … mm (blank:
+  models does that). Under the list, **Check clashes** picks side A (a filter, or What the filters show), side B
+  (Everything, Itself: those elements against each other, What the filters show, or another filter), hard clashes
+  deeper than … mm or elements closer than … mm (on its own row; a full-width **Check clashes** button ends the block, with why it is off under it; blank:
   the defaults, `Workspace.check_defaults`, also `detect_tests`' `check`), with each filter's count, and says "The
   clashes replace the open list; Detect again repeats this check." A filter that is switched off can still be a side:
-  a check reads its conditions, not what is on screen.
+  a check reads its conditions, not what is on screen. What the filters show is off when they show nothing, or hide
+  nothing (Check the open models does that).
 - **Afterwards** the run summary says "Only <check>" and offers **Check the open models** (every test again). Detect
   again repeats the check, also one chat or an agent ran (the run returns the tests it ran, `Detection.tests`). A clash
   the full check also finds keeps its #N, title, views and sign-offs between the two.
 - **Chat and agents** (`detect_clashes` with `a`, `b`, `kind`, `clearance_mm`, `name`): a side is elements described
-  as for `set_filters`, or one of the user's filters by name. The page shares its filters (`filters.shareable`: each
-  by its name, with only its complete conditions) with every chat turn and the agent link's context, and `get_session`
-  lists them. Sides are resolved and counted before a run is spent, so a misspelt filter costs no detection run.
+  as for `set_filters`, one of the user's filters by name, or what their filters show (`{"shown": true}`). The page
+  shares its filters (`filters.shareable`: each by its name, with only its complete conditions, what it does and,
+  colouring by value, by what) and how they show (`filter_view`: Hide the rest, Show colours) with every chat turn and
+  the agent link's context; the `[context]` line and `get_session` say how many the filters show together. Sides are resolved and counted before a run is spent, so a misspelt filter costs no detection run.
 - **Limits:** a side takes at most 30 conditions of 500 values each; an element whose
   GlobalId two open files share is read from the first file by the index and the last by detection
   ([20](architecture/20-decisions-limits-and-roadmap.md)).

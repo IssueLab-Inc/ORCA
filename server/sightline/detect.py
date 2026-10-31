@@ -58,17 +58,27 @@ class Selection:
     exclude_classes: list[str] = field(default_factory=list)
     systems: list[str] = field(default_factory=list)      # distribution system names
     ids: list[str] = field(default_factory=list)          # particular elements, by GlobalId
-    # A filter by what the model says (docs/filters.md): {when: [conditions as the page writes them], invert}, found
-    # against the filters' index at run time, so a rerun after a kept fix selects by properties again.
+    # A filter by what the model says (docs/filters.md): {when: [conditions as the page writes them], invert, by?},
+    # found against the filters' index at run time, so a rerun after a kept fix selects by properties again. `by`
+    # ({facet, off}) is a colour-by-value filter's: it takes only what it colours (`facets.acted`).
     filter: dict | None = None
+    # What the page's filters show together ({filters, hide_rest, colours}: `facets.shown`), also found at run time.
+    view: dict | None = None
 
     @staticmethod
     def from_dict(s: dict) -> "Selection":
         lists = {k: [str(x) for x in (v or [])] for k, v in s.items() if k in LIST_FIELDS}
-        return Selection(**lists, filter=_filter(s["filter"]) if s.get("filter") is not None else None)
+        return Selection(**lists, filter=_filter(s["filter"]) if s.get("filter") is not None else None,
+                         view=_view(s["view"]) if s.get("view") is not None else None)
+
+    def on_filters(self) -> bool:
+        """Whether this side comes from the page's filters (a check on filters)."""
+        return self.filter is not None or self.view is not None
 
     def describe(self) -> str:
         """What the side takes, in words: its filter's name, else its files, classes, systems; "Everything"."""
+        if self.view is not None:
+            return "What the filters show"
         if self.filter is not None:
             return facets.name_for(self.filter["when"], self.filter["invert"])
         parts = [", ".join(self.files), ", ".join(c.removeprefix("Ifc") for c in self.classes), ", ".join(self.systems),
@@ -77,7 +87,8 @@ class Selection:
 
 
 LIST_FIELDS = ("files", "teams", "classes", "exclude_classes", "systems", "ids")
-FILTER_CONDITIONS, FILTER_VALUES = 30, 500
+FILTER_CONDITIONS, FILTER_VALUES, VIEW_FILTERS = 30, 500, 100
+VIEW_ACTIONS = ("colour", "byValue", "hide", "isolate")
 
 
 def _filter(f) -> dict:
@@ -106,7 +117,33 @@ def _filter(f) -> dict:
                 one[k] = float(c[k])
         out.append(one)
     out.sort(key=lambda c: json.dumps(c, sort_keys=True))
-    return {"when": out, "invert": bool(f.get("invert"))}
+    kept = {"when": out, "invert": bool(f.get("invert"))}
+    by = f.get("by")
+    if by is not None:
+        if not isinstance(by, dict) or not isinstance(by.get("facet"), str) or not by["facet"]:
+            raise ValueError("A filter's colour by names its facet")
+        off = by.get("off") or []
+        if not isinstance(off, list) or len(off) > FILTER_VALUES:
+            raise ValueError(f"A colour by leaves out at most {FILTER_VALUES} values")
+        kept["by"] = {"facet": by["facet"], "off": sorted({str(v) for v in off})}
+    return kept
+
+
+def _view(v) -> dict:
+    """What the filters show, checked and written one way only: the filters that are on (sorted: what they show
+    together does not depend on their order), and whether the rest is hidden and colours show."""
+    if not isinstance(v, dict) or not isinstance(v.get("filters") or [], list):
+        raise ValueError("A view is {filters, hide_rest, colours}")
+    rules = v.get("filters") or []
+    if len(rules) > VIEW_FILTERS:
+        raise ValueError(f"A view has at most {VIEW_FILTERS} filters")
+    out = []
+    for r in rules:
+        if not isinstance(r, dict) or r.get("action", "colour") not in VIEW_ACTIONS:
+            raise ValueError("Each filter of a view says what it does: colour, byValue, hide or isolate")
+        out.append({**_filter(r), "action": r.get("action", "colour")})
+    out.sort(key=lambda r: json.dumps(r, sort_keys=True))
+    return {"filters": out, "hide_rest": bool(v.get("hide_rest")), "colours": v.get("colours", True) is not False}
 
 
 def check_name(a: Selection, b: Selection | None, kind: str = "hard", clearance_m: float = 0.0) -> str:
@@ -266,18 +303,23 @@ class _Index:
             return "host"
         return None
 
-    def filtered(self, f: dict) -> set[str]:
-        """The elements a side's filter finds, against the filters' index as the scene is now; once per run."""
-        key = json.dumps(f, sort_keys=True)
+    def filtered(self, f: dict, view: bool = False) -> set[str]:
+        """The elements a side's filter acts on, or its view shows, against the filters' index as the scene is now;
+        once per run."""
+        key = json.dumps([view, f], sort_keys=True)
         if key not in self._filtered:
             idx = facets.index(self.scene)
-            self._filtered[key] = {idx["elements"][i] for i in facets.found(idx, f["when"], f["invert"])}
+            got = facets.shown(idx, f) if view else facets.acted(idx, f)
+            self._filtered[key] = {idx["elements"][i] for i in got}
         return self._filtered[key]
 
     def select(self, sel: Selection) -> list[str]:
         out = []
         ids = set(sel.ids)
         allowed = self.filtered(sel.filter) if sel.filter is not None else None
+        if sel.view is not None:
+            shown = self.filtered(sel.view, view=True)
+            allowed = shown if allowed is None else allowed & shown
         for g, e in self.entity.items():
             if ids and g not in ids:
                 continue
@@ -312,14 +354,12 @@ def default_tests(scene: IfcScene, index: _Index | None = None) -> list[Test]:
     """Every pair of model files, each file against itself, and duplicates across everything: hard, 1 mm. A site model
     (terrain, paving, planting) is context for the building, so its tests are listed but off, unless it is all there is."""
     ix = index or _Index(scene)
-    files = [i for i in range(len(scene.models)) if any(f == i for f in ix.file.values())]
+    files = _files(scene, ix)
     counts = Counter(ix.teams[i] for i in files)
     # A discipline names a model only among several; one model on its own (a machine cell) keeps its file name.
     label = {i: ix.teams[i] if len(files) > 1 and counts[ix.teams[i]] == 1 else Path(ix.names[i]).stem for i in files}
     order = sorted(files, key=lambda i: label[i])
-    site = {i for i in files if ix.teams[i] == "Site"}
-    if site == set(files):
-        site = set()
+    site = _site(ix, files)
     tests = []
     for i, j in combinations(order, 2):
         tests.append(Test(id=f"pair:{ix.names[i]}|{ix.names[j]}", name=f"{label[i]} vs {label[j]}",
@@ -332,6 +372,25 @@ def default_tests(scene: IfcScene, index: _Index | None = None) -> list[Test]:
                       a=Selection(files=[ix.names[i] for i in order if i not in site]) if site else Selection(),
                       kind="duplicate", tolerance_m=DUPLICATE_M))
     return tests
+
+
+def _files(scene: IfcScene, ix: _Index) -> list[int]:
+    return [i for i in range(len(scene.models)) if any(f == i for f in ix.file.values())]
+
+
+def _site(ix: _Index, files: list[int]) -> set[int]:
+    """The site models among the files (terrain, paving, planting): context for the building, unless all there is."""
+    site = {i for i in files if ix.teams[i] == "Site"}
+    return set() if site == set(files) else site
+
+
+def everything(scene: IfcScene, index: _Index | None = None) -> Selection:
+    """"Everything" as a check on filters takes it: what the full check covers, so a site model is left out as
+    context (`default_tests`), unless it is all there is (docs/filters.md, "Checks")."""
+    ix = index or _Index(scene)
+    files = _files(scene, ix)
+    site = _site(ix, files)
+    return Selection(files=sorted(ix.names[i] for i in files if i not in site)) if site else Selection()
 
 
 def presets(scene: IfcScene, index: _Index | None = None) -> list[Test]:
@@ -714,7 +773,7 @@ def run(scene: IfcScene, tests: list[Test] | None = None, on_event: Event | None
     # The title and the element count say what the tests checked (a site model open for context is not, by default).
     checked_ids = {g for sel in selections.values() for side in (sel["a"], sel["b"] or ()) for g in side}
     checked = len({ix.file[g] for g in checked_ids})
-    if title is None and len(tests) == 1 and (tests[0].a.filter is not None or (tests[0].b and tests[0].b.filter is not None)):
+    if title is None and len(tests) == 1 and (tests[0].a.on_filters() or (tests[0].b and tests[0].b.on_filters())):
         title = f"Coordination · {tests[0].name}"
     report = Report(id=uuid.uuid4().hex[:12], title=title or f"Coordination · {checked} model"
                     f"{'' if checked == 1 else 's'}", root=root, sources=list(ix.names), clashes=clashes,

@@ -192,3 +192,50 @@ def test_a_filter_is_named_from_what_it_finds_as_the_page_names_it():
             {"facet": "attr:Tag", "op": "isNot", "values": ["A", "B", "C"]}, {"facet": "pset:P/Y", "op": "gt"}]
     assert facets.name_for(when) == "DuctSegment · Level 02 · Length · has X · not A, B +1"
     assert facets.name_for([]) == "Everything" and facets.name_for(when[:1], invert=True) == "everything but DuctSegment"
+
+
+# The page's filters.test.mjs index, so what a side takes here is what the page counts there.
+PAGE = {"revision": 0, "files": ["S.ifc", "M.ifc"], "elements": ["beam", "duct1", "duct2", "pipe", "wall"],
+        "file": [0, 1, 1, 1, 0], "facets": [
+            {"key": "file", "kind": "text", "values": ["M.ifc", "S.ifc"], "items": [[1, 2, 3], [0, 4]]},
+            {"key": "class", "kind": "text", "values": ["IfcBeam", "IfcDuctSegment", "IfcPipeSegment", "IfcWall"],
+             "items": [[0], [1, 2], [3], [4]]},
+            {"key": "storey", "kind": "text", "values": ["Level 01", "Level 02"], "items": [[0, 1, 4], [2, 3]]},
+            {"key": "pset:Model data/System", "kind": "text", "values": ["Cold water", "Supply air"], "items": [[3], [1, 2]]},
+            {"key": "pset:Pset_WallCommon/IsExternal", "kind": "bool", "values": [True], "items": [[4]]}]}
+
+
+def _names(found):
+    return sorted(PAGE["elements"][i] for i in found)
+
+
+def test_a_filter_colouring_by_value_acts_on_what_it_colours_not_on_everything():
+    """docs/filters.md, "Checks": a Colour by… filter has no conditions; as a side it takes what it colours."""
+    by_system = {"when": [], "by": {"facet": "pset:Model data/System"}}
+    assert _names(facets.acted(PAGE, by_system)) == ["duct1", "duct2", "pipe"]
+    assert _names(facets.acted(PAGE, {**by_system, "by": {**by_system["by"], "off": ["Cold water"]}})) == ["duct1", "duct2"]
+    assert _names(facets.acted(PAGE, {"when": [], "by": {"facet": "file", "off": ["S.ifc"]}})) == ["duct1", "duct2", "pipe"], \
+        "a model ticked off is left out"
+    assert _names(facets.acted(PAGE, {"when": [], "by": {"facet": "pset:Pset_WallCommon/IsExternal", "off": ["true"]}})) == [], \
+        "values as the page writes them"
+    level2 = [{"facet": "storey", "op": "is", "values": ["Level 02"]}]
+    assert _names(facets.acted(PAGE, {"when": level2, "by": {"facet": "pset:Model data/System"}})) == ["duct2", "pipe"]
+    assert _names(facets.acted(PAGE, {"when": level2})) == ["duct2", "pipe"], "without by: what it finds"
+    assert facets.acted(PAGE, {"when": [], "by": {"facet": "pset:Nothing/Here"}}) == set()
+
+
+def test_what_the_filters_show_together_is_what_the_page_evaluates():
+    """The same cases as filters.test.mjs's hide the rest."""
+    level2 = {"when": [{"facet": "storey", "op": "is", "values": ["Level 02"]}], "action": "colour"}
+    beams = {"when": [{"facet": "class", "op": "is", "values": ["IfcBeam"]}], "action": "isolate"}
+    pipes = {"when": [{"facet": "class", "op": "is", "values": ["IfcPipeSegment"]}], "action": "hide"}
+    by_system = {"when": [], "action": "byValue", "by": {"facet": "pset:Model data/System", "off": ["Cold water"]}}
+    view = lambda filters, **more: {"filters": filters, "hide_rest": True, "colours": True, **more}
+    assert _names(facets.shown(PAGE, view([level2]))) == ["duct2", "pipe"]
+    assert _names(facets.shown(PAGE, view([level2, beams]))) == ["beam", "duct2", "pipe"]
+    assert _names(facets.shown(PAGE, view([level2, pipes]))) == ["duct2"], "a hide filter hides what another keeps"
+    assert _names(facets.shown(PAGE, view([by_system]))) == ["duct1", "duct2"]
+    assert _names(facets.shown(PAGE, view([level2], hide_rest=False))) == PAGE["elements"], "colours alone hide nothing"
+    assert _names(facets.shown(PAGE, view([level2], colours=False))) == PAGE["elements"], "colours off: nothing to keep"
+    assert _names(facets.shown(PAGE, view([level2, beams], colours=False))) == ["beam"]
+    assert _names(facets.shown(PAGE, view([pipes]))) == ["beam", "duct1", "duct2", "wall"]

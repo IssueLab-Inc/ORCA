@@ -472,6 +472,8 @@ export function App() {
   const facetKeys = useMemo(() => new Set(prepared?.byKey.keys() ?? []), [prepared]);
   // The page's filters as chat and an agent know them, by name (docs/filters.md, "Checks").
   const sharedFilters = useMemo(() => shareable(filterState.rules), [filterState]);
+  // How they show together (Hide the rest, colours), for a check of what the filters show from chat or an agent.
+  const filterView = useMemo(() => ({ hide_rest: !!filterState.hideRest, colours: filterState.colours }), [filterState.hideRest, filterState.colours]);
   // A check on filters from the Filters panel: its clashes replace the open list (docs/filters.md, "Checks").
   const filterCheck = { defaults: detectSetup?.check ?? null, busy: !!busy || !!detecting,
     onCheck: (t: DetectTest) => { setFiltersOpen(false); void runDetect([t]); } };
@@ -1318,7 +1320,8 @@ export function App() {
     const selected = report?.origin === "sightline" ? clash?.id : undefined;
     lastTests.current = tests;
     // A check on filters is one test of its own (docs/filters.md, "Checks"): its name says what was checked.
-    traceStart("detect", "you", tests?.length === 1 && (tests[0].a.filter || tests[0].b?.filter) ? tests[0].name : "The open models");
+    const onFilters = tests?.length === 1 && !!(tests[0].a.filter || tests[0].a.view || tests[0].b?.filter || tests[0].b?.view);
+    traceStart("detect", "you", onFilters && tests ? tests[0].name : "The open models");
     setDetecting({ phase: "Starting…", tests: [] }); setError(null);
     try {
       const done = await api.detect(sid, tests, onDetectEvent);
@@ -2312,7 +2315,7 @@ export function App() {
   async function connectAgent() {
     setAgentBusy(true); setAgentError(null);
     try {
-      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters }));
+      setAgentLink(await api.createLink({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView }));
       setAgentLog([]);
     } catch (e) { setAgentError((e as Error).message); } finally { setAgentBusy(false); }
   }
@@ -2324,12 +2327,12 @@ export function App() {
   useEffect(() => {
     if (!agentLink) return;
     const t = setTimeout(() => {
-      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters })
+      api.linkContext(agentLink.token, { scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView })
         .catch((e) => { if (e instanceof ApiError && e.status === 404) setAgentLink(null); });
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId, sharedFilters]);
+  }, [agentLink?.token, sceneId, report?.id, clash?.id, resolved, reqId, sharedFilters, filterView]);
   /** What the agent does, carried out here: the chat's ui events, opened models, applied fixes, pictures. */
   async function onAgentEvent(e: LinkEvent) {
     if (!agentLink) return;
@@ -3256,7 +3259,7 @@ export function App() {
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${chatReport}`} voiceModel={labels.voice} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
-            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters })} />
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView })} />
         </div>)}
       {inSlot(slots.plan, <div className="plan-slot" hidden={!docked && tab !== "plan"}>
         {(docked || tab === "plan") && <>

@@ -191,6 +191,9 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
                                "selected_clash": c.clash_id, "fixed": list(c.fixed)}
         if c.filters:   # the person's own filters: detect_clashes can check one by name (a={"filter": name})
             out["filters"] = [{"name": f.get("name"), "on": f.get("on", True)} for f in c.filters]
+            shown = T()._shown_count(c)
+            if shown is not None:   # what they show together: a={"shown": true}
+                out["filters_show"] = {"elements": shown[0], "of": shown[1]}
         if c.scene_id in W().scenes:
             scene = W().scene(c.scene_id)
             out["models"] = {"files": [p.name for p in scene.paths], "elements": len(scene.bounds())}
@@ -259,9 +262,11 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         which clashes were resolved. Each run is one of the demo's detection runs.
 
         To check only some elements (docs/filters.md, "Checks"), give side `a` and optionally `b`: each either one of
-        the person's filters by name ({"filter": "<name>"}, as get_session lists them) or elements described as in
-        set_filters ({classes, levels, models, where, invert}); `b` may instead be {"everything": true} (the default)
-        or {"itself": true}. `kind` hard (default), clearance (with `clearance_mm`) or duplicate; `name` names the
+        the person's filters by name ({"filter": "<name>"}, as get_session lists them), what their filters show
+        together ({"shown": true}: the filtered items, as on their screen), or elements described as in set_filters
+        ({classes, levels, models, where, invert}); `b` may instead be {"everything": true} (the default: the models
+        the full check covers, a site model left out) or {"itself": true}. A filter that colours by value takes what
+        it colours. `kind` hard (default), clearance (with `clearance_mm`) or duplicate; `name` names the
         check. A name the models lack, or an A that finds nothing, is refused before a run is spent."""
         args: dict = {k: v for k, v in (("tolerance_mm", tolerance_mm), ("a", a), ("b", b), ("kind", kind),
                                         ("clearance_mm", clearance_mm), ("name", name)) if v is not None}

@@ -133,10 +133,13 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .fcond-head .fselect { flex: 1; }
 .fvalue { flex-wrap: wrap; }
 .fop { flex: 0 0 auto !important; }
-.fcheck { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.fcheck { border-top: 1px solid var(--line); padding-top: 8px; }
 .fcheck > summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-.fcheck:not([open]) { gap: 0; }
+/* details lays its content out as blocks in Chromium (no flex gap): the body spaces it */
+.fcheck-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
 .fcheck .hint { margin: 0; }
+.fcheck-go { width: 100%; justify-content: center; gap: 6px; height: 36px; margin-top: 4px; }
+.fcheck-why { margin: -4px 0 0; font-size: 12px; color: var(--muted); }
 .pick { position: relative; flex: 1; min-width: 0; }
 .pick > summary { list-style: none; cursor: pointer; padding: 4px 22px 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; }
 .pick > summary::-webkit-details-marker { display: none; }

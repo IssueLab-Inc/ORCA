@@ -85,7 +85,7 @@ cd server && uv run python -m sightline.mcp_server
 | | Tools |
 |---|---|
 | Session | `get_session` (what is open, whether a browser follows), `list_models`, `open_models` |
-| Clashes | `detect_clashes` (all models, or a check of what side A takes against B: one of the person's filters by name, as `get_session` lists them, or elements described as for `set_filters`), `report_summary`, `list_clashes`, `get_clash`, `get_clash_images` (A/B/C pictures), `measure_clash`, `find_root_causes`, `find_patterns`, `triage` |
+| Clashes | `detect_clashes` (all models, or a check of what side A takes against B: one of the person's filters by name, as `get_session` lists them, what their filters show together, `{"shown": true}`, or elements described as for `set_filters`; B defaults to everything the full check covers), `report_summary`, `list_clashes`, `get_clash`, `get_clash_images` (A/B/C pictures), `measure_clash`, `find_root_causes`, `find_patterns`, `triage` |
 | The model | `describe_element`, `find_elements`, `find_openings` |
 | Fixes | `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`, `check_seat` (test the agent's own idea), `propose_fixes` (ORCA's fix agent), `plan_fixes_together`, `plan_root_cause`, `get_job`, `apply_fix`, `apply_plan` |
 | The person's view | `show_clash`, `set_view`, `set_filters` / `clear_filters` (colour, hide or isolate by property: [filters.md](filters.md)), `capture_view` (a picture of what they see) |
