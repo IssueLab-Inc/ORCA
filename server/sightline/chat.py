@@ -105,7 +105,11 @@ TOOLS = [
         "without keeping it: sized from the service with the clearance all round, cut in a trial, the service checked "
         "against the host and everything else. Says who must review it (structure for slabs and load-bearing walls).",
         {"element": {"type": "string"}, "host": {"type": "string"}}, ["element", "host"]),
-    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes, flatter sections, trims at joints and openings, checks each "
+    _fn("check_seat", "Check seating `element` on `support` without keeping it: where `element` comes down into "
+        "`support` and stands above its top, it is cut where it is inside the support's footprint below that top, so "
+        "what is left bears on it. Nothing moves; how it bears is reviewed (structure).",
+        {"element": {"type": "string"}, "support": {"type": "string"}}, ["element", "support"]),
+    _fn("propose_fixes", "Run ORCA's fix agent on a clash: it proposes moves, local offsets, routes, flatter sections, trims at joints, seats and openings, checks each "
         "against the whole model, and shows the verified ones in the options panel for the user to preview and "
         "accept. Takes about 20 s and counts against the demo's proposal allowance; use it when the user wants fixes. "
         "With escalate true it is a second, longer try on Muse Wonder that reads the first try's failures and may "
@@ -471,6 +475,10 @@ class Chat:
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "check_penetration":
             v = ws.check_penetration(self._scene(ctx), args["element"], args["host"])
+            v.pop("preview", None)
+            return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
+        if name == "check_seat":
+            v = ws.check_seat(self._scene(ctx), args["element"], args["support"])
             v.pop("preview", None)
             return v, "passes" if v["passed"] else f"fails: {v['reason']}", []
         if name == "propose_fixes":

@@ -94,6 +94,11 @@ def _in_trial_trim(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[s
     return list(o["moved"]), set(o["moved"]), None
 
 
+def _in_trial_seat(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
+    edits.apply_seat(scene, agent.seat_of(scene, o["moved"][0], o["edit"]["support"]))
+    return list(o["moved"]), set(o["moved"]), None
+
+
 def _in_trial_route(scene, it: Item, o: dict) -> tuple[list[str], set[str], set[str] | None]:
     r = edits.apply_route(scene, o["moved"][0], o["edit"]["steps"])
     other = it.element_b if o["moved"][0] == it.element_a else it.element_a
@@ -131,12 +136,13 @@ def _in_trial_combined(scene, it: Item, o: dict):
 # its shortened end pieces are checked against; None when every element it changed is checked against everything;
 # or, for a fix of several runs, its own check: (clearance, the plan's elements by fix) → (hits, least clearance)).
 IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_trial_trim, "route": _in_trial_route,
-            "resize": _in_trial_resize, "penetration": _in_trial_penetration, "combined": _in_trial_combined}
+            "resize": _in_trial_resize, "penetration": _in_trial_penetration, "seat": _in_trial_seat,
+            "combined": _in_trial_combined}
 # The files a fix changes beyond its moved elements' (a penetration's provision for void goes in the service's file).
 EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]]}
 # Kinds whose element keeps the contacts it had (a trimmed member is framed into its neighbours, a service through a
 # wall stays where it is): only contacts new or worse count, and the partner must clear (a trim may touch it).
-KEEPS_CONTACTS = {"trim": lambda o: o["moved"], "penetration": lambda o: [o["edit"]["service"]]}
+KEEPS_CONTACTS = {"trim": lambda o: o["moved"], "seat": lambda o: o["moved"], "penetration": lambda o: [o["edit"]["service"]]}
 
 
 def option_files(scene, o: dict) -> set[int]:
@@ -205,6 +211,10 @@ def verify_together(ws: Workspace, scene_id: str, items: list[Item], clearance_m
                     # Every element the item is for must clear (a merged item's others too); the rest only must not
                     # get worse.
                     meant = {partner, *it.others}
+                    if it.option["kind"] == "seat":   # it bears on its support by construction (edits.seat): not measured
+                        support = (it.option.get("edit") or {}).get("support", partner)
+                        meant.discard(support)
+                        hits = [h for h in hits if h.other != support]
                     hits = [h for h in hits if ((h.distance_m < -0.002 or not touch) if h.other in meant
                                                 else h.other not in was or h.distance_m < was[h.other] - 0.002)]
                 why = None
@@ -301,6 +311,8 @@ def _direction(a) -> str:
         return a.edit["summary"]
     if a.kind == "trim":
         return "trimming it"
+    if a.kind == "seat":
+        return "seating it on the other element"
     vertical = abs(d[2]) >= max(abs(d[0]), abs(d[1]))
     size = round(max(abs(x) for x in d) * 1000) if any(d) else 0
     move = (f"{'up' if d[2] > 0 else 'down'} {size} mm" if vertical else f"sideways {size} mm") if size else "in place"
@@ -569,6 +581,10 @@ def _keep_trim(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
     return ws.apply_trim(scene_id, o["moved"][0], o["trim"]["end"], o["trim"]["by_m"]), []
 
 
+def _keep_seat(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
+    return ws.apply_seat(scene_id, o["moved"][0], o["edit"]["support"]), []
+
+
 def _keep_route(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
     r = ws.apply_route(scene_id, o["moved"][0], o["edit"]["steps"])
     return r, r["pieces"]
@@ -592,7 +608,7 @@ def _keep_combined(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[li
 # How each kind of fix is kept in the scene: → (the Workspace's reply, with "files"; the pieces, the original first;
 # a fix of several runs, one such list per run).
 KEEP = {"move": _keep_move, "offset": _keep_offset, "trim": _keep_trim, "route": _keep_route,
-        "resize": _keep_resize, "penetration": _keep_penetration, "combined": _keep_combined}
+        "resize": _keep_resize, "penetration": _keep_penetration, "seat": _keep_seat, "combined": _keep_combined}
 
 
 class NotVerified(ValueError):
@@ -617,6 +633,10 @@ def _candidate_trim(o: dict, a: str, b: str) -> tuple[dict, str]:
     return {"by_m": o["trim"]["by_m"]}, o["moved"][0]
 
 
+def _candidate_seat(o: dict, a: str, b: str) -> tuple[dict, str]:
+    return {}, o["moved"][0]
+
+
 def _candidate_route(o: dict, a: str, b: str) -> tuple[dict, str]:
     return {"steps": o["edit"]["steps"]}, o["moved"][0]
 
@@ -637,7 +657,8 @@ def _candidate_combined(o: dict, a: str, b: str) -> tuple[dict, str]:
 # How each kind of kept option is tried again (agent.TRIES): → (its parameters as Muse proposes them, the element of
 # the clash it changes).
 CANDIDATE = {"move": _candidate_move, "offset": _candidate_offset, "trim": _candidate_trim, "route": _candidate_route,
-             "resize": _candidate_resize, "penetration": _candidate_penetration, "combined": _candidate_combined}
+             "resize": _candidate_resize, "penetration": _candidate_penetration, "seat": _candidate_seat,
+             "combined": _candidate_combined}
 
 
 def option_pair(o: dict) -> tuple[str, str, list[str]]:

@@ -28,7 +28,7 @@ flowchart LR
         links["agents.Links: Link per token hash"]
         gate["_McpGate at /mcp"]
         transport["streamable HTTP app, stateless JSON"]
-        tools["mcp_server.build: 31 tools"]
+        tools["mcp_server.build: 32 tools"]
         chatRun["chat.Chat._run: the shared tool layer"]
         ws["service.Workspace"]
         hooks["mcp_hooks: caps, triage, report"]
@@ -207,7 +207,7 @@ link points at; the page adopts the new report from its `ui open_report` event a
 
 ## Every tool
 
-All 31 `@tool`-decorated functions in `mcp_server.build`. Every call first publishes `agent_call`; "Page events"
+All 32 `@tool`-decorated functions in `mcp_server.build`. Every call first publishes `agent_call`; "Page events"
 lists what else the page receives. `agent_result` follows at the end unless the row says otherwise. "Chat" means the
 call goes through `chat.Chat._run` under the same name.
 
@@ -233,6 +233,7 @@ call goes through `chat.Chat._run` under the same name.
 | `check_route` | yes | A route of up to three steps checked without keeping it | chat → `Workspace.check_route` | none |
 | `check_resize` | yes | A flatter section checked without keeping it | chat → `Workspace.check_resize` | none |
 | `check_penetration` | yes | An opening through a wall or slab checked without keeping it | chat → `Workspace.check_penetration` | none |
+| `check_seat` | yes | An element seated on what it comes down into, checked without keeping it | chat → `Workspace.check_seat` | none |
 | `propose_fixes` | no | ORCA's fix agent on one clash, numbered verified options (`option` from 1); `escalate` for a second try on Muse Wonder. One proposal, or one escalation and one proposal | `job` + chat → `Workspace.propose` / `Workspace.escalate` | `ui select_clash`, `agent` events (the pilot), `proposal` (the options panel) |
 | `plan_fixes_together` | no | One plan for several clashes, checked together; returns a `plan_id`. One proposal per distinct pair | `job` + chat → `plans.build_batch` | `plan_started`, `plan_event`, `plan` |
 | `find_root_causes` | yes | Elements in several real clashes, with clashes the report missed | chat → `plans.root_causes` | none |

@@ -27,6 +27,7 @@ combined in `escalation.md`).
 | `offset` | Splits a level segment either side of the obstacle, takes the middle up or down, with bends | `split_m`, `dz_m` | `agent._try_offset` | `edits.apply_offset` | 0 | none |
 | `route` | Holds up to 3 stretches at offsets up and/or sideways, with bends | `steps` | `agent._try_route` | `edits.apply_route` | 0 | none |
 | `trim` | Cuts a slender member's end back to butt the other's face | `by_m` (optional) | `agent._try_trim` | `edits.butt_trim`, `apply_trim` | 0 | none; `cleanup` when both are in one model |
+| `seat` | Cuts an element that comes down into its support where it is inside, below the support's top, so it bears on it | none (the geometry decides) | `agent._try_seat` | `edits.seat`, `apply_seat` (a recess) | 0 | `domains.SEAT_REVIEW` (structure) |
 | `combined` | 1 to 3 move/offset/route steps on different elements, checked together | `steps` | `agent._try_combined` | `agent.apply_combined` | 0.5 | none |
 | `resize` | A flatter, wider section for a stretch of a rectangular duct or tray | `split_m`, `depth_m`, `keep` | `agent._try_resize` | `edits.resize_size`, `apply_resize` | 1 | `services` |
 | `penetration` | Asks for an opening where a straight service crosses a host | none | `agent._try_penetration` | `edits.penetration`, `apply_penetration` | 2, or 2.5 for a host that is not a wall or slab | the host reading's reviewer |
@@ -262,6 +263,21 @@ flowchart LR
   top kept, half with centre).
 - **Review:** `services`, and `also_needs` gains "the services designer to confirm the new section (equivalent
   diameter …)".
+
+### Seat
+
+- **Shape:** `{"kind": "seat", "move": "A"}`, where `move` names the element that comes down into the other.
+- **When:** `agent.seat_of` → `edits.seat`: it stands at least 50 mm above the support's top, its foot lands in the
+  support (no more than 100 mm below its bottom), the support is a straight prism under its top, the cut takes at most
+  half of it, neither is a run or a zone, and it is not seated on it already. Asked the other way round, the attempt
+  names the element to seat.
+- **Builds:** a recess (`IfcOpeningElement`, `RECESS`) voiding the element, shaped as the support's top face grown by
+  a 1 mm bedding joint (`SEAT_JOINT_M`: flush faces read as overlaps in the clash queries), from below its foot to
+  1 mm over the support's top; an `ORCA_Seat` pset names the support. Nothing moves; the element keeps its
+  GlobalId.
+- **Checked:** the support's contact is proved by construction, not measured; a merged item's others must clear; the
+  rest only not closer than before. The option's `edit` carries `support`, `summary`, `size_m`, `share`, `top_m` and a
+  `key`. Design: [docs/edits.md](../edits.md), "Seat".
 
 ### Penetration
 

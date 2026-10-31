@@ -631,8 +631,8 @@ def built_stream(scene_id: str, body: BuiltBody, request: Request):
     _scene(scene_id)
     if not settings.built_views():
         raise HTTPException(403, "Show it built is switched off.")
-    if body.fix_kind in ("trim",):
-        raise HTTPException(422, "A trim is too small to show at this scale: the model's own view shows it.")
+    if body.fix_kind in ("trim", "seat"):
+        raise HTTPException(422, f"A {body.fix_kind} is too small to show at this scale: the model's own view shows it.")
     try:
         p = built.passes(body.look, body.ids, body.normals)
     except built.Refused as e:

@@ -15,6 +15,7 @@ before anyone sees it. This page is the design of the kinds of fix and how a new
 | `route` | Holds stretches of a straight segment at offsets (up and/or sideways) in up to 3 steps, with bends | Oct 29 |
 | `resize` | Makes a stretch of a rectangular duct or tray flatter (one face level, wider to carry the same), with transitions | Oct 29 |
 | `penetration` | Asks for an opening where a straight service crosses a wall or slab: a provision for void always, the opening cut when the host's team allows edits | Oct 29 |
+| `seat` | Cuts an element that comes down into what carries it where it is inside, below the support's top, so what is left bears on it | Oct 31 |
 
 ## One registry (Oct 29)
 
@@ -42,7 +43,7 @@ An option of a newer kind carries `edit` (its parameters, a `summary` and a `key
 
 ## Ranking
 
-Plain geometry fixes (move, offset, trim, route) rank before a resize (it changes how a service performs), and a
+Plain geometry fixes (move, offset, trim, route, seat) rank before a resize (it changes how a service performs), and a
 resize before a penetration (another team builds it): `agent.TIERS`; an opening in a wall or slab before one in
 anything else. Then comfortable clearance, the smallest change,
 the most clearance. A round that verified only a resize or a penetration does not end the search: Muse gets one more
@@ -340,6 +341,58 @@ was to lift the post 100-200 mm off its slab: verified by geometry, not buildabl
   pushed into a cabinet fails; the clash partner is never a support; runs have none; a plan and a checked move agree).
   On the cell: post N3 slid 300 mm out of the robot's restricted space passes (74 mm clear); the same with a 150 mm lift
   fails as floating; the HMI 0.5 m out of the panel's working space passes.
+
+## Seat (Oct 31, owner request)
+
+**Why:** on Northbank a lift-pit wall runs 500 mm into a pad footing: its top stands 350 mm above the pad's top, its
+foot sits in the pad. The detail a designer draws is the wall bearing on the pad: its foot stops at the pad's face and
+its top carries on over it. ORCA could only trim the wall's whole end (losing the part over the pad) or move one of
+them. The owner asked for this as a capability, not a fix for one clash: a seat is decided from the geometry for any
+pair, and which kinds of element may be seated is the requirements' and Muse's call, never a class list.
+
+**When it applies** (`edits.seat(scene, element, support)`, from the boxes and the support's mesh):
+
+- the element runs into the support and stands at least `SEAT_ABOVE_M` (50 mm) above the support's top: something of
+  it is left to bear;
+- its foot is below the support's top, and no more than `SEAT_BELOW_M` (100 mm) below the support's bottom: it lands in
+  the support, it does not pass it (a wall running down past a slab is the slab's to notch);
+- the support is a straight prism under its top: its volume is its top face's area times its height (a stepped or
+  tapered base is refused), so the cut leaves nothing of the element inside it, by construction;
+- the cut takes no more than `SEAT_MAX_SHARE` (half) of the element: one mostly inside its support is modelled in the
+  wrong place;
+- neither is a run or a see-through zone (`verify.is_run`: a duct, pipe or tray is carried along its length, never
+  seated): `agent.seat_of`;
+- it is not already seated on that support (its recess's `ORCA_Seat` pset names the support).
+
+The element that comes down into the other is the one seated; asked the other way round, the attempt says which to
+seat. Like a trim, a seat sets how two elements that stay put meet: when the support can move (`IfcScene.stays`), it
+moves instead.
+
+**The edit** (`edits.apply_seat`): a recess in the element (an `IfcOpeningElement`, `RECESS`, voiding it), shaped as the
+support's top face (`_top_outline`: the boundary of the triangles that look up at its top; a rectangle profile when
+it is one, else a polyline) grown by a 1 mm bedding joint (`SEAT_JOINT_M`), from 10 mm below the element's foot up
+to 1 mm over the support's top. Exactly flush faces are numerically fragile in the clash queries: on Northbank a
+flush seat still re-measured as -500 mm (the collision query saw the coplanar faces and fell back to the boxes'
+overlap); 0.5 mm and up read as no overlap everywhere (the check, the clash panel's "Now", Detect again). The element keeps its body
+and GlobalId; everything that draws, checks or exports it subtracts the recess (STEP export cuts it, as it cuts a
+penetration's opening). An `ORCA_Seat` pset names the support.
+
+**The check** (`agent._try_seat`): the support's contact is the seat itself and is proved by construction, so it is not
+measured (the check's box depth would call the flush faces of an L-shaped element an overlap); a merged item's other
+obstacles must clear; everything else may only not get closer than before. `plans.verify_together` drops the support's
+hits the same way. Reviewed by the frame's designer (`domains.SEAT_REVIEW`: structure).
+
+**What Muse reads** (`agent._seat_text`): "Bearing: element A comes down into element B and stands 350 mm above its
+top (z -0.600 m). A "seat" of A on B cuts A where it is inside B's footprint below that top (0.20 x 0.50 x 0.65 m,
+10% of it), so what is left bears on B's top". Both packs describe the kind; their examples are no demo's answer.
+
+**Everywhere else:** `agent.TRIES` / `PARAMS`, `plans.IN_TRIAL` / `KEEPS_CONTACTS` / `KEEP` / `CANDIDATE`,
+`Workspace.check_seat` / `apply_seat`, chat and MCP `check_seat`, `requirements.blocked` (a seat is a trim to the
+requirements: "no trims" forbids it, "cleanup" keeps it within one model), and `fixKinds.ts` ("Seat", "bears on it").
+Show it built skips it, as it skips a trim.
+
+**Checked:** `tests/test_seat.py` (15, metres and millimetres: the fixture's wall and column seated on a base, the
+refusals, the agent and Muse's text, the requirements, proposed, kept in place, refused stale and again, a plan).
 
 ## Rejecting a fix (Oct 30)
 
