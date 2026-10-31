@@ -115,7 +115,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 | `test_escalation.py` | 30 | `escalation.py`, `spend.py` and the combined kind (`agent._try_combined`): the brief and its budget, the second try's options with the first's, the setting and caps (both or neither), token usage and the day's budget, stale first tries, structure never moved, the apply endpoint returns every run |
 | `test_triage.py` | 10 | `triage.py`: sure rules cost no call, JSON-mode fallback, the open-weights host only when switched on, the shared and replayed stream, rule verdicts say why, settled facts correct answers, reasoning streams, late subscribers, alike clashes read once |
 | `test_titles.py` | 5 | `titles.py`: batches, facts, finding a clash by number, titles survive Detect again, the shared titles stream |
-| `test_chat.py` | 9 | `chat.py`: tools run and images reach the model, tool errors go back to the model, `/api/chat` streams, filters set and cleared from chat (resolved against the index) and a name the models lack refused with the closest, root causes and plans from chat, history ordering on resume and cancellation |
+| `test_chat.py` | 11 | `chat.py`: tools run and images reach the model, tool errors go back to the model, `/api/chat` streams, filters set and cleared from chat (resolved against the index) and a name the models lack refused with the closest, root causes and plans from chat, history ordering on resume and cancellation |
 | `test_built.py` | 10 | `built.py`: passes and key, the pixel gate, two judges, retries, the cache, the API switch and caps, the setting, the PDF takes a built view by URL only, oversized passes refused, one picture made once |
 | `test_meta_client.py` | 3 | `MetaChatModel`: the Responses stream gives reasoning summaries then JSON, falls back to chat completions, other hosts never try Responses |
 
@@ -154,7 +154,7 @@ Counts are tests collected at `104fda9` (parametrised cases counted separately).
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_mcp.py` | 10 | `mcp_server.py` and `agents.py`: the tools and their `readOnlyHint`s, 401 without a live token, an agent finds, checks, proposes, applies and exports, the page answers for pictures and follows `set_view`, `set_filters` and `clear_filters`, link expiry (sliding, 24 h at most) and caps, long proposals become jobs, stdio on its own session, a closed page |
+| `test_mcp.py` | 12 | `mcp_server.py` and `agents.py`: the tools and their `readOnlyHint`s, 401 without a live token, an agent finds, checks, proposes, applies and exports, the page answers for pictures and follows `set_view`, `set_filters` and `clear_filters`, link expiry (sliding, 24 h at most) and caps, long proposals become jobs, stdio on its own session, a closed page |
 | `test_voice_live.py` | 10 | `voice_live.py` against a fake Meta socket: hold to talk, hands-free sentences, the time limit, non-microphone audio refused, Meta failures in words without the key, one voice cap use per session, no cap for the owner, other origins refused, the page leaving ends the session |
 
 **The docs map**

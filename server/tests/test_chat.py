@@ -103,6 +103,8 @@ def test_chat_sets_and_clears_filters_by_what_the_model_says(tmp_path):
                              {"facet": "storey", "op": "is", "values": ["Level 02"]}]
     assert ducts["origin"] == "chat" and ducts["colour"] == "#318181" and ducts["action"] == "colour"
     assert by_class["action"] == "byValue" and by_class["by"] == {"facet": "class"}
+    told = json.loads(next(m for m in model.seen if m.get("role") == "tool" and "filters" in (m.get("content") or ""))["content"])
+    assert {"value": "IfcBeam", "elements": 1} in told["filters"][1]["values"], "the model hears what it coloured, by name"
     assert rest["invert"] is True and rest["when"][0] == {"facet": "attr:Name", "op": "contains", "values": ["beam"]}
     assert ui[1] == {"type": "ui", "action": "filters", "mode": "clear"}
     found = next(e for e in events if e["type"] == "tool_result" and e["name"] == "set_filters")["summary"]

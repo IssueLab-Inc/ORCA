@@ -1556,3 +1556,7 @@ Filters by chat, voice and agents (Oct 31; owner decision: chat and voice drive 
   page as `ui filters`. Chat's own replace its last; the user's pause while they show and come back on
   `clear_filters`. The same tools on MCP (34 tools; chat has 26). Voice goes through chat. One prompt line.
 - **Checked:** `tests/test_chat.py` (9), `test_facets.py` (9), `test_mcp.py`; `web/tests/filters-chat.test.mjs`.
+- **After a live run** (Muse Spark, "Isolate the MEP model and colour the services by system."): the first reply named a
+  system the model does not have, as `set_filters` only said how many elements each filter found. It now also says
+  each value a colour-by-value filter colours, with its count, and the page frames what chat isolated. The second run
+  listed the nine systems and their counts, and showed the services framed and coloured.

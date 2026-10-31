@@ -163,6 +163,20 @@ TOOLS = [
 ]
 
 
+def _coloured(idx: dict, rule: dict) -> dict:
+    """For a colour-by-value filter, the values it colours with how many elements each, as the model may name them."""
+    if rule["action"] != "byValue":
+        return {}
+    f = facets.facet(idx, rule["by"]["facet"])
+    hit = set(range(len(idx["elements"])))
+    for c in rule["when"]:
+        hit &= facets.matching(idx, c["facet"], c["op"], c.get("values"), c.get("min"), c.get("max"))
+    if rule.get("invert"):
+        hit = set(range(len(idx["elements"]))) - hit
+    rows = [{"value": v, "elements": len(hit & set(items))} for v, items in zip(f["values"], f["items"])] if f else []
+    return {"values": [r for r in rows if r["elements"]][:24]}
+
+
 @dataclass
 class Session:
     id: str
@@ -608,7 +622,7 @@ class Chat:
                 return {"error": str(e)}, "refused: not in the model", []
             emit({"type": "ui", "action": "filters", "mode": "replace", "filters": [r for r, _ in made],
                   **({"grey_rest": bool(args["grey_rest"])} if "grey_rest" in args else {})})
-            found = [{"filter": r["name"] or r["action"], "elements": n} for r, n in made]
+            found = [{"filter": r["name"] or r["action"], "elements": n, **_coloured(idx, r)} for r, n in made]
             return {"filters": found}, ", ".join(f"{n} elements" for _, n in made) or "no filters", []
         if name == "clear_filters":
             emit({"type": "ui", "action": "filters", "mode": "clear"})

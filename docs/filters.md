@@ -130,11 +130,16 @@ value** (a temporary isolate). A storey's breadcrumb offers **Filter by this lev
   level as the storey, a model by part of its file name, a property by name (or `set/name`; a property set wins over
   an attribute or quantity of the same name), values in any case. A name the models lack fails back to the model with
   the closest ones (`facets.Unresolved`), so it can try again; the hidden demo note can never be suggested. The reply
-  says how many elements each filter finds.
+  says how many elements each filter finds, and for a colour-by-value filter each value it colours with its count, so
+  the model names what is there.
 - **On the page** (`ui filters`): chat's filters (`origin: "chat"`) replace its own; the user's that were on are
   paused (`Rule.paused`) while they show, and come back with **`clear_filters`**. They show in the Filters panel like
-  any other, so the user can edit, keep or delete them.
+  any other, so the user can edit, keep or delete them. The views go to what chat isolated (else to what it coloured)
+  unless that is everything.
 - One line in `domain_packs/chat.md` says when to use them (kinds of element by class, level, model or property).
+- Measured in Chromium on Northbank with Muse Spark: "Isolate the MEP model and colour the services by system." →
+  two filters (the MEP model isolated, coloured by System), the views framed on the services, and a reply listing the
+  nine systems with their counts.
 
 ## Tests
 

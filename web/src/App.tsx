@@ -45,7 +45,7 @@ import { AppIcon, KeptToast, LoadCard, Notch, Wordmark, type LoadProgress, type 
 import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./dock";
 import { FiltersPanel, blankRule } from "./FiltersPanel";
 import { ElementCard, type CardActions } from "./ElementCard";
-import { EMPTY as NO_FILTERS, complete, evaluate, legend, matching, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
+import { EMPTY as NO_FILTERS, complete, evaluate, found, legend, matching, migrate, prepare, type FacetIndex, type FilterState, type Rule } from "./filters";
 import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
 import type { Peek } from "./workingsGraph";
@@ -2197,7 +2197,17 @@ export function App() {
           rules: [...(e.filters ?? []).map((r) => ({ ...r, origin: "chat" as const })), ...paused] };
       });
       setFilterDraft(null);
-      if (e.mode === "replace") openFilters();
+      if (e.mode === "replace") {
+        openFilters();
+        // Take the views to what chat isolated (else to what it coloured), when that is not everything.
+        if (prepared) {
+          const rules = e.filters ?? [], pick = rules.some((r) => r.action === "isolate") ? rules.filter((r) => r.action === "isolate")
+            : rules.filter((r) => r.action !== "hide");
+          const ids = new Set<number>();
+          for (const r of pick) for (const i of found(prepared, r)) ids.add(i);
+          if (ids.size && ids.size < prepared.n) viewer.current?.frame([...ids].map((i) => prepared.index.elements[i]));
+        }
+      }
     }
     if (e.type === "ui" && e.action === "set_view") {
       setTool((t) => ({ ...t, ...(e.mode ? { mode: e.mode as ViewMode } : {}), ...(e.section_box != null ? { section: e.section_box } : {}) }));
