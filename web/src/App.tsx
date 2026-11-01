@@ -1,4 +1,4 @@
-import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LayoutPanelLeft, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Radar, RotateCcw, Sparkles, Upload, Wand2, X } from "lucide-react";
+import { Bot, Boxes, Brain, Building2, Check, ChevronRight, CircleCheck, ClipboardCheck, ClipboardPlus, Compass, Download, FileSpreadsheet, FileText, FolderOpen, Hand, Info, LayoutPanelLeft, List, LocateFixed, Menu, MessageSquare, Move, Navigation, Network, Plug, Plus, Radar, RotateCcw, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, statusLine, type ActivityView, type Progress } from "./Activity";
 import { BuiltView, builtStep, cutText, type BuiltRun } from "./BuiltView";
@@ -6,12 +6,13 @@ import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, 
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, BuiltResult, EditCheck, EditKept, EscalationInfo, Journal, JournalEntry, Stepped, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AddedModels, AgentLink, BuiltResult, EditCheck, EditKept, EscalationInfo, Journal, JournalEntry, Stepped, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
 import { ProjectStart } from "./ProjectStart";
 import { localFile, uploadRefusal, uploadStatus } from "./uploads";
+import { addableSamples, addRefusal, clashesWith, editsIn, isMachine, removalWarning, shiftHidden, waitFor } from "./sceneModels";
 import { countsText, highlightGroups, indexGraph, LINK_COLOURS, type LinkIndex } from "./links";
 import { loadSignoffs, migrateTitleKeyed, saveSignoffs, signoffScope } from "./signoffs";
 import { addByDesign, addPenetration, hasByDesign, hasPenetration, load as loadRequirements, save as saveRequirements, shortLabel, type Saved as SavedRequirements } from "./reqFile";
@@ -338,6 +339,15 @@ export function App() {
   const goneScene = !!sceneId && goneIds.scene === sceneId, goneReport = !!report && goneIds.report === report.id;
   const gone = goneScene || goneReport ? { scene: goneScene, report: goneReport } : null;
   const sceneUploaded = useRef(false);   // the open models are the visitor's own files: only they can pick them again
+  // Adding and removing models (docs/add-and-remove-models.md). The server's layout of the open models (bumped by each
+  // add or remove): a reply on another layout means another tab or an agent changed the list, so the files are loaded
+  // again. `layoutRev` re-reads what depends on the file list; `adding`: samples ticked to add; `removing`: the model
+  // asked about before it goes; `pickFor`: what the model file input's files are for.
+  const sceneLayout = useRef<number | null>(null);
+  const [layoutRev, setLayoutRev] = useState(0);
+  const [adding, setAdding] = useState<string[]>([]);
+  const [removing, setRemoving] = useState<{ index: number; name: string; text: string; edits: number } | null>(null);
+  const pickFor = useRef<"open" | "add">("open");
   const sampleReports = useRef<Record<string, string>>({});   // report id → the sample report it was opened from
   const goneWords = useRef(new Set<string>());   // the server's words for it: the notice says them, never the error line
   const [agentOpen, setAgentOpen] = useState(false);
@@ -634,7 +644,7 @@ export function App() {
     let live = true;
     api.match(report.id, sceneId).then((m) => { if (live) setMatches(m); }).catch((e) => { if (live) setError((e as Error).message); });
     return () => { live = false; };
-  }, [report, sceneId]);
+  }, [report, sceneId, layoutRev]);
 
   // Root causes and patterns, over the clashes still open (not fixed, not reviewed). Nothing jumps while the user
   // works through them: patterns are read once per report, and Insights shows each one's open clashes from `resolved`;
@@ -1259,7 +1269,7 @@ export function App() {
         const refusal = uploadRefusal(source as File[], uploadMax);
         if (refusal) throw new Error(refusal);
       }
-      const { id, files, step: stepMap, revision } = existing ?? (upload
+      const { id, files, step: stepMap, revision, layout: opened } = existing ?? (upload
         ? await api.uploadModelsStream(source as File[], (e) => {
           const line = uploadStatus(e, hasStep);
           if (line && sceneEpoch.current === epoch) { setBusy(line); step({ line }); }
@@ -1281,6 +1291,8 @@ export function App() {
         (drawn, elements) => step({ drawn, elements }));
       if (sceneEpoch.current !== epoch || !stats) return;
       sceneRevision.current = revision ?? null;
+      sceneLayout.current = opened ?? null;
+      setAdding([]); setRemoving(null);
       setModelNames(shortNames(files));
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
@@ -1299,6 +1311,122 @@ export function App() {
   async function openDemo(source?: string[] | File[]) {
     const id = await open(source);
     if (id) await runDetect(null, id);
+  }
+
+  /** Add models to the open scene (docs/add-and-remove-models.md): samples by name, or the visitor's own files. Only the
+   * new files are fetched (an uploaded IFC is read from the visitor's own file) and drawn beside the others; fixes,
+   * edits, checks and triage stay. Then every kept check runs again, as opening checks. */
+  async function addModels(source: string[] | File[]) {
+    const sid = sceneId;
+    if (!sid || !source.length) return;
+    const upload = source[0] instanceof File;
+    const names = (source as (string | File)[]).map((x) => (typeof x === "string" ? x : x.name));
+    const refusal = modelsWait() ?? addRefusal(names, sceneFiles, stepFiles) ?? (upload ? uploadRefusal(source as File[], uploadMax) : null);
+    if (refusal) { setError(refusal); return; }
+    const hasStep = names.some((n) => /\.(step|stp)$/i.test(n));
+    const epoch = sceneEpoch.current, live = () => sceneEpoch.current === epoch;
+    setBusy(`Adding ${names.length === 1 ? shortNames(names)[0] : `${names.length} models`}${hasStep ? " and converting the STEP" : ""}…`);
+    setError(null);
+    try {
+      const added: AddedModels = upload
+        ? await api.addModelsStream(sid, source as File[], (e) => { const line = uploadStatus(e, hasStep); if (line && live()) setBusy(line); })
+        : await api.addModels(sid, source as string[]);
+      if (!live()) return;
+      sceneUploaded.current ||= upload;   // a sample scene with an upload added can only be picked again by hand
+      setAdding([]);
+      if (!nextLayout(added.layout)) await reloadModels(sid, live);   // another tab or an agent changed the list meanwhile
+      else {
+        setBusy("Drawing the new models…");
+        const bytes = await Promise.all(added.added.map(async (i) => {
+          const local = upload ? localFile(source as File[], added.files, added.step, i) : null;
+          return local ? new Uint8Array(await local.arrayBuffer()) : api.file(sid, i);
+        }));
+        if (!live()) return;
+        const drawn = await viewer.current!.add(bytes, added.added.map((i) => added.files[i]), live);
+        if (!live() || !drawn) return;
+        adoptFiles(added, drawn);
+      }
+    } catch (e) { if (live()) setError((e as Error).message); return; } finally { if (live()) setBusy(null); }
+    await runDetect(null, sid, { all: true });
+  }
+
+  /** Whether a reply's layout is the one after this page's (its own add or remove), so it may update in place. */
+  function nextLayout(layout: number | undefined): boolean {
+    return layout == null || sceneLayout.current == null || layout === sceneLayout.current + 1;
+  }
+
+  /** The open models' list as the server has it now (after adding or removing here, or loading them again): names,
+   * STEP files, the revision and layout drawn, and what is read from the file list read again (classes, levels, the
+   * filters' index, the clash matches, the tests a check would run). The filters on screen carry over to the new set. */
+  function adoptFiles(scene: OpenedScene, drawn: Stats | null) {
+    const files = scene.files;
+    try { localStorage.setItem(filtersKey(shortNames(files)), JSON.stringify(filterState)); } catch { /* kept for this visit */ }
+    setSceneFiles(files); setModelNames(shortNames(files)); setStepFiles(Object.values(scene.step ?? {}));
+    sceneRevision.current = scene.revision ?? null; sceneLayout.current = scene.layout ?? null;
+    if (drawn) setStats(drawn);
+    setInfoRev((n) => n + 1); setLayoutRev((n) => n + 1);
+  }
+
+  /** Draw the open models again from the server's list, as after a restart: a layout this page doesn't know (another
+   * tab or an agent added or removed a model). ORCA's list on screen is read again too. */
+  async function reloadModels(sid: string, live: () => boolean) {
+    const info = await api.sceneInfo(sid);
+    if (!live()) return;
+    const bytes = await Promise.all(info.files.map((_, i) => api.file(sid, i)));
+    if (!live()) return;
+    const drawn = await viewer.current!.load(bytes, info.files, live);
+    if (!live() || !drawn) return;
+    setTool((t) => ({ ...t, hiddenModels: [] }));
+    adoptFiles(info, drawn);
+    if ((!reportNow.current || reportNow.current.origin === "sightline") && info.report_id !== reportNow.current?.id) {
+      const r = info.report_id ? await api.report(info.report_id).catch(() => null) : null;
+      if (live()) await adoptRun(r, info.checks ?? [], null, []);
+    }
+  }
+
+  /** The toolbar's remove button: ask first, saying what goes with the model (its kept edits, its clashes in the list). */
+  function askRemove(i: number) {
+    const name = sceneFiles[i];
+    if (!sceneId || !name) return;
+    const wait = modelsWait();
+    if (wait) { setError(wait); return; }
+    const clashes = report?.origin === "sightline" ? clashesWith(report.clashes, name) : 0;
+    const edits = editsIn(journal?.entries ?? [], i);
+    setRemoving({ index: i, name, edits, text: removalWarning(name, clashes, edits) });
+  }
+
+  /** Take the model asked about out of the open scene: the server first (its clashes leave every kept check), then the
+   * viewer, the list (ORCA's checks; an imported report stays, matched again), and whatever pointed into the model. */
+  async function removeModel() {
+    const r = removing, sid = sceneId;
+    setRemoving(null);
+    if (!r || !sid) return;
+    const wait = modelsWait();
+    if (wait) { setError(wait); return; }
+    const epoch = sceneEpoch.current, live = () => sceneEpoch.current === epoch;
+    setBusy(`Removing ${shortNames([r.name])[0]}…`); setError(null);
+    try {
+      const out = await api.removeModel(sid, r.index, r.name);
+      if (!live()) return;
+      viewer.current?.preview([]);
+      if (!nextLayout(out.layout)) await reloadModels(sid, live);
+      else {
+        const drawn = viewer.current?.remove(r.index) ?? null;
+        setTool((t) => ({ ...t, hiddenModels: shiftHidden(t.hiddenModels, r.index) }));
+        adoptFiles(out, drawn);
+        if (!reportNow.current || reportNow.current.origin === "sightline") await adoptRun(out.report, out.checks, null, []);
+      }
+      if (!live()) return;
+      const here = (g: string | null) => (g && viewer.current?.has(g) ? g : null);
+      setA(here); setB(here);
+      setSelected((x) => (x && viewer.current?.has(x.globalId) ? x : null));
+      setStandIns({});
+      void refreshJournal(sid);
+    } catch (e) {
+      if (!live()) return;
+      if (e instanceof ApiError && e.status === 409) await reloadModels(sid, live).catch(() => undefined);   // the list changed
+      setError((e as Error).message);
+    } finally { if (live()) setBusy(null); }
   }
   // The second demo: the palletising cell, opened from its STEP file.
   const cellDemo = demos.find((d) => d.tour === "cell");
@@ -1395,7 +1523,7 @@ export function App() {
     let live = true;
     api.detectTests(sceneId).then((s) => { if (live) setDetectSetup(s); }).catch(() => undefined);
     return () => { live = false; };
-  }, [sceneId, reqId]);
+  }, [sceneId, reqId, layoutRev]);
 
   function onDetectEvent(e: DetectEvent) {
     const trace = traces.current.detect;
@@ -2251,6 +2379,12 @@ export function App() {
   /** Bring the viewer up to a kept fix: patch the changed elements in place when the server sent them and this page's
    * model is at the revision the fix started from (viewer/patch.ts); otherwise reload the files it changed. */
   async function applyToViewer(sid: string, kept: { files: number[] } & Patch, pieces: string[][] | undefined, live: () => boolean) {
+    // File indexes hold only within one layout: a model added or removed elsewhere means loading the files again.
+    if (kept.layout != null && sceneLayout.current != null && kept.layout !== sceneLayout.current) {
+      await reloadModels(sid, live);
+      if (live()) void refreshJournal(sid);
+      return;
+    }
     const origin = new Map((pieces ?? []).flatMap((ps) => ps.slice(1).map((g) => [g, ps[0]] as const)));
     if (kept.meshes && kept.scene_id === sid && kept.revision_before != null && kept.revision_before === sceneRevision.current
         && viewer.current?.patch(kept.meshes, origin, kept.removed ?? [])) {
@@ -2762,7 +2896,7 @@ export function App() {
     const r = resumable;
     if (!r || busy) return;
     const { saved, info } = r;
-    const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision });
+    const id = await open(info.files, { id: info.id, files: info.files, step: info.step, revision: info.revision, layout: info.layout });
     if (!id) return;
     // An imported report it had open comes back as it was; ORCA's checks as the list they make now, on the check it showed.
     const imported = saved.report_id ? await api.report(saved.report_id).then((x) => (x.origin === "sightline" ? null : x), () => null) : null;
@@ -3004,6 +3138,9 @@ export function App() {
   const pickedDemo = demos.find((d) => d.files.length === picked.length && d.files.every((f) => picked.includes(f)));
   const startLabel = pickedDemo?.label ?? "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
+  /** What adding or removing a model must wait for (sceneModels.waitFor), in words, or null. */
+  const modelsWait = () => waitFor({ busy, detecting: !!detecting, proposing: proposing || !!runningNow.current, planning,
+    triage: !!triageRun && !triageRun.done });
   // Phones and tablets: the sheet (or drawer) follows what happens, so the panel people need is the one showing. The
   // list when a report or the models open, the clash once one is picked, out of the way while ORCA drives the model,
   // back up with the result. Moving the sheet by hand always wins until the next thing happens.
@@ -3281,8 +3418,25 @@ export function App() {
   const noFolders = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   // The header's two menus, as popovers on a desktop and as sections of the menu on phones and tablets.
+  const addable = sceneId && !gone?.scene ? addableSamples(samples, sceneFiles, stepFiles) : null;
+  const addWait = addable ? modelsWait() : null;
   const modelsMenu = (close: () => void) => (<>
-    <p className="pop-title">Models to open together</p>
+    {addable && <>
+      <p className="pop-title">Add to the open models</p>
+      {addable.map((f) => (
+        <label key={f} className="pop-item check">
+          <input type="checkbox" value={f} checked={adding.includes(f)}
+            onChange={(e) => setAdding(e.target.checked ? [...adding, f] : adding.filter((x) => x !== f))} /> {f}
+        </label>))}
+      {!addable.length && <p className="hint">{isMachine(sceneFiles, stepFiles) ? "No other STEP sample to add." : "Every sample model is open."}</p>}
+      <button className="btn primary small" data-add-models disabled={!adding.length || !!addWait} onClick={() => { close(); void addModels(adding); }}>
+        <Plus size={14} aria-hidden /> Add {adding.length} model{adding.length === 1 ? "" : "s"}</button>
+      <button className="pop-item" disabled={!!addWait} onClick={() => { close(); pickFor.current = "add"; modelInput.current?.click(); }}>
+        <Upload size={14} aria-hidden /> Upload models to add…</button>
+      <p className="hint">{addWait ?? "They draw beside the open models and every kept check runs again; fixes, edits and checks stay."}</p>
+      <p className="pop-title">Open instead</p>
+    </>}
+    {!addable && <p className="pop-title">Models to open together</p>}
     {samples.map((f) => (
       <label key={f} className="pop-item check">
         <input type="checkbox" value={f} checked={picked.includes(f)}
@@ -3429,7 +3583,11 @@ export function App() {
       </header>
       ) : null}
       <input ref={modelInput} type="file" hidden multiple accept=".ifc,.step,.stp" disabled={!!busy}
-        onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) void openDemo(files); }} />
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])], forAdding = pickFor.current === "add";
+          e.target.value = ""; pickFor.current = "open";
+          if (files.length) void (forAdding ? addModels(files) : openDemo(files));
+        }} />
       <input ref={folderInput} type="file" hidden multiple disabled={!!busy} {...{ webkitdirectory: "" }} onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
       <input ref={filesInput} type="file" hidden multiple disabled={!!busy} accept=".xml,.png,.jpg,.jpeg" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
 
@@ -3488,7 +3646,8 @@ export function App() {
         onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
         {stats && <ViewerToolbar compact={layout === "phone"} state={tool} models={modelNames} hasFocus={!!(a || b || selected)} views={viewsControls} split={rail3d()}
           onMode={(mode) => setTool((t) => ({ ...t, mode }))} onStyle={(style) => setTool((t) => ({ ...t, style }))} onToggle={toggle}
-          onView={(p) => viewer.current?.view(p)} onFit={() => viewer.current?.home()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot} />}
+          onView={(p) => viewer.current?.view(p)} onFit={() => viewer.current?.home()} onFocus={focusNow} onModel={setModelVisible} onShot={screenshot}
+          remove={sceneId && !gone?.scene ? { onRemove: askRemove, blocked: addWait } : undefined} />}
         {stats && <ViewPanes viewer={viewer.current} offset={layout === "phone" ? 8 : 64} compact={layout === "phone"} clear={compact ? 0 : 52} chip={(clash || a || b) && !viewPlan && !activeContext ? (
           <div className="clash-chip">
             <span className="sw-pair"><i className="sw red" /><i className="sw green" /></span>
@@ -3893,6 +4052,20 @@ export function App() {
       <Tooltips />
       {popouts.map((w, i) => <Tooltips key={i} doc={w.document} />)}
       {aboutTab && <AboutOrca tab={aboutTab} onTab={switchAbout} onClose={closeAbout} triageOpen={!!triageModel?.open_weights} />}
+      {removing && (
+        <div className="about-dialog" role="dialog" aria-modal="true" aria-label="Remove a model" onClick={() => setRemoving(null)}>
+          <div className="report-dialog remove-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="row"><h2><Trash2 size={18} aria-hidden /> Remove a model</h2>
+              <button className="ibtn" aria-label="Close" onClick={() => setRemoving(null)}><X size={16} aria-hidden /></button></div>
+            <p>{removing.text}</p>
+            <p className="hint">Edits in the other models stay, fixes made for its clashes too. Nothing is checked again.</p>
+            <div className="actions">
+              {removing.edits > 0 && sceneId && <a className="btn" href={api.exportUrl(sceneId)}><Download size={15} aria-hidden /> Export first</a>}
+              <button className="btn" onClick={() => setRemoving(null)}>Cancel</button>
+              <button className="btn primary" data-remove-model onClick={() => void removeModel()}><Trash2 size={15} aria-hidden /> Remove</button>
+            </div>
+          </div>
+        </div>)}
       {agentOpen && <AgentDialog link={agentLink} log={agentLog} now={now} creating={agentBusy} error={agentError}
         canCreate={!!sceneId} onCreate={() => void connectAgent()} onRevoke={() => void disconnectAgent()} onClose={() => setAgentOpen(false)} />}
       {touring && <Tour key={tourWhich} which={tourWhich} state={tourState} actions={tourActions} onClose={() => setTouring(false)} />}

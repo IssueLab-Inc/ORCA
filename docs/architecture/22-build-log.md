@@ -2092,3 +2092,22 @@ main too: two detection clash points, two PDF tests without GTK); 240 web tests,
 cell's STEP refused in words, a stale delete 409, Architecture removed (12 clashes gone, 451 left, the check not
 stale), then Structure removed and the export one `Northbank-MEP.orca.ifc` carrying the edit's `ORCA_Edit`. The page
 and viewer are slice 2 (`feature/add-remove-models-page`).
+
+**Nov 1, adding and removing models: the page and viewer** ([docs/add-and-remove-models.md](../add-and-remove-models.md),
+slice 2). With models open, Menu › Models offers **Add to the open models** (the samples of their kind not open yet,
+and **Upload models to add…**) above **Open instead**. `App.addModels` checks first (`sceneModels.addRefusal`: mixing
+STEP and IFC, a name already open, in the server's words, so nothing is uploaded or charged), then fetches only the new
+files and `Viewer.add`s them at the models' origin, and runs every kept check again. Each model in the Visibility menu
+has a remove button that asks first, naming what goes ("Remove Northbank-Architecture? The 12 clashes with it go
+too."; kept edits add "Export first to keep the edits." and an Export first button); `Viewer.remove` disposes the file
+and moves the later ones and their hidden marks down. Both wait in words while a proposal, plan, triage, check or other
+work runs. A reply on a layout the page doesn't know (another tab, an agent) loads every file again (`reloadModels`),
+including any patch through `applyToViewer`. New `sceneModels.ts`; `api.ts` gets `addModels`, `addModelsStream`,
+`removeModel` (both upload streams now one `streamUpload`). Checked: `scene-models.test.mjs` (8),
+`viewer-load.test.mjs` (+3), 251 web tests, build clean; in Chromium against port 8023: Northbank Structure + MEP 452
+clashes, #1 (the supply main through the transfer girder) proposed and its offset kept (E1); Architecture added: 463
+clashes, its 12 listed, #1 still resolved, the same scene; removed after "Remove Northbank-Architecture? The 12
+clashes with it go too.": 451, E1 kept, the Visibility menu MEP and Structure; the export `Northbank-MEP.orca.ifc`
+carrying `ORCA_Edit`; the palletising cell's STEP refused in words on the page with nothing uploaded; both demo cards
+(464 and 112 clashes), the first three steps of both tours, Architecture added to Structure alone framed with it; and
+a model added through the API behind the page's back, then Ctrl+Z on the page: the page loaded all three files again.

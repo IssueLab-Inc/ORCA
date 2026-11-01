@@ -433,6 +433,11 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .pop-scroll { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .pop-item small.why, .pop-item .why { margin-left: auto; }
 .saved-view { justify-content: space-between; cursor: default; }
+/* A model in the visibility menu: show it or not, and take it out of the open models (docs/add-and-remove-models.md). */
+.model-row { justify-content: space-between; cursor: default; }
+.model-row .check { display: flex; align-items: center; gap: 8px; flex: 1; cursor: pointer; }
+.remove-dialog { width: min(480px, 100%) !important; }
+.remove-dialog .actions { justify-content: flex-end; margin-top: 8px; }
 .saved-view .link { all: unset; cursor: pointer; flex: 1; }
 .saved-view .link:hover { color: var(--accent); }
 .temp-row { background: #e3f7fa; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; justify-content: space-between; }

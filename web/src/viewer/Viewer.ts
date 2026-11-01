@@ -309,11 +309,65 @@ export class Viewer {
     this.applyMode();
     this.fitAll(false);
     this.history.clear();   // after the fit: Back never flies to the camera of the models before
+    return this.stats();
+  }
+
+  /** What is loaded: elements, triangles and the time it took to parse them. */
+  private stats() {
     return {
       elements: this.models.reduce((n, m) => n + m.stats.elements, 0),
       triangles: this.models.reduce((n, m) => n + m.stats.triangles, 0),
       parseMs: this.models.reduce((n, m) => n + m.stats.parseMs, 0),
     };
+  }
+
+  /** Add federated files to the open models (docs/add-and-remove-models.md): each parsed from the models' own origin,
+   * as `replace` does, all of them before any is shown, then appended after the others and framed with them. Null when
+   * superseded (`isCurrent`); a file that fails leaves the open models as they were. */
+  async add(files: Uint8Array[], names: string[], isCurrent: () => boolean = () => true) {
+    const staged: LoadedModel[] = [];
+    try {
+      for (const bytes of files) {
+        staged.push(await loadIfc(bytes, origin()));
+        if (!isCurrent()) { for (const m of staged) disposeBatches(m); return null; }
+      }
+    } catch (e) { for (const m of staged) disposeBatches(m); throw e; }
+    this.models = [...this.models, ...staged.map((m) => this.adopt(m))];
+    this.names = [...this.names, ...names];
+    this.sceneChanged();
+    this.clearFocusCache();
+    this.configureViews(false);
+    this.applyMode();
+    this.fitAll();
+    return this.stats();
+  }
+
+  /** Take one federated file out (docs/add-and-remove-models.md): its batches are disposed, every file after it moves
+   * down one (the hidden marks with them), and what referred to its elements goes: moves and hides previewed on them,
+   * the focus and selection on them, measurements, the hover snap and the focus cache. Null for a position it does not
+   * have. */
+  remove(index: number) {
+    const gone = this.models[index];
+    if (!gone) return null;
+    this.scene.remove(...batches(gone));
+    disposeBatches(gone);
+    const ids = gone.byGlobalId;
+    for (const gid of ids.keys()) { this.moved.delete(gid); this.hidden.delete(gid); this.info.delete(gid); this.paints.delete(gid); }
+    this.models = this.models.filter((_, i) => i !== index);
+    this.names = this.names.filter((_, i) => i !== index);
+    this.hiddenModels = new Set([...this.hiddenModels].filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)));
+    const keep = (gid: string | null) => (gid && ids.has(gid) ? null : gid);
+    this.focus = { a: keep(this.focus.a), b: keep(this.focus.b),
+      group: Object.fromEntries(Object.entries(this.focus.group ?? {}).filter(([gid]) => !ids.has(gid))) };
+    if (this.selection && ids.has(this.selection)) this.selection = null;
+    this.lastClash = null;
+    this.measures = []; this.draft = null; this.hover = null; this.measureStamp++;
+    this.sceneChanged();
+    this.clearFocusCache();
+    this.configureViews(false);
+    this.applyMode();
+    this.onChange?.();   // the page's list of measurements, among others
+    return this.stats();
   }
 
   /** Swap one federated file for a new version of it (after an edit was accepted on the server). */
