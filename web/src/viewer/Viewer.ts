@@ -366,6 +366,7 @@ export class Viewer {
     this.clearFocusCache();
     this.configureViews(false);
     this.applyMode();
+    this.onChange?.();   // the page's list of measurements, among others
     return this.stats();
   }
 
