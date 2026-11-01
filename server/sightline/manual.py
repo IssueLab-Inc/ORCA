@@ -32,7 +32,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import numpy as np
 
-from . import connections, consistency, detect, edits, faces, hosts, requirements, verify
+from . import connections, consistency, detect, edits, faces, hosts, parametric, requirements, verify
 from .scene import IfcScene, not_physical
 
 PARALLEL_COS = np.cos(np.radians(1))   # two faces this close to parallel meet all over when aligned
@@ -288,7 +288,7 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     params = {"op": "push_pull", "element": gid, "face": spec(face), "by_m": by}
     warn = structure_warnings(scene, gid, "the new size")
     if face.kind == "side":
-        so = edits.solid(scene, scene.entity(gid), faces.split_id(face.id)[0])
+        so = edits.solid(scene, scene.entity(gid), faces.split_id(face.id)[0], through_maps=True)
         prof = so.item.SweptArea if so.kind == "extrusion" else None
         if prof is not None and prof.is_a() in edits.SECTION_DIMS:
             name = f" ({prof.ProfileName})" if prof.ProfileName else ""
@@ -893,6 +893,21 @@ def key_of(op: dict, revision: int) -> str:
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
 
+def _sync(scene: IfcScene, plan: Plan, made: Made, was: dict) -> parametric.Synced:
+    """After the edit, inside its transaction: what the model says besides the shape follows the body (parametric.py),
+    the same in the trial and when kept."""
+    return parametric.sync(scene, was, made.changed, made.created, made_from=plan.element, label=label)
+
+
+def _left_words(scene: IfcScene, synced: parametric.Synced) -> list[dict]:
+    if not synced.left:
+        return []
+    names = ", ".join(q.split(".", 1)[1] for q in synced.left[:4]) + (" …" if len(synced.left) > 4 else "")
+    return [{"rule": "quantities", "review": "design",
+             "text": f"{len(synced.left)} base quantit{'y' if len(synced.left) == 1 else 'ies'} ORCA does not work out "
+                     f"were left as they were ({names})"}]
+
+
 def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
     """Make the edit in a trial and measure it; nothing is kept. Refusals come back as `blocked` with why."""
     scene = ws.scene(scene_id)
@@ -918,9 +933,11 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
         before = {h.other: h for h in verify.check(scene, targets, clearance_m=clearance).hits} if targets else {}
         shapes_before = edits.meshes(scene, [g for g in plan.targets if scene.has(g)]) if preview else None
         readings = consistency.measure(scene, plan.targets, label)   # what the model says besides the shape, before
+        was = parametric.snapshot(scene, plan.targets)
         try:
             with edits.trial_files(scene, plan.files):
                 made = OPS[plan.op].make(scene, plan)
+                synced = _sync(scene, plan, made, was)
                 boxes = scene.bounds()
                 mine = [g for g in dict.fromkeys([*made.changed, *made.created]) if g in boxes]
                 issues = consistency.compare(scene, readings, consistency.measure(scene, [
@@ -938,7 +955,12 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
             return {**base, "passed": False, "blocked": blocks[0].text + more, "clashes": 0,
                     "consistency": [i.to_dict() for i in issues]}
         base["warnings"] = [*base["warnings"], *({"rule": i.rule, "review": "design", "text": i.text}
-                                                  for i in issues if i.severity == "warn")]
+                                                  for i in issues if i.severity == "warn"), *_left_words(scene, synced)]
+        if synced.opened:   # path joins the edit leaves open, kept only when said (as port joints are)
+            base["joints"] = [*base["joints"], *synced.opened]
+            base["warnings"].append(_open_joint_words(scene, plan.element, synced.opened))
+        if synced.notes:
+            base["summary"] = f"{base['summary']}; {'; '.join(synced.notes)}"
         hits = [h for h in v.hits if not (h.other in plan.touching and h.distance_m > -WORSE_M)]
         new = [h for h in hits if h.other not in before]
         worse = [h for h in hits if h.other in before and h.distance_m < before[h.other].distance_m - WORSE_M]
@@ -984,12 +1006,14 @@ def apply(ws, scene_id: str, op: dict, *, key: str | None = None, accept_clashes
             near = {*log.made_from(pair[0]), *log.made_from(pair[1])}
             if near.isdisjoint(plan.targets):
                 clashes = []
+        was = parametric.snapshot(scene, plan.targets)
         with log.record(scene, source, plan.op, actor=actor, requirements=requirements.current_id()) as rec, \
                 edits.kept_files(scene, plan.files):
             made = OPS[plan.op].make(scene, plan)
+            _sync(scene, plan, made, was)
             scene._edited.update(plan.files)   # export writes these files
             scene.bump(plan.files)
-            rec.changed, rec.summary, rec.title = list(made.changed), plan.summary, plan.summary
+            rec.changed, rec.summary, rec.title = list(made.changed), r["summary"], plan.summary
             rec.params, rec.clashes, rec.warnings = plan.params, clashes, list(r["warnings"])
             rec.check = {"verified": False, "cleared": r["cleared"], "new": r["new"], "worse": r["worse"],
                          "accepted_clashes": r["clashes"], "min_clearance_m": r["min_clearance_m"],

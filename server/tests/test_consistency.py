@@ -47,6 +47,17 @@ def test_a_type_whose_map_changed_changes_every_element_of_it(scene):
         assert consistency.compare(s, before, consistency.measure(s, [g["F1"]]), allow=frozenset({"type"})) == []
 
 
+def test_a_set_other_elements_share_changed_in_place_changes_them_too(scene):
+    s, g = scene
+    before = consistency.measure(s, [g["W1"]])
+    assert before[(g["W1"], "shared")].words["others"] == 1   # W2, through their type
+    with edits.trial_files(s, {0}):
+        ifcopenshell.util.element.get_material(s.entity(g["W1"])).ForLayerSet.MaterialLayers[2].LayerThickness = 0.05
+        issues = consistency.compare(s, before, consistency.measure(s, [g["W1"]]))
+        (shared,) = [i for i in issues if i.rule == "shared"]
+        assert shared.severity == "block" and "shared by 1 other element" in shared.text
+
+
 def test_quantities_warn_only_when_the_body_changed_and_they_did_not(scene):
     s, g = scene
     before = consistency.measure(s, [g["SL1"]])

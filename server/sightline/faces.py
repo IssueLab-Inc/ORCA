@@ -247,7 +247,7 @@ def faces(scene: IfcScene, gid: str) -> list[Face]:
     """Every face of the element's body there is to edit, with its name (numbered when two share one). A body of
     several solids lists each one's faces, their ids prefixed with the solid's place in it ("i1:cap:end")."""
     element = scene.entity(gid)
-    sol = edits.solids(scene, element)
+    sol = edits.solids(scene, element, through_maps=True)   # a type's shape reads as the element's: edits unmap first
     s = scene.unit_scales[scene.index_of(gid)]
     out: list[Face] = []
     for so in sol:
@@ -278,7 +278,7 @@ def faces(scene: IfcScene, gid: str) -> list[Face]:
 def _has_section(scene: IfcScene, gid: str, face_id: str) -> bool:
     k, _ = split_id(face_id)
     try:
-        so = edits.solid(scene, scene.entity(gid), k)
+        so = edits.solid(scene, scene.entity(gid), k, through_maps=True)
     except edits.Unsupported:
         return False
     return so.kind == "extrusion" and _section(so.item.SweptArea) is not None
@@ -412,7 +412,7 @@ def resolve(scene: IfcScene, gid: str, point, normal) -> Face:
         return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, f.allows, f.why_not)
     s = scene.unit_scales[scene.index_of(gid)]
     found: list[tuple[float, Face]] = []
-    for so in edits.solids(scene, element):
+    for so in edits.solids(scene, element, through_maps=True):
         try:
             if so.kind == "extrusion":
                 d = _on_extrusion(scene, so, s, P)

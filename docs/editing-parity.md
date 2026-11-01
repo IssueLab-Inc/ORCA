@@ -34,7 +34,7 @@ Northbank has none of what real exports carry, so these paths were never exercis
 |---|---|---|
 | 0a | This face or element only by default; `carry` to take joined parts along | done (Nov 1) |
 | 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | done (Nov 1) |
-| 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | planned |
+| 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | done (Nov 1), but for a type edited for all its elements and a joined wall's neighbour re-trimmed |
 | 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | planned |
 | 3 | Editable properties: attributes, psets, type, material, classification, container | planned |
 
@@ -58,22 +58,52 @@ Geometry comes from `ifcopenshell.geom.create_shape` in the element's own placem
 one of these. Northbank carries base quantities only (36 on the architecture model), so it sees the warning and nothing
 else.
 
+A sixth rule, `shared`, guards the copies below: a layer or profile set other elements use that changes in place blocks
+("the layer set of wall 'W1' is shared by 1 other element: changing it would change them too").
+
+## Edits that keep it (Tier 1)
+
+`parametric.py` runs after every hand edit, inside its transaction, the same in the check's trial and when kept
+(`manual._sync`): `snapshot` reads each element before, `sync` brings its data along with its body after. Data that was
+already out of line stays as it was; only what the edit moved is moved.
+
+| What | How |
+|---|---|
+| Shared data (decision 2) | `own_usage`: a set the element's type gives other elements too → `root.copy_class` on the type, named "… (ORCA)", the element reassigned to it (its body kept) and given its own usage of the copied set, the usage's direction, sense, offset and cardinal point kept; a set shared another way → `material.copy_material` |
+| A body from its type | `edits.make_unique` → `unmap`: the mapped items become the element's own copy of what they draw, where they draw it (`mapping`: the target after the origin, composed into each solid's position, a mesh's or a brep's points); a scaled target is refused. Faces read through the map (`solids(through_maps=True)`), so a mapped fitting pushes and pulls like any other; edits unmap first, the fix kinds never see through |
+| Layers (decision 4) | The body's extent along the usage's axis before and after: the side that moved changes the layer on that side (first or last, by the sense), and `OffsetFromReferenceLine` follows the start of the layers |
+| Section | A profile set usage's material profile becomes the body's new profile (assigning a usage puts the set's profile back on the body, so the edit's is put back after) |
+| `Axis` | Its ends move with the body's ends, keeping how far off them they were (a joined wall's axis running to the corner stays so); a piece made without one gets its source's (`_give_axis`) |
+| Base quantities | `quantities.recompute` for an element whose volume changed or that the edit made |
+| Path joins | A join whose end moved off the other wall goes to the piece of a split that now holds that end; else it is left open (`geometry.disconnect_path`) and listed with the joints, kept only as **Keep with N open joints** (decision 1) |
+
+Measured on the fixture: W1 pushed 50 mm out on its north face becomes "WT-250 (ORCA)" with its insulation 85 mm (W2
+keeps 35 mm), then 20 mm on its south face grows its plaster to 35 mm with the reference line at −20 mm; BM1's top
+pushed 50 mm gets "BT-UB (ORCA)" with a 450 mm section, cardinal point 5 kept, BM2 still 400 mm; W1 split at 2 m gives
+two 2 m axes and quantities, the join handed to "W1 (part 2)"; F1's top pushed 100 mm is its own extrusion, F2 still
+mapped, FT-BOX's map 300 mm deep.
+
+Not yet (later): "apply to the type" (an edit to a type for all its elements); a joined wall's neighbour re-trimmed when
+its join is carried; a profile's cardinal point re-centred when a section grows on one side (the body grows to the side
+pushed, as people expect); quantities ORCA does not work out (weights, surface areas, perimeters) are left and named.
+
 ## Test matrix
 
 `server/tests/test_parametric_edits.py` on `fixtures.build_parametric_fixture` (walls W1, W2; slab SL1; beams BM1, BM2;
-mapped fittings F1, F2). "Refused" is the words of the refusal; Tier 1 turns refusals into consistent edits.
+mapped fittings F1, F2). Each edit is kept, then the whole model is read again: every layer set, profile, axis, join and
+base quantity matches its body, and every other element, type, set and map is as it was. Undo puts them back.
 
 | Edit | Wall (layers, axis, join, quantities) | Slab (layers, quantities) | Beam (profile, axis, quantities) | Mapped fitting |
 |---|---|---|---|---|
-| Push the top / an end / a side | height: kept, quantities warn · length: refused (axis) · thickness: refused (layers) | thickness: refused (layers) · size: kept, quantities warn | length: refused (axis) · section: refused (profile) | refused (from its type) |
-| Move | up: kept · off its join: refused (joins) | kept | kept | kept |
-| Void | kept, quantities warn | | | |
-| Split / remove a section | refused (axis) | kept, quantities warn on both pieces | refused (axis) | refused (from its type) |
-| Clip | | | | refused (from its type) |
+| Push the top / an end / a side | height, length, thickness on either face: kept consistent | thickness, size: kept consistent | length, section: kept consistent | top, a turned one's end: unmapped, kept |
+| Move | up: kept · off its join: kept with 1 open joint | kept | kept | kept |
+| Void | kept consistent | | | |
+| Split / remove a section | kept, the join handed on | kept, both pieces' quantities | kept, both axes | kept |
+| Clip | | | | kept |
 | Delete | kept | | | kept |
 
 Not yet read: the fix agent's own edits (offsets, routes, resizes) go through `plans.apply`, not `manual.check`; on a
-model with these constructs they are not yet checked for consistency.
+model with these constructs they are not yet checked or brought along.
 
 ## When to update this doc
 

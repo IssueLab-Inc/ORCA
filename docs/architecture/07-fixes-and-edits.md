@@ -584,7 +584,10 @@ The Edit tool, chat, voice and MCP edit elements directly through ops (push_pull
 remove_section, delete, clip), each resolved, gated by the requirements, checked in a trial and kept only when checked
 again ([docs/manual-edits.md](../manual-edits.md)). An edit changes the face or element picked only; `carry: true`
 (`manual.carries`) takes joined parts along: `manual._follows` for a pushed cap, `connections.run` and `plan_move` for
-a move, as the fix kinds always do (owner decision, Nov 1; [docs/editing-parity.md](../editing-parity.md)). They share the fix kinds' primitives (`edits.stretch`,
+a move, as the fix kinds always do (owner decision, Nov 1; [docs/editing-parity.md](../editing-parity.md)). After the
+edit, inside its transaction, `parametric.sync` brings what the model says besides the shape along (layer and profile
+sets, `Axis`, base quantities, path joins; shared sets and a type's mapped shape copied for the element alone), and the
+check reads `consistency` before and after: what still disagrees is refused in words. They share the fix kinds' primitives (`edits.stretch`,
 `apply_trim`, `_build_chain`, `_void_rep`/`_void_place`, `_grown`, the ray casts) and add `stretch_radius`,
 `offset_edge`, `face_axes`, `through_depth`, `misses`, `cut_void`, `cut_by_shape`, `split_axis`, `split`,
 `remove_product_with`, `clip_to_plane`. `edits._body(clipped=True)` and `_frames(clipped=True)` look through a hand

@@ -294,6 +294,11 @@ what it compiles into and how pages send it: [15](15-requirements-settings-and-c
   `orca-edits.json` and `orca-edits.csv` (a single file stays a bare IFC). From STEP, a part a hand edit deleted is
   taken out of its assembly with its own shape (`step.export(remove=)`, `service.step_removed`), and a box or cylinder
   whose side or radius was pushed is written with its new profile (`step_changes` compares profiles too).
+- **What the IFC says besides the shape is written true** ([docs/editing-parity.md](../editing-parity.md)): a hand
+  edit brings an element's layer or profile set, `Axis`, base quantities and path joins along with its body before it
+  is kept, so the exported file carries them as the edit left them. An element whose layer set its type shared is
+  written with its own type ("… (ORCA)"); a type's mapped shape edited for one element is that element's own copy, the
+  type's other elements still mapped. The UTF-8 log files keep the CSV's own line ends on every host.
 
 ## Out: the coordination report (PDF) and BCF
 

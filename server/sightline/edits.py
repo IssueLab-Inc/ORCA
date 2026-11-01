@@ -1914,13 +1914,15 @@ def shared(model, element, body, item) -> bool:
 def make_unique(model, element) -> bool:
     """Give the element its own copy of a shape other elements share (copy_deep, contexts kept), its styles copied
     onto the new solids so it keeps its colour. Returns whether it copied. A body drawn from its type (a mapped item)
-    is refused: editing the type would change every element of it."""
+    becomes the element's own copy of the type's shape where its map puts it (`unmap`): the type, and every other
+    element of it, stay as they were (docs/editing-parity.md)."""
     rep = element.Representation
     bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
     if not bodies:
         return False
     if any(it.is_a("IfcMappedItem") for it in bodies[0].Items):
-        raise Unsupported("its shape comes from its type: editing it would change every element of that type")
+        unmap(model, element)
+        return True
     if not any(shared(model, element, bodies[0], it) for it in bodies[0].Items):
         return False
     import ifcopenshell.util.element as ue
@@ -1931,6 +1933,76 @@ def make_unique(model, element) -> bool:
                 model.createIfcStyledItem(new_i, st.Styles, st.Name)
     element.Representation = new
     return True
+
+
+def mapping(item) -> np.ndarray:
+    """Where a mapped item puts its type's shape in the element's frame (file units): its target after its origin.
+    Refused when the target scales it (the copy would need its sizes scaled too)."""
+    target = item.MappingTarget
+    if target is not None and (not target.is_a("IfcCartesianTransformationOperator3D")
+                               or abs(float(target.Scale if target.Scale is not None else 1.0) - 1.0) > 1e-9
+                               or target.is_a("IfcCartesianTransformationOperator3DnonUniform")):
+        raise Unsupported("its type's shape is scaled where it is placed: ORCA cannot copy it for this element alone")
+    return np.asarray(ifcopenshell.util.placement.get_mappeditem_transformation(item), float)
+
+
+def unmap(model, element) -> None:
+    """Replace the mapped items of the element's Body by its own copy of what they draw, where they draw it (`mapping`
+    composed into each solid's position, a mesh's points or a brep's points), styles copied: the element keeps its type,
+    and the type keeps its shape. Refused for a solid drawn some other way."""
+    import ifcopenshell.util.element as ue
+    rep = element.Representation
+    body = next(r for r in rep.Representations if r.RepresentationIdentifier == "Body")
+    items, kind = [], body.RepresentationType
+    for it in body.Items:
+        if not it.is_a("IfcMappedItem"):
+            items.append(it)
+            continue
+        m = mapping(it)
+        source = it.MappingSource.MappedRepresentation
+        kind = source.RepresentationType if kind == "MappedRepresentation" else kind
+        for inner in source.Items:
+            copy = ue.copy_deep(model, inner, exclude=["IfcGeometricRepresentationContext"])
+            _move_item(model, copy, m)
+            for st in [x for x in model.get_inverse(inner) if x.is_a("IfcStyledItem")]:
+                model.createIfcStyledItem(copy, st.Styles, st.Name)
+            items.append(copy)
+    new_body = model.createIfcShapeRepresentation(body.ContextOfItems, "Body",
+                                                  kind if kind != "MappedRepresentation" else "SweptSolid", items)
+    element.Representation = model.createIfcProductDefinitionShape(
+        rep.Name, rep.Description, [new_body if r == body else r for r in rep.Representations])
+    if not model.get_inverse(rep):   # the old shape and its mapped body go; the type's map, used by its type, stays
+        ue.remove_deep2(model, rep)
+
+
+def _placement(model, m: np.ndarray):
+    return model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(float(x) for x in m[:3, 3])),
+                                           _dir(model, m[:3, 2]), _dir(model, m[:3, 0]))
+
+
+def _move_item(model, item, m: np.ndarray) -> None:
+    """Move a solid (its own copy) by the 4 x 4 `m`, in file units."""
+    if item.is_a("IfcBooleanResult"):
+        _move_item(model, item.FirstOperand, m)
+        _move_item(model, item.SecondOperand, m)
+    elif item.is_a("IfcSweptAreaSolid") or item.is_a("IfcCsgPrimitive3D"):
+        old = (ifcopenshell.util.placement.get_axis2placement(item.Position) if item.Position is not None else np.eye(4))
+        item.Position = _placement(model, m @ old)
+    elif item.is_a("IfcHalfSpaceSolid"):
+        plane = item.BaseSurface
+        plane.Position = _placement(model, m @ ifcopenshell.util.placement.get_axis2placement(plane.Position))
+        if item.is_a("IfcPolygonalBoundedHalfSpace"):
+            item.Position = _placement(model, m @ ifcopenshell.util.placement.get_axis2placement(item.Position))
+    elif item.is_a("IfcTessellatedFaceSet"):
+        pts = np.asarray(item.Coordinates.CoordList, float)
+        item.Coordinates.CoordList = [tuple(float(x) for x in p) for p in (pts @ m[:3, :3].T + m[:3, 3])]
+        if getattr(item, "Normals", None) is not None:
+            item.Normals = None
+    elif item.is_a("IfcFacetedBrep") or item.is_a("IfcShellBasedSurfaceModel"):
+        for p in {e for e in model.traverse(item) if e.is_a("IfcCartesianPoint")}:
+            p.Coordinates = tuple(float(x) for x in m[:3, :3] @ np.asarray(p.Coordinates, float) + m[:3, 3])
+    else:
+        raise Unsupported(f"its type's shape is drawn as {item.is_a()}: ORCA cannot copy it for this element alone")
 
 
 SECTION_DIMS = {   # an I, U, C, L or T section's overall width (profile x) and depth (profile y)
@@ -1975,35 +2047,47 @@ class Solid:
     clipped: bool
 
 
-def solids(scene: IfcScene, element) -> list[Solid]:
-    """Every solid of the element's Body, each with what it is and its world frame. Empty without one Body."""
+def solids(scene: IfcScene, element, through_maps: bool = False) -> list[Solid]:
+    """Every solid of the element's Body, each with what it is and its world frame. Empty without one Body.
+    `through_maps` reads a body drawn from its type (mapped items) as the solids it draws, in the order `unmap` copies
+    them: for listing and resolving faces only; an edit unmaps first (`make_unique`), so it never changes the type."""
     rep = element.Representation
     bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
     if len(bodies) != 1:
         return []
     place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
              if element.ObjectPlacement is not None else np.eye(4))
-    items = bodies[0].Items
+    items: list = []
+    for top in bodies[0].Items:
+        if through_maps and top.is_a("IfcMappedItem"):
+            try:
+                m = mapping(top)
+            except Unsupported:
+                items.append((top, place))
+                continue
+            items += [(inner, place @ m) for inner in top.MappingSource.MappedRepresentation.Items]
+        else:
+            items.append((top, place))
     out = []
-    for k, top in enumerate(items):
+    for k, (top, frame) in enumerate(items):
         item = top
         while item.is_a("IfcBooleanClippingResult"):
             item = item.FirstOperand
         key = k if len(items) > 1 else None
         if (item.is_a("IfcExtrudedAreaSolid") and item.Position is not None
                 and np.linalg.norm(np.asarray(item.ExtrudedDirection.DirectionRatios) - (0, 0, 1)) <= 1e-9):
-            out.append(Solid(key, "extrusion", item, top, place @ ifcopenshell.util.placement.get_axis2placement(item.Position),
+            out.append(Solid(key, "extrusion", item, top, frame @ ifcopenshell.util.placement.get_axis2placement(item.Position),
                              top is not item))
         elif any(item.is_a(c) for c in MESH_ITEMS):
-            out.append(Solid(key, "mesh", item, top, place, top is not item))
+            out.append(Solid(key, "mesh", item, top, frame, top is not item))
         else:
             out.append(Solid(key, "other", item, top, place, top is not item))
     return out
 
 
-def solid(scene: IfcScene, element, k: int | None) -> Solid:
-    """The solid a face id's prefix names (None: the Body's one solid)."""
-    sol = solids(scene, element)
+def solid(scene: IfcScene, element, k: int | None, through_maps: bool = False) -> Solid:
+    """The solid a face id's prefix names (None: the Body's one solid); `through_maps` as `solids`, for reading."""
+    sol = solids(scene, element, through_maps)
     found = next((x for x in sol if x.k == k), None) if k is not None else (sol[0] if len(sol) == 1 else None)
     if found is None:
         raise Unsupported("it has no such solid in its body")

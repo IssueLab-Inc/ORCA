@@ -1987,3 +1987,19 @@ edit on every construct: kept consistent or refused, nothing in between. Measure
 server tests pass (the same five environment failures), `test_docs_map`; on the running server, the fixture uploaded
 through `/api/models/upload`: a layered wall's thickness refused with its numbers, its height allowed with the
 quantities warning, a beam lengthened past its axis refused, and keeping a refused edit answers 409.
+
+**Nov 1, hand edits bring the model's data along** ([docs/editing-parity.md](../editing-parity.md), Tier 1). New
+`parametric.py` runs after every hand edit, in the trial and when kept: a layered wall or slab's layer on the pushed face
+grows or shrinks (the reference line held), a profile set's material profile becomes the new section, the `Axis` follows
+the body's ends (and a split's piece gets its own), base quantities are worked out again (`quantities.py`, only those
+already there), and a path join goes to the piece of a split that holds its end or is left open as a joint. Shared data
+is copied for the edited element alone (owner decision): its own type "… (ORCA)" when its type gave the set to others, its
+own set otherwise; a type's mapped shape becomes the element's own copy (`edits.unmap`, faces read through the map), the
+type and its other elements unchanged. A new `shared` consistency rule refuses a shared set changed in place: it caught
+the first version, where assigning the copied type left the usage on the old set and W2's layers moved with W1's.
+Checked: 804 server tests pass (the same five environment failures); the matrix keeps all 24 edits and reads the whole
+model again after each (every layer set, profile, axis, join and quantity matches its body, everything else as it was,
+the file schema-valid; the first run found the old shape `unmap` left behind, now removed); on the running server, the
+fixture uploaded, four edits kept (a wall thickened, a beam lengthened, a mapped fitting pushed, a wall split) and
+exported: W1 "WT-250 (ORCA)" 300 mm, W2 still 250 mm, the join on "W1 (part 2)", F1 its own extrusion and F2 still
+mapped, `ORCA_Edit` stamped, no schema issues; six edits undone leave the file valid with F1 mapped again.

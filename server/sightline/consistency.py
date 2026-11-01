@@ -123,13 +123,42 @@ def _axis_points(entity, scale: float) -> np.ndarray | None:
     return None
 
 
-def _type_digest(model, rtype) -> str:
-    """What a type's maps draw, as a digest: changed when any entity under them changed."""
+def _digest(model, roots) -> str:
+    """Everything under some entities, as a digest: changed when any of it changed."""
     h = hashlib.sha1()
-    for m in rtype.RepresentationMaps or []:
-        for e in sorted(model.traverse(m), key=lambda x: x.id()):
+    for root in roots:
+        for e in sorted(model.traverse(root), key=lambda x: x.id()):
             h.update(str(e).encode())
     return h.hexdigest()
+
+
+def _type_digest(model, rtype) -> str:
+    """What a type's maps draw, as a digest."""
+    return _digest(model, rtype.RepresentationMaps or [])
+
+
+def users(model, mset) -> set:
+    """Every element a material set reaches: through its usages, and through the types it is assigned to."""
+    out = set()
+    for inv in model.get_inverse(mset):
+        if inv.is_a("IfcMaterialLayerSetUsage") or inv.is_a("IfcMaterialProfileSetUsage"):
+            for rel in model.get_inverse(inv):
+                if rel.is_a("IfcRelAssociatesMaterial"):
+                    out.update(rel.RelatedObjects)
+        elif inv.is_a("IfcRelAssociatesMaterial"):
+            for o in inv.RelatedObjects:
+                out.update(ifcopenshell.util.element.get_types(o) if o.is_a("IfcTypeObject") else [o])
+    return {o for o in out if not o.is_a("IfcTypeObject")}
+
+
+def _material_set(mat):
+    if mat is None:
+        return None
+    if mat.is_a("IfcMaterialLayerSetUsage"):
+        return mat.ForLayerSet
+    if mat.is_a("IfcMaterialProfileSetUsage"):
+        return mat.ForProfileSet
+    return mat if mat.is_a("IfcMaterialLayerSet") or mat.is_a("IfcMaterialProfileSet") else None
 
 
 def measure(scene: IfcScene, gids, label: Callable[[IfcScene, str], str] = _label) -> dict[tuple, Reading]:
@@ -186,6 +215,11 @@ def measure(scene: IfcScene, gids, label: Callable[[IfcScene, str], str] = _labe
                     a, b = rel.RelatingElement.GlobalId, rel.RelatedElement.GlobalId
                     out[(gid, "joins", rel.id())] = Reading(gid, "joins", (round(gap, 6),),
                                                            {"name": label(scene, a), "other": label(scene, b)})
+        mset = _material_set(mat)
+        if mset is not None:
+            out[(gid, "shared")] = Reading(gid, "shared", (mset.id(), _digest(model, [mset])),
+                                           {"name": name, "others": len(users(model, mset) - {e}),
+                                            "set": "layer" if mset.is_a("IfcMaterialLayerSet") else "profile"})
         rtype = ifcopenshell.util.element.get_type(e)
         if rtype is not None and getattr(rtype, "RepresentationMaps", None):
             out[(gid, "type", rtype.id())] = Reading(gid, "type", (_type_digest(model, rtype),),
@@ -278,6 +312,11 @@ def _changed(scene: IfcScene, r: Reading, was: Reading | None) -> Issue | None:
             return Issue(r.element, "joins", "block",
                          f"{w['name']} and {w['other']} are joined (a path join) and would no longer meet "
                          f"({r.values[0] * 1000:.0f} mm apart): moving a joined wall's end cannot keep its join yet")
+    elif r.rule == "shared":
+        if was is not None and r.values[0] == was.values[0] and r.values[1] != was.values[1] and w["others"]:
+            return Issue(r.element, "shared", "block",
+                         f"the {w['set']} set of {w['name']} is shared by {w['others']} other "
+                         f"element{'s' if w['others'] > 1 else ''}: changing it would change them too")
     elif r.rule == "type":
         if was is not None and r.values != was.values:
             return Issue(r.element, "type", "block",
