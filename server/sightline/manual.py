@@ -505,8 +505,12 @@ def _retrims(scene: IfcScene, gid: str, delta) -> list[Plan]:
             continue
         if float(np.asarray(face.normal, float) @ np.array([*outward, 0.0])) < 0.99 or "push_pull" not in face.allows:
             continue
-        out.append(_resolve_push(scene, {"op": "push_pull", "element": other.GlobalId, "face": spec(face),
-                                         "by_m": t if at == "ATEND" else -t}))
+        try:
+            out.append(_resolve_push(scene, {"op": "push_pull", "element": other.GlobalId, "face": spec(face),
+                                             "by_m": t if at == "ATEND" else -t}))
+        except edits.Unsupported as e:   # say which wall cannot follow, and that moving this one alone leaves it be
+            raise edits.Unsupported(f"{label(scene, other.GlobalId)}, joined at its end, cannot follow ({e}): move it "
+                                    "less, or without joined parts") from None
     return out
 
 
@@ -566,7 +570,13 @@ def _make_move(scene: IfcScene, plan: Plan) -> Made:
     broken = connections.check_joints(scene, mp)
     if broken:
         raise edits.Unsupported("a joint would not hold: " + "; ".join(w for *_, w in broken))
-    followed = [g for r in plan.extra.get("retrim", []) for g in _make_push(scene, r).changed]
+    followed = []
+    for r in plan.extra.get("retrim", []):
+        try:
+            followed += _make_push(scene, r).changed
+        except edits.Unsupported as e:
+            raise edits.Unsupported(f"{label(scene, r.element)}, joined at its end, cannot follow ({e}): move it less, "
+                                    "or without joined parts") from None
     return Made(changed=list(dict.fromkeys([*mp.changed(), *followed])), created=list(mp.made))
 
 
@@ -700,8 +710,8 @@ def _resolve_void(scene: IfcScene, op: dict) -> Plan:
     else:
         depth = edits.through_depth(scene, gid, at, n, offsets)
         if depth is None:   # no way through found: as deep as the element is behind the face, when that is a wall's worth
-            v = edits._mesh_verts(scene.entity(gid))
-            behind = float(((at - v) @ n).max()) + 0.001
+            verts = edits._mesh_verts(scene.entity(gid))   # not `v`: that is the opening's own in-face direction
+            behind = float(((at - verts) @ n).max()) + 0.001
             if not 0.001 < behind <= edits.MAX_THROUGH_M:
                 raise edits.Unsupported("it does not come out the other side here: give it a depth (a recess)")
             depth = behind

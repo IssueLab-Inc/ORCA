@@ -191,6 +191,54 @@ profiled element's material or type (its layers or profile come from its type).
 Measured in Chromium on Northbank: the supply main's Tag SA-MAIN-L02-5 → SA-MAIN-L02-5R kept as E1, Ctrl+Z back,
 Ctrl+Y again, the panel following each; its storey Level 02 → Level 03 from the panel's list.
 
+## Real Revit models (Nov 1)
+
+Every hand edit was checked (never kept) on Autodesk's Snowdon Towers sample, as Revit 2027 exports it to IFC2X3 in
+feet: Site, HVAC, Electrical, Plumbing, Structural and Architectural (106 to 7,216 elements, 10 to 204 MB, each open
+in 11 to 34 s). Five elements of each class per file, every edit each takes: push/pull of up to three faces, the same
+applied to the type, move, a carried move, offset, void, split, delete, and a property change with its choices. The
+files stay local; nothing from them is committed.
+
+| | Checks | Made | Refused in words | Errors |
+|---|---|---|---|---|
+| First run | 1,644 | 1,493 | 91 | 60, and a native crash |
+| After the fixes | | | | 0 (the 60 were one bug) |
+
+Fixed on the way, each with a test:
+
+- **IFC2X3 MEP.** Ducts and pipes are `IfcFlowSegment`, what they are given by their type: bends, transitions, offsets,
+  joins and re-fits refused them, and the meshes they wrote (`IfcTriangulatedFaceSet`) do not exist in 2X3.
+  `edits.segment_kind`, `fitting_class`, `mesh_item` (a faceted brep in 2X3), fittings typed as ORCA's own BEND or
+  TRANSITION. An offset of a Revit copper pipe and a re-fit of a carried pipe lift now hold.
+- **Side branches.** Revit taps grilles into duct sides; any segment with more than two ports was refused. A branch
+  now stays on the piece that keeps its place, and an edit that would move it is refused naming what it feeds,
+  before anything changes (`_branch_home`).
+- **A native crash.** Splitting a toilet (a surface, `IfcFaceBasedSurfaceModel`) clipped a surface, which is not valid
+  IFC: OpenCASCADE died and would take the server with it. Surfaces are refused for splits and clips in words; 75
+  edits on 25 surface-bodied elements, each in a process restarted on any crash, found no other.
+- **IFC2X3 classifications.** A reference's code is `ItemReference` there: the property choices failed for every
+  element of a file with one reference (`property_edits.ref_code`), and a new link now carries 2X3's owner history.
+- **A void with no way through found** (a wall with a notch) overwrote the opening's own direction: a numpy error.
+- **Words.** A joined wall that cannot follow a carried move is named; walls of a type that do not say which way their
+  layers run are counted and one named; a wall's pushed end reads long, its side thick; no "-0.000".
+- **Speed.** Clash checks triangulated everything every time: a type of 100 fittings across the HVAC model took 66 s,
+  a toposolid with a pad cut 19 s per check. Neighbourhoods now triangulate on up to 8 threads, heavy neighbours come
+  from a digest-keyed cache, and a check's before and after share the unchanged neighbours (66 s to 13 s).
+
+What is still refused, in words, and why that is right for now:
+
+- **Apply to the type changes nothing** on a duct, pipe or conduit's length, or a beam's (each element's own).
+- **Walls whose type is shared with walls that have no layer usage** (11 of the type, in the architecture): which
+  face holds which layer is not said, so they cannot follow.
+- **Curved faces** (Revit's round grilles, railings) are not pushed: ORCA pushes flat faces.
+- **Carried moves stopped by what stays** (terminals, a heat recovery unit) or by risers too short to lose 400 mm;
+  flexible ducts are taken along rigid, so the diffuser past them stops the move.
+- **Slab outlines that would cross themselves**; splits of bodies that are not one straight extrusion.
+
+Costs: a check takes about 1 s (median); applying an edit to a type checks every element of it, 10 s median and up to
+150 s for a chair or lamp type with hundreds of elements in the 204 MB model (the Edit tool says how many it checks).
+A 146 m railroad-track railing (a 2,600-face brep) takes up to 2 minutes to delete or split.
+
 ## Test matrix
 
 `server/tests/test_parametric_edits.py` on `fixtures.build_parametric_fixture` (walls W1, W2; slab SL1; beams BM1, BM2;

@@ -182,11 +182,13 @@ def type_share(scene: IfcScene, gid: str, face, label=consistency._label) -> Typ
             if ifcopenshell.util.element.get_material(rtype, should_skip_usage=True) != lset:
                 raise edits.Unsupported("its layer set is its own, not its type's: leave Apply to the type off")
             others = [o.GlobalId for o in consistency.users(model, lset) if o != e and scene.has(o.GlobalId)]
-            for o in others:
-                ou = ifcopenshell.util.element.get_material(scene.entity(o), should_skip_usage=False)
-                if ou is None or not ou.is_a("IfcMaterialLayerSetUsage") or ou.LayerSetDirection not in consistency.AXES:
-                    raise edits.Unsupported(f"{label(scene, o)} has {name}'s layers without saying which way they run: "
-                                            "it cannot follow its type")
+            unsaid = [o for o in others if not _says_which_way(scene.entity(o))]
+            if unsaid:   # Revit gives some walls of a type its layers but no usage: which face holds which is unknown
+                n = len(unsaid)
+                raise edits.Unsupported(f"{n} other element{'s' if n > 1 else ''} of {name} (such as "
+                                        f"{label(scene, unsaid[0])}) {'have' if n > 1 else 'has'} its layers without "
+                                        f"saying which way they run, so {'they' if n > 1 else 'it'} cannot follow: "
+                                        "leave Apply to the type off to change this one alone")
             return TypeShare("layers", name, others)
     body = consistency._body(e)
     mapped = [it for it in (body.Items if body is not None else ()) if it.is_a("IfcMappedItem")]
@@ -209,6 +211,11 @@ def type_share(scene: IfcScene, gid: str, face, label=consistency._label) -> Typ
     own = ", and a length is each element's own" if usage is not None else ""
     raise edits.Unsupported(f"this edit changes nothing its type {name} gives (its shape is its own{own}): leave "
                             "Apply to the type off")
+
+
+def _says_which_way(e) -> bool:
+    usage = ifcopenshell.util.element.get_material(e, should_skip_usage=False)
+    return usage is not None and usage.is_a("IfcMaterialLayerSetUsage") and usage.LayerSetDirection in consistency.AXES
 
 
 def hold(scene: IfcScene, gid: str, share: TypeShare) -> dict:

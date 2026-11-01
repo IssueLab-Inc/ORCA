@@ -291,6 +291,18 @@ def test_applied_to_its_type_a_thicker_wall_thickens_every_wall_of_it_on_the_sam
     assert untouched(scene, g, "") == before
 
 
+def test_applied_to_its_type_walls_that_do_not_say_which_way_their_layers_run_are_named(param):
+    import ifcopenshell.api
+    ws, sid, scene, g = param
+    w2 = scene.entity(g["W2"])
+    lset = ue.get_material(w2, should_skip_usage=True)
+    ifcopenshell.api.run("material.unassign_material", scene.models[0], products=[w2])
+    ifcopenshell.api.run("material.assign_material", scene.models[0], products=[w2], type="IfcMaterialLayerSet", material=lset)
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "north face", "by_m": 0.05, "scope": "type"})
+    assert r["blocked"] == ("1 other element of WT-250 (such as wall 'W2') has its layers without saying which way they "
+                            "run, so it cannot follow: leave Apply to the type off to change this one alone")
+
+
 def test_applied_to_its_type_a_wall_pulled_in_through_a_layer_is_refused(param):
     ws, sid, scene, g = param
     r = manual.check(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "south face", "by_m": -0.02, "scope": "type"})
@@ -345,6 +357,13 @@ def test_a_wall_moved_across_the_joined_wall_s_line_shortens_it(param):
     assert_consistent(scene)
 
 
+def test_a_joined_wall_that_cannot_follow_is_named(param):
+    ws, sid, scene, g = param
+    r = manual.check(ws, sid, {"op": "move", "element": g["W1"], "delta_m": [0, 3.2, 0], "carry": True})
+    assert r["blocked"] and r["blocked"].startswith("wall 'W2', joined at its end, cannot follow ("), r["blocked"]
+    assert r["blocked"].endswith("move it less, or without joined parts")
+
+
 def test_a_wall_moved_along_its_own_line_leaves_its_join_open_even_with_joined_parts(param):
     ws, sid, scene, g = param
     r = manual.check(ws, sid, {"op": "move", "element": g["W1"], "delta_m": [-0.2, 0, 0], "carry": True})
@@ -373,3 +392,37 @@ def test_a_face_says_what_the_edit_tool_s_choices_would_do(param):
     assert face("W1", "north face") == {"type": {"name": "WT-250", "others": 1, "kind": "layers"}, "joined": 1}
     assert face("W1", "top") == {"type": None, "joined": 1}, "a wall's height is its own"
     assert face("SL1", "top") == {"type": None, "joined": 0}
+
+
+
+def test_a_surface_body_is_refused_for_a_split_or_clip_never_handed_to_the_kernel(param):
+    """Revit draws toilets and lamps as surfaces (IfcFaceBasedSurfaceModel): clipping one is not valid IFC, and
+    OpenCASCADE dies on it, taking the server with it."""
+    import ifcopenshell.api
+    ws, sid, scene, g = param
+    model = scene.models[0]
+    body = next(c for c in model.by_type("IfcGeometricRepresentationSubContext") if c.ContextIdentifier == "Body")
+    pt = lambda x, y, z: model.createIfcCartesianPoint((float(x), float(y), float(z)))
+    c = [pt(x, y, z) for z in (0, 0.4) for y in (20, 20.4) for x in (0, 0.6)]
+    quads = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+    faces = [model.createIfcFace([model.createIfcFaceOuterBound(model.createIfcPolyLoop([c[i] for i in q]), True)]) for q in quads]
+    surface = model.createIfcFaceBasedSurfaceModel([model.createIfcConnectedFaceSet(faces)])
+    wc = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcSanitaryTerminal", name="WC1")
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=wc)
+    wc.Representation = model.createIfcProductDefinitionShape(None, None, [
+        model.createIfcShapeRepresentation(body, "Body", "SurfaceModel", [surface])])
+    scene.refresh_bounds([wc.GlobalId])
+    r = manual.check(ws, sid, {"op": "split", "element": wc.GlobalId, "at": [0.3, 20.2, 0.2]})
+    assert r["blocked"] == "its shape is a surface, not a solid: it cannot be split or clipped"
+
+
+
+def test_a_void_with_no_way_through_found_falls_back_to_the_wall_s_depth(param, monkeypatch):
+    """When rays find no way through (a Revit wall's notch), the opening is as deep as the wall is behind the face; the
+    fallback once overwrote the opening's own direction and failed with a numpy error instead."""
+    from sightline import edits
+    ws, sid, scene, g = param
+    monkeypatch.setattr(edits, "through_depth", lambda *a, **k: None)
+    r = manual.check(ws, sid, {"op": "void", "element": g["W1"], "face": "north face", "at": [2.0, 0.25, 1.5],
+                               "shape": "rect", "width_m": 0.4, "height_m": 0.4})
+    assert r["blocked"] is None and "opening cut" in r["summary"], r["blocked"]

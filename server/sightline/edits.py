@@ -3342,6 +3342,14 @@ def long_axis(scene: IfcScene, global_id: str) -> tuple[np.ndarray, np.ndarray, 
     return c + d * proj.min(), d, float(proj.max() - proj.min())
 
 
+def _surface(item) -> bool:
+    """Whether a body item is a surface rather than a solid (through clips): nothing can be cut out of it."""
+    while item.is_a("IfcBooleanResult"):
+        item = item.FirstOperand
+    return (item.is_a("IfcFaceBasedSurfaceModel") or item.is_a("IfcShellBasedSurfaceModel")
+            or (item.is_a("IfcTessellatedFaceSet") and getattr(item, "Closed", True) is False))
+
+
 def _clip_items(scene: IfcScene, element, point, normal) -> None:
     """Clip every solid of the element's Body with the half-space on the side `normal` points to (world metres):
     meshes and extrusions alike. A solid wholly kept is left as it is; one wholly taken away is dropped."""
@@ -3350,6 +3358,10 @@ def _clip_items(scene: IfcScene, element, point, normal) -> None:
     body = _body_rep(element)
     if any(it.is_a("IfcMappedItem") for it in body.Items):
         raise Unsupported("its shape comes from its type: editing it would change every element of that type")
+    # Only a solid can be clipped: a surface (Revit's toilets and lamps: IfcFaceBasedSurfaceModel) has no inside, and
+    # clipping one is not valid IFC (OpenCASCADE dies on it)
+    if any(_surface(it) for it in body.Items):
+        raise Unsupported("its shape is a surface, not a solid: it cannot be split or clipped")
     P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
     place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
              if element.ObjectPlacement is not None else np.eye(4))

@@ -270,7 +270,7 @@ def _said(text: str, scene, gid: str, change: dict) -> bool:
             return str(v).lower() in t
         target = {"type": lambda: model.by_guid(change["type"]).Name, "container": lambda: model.by_guid(change["container"]).Name,
                   "material": lambda: model.by_id(int(change["material"])).Name,
-                  "classification": lambda: model.by_id(int(change["reference"])).Identification}[kind]()
+                  "classification": lambda: property_edits.ref_code(model.by_id(int(change["reference"])))}[kind]()
     except (KeyError, RuntimeError, TypeError, ValueError):
         return False
     return bool(target) and str(target).lower() in t

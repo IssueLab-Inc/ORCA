@@ -152,3 +152,30 @@ def test_an_export_carries_the_change_and_its_stamp(client, tmp_path):
     m = ifcopenshell.open(str(next(p for p in out if p.suffix == ".ifc")))
     w2 = next(e for e in m.by_type("IfcWall") if e.Name == "W2")
     assert w2.Tag == "W-02" and "ORCA_Edit" in ue.get_psets(w2)
+
+
+
+def test_ifc2x3_classification_references_read_and_are_given_as_revit_writes_them(tmp_path):
+    """IFC2X3 names a reference's code ItemReference (Revit's 2x3 exports): the choices read it, a change says it, and
+    the link it makes carries the owner history 2x3 asks for."""
+    import ifcopenshell.validate
+    from sightline import property_edits
+    from sightline.fixtures import build_mep_fixture
+    build_mep_fixture(tmp_path / "m.ifc", schema="IFC2X3")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["m.ifc"])
+    scene = ws.scene(sid)
+    g = {scene.entity(x).Name: x for x in scene.bounds()}
+    model = scene.models[0]
+    cl = ifcopenshell.api.run("classification.add_classification", model, classification="Uniclass")
+    ref = ifcopenshell.api.run("classification.add_reference", model, products=[scene.entity(g["DB"])],
+                               identification="Ss_65_40", name="Ductwork", classification=cl)
+    (choice,) = property_edits.choices(scene, g["DA"])["classifications"]
+    assert choice["identification"] == "Ss_65_40" and not choice["on"]
+    r = property_edits.edit(ws, sid, g["DA"], {"kind": "classification", "reference": ref.id()})
+    assert r["entry"]["summary"].endswith("classified Ss_65_40 Ductwork")
+    (rel,) = [x for x in model.by_type("IfcRelAssociatesClassification") if scene.entity(g["DA"]) in x.RelatedObjects]
+    assert rel.OwnerHistory is not None, "2x3 asks for it (the test's own classification, made by the API, may not)"
+    log = ifcopenshell.validate.json_logger()
+    ifcopenshell.validate.validate(model, log)
+    assert not [s for s in log.statements if s.get("instance") == rel], [s.get("message") for s in log.statements]

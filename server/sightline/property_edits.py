@@ -27,6 +27,11 @@ def _label(scene: IfcScene, gid: str) -> str:
     return label(scene, gid)
 
 
+def ref_code(r):
+    """A classification reference's code: IFC4's Identification, IFC2X3's ItemReference (Revit's 2x3 exports)."""
+    return getattr(r, "Identification", None) or getattr(r, "ItemReference", None)
+
+
 def _words(v) -> str:
     return "nothing" if v in (None, "") else f"'{v}'" if isinstance(v, str) else str(v)
 
@@ -68,7 +73,7 @@ def choices(scene: IfcScene, gid: str) -> dict:
         "containers": [{"global_id": c.GlobalId, "name": c.Name or c.is_a(), "ifc_class": c.is_a()}
                        for c in [*model.by_type("IfcBuildingStorey"), *model.by_type("IfcSpace")]],
         "container": container.GlobalId if container is not None else None,
-        "classifications": [{"id": r.id(), "identification": r.Identification, "name": r.Name,
+        "classifications": [{"id": r.id(), "identification": ref_code(r), "name": r.Name,
                              "system": getattr(r.ReferencedSource, "Name", None) if r.ReferencedSource else None,
                              "on": r.id() in refs} for r in model.by_type("IfcClassificationReference")],
     }
@@ -156,7 +161,7 @@ def plan(scene: IfcScene, gid: str, change: dict):
         ref = model.by_id(int(change.get("reference"))) if change.get("reference") is not None else None
         if ref is None or not ref.is_a("IfcClassificationReference"):
             raise ValueError("say which classification reference (its id, from the choices)")
-        words = " ".join(str(x) for x in (ref.Identification, ref.Name) if x)
+        words = " ".join(str(x) for x in (ref_code(ref), ref.Name) if x)
         on = {r.id() for r in ifcopenshell.util.classification.get_references(e)}
         if change.get("remove"):
             if ref.id() not in on:
@@ -175,9 +180,10 @@ def plan(scene: IfcScene, gid: str, change: dict):
             rels = [r for r in model.get_inverse(ref) if r.is_a("IfcRelAssociatesClassification")]
             if rels:
                 rels[0].RelatedObjects = [*rels[0].RelatedObjects, e]
-            else:
-                model.createIfcRelAssociatesClassification(ifcopenshell.guid.new(), None, None, None, [e], ref)
-        was = " ".join(str(x) for x in (old.Identification, old.Name) if x) if old is not None else None
+            else:   # IFC2X3 asks every relationship for its owner history
+                history = ifcopenshell.api.run("owner.create_owner_history", model) if model.schema == "IFC2X3" else None
+                model.createIfcRelAssociatesClassification(ifcopenshell.guid.new(), history, None, None, [e], ref)
+        was = " ".join(str(x) for x in (ref_code(old), old.Name) if x) if old is not None else None
         return (f"{name} classified {words}" + (f" (was {was})" if was else "")), add
     if kind == "container":
         c = model.by_guid(change.get("container")) if change.get("container") else None
