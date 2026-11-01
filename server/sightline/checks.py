@@ -153,6 +153,36 @@ class Register:
             raise ValueError("The check of the open models is run again, not removed.")
         return self.checks.pop(key)
 
+    def drop_file(self, name: str, elements) -> int:
+        """A model was taken out of the scene: the clashes with any of its elements (`elements`, or a side in the file
+        `name`) leave every kept check, and what each check compares its next run with forgets them, so they are
+        neither listed nor said to be resolved. Ids, numbers, titles and readings stay (a number is never reused).
+        Returns how many clashes went."""
+        gone = set(elements)
+        hit = lambda a, b, fa=None, fb=None: a in gone or b in gone or name in (fa, fb)
+        dropped: set[str] = set()
+        for check in list(self.checks.values()):
+            keep = []
+            for c in check.clashes:
+                if hit(c.a.global_id, c.b.global_id, c.a.file, c.b.file):
+                    dropped.add(c.id)
+                else:
+                    keep.append(c)
+            check.clashes = keep
+            st = check.state
+            st["clashes"] = {cid: was for cid, was in st.get("clashes", {}).items()
+                             if cid not in dropped and not hit(was.get("a"), was.get("b"))}
+            st["contacts"] = [p for p in st.get("contacts", []) if not gone & set(p)]
+            for sel in st.get("selections", {}).values():
+                sel["a"] = set(sel["a"]) - gone
+                if sel.get("b") is not None:
+                    sel["b"] = set(sel["b"]) - gone
+            d = check.diff
+            check.diff = {**d, "new": [i for i in d.get("new", []) if i not in dropped],
+                          "resolved": [x for x in d.get("resolved", []) if not hit(x.get("a"), x.get("b"))],
+                          "no_longer_checked": [x for x in d.get("no_longer_checked", []) if not hit(x.get("a"), x.get("b"))]}
+        return len(dropped)
+
     def find(self, key_or_name: str) -> Check | None:
         """A kept check by its key, or by its name as people say it (`pick`)."""
         return pick(self.checks.values(), key_or_name)
