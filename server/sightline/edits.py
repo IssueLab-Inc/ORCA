@@ -640,6 +640,131 @@ def _loft(p0, d, length, side, up, a: tuple, b: tuple) -> tuple[np.ndarray, list
     return verts, out
 
 
+@dataclass
+class Section:
+    """A straight segment's section where it runs (world metres): its centreline ends, direction, profile axes and size
+    (width along profile X, depth along profile Y; a circle's diameter both)."""
+    start: np.ndarray
+    end: np.ndarray
+    d: np.ndarray
+    px: np.ndarray
+    py: np.ndarray
+    w: float
+    h: float
+    round_: bool
+
+
+def section_of(scene: IfcScene, global_id: str) -> Section:
+    """The section of a straight segment of one rectangular or round extrusion; else Unsupported."""
+    element = scene.entity(global_id)
+    i, _, item, origin, d, px, py = _frames(scene, element)
+    s = scene.unit_scales[i]
+    prof = item.SweptArea
+    if prof.is_a("IfcCircleProfileDef"):
+        w = h = 2 * prof.Radius * s
+    elif prof.is_a() == "IfcRectangleProfileDef":
+        w, h = prof.XDim * s, prof.YDim * s
+    else:
+        raise Unsupported("only a rectangular or round section takes a transition")
+    c = prof.Position.Location.Coordinates if getattr(prof, "Position", None) is not None else (0.0, 0.0)
+    start = (origin + px * c[0] + py * c[1]) * s
+    return Section(start, start + d * item.Depth * s, d, px, py, w, h, prof.is_a("IfcCircleProfileDef"))
+
+
+def _loft_any(p0, d, length, side, up, a: tuple, b: tuple, round_: bool) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
+    """A closed lofted transition between two sections square to `d`, rectangles or circles (16-gons): `a` = (width
+    across `side`, depth along `up`, centre offset up, centre offset across) at `p0`, `b` at p0 + d·length. Faces
+    point outward."""
+    if round_:
+        ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
+        unit = list(zip(np.cos(ang), np.sin(ang)))
+    else:
+        unit = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+    m = len(unit)
+    verts = np.array([p0 + d * t + side * (off_s + ux * w / 2) + up * (off_u + uy * h / 2)
+                      for t, (w, h, off_u, off_s) in ((0.0, a), (length, b)) for ux, uy in unit])
+    faces = [(k, (k + 1) % m, m + (k + 1) % m) for k in range(m)] + [(k, m + (k + 1) % m, m + k) for k in range(m)]
+    faces += [(0, j, j + 1) for j in range(1, m - 1)] + [(m, m + j, m + j + 1) for j in range(1, m - 1)]
+    centre = verts.mean(axis=0)
+    out = []
+    for f in faces:   # convex: a face points outward when its normal leaves the centre
+        n = np.cross(verts[f[1]] - verts[f[0]], verts[f[2]] - verts[f[0]])
+        out.append(f if n @ (verts[list(f)].mean(axis=0) - centre) > 0 else (f[0], f[2], f[1]))
+    return verts, out
+
+
+def joined_caps(scene: IfcScene, global_id: str) -> list[str]:
+    """Which ends ("start", "end") of a straight segment are joined by a port to something."""
+    try:
+        sec = section_of(scene, global_id)
+    except Unsupported:
+        return []
+    out = []
+    for port in ifcopenshell.util.system.get_ports(scene.entity(global_id)):
+        if ifcopenshell.util.system.get_connected_port(port) is None or port.ObjectPlacement is None:
+            continue
+        at = scene.placement(port.GlobalId)[:3, 3]
+        for end, p in (("start", sec.start), ("end", sec.end)):
+            if np.linalg.norm(at - p) <= 0.005 and end not in out:
+                out.append(end)
+    return out
+
+
+def add_transitions(scene: IfcScene, global_id: str, before: Section, ends: list[str]) -> list[str]:
+    """After a segment's section changed (a side pushed out, a radius grown): at each joined end in `ends`, the segment
+    shortened by a transition's length (no face turning more than 30°) and a transition fitting from its new section
+    back to the one it had, joined between it and what that end was joined to, so the joint still meets the same size.
+    Returns the transitions' GlobalIds."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    place = ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+    inv = np.linalg.inv(place)
+    made = []
+    for end in ends:
+        cur = section_of(scene, global_id)
+        out = cur.d if end == "end" else -cur.d
+        old_c = before.end if end == "end" else before.start
+        new_line = cur.end if end == "end" else cur.start
+        shift = new_line - old_c - out * float((new_line - old_c) @ out)   # the new centreline off the old one
+        moves = [abs(cur.w - before.w) / 2 + abs(float(shift @ cur.px)), abs(cur.h - before.h) / 2 + abs(float(shift @ cur.py))]
+        lt = max(max(moves) / np.tan(TRANSITION_ANGLE), MIN_PIECE_M)
+        if np.linalg.norm(cur.end - cur.start) - lt < MIN_PIECE_M:
+            raise Unsupported(f"it is too short for a {lt * 1000:.0f} mm transition at its {end}")
+        port = next((p for p in ifcopenshell.util.system.get_ports(element) if p.ObjectPlacement is not None
+                     and np.linalg.norm(scene.placement(p.GlobalId)[:3, 3] - old_c) <= 0.005), None)
+        peer = ifcopenshell.util.system.get_connected_port(port) if port is not None else None
+        if peer is not None:
+            ifcopenshell.api.run("system.disconnect_port", model, port=port)
+        stretch(scene, global_id, end, -lt, unique=True)
+        cur = section_of(scene, global_id)
+        new_c = cur.end if end == "end" else cur.start
+        verts, tris = _loft_any((old_c - out * lt) / s, out, lt / s, cur.px, cur.py,
+                                (cur.w / s, cur.h / s, float(shift @ cur.py) / s, float(shift @ cur.px) / s),
+                                (before.w / s, before.h / s, 0.0, 0.0), cur.round_)
+        part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} transition",
+                            f"{element.Tag}-TR{end[0].upper()}" if element.Tag else None, TRANSITION_TYPE[element.is_a()])
+        local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
+        solid = model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]),
+                                                   None, True, [[int(x) + 1 for x in f] for f in tris], None)
+        body = next(r for r in element.Representation.Representations if r.RepresentationIdentifier == "Body")
+        part.Representation = model.createIfcProductDefinitionShape(None, None, [model.createIfcShapeRepresentation(
+            body.ContextOfItems, "Body", "Tessellation", [solid])])
+        for st in [x for it in body.Items for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
+            model.createIfcStyledItem(solid, st.Styles, st.Name)
+        near, far = _ports(part)
+        _place_port(model, near, new_c / s, s, -out, cur.px)   # its end at the segment, its other at the old joint
+        _place_port(model, far, old_c / s, s, out, cur.px)
+        if port is not None:
+            _place_port(model, port, new_c / s, s, out, cur.px)   # the segment's own end port, on its new centreline
+            ifcopenshell.api.run("system.connect_port", model, port1=port, port2=near, direction=port.FlowDirection or "NOTDEFINED")
+        if peer is not None:
+            ifcopenshell.api.run("system.connect_port", model, port1=far, port2=peer, direction=far.FlowDirection or "NOTDEFINED")
+        made.append(part.GlobalId)
+    scene.refresh_bounds([global_id, *made])
+    return made
+
+
 def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m: float, keep: str = "bottom") -> Resize:
     """Resize a stretch of a level rectangular duct or tray: from `split_m[0]` to `split_m[1]` (metres along it) it
     takes the section `resize_size` gives at `depth_m`, with the `keep` face level ("bottom", "top" or "centre") and

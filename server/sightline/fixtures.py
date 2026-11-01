@@ -11,6 +11,7 @@ import numpy as np
 import ifcopenshell
 import ifcopenshell.api
 import ifcopenshell.util.element
+import ifcopenshell.util.system
 import ifcopenshell.util.unit
 
 
@@ -996,7 +997,7 @@ def build_mep_fixture(path: Path) -> Path:
 
     - DA along x from 0 to 3 (y = 0); DC along x from 4.5 to 6 on the same line: a gap of 1.5 m to join in line.
     - DB along y from 1 to 4 (x = 4): square to DA in plan, the axes meeting at (4, 0): a corner to join with a bend.
-    - PA, a 100 mm round pipe along x from 0 to 3 at y = -2, z = 2.8.
+    - PA, a 100 mm round pipe along x from 0 to 3 at y = -2, z = 2.8, joined at its end to PB (3 to 4.5).
     """
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
     project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA MEP fixture")
@@ -1033,7 +1034,11 @@ def build_mep_fixture(path: Path) -> Path:
     segment("IfcDuctSegment", "DA", (0.0, 0.0, 2.8), (1.0, 0.0, 0.0), 3.0, rect())
     segment("IfcDuctSegment", "DC", (4.5, 0.0, 2.8), (1.0, 0.0, 0.0), 1.5, rect())
     segment("IfcDuctSegment", "DB", (4.0, 1.0, 2.8), (0.0, 1.0, 0.0), 3.0, rect())
-    segment("IfcPipeSegment", "PA", (0.0, -2.0, 2.8), (1.0, 0.0, 0.0), 3.0, model.createIfcCircleProfileDef("AREA", None, None, 0.05))
+    pa = segment("IfcPipeSegment", "PA", (0.0, -2.0, 2.8), (1.0, 0.0, 0.0), 3.0, model.createIfcCircleProfileDef("AREA", None, None, 0.05))
+    pb = segment("IfcPipeSegment", "PB", (3.0, -2.0, 2.8), (1.0, 0.0, 0.0), 1.5, model.createIfcCircleProfileDef("AREA", None, None, 0.05))
+    out = next(p for p in ifcopenshell.util.system.get_ports(pa) if p.Name == "Port 1")
+    into = next(p for p in ifcopenshell.util.system.get_ports(pb) if p.Name == "Port 0")
+    ifcopenshell.api.run("system.connect_port", model, port1=out, port2=into, direction="SOURCE")
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path

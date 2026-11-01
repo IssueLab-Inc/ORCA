@@ -297,15 +297,26 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     if face.kind == "radial" and scene.entity(gid).is_a("IfcFlowSegment"):
         warn.append({"rule": "size", "review": "services",
                      "text": f"{label(scene, gid)} changes size: its designer must confirm what it carries"})
+    # A duct's or pipe's section changed where it is joined: carried, a transition back to the old size at each joined
+    # end keeps the joints meeting what they join; on its own, the ends no longer match (said so)
+    resized_ends = (edits.joined_caps(scene, gid) if face.kind in ("side", "radial") and faces.split_id(face.id)[0] is None
+                    and scene.entity(gid).is_a("IfcFlowSegment") and scene.entity(gid).is_a() in edits.TRANSITION_TYPE else [])
+    transitions = resized_ends if carries(op) else []
+    if resized_ends and not transitions:
+        warn.append({"rule": "size", "review": "services",
+                     "text": f"{label(scene, gid)} no longer matches the size of what it joins at its "
+                             f"{' and '.join(resized_ends)}: take joined parts along to add transitions"})
     if carries(op):
         params["carry"] = True
     if opened:
         warn.append(_open_joint_words(scene, gid, opened))
     kept = f"; {', '.join(label(scene, p) for p, _ in follow)} {'shorter' if by > 0 else 'longer'} so the joint holds" if follow else ""
+    if transitions:
+        kept += f"; a transition back to its old size at its {' and '.join(transitions)}"
     plan = Plan("push_pull", gid, params, {scene.index_of(gid), *(scene.index_of(p) for p, _ in follow)},
                 [gid, *(p for p, _ in follow)], f"{face.name} of {label(scene, gid)} pushed {change}{sizes}{kept}", "resize",
                 abs(by), gated=[gid, *(p for p, _ in follow)], face=face, warnings=warn)
-    plan.extra.update(follow=follow, open_joints=opened)
+    plan.extra.update(follow=follow, open_joints=opened, transitions=transitions)
     return plan
 
 
@@ -373,6 +384,7 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
     # The openings through this face, found before it moves: a thicker wall, however drawn (an elevation's cap, a plan
     # rectangle's side, a plan outline's edge), takes them with it
     through = _openings_on(scene, gid, face) if k is None and by > 0 and face.kind in ("cap", "side", "edge") else []
+    before = edits.section_of(scene, gid) if plan.extra.get("transitions") else None
     if face.kind == "cap":
         edits.stretch(scene, gid, own.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid), k), item=k, **hand)
     elif face.kind == "side":
@@ -390,6 +402,7 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
     else:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled")
     _stretch_openings(scene, through, face, by)
+    made = edits.add_transitions(scene, gid, before, plan.extra["transitions"]) if before is not None else []
     for peer, cap in plan.extra.get("follow", []):   # its joined segment's end goes the same way: the joint holds
         edits.stretch(scene, peer, cap, -by, **hand)
     model = scene.models[scene.index_of(gid)]
@@ -397,7 +410,7 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
         port = model.by_guid(j["port"])
         if ifcopenshell.util.system.get_connected_port(port) is not None:
             ifcopenshell.api.run("system.disconnect_port", model, port=port)
-    return Made(changed=[gid, *(p for p, _ in plan.extra.get("follow", []))],
+    return Made(changed=[gid, *(p for p, _ in plan.extra.get("follow", []))], created=made,
                 open_ends=[gid, *(j["element"] for j in plan.extra.get("open_joints", []))] if plan.extra.get("open_joints") else [])
 
 

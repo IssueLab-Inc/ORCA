@@ -113,8 +113,15 @@ says when), carried in the option's `edit` to its recheck and keep. Measured on 
 4.5 m with 45° bends clears the beam: 1.18 m straight, bend, a 0.32 m riser on the slope, bend, 2.35 m 400 mm up, and
 back down; one joined chain, schema-valid.
 
-Later: transitions when a carried resize meets a neighbour of the old size, a carried move that re-fits its neighbours
-instead of carrying them.
+**Transitions on a carried resize** (Nov 1, second program): a duct's or pipe's side or radius pushed with **Take
+joined parts along** keeps its joints meeting the same size: at each joined end it is shortened by a transition's length
+(no face turning more than 30°) and a transition fitting (`edits.add_transitions`, lofted by `_loft_any`: rectangles or
+round, its new centreline's offset included) goes between it and what that end joined, the ports re-joined through it.
+Pushed on its own, the check warns that its end no longer matches what it joins. Measured on the run fixture: the
+main's north side out 100 mm, carried: the main 500 wide ends at 5.83 m, a 173 mm transition back to 400 wide meets
+the end segment at 6 m.
+
+Later: a carried move that re-fits its neighbours instead of carrying them.
 
 ## What the model says, edited (Tier 3)
 

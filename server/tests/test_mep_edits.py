@@ -141,3 +141,35 @@ def test_muse_s_offset_can_ask_for_45_degree_bends_and_keeps_them(run):
     assert len(run_pieces) == 9 and scene.entity(run_pieces[2]).is_a("IfcDuctSegment")
     riser = scene.bounds()[run_pieces[2]]
     assert riser[1][0] - riser[0][0] > 0.2   # kept as tried: up a slope, not a square riser
+
+
+def test_a_side_pushed_on_its_own_warns_its_end_no_longer_matches_and_carried_adds_a_transition(run):
+    from sightline import faces
+    ws, sid, scene, main = run
+    tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    north = next(f for f in faces.faces(scene, main) if f.kind == "side" and f.normal[1] > 0.9)
+    op = {"op": "push_pull", "element": main, "face": north.id, "by_m": 0.1}
+    alone = manual.check(ws, sid, op, preview=False)
+    assert any("no longer matches the size of what it joins at its end" in w["text"] for w in alone["warnings"])
+    carried = manual.check(ws, sid, {**op, "carry": True}, preview=False)
+    assert carried["blocked"] is None and "a transition back to its old size at its end" in carried["summary"]
+    kept = manual.apply(ws, sid, {**op, "carry": True})
+    (tr,) = kept["created"]
+    assert scene.entity(tr).is_a("IfcDuctFitting") and scene.entity(tr).PredefinedType == "TRANSITION"
+    assert scene.element(main).connected == [tr] and scene.element(tail).connected == [tr]
+    box = scene.bounds()[tr]   # from the new 500 mm (shifted 50 mm north) back to the old 400 mm at x = 6
+    assert box[1][0] == pytest.approx(6.0, abs=1e-3) and box[1][1] == pytest.approx(0.3, abs=1e-3)
+    assert edits.run_of(scene, main).length_m == pytest.approx(6.0 - 0.1 / np.tan(np.radians(30)), abs=1e-3)
+    assert not valid(scene)
+    ws.journal(sid).undo(scene)
+    assert scene.element(tail).connected == [main] and not scene.has(tr) and not valid(scene)
+
+
+def test_a_pipe_made_bigger_carried_gets_a_round_transition_to_the_pipe_it_joins(mep):
+    ws, sid, scene, g = mep
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["PA"], "face": "round side", "by_m": 0.025, "carry": True})
+    (tr,) = kept["created"]
+    assert scene.entity(tr).is_a("IfcPipeFitting") and scene.element(g["PB"]).connected == [tr]
+    box = scene.bounds()[tr]
+    assert box[1][1] - box[0][1] == pytest.approx(0.15, abs=0.005)   # 150 mm where it leaves PA, 100 mm at PB
+    assert not valid(scene)
