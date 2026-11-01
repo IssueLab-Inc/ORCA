@@ -1880,3 +1880,15 @@ runs on in the background for its own clash, one at a time, and a finished one i
 - **Checked:** `web/tests/proposal-status.test.mjs` (2), 208 web tests, build clean. In Chromium on Northbank against
   a local server with Muse Spark: #1 proposed from its row showed Proposing…, kept it with #2 open (whose panel stayed
   empty), then "1 fix ready · View"; View brought up #1's Verified options.
+
+Isolate a clash's elements from its row (Nov 1; owner: "a new hover button that will isolate only the clashing
+elements, if its on for a clash, clicking another clash should go straight to it and isolate it too, until the user
+removes the isolation"; code App's `isolating` / `isolateClash` / `endIsolation`, `ReportList` `RowActions`):
+- **What:** a row's Isolate (the element card's Isolate icon) isolates the clash's two elements through the page's
+  "for now" isolation (`temporary`), with the pieces a kept fix added to them, and takes every view to the clash. While
+  on, each clash opened after (row, chat, next) goes straight to its own pair, isolated, with "Clash #N isolated · Show
+  all" over the model; Show all, the toolbar's Reset or the button again on the isolated clash show everything, and the
+  element card's own hide or isolate replaces it.
+- **Checked:** `web/tests/isolate-clash.test.mjs` (2), `row-actions.test.mjs` (4), 211 web tests, build clean; in
+  Chromium on Northbank against a local server: #1 isolated shows only the supply air main and the girder, #2 then
+  only the cable tray and the girder, Show all brings everything back.

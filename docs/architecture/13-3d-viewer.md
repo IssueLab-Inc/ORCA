@@ -192,7 +192,8 @@ every style.
 - **Selection:** `setSelection(gid)` draws the selected element blue (`#2f8fdf`) with an outline through everything,
   in every pane (`selectionLayer`; the outline on layer 1). `App` sets it from a single click.
 - **Visibility:** what wins is a hidden model (`setModelVisible`), then a temporary hide or isolate
-  (`setTemporary({ hidden, isolated })`), then the filters (`setFilters({ classes, levels })`: classes and storeys
+  (`setTemporary({ hidden, isolated })`; a clash row's Isolate isolates the clashing pair, and each clash opened after,
+  through the same call: `App.isolateClash`), then the filters (`setFilters({ classes, levels })`: classes and storeys
   left out, `views.shownBy`), then the filters' rules (`setRules`: what hide rules find is hidden; while an isolate
   rule is on, only what isolate rules find shows), then the mode round the focus. `isShown(gid)` answers for the card
   and App (a filter that hides the selection clears it); the selection and lit links leave out what is hidden.
