@@ -9,7 +9,7 @@ import { api, type EditCheck, type EditFace, type EditKept, type EditOp, type Jo
 import { AlignIcon, CheckingIcon, ClipIcon, CutByIcon, DeleteIcon, EditIcon, KeepIcon, LogIcon, MoveIcon, PushPullIcon,
   RemoveSectionIcon, SplitIcon, VoidIcon } from "./editIcons";
 import { EditPanel } from "./EditPanel";
-import { alignDistance, EDIT_TOOLS, faceRef, OFFER, signedMm, toolForKey, toolState, type EditToolId } from "./viewer/edit";
+import { alignDistance, EDIT_TOOLS, faceRef, OFFER, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState, type EditToolId } from "./viewer/edit";
 import type { FacePick, Viewer } from "./viewer/Viewer";
 
 const ICON: Record<EditToolId, LucideIcon> = { push_pull: PushPullIcon, align: AlignIcon, move: MoveIcon, void: VoidIcon,
@@ -74,8 +74,9 @@ export const EditTool = forwardRef<EditToolHandle, {
   const [keeping, setKeeping] = useState(false);
   const [settled, setSettled] = useState(0);
   const ask = useRef(0), frame = useRef(0);
-  /** A face kept across a change of tool (a face the last tool could not take: "Align it"). */
-  const carry = useRef<{ face: Face; pick: FacePick } | null>(null);
+  /** A face kept across a change of tool (a face the last tool could not take: "Align it"), with a target and an op
+   * to check at once ("Clip it flush"). */
+  const carry = useRef<{ face: Face; pick: FacePick; target?: Face | null; targetPick?: FacePick | null; then?: EditOp } | null>(null);
   const act = coarse ? "Tap" : "Click";
   const element = face?.element ?? pick?.globalId ?? null;
 
@@ -95,7 +96,11 @@ export const EditTool = forwardRef<EditToolHandle, {
     const c = carry.current;
     carry.current = null;
     reset();
-    if (c) { setFace(c.face); setPick(c.pick); setHow(c.face.allows.includes("push_pull") ? "stretch" : "move"); }
+    if (c) {
+      setFace(c.face); setPick(c.pick); setHow(c.face.allows.includes("push_pull") ? "stretch" : "move");
+      if (c.target && c.targetPick) { setTarget(c.target); setTargetPick(c.targetPick); }
+      if (c.then) void run(c.then);
+    }
   }, [tool, sceneId]);
   useEffect(() => { onFace?.(face ? { element: face.element, face: face.name, pick: pick ? { point: pick.point, normal: pick.normal } : undefined } : null); }, [face, pick]);
   // Muse's (or an agent's) check: its tool, its face, its result and its preview, as if checked here.
@@ -145,7 +150,11 @@ export const EditTool = forwardRef<EditToolHandle, {
 
   const own = () => faceRef(face!, pick ?? { point: face!.point, normal: face!.normal });
   /** The face aimed at: by id, or by the pick on it when only a pick places it. */
-  const toFace = (t: Face, tp: FacePick) => { const r = faceRef(t, tp); return typeof r === "string" ? { element: t.element, face: r } : { element: t.element, ...r }; };
+  const toFace = (t: Face, tp: FacePick) => {
+    if (t.id.startsWith("point:")) return { element: t.element, point: tp.point, snap: t.id.slice(6) };   // a corner or an edge
+    const r = faceRef(t, tp);
+    return typeof r === "string" ? { element: t.element, face: r } : { element: t.element, ...r };
+  };
   const pushOp = (m: number): EditOp => ({ op: "push_pull", element: face!.element, face: own(), by_m: m });
   const alignOp = (t = target!, tp = targetPick!, g = gap, h = how): EditOp => ({ op: "align", element: face!.element, face: own(),
     gap_m: g, how: h, to: toFace(t, tp) });
@@ -217,7 +226,8 @@ export const EditTool = forwardRef<EditToolHandle, {
   /** Align to that face: at once a preview from the two picks (a stretch or a move), then the server's check. */
   function runAlign(t: Face, tp: FacePick, g = gap, h = how) {
     if (!face || !pick) return;
-    const v = viewer(), d = alignDistance(pick.point, face.normal, tp.point, t.normal, g);
+    const v = viewer(), d = t.id.startsWith("point:") ? pointDistance(pick.point, face.normal, tp.point, g)
+      : alignDistance(pick.point, face.normal, tp.point, t.normal, g);
     if (v && d != null) {
       v.preview([]);
       if (h === "stretch" && face.allows.includes("push_pull")) v.pushPreview(face.element, pick.point, face.normal, d);
@@ -226,10 +236,20 @@ export const EditTool = forwardRef<EditToolHandle, {
     return run(alignOp(t, tp, g, h));
   }
 
-  /** Change tool, keeping the face chosen. */
-  function offer(t: EditToolId) {
-    if (face && pick) carry.current = { face, pick };
+  /** Change tool, keeping the face chosen (and the target, and an op to check at once). */
+  function offer(t: EditToolId, then?: EditOp) {
+    if (face && pick) carry.current = { face, pick, target, targetPick, then };
     setTool(t);
+  }
+
+  /** A snapped corner, edge midpoint or edge point of another element as the align target. */
+  function pointTarget(globalId: string, s: { point: [number, number, number]; kind: string }) {
+    if (!face || !pick) return;
+    const t: Face = { element: globalId, id: `point:${s.kind}`, kind: "other", name: `the ${SNAP_WORDS[s.kind] ?? "point"}`, normal: face.normal,
+      point: s.point, size_m: null, allows: [], why_not: null };
+    const tp: FacePick = { globalId, point: s.point, normal: face.normal as [number, number, number] };
+    setTarget(t); setTargetPick(tp);
+    void runAlign(t, tp);
   }
 
   useImperativeHandle(ref, () => ({
@@ -256,6 +276,8 @@ export const EditTool = forwardRef<EditToolHandle, {
         return;
       }
       if ((tool === "align" || tool === "cut_by" || tool === "clip") && face && toolState(tool, face, READY).ok && p.globalId !== face.element) {
+        const sn = tool === "align" ? v.snapPoint(ev) : null;   // a corner or an edge: its point is the target
+        if (sn && (sn.kind === "end" || sn.kind === "mid" || sn.kind === "edge")) { pointTarget(p.globalId, sn); return; }
         void choose(p, "target"); return;
       }
       if (tool === "void" && face && p.globalId === face.element && sameNormal(p.normal, pick?.normal)) {
@@ -355,7 +377,7 @@ export const EditTool = forwardRef<EditToolHandle, {
           </form>)}
         {tool === "align" && face && target && !refused && (
           <div className="edit-row-in">
-            <span className="edit-target"><b>{target.name}</b>{target.label ? <> of {target.label}</> : null}</span>
+            <span className="edit-target">{target.id.startsWith("point:") ? "through " : ""}<b>{target.name}</b>{target.label ? <> of {target.label}</> : null}</span>
             <label>Gap <input type="number" step={5} min={0} value={mmIn(gap)} aria-label="Gap, mm"
               onChange={(e) => setGap(Number(e.target.value) / 1000)} onBlur={() => target && targetPick && void runAlign(target, targetPick)}
               onKeyDown={(e) => { if (e.key === "Enter" && target && targetPick) void runAlign(target, targetPick); }} /> mm</label>
@@ -408,6 +430,9 @@ export const EditTool = forwardRef<EditToolHandle, {
           </div>)}
         {check && !check.blocked && check.summary && <p className="edit-summary">{check.summary}</p>}
         {check?.warnings.map((w, i) => <p key={i} className="edit-warn">{w.text}{w.review ? <span className="chip">review: {w.review}</span> : null}</p>)}
+        {check?.offer?.op === "clip" && !check.blocked && READY.has("clip") && (
+          <div className="edit-offer-tools"><button type="button" className="ebtn btn small" onClick={() => offer("clip", check.offer!)}
+            data-tip="Clip its end to that face, so it is flush all along"><ClipIcon size={14} aria-hidden /> Clip it flush</button></div>)}
         {check && !check.blocked && (
           <div className="edit-actions">
             <button type="button" className={`ebtn btn ${check.clashes ? "danger" : "primary"}`} disabled={keeping || checking} onClick={() => void keep()}

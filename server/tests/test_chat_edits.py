@@ -100,8 +100,8 @@ def test_proposals_hear_about_edits_already_made(setup):
 
 def test_the_face_chosen_in_the_edit_tool_reaches_muse_as_its_pick(setup):
     ws, sid, g = setup
-    pick = {"point": [1.0, 2.4, 2.7], "normal": [0.0, -1.0, 0.0]}   # the beam's south flange tip: only a pick places it
-    ctx = Context(sid, selected={"element": g["B1"], "face": "south side", "pick": pick})
+    pick = {"point": [1.0, 2.495, 2.7], "normal": [0.0, -1.0, 0.0]}   # the beam's web: only a pick places it
+    ctx = Context(sid, selected={"element": g["B1"], "face": "south side 2", "pick": pick})
     op = {"op": "align", "element": "selected", "face": "selected", "to": {"element": g["P1"], "face": "round side"}, "how": "move"}
     model = Scripted([[("edit_check", {"op": op})], "Checked."])
     events = []
@@ -109,4 +109,4 @@ def test_the_face_chosen_in_the_edit_tool_reaches_muse_as_its_pick(setup):
     c.turn(c.session(None), "move this face down to the pipe", ctx, events.append)
     check = next(e for e in events if e.get("action") == "edit_preview")["check"]
     assert check["blocked"] is None and check["op"]["face"] == pick
-    assert Chat._chosen_face(ctx, g["B1"], "south side") == pick and Chat._chosen_face(ctx, g["P1"], "selected") == "selected"
+    assert Chat._chosen_face(ctx, g["B1"], "south side 2") == pick and Chat._chosen_face(ctx, g["P1"], "selected") == "selected"

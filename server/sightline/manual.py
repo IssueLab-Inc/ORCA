@@ -31,11 +31,12 @@ import numpy as np
 from . import connections, detect, edits, faces, hosts, requirements, verify
 from .scene import IfcScene, not_physical
 
-PARALLEL_COS = np.cos(np.radians(1))   # two faces this close to parallel align by a push or a move; else a clip
+PARALLEL_COS = np.cos(np.radians(1))   # two faces this close to parallel meet all over when aligned
+ALIGN_MAX_DEG = 80                     # past this apart, a face meets the other at its first corner only: clip instead
 LEAST_M = 0.0005                       # an edit shorter than this is already there
 WORSE_M = 0.002                        # a contact this much deeper than before counts as worse (agent._try_trim)
 MIN_HAND_M = 0.005                     # the least a hand edit leaves of a length or a width (fixes keep MIN_PIECE_M)
-PICKED = ("other", "flank", "clip", "plane")   # faces whose plane only a pick on them says: a name is not enough
+PICKED = ("other", "flank", "plane")   # faces whose plane only a pick on them says: a name is not enough
 
 
 class NotKept(ValueError):
@@ -123,6 +124,8 @@ def face_of(scene: IfcScene, gid: str, spec) -> faces.Face:
     if not isinstance(spec, str) or not spec:
         raise ValueError("say which face: its name (east end, top) or a point and a normal on it")
     f = faces.by_name(scene, gid, spec)
+    if f.kind == "plane" and f.point:   # a mesh's face as listed: its middle is on it
+        return faces.resolve(scene, gid, np.asarray(f.point), np.asarray(f.normal))
     if f.kind in PICKED:
         raise ValueError(f"its {f.name if f.kind != 'other' else 'faces'} need a pick: give a point and a normal on the face")
     return f
@@ -212,20 +215,27 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     by = _num(op, "by_m")
     if abs(by) < LEAST_M:
         raise edits.Unsupported("push or pull a face at least 0.5 mm")
-    if face.kind == "cap":
-        listed = next(f for f in faces.faces(scene, gid) if f.id == face.id)
-        joined = _ports_at(scene, gid, listed.point, listed.normal)
+    if face.kind in ("cap", "plane"):
+        joined = _ports_at(scene, gid, plane_point(scene, gid, face), face.normal)
         if joined:
             raise edits.Unsupported(f"its {face.name} is joined to {label(scene, joined[0])}: move the run instead, "
                                     "or split it first")
     size = face.size_m
     after = None if size is None else size + (2 * by if face.kind == "radial" else by)
     what = {"cap": "long" if face.name.endswith("end") else "thick" if face.name.endswith("face") else "deep",
-            "side": "deep" if abs(face.normal[2]) > 0.9 else "wide", "radial": "across", "edge": "long"}.get(face.kind, "")
+            "side": "deep" if abs(face.normal[2]) > 0.9 else "wide", "radial": "across", "edge": "long",
+            "plane": "thick behind it", "clip": "long behind it"}.get(face.kind, "")
     change = f"{_mm(by)} {'out' if by > 0 else 'in'}"
     sizes = f" ({size:.3f} → {after:.3f} m {what})" if size is not None and after is not None and face.kind != "edge" else ""
     params = {"op": "push_pull", "element": gid, "face": spec(face), "by_m": by}
     warn = structure_warnings(scene, gid, "the new size")
+    if face.kind == "side":
+        so = edits.solid(scene, scene.entity(gid), faces.split_id(face.id)[0])
+        prof = so.item.SweptArea if so.kind == "extrusion" else None
+        if prof is not None and prof.is_a() in edits.SECTION_DIMS:
+            name = f" ({prof.ProfileName})" if prof.ProfileName else ""
+            warn.append({"rule": "section", "review": "structure",
+                         "text": f"{label(scene, gid)} changes section{name}: a structural engineer must confirm the new section"})
     if face.kind == "radial" and scene.entity(gid).is_a("IfcFlowSegment"):
         warn.append({"rule": "size", "review": "services",
                      "text": f"{label(scene, gid)} changes size: its designer must confirm what it carries"})
@@ -275,16 +285,24 @@ def _stretch_openings(scene: IfcScene, gid: str, face: faces.Face, by: float) ->
 
 def _make_push(scene: IfcScene, plan: Plan) -> Made:
     gid, face, by = plan.element, plan.face, plan.params["by_m"]
+    k, own = faces.split_id(face.id)    # which solid of the body (None: its one solid), and the face's own id
+    hand = {"least_m": MIN_HAND_M, "unique": True}
     if face.kind == "cap":
-        edits.stretch(scene, gid, face.id.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid)),
-                      least_m=MIN_HAND_M, unique=True)
-        _stretch_openings(scene, gid, face, by)
+        edits.stretch(scene, gid, own.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid), k), item=k, **hand)
+        if k is None:
+            _stretch_openings(scene, gid, face, by)
     elif face.kind == "side":
-        edits.stretch(scene, gid, "side", by, normal=face.normal, least_m=MIN_HAND_M, unique=True)
+        edits.stretch(scene, gid, "side", by, normal=face.normal, clipped=edits._is_clipped(scene.entity(gid), k), item=k,
+                      sections=True, **hand)
     elif face.kind == "radial":
-        edits.stretch_radius(scene, gid, by, unique=True)
+        edits.stretch_radius(scene, gid, by, unique=True, item=k)
     elif face.kind == "edge":
-        edits.offset_edge(scene, gid, int(face.id.split(":")[1]), by, keep_inside=_opening_corners(scene, gid), unique=True)
+        edits.offset_edge(scene, gid, int(own.split(":")[1]), by, unique=True, item=k,
+                          keep_inside=_opening_corners(scene, gid) if k is None else [])
+    elif face.kind == "plane":
+        edits.push_mesh_face(scene, gid, face.point, face.normal, by, item=k, **hand)
+    elif face.kind == "clip":
+        edits.move_clip(scene, gid, int(own.split(":")[1]), by, item=k, least_m=MIN_HAND_M)
     else:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled")
     return Made(changed=[gid])
@@ -328,9 +346,17 @@ def _make_move(scene: IfcScene, plan: Plan) -> Made:
 # ----------------------------------------------------------------------------------------------------- align
 
 
-def _target_plane(scene: IfcScene, to: dict) -> tuple[np.ndarray, np.ndarray, str, str | None]:
-    """The plane to align to: a face of another element (by name, id or pick), or a bare point and normal."""
+SNAP_WORDS = {"end": "corner", "mid": "midpoint of an edge", "edge": "edge"}
+
+
+def _target_plane(scene: IfcScene, to: dict) -> tuple[np.ndarray, np.ndarray | None, str, str | None]:
+    """The plane to align to: a face of another element (by name, id or pick), or a bare point and normal. A point
+    with no normal (a corner, an edge's midpoint, a point on an edge, snapped as a measure snaps) is a point target:
+    its normal is None."""
     gid = to.get("element")
+    if to.get("point") is not None and to.get("normal") is None and not to.get("face"):
+        what = SNAP_WORDS.get(to.get("snap") or "end", "point")
+        return _vec(to["point"], "point"), None, f"{what} of {label(scene, gid)}" if gid else "point picked", gid
     if gid and (to.get("face") or (to.get("point") is not None and to.get("normal") is not None)):
         f = face_of(scene, gid, to if to.get("point") is not None else to["face"])
         return plane_point(scene, gid, f), np.asarray(f.normal, float), f"{f.name} of {label(scene, gid)}", gid
@@ -351,23 +377,25 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     if other == gid:
         raise edits.Unsupported("align it to another element's face")
     gap = _num(op, "gap_m", 0.0)
-    cos = abs(na @ nb)
-    if cos < PARALLEL_COS:
-        raise edits.Unsupported(f"the faces are {np.degrees(np.arccos(min(cos, 1.0))):.0f}° apart, not parallel: clip "
-                                "its end to that face instead")
-    t = float(((pb - pa) @ nb) / (na @ nb)) - gap
+    meets = ""
+    if nb is None:   # a point: the face's plane through it, parallel to itself, the gap short of it
+        t0 = float((pb - pa) @ na)
+        t = t0 - gap * (1.0 if t0 >= 0 else -1.0)
+    else:
+        t, meets = _first_contact(scene, gid, face, pa, na, pb, nb, gap)
     if abs(t) < LEAST_M:
         raise edits.Unsupported("it is already there")
     how = op.get("how") or ("stretch" if "push_pull" in face.allows else "move")
-    where = "flush with" if abs(gap) < 1e-6 else f"{_mm(gap)} off"
+    where = ("flush with" if abs(gap) < 1e-6 else f"{_mm(gap)} off") if nb is not None else (
+        "through" if abs(gap) < 1e-6 else f"{_mm(gap)} short of")
     if how == "stretch":
         if "push_pull" not in face.allows:
             raise edits.Unsupported(f"its {face.name} cannot be stretched: move it instead")
         plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t})
-        plan.summary = f"{face.name} of {label(scene, gid)} stretched {_mm(t)} {'out' if t > 0 else 'in'}, {where} the {target}"
+        plan.summary = f"{face.name} of {label(scene, gid)} stretched {_mm(t)} {'out' if t > 0 else 'in'}, {where} the {target}{meets}"
     elif how == "move":
         plan = _resolve_move(scene, {"op": "move", "element": gid, "delta_m": (na * t).tolist()})
-        plan.summary = f"{label(scene, gid)} moved {_mm(t)} so its {face.name} is {where} the {target}"
+        plan.summary = f"{label(scene, gid)} moved {_mm(t)} so its {face.name} is {where} the {target}{meets}"
     else:
         raise ValueError("how is stretch or move")
     plan.op = "align"
@@ -376,7 +404,31 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     if other:
         plan.touching.add(other)
     plan.extra["how"] = how
+    if meets:   # it meets the other face along one edge: clipping it to that face makes it flush all along
+        plan.extra["offer"] = {"op": "clip", "element": gid, "to": op.get("to"), "gap_m": gap}
     return plan
+
+
+def _first_contact(scene: IfcScene, gid: str, face: faces.Face, pa, na, pb, nb, gap: float) -> tuple[float, str]:
+    """How far face A moves along its normal to meet face B's plane `gap` off it: flush all over when they are
+    parallel, else at its first corner (up to 80° apart). Faces turned to each other end on B's outer side; faces
+    turned the same way (level with) stay on the side A is on. Returns the distance and, when they are not parallel,
+    words for where it meets."""
+    cos = float(na @ nb)
+    angle = float(np.degrees(np.arccos(min(abs(cos), 1.0))))
+    if angle > ALIGN_MAX_DEG:
+        raise edits.Unsupported(f"the faces are {angle:.0f}° apart: clip its end to that face instead")
+    corners = faces.patch_vertices(scene, gid, face, pa) if abs(cos) < PARALLEL_COS else np.zeros((0, 3))
+    if not len(corners):
+        corners = np.asarray([pa])
+    g = (corners - pb) @ nb
+    if cos < 0:     # turned to each other: every corner on B's outer side, the nearest at the gap
+        t = float(np.min((g - gap) / -cos))
+    else:           # turned the same way: level with it, on the side A is on
+        side = 1.0 if (pa - pb) @ nb > 0 else -1.0
+        t = float(np.max((gap - g) / cos)) if side > 0 else float(np.min((-gap - g) / cos))
+    meets = f", meeting it at one edge ({angle:.0f}° apart)" if abs(cos) < PARALLEL_COS else ""
+    return t, meets
 
 
 def _make_align(scene: IfcScene, plan: Plan) -> Made:
@@ -728,7 +780,7 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
         base = {"op": plan.params, "summary": plan.summary,
                 "face": {**plan.face.to_dict(), "label": label(scene, plan.element)} if plan.face else None,
                 "warnings": plan.warnings, "revision": scene.revision, "key": key_of(plan.params, scene.revision),
-                "targets": plan.targets}
+                "targets": plan.targets, **({"offer": plan.extra["offer"]} if plan.extra.get("offer") else {})}
         if refused:
             return {**base, "passed": False, "blocked": refused, "clashes": 0}
         clearance = ws.clearance(scene_id)

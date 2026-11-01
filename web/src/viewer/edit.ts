@@ -74,9 +74,9 @@ export function signedMm(m: number): string {
   return v === 0 ? "0 mm" : `${v > 0 ? "+" : "−"}${Math.abs(v).toLocaleString()} mm`;
 }
 
-/** Faces whose plane only a pick on them says (an I-section's sides, a clipped end, a round side, a fitting's face):
- * an op names them by the pick, never by id. */
-export const PICKED_KINDS: ReadonlySet<string> = new Set(["other", "flank", "clip", "plane", "radial"]);
+/** Faces whose plane only a pick on them says (an I-section's inner faces, a mesh's face, a round side, a face ORCA
+ * does not edit): an op names them by the pick, never by id. */
+export const PICKED_KINDS: ReadonlySet<string> = new Set(["other", "flank", "plane", "radial"]);
 
 /** How an op names a face: its id, or the pick on it (`PICKED_KINDS`). */
 export function faceRef(f: { id: string; kind: string }, p: { point: number[]; normal: number[] }):
@@ -93,6 +93,17 @@ export function alignDistance(pa: ArrayLike<number>, na: ArrayLike<number>, pb: 
   if (Math.abs(cos) < Math.cos(Math.PI / 180)) return null;
   return ((pb[0] - pa[0]) * b[0] + (pb[1] - pa[1]) * b[1] + (pb[2] - pa[2]) * b[2]) / cos - gap;
 }
+
+/** How far face A moves along its normal so its plane passes through point P, the gap short of it (a corner, an
+ * edge's midpoint, a point on an edge as the target). */
+export function pointDistance(pa: ArrayLike<number>, na: ArrayLike<number>, p: ArrayLike<number>, gap = 0): number {
+  const l = Math.hypot(na[0], na[1], na[2]) || 1;
+  const t = ((p[0] - pa[0]) * na[0] + (p[1] - pa[1]) * na[1] + (p[2] - pa[2]) * na[2]) / l;
+  return t - gap * (t >= 0 ? 1 : -1);
+}
+
+/** A snapped point as an align target, in words. */
+export const SNAP_WORDS: Record<string, string> = { end: "corner", mid: "midpoint of an edge", edge: "edge" };
 
 /** Short words for a tool offered on a face the current tool cannot take ("Align it"). */
 export const OFFER: Record<EditToolId, string> = { push_pull: "Push/pull it", align: "Align it", move: "Move it", void: "Cut a void",

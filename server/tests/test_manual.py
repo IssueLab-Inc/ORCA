@@ -41,13 +41,15 @@ def test_faces_are_named_as_people_say_them_and_say_what_they_allow(scene):
     assert names(s, g["W1"]) == {"cap:start": "north face", "cap:end": "south face", "edge:0": "bottom",
                                  "edge:1": "east end", "edge:2": "top", "edge:3": "west end"}
     assert names(s, g["C1"])["side:-x"] == "west side" and names(s, g["C1"])["cap:end"] == "top"
-    assert names(s, g["B1"]) == {"cap:start": "west end", "cap:end": "east end", "flank": "sides"}
+    assert names(s, g["B1"]) == {"cap:start": "west end", "cap:end": "east end", "side:+x": "north side",
+                                 "side:-x": "south side", "side:+y": "top", "side:-y": "bottom", "flank": "inner faces"}
     assert names(s, g["P1"])["radial"] == "round side"
     wall = {f.id: f for f in faces.faces(s, g["W1"])}
     assert wall["cap:start"].size_m == pytest.approx(0.2) and "void" in wall["cap:start"].allows
     assert wall["edge:1"].allows == ["push_pull", "align"]
     beam = {f.id: f for f in faces.faces(s, g["B1"])}
-    assert "push_pull" not in beam["flank"].allows
+    assert "push_pull" not in beam["flank"].allows and "push_pull" in beam["side:+y"].allows
+    assert beam["side:+y"].size_m == pytest.approx(0.4) and beam["side:+x"].size_m == pytest.approx(0.2)
     # A pick is resolved to its face; Muse can say the name instead
     f = faces.resolve(s, g["W1"], [4.0, -0.1, 1.5], [1, 0, 0])
     assert (f.id, f.name) == ("edge:1", "east end")
@@ -106,11 +108,13 @@ def test_a_wall_end_aligns_to_a_column_face_with_a_gap(scene):
     assert moved["op"]["delta_m"] == pytest.approx([0.025, 0.0, 0.0]) and "moved 25 mm" in moved["summary"]
 
 
-def test_faces_that_are_not_parallel_say_to_clip_instead(scene):
+def test_faces_45_degrees_apart_meet_at_the_first_corner(scene):
     ws, sid, s, g = scene
+    # The wall's east end (x = 4) to a slope through (5, 0, 0): its bottom corner reaches the slope 1 m out
     r = manual.check(ws, sid, {"op": "align", "element": g["W1"], "face": "east end",
                                "to": {"point": [5, 0, 0], "normal": [-0.7071, 0, 0.7071]}})
-    assert "not parallel" in r["blocked"] and "clip" in r["blocked"]
+    assert r["blocked"] is None and r["op"]["by_m"] == pytest.approx(1.0, abs=1e-4) and "(45° apart)" in r["summary"]
+    assert r["offer"] == {"op": "clip", "element": g["W1"], "to": {"point": [5, 0, 0], "normal": [-0.7071, 0, 0.7071]}, "gap_m": 0.0}
 
 
 def test_a_wall_end_cannot_be_pulled_through_its_window(scene):
@@ -148,7 +152,15 @@ def test_a_transfer_beam_trimmed_warns_for_structure_but_is_not_refused(scene):
     assert r["passed"] and r["warnings"][0]["rule"] == "transfer" and "C2" in r["warnings"][0]["text"]
     kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "east end", "by_m": -0.2})
     assert kept["entry"]["warnings"][0]["review"] == "structure"
-    assert "need a pick" in manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "sides", "by_m": 0.1})["blocked"]
+    assert "need a pick" in manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "inner faces", "by_m": 0.1})["blocked"]
+    # Its top flange pushed up: a deeper section, its bottom held, a structural engineer to confirm it
+    deeper = manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "top", "by_m": 0.05})
+    assert deeper["blocked"] is None and any(w["rule"] == "section" for w in deeper["warnings"])
+    manual.apply(ws, sid, deeper["op"], accept_clashes=deeper["clashes"])
+    b = s.bounds()[g["B1"]]
+    assert b[0][2] == pytest.approx(2.5) and b[1][2] == pytest.approx(2.95)
+    assert s.entity(g["B1"]).Representation.Representations[0].Items[0].SweptArea.OverallDepth == pytest.approx(0.45)
+    assert "flanges would not fit" in manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "top", "by_m": -0.43})["blocked"]
 
 
 def test_a_move_takes_the_element_and_is_logged(scene):
@@ -314,7 +326,12 @@ def test_a_beam_end_is_clipped_to_a_sloping_face_and_its_other_end_still_pushes(
     manual.apply(ws, sid, r["op"])
     assert s.bounds()[g["B1"]][1][0] < 4.0 - 0.1
     ends = {f.id: f for f in faces.faces(s, g["B1"])}
-    assert ends["cap:end"].kind == "clip" and ends["cap:start"].allows[0] == "push_pull"
+    assert "cap:end" not in ends and ends["clip:0"].kind == "clip" and ends["cap:start"].allows[0] == "push_pull"
+    assert np.allclose(ends["clip:0"].normal, [0.7071, 0, -0.7071], atol=1e-3)
+    # The clip's plane pulled in 50 mm: it takes more away
+    top = s.bounds()[g["B1"]][1][0]
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "clip:0", "by_m": -0.05})
+    assert s.bounds()[g["B1"]][1][0] == pytest.approx(top - 0.05 / np.cos(np.radians(45)), abs=1e-4)
     manual.apply(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "west end", "by_m": 0.2})
     assert s.bounds()[g["B1"]][0][0] == pytest.approx(-0.2)
     assert "nothing to clip" in manual.check(ws, sid, {"op": "clip", "element": g["P1"], "to": {"point": [10, 0, 0], "normal": [-1, 0, 0]}})["blocked"]
@@ -360,9 +377,78 @@ def test_people_may_leave_5_mm_where_fixes_leave_50(scene):
 
 def test_a_face_only_a_pick_can_place_is_refused_by_name_and_aligns_from_its_pick(scene):
     ws, sid, s, g = scene
-    assert "need a pick" in manual.check(ws, sid, {"op": "align", "element": g["B1"], "face": "sides",
+    assert "need a pick" in manual.check(ws, sid, {"op": "align", "element": g["B1"], "face": "inner faces",
                                                    "to": {"element": g["C1"], "face": "west side"}})["blocked"]
-    # From a pick on the beam's south flange tip (y = 2.4), not the profile's middle: moved 3.35 m to the pipe's top side.
-    r = manual.check(ws, sid, {"op": "align", "element": g["B1"], "face": {"point": [1.0, 2.4, 2.7], "normal": [0, -1, 0]},
+    # From a pick on the beam's web (its south face, y = 2.495), not the profile's middle: moved 3.445 m to the pipe's top.
+    r = manual.check(ws, sid, {"op": "align", "element": g["B1"], "face": {"point": [1.0, 2.495, 2.7], "normal": [0, -1, 0]},
                                "to": {"element": g["P1"], "face": {"point": [1.0, -0.95, 1.5], "normal": [0, 1, 0]}}})
-    assert r["blocked"] is None and r["op"]["by_m"] == pytest.approx(3.35, abs=1e-6) and r["op"]["how"] == "move"
+    assert r["blocked"] is None and r["op"]["by_m"] == pytest.approx(3.445, abs=1e-6) and r["op"]["how"] == "move"
+
+
+def test_a_body_of_two_solids_lists_each_ones_faces_and_pushes_the_one_picked(scene):
+    ws, sid, s, g = scene
+    listed = names(s, g["K1"])
+    assert listed["i0:cap:end"] == "top" and listed["i1:cap:end"] == "top 2" and "cap:end" not in listed
+    up = faces.resolve(s, g["K1"], [20.85, 0.15, 1.9], [0, 0, 1])
+    assert up.id == "i1:cap:end" and up.size_m == pytest.approx(0.6)
+    low = faces.resolve(s, g["K1"], [20.3, 0.15, 1.3], [0, 0, 1])
+    assert low.id == "i0:cap:end"
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["K1"], "face": {"point": [20.85, 0.15, 1.9], "normal": [0, 0, 1]},
+                           "by_m": 0.1})
+    assert s.bounds()[g["K1"]][1][2] == pytest.approx(2.0)
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["K1"], "face": "i0:cap:start", "by_m": 0.05})
+    assert s.bounds()[g["K1"]][0][2] == pytest.approx(0.95) and kept["entry"]["kind"] == "push_pull"
+    ws.undo_edit(sid)
+    ws.undo_edit(sid)
+    assert np.allclose(s.bounds()[g["K1"]], [[20, 0, 1], [21, 0.3, 1.9]])
+
+
+def test_a_mesh_lists_its_flat_faces_and_pushes_one(scene):
+    ws, sid, s, g = scene
+    listed = {f.name: f for f in faces.faces(s, g["M1"])}
+    assert set(listed) == {"top", "bottom", "east end", "west end", "north side", "south side"}
+    assert all(f.kind == "plane" and "push_pull" in f.allows for f in listed.values())
+    assert listed["east end"].size_m == pytest.approx(0.6)
+    east = faces.resolve(s, g["M1"], [24.6, 0.2, 1.15], [1, 0, 0])
+    assert east.kind == "plane" and east.name == "east end"
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["M1"], "face": "east end", "by_m": 0.05})
+    assert s.bounds()[g["M1"]][1][0] == pytest.approx(24.65) and "0.600 → 0.650" in kept["entry"]["summary"]
+    assert "fold through its other side" in manual.check(ws, sid, {"op": "push_pull", "element": g["M1"], "face": "top",
+                                                                   "by_m": -0.3})["blocked"]
+    # Its west face stretched to the fitting's east end: a mesh aligns by stretching too
+    r = manual.apply(ws, sid, {"op": "align", "element": g["M1"], "face": {"point": [24.0, 0.2, 1.15], "normal": [-1, 0, 0]},
+                               "to": {"element": g["K1"], "face": {"point": [21.0, 0.15, 1.1], "normal": [1, 0, 0]}}})
+    assert s.bounds()[g["M1"]][0][0] == pytest.approx(21.0) and r["entry"]["kind"] == "align"
+    ws.undo_edit(sid)
+    ws.undo_edit(sid)
+    assert np.allclose(s.bounds()[g["M1"]], [[24, 0, 1], [24.6, 0.4, 1.3]])
+
+
+def test_faces_apart_align_at_first_contact_and_offer_a_clip(scene):
+    ws, sid, s, g = scene
+    # The column C1's west side (x = 5) to a plane turned 30° off it, through (4.6, 0, 0): its nearest corner meets it.
+    n = [np.cos(np.radians(30)), np.sin(np.radians(30)), 0.0]
+    r = manual.check(ws, sid, {"op": "align", "element": g["C1"], "face": "west side", "to": {"point": [4.6, 0.0, 0.0], "normal": n}})
+    assert r["blocked"] is None and "meeting it at one edge (30° apart)" in r["summary"] and r["offer"]["op"] == "clip"
+    # Its corners at x = 5, y -0.25 and 0.05: the one at y = -0.25 is nearest the plane
+    t = min((5 - 4.6) * n[0] + y * n[1] for y in (-0.25, 0.05)) / n[0]
+    assert r["op"]["by_m"] == pytest.approx(t, abs=1e-6)
+    assert "clip its end" in manual.check(ws, sid, {"op": "align", "element": g["C1"], "face": "west side",
+                                                    "to": {"point": [4.6, 0, 0], "normal": [0.05, 0.9987, 0]}})["blocked"]
+
+
+def test_a_face_aligns_to_a_point_through_its_plane(scene):
+    ws, sid, s, g = scene
+    # The slab's top (z = 3.2) up to the column C2's top corner (z = 3.9): by the corner alone, no normal
+    r = manual.check(ws, sid, {"op": "align", "element": g["S1"], "face": "top", "to": {"element": g["C2"], "point": [1.9, 2.4, 3.9], "snap": "end"}})
+    assert r["blocked"] is None and r["op"]["by_m"] == pytest.approx(0.7) and "through the corner of column 'C2'" in r["summary"]
+    r = manual.check(ws, sid, {"op": "align", "element": g["S1"], "face": "top", "gap_m": 0.05,
+                               "to": {"element": g["C2"], "point": [1.9, 2.4, 3.9], "snap": "mid"}})
+    assert r["op"]["by_m"] == pytest.approx(0.65) and "50 mm short of the midpoint of an edge of column 'C2'" in r["summary"]
+
+
+def test_a_face_turned_the_same_way_aligns_level_and_keeps_its_side(scene):
+    ws, sid, s, g = scene
+    # The wall's top (z = 3) level with the slab's top (z = 3.2), 20 mm short: it stays below
+    r = manual.check(ws, sid, {"op": "align", "element": g["W1"], "face": "top", "gap_m": 0.02, "to": {"element": g["S1"], "face": "top"}})
+    assert r["op"]["by_m"] == pytest.approx(0.18)

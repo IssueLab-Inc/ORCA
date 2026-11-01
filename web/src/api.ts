@@ -173,7 +173,7 @@ export interface JournalEntry {
 export interface Journal { entries: JournalEntry[]; can_undo: boolean; can_redo: boolean; undo: string | null; redo: string | null }
 /** A face of an element as the server reads a pick (faces.py): its kind, its name in words, what it allows. */
 export interface EditFace {
-  element: string; id: string; kind: "cap" | "side" | "radial" | "flank" | "edge" | "other"; name: string;
+  element: string; id: string; kind: "cap" | "side" | "radial" | "flank" | "edge" | "plane" | "clip" | "other"; name: string;
   normal: number[]; point: number[]; size_m: number | null; allows: string[]; why_not: string | null;
 }
 /** A hand edit, as the server takes it from the page, chat, voice and MCP (manual.py). */
@@ -186,6 +186,8 @@ export interface EditCheck {
   new?: EditHit[]; worse?: EditHit[]; cleared?: { other: string; name: string; was_m: number }[];
   min_clearance_m?: number | null; checked_against?: number; changed?: string[]; created?: string[]; removed?: string[];
   open_ends?: string[]; preview?: Piece[] | null; before?: Piece[] | null;
+  /** A follow-up the check suggests: an align that meets the other face at one edge offers to clip it flush. */
+  offer?: EditOp | null;
 }
 export type EditKept = { entry: JournalEntry | null; files: number[]; changed: string[]; created: string[]; removed: string[];
   pieces: string[]; check: EditCheck } & Patch;

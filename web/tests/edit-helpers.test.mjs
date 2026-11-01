@@ -61,7 +61,16 @@ test("align previews from the two picks: how far the face moves to sit a gap off
 
 test("a face only a pick places is named by its pick; a face ORCA sizes by its id", () => {
   const p = { point: [1, 2, 3], normal: [0, -1, 0] };
-  for (const kind of ["other", "flank", "clip", "plane", "radial"]) assert.deepEqual(edit.faceRef({ id: kind, kind }, p), p, kind);
+  for (const kind of ["other", "flank", "plane", "radial"]) assert.deepEqual(edit.faceRef({ id: kind, kind }, p), p, kind);
   assert.equal(edit.faceRef({ id: "cap:end", kind: "cap" }, p), "cap:end");
+  assert.equal(edit.faceRef({ id: "i1:clip:0", kind: "clip" }, p), "i1:clip:0", "a clip's plane is listed: its id");
   assert.equal(edit.faceRef({ id: "edge:2", kind: "edge" }, p), "edge:2");
+});
+
+test("a face aligns to a point through its plane, the gap short of it", () => {
+  // A slab's top at z = 3.2 up to a column's corner at z = 3.9: 0.7 m, 0.65 m with a 50 mm gap; down to a point below
+  assert.ok(Math.abs(edit.pointDistance([1, 5, 3.2], [0, 0, 1], [1.9, 2.4, 3.9]) - 0.7) < 1e-12);
+  assert.ok(Math.abs(edit.pointDistance([1, 5, 3.2], [0, 0, 1], [1.9, 2.4, 3.9], 0.05) - 0.65) < 1e-12);
+  assert.ok(Math.abs(edit.pointDistance([1, 5, 3.2], [0, 0, 1], [0, 0, 3.0], 0.05) + 0.15) < 1e-12);
+  assert.equal(edit.SNAP_WORDS.end, "corner");
 });

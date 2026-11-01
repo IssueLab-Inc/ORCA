@@ -760,6 +760,9 @@ def build_edit_fixture(path: Path) -> Path:
     - P1, a round pipe (radius 50 mm) along x at y = -1, z = 1.5, from x = 0 to 4.
     - T1, a 0.4 x 0.2 m post turned 30° in its plan (its rectangle's RefDirection), 1 m tall, centred on (10, 0).
     - D1 and D2, two 0.3 x 0.3 x 2 m columns sharing one body (one IfcShapeRepresentation), at x = 12 and x = 13.
+    - K1, a duct fitting of two solids: a 1 x 0.3 x 0.3 m box along x (x 20-21, y 0-0.3, z 1-1.3) and a 0.3 x 0.3 x
+      0.6 m box standing on its east end (x 20.7-21, z 1.3-1.9).
+    - M1, a 0.6 x 0.4 x 0.3 m box drawn as a triangulated mesh (x 24-24.6, y 0-0.4, z 1-1.3).
     """
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
     project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA edit fixture")
@@ -820,6 +823,29 @@ def build_edit_fixture(path: Path) -> Path:
     ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[d2])
     d2.Representation = model.createIfcProductDefinitionShape(None, None, d1.Representation.Representations)
     place(d2, (13.0, 0.0, 0.0))
+
+    def box_solid(size, corner):
+        sx, sy, sz = size
+        prof = model.createIfcRectangleProfileDef("AREA", None, model.createIfcAxis2Placement2D(
+            model.createIfcCartesianPoint((sx / 2, sy / 2)), None), float(sx), float(sy))
+        pos = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(float(c) for c in corner)), None, None)
+        return model.createIfcExtrudedAreaSolid(prof, pos, model.createIfcDirection((0.0, 0.0, 1.0)), float(sz))
+
+    fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcDuctFitting", name="K1")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[fitting])
+    rep = model.createIfcShapeRepresentation(body, "Body", "SweptSolid",
+                                             [box_solid((1.0, 0.3, 0.3), (0, 0, 0)), box_solid((0.3, 0.3, 0.6), (0.7, 0, 0.3))])
+    ifcopenshell.api.run("geometry.assign_representation", model, product=fitting, representation=rep)
+    place(fitting, (20.0, 0.0, 1.0))
+    mesh = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingElementProxy", name="M1")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[mesh])
+    corners = [(x, y, z) for z in (0.0, 0.3) for y in (0.0, 0.4) for x in (0.0, 0.6)]
+    quads = [(1, 3, 4, 2), (5, 6, 8, 7), (1, 2, 6, 5), (3, 7, 8, 4), (1, 5, 7, 3), (2, 4, 8, 6)]   # outward, 1-based
+    tris = [t for a, b, c, d in quads for t in ((a, b, c), (a, c, d))]
+    faceset = model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D(corners), None, True, tris, None)
+    rep = model.createIfcShapeRepresentation(body, "Body", "Tessellation", [faceset])
+    ifcopenshell.api.run("geometry.assign_representation", model, product=mesh, representation=rep)
+    place(mesh, (24.0, 0.0, 1.0))
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path

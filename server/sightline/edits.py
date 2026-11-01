@@ -1549,12 +1549,14 @@ class Stretched:
 
 
 def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None, clipped: bool = False,
-            item: int | None = None, least_m: float = MIN_PIECE_M, unique: bool = False) -> Stretched:
+            item: int | None = None, least_m: float = MIN_PIECE_M, unique: bool = False,
+            sections: bool = False) -> Stretched:
     """Make a straight segment longer (+) or shorter (-) by moving one face outward by `by_m` metres: its "start" or
     "end" cap (the extrusion's depth, and its start when the start moves), or, for a rectangular one, a "side" whose
     outward world `normal` is given (the profile grows to that side: a ladder riser a bend sits on). Ports at that face
     move with it without turning. Edits the model in place; wrap in a trial to undo. Hand edits (manual.py) name the
-    `item` of a body of several solids, keep `least_m` (5 mm), and give a shared body its own copy (`unique`)."""
+    `item` of a body of several solids, keep `least_m` (5 mm), give a shared body its own copy (`unique`), and may
+    push an I, U, C, L or T section's outer side (`sections`: its overall width or depth, the opposite side held)."""
     element = scene.entity(global_id)
     k = item
     i = scene.index_of(global_id)
@@ -1584,8 +1586,10 @@ def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None
         item.Depth = float(item.Depth + by_m / s)
     elif face == "side":
         prof = item.SweptArea
-        if prof.is_a() != "IfcRectangleProfileDef":
+        dims_of = {"IfcRectangleProfileDef": ("XDim", "YDim"), **(SECTION_DIMS if sections else {})}
+        if prof.is_a() not in dims_of:
             raise Unsupported("only a rectangular section grows sideways")
+        xa, ya = dims_of[prof.is_a()]
         # A rectangle may sit off the solid's axis (a box drawn from its corner) and be turned in its plane: its own
         # axes are the solid's turned by its RefDirection.
         loc = np.asarray(prof.Position.Location.Coordinates[:2], float) if prof.Position is not None else np.zeros(2)
@@ -1597,19 +1601,31 @@ def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None
         out = np.asarray(normal, float)
         out /= np.linalg.norm(out)
         if abs(out @ ax) > 0.999:
-            attr, across = "XDim", prof.XDim
+            attr = xa
         elif abs(out @ ay) > 0.999:
-            attr, across = "YDim", prof.YDim
+            attr = ya
         else:
             raise Unsupported("that side is not square to the segment's profile")
+        across = _section_dim(prof, attr)
         size = across * s + by_m
         if size < least_m - 1e-9:
             raise Unsupported(f"it would be {size * 1000:.0f} mm across (at least {least_m * 1000:.0f} mm stays)")
+        inner = _section_least(prof, attr)
+        if size <= inner * s + 1e-6:
+            raise Unsupported(f"its {'flanges' if attr in ('OverallDepth', 'Depth') else 'web'} would not fit: at least "
+                              f"{inner * s * 1000:.0f} mm stays")
         mid = (origin + px * loc[0] + py * loc[1]) * s + d * (item.Depth * s / 2)
         old_centre = mid + out * (across * s / 2)
-        dims = {"XDim": prof.XDim, "YDim": prof.YDim, attr: float(size / s)}
-        item.SweptArea = model.createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
-                                                            dims["XDim"], dims["YDim"])
+        if prof.is_a() == "IfcRectangleProfileDef":
+            dims = {"XDim": prof.XDim, "YDim": prof.YDim, attr: float(size / s)}
+            item.SweptArea = model.createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+                                                                dims["XDim"], dims["YDim"])
+        else:   # a copy (profiles are shared, often by every beam of a size), the one size changed
+            new = ifcopenshell.util.element.copy(model, prof)
+            if prof.is_a("IfcLShapeProfileDef") and new.Width is None:
+                new.Width = new.Depth
+            setattr(new, attr, float(size / s))
+            item.SweptArea = new
         local = ifcopenshell.util.placement.get_axis2placement(item.Position)
         local[:3, 3] = (inv @ np.append(origin + out * (by_m / s / 2), 1.0))[:3]
         item.Position = model.createIfcAxis2Placement3D(
@@ -1915,6 +1931,329 @@ def make_unique(model, element) -> bool:
                 model.createIfcStyledItem(new_i, st.Styles, st.Name)
     element.Representation = new
     return True
+
+
+SECTION_DIMS = {   # an I, U, C, L or T section's overall width (profile x) and depth (profile y)
+    "IfcIShapeProfileDef": ("OverallWidth", "OverallDepth"), "IfcUShapeProfileDef": ("FlangeWidth", "Depth"),
+    "IfcCShapeProfileDef": ("Width", "Depth"), "IfcLShapeProfileDef": ("Width", "Depth"),
+    "IfcTShapeProfileDef": ("FlangeWidth", "Depth")}
+MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet", "IfcFacetedBrep")
+PLANE_COS = 0.9998     # triangles within ~1° of each other on one plane are one face of a mesh
+PLANE_TOL_M = 0.001    # and within 1 mm of its plane
+
+
+def _section_dim(prof, attr: str) -> float:
+    v = getattr(prof, attr)
+    return float(prof.Depth if v is None and prof.is_a("IfcLShapeProfileDef") else v)
+
+
+def _section_least(prof, attr: str) -> float:
+    """What a section's width or depth must stay above: its flanges (twice their thickness) or its web."""
+    g = lambda a: float(getattr(prof, a, None) or 0.0)
+    t = prof.is_a()
+    if t == "IfcIShapeProfileDef":
+        return 2 * g("FlangeThickness") if attr == "OverallDepth" else g("WebThickness")
+    if t == "IfcUShapeProfileDef":
+        return 2 * g("FlangeThickness") if attr == "Depth" else g("WebThickness")
+    if t == "IfcCShapeProfileDef":
+        return 2 * g("WallThickness") if attr == "Depth" else g("WallThickness")
+    if t == "IfcLShapeProfileDef":
+        return g("Thickness")
+    if t == "IfcTShapeProfileDef":
+        return g("FlangeThickness") if attr == "Depth" else g("WebThickness")
+    return 0.0
+
+
+@dataclass
+class Solid:
+    """One solid of an element's Body, as hand edits see it."""
+    k: int | None          # its place in the Body; None when the Body is one solid (face ids carry no prefix)
+    kind: str              # extrusion (straight, along its own axis), mesh, other
+    item: object           # the extrusion or mesh, under any clips
+    top: object            # the Body's item itself: a clip result when clipped
+    world: np.ndarray      # file units: an extrusion's own frame, else the representation's (the element's placement)
+    clipped: bool
+
+
+def solids(scene: IfcScene, element) -> list[Solid]:
+    """Every solid of the element's Body, each with what it is and its world frame. Empty without one Body."""
+    rep = element.Representation
+    bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
+    if len(bodies) != 1:
+        return []
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    items = bodies[0].Items
+    out = []
+    for k, top in enumerate(items):
+        item = top
+        while item.is_a("IfcBooleanClippingResult"):
+            item = item.FirstOperand
+        key = k if len(items) > 1 else None
+        if (item.is_a("IfcExtrudedAreaSolid") and item.Position is not None
+                and np.linalg.norm(np.asarray(item.ExtrudedDirection.DirectionRatios) - (0, 0, 1)) <= 1e-9):
+            out.append(Solid(key, "extrusion", item, top, place @ ifcopenshell.util.placement.get_axis2placement(item.Position),
+                             top is not item))
+        elif any(item.is_a(c) for c in MESH_ITEMS):
+            out.append(Solid(key, "mesh", item, top, place, top is not item))
+        else:
+            out.append(Solid(key, "other", item, top, place, top is not item))
+    return out
+
+
+def solid(scene: IfcScene, element, k: int | None) -> Solid:
+    """The solid a face id's prefix names (None: the Body's one solid)."""
+    sol = solids(scene, element)
+    found = next((x for x in sol if x.k == k), None) if k is not None else (sol[0] if len(sol) == 1 else None)
+    if found is None:
+        raise Unsupported("it has no such solid in its body")
+    return found
+
+
+def item_verts(scene: IfcScene, element, top) -> np.ndarray:
+    """One solid's triangulated vertices, world metres (its clips applied)."""
+    i = scene.index_of(element.GlobalId)
+    s = scene.unit_scales[i]
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    shape = ifcopenshell.geom.create_shape(ifcopenshell.geom.settings(), top)
+    v = np.asarray(shape.verts, float).reshape(-1, 3)    # metres, in the representation's frame
+    return v @ place[:3, :3].T + place[:3, 3] * s
+
+
+def mesh_data(item) -> tuple[np.ndarray, np.ndarray]:
+    """A mesh's vertices (file units, its representation's frame) and its triangles (index triples into them)."""
+    if item.is_a("IfcTriangulatedFaceSet") or item.is_a("IfcPolygonalFaceSet"):
+        pts = np.asarray(item.Coordinates.CoordList, float)
+        pn = getattr(item, "PnIndex", None)
+        at = (lambda k: pn[k - 1] - 1) if pn else (lambda k: k - 1)
+        if item.is_a("IfcTriangulatedFaceSet"):
+            tris = [tuple(at(k) for k in t) for t in item.CoordIndex]
+        else:
+            tris = []
+            for f in item.Faces:
+                loop = [at(k) for k in f.CoordIndex]
+                tris += [(loop[0], loop[j], loop[j + 1]) for j in range(1, len(loop) - 1)]
+        return pts, np.asarray(tris, int).reshape(-1, 3)
+    index: dict[int, int] = {}
+    pts, tris = [], []
+    for f in item.Outer.CfsFaces:
+        bounds = [b for b in f.Bounds if b.is_a("IfcFaceOuterBound")] or list(f.Bounds[:1])
+        for b in bounds:
+            loop = []
+            for p in b.Bound.Polygon:
+                if p.id() not in index:
+                    index[p.id()] = len(pts)
+                    pts.append(p.Coordinates)
+                loop.append(index[p.id()])
+            if not b.Orientation:
+                loop = loop[::-1]
+            tris += [(loop[0], loop[j], loop[j + 1]) for j in range(1, len(loop) - 1)]
+    return np.asarray(pts, float), np.asarray(tris, int).reshape(-1, 3)
+
+
+def mesh_patches(pts: np.ndarray, tris: np.ndarray) -> list[dict]:
+    """A mesh's flat faces: triangles joined through shared corners (by position) that lie on one plane, within ~1° and
+    1 mm (`pts` in metres). Each: its triangles, area-weighted normal (from the winding), centroid and area."""
+    if not len(tris):
+        return []
+    a, b, c = pts[tris[:, 0]], pts[tris[:, 1]], pts[tris[:, 2]]
+    cr = np.cross(b - a, c - a)
+    area = np.linalg.norm(cr, axis=1) / 2
+    n = cr / np.maximum(np.linalg.norm(cr, axis=1), 1e-15)[:, None]
+    cen = (a + b + c) / 3
+    keys = np.round(pts / 1e-6).astype(np.int64)
+    corner: dict[tuple, list[int]] = {}
+    for t, tri in enumerate(tris):
+        for v in tri:
+            corner.setdefault(tuple(keys[v]), []).append(t)
+    parent = list(range(len(tris)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for ts in corner.values():
+        for x in ts:
+            for y in ts:
+                if x < y and area[x] > 0 and area[y] > 0 and n[x] @ n[y] > PLANE_COS \
+                        and abs(n[x] @ (cen[y] - cen[x])) < PLANE_TOL_M:
+                    parent[find(x)] = find(y)
+    groups: dict[int, list[int]] = {}
+    for t in range(len(tris)):
+        if area[t] > 0:
+            groups.setdefault(find(t), []).append(t)
+    out = []
+    for ts in groups.values():
+        w = area[ts]
+        nn = (n[ts] * w[:, None]).sum(axis=0)
+        out.append({"tris": ts, "normal": nn / (np.linalg.norm(nn) or 1.0), "point": (cen[ts] * w[:, None]).sum(axis=0) / w.sum(),
+                    "area": float(w.sum())})
+    return sorted(out, key=lambda x: -x["area"])
+
+
+def mesh_world(scene: IfcScene, element, so: Solid) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A mesh solid's vertices in its own frame (file units) and in the world (metres), and its triangles."""
+    s = scene.unit_scales[scene.index_of(element.GlobalId)]
+    local, tris = mesh_data(so.item)
+    world = (local @ so.world[:3, :3].T + so.world[:3, 3]) * s
+    return local, world, tris
+
+
+def patch_at(world: np.ndarray, tris: np.ndarray, point, normal) -> dict:
+    """The flat face of a mesh under a pick: the patch holding the triangle nearest the point, square to the normal
+    (either winding). Refused on a curved surface (its patch under 1% of the mesh's area) or when nothing is there."""
+    P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    patches = mesh_patches(world, tris)
+    total = sum(x["area"] for x in patches) or 1.0
+    best = None
+    for x in patches:
+        if abs(x["normal"] @ N) < 0.99:
+            continue
+        off = abs((P - x["point"]) @ x["normal"])
+        if off > NEAR_PICK_M:
+            continue
+        a, b, c = world[tris[x["tris"], 0]], world[tris[x["tris"], 1]], world[tris[x["tris"], 2]]
+        d = float(np.min(np.linalg.norm((a + b + c) / 3 - P, axis=1)))
+        if best is None or d < best[0]:
+            best = (d, x)
+    if best is None:
+        raise Unsupported("there is no flat face of it under the pick")
+    if best[1]["area"] < 0.01 * total:
+        raise Unsupported("that is a curved surface: ORCA pushes and pulls flat faces")
+    return best[1]
+
+
+NEAR_PICK_M = 0.005
+
+
+def push_mesh_face(scene: IfcScene, global_id: str, point, normal, by_m: float, item: int | None = None,
+                   least_m: float = MIN_PIECE_M, unique: bool = False) -> float:
+    """Push (+) or pull (−) a mesh's flat face along its outward `normal` (the pick's) by `by_m` metres: the face's
+    corners move, the faces round it stretch. Ports on that face go with it. Refused when it would fold through the
+    mesh's other side. Returns how thick it is behind the face after, metres."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    if unique:
+        make_unique(model, element)
+    so = solid(scene, element, item)
+    if so.kind != "mesh":
+        raise Unsupported("that solid is not a mesh")
+    if shared(model, element, _body_rep(element), so.top):
+        raise Unsupported("its body is shared with other elements")
+    by = float(by_m)
+    if not np.isfinite(by):
+        raise Unsupported("a push must be a finite length")
+    local, world, tris = mesh_world(scene, element, so)
+    P, n = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    patch = patch_at(world, tris, P, n)
+    plane = patch["point"]
+    keys = np.round(local * s / 1e-6).astype(np.int64)    # corners by position, to the micrometre
+    on = {tuple(keys[v]) for t in patch["tris"] for v in tris[t]}
+    moving = np.array([tuple(k) in on for k in keys])
+    depth = (plane - world) @ n
+    behind = depth[~moving & (depth > 1e-4)]
+    thick = float(depth.max())
+    near = float(behind.min()) if len(behind) else thick
+    if by < 0 and -by > near - least_m + 1e-9:
+        raise Unsupported(f"it would fold through its other side: at most {max(near - least_m, 0) * 1000:.0f} mm in")
+    step = (so.world[:3, :3].T @ (n * by)) / s           # the move in the mesh's own frame, file units
+    if so.item.is_a("IfcFacetedBrep"):
+        made: dict[tuple, object] = {}
+        for f in so.item.Outer.CfsFaces:
+            for b in f.Bounds:
+                loop = b.Bound
+                new = []
+                for p in loop.Polygon:
+                    k = tuple(np.round(np.asarray(p.Coordinates, float) * s / 1e-6).astype(np.int64))
+                    if k in on:
+                        if k not in made:
+                            made[k] = model.createIfcCartesianPoint(tuple(float(c) for c in np.asarray(p.Coordinates) + step))
+                        new.append(made[k])
+                    else:
+                        new.append(p)
+                loop.Polygon = new
+    else:
+        moved = local.copy()
+        moved[moving] += step
+        so.item.Coordinates = model.createIfcCartesianPointList3D([tuple(float(c) for c in r) for r in moved])
+        if getattr(so.item, "Normals", None) is not None:
+            so.item.Normals = None
+    for port in ifcopenshell.util.system.get_ports(element):   # ports on that face go with it
+        if port.ObjectPlacement is None:
+            continue
+        m = scene.placement(port.GlobalId)
+        if abs((m[:3, 3] - plane) @ n) <= 0.002:
+            m[:3, 3] += n * by
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+    scene.refresh_bounds([global_id])
+    return thick + by
+
+
+def _body_rep(element):
+    rep = element.Representation
+    return next(r for r in rep.Representations if r.RepresentationIdentifier == "Body")
+
+
+def clip_chain(top) -> list:
+    """The clip results over a solid, outermost first (the last clip made is first)."""
+    out = []
+    while top is not None and top.is_a("IfcBooleanClippingResult"):
+        out.append(top)
+        top = top.FirstOperand
+    return out
+
+
+def clip_planes(scene: IfcScene, element, so: Solid) -> list[tuple[object, np.ndarray, np.ndarray]]:
+    """Each clip over a solid: the clip result, a point on its plane (world metres) and its outward normal (out of
+    what is left, into what it took away)."""
+    i = scene.index_of(element.GlobalId)
+    s = scene.unit_scales[i]
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    out = []
+    for res in clip_chain(so.top):
+        half = res.SecondOperand
+        if not half.is_a("IfcHalfSpaceSolid") or not half.BaseSurface.is_a("IfcPlane"):
+            continue
+        m = ifcopenshell.util.placement.get_axis2placement(half.BaseSurface.Position)
+        n = m[:3, 2] * (-1.0 if half.AgreementFlag else 1.0)   # the flag: the normal points away from the half-space
+        n = place[:3, :3] @ n
+        out.append((res, (place @ np.append(m[:3, 3], 1.0))[:3] * s, n / np.linalg.norm(n)))
+    return out
+
+
+def move_clip(scene: IfcScene, global_id: str, j: int, by_m: float, item: int | None = None,
+              least_m: float = MIN_PIECE_M) -> float:
+    """Move a clip's plane out (+, it takes less away) or in (−, more) along its outward normal by `by_m` metres: a
+    clipped end pushed or pulled. Refused when it would leave less than `least_m`. Returns the move, metres."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    so = solid(scene, element, item)
+    planes = clip_planes(scene, element, so)
+    if not 0 <= j < len(planes):
+        raise Unsupported("it has no such clip")
+    res, P, n = planes[j]
+    by = float(by_m)
+    v = item_verts(scene, element, so.top)
+    left = float(((P - v) @ n).max())
+    if by < 0 and left + by < least_m - 1e-9:
+        raise Unsupported(f"less than {least_m * 1000:.0f} mm of it would be left")
+    half = res.SecondOperand
+    pos = half.BaseSurface.Position
+    m = ifcopenshell.util.placement.get_axis2placement(pos)
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    step = place[:3, :3].T @ (n * by) / s
+    loc = m[:3, 3] + step
+    half.BaseSurface = model.createIfcPlane(model.createIfcAxis2Placement3D(
+        _point(model, loc), pos.Axis, pos.RefDirection))
+    scene.refresh_bounds([global_id])
+    return by
 
 
 def _sole_body(model, element, unique: bool = False, item: int | None = None):
@@ -2408,10 +2747,16 @@ def clip_to_plane(scene: IfcScene, global_id: str, point, normal, least_m: float
     scene.refresh_bounds([global_id])
 
 
-def _is_clipped(element) -> bool:
+def _is_clipped(element, item: int | None = None) -> bool:
+    """Whether the Body's one solid (or its `item`th) is under a clip."""
     rep = element.Representation
     bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
-    return bool(bodies) and len(bodies[0].Items) == 1 and bodies[0].Items[0].is_a("IfcBooleanClippingResult")
+    if not bodies:
+        return False
+    items = bodies[0].Items
+    if item is None:
+        return len(items) == 1 and items[0].is_a("IfcBooleanClippingResult")
+    return 0 <= item < len(items) and items[item].is_a("IfcBooleanClippingResult")
 
 
 def _mesh_verts(element) -> np.ndarray:
