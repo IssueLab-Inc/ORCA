@@ -1,6 +1,7 @@
 // Measuring (docs/measure.md): the pure parts. Where a plane cuts an element's triangles and how the cut joins into the
 // outline's straight runs, clipping an edge to a view's planes, choosing what the pointer snaps to, and the words.
 import * as THREE from "three";
+import { pointToIfc } from "./origin";
 
 export type SnapKind = "end" | "mid" | "edge" | "face" | "free";
 export type Segment = [THREE.Vector3, THREE.Vector3];
@@ -132,7 +133,7 @@ export function measureText(m: Pick<Measurement, "a" | "b">): { length: string; 
 /** One measurement as a line to paste: number, length, components, the view, and both ends in model coordinates. */
 export function copyLine(m: Measurement): string {
   const t = measureText(m);
-  const at = (v: THREE.Vector3) => `(${ifc(v).map((x) => x.toFixed(3)).join(", ")})`;
+  const at = (v: THREE.Vector3) => `(${pointToIfc(v).map((x) => x.toFixed(3)).join(", ")})`;   // where it is in the model
   return `M${m.id}  ${t.length}  (${t.parts})  ${m.view}  from ${at(m.a)} to ${at(m.b)} m`;
 }
 

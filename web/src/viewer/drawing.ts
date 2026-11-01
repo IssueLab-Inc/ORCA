@@ -3,12 +3,14 @@
 // planes its spec asks for, and the render target the viewer draws it into before compositing it into its pane.
 import * as THREE from "three";
 import { facingLook, planRange, sectionFrame, toThree, type DrawingSpec, type Level, type Rect, type SectionSpec } from "./views";
+import { pointToIfc, pointToThree } from "./origin";
 
 /** The paper a drawing is drawn on. */
 export const PAPER = new THREE.Color("#fbfbf8");
 
 /** IFC (x, y, z) ← three.js (x, y, z): (x, −z, y). */
-export const toIfc = (v: THREE.Vector3): [number, number, number] => [v.x, -v.z, v.y];
+/** A viewer point in IFC metres (drawing specs, datums and the server are in IFC; the viewer draws from the origin). */
+export const toIfc = pointToIfc;
 
 export class DrawingView {
   readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
@@ -66,7 +68,7 @@ export class DrawingView {
       const { along, look } = sectionFrame(spec);
       this.look.copy(toThree(look[0], look[1], 0)).normalize();
       this.up.set(0, 1, 0);
-      const o = toThree(spec.origin[0], spec.origin[1], 0);
+      const o = pointToThree(spec.origin[0], spec.origin[1], 0);
       this.cut = new THREE.Plane().setFromNormalAndCoplanarPoint(this.look, o);   // keeps what lies ahead of the line
       this.planes.push(this.cut);
       this.beyond = spec.far ?? null;
@@ -221,7 +223,7 @@ export function corners(b: THREE.Box3): THREE.Vector3[] {
 /** A section's far clip by default: everything of the pair behind its line, and 2 m (or a share of the model) more. */
 export function farBehind(spec: SectionSpec, pair: THREE.Box3, extra: number): number {
   const { look } = sectionFrame(spec);
-  const n = toThree(look[0], look[1], 0).normalize(), o = toThree(spec.origin[0], spec.origin[1], 0);
+  const n = toThree(look[0], look[1], 0).normalize(), o = pointToThree(spec.origin[0], spec.origin[1], 0);
   const d = corners(pair).map((p) => n.dot(p.clone().sub(o)));
   return Math.max(0, ...d) + extra;
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { flush, viewerModule } from "./app-host.mjs";
+import { flush, originModule, viewerModule } from "./app-host.mjs";
 
 async function stage({ glass = false, realAdopt = false } = {}) {
   const pending = [], removed = [], adopted = [], added = [];
@@ -88,4 +88,22 @@ test("dual-batch successful replacement adopts both new batches and removes and 
   assert.deepEqual(s.removed, [s.old.mesh, s.old.glass]);
   assert.equal(s.old.mesh.disposed, true); assert.equal(s.old.glass.disposed, true);
   assert.equal(next.mesh.material, s.v.solid); assert.equal(next.glass.material, s.v.glass);
+});
+
+test("every file of a load is placed from the first file's origin, and the viewer takes it with the models", async () => {
+  const o = await originModule(); o.setOrigin(null);
+  const s = await stage(), calls = [];
+  globalThis.__sightlineLoadIfc = (...a) => new Promise((resolve, reject) => { calls.push(a); s.pending.push({ resolve, reject }); });
+  const work = s.v.load([new Uint8Array([1]), new Uint8Array([2])], ["one", "two"]);
+  s.pending[0].resolve({ ...s.model("first"), origin: [417609, 78711] }); await flush();
+  assert.equal(calls[0][1], null, "the first file picks its own");
+  assert.deepEqual(calls[1][1], [417609, 78711], "the second is placed from the first's, so they stay aligned");
+  assert.deepEqual(o.origin(), [0, 0], "the models on screen keep theirs until the new ones are adopted");
+  s.pending[1].resolve({ ...s.model("second"), origin: [417609, 78711] }); await work;
+  assert.deepEqual(o.origin(), [417609, 78711]);
+  // A superseded load never touches it.
+  let current = 1; const stale = s.v.load([new Uint8Array([3])], ["stale"], () => current === 1); current = 2;
+  s.pending[2].resolve({ ...s.model("stale"), origin: [5000, 5000] }); await stale;
+  assert.deepEqual(o.origin(), [417609, 78711]);
+  o.setOrigin(null);
 });

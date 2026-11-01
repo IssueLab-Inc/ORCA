@@ -23,19 +23,26 @@ export async function compiled(path, dependencies = {}, labels = false) {
   for (const [name, target] of Object.entries(dependencies)) outputText = outputText.replaceAll(`from "${name}"`, `from ${JSON.stringify(target)}`);
   return url(outputText + `\n// host ${sequence++}`);
 }
+/** viewer/origin.ts holds the origin the models are drawn from: compiled once, so the Viewer, its modules and a test
+ * share the one instance. */
+let originUrl = null;
+const originOnce = () => (originUrl ??= compiled("../src/viewer/origin.ts", { three: import.meta.resolve("three") }));
+export async function originModule() { return import(await originOnce()); }
 /** The real Viewer module with its own modules compiled in, and `loader` (source) standing in for ./ifcLoader. */
 export async function viewerModule(loader = "export const loadIfc=()=>null;") {
   const three = import.meta.resolve("three");
+  const origin = await originOnce();
   const views = await compiled("../src/viewer/views.ts", { three });
   const normals = await compiled("../src/viewer/normals.ts", { three });
   return import(await compiled("../src/viewer/Viewer.ts", {
     three, "three/examples/jsm/controls/OrbitControls.js": import.meta.resolve("three/examples/jsm/controls/OrbitControls.js"),
     "three/examples/jsm/utils/BufferGeometryUtils.js": import.meta.resolve("three/examples/jsm/utils/BufferGeometryUtils.js"),
     "./ifcLoader": url(loader), "./views": views, "./cube": await compiled("../src/viewer/cube.ts", { three, "./views": views }),
-    "./drawing": await compiled("../src/viewer/drawing.ts", { three, "./views": views }),
-    "./annotate": await compiled("../src/viewer/annotate.ts", { three, "./views": views }),
-    "./measure": await compiled("../src/viewer/measure.ts", { three }),
-    "./normals": normals, "./patch": await compiled("../src/viewer/patch.ts", { three, "./normals": normals }),
+    "./drawing": await compiled("../src/viewer/drawing.ts", { three, "./views": views, "./origin": origin }),
+    "./annotate": await compiled("../src/viewer/annotate.ts", { three, "./views": views, "./origin": origin }),
+    "./measure": await compiled("../src/viewer/measure.ts", { three, "./origin": origin }),
+    "./normals": normals, "./origin": origin,
+    "./patch": await compiled("../src/viewer/patch.ts", { three, "./normals": normals, "./origin": origin }),
     "./edit": await compiled("../src/viewer/edit.ts", { three }) }));
 }
 export function find(node, predicate) {

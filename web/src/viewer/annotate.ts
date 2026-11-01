@@ -6,6 +6,7 @@ import * as THREE from "three";
 import type { DrawingView } from "./drawing";
 import { COMPASS_NAME, facingLook, gridShows, level3, nearestScale, planRange, scaleBar, sectionFrame, toThree, type DrawingSpec,
   type GridAxis, type Level, type Rect } from "./views";
+import { pointToThree } from "./origin";
 
 const INK = "#1d2530", GRID = "#2f6aa3", CLOUD = "#d0342c", MUTED = "#5d6a7a", MARK = "#7a3db8";
 
@@ -41,14 +42,14 @@ export function annotate(g: CanvasRenderingContext2D, dpr: number, a: AnnotateIn
   if (spec.kind === "plan") {
     // Grids: dash-dot centre lines, a bubble at each end.
     for (const ax of a.grids) {
-      const p0 = px(toThree(ax.start[0], ax.start[1], 0)), p1 = px(toThree(ax.end[0], ax.end[1], 0));
+      const p0 = px(pointToThree(ax.start[0], ax.start[1], 0)), p1 = px(pointToThree(ax.end[0], ax.end[1], 0));
       gridLine(g, p0, p1, ax.tag, true);
     }
     // Sections: the line, look heads and name; the far clip and the crop's sides.
     for (const o of a.others) {
       if (o.spec.kind === "section") {
         const s = o.spec, { along, look } = sectionFrame(s);
-        const o3 = (u: number, v = 0) => toThree(s.origin[0] + along[0] * u + look[0] * v, s.origin[1] + along[1] * u + look[1] * v, 0);
+        const o3 = (u: number, v = 0) => pointToThree(s.origin[0] + along[0] * u + look[0] * v, s.origin[1] + along[1] * u + look[1] * v, 0);
         const left = s.crop?.left ?? 6, right = s.crop?.right ?? 6;
         const A = px(o3(-left)), B = px(o3(right));
         g.save(); g.strokeStyle = MARK; g.lineWidth = 2.2; g.setLineDash([18, 5, 3, 5]); line(g, A, B); g.restore();
@@ -102,7 +103,7 @@ export function annotate(g: CanvasRenderingContext2D, dpr: number, a: AnnotateIn
     // Grid axes that run along the view's look: a vertical line with its bubble on top.
     for (const ax of a.grids) {
       if (!gridShows(ax, look)) continue;
-      const mid = toThree((ax.start[0] + ax.end[0]) / 2, (ax.start[1] + ax.end[1]) / 2, 0);
+      const mid = pointToThree((ax.start[0] + ax.end[0]) / 2, (ax.start[1] + ax.end[1]) / 2, 0);
       const x = px(mid).x;
       if (x < -10 || x > rect.w + 10) continue;
       gridLine(g, new THREE.Vector2(x, rect.h - 8), new THREE.Vector2(x, 70), ax.tag, false);

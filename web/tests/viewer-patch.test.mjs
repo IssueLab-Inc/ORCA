@@ -5,7 +5,7 @@ import { appHost, compiled, option } from "./app-host.mjs";
 
 const three = import.meta.resolve("three");
 const { patchModel, makeRoom, toGeometry, removeElements } = await import(await compiled("../src/viewer/patch.ts",
-  { three, "./normals": await compiled("../src/viewer/normals.ts", { three }) }));
+  { three, "./normals": await compiled("../src/viewer/normals.ts", { three }), "./origin": await compiled("../src/viewer/origin.ts", { three }) }));
 
 /** A box as the server sends it: world metres, IFC Z up, unwelded (one quad of two triangles per face). */
 function box(gid, [x, y, z], [sx, sy, sz] = [1, 1, 1], extra = {}) {

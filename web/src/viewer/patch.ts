@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import type { LoadedElement, LoadedModel } from "./ifcLoader";
 import { creased } from "./normals";
+import { serverVerts } from "./origin";
 
 /** One element's triangles from the server: world metres, IFC Z up, unwelded, with normals (unused: `toGeometry`
  * makes its own) and its style's colour. */
@@ -21,9 +22,7 @@ export const ROOM = { instances: 64, vertices: 16384, indices: 49152 };
  * creased like the loader's (viewer/normals.ts), not taken from the server, so a kept element shades like the model
  * round it. */
 export function toGeometry(m: ElementMesh): THREE.BufferGeometry {
-  const pos = new Float32Array(m.verts.length);
-  for (let i = 0; i < pos.length; i += 3) { pos[i] = m.verts[i]; pos[i + 1] = m.verts[i + 2]; pos[i + 2] = -m.verts[i + 1]; }
-  return creased(pos, m.faces);
+  return creased(serverVerts(m.verts), m.faces);   // from the origin the models are drawn from (viewer/origin.ts)
 }
 
 /** Make sure `batch` has room for `vertices`, `indices` and `instances` more: first by packing out what earlier patches
