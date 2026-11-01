@@ -48,6 +48,12 @@ Every element's box is measured once when a model opens (`IfcScene.bounds`). Two
 - **Wider fixes** copy the open models two or three times, so they are offered up to `SIGHTLINE_WIDER_FIX_MAX_MB`
   (100 by default); Propose fixes works at any size.
 - Written models and exports older than an hour are deleted.
+- **Adding to an open scene** ([add-and-remove-models.md](add-and-remove-models.md), Nov 1). An upload added to a scene
+  is one model upload and passes the same caps; its folder joins the scene's (`Workspace._roots` holds a list, one
+  folder per opening or adding, all deleted with the scene). The byte budget then bounds one scene too: adding what
+  would put it alone past `SIGHTLINE_SCENE_BUDGET_MB` is refused, since a scene grown upload by upload is not held by
+  the upload cap. Only the new files' boxes are measured (`IfcScene.add_files`). A model taken out is deleted from its
+  folder at once, and a folder that holds none of the scene's files any more goes with it.
 
 ## Measured, and the cap
 

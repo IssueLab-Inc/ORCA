@@ -198,3 +198,8 @@ Work test-first: write the failing test, run it red, implement, run it green.
 | Date | Slice / task | State | Commit | Checked |
 |---|---|---|---|---|
 | Nov 1 | Spec and plan | written, owner-approved | (this commit) | n/a |
+| Nov 1 | 1.1 `IfcScene.add_files`, `remove_file`, `layout` | done | `88fb766` | `test_scene_models.py` (7) |
+| Nov 1 | 1.2–1.3 `Workspace.add_models` / `add_samples`, `remove_model`, `Register.drop_file`, journal marking | done | `1d20c77` | +15 tests, Northbank add and remove |
+| Nov 1 | 1.4 routes, `layout` on every way in and the patch, doc 10 | done | `1314f57` | +5 route tests, docs map |
+| Nov 1 | 1.5 docs (04, 05, 10, 14, 15, 16, 18, 20, 22; uploads, detection, manual edits; spec status) | done | (the docs commit) | docs map |
+| Nov 1 | 1.6 finish | PR open | | server suite, web build and tests, runtime on port 8023 (build log) |

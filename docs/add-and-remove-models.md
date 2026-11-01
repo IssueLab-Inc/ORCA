@@ -1,7 +1,8 @@
 # Adding and removing models in an open scene
 
 **Status:** approved by the owner (Nov 1), to go in before the Nov 3 freeze. The plan is
-[add-and-remove-models-plan.md](add-and-remove-models-plan.md). Not built yet.
+[add-and-remove-models-plan.md](add-and-remove-models-plan.md). Slice 1 (the server) is built (Nov 1); slice 2 (the
+page and viewer) is next.
 
 Owner decisions (Nov 1, after "we are unable to add/append a new model once we have opened one"):
 
@@ -48,7 +49,7 @@ again and loses what they did.
 |---|---|
 | A STEP file into an IFC scene, or the reverse | "A STEP machine can't join building models yet: open it on its own." (or the reverse) |
 | A file whose name is already open | "Northbank-MEP.ifc is already open." |
-| Over the scene budget (`SIGHTLINE_SCENE_BUDGET_MB`) | today's budget refusal, with the new total |
+| Over the scene budget (`SIGHTLINE_SCENE_BUDGET_MB`) | "With these the open models would be 340 MB, over this server's 300 MB for one set: open fewer models together." (Opening had no refusal: the budget only evicted older scenes. Adding evicts them too, and refuses when this scene alone would pass it, since a scene grown upload by upload is not held by the upload cap.) |
 | Over the upload allowance or size cap | today's upload refusals; adding samples is free |
 | Removing the only model | "This is the only model: open others instead." |
 | Removing by a stale position (another tab changed the list) | 409: "The models changed: reload them." |

@@ -2,7 +2,7 @@
 
 > **Covers:** `server/sightline/scene.py` (opening IFC), `server/sightline/step.py`, `server/sightline/reports.py`,
 > `server/sightline/document.py`, the file parts of `server/sightline/service.py` (`Workspace.open`, `open_paths`,
-> `export`, `file`, `step_changes`, `open_report_sample`, `open_report_folder`, `save_capture`, `match`) and of
+> `add_models`, `remove_model`, `export`, `file`, `step_changes`, `open_report_sample`, `open_report_folder`, `save_capture`, `match`) and of
 > `server/sightline/app.py` (`_receive_models`, `_unpack`, `upload_report`, `export`, `_build_document`,
 > `_tidy_exports`), `server/sightline/built.py` (its cache), `web/src/uploads.ts`, `web/src/reqFile.ts` (the file
 > side) · **Checked against code:** 2026-10-30 (`104fda9`) · **Deeper design:** [docs/step.md](../step.md),
@@ -126,6 +126,25 @@ sequenceDiagram
   (`uploads.localFile`); only a STEP comes back from the server, as its converted IFC.
 - **A 409 `requirements_unknown`** (the server forgot the requirements id) re-registers and resends once
   (`reRegister` in `api.ts`).
+
+### Adding to an open scene, and taking a model out
+
+An open scene can take more models without being opened again, and give one up
+([docs/add-and-remove-models.md](../add-and-remove-models.md)):
+
+- **Samples:** `POST /api/scenes/{scene_id}/models` (`Workspace.add_samples`), free. **Uploads:**
+  `POST /api/scenes/{scene_id}/models/upload/stream` goes through `_receive_models` as an upload does (the same caps,
+  one use of `model_upload_limit`), with a `check` that refuses before anything is charged: a STEP machine among
+  building models or the reverse ("A STEP machine can't join building models yet: open it on its own."), a name
+  already open. Then `Workspace.add_models` converts STEP as opening does (`Workspace._as_ifc`, shared with
+  `open_paths`), refuses a set past the byte budget, makes room by evicting other scenes, and appends the files
+  (`IfcScene.add_files`: only their boxes are measured). The upload's folder joins the scene's (`_roots`, one per
+  opening or adding).
+- **Removing:** `DELETE /api/scenes/{scene_id}/models/{index}?name=` (`Workspace.remove_model`), by position and name
+  so a page that missed a change gets 409 instead of the wrong file. An uploaded file is deleted at once (a sample
+  never is); a folder that no longer holds any of the scene's files goes with it.
+- **Indexes move.** Every later file's index drops by one, so `GET /api/scenes/{scene_id}/files/{index}` serves
+  another file at the same URL: the reply's `layout` tells the page to load the files again by the new list.
 
 ## In: STEP models
 
@@ -416,7 +435,7 @@ under `samples/`, the settings store and a built cache placed outside `$TMP`.
 |---|---|---|
 | Sample models, sample reports, shipped STEP cache | `samples/`, `samples/reports/<name>/`, `samples/step-cache/` | Redeploy (part of the image) |
 | Open scenes and every edit | Memory (`Workspace.scenes`, `IfcScene.models`) | Evicted by `SIGHTLINE_MAX_SCENES` or `SIGHTLINE_SCENE_BUDGET_MB` (oldest first, live agent links' last), or restart |
-| Uploaded models (unpacked) | `$TMP/sightline-models/<tmp>/` | The scene is dropped, or the open fails |
+| Uploaded models (unpacked) | `$TMP/sightline-models/<tmp>/`, one folder per opening or adding | The scene is dropped, or the open or add fails; a removed model's file at once, its folder once it holds none of the scene's files |
 | STEP conversions (sample or upload) | `<scene folder>/converted-<i>/<stem>.ifc` and `<stem>.step.json` | The scene is dropped |
 | STEP cache when none is shipped | `$TMP/sightline-models/step-cache/<sha256>.ifc`, `.json` | Restart |
 | Open reports | Memory (`Workspace.reports`) | Evicted by `SIGHTLINE_MAX_REPORTS` (0: never), or restart |
@@ -430,7 +449,7 @@ under `samples/`, the settings store and a built cache placed outside `$TMP`.
 
 - **"An hour"** is `EXPORTS_KEEP_S` (3,600 s): `app._tidy_exports` deletes anything in `sightline-exports` older
   than that, but it runs only when someone fetches a model file or an export, not on a timer.
-- Dropping a scene deletes its own folder (`Workspace._roots`: the upload and its conversions); dropping a
+- Dropping a scene deletes its own folders (`Workspace._roots`: the uploads and their conversions); dropping a
   `temporary` report deletes its folder (`Workspace._keep`).
 
 ## When to update this doc
@@ -439,6 +458,7 @@ under `samples/`, the settings store and a built cache placed outside `$TMP`.
   a new STEP shape kind in `_prism`, a new BCF field, a new PDF section).
 - A new or renamed temporary folder, cache, export name or retention rule (`EXPORTS_KEEP_S`, `_tidy_exports`,
   `built.CACHE`, `Workspace._evict` / `_keep`).
-- A change to the upload path (`_receive_models`, `_unpack`, size or count caps, the page's packing in `api.ts`).
+- A change to the upload path (`_receive_models`, `_unpack`, size or count caps, the page's packing in `api.ts`), or
+  to adding models to an open scene or removing one (`Workspace.add_models`, `remove_model`).
 - A change to how teams, acting team, sections or the DRAFT rule are decided in `document.py`.
 - A change to `service.step_changes` or `step.export` (what is moved, replaced or added).
