@@ -517,7 +517,8 @@ What is joined to what, so a fix that moves something never leaves a joint apart
   joined cap to cap, the element first), `plan_move` → `MovePlan` (`moved`, `carried`, `stretched`, `refused`,
   `refused_at`, `key`, `edit`), `summary`, `apply_move`, `check_joints`, `baseline` / `check_applied`, `trial_move`
   (`MoveTrial`), `describe` (Muse's text), `graph` / `links_of` (every link by kind for the viewer and the properties
-  card, cached on the scene), `move_words`, `mode` (`SIGHTLINE_CONNECTED_MOVES`), `CARRY_MAX`,
+  card, cached on the scene), `move_words`, `mode` (`SIGHTLINE_CONNECTED_MOVES`), `refit_moves`
+  (`SIGHTLINE_MOVE_REFIT`), `Jog` (a re-fit, `plan_move(refit=)`), `CARRY_MAX`,
   `PARALLEL_M`, `COVER`, `TOUCH_M`, `FACING`, `INLINE`.
 - **Imports:** `edits.py`, `scene.py`. **Imported by:** `agent.py`, `plans.py`, `service.py`.
 - **Rules:** every path that moves something plans first (`agent._try_move`, combined steps, `plans` joint hits,

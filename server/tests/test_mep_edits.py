@@ -232,3 +232,30 @@ def test_a_carried_move_still_takes_a_free_ended_neighbour_whole(mep):
     r = manual.check(ws, sid, {"op": "move", "element": g["DA"], "delta_m": [0, 0, 0.4], "carry": True})
     assert r["blocked"] is None and "re-fitted" not in r["summary"] and r["created"] == []
     assert g["DB"] in r["changed"], "nothing beyond it: taken along, no new parts"
+
+
+
+def test_muse_s_move_re_fits_too_and_keeps_it_as_tried(mep, monkeypatch):
+    import ifcopenshell.util.system as us
+    from sightline import agent, connections, plans
+    ws, sid, scene, g = mep
+    terminal, port = _corner_to_a_terminal(ws, sid, scene, g)
+    monkeypatch.setenv("SIGHTLINE_MOVE_REFIT", "off")   # as before: the terminal beyond DB refuses the move
+    attempt, option = agent._try_move(scene, {"title": "lift the main", "delta_m": [0, 0, 0.4]}, g["DA"], 0.025)
+    assert option is None and "AT1" in attempt.reason
+    monkeypatch.setenv("SIGHTLINE_MOVE_REFIT", "on")
+    attempt, option = agent._try_move(scene, {"title": "lift the main", "delta_m": [0, 0, 0.4]}, g["DA"], 0.025)
+    assert option is not None, attempt.reason
+    assert option.edit["jogs"] == [{"global_id": g["DB"], "end": "start"}] and "re-fitted" in option.edit["summary"]
+    assert option.preview and len(option.preview) == 5, "DB's five pieces drawn for the page"
+    assert scene.bounds()[g["DB"]][:, 2] == pytest.approx([2.65, 2.95]) and scene.bounds()[g["DB"]][1][1] == pytest.approx(4.0),         "the trial put everything back"
+    kept = plans.apply(ws, sid, [{**agent.asdict(option), "pair": [g["DA"], terminal]}])
+    assert scene.bounds()[g["DB"]][:, 2] == pytest.approx([3.05, 3.35])
+    peer = us.get_connected_port(port)
+    assert peer is not None and us.get_port_element(peer).GlobalId != g["DB"] and scene.bounds()[terminal][0][2] == pytest.approx(2.5)
+    assert all(scene.has(x) for x in kept["changed"]) and len(kept["changed"]) >= 7, "the page draws the re-fit's pieces"
+    assert not valid(scene)
+    (entry,) = ws.journal(sid).entries[1:]
+    assert len(entry.created) == 4
+    ws.journal(sid).undo(scene)
+    assert us.get_port_element(us.get_connected_port(port)).GlobalId == g["DB"] and not valid(scene)

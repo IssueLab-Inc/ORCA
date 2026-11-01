@@ -309,7 +309,7 @@ class Workspace:
         if clearance_m is None:
             clearance_m = self.clearance(scene_id, moved[0] if moved else None, obstacles[0] if obstacles else None)
         with self.lock:
-            plan = connections.plan_move(s, moved, delta_m)
+            plan = connections.plan_move(s, moved, delta_m, refit=connections.refit_moves())
             if not plan.ok:
                 return {"passed": False, "hits": [], "min_clearance_m": None, "checked_against": 0, "placements": {},
                         "reason": plan.refused, "joints": {"refused_at": plan.refused_at}}
@@ -538,18 +538,18 @@ class Workspace:
         since it was checked is refused."""
         s = self.scene(scene_id)
         with self.lock:
-            plan = connections.plan_move(s, moved, delta_m)
+            plan = connections.plan_move(s, moved, delta_m, refit=connections.refit_moves())
             if not plan.ok:
                 raise edits.Unsupported(plan.refused)
             if expect and expect.get("key") and expect["key"] != plan.key():
                 raise edits.Unsupported("the model changed since this move was checked: propose it again")
-            changed = plan.changed()
-            files = {s.index_of(g) for g in changed}
+            files = {s.index_of(g) for g in plan.changed()}
             with edits.kept_files(s, files):
                 placements = connections.apply_move(s, plan)
                 broken = connections.check_joints(s, plan)
                 if broken:   # never kept: undone with the rest
                     raise edits.Unsupported("a joint would not hold: " + "; ".join(w for *_, w in broken))
+            changed = plan.changed()   # with what its re-fits made: the page draws them
             for g in changed:  # kept: export writes these files
                 s.mark_edited(g)
             s.bump(files)

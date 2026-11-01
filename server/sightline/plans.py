@@ -67,7 +67,7 @@ _trial = edits.trial_files
 
 
 def _in_trial_move(scene, it: Item, o: dict):
-    plan = connections.plan_move(scene, o["moved"], o["delta_m"])
+    plan = connections.plan_move(scene, o["moved"], o["delta_m"], refit=connections.refit_moves())
     if not plan.ok:   # never tried: it would pull a joint apart (the check reports which)
         broken = [verify.Hit(g, scene.entity(g).is_a(), "joint", 0.0) for g in plan.refused_at]
         return list(o["moved"]), set(o["moved"]), lambda clearance_m, owner: (broken, None)

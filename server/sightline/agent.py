@@ -551,7 +551,8 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
     for o in options:  # what each option changes, as it is now, so the UI can show before and after together
         try:
             with lock:   # a move's stretched segments change too
-                o.before = edits.meshes(base, o.moved + [st["global_id"] for st in (o.edit or {}).get("stretched", [])])
+                o.before = edits.meshes(base, o.moved + [st["global_id"] for st in (o.edit or {}).get("stretched", [])]
+                                        + [j["global_id"] for j in (o.edit or {}).get("jogs", [])])
         except RuntimeError:
             o.before = None
         if policy and doc is not None:
@@ -677,7 +678,7 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
     move must clear, which never counts as what it stands on."""
     run = connections.run(scene, target)
     delta = [float(v) for v in cand.get("delta_m", [0, 0, 0])]
-    plan = connections.plan_move(scene, run, delta)
+    plan = connections.plan_move(scene, run, delta, refit=connections.refit_moves())
     if not plan.ok:
         if on_trial:   # the pilot still shows the idea, and what it would have pulled apart
             on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
