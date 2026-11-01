@@ -90,6 +90,10 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .prow-tools { display: none; gap: 0; flex: none; margin: -3px 0; }
 .prow-tools .ibtn { width: 22px; height: 22px; }
 .kv dd.prow:hover .prow-tools, .kv dd.prow:focus-within .prow-tools { display: inline-flex; }
+/* A row that can be changed shows its pencil, muted, without a hover: editing is found, not stumbled on */
+.kv dd.prow.editable .prow-tools { display: inline-flex; }
+.kv dd.prow.editable:not(:hover):not(:focus-within) .prow-tools .ibtn:not(.pencil) { display: none; }
+.kv dd.prow.editable:not(:hover):not(:focus-within) .prow-tools .pencil { opacity: .45; }
 @media (pointer: coarse) { .kv dd.prow .prow-tools { display: inline-flex; } }
 .pset-link { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .slot-properties.in-dock { padding: 10px 12px; }
@@ -2129,6 +2133,13 @@ a.pop-item { color: inherit; }
 .edit-status.ok { background: var(--ok-soft); color: var(--ok); } .edit-status.warn { background: var(--warn-soft); color: var(--warn); }
 .edit-status.bad { background: var(--fail-soft); color: var(--fail); }
 .edit-summary { margin: 0; color: var(--ink); }
+.edit-effects { margin: 2px 0 0; padding-left: 16px; font-size: 12px; color: var(--ink); }
+.edit-effects li { margin: 1px 0; }
+.edit-also { margin-top: 4px; padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--accent-soft);
+  font-size: 12px; }
+.edit-also-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.edit-also ul { margin: 2px 0 0; padding-left: 16px; }
+.edit-also li { margin: 1px 0; overflow-wrap: anywhere; }
 .edit-panel .edit-warn { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .edit-actions { display: flex; gap: 6px; align-items: center; }
 .edit-actions .btn.primary, .edit-actions .btn.danger { display: inline-flex; align-items: center; gap: 6px; }

@@ -93,7 +93,8 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
     filter, on top) and **Isolate all with this value** (for now); applying a filter or isolating takes every view
     to what it acts on ([filters.md](filters.md), "Zoom"). The Storey row opens the storey. **Collapse all** /
     **Expand all** beside the filter.
-  - **Change it** (a pencil on the rows of the element itself, Nov 1: [editing-parity.md](editing-parity.md), Tier 3):
+  - **Change it** (a pencil on the rows of the element itself, shown muted without a hover so editing is found, Nov 1:
+    [editing-parity.md](editing-parity.md), Tier 3):
     its Name, Description, Object type, Tag and Predefined type, a value in one of its own property sets (text, a
     number, yes or no), its type, its storey and its material, each from what its own model has (`property-choices`).
     A classification's pencil swaps it for another of its model's references in one change, or takes it off

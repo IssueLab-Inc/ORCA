@@ -2991,6 +2991,9 @@ export function App() {
   }, [dockCover]);
   // Selecting an element shows its Properties panel (floating at first, wherever the user put it after).
   useEffect(() => { if (selected?.globalId && docked) dock.current?.show("properties"); }, [selected?.globalId, docked]);
+  // The Edit tool works over the model: a Properties panel floating there closes (one docked in a side bar stays), and
+  // the next selection brings it back.
+  useEffect(() => { if (tool.edit && docked) dock.current?.closeFloating("properties"); }, [tool.edit, docked]);
   const pickedDemo = demos.find((d) => d.files.length === picked.length && d.files.every((f) => picked.includes(f)));
   const startLabel = pickedDemo?.label ?? "Open the models";
   const planning = !!planRun && planRun.phase !== "done";

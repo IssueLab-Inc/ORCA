@@ -190,12 +190,18 @@ export interface Journal { entries: JournalEntry[]; can_undo: boolean; can_redo:
 export interface EditFace {
   element: string; id: string; kind: "cap" | "side" | "radial" | "flank" | "edge" | "plane" | "clip" | "other"; name: string;
   normal: number[]; point: number[]; size_m: number | null; allows: string[]; why_not: string | null;
+  /** What the Edit tool's choices would do here (manual.choices_for): the type an edit to this face would change for
+   * all its elements (null: none), and how many parts are joined to the element. */
+  choices?: { type: { name: string; others: number; kind: string } | null; joined: number };
 }
+/** Another element a checked edit changes or makes, and why (manual.also). */
+export interface EditAlso { element: string; name: string; why: string }
 /** A hand edit, as the server takes it from the page, chat, voice and MCP (manual.py). */
 export type EditOp = { op: string; element: string } & Record<string, unknown>;
 export interface EditHit { other: string; other_class: string; kind: string; distance_m: number; name: string }
 /** What checking a hand edit found (manual.check): refused (`blocked`), or what it clears and hits, and its preview. */
 export interface EditCheck {
+  also?: EditAlso[];
   op: EditOp; passed: boolean; blocked: string | null; clashes: number; warnings: JournalEntry["warnings"];
   summary?: string; face?: EditFace | null; key?: string; revision?: number; targets?: string[]; close?: number;
   new?: EditHit[]; worse?: EditHit[]; cleared?: { other: string; name: string; was_m: number }[];

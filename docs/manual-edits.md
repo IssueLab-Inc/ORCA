@@ -242,8 +242,13 @@ back.
   Keep, or **Keep with N clashes** / **Keep with 1 clash · 1 open joint** (`keepLabel`); a check's offer is a button
   (**Clip it flush**, **Move it on its own**, which also turns carrying off). **Take joined parts along** (push/pull,
   align and move; off by default, remembered for the visit in `sessionStorage` `orca.edit.carry`) sends `carry`;
-  **Apply to the type** (push/pull and align; off by default and again for each element) sends `scope: "type"`. Esc
-  steps back one thing at a time.
+  **Apply to the type** (push/pull and align; off by default and again for each element) sends `scope: "type"`. Each
+  shows only where it does something: the face picked says how many parts are joined to the element and which type an
+  edit there would change, with how many others (`choices`; "Apply to type FT-BOX · 1 other"). A check reads as the
+  edit, then each thing it brings along on its own line (`effects`), then **Also changes N other elements**, by why,
+  a few names each (`also`, `alsoGroups`: same type, a joined wall's end, taken along, re-fitted, new part), with
+  **Show them** to frame them all before keeping it. A Properties panel floating over the model closes when the Edit
+  tool opens (one docked in a side bar stays). Esc steps back one thing at a time.
 - **No dead ends**: a face the tool cannot take is still chosen and lit; the panel says why and offers the tools it does
   take as buttons ("Align it", "Move it", "Cut a void"), keeping the face across the change of tool.
 - **The Edits panel** (`web/src/EditPanel.tsx`, a tab in the right side bar beside Clash, Plan and Chat): the log,

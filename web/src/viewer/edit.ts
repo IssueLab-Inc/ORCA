@@ -110,6 +110,27 @@ export function keepLabel(c: { clashes: number; joints?: unknown[] | null }, del
   return `Keep with ${parts.join(" · ")}`;
 }
 
+/** A check's summary as the edit and then each thing it brings along, one per line ("…; its type FT-BOX too"). */
+export function effects(summary: string): { lead: string; rest: string[] } {
+  const [lead, ...rest] = summary.split("; ").map((s) => s.trim()).filter(Boolean);
+  return { lead: lead ?? "", rest };
+}
+
+/** The other elements an edit changes, by why, a few names each and how many more: what to look at before keeping it. */
+export function alsoGroups(also: { element: string; name: string; why: string }[], show = 3):
+  { why: string; names: string[]; more: number; elements: string[] }[] {
+  const by = new Map<string, { element: string; name: string }[]>();
+  for (const a of also) by.set(a.why, [...(by.get(a.why) ?? []), a]);
+  return [...by].map(([why, list]) => ({ why, names: list.slice(0, show).map((a) => a.name), more: Math.max(0, list.length - show),
+    elements: list.map((a) => a.element) }));
+}
+
+/** The Edit tool's "Apply to the type" choice in words: which type, and how many other elements it would change. */
+export function typeChoice(t: { name: string; others: number } | null | undefined): string {
+  if (!t) return "Apply to the type";
+  return `Apply to type ${t.name}` + (t.others ? ` · ${t.others} other${t.others === 1 ? "" : "s"}` : "");
+}
+
 /** The ways an offset can take a section between two points along a run (IFC axes, Z up): up, down, and the two sides
  * square to the run in plan, named by compass. The run must be level (the server refuses the rest). */
 export function offsetWays(from: number[], to: number[]): { label: string; toward: [number, number, number] }[] {

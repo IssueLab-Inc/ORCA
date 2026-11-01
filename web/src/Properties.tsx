@@ -302,14 +302,14 @@ export function PropertySets({ data, loading, rows: acts, onOpen, editor }: { da
               const usable = !!acts && !!r.facet && acts.facets.has(r.facet) && r.raw !== undefined;
               if (editor && r.edit && editing?.key === key) return form(key, r);
               return <Fragment key={key}><dt>{r.name}{r.fromType && !s.fromType && <span className="from-type" data-tip="Given by its type">Type</span>}</dt>
-                <dd className="prow">
+                <dd className={`prow${editor && r.edit ? " editable" : ""}`}>
                   {r.link && onOpen ? <button type="button" className="pset-link" onClick={() => onOpen(r.link!)} data-tip="Its own properties">{r.value}</button>
                     : r.href ? <a href={r.href} target="_blank" rel="noreferrer">{r.value}</a>
                     : <button type="button" className="pset-value" title="Click to copy" onClick={(e) => copy(e, r.value, key)}>
                       {copied === key ? "Copied" : r.value}</button>}
                   <span className="prow-tools">
                     <button type="button" className="ibtn" aria-label={`Copy ${r.name}`} data-tip="Copy" onClick={(e) => copy(e, r.value, key)}><Copy size={13} aria-hidden /></button>
-                    {editor && r.edit && <button type="button" className="ibtn" aria-label={`Change ${r.name}`} data-tip="Change it (kept in the edit log)"
+                    {editor && r.edit && <button type="button" className="ibtn pencil" aria-label={`Change ${r.name}`} data-tip="Change it (kept in the edit log)"
                       onClick={() => begin(key, r)}><Pencil size={13} aria-hidden /></button>}
                     {usable && <>
                       <button type="button" className="ibtn" aria-label={`Filter by ${r.name} = ${r.value}`} data-tip="Filter by this value" onClick={() => acts!.onFilter(r)}><ListFilter size={13} aria-hidden /></button>

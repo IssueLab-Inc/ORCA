@@ -9,7 +9,7 @@ import { api, type EditCheck, type EditFace, type EditKept, type EditOp, type Jo
 import { AlignIcon, CheckingIcon, ClipIcon, CutByIcon, DeleteIcon, DisconnectIcon, EditIcon, JoinIcon, KeepIcon, LogIcon, MoveIcon,
   OffsetIcon, PushPullIcon, RemoveSectionIcon, SplitIcon, VoidIcon } from "./editIcons";
 import { EditPanel } from "./EditPanel";
-import { alignDistance, EDIT_TOOLS, faceRef, keepLabel, OFFER, offsetWays, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState,
+import { alignDistance, alsoGroups, EDIT_TOOLS, effects, faceRef, keepLabel, OFFER, offsetWays, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState, typeChoice,
   type EditToolId } from "./viewer/edit";
 import type { FacePick, Viewer } from "./viewer/Viewer";
 
@@ -96,6 +96,7 @@ export const EditTool = forwardRef<EditToolHandle, {
    * each checked. Off by default and again for each element, so a type's other elements never change by accident. */
   const [toType, setToType] = useState(false);
   useEffect(() => { setToType(false); }, [element]);
+  useEffect(() => { if (face?.choices && !face.choices.type) setToType(false); }, [face]);   // a face its type does not give
   const typeScope = () => (toType ? { scope: "type" } : {});
 
   /** Back to picking (the tool stays): previews and highlights go. */
@@ -397,16 +398,16 @@ export const EditTool = forwardRef<EditToolHandle, {
         {face && <div className="edit-face">
           <Tool size={14} aria-hidden /><span><b>{face.name}</b>{face.label ? <> of {face.label}</> : null}
             {face.size_m != null && face.kind !== "edge" ? <span className="why mono"> · {metres(face.size_m)}</span> : null}</span></div>}
-        {(tool === "push_pull" || tool === "align" || tool === "move") && element && !refused && (
+        {(tool === "push_pull" || tool === "align" || tool === "move") && element && !refused && (face?.choices?.joined ?? 1) > 0 && (
           <label className="check-in edit-carry" data-tip={joined ? "Joined parts come along: a straight joined to a pushed end follows it; a move takes its run and fittings"
             : "This face or element only: joints it leaves open are listed, for you to keep"} data-tip-side="bottom">
             <input type="checkbox" checked={joined} onChange={(e) => { setJoined(e.target.checked); setCheck(null); viewer()?.preview([]); }} />
             {" "}Take joined parts along</label>)}
-        {(tool === "push_pull" || tool === "align") && face && !refused && (
+        {(tool === "push_pull" || tool === "align") && face && !refused && (face.choices === undefined || face.choices.type) && (
           <label className="check-in edit-carry" data-tip={toType ? "Its type changes: every element of the type takes the new shape, section or thickness, each checked"
             : "This element only: a shape or section its type gives becomes its own"} data-tip-side="bottom">
             <input type="checkbox" checked={toType} onChange={(e) => { setToType(e.target.checked); setCheck(null); viewer()?.preview([]); }} />
-            {" "}Apply to the type</label>)}
+            {" "}{typeChoice(face.choices?.type)}</label>)}
         {face && refused && (
           <div className="edit-offer" role="status">
             <p>{refused}{face.why_not ? `: ${face.why_not}` : ""}.</p>
@@ -490,9 +491,23 @@ export const EditTool = forwardRef<EditToolHandle, {
           </form>)}
         {(checking || check) && (
           <div className={`edit-status ${status?.tone ?? ""}`} role="status">
-            {checking ? <><CheckingIcon size={15} aria-hidden /> Checking against the model…</> : status && <span>{status.text}</span>}
+            {checking ? <><CheckingIcon size={15} aria-hidden /> {toType && face?.choices?.type?.others
+              ? `Checking it and the ${face.choices.type.others} other element${face.choices.type.others === 1 ? "" : "s"} of ${face.choices.type.name} against the model…`
+              : "Checking against the model…"}</> : status && <span>{status.text}</span>}
           </div>)}
-        {check && !check.blocked && check.summary && <p className="edit-summary">{check.summary}</p>}
+        {check && !check.blocked && check.summary && (() => {
+          const { lead, rest } = effects(check.summary);
+          return <><p className="edit-summary">{lead}</p>
+            {rest.length > 0 && <ul className="edit-effects">{rest.map((r, i) => <li key={i}>{r}</li>)}</ul>}</>;
+        })()}
+        {check && !check.blocked && (check.also?.length ?? 0) > 0 && (
+          <div className="edit-also">
+            <div className="edit-also-head"><b>Also changes {check.also!.length} other element{check.also!.length === 1 ? "" : "s"}</b>
+              <button type="button" className="btn small ghost" data-tip="Frame everything this edit changes" data-tip-side="left"
+                onClick={() => viewer()?.frameEverywhere([check.op.element as string, ...check.also!.map((a) => a.element)])}>Show them</button></div>
+            <ul>{alsoGroups(check.also!).map((g) => <li key={g.why}><span className="why">{g.why}:</span> {g.names.join(", ")}
+              {g.more ? ` and ${g.more} more` : ""}</li>)}</ul>
+          </div>)}
         {check?.warnings.map((w, i) => <p key={i} className="edit-warn">{w.text}{w.review ? <span className="chip">review: {w.review}</span> : null}</p>)}
         {check?.offer && (() => {   // another way: Clip it flush (another tool), Move it on its own (this one, joined parts left)
           const o = check.offer, other = o.op !== tool && READY.has(o.op as EditToolId);

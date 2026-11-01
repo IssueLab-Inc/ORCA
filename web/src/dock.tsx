@@ -81,6 +81,8 @@ export interface DockHandle {
   show(id: PanelId, opts?: { dock?: boolean }): void;
   /** Put a closed panel in its side bar without bringing it to the front (the Edits log, on the first kept edit). */
   place(id: PanelId): void;
+  /** Close a panel when it floats over the model (Properties, when the Edit tool opens); one in a side bar stays. */
+  closeFloating(id: PanelId): void;
   /** Back to the default layout. */
   reset(): void;
   /** Every panel back in this window, every side bar open (the tour, which reads the main page). */
@@ -450,6 +452,10 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
         }
       },
       place(id) { if (!api.getPanel(id)) addHome(api, id, true); },
+      closeFloating(id) {
+        const p = api.getPanel(id);
+        if (p && p.group.api.location.type === "floating") p.api.close();
+      },
       reset() {
         building = true;   // the bars are empty for a moment while they fill: they stay as they are made
         try { clearAll(api); build(api, live.current.sizes); } finally { building = false; }

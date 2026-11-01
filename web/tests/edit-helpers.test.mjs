@@ -91,3 +91,22 @@ test("the keep button says what an edit is kept with: clashes and open joints", 
   assert.equal(edit.keepLabel({ clashes: 1, joints: [{}] }), "Keep with 1 clash · 1 open joint");
   assert.equal(edit.keepLabel({ clashes: 0, joints: [{}, {}] }), "Keep with 2 open joints");
 });
+
+
+test("a check reads as the edit, then each thing it brings along, then what else changes by why", () => {
+  assert.deepEqual(edit.effects("top of duct fitting 'F1' pushed 100 mm out (0.300 → 0.400 m deep); its type FT-BOX too, and the 1 other element of it"),
+    { lead: "top of duct fitting 'F1' pushed 100 mm out (0.300 → 0.400 m deep)", rest: ["its type FT-BOX too, and the 1 other element of it"] });
+  assert.deepEqual(edit.effects("wall 'W1' moved up 100 mm"), { lead: "wall 'W1' moved up 100 mm", rest: [] });
+  const also = [1, 2, 3, 4, 5].map((n) => ({ element: `e${n}`, name: `endcap ${n}`, why: "same type (Round Endcap)" }))
+    .concat([{ element: "w2", name: "wall 'W2'", why: "joined wall: its end follows" }]);
+  assert.deepEqual(edit.alsoGroups(also), [
+    { why: "same type (Round Endcap)", names: ["endcap 1", "endcap 2", "endcap 3"], more: 2, elements: ["e1", "e2", "e3", "e4", "e5"] },
+    { why: "joined wall: its end follows", names: ["wall 'W2'"], more: 0, elements: ["w2"] }]);
+});
+
+test("the type choice names the type and how many others it changes", () => {
+  assert.equal(edit.typeChoice({ name: "FT-BOX", others: 1 }), "Apply to type FT-BOX · 1 other");
+  assert.equal(edit.typeChoice({ name: "WT-250", others: 12 }), "Apply to type WT-250 · 12 others");
+  assert.equal(edit.typeChoice({ name: "BT-UB", others: 0 }), "Apply to type BT-UB");
+  assert.equal(edit.typeChoice(undefined), "Apply to the type");
+});
