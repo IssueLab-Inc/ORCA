@@ -2067,3 +2067,28 @@ the list.
 **Nov 1, fittings placed right on millimetre and feet models** ([07](07-fixes-and-edits.md)). Proposing a fix on Snowdon Towers (Revit, feet) blanked the 3D view while ORCA tried a route, and clicking an option flew the camera away. The route's bends were the cause, not the viewer: IfcOpenShell's `geometry.edit_object_placement` with `is_si=False` scales the matrix it is given to SI in place, and `edits._new_fitting` passed the segment's frame, shared by every fitting of the run, so each fitting after the first was scaled again (bends at x 127,277, 38,785 and 11,812 m for a duct at 417,607 m: each × 0.3048). The camera framed pieces 400 km apart, and the geometry check passed bends in empty space as "verified". `_new_fitting` now passes a copy. Metre models (Northbank, every fixture) were never affected: their scale is 1, and the fixtures' ducts sit at an identity placement. Checked: `test_route.py` (every piece of a route on the run fixture in metres and millimetres, its ducts placed as Revit places them, failing before the fix with a bend at z ≈ 0 m); the server suite (866 passed; the 5 failures fail on main too: two detection clash points, two PDF tests without GTK, one live-voice test); on Snowdon HVAC in Python, two routes' pieces within the original run's box; in Chromium on Snowdon HVAC + plumbing, #14 proposed again: the sidestep's four bends drawn on the duct round the riser with the view on the clash throughout, and clicking the verified option framed it there (before: the view blanked on a route and an option flew away).
 
 **Nov 1, a chain's pieces must meet** ([07](07-fixes-and-edits.md), "The chain builder"). After #100, nothing still stopped a misplaced piece from being verified: a chain's ports are joined whatever its bodies do, and the clash check passes a fitting left far away because it hits nothing. `_build_chain` now ends with `_check_meets`: each piece's box within `MEET_M` (5 mm) of the next one's, else `Unsupported` ("its new pieces would not meet", ORCA's fault), which the trial undoes, so the idea is never shown. Checked: `test_route.py` (a bend sent 50 m away is refused and leaves nothing behind; it did not raise before), the server suite (867 passed; the failures fail on main too, and the live-voice test passes alone), and in Chromium on Snowdon HVAC + plumbing, #14 proposed twice: both routes drawn as one connected dog-leg round the riser, neither refused.
+
+**Nov 1, adding and removing models: the server** ([docs/add-and-remove-models.md](../add-and-remove-models.md), slice 1
+of the plan). An open scene takes more models and gives one up without being opened again, so its edits, fixes, checks
+and triage readings stay. `IfcScene.add_files` appends files and measures only their boxes (`_measure`, shared with
+`bounds`); `remove_file` drops one file's boxes and moves every later index down (`_edited`, `history`); both bump the
+revision and a new `layout`, and drop what other modules cached from the file list (`scene.FILE_CACHES`).
+`Workspace.add_models` (and `add_samples`) refuses in words STEP among building models or the reverse, a name already
+open, and one scene past the byte budget (opening had no budget refusal: it only evicted older scenes); STEP converts
+through the helper opening now uses too (`_as_ifc`), and each upload's folder joins the scene's (`_roots` is a list).
+`Workspace.remove_model` refuses a stale position (`StaleLayout`, 409) and the only model, deletes an uploaded file
+(never a sample), and takes the model's clashes out of every kept check and what each compares its next run with
+(`checks.Register.drop_file`): the checks stay current, nothing is called resolved, no number is reused. The edit log
+marks an entry that changed the model `model_removed` (`Journal.drop_file`): it stays, is never undone or redone, and
+undo passes over it; the other entries' file indexes move down, so their undo and redo still work. A wider fix's saved
+state holds the old file list, so it is refused once the layout has changed. Routes `POST /api/scenes/{id}/models`
+(samples, free), `POST …/models/upload/stream` (one model upload; mixing and "already open" refused before it is
+charged) and `DELETE …/models/{index}?name=`; every way in, `GET /api/scenes/{id}` and the patch now carry `layout`.
+Found on the way: doc 10 said 64 routes (80 before this, 83 now) and doc 05 said report matches are never dropped
+(they go with their report). Checked: `test_scene_models.py` (27); 895 server tests pass (the four failures fail on
+main too: two detection clash points, two PDF tests without GTK); 240 web tests, build clean; against a server on port
+8023 with Northbank: Structure + MEP 452 clashes, a hand edit kept (E1), Architecture added in 0.6 s, Run all again
+463 clashes in 2.9 s (12 new from #453, every earlier #N kept), Architecture's file served at index 2, the palletising
+cell's STEP refused in words, a stale delete 409, Architecture removed (12 clashes gone, 451 left, the check not
+stale), then Structure removed and the export one `Northbank-MEP.orca.ifc` carrying the edit's `ORCA_Edit`. The page
+and viewer are slice 2 (`feature/add-remove-models-page`).

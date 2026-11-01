@@ -38,6 +38,7 @@ classDiagram
         +list models
         +list unit_scales
         +int revision
+        +int layout
         +list history
         +set _edited
         +dict _bounds
@@ -266,11 +267,12 @@ everywhere; express ids are file-local and never leave the server.
 
 | Field | Holds |
 |---|---|
-| `paths`, `models` | The files it was opened from, and their `ifcopenshell` models, which carry every kept edit in memory |
+| `paths`, `models` | The files it holds, in order, and their `ifcopenshell` models, which carry every kept edit in memory. Opened together, then grown by `add_files` (appended) or shrunk by `remove_file` ([docs/add-and-remove-models.md](../add-and-remove-models.md)) |
 | `unit_scales` | Each file's length unit in metres; placements and moves are always metres |
-| `_bounds` | GlobalId → world box in metres, for every physical element; measured once (`bounds`), shifted by moves, recomputed for changed pieces (`refresh_bounds`) |
+| `_bounds` | GlobalId → world box in metres, for every physical element; measured once (`bounds`, through `_measure`), shifted by moves, recomputed for changed pieces (`refresh_bounds`); a file added is measured alone, a file removed takes its boxes with it |
 | `_edited` | Indexes of the files a kept fix changed: what `export` and `Workspace.file` write |
 | `revision`, `history` | A counter bumped by every kept fix (`bump`), and `(revision, files it changed)` for each, so a page that missed an edit knows which files to reload |
+| `layout` | A counter bumped (with `revision`) when a file is added or removed. File indexes, `history` included, hold only within one layout: a page that sees another reloads the files instead of patching by index. Adding or removing also drops what other modules cached on the scene from its file list (`scene.FILE_CACHES`) |
 
 `IfcScene.element(gid)` builds an `Element` on demand (class, name, tag, storey, file, `fixed` from `IfcScene.stays`,
 port-connected neighbours); nothing caches it. `IfcScene.domain` is building or machine as opened (all from STEP: a
@@ -286,10 +288,10 @@ The one place the API and MCP find scenes and reports. `app.py` makes one (`ws`)
 | Field | Holds | Bounded by |
 |---|---|---|
 | `scenes` | Scene id → `IfcScene` | `max_scenes` (`SIGHTLINE_MAX_SCENES`) and `budget` (`SIGHTLINE_SCENE_BUDGET_MB`, the IFC bytes opened), by `_evict` |
-| `sizes`, `names`, `sources`, `_roots` | Per scene: IFC bytes, the file names as opened, for STEP files the original and its converter manifest, and the scene's own temporary folder | Dropped with the scene |
+| `sizes`, `names`, `sources`, `_roots` | Per scene: IFC bytes, the file names in order (the scene's `paths`, as given), for STEP files (by index) the original and its converter manifest, and the scene's own temporary folders (one per opening or adding that brought an upload or a conversion). `add_models` extends them; `remove_model` shifts them down and deletes a folder that holds none of its files any more | Dropped with the scene |
 | `checks` | Scene id → its `checks.Register`: each kept check's latest run, the ids issued per pair and kind, numbers, titles, captured views (its own folder), triage readings and the current list of their clashes ([docs/detection.md](../detection.md), "Kept checks") | `SIGHTLINE_MAX_CHECKS` (12) checks per scene; dropped with the scene, its folder deleted |
 | `reports` | Report id → `Report` | `max_reports` (`SIGHTLINE_MAX_REPORTS`), by `_keep` |
-| `_matches` | (report id, scene id) → which model element each clash side is | Never dropped |
+| `_matches` | (report id, scene id) → which model element each clash side is | Dropped with its report, and for a scene whose files change (`_files_changed`, with `_stays`, the pattern readings and the last tries) |
 | `_last` | (scene id, GlobalId, GlobalId) → (stamp, last try), for a second try to read | `LAST_KEPT` (200); dropped with the scene; valid only while the stamp (scene revision, requirements id) matches |
 | `lock` | The RLock every geometry operation holds | |
 | `keep` | A callable returning the ids to evict last; `app.py` sets it to `links.kept` | |
@@ -402,7 +404,8 @@ Navisworks reports and ORCA's own detection produce the same objects, so everyth
 | `label` | "#N title-or-name" | `ReportClash.label` | As number and title |
 | `guid` | Navisworks result guid; for a detected clash, the clash id | `reports.read_xml`, `detect.run` | The source |
 | GlobalId | IFC's 22-character id | The authoring tool; STEP parts: uuid5 of the file hash and label path (`step.write_ifc`); new pieces of an edit: IfcOpenShell (`root.copy_class`) | The file. An offset, route or resize keeps the original GlobalId on its first piece; a STEP file always converts to the same ids |
-| Scene `revision` | Integer from 0, plus `history` | `IfcScene.bump` on every kept fix | Only grows. Apply replies carry `revision_before` and `revision`; wider-fix proposals are pinned to it |
+| Scene `revision` | Integer from 0, plus `history` | `IfcScene.bump` on every kept fix; adding or removing a model bumps it too | Only grows. Apply replies carry `revision_before` and `revision`; wider-fix proposals are pinned to it |
+| Scene `layout` | Integer from 0 | `IfcScene.add_files`, `remove_file` | Only grows. File indexes (`files/{index}`, `history`, `step`, the edit log's `files`) hold within one layout; every reply that opens, adds or removes models carries it, and so does the patch |
 | Requirements id | 16 hex of sha256 of the canonical file | `requirements.doc_id` (content-addressed) | Any server: the same file has the same id. The registry keeps 500 |
 | Sign-off key (browser) | `sightline.signoffs:clash:<clash id>` for each clash of a detection run; `sightline.signoffs:import:<title>:<sorted file names as JSON>` for an imported report | `signoffs.signoffScope`, `loadSignoffs` (`web/src/signoffs.ts`) | Detected: every run of the same elements, whatever the requirements or the other models open (the id hashes the test and the GlobalId pair), and never another project. Imported: every opening of the same report (its title and files), since a Navisworks id is a place in its file |
 | `model_key`, `rules_key` | 12 hex each | `requirements.model_key`, `rules_key` | The parts of the file that change the triage prompt, and the by-design rules |
@@ -436,6 +439,8 @@ stateDiagram-v2
     held --> held : trial, edited and undone
     held --> edited : fix kept, revision bumped
     edited --> edited : another fix kept
+    held --> held : model added or removed, layout bumped
+    edited --> edited : model added or removed, layout bumped
     held --> evicted : over the count or byte budget
     edited --> evicted : over the count or byte budget
     evicted --> [*] : edits lost, folder deleted
@@ -446,8 +451,17 @@ stateDiagram-v2
 - **Opening** (`Workspace.open_paths`): STEP files are converted first (cached by hash); room is made for the new
   scene's bytes before it is read (`_evict(incoming)`), the boxes are measured, then the id is assigned and the count
   is checked again with the new scene protected.
+- **Adding** (`Workspace.add_models`, [docs/add-and-remove-models.md](../add-and-remove-models.md)): refused in words
+  for STEP among building models or the reverse, a name already open, or the scene alone past the byte budget; STEP
+  converted as on opening; room made by evicting other scenes (never this one); the new files appended and only their
+  boxes measured. Edits, fixes, checks and triage readings stay; the page runs every kept check again.
+- **Removing** (`Workspace.remove_model`): by index and name (`StaleLayout`, 409, when they no longer agree), never
+  the only model. The file and its boxes go; indexes after it shift down everywhere (`_edited`, `history`, `sources`,
+  the edit log's entries); its clashes leave every kept check (`checks.Register.drop_file`), which stay current; an
+  entry of the edit log that changed it stays, marked `model_removed`, never undone (`journal.Journal.drop_file`); an
+  uploaded file is deleted.
 - **Eviction** (`_evict`, `_oldest`): the oldest scene that no live agent link points at goes first (`keep`), else
-  the oldest. Its sizes, names, sources, detection summary, last tries and folder go with it. Reports are evicted on
+  the oldest. Its sizes, names, sources, detection summary, last tries and folders go with it. Reports are evicted on
   their own (`_keep`, same rule).
 - **Edited** means the in-memory models differ from the files. `export` writes only the edited files; a reopen or a
   restart starts from the files again. A wider fix's accept replaces the scene's state with an evaluated private
@@ -577,7 +591,7 @@ Paths under "temp" are in the system temporary folder (`tempfile.gettempdir()`).
 | What | Path | Kept until |
 |---|---|---|
 | Sample models, sample reports, shipped STEP cache | `samples/`, `samples/reports/<name>/`, `samples/step-cache/` | Read-only; part of the deploy image |
-| Uploaded models and STEP conversions | temp `sightline-models/<folder>/` (`service.MODELS`, `Workspace._roots`) | The scene is evicted (or the open fails) |
+| Uploaded models and STEP conversions | temp `sightline-models/<folder>/` (`service.MODELS`, `Workspace._roots`: one folder per opening or adding) | The scene is evicted (or the open or add fails); a removed model's file at once, its folder once it holds none of the scene's files |
 | STEP conversion cache (when `samples/step-cache` is absent) | temp `sightline-models/step-cache/` (`Workspace.step_cache`) | Not cleaned |
 | Uploaded Navisworks reports | temp `sightline-reports/<folder>/` (`app.UPLOADS`) | The report is dropped (it is `temporary`) |
 | A run on its own (evals, the requirements preview) | temp `sightline-run-*/` | The report is dropped |

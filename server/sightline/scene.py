@@ -67,6 +67,8 @@ THREADS = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 
 MESH_KERNEL = "hybrid-cgal-simple-opencascade"
 BOUNDS_BATCH = 2000   # elements per geometry iterator while measuring boxes
 HISTORY_SIZE = 1024   # transactions each file keeps: kept edits must outlast the trials between them (journal.py)
+# What other modules work out from the scene's file list and keep on it; a file added or removed drops them.
+FILE_CACHES = ("_facets", "_req_teams", "_joint_graph", "_joint_groups", "_joint_tris")
 # From this size (all files together) every element goes through CGAL, extrusions too: about twice as fast, with boxes
 # within 1 mm of OpenCASCADE's on curved sections (it facets them a little differently). Smaller models keep the
 # default kernel for everything but meshes, so their boxes and checks are exactly as before.
@@ -122,6 +124,9 @@ class IfcScene:
         self._bounds: dict[str, np.ndarray] | None = None
         self.revision = 0
         self.history: list[tuple[int, list[int]]] = []   # (revision, files it changed), for pages that missed an edit
+        # Bumped when a file is added or removed (with the revision): file indexes, and `history`, hold only within one
+        # layout, so a page that missed a change reloads the files instead of patching by index.
+        self.layout = 0
         # Building or machine as opened (`domains.infer`); a requirements file may say otherwise (`requirements.domain_of`).
         self.domain = domains.CONSTRUCTION
         # What stays in place, as the effective requirements say (`Workspace` sets it: `requirements.stays_rule`).
@@ -148,6 +153,7 @@ class IfcScene:
         clone._bounds = None if self._bounds is None else {g: b.copy() for g, b in self._bounds.items()}
         clone.revision = self.revision
         clone.history = list(self.history)
+        clone.layout = self.layout
         clone.domain, clone.stays_rule = self.domain, self.stays_rule
         return clone
 
@@ -205,46 +211,97 @@ class IfcScene:
         The geometry check uses these to test only the neighbourhood of what moved.
         """
         if self._bounds is None:
-            settings = ifcopenshell.geom.settings()
-            settings.set("use-world-coords", True)
-            bounds: dict[str, np.ndarray] = {}
-            groups: dict[tuple[int, bool], list] = {}
-            order = []
-            for i, m in enumerate(self.models):
-                for p in m.by_type("IfcElement"):
-                    if p.Representation is not None and not not_physical(p):
-                        groups.setdefault((i, meshes_only(p)), []).append(p)
-                        order.append(p.GlobalId)
-            total, done = sum(len(g) for g in groups.values()), 0
-            try:
-                big = sum(p.stat().st_size for p in self.paths) >= BIG_MODEL_BYTES
-            except OSError:
-                big = False
-            # Meshes through OpenCASCADE cost 20-30 ms each (it sews them into shells); CGAL reads them in about 1 ms with
-            # the same vertices. Everything else keeps the default kernel, so boxes do not change. In batches: an
-            # iterator holds what it made until it is dropped (a 150 MB model in one went past 4.5 GB).
-            batches = [(i, meshes, include[k:k + BOUNDS_BATCH]) for (i, meshes), include in groups.items()
-                       for k in range(0, len(include), BOUNDS_BATCH)]
-            for i, meshes, include in batches:
-                kw = {"geometry_library": MESH_KERNEL} if meshes or big else {}
-                it = ifcopenshell.geom.iterator(settings, self.models[i], THREADS, include=include, **kw)
-                if not it.initialize():
-                    done += len(include)
-                    continue
-                while True:
-                    shape = it.get()
-                    verts = np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
-                    if len(verts):
-                        bounds[shape.guid] = np.array([verts.min(axis=0), verts.max(axis=0)])
-                    done += 1
-                    if progress is not None and done % 500 == 0:
-                        progress(done, total)
-                    if not it.next():
-                        break
-            if progress is not None:
-                progress(total, total)
-            self._bounds = {g: bounds[g] for g in order if g in bounds}   # model order, whatever the kernel
+            self._bounds = self._measure(range(len(self.models)), progress)
         return self._bounds
+
+    def _measure(self, indexes, progress: Callable[[int, int], None] | None = None) -> dict[str, np.ndarray]:
+        """The boxes of every physical element in these files, in model order."""
+        settings = ifcopenshell.geom.settings()
+        settings.set("use-world-coords", True)
+        bounds: dict[str, np.ndarray] = {}
+        groups: dict[tuple[int, bool], list] = {}
+        order = []
+        for i in indexes:
+            for p in self.models[i].by_type("IfcElement"):
+                if p.Representation is not None and not not_physical(p):
+                    groups.setdefault((i, meshes_only(p)), []).append(p)
+                    order.append(p.GlobalId)
+        total, done = sum(len(g) for g in groups.values()), 0
+        try:   # the whole scene's size, so a file added later is measured as it would be had it opened with the rest
+            big = sum(p.stat().st_size for p in self.paths) >= BIG_MODEL_BYTES
+        except OSError:
+            big = False
+        # Meshes through OpenCASCADE cost 20-30 ms each (it sews them into shells); CGAL reads them in about 1 ms with
+        # the same vertices. Everything else keeps the default kernel, so boxes do not change. In batches: an
+        # iterator holds what it made until it is dropped (a 150 MB model in one went past 4.5 GB).
+        batches = [(i, meshes, include[k:k + BOUNDS_BATCH]) for (i, meshes), include in groups.items()
+                   for k in range(0, len(include), BOUNDS_BATCH)]
+        for i, meshes, include in batches:
+            kw = {"geometry_library": MESH_KERNEL} if meshes or big else {}
+            it = ifcopenshell.geom.iterator(settings, self.models[i], THREADS, include=include, **kw)
+            if not it.initialize():
+                done += len(include)
+                continue
+            while True:
+                shape = it.get()
+                verts = np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
+                if len(verts):
+                    bounds[shape.guid] = np.array([verts.min(axis=0), verts.max(axis=0)])
+                done += 1
+                if progress is not None and done % 500 == 0:
+                    progress(done, total)
+                if not it.next():
+                    break
+        if progress is not None:
+            progress(total, total)
+        return {g: bounds[g] for g in order if g in bounds}   # model order, whatever the kernel
+
+    def add_files(self, paths: list[str | Path], progress: Callable[[int, int], None] | None = None) -> list[int]:
+        """Open more files into the scene, sharing its coordinates, after the ones it has: their indexes. With boxes
+        cached, only the new files' elements are measured. A file that will not open leaves the scene as it was."""
+        paths = [Path(p) for p in paths]
+        models = [ifcopenshell.open(str(p)) for p in paths]
+        for m in models:
+            m.set_history_size(HISTORY_SIZE)
+        scales = [ifcopenshell.util.unit.calculate_unit_scale(m) for m in models]
+        was = (self.paths, self.models, self.unit_scales)
+        start = len(self.models)
+        # New lists, never the old ones grown: a wider fix's saved state (journal.py) holds the old ones.
+        self.paths, self.models, self.unit_scales = [*self.paths, *paths], [*self.models, *models], [*self.unit_scales, *scales]
+        added = list(range(start, len(self.models)))
+        if self._bounds is not None:
+            try:
+                self._bounds = {**self._bounds, **self._measure(added, progress)}
+            except BaseException:
+                self.paths, self.models, self.unit_scales = was
+                raise
+        self._new_layout()
+        return added
+
+    def remove_file(self, index: int) -> Path:
+        """Take one file out of the scene: its elements' boxes go, and every file index after it moves down one (the
+        files marked edited, `history`). Returns its path. IndexError for a position the scene does not have."""
+        if not 0 <= index < len(self.models):
+            raise IndexError(index)
+        path = self.paths[index]
+        gone = {e.GlobalId for e in self.models[index].by_type("IfcElement")}
+        keep = [i for i in range(len(self.models)) if i != index]
+        self.paths = [self.paths[i] for i in keep]
+        self.models = [self.models[i] for i in keep]
+        self.unit_scales = [self.unit_scales[i] for i in keep]
+        if self._bounds is not None:   # a GlobalId another file repeats keeps its box
+            self._bounds = {g: b for g, b in self._bounds.items() if g not in gone or self.has(g)}
+        shift = lambda files: [i - (i > index) for i in files if i != index]
+        self._edited = set(shift(self._edited))
+        self.history = [(rev, shift(files)) for rev, files in self.history]
+        self._new_layout()
+        return path
+
+    def _new_layout(self) -> None:
+        self.revision += 1
+        self.layout += 1
+        for name in FILE_CACHES:
+            self.__dict__.pop(name, None)
 
     def refresh_bounds(self, global_ids: list[str]) -> None:
         """Recompute the cached boxes of elements whose shape changed or that were just created."""

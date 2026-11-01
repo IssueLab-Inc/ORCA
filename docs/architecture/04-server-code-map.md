@@ -128,7 +128,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `plans.py` | Workflows | Fix together, root causes, patterns; the plan check; `KEEP` and `apply` for every kept fix |
 | `reports.py` | Inputs | Navisworks XML reports: `Report`, `ReportClash`, `ReportElement`, numbering, image sets |
 | `requirements.py` | Policy | The `orca-requirements/1` file: parse, ids, registry, what it compiles into, policies, prompt lines |
-| `scene.py` | Geometry | `IfcScene`: the federated IFC models, element facts, cached boxes, moves, revisions, writing |
+| `scene.py` | Geometry | `IfcScene`: the federated IFC models, element facts, cached boxes, moves, revisions, files added and removed (`layout`), writing |
 | `service.py` | Operations | `Workspace`: every operation the API and MCP share, plus `step_changes` for STEP export |
 | `settings.py` | Policy | Settings for everyone (open weights, effort, escalation, built views), in a Modal Dict or a JSON file |
 | `spend.py` | Policy | The day's Muse Wonder budget: charge, claim, hold, refuse |
@@ -310,9 +310,11 @@ lower by `SIGHTLINE_CONTEXT_*`) over complete arrangements of up to three edit g
 plus the STEP export helpers.
 
 - **Main symbols:** `Workspace` with
-  - scenes: `open`, `open_paths`, `_evict`, `scene`, `scene_info`, `classes`, `describe`, `properties`, `facets`,
-    `step_files`, `step_cache`,
-    `list_samples`;
+  - scenes: `open`, `open_paths`, `_as_ifc` (STEP converted, shared by opening and adding), `_evict`, `scene`,
+    `scene_info`, `classes`, `describe`, `properties`, `facets`, `step_files`, `step_cache`, `list_samples`;
+  - models in an open scene ([docs/add-and-remove-models.md](../add-and-remove-models.md)): `add_samples`,
+    `add_models`, `check_adding` (the refusals in words), `remove_model`, `_delete_upload`, `_files_changed` (the
+    caches a new file list clears);
   - checks: `verify_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`;
   - keeps: `apply`, `apply_offset`, `apply_route`, `apply_resize`, `apply_penetration`, `apply_trim`,
     `apply_combined`, `patch`;
@@ -323,7 +325,8 @@ plus the STEP export helpers.
     `checks_info`, `remove_check`, `requirements_info`;
   - files: `file`, `export`.
 
-  Module level: `step_changes`, `_spec`, `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,
+  Module level: `StaleLayout` (a model named by a position that no longer holds it: 409), `step_changes`, `_spec`,
+  `SAMPLES`, `MODELS`, `MODEL_SUFFIXES`, `MAX_SCENES`, `MAX_REPORTS`,
   `SCENE_BUDGET_MB`, `LAST_KEPT` (200), `SAMPLE_EXCLUDE`, `HOSTS_TIMEOUT_S`.
 - **Imports:** `agent.py`, `detect.py`, `domains.py`, `edits.py`, `escalation.py`, `facets.py`, `hosts.py`, `limits.py`,
   `meta_client.py`, `reports.py`, `requirements.py`, `scene.py`, `settings.py`, `spend.py`, `step.py`, `verify.py`.
