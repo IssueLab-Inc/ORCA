@@ -121,6 +121,24 @@ def test_drainage_only_steps_sideways(scene):
         assert not check(scene, route.pieces, {column})
 
 
+@pytest.mark.parametrize("name, system_name, gravity", [
+    ("Pipe Types:PVC - DWV:1508981", "Building Sanitary", True),   # Revit's sample: a washer drain
+    ("Pipe Types:Copper:1618900", "Building Sanitary", True),      # copper in a sanitary system drains too
+    ("Pipe Types:PVC - DWV:1508981", "Plumbing 4", True),          # the pipe type alone says drain-waste-vent
+    ("Pipe Types:Copper:1618876", "Domestic Cold Water 1", False),
+])
+def test_revit_sanitary_and_dwv_pipes_are_gravity_drainage(name, system_name, gravity):
+    # Revit's IFC2x3 export gives systems no PredefinedType, so names are all there is. "Building Sanitary" and
+    # "PVC - DWV" matched none of the words, and the drainage rule never applied to Snowdon's 697 sanitary segments.
+    import ifcopenshell
+    import ifcopenshell.guid
+    model = ifcopenshell.file(schema="IFC2X3")   # as Revit writes it: a plain IfcSystem, grouped by name only
+    pipe = model.createIfcFlowSegment(ifcopenshell.guid.new(), Name=name)
+    service = model.createIfcSystem(ifcopenshell.guid.new(), Name=system_name)
+    model.createIfcRelAssignsToGroup(ifcopenshell.guid.new(), RelatedObjects=[pipe], RelatingGroup=service)
+    assert edits.is_gravity(pipe) is gravity
+
+
 def test_a_round_pipe_takes_a_rolling_offset(scene):
     pipe, column = by_tag(scene, "RT-5"), by_name(scene, "Column E3")
     with edits.trial(scene, pipe):
