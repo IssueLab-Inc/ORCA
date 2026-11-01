@@ -132,6 +132,8 @@ not a thing that stands or can be cut.
 | `placement(gid)` / `translate(gids, delta_m)` | World matrix in metres; move by a metre delta, returning the new 4x4 matrices the page applies to its preview |
 | `snapshot()` | A full copy of the in-memory models (through `to_string`), boxes, edited set and revision. The wider-fix planner searches on copies ([07](07-fixes-and-edits.md)) |
 | `mark_edited(gid)` | Records that the file holding `gid` changed, so export writes it. `translate` does not call it: trials move and move back |
+| `forget(gids)` | Drops the cached boxes of elements an edit removed (a hand edit's delete, a removed section) |
+| `HISTORY_SIZE` | Each model keeps 1,024 IfcOpenShell transactions (`set_history_size` at open and in `snapshot`): kept edits stay undoable while trials come and go ([docs/manual-edits.md](../manual-edits.md)) |
 | `bump(files)` | A kept edit: `revision += 1` and `(revision, files)` appended to `history`, so a page that missed an edit knows which files to reload |
 | `write_edited(out_dir, ".orca")` | Writes each edited file as `<name>.orca.ifc`; untouched files are not rewritten ([14](14-files-in-and-out.md)) |
 
@@ -174,7 +176,14 @@ flowchart TD
 3. **Empty-set guard.** With nothing nearby the check passes at once. This is required: IfcOpenShell's `*_many`
    clash queries crash the process on an empty set.
 4. **The tree.** `ifcopenshell.geom.tree(backend="opencascade.trianglebvh")`, filled with one iterator per federated
-   file over just the needed elements. The default `opencascade.brep` tree has no `*_many` queries.
+   file over just the needed elements, on several threads past 50 of them (`geometry_threads`, `SIGHTLINE_GEOM_THREADS`,
+   up to 8: an edit to a type of 100 fittings across a building checks against 2,500 elements, 33 s on one thread, 10 s
+   on eight). The default `opencascade.brep` tree has no `*_many` queries. Two things are triangulated once:
+   - **Heavy neighbours** (`_heavy`: a faceted or surface body with openings cut through it, a Revit toposolid with a
+     pad: 19 s in OpenCASCADE) come from the scene's cache (`_cached_shape`), keyed by a digest of everything that
+     draws them (body, placement, openings), so a changed one is made afresh.
+   - **One edit's neighbours** (`neighbours`, a dict the caller keeps): a hand edit's check before it and after it share
+     the triangles of what it leaves alone. What it changes is `moved` or `ignore` after, never read from there.
 5. **Hard hits, first query.** `clash_intersection_many(tolerance=0.002, check_all=True)`. Intersection, not
    collision: collision only sees crossing triangles and misses one element wholly inside another (a pipe inside a
    duct). Each hit's distance is minus its depth; its location is the middle of the two witness points.

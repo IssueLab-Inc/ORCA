@@ -111,6 +111,21 @@ export interface MaterialUse {
   items: { material: string | null; name?: string; thickness_m?: number; fraction?: number; profile?: string; category?: string }[];
   total_m?: number; sets: PropSet[];
 }
+/** One change to what the model says about an element (property_edits.plan). */
+export type PropertyChange =
+  | { kind: "attribute"; name: string; value: string | null }
+  | { kind: "property"; pset: string; name: string; value: string | number | boolean | null }
+  | { kind: "type"; type: string } | { kind: "material"; material: number } | { kind: "container"; container: string }
+  | { kind: "classification"; reference: number; remove?: boolean; replace?: number };
+/** What an element's properties can be set to from its own model (property_edits.choices). */
+export interface PropertyChoices {
+  attributes: string[]; predefined: string[];
+  types: { global_id: string; name: string; ifc_class: string }[]; type: string | null;
+  materials: { id: number; name: string }[]; material: number | null; material_fixed: string | null;
+  containers: { global_id: string; name: string; ifc_class: string }[]; container: string | null;
+  classifications: { id: number; identification: string | null; name: string | null; system: string | null; on: boolean }[];
+}
+export interface PropertyEdited { entry: JournalEntry | null; properties: ElementProperties; revision_before: number; revision: number }
 /** Everything the model says about one object (properties.py): every attribute, its type, every set (the type's
  * marked), materials, classifications, groups, documents, where it sits and the path up to the project; size in
  * metres (IFC axes), none for a storey or a building. */
@@ -120,7 +135,7 @@ export interface ElementProperties {
   type: { global_id: string | null; ifc_class: string; name: string | null; attributes: PropRow[] } | null;
   storey: ObjectRef | null; container: ObjectRef | null; path: ObjectRef[];
   materials: MaterialUse[];
-  classifications: { system: string | null; identification: string | null; name: string | null; location: string | null }[];
+  classifications: { id?: number; system: string | null; identification: string | null; name: string | null; location: string | null }[];
   groups: { global_id: string | null; ifc_class: string; name: string }[];
   documents: { identification: string | null; name: string | null; location: string | null }[];
   sets: PropSet[];
@@ -155,7 +170,57 @@ export interface ContextApplied extends Patch {
 export interface Patch {
   scene_id?: string; revision_before?: number; revision?: number; meshes?: ElementMesh[] | null;
   history?: [number, number[]][];   // (revision, files it changed): a page that missed an edit reloads those
+  removed?: string[];               // elements the request took out (a delete, undo of what a fix made)
 }
+
+/** Who kept an edit: by hand on the page, Muse in chat or voice, an MCP agent, an accepted fix, a plan, a wider fix. */
+export type EditSource = "you" | "muse" | "agent" | "fix" | "plan" | "wider";
+/** One kept edit in the scene's edit log (server: journal.py, docs/manual-edits.md). */
+export interface JournalEntry {
+  id: string; seq: number; when: string; source: EditSource; kind: string; title: string; summary: string;
+  actor: string | null; elements: string[]; created: string[]; removed: string[]; names: Record<string, string>;
+  files: number[]; revision: number; clashes: { id: string | null; pair: string[] }[]; follows: string[];
+  check: { verified?: boolean; cleared?: unknown[]; new?: { kind?: string }[]; worse?: { kind?: string }[]; accepted_clashes?: number;
+    min_clearance_m?: number | null; open_joints?: { element: string; name: string }[] } | null;
+  warnings: { rule: string; text: string; review: string | null }[]; status: { clash: string | null; resolved: boolean;
+    depth_m: number | null } | null; state: "kept" | "undone"; has_picture: boolean; params: Record<string, unknown>;
+}
+export interface Journal { entries: JournalEntry[]; can_undo: boolean; can_redo: boolean; undo: string | null; redo: string | null }
+/** A face of an element as the server reads a pick (faces.py): its kind, its name in words, what it allows. */
+export interface EditFace {
+  element: string; id: string; kind: "cap" | "side" | "radial" | "flank" | "edge" | "plane" | "clip" | "other"; name: string;
+  normal: number[]; point: number[]; size_m: number | null; allows: string[]; why_not: string | null;
+  /** What the Edit tool's choices would do here (manual.choices_for): the type an edit to this face would change for
+   * all its elements (null: none), and how many parts are joined to the element. */
+  choices?: { type: { name: string; others: number; kind: string } | null; joined: number };
+}
+/** Another element a checked edit changes or makes, and why (manual.also). */
+export interface EditAlso { element: string; name: string; why: string }
+/** A hand edit, as the server takes it from the page, chat, voice and MCP (manual.py). */
+export type EditOp = { op: string; element: string } & Record<string, unknown>;
+export interface EditHit { other: string; other_class: string; kind: string; distance_m: number; name: string }
+/** What checking a hand edit found (manual.check): refused (`blocked`), or what it clears and hits, and its preview. */
+export interface EditCheck {
+  also?: EditAlso[];
+  op: EditOp; passed: boolean; blocked: string | null; clashes: number; warnings: JournalEntry["warnings"];
+  summary?: string; face?: EditFace | null; key?: string; revision?: number; targets?: string[]; close?: number;
+  new?: EditHit[]; worse?: EditHit[]; cleared?: { other: string; name: string; was_m: number }[];
+  min_clearance_m?: number | null; checked_against?: number; changed?: string[]; created?: string[]; removed?: string[];
+  open_ends?: string[]; preview?: Piece[] | null; before?: Piece[] | null;
+  /** A follow-up the check suggests, in a few words: an align that meets the other face at one edge offers to clip it
+   * flush; a move carrying its joined parts that cannot keep its joints offers to move it on its own. */
+  offer?: EditOp | null; offer_words?: string;
+  /** The joints it leaves open (an edit changes the face or element picked only, unless `carry` takes joined parts
+   * along): kept only when said. */
+  joints?: { element: string; name: string }[];
+}
+export type EditKept = { entry: JournalEntry | null; files: number[]; changed: string[]; created: string[]; removed: string[];
+  pieces: string[]; check: EditCheck } & Patch;
+/** Undo or redo: the entry, and how to patch the page (what came back in `changed`, what went in `removed`). */
+export type Stepped = { entry: JournalEntry; files: number[]; can_undo: boolean; can_redo: boolean;
+  undo: string | null; redo: string | null;
+  /** Each clash of the entry measured again after the step: what the page marks fixed or opens again. */
+  clash_states?: { clash: string | null; pair: string[]; resolved: boolean; depth_m: number | null }[] } & Patch;
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent = (
   | { type: "thinking"; round: number }
@@ -515,6 +580,11 @@ export type ChatEvent =
   | { type: "tool"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; summary: string }
   | { type: "ui"; action: "select_clash"; clash_id: string }
+  /** A hand edit Muse (or an agent) checked: the page previews it in the Edit tool, with its own Keep. */
+  | { type: "ui"; action: "edit_preview"; check: EditCheck }
+  /** A hand edit kept on the person's word (chat, voice) or by an agent: patch the model, read the log again. */
+  | { type: "ui"; action: "edit_kept"; kept: EditKept }
+  | { type: "ui"; action: "edit_stepped"; step: Stepped }
   | { type: "ui"; action: "show_it_built"; clash_id: string }   // draw the chosen or kept fix (docs/show-it-built.md)
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   /** Chat's or an agent's filters (docs/filters.md): replace its own (the user's paused), or clear them. */
@@ -693,10 +763,11 @@ export const api = {
     if (!plan) throw new Error("The server stopped before the plan was ready. Try again.");
     return plan;
   },
-  applyPlan: (sceneId: string, options: Option[]) =>
-    call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
+  applyPlan: (sceneId: string, options: Option[], clashIds: (string | null)[] = []) =>
+    call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options, clash_ids: clashIds }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
-                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView; check?: string | null },
+                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView; check?: string | null;
+                 selected?: { element: string; face: string | null; pick?: { point: number[]; normal: number[] } } | null },
          onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   /** The sample models, and the demos among them (server: demos.py). */
@@ -808,6 +879,13 @@ export const api = {
   /** Everything the model says about one element, for the Properties panel (properties.py). */
   properties: (id: string, globalId: string, file?: number) =>
     call<ElementProperties>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties${file === undefined ? "" : `?file=${file}`}`),
+  /** What an element's properties can be set to from its own model (property_edits.choices). */
+  propertyChoices: (id: string, globalId: string) =>
+    call<PropertyChoices>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/property-choices`),
+  /** Change one thing the model says about an element, not its shape (property_edits.edit): kept in the edit log. */
+  editProperty: (id: string, globalId: string, change: PropertyChange) =>
+    call<PropertyEdited>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties`,
+      { method: "POST", body: JSON.stringify({ change }) }),
   /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
    *  check): the connection highlight's graph (docs/connections.md). */
   connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),
@@ -815,15 +893,35 @@ export const api = {
    *  from the option itself (its meshes are not needed there): the server tries it again against the clash it names
    *  (`pair`: the option's own, else the clash on screen) and answers 409 with why when it no longer passes. A
    *  penetration whose host the requirements lock comes back `cut: false`: only its provision for void was written. */
-  accept: (id: string, o: Option, pair: string[] | null) =>
+  accept: (id: string, o: Option, pair: string[] | null, clashId: string | null = null) =>
     call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST",
-      body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null } }) }),
+      body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null }, clash_id: clashId }) }),
+  /** The face of an element under a pick (IFC axes): its name, and what the Edit tool can do with it. */
+  editFace: (id: string, element: string, point: number[], normal: number[]) =>
+    call<EditFace>(`/scenes/${id}/edit/face`, { method: "POST", body: JSON.stringify({ element, point, normal }) }),
+  elementFaces: (id: string, element: string) => call<{ element: string; faces: EditFace[] }>(`/scenes/${id}/elements/${encodeURIComponent(element)}/faces`),
+  /** Try a hand edit without keeping it: what it clears and hits, its warnings, its preview; `blocked` says why not. */
+  editCheck: (id: string, op: EditOp) => call<EditCheck>(`/scenes/${id}/edit/check`, { method: "POST", body: JSON.stringify({ op }) }),
+  /** Keep a hand edit: checked again on the server (409 when it would make more clashes than accepted, or changed). */
+  editApply: (id: string, op: EditOp, key: string | undefined, acceptClashes: number, clash: { id: string | null; pair: string[] | null } | null,
+    acceptJoints = 0) =>
+    call<EditKept>(`/scenes/${id}/edit/apply`, { method: "POST", body: JSON.stringify({ op, key: key ?? null, accept_clashes: acceptClashes,
+      accept_joints: acceptJoints, clash_id: clash?.id ?? null, pair: clash?.pair ?? null }) }),
+  /** The scene's edit log: every kept edit, oldest first, and whether undo and redo can go now. */
+  journal: (id: string) => call<Journal>(`/scenes/${id}/edits`),
+  journalCsvUrl: (id: string) => `/api/scenes/${id}/edits?format=csv`,
+  /** A picture of a kept edit, for the report's "After the edits". */
+  editPicture: (id: string, entry: string, png: string) =>
+    call<{ ok: boolean }>(`/scenes/${id}/edits/${encodeURIComponent(entry)}/picture`, { method: "POST", body: JSON.stringify({ png }) }),
+  /** Undo (or redo) the newest edit; `entry` names the one meant (409 when it is not next in line). */
+  undo: (id: string, entry?: string) => call<Stepped>(`/scenes/${id}/edits/undo`, { method: "POST", body: JSON.stringify({ entry: entry ?? null }) }),
+  redo: (id: string, entry?: string) => call<Stepped>(`/scenes/${id}/edits/redo`, { method: "POST", body: JSON.stringify({ entry: entry ?? null }) }),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). `again`: run a kept check
    * again by its key, or every kept check (`all`). */
   detect: async (sceneId: string, tests: DetectTest[] | null, onEvent: (e: DetectEvent) => void,
-                 again: { check?: string; all?: boolean } = {}) => {
+                 again: { check?: string; all?: boolean; after_edit?: string } = {}) => {
     let done: Extract<DetectEvent, { type: "done" }> | null = null;
     await ndjson<DetectEvent>(`/scenes/${sceneId}/detect/stream`, { tests, ...again }, (e) => {
       onEvent(e);

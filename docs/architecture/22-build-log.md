@@ -1892,3 +1892,168 @@ removes the isolation"; code App's `isolating` / `isolateClash` / `endIsolation`
 - **Checked:** `web/tests/isolate-clash.test.mjs` (2), `row-actions.test.mjs` (4), 211 web tests, build clean; in
   Chromium on Northbank against a local server: #1 isolated shows only the supply air main and the girder, #2 then
   only the cable tray and the girder, Show all brings everything back.
+
+Edit by hand, and one edit log for everything (Nov 1; owner: "basic manual (possibly via ai as well) editing on
+objects ... select a face and increase / decrease length, align a face to another face, create a void, cut an object
+... the key thing too is that all edits are tracked and can be fed to muse, for our reports", "say muse proposes a fix
+and i accept it, and then i manually make some changes ... i want that to be known, not just in the geometry";
+owner decisions: the full toolset before the freeze; Keep with N clashes, never verified, the clash listed; the
+requirements bind, ORCA's hard rules warn; cut means split and remove a section; the person's own "keep it" in chat
+or voice keeps; [docs/manual-edits.md](../manual-edits.md)):
+- **The edit log** (`journal.py`): one entry per keep (fixes, plans, wider fixes, MCP keeps, hand edits), with who,
+  what, the clash, the fix a hand edit follows (lineage), its check and warnings; undo and redo over each file's
+  transactions (a wider fix by its state). **Found on the way:** a trial move outside a transaction broke the next
+  undo (`UndoSystemError`), so trial moves run in `edits.scratch`; `file.redo()` would replay trials, so the log
+  holds its transactions; files keep 1,024 transactions.
+- **Hand edits** (`faces.py`, `manual.py`): faces named as people say them; push/pull (depth, a rectangle's side, a
+  radius, an outline's edge), align, move, void, cut by shape, split, remove a section, delete, clip; each gated by the
+  requirements, checked in a trial (cleared, new, worse) and checked again on keep. Routes `/edit/face`,
+  `/elements/{id}/faces`, `/edit/check`, `/edit/apply`, `/edits`, `/edits/undo`, `/edits/redo`, `/edits/{id}/picture`.
+- **The page:** the Edit tool (P) with animated icons (`editIcons.tsx`), lit faces, a draggable arrow with a live
+  stretch preview, Keep / Keep with N clashes; the Edits panel; Ctrl+Z and Ctrl+Shift+Z; patches that remove elements.
+- **Muse and agents:** chat `list_faces`, `edit_check`, `edit_keep`, `undo_edit`, `list_edits` behind a consent gate
+  on the person's own words; the selection and recent edits in chat's context; proposals told of earlier edits; MCP
+  `list_faces`, `check_edit`, `apply_edit`, `list_edits`, `undo_edit`, `redo_edit`.
+- **Out:** the report's "What was done" per clash ("Fix applied, then edited by hand, still resolved") and "Changes to
+  the model", BCF comments and Request topics, `ORCA_Edit` on edited elements in the exported IFC, `orca-edits.json`
+  and `.csv` in zips, deleted STEP parts removed from the STEP.
+- **Checked:** `tests/test_journal.py` (9), `test_manual.py` (23), `test_chat_edits.py` (4), `test_edit_log_out.py`
+  (5), an MCP and a STEP test, 750+ server tests; `web/tests/edit-helpers.test.mjs` (4) and a patch test, 213 web
+  tests, build clean; answer key 3/3 first try at Rev04 heights after the trial-move change. In Chromium on Northbank:
+  P, a click on clash #1's duct top (0.300 m), 50 mm typed, "Makes 1 clash: girder −350 mm", Keep with 1 clash, the
+  model patched and the kept checks run again; the Edits panel, Ctrl+Z and Ctrl+Shift+Z. Chat with Muse Spark: "check
+  pushing the top face of its duct up 50 mm" opened the check in the Edit tool (Makes 1 clash), and "Keep it with the
+  clash." kept E1 as Muse's; with a bracing member selected instead, Muse said it has no top face and kept nothing.
+  Against the live server: Muse's fix for the duct and girder (offset +400 mm, 50 mm clear) kept as E1, then the middle
+  piece it made pulled 20 mm in by hand: E2 follows E1, carries the clash, and the clash is still resolved. Answer key
+  3/3 again at the end. `evals/step_cell.py` was not run: the demo-models checkout is not in this session.
+
+**Nov 1, fewer restrictions on editing by hand** (owner testing of the Edit tool: "too many restrictions"). Faces for
+every body (`edits.solids`: each solid of a Body, ids prefixed `i1:` only when there are several; mesh faces that push
+by moving their corners; an I, U, C, L or T section's outer sides; a clip's plane), align at first contact up to 80°
+apart with Clip it flush offered, and to a corner or an edge point, joints that follow (a collinear segment stretches)
+or are left open behind "Keep with 1 open joint" (`accept_joints` on the route, MCP and chat's "joint"), Move it alone,
+void, split, remove a section and clip on any body by half-space clips (`edits.split_by_clip`, `_clip_items`), people's
+5 mm minimum, shared bodies copied, turned rectangles. On the page: the drag stretches every drawing of the element
+live with its distance at the arrow, align previews from the two picks, a face the tool cannot take offers the tools it
+does, and Undone sits in an Edits row's header. Measured: all 1,732 of Northbank's physical elements now have a face to
+push (was 1,324), listed in 1.6 s; a diffuser's side, a door's bottom and a UB 457's flange check in 0.1–0.7 s; 312 of
+the MEP model's mesh faces push cleanly, the rest are joined ends. Checked: 761 server tests, 218 web tests,
+`test_docs_map`, the answer key 3/3 first try at Rev04's heights (+0.40, +0.25, +0.28), and in Chromium the duct's top
+dragged up live ("+440 mm" at the arrow) then checked on release. Design: [docs/manual-edits.md](../manual-edits.md).
+
+**Nov 1, review of PR IssueLab-Inc/ORCA#92** (13 threads), and `main` merged in (its row Isolate; conflicts in
+App's scene reset and this log, both sides kept). Fixed:
+- **Openings:** a push takes only the openings through the pushed face, for caps, sides and outline edges (a plan-drawn
+  wall's door now goes with its face; a beam's web opening stays when its end is pushed).
+- **Chat consent gate** (`chat.consents`, `accepts`): a bare "keep" is not consent; nothing is kept in the turn Muse
+  checked it unless "keep it" is all that was said; clashes and open joints only when kept *with* them; every undo word
+  negated, "go back" dropped.
+- **Clash state:** undo and redo return each clash measured again (`clash_states`) and the page acts on that, not on
+  the entry's source. A hand edit is tied to the clash on screen only when it touches its elements.
+- **Caps:** the run after a hand edit has its own cap (`edit_rerun_limit`).
+- **Smaller:**
+  - a partial face name several faces fit is refused with the candidates;
+  - holes drawn as indexed poly curves are read (`faces.curve_points`);
+  - a fix's pieces are measured on one index (`detect.measure_pairs`);
+  - structure and transfer rules live in `hosts.py` (a machine's beam gets no structural review);
+  - `IfcScene.has` replaces two copies of `_exists`;
+  - chat keeps no preview meshes pending;
+  - clash ids in Muse's edit lines are no longer written as `#`;
+  - the palette says P again stops editing.
+
+Checked: 771 server tests, 222 web tests, build clean, `test_docs_map`.
+
+**Nov 1, hand edits change the face or element picked only** (owner: "when we are extending a face, it's pulling
+everything"; [docs/editing-parity.md](../editing-parity.md), slice 0a). Push/pull, align and move no longer take joined
+parts along by default: a joint they leave open is listed and kept only as **Keep with N open joints**. `carry: true`
+(`manual.carries`; the Edit tool's **Take joined parts along**, off by default, kept for the visit) brings back the
+following segment and the carried run; a carried move that cannot keep its joints offers **Move it on its own**. The
+fix agent's moves are unchanged. Also: the export's `orca-edits.csv`/`.json` are written as UTF-8 with the CSV's own
+line ends (Windows wrote cp1252 and doubled carriage returns). Checked: 768 server tests pass (the five that fail on a
+clean checkout of this branch on this machine fail the same: two detection, two PDF fonts, one voice socket), 222 web
+tests, build clean; in Chromium on Northbank, the supply main moved up 50 mm on its own (two tees left open, kept as
+E1 with "Keep with 2 open joints", Ctrl+Z undid it), and carried it is refused past 12 parts with the offer.
+
+**Nov 1, hand edits can no longer leave a model saying two things** ([docs/editing-parity.md](../editing-parity.md),
+slice 0b). Northbank carries none of what real exports do (layer and profile set usages, `Axis`, path joins, bodies
+from a type), so those paths were never exercised. New `fixtures.build_parametric_fixture` carries all of them, built
+with `ifcopenshell.api`. New `consistency.py` reads, per element and rule, what a consistent edit keeps, and
+`manual.check` compares the reading before an edit with the one in its trial: what it made worse is refused in words
+with the numbers ("the material layers of wall 'W1' add up to 250 mm but its body would be 300 mm thick…"), stale
+base quantities warn, and a model that was already inconsistent never blocks. `test_parametric_edits.py` runs every hand
+edit on every construct: kept consistent or refused, nothing in between. Measured: on a Northbank wall the check takes
+0.38 s with it and 0.40 s without (Northbank's only base quantities are on spaces, which are not edited). Checked: 796
+server tests pass (the same five environment failures), `test_docs_map`; on the running server, the fixture uploaded
+through `/api/models/upload`: a layered wall's thickness refused with its numbers, its height allowed with the
+quantities warning, a beam lengthened past its axis refused, and keeping a refused edit answers 409.
+
+**Nov 1, hand edits bring the model's data along** ([docs/editing-parity.md](../editing-parity.md), Tier 1). New
+`parametric.py` runs after every hand edit, in the trial and when kept: a layered wall or slab's layer on the pushed face
+grows or shrinks (the reference line held), a profile set's material profile becomes the new section, the `Axis` follows
+the body's ends (and a split's piece gets its own), base quantities are worked out again (`quantities.py`, only those
+already there), and a path join goes to the piece of a split that holds its end or is left open as a joint. Shared data
+is copied for the edited element alone (owner decision): its own type "… (ORCA)" when its type gave the set to others, its
+own set otherwise; a type's mapped shape becomes the element's own copy (`edits.unmap`, faces read through the map), the
+type and its other elements unchanged. A new `shared` consistency rule refuses a shared set changed in place: it caught
+the first version, where assigning the copied type left the usage on the old set and W2's layers moved with W1's.
+Checked: 804 server tests pass (the same five environment failures); the matrix keeps all 24 edits and reads the whole
+model again after each (every layer set, profile, axis, join and quantity matches its body, everything else as it was,
+the file schema-valid; the first run found the old shape `unmap` left behind, now removed); on the running server, the
+fixture uploaded, four edits kept (a wall thickened, a beam lengthened, a mapped fitting pushed, a wall split) and
+exported: W1 "WT-250 (ORCA)" 300 mm, W2 still 250 mm, the join on "W1 (part 2)", F1 its own extrusion and F2 still
+mapped, `ORCA_Edit` stamped, no schema issues; six edits undone leave the file valid with F1 mapped again.
+
+**Nov 1, MEP by hand: offset, join, disconnect** ([docs/editing-parity.md](../editing-parity.md), Tier 2). Three hand
+edits on the fix kinds' geometry: `offset` (a section of a level duct, pipe or tray up, down or sideways square to its
+run, with bends: `edits.apply_offset`), `join` (two free ends in line, or square with a 90° bend fitting:
+`edits.join_plan`, `join_segments`) and `disconnect` (a joint left open, kept as one). Edit tool keys F, N and X, with
+animated icons; Muse and MCP read the ops. Two fixes found on the way, both older than these tools: a point clicked for a
+split, a section or an offset snapped through the see-through context to the slab above a clash pair (now it snaps
+only to the element picked), and the tool's number fields refused values off their step (400 mm on a 10 mm step from
+1, a void's 300 mm on 10 from 5), so their Check did nothing (the forms are now `noValidate`; the server checks every
+op). Checked: 812 server tests pass (the four environment failures), 223 web tests, build clean; in Chromium on
+Northbank, clash #1 offset by hand 400 mm up over 2.48 m: "Clear · nearest 50 mm · clears 1 clash", kept as E1, the
+clash marked fixed ("no overlap here"), Ctrl+Z undid it.
+
+**Nov 1, what the model says, edited** ([docs/editing-parity.md](../editing-parity.md), Tier 3). New
+`property_edits.py`: an element's attributes, a value in its own property sets, its type, material, classification and
+storey changed through `ifcopenshell.api`, each an edit-log entry (kind `property`) undone and redone as any edit and
+stamped in the export; refused in words where the model would say two things (base quantities, a type's own values, a
+layered element's material or type). Routes `GET …/property-choices` and `POST …/properties`, MCP `edit_property`, and
+Muse's `edit_property`, kept only when the person's own message says the value. The Properties panel has a pencil on
+the element's editable rows (typed, or chosen from its own model), and now reads the element again after every keep,
+undo and redo: before, a hand edit's new size or an undone change stayed on screen until another selection. Checked:
+820 server tests pass (the four environment failures), 225 web tests, build clean; in Chromium on Northbank, the supply main's Tag
+changed in the panel, kept as E1, Ctrl+Z and Ctrl+Y followed by the panel; its storey moved Level 02 → Level 03 from
+the list.
+
+**Nov 1, Muse's fixes keep the model true** ([docs/editing-parity.md](../editing-parity.md)). The offset, trim, seat, route and resize trials and a plain move now bring layer and profile sets, `Axis`, base quantities and a split's join along with the body (`agent._fix_trial`, `_keeps_true` over `parametric.sync` and `consistency`), and fail with the reason when the model would still disagree or a wall's join would be left open; Muse reads it next round. `plans.apply` does the same after each kept fix and refuses all of them when one disagrees. Elements with nothing to keep (all of Northbank's) skip it. Checked: `test_fix_consistency.py` (a typed beam trimmed back to a column keeps its axis and quantities at 4.8 m; a move off a wall's join refused in its trial and when kept), the fix kinds' suites unchanged.
+
+**Nov 1, bends at any angle** ([docs/editing-parity.md](../editing-parity.md)). Bends are drawn for any angle (`edits.bend_turn`, `bend_end`, `_bend_mesh`; 90° unchanged) and an offset can climb a slope with angled bends either end (`apply_offset(bend_deg=)`, 15 to 90): the Edit tool's offset has 90° / 45°, Muse's offset candidate takes `bend_deg` (construction and machines prompts say when), carried in its option to the recheck and the keep. Checked: `test_mep_edits.py` (a 45° offset by hand is one joined chain with its middle 400 mm up, schema-valid; Muse's 45° offset kept as tried), the offset, route and fix-kind suites unchanged, 225 web tests, build clean.
+
+**Nov 1, transitions on a carried resize** ([docs/editing-parity.md](../editing-parity.md)). A duct's or pipe's side or radius pushed with Take joined parts along now adds a transition fitting back to the old size at each joined end (`edits.add_transitions`, `section_of`, `joined_caps`, `_loft_any` for rectangles and round), the segment shortened so no face turns more than 30° and its ports re-joined through it; pushed on its own it warns that its end no longer matches. Checked: `test_mep_edits.py` (the run fixture's main 500 wide, a 173 mm transition to the end segment, undone; a pipe made 150 mm with a round transition to the pipe it joins), schema-valid.
+
+**Nov 1, classifications from the panel** ([docs/editing-parity.md](../editing-parity.md), Tier 3). A classification row's pencil swaps the reference for another in one change (`replace`: one entry, one undo) or takes it off; **Add a classification** gives the element one more of its model's references. `properties.py` now gives each classification its id, and a reference the element already has is refused in words, never given twice. Checked: `test_property_edits.py` (swapped in one entry and undone, W2 keeping its own; a duplicate and taking off one it does not have refused), 226 web tests.
+
+**Nov 1, apply to the type** ([docs/editing-parity.md](../editing-parity.md)). A push/pull or align can change what the element's type gives for every element of it (`scope: "type"`; the Edit tool's **Apply to the type**, off by default and again for each element; Muse and MCP use it only when asked for the type or all of them). A mapped body's new solids go back into the type's map through the inverse of where the element's map puts them, and the element draws it through the map again; a profile set takes the new section and each other element takes it about its own axis (`parametric.type_share`, `hold`, `to_type`). The other elements are targets: checked for clashes, gated by requirements, their quantities worked out again. A layered type, an element without a type, a length and every other op are refused in words. Checked: `test_parametric_edits.py` (F1's top 100 mm taller makes F2 taller too, both still mapped, undone with every element and map as it was; F2's turned north end makes F1 longer along x; BT-UB 450 mm deep with BM2 grown about its axis and no type copy; four refusals), schema-valid.
+
+**Nov 1, a carried wall end** ([docs/editing-parity.md](../editing-parity.md)). A wall moved with Take joined parts along now brings each wall whose end is path-joined to it along (`manual._retrims`): that end is pushed along its own axis so it meets the moved wall as it did, through the hand edits' own push, so its axis, layers, quantities and openings follow and its refusals hold. A wall moved along its own line, or a join in line with it, is still left open and listed. Spiked first: a carried move left every path join open; `geometry.regenerate_wall_representation` was set aside because it redraws a wall from its layers. Checked: `test_parametric_edits.py` (W2 moved 500 mm east: W1 4.5 m, its axis, quantities and join holding, nothing else changed, undone; W1 moved north shortens W2 to 2.5 m; a move along W1's line leaves its join open), schema-valid.
+
+**Nov 1, Muse and agents use the new edits** ([docs/editing-parity.md](../editing-parity.md)). Muse's chat rules and the `edit_check` / `check_edit` texts say when to take joined parts along and when to apply an edit to the type (only when asked for the type or all of them), and `edit_property` names a classification swapped in one change (`replace`). Muse's fix proposals already take `bend_deg` and keep the model consistent. Checked: chat, MCP and property edit suites unchanged (30 passed).
+
+**Nov 1, a beam's axis stays at its cardinal point** ([docs/editing-parity.md](../editing-parity.md)). A side of a profiled element pushed grows its body to that side, and its axis now goes back to the section's cardinal point (`parametric._cardinal`): the placement moves across, the body back by as much, what is placed in it stays. A new `cardinal` consistency rule reads where the cardinal point is from the axis (`consistency.cardinal_offset`, points 1-9 on the section's box, 10-15 for sections symmetric both ways). Checked: `test_parametric_edits.py` (BM1's top pushed 50 mm: body 2.8 to 3.25 m, axis at 3.025 m, undone; a bottom-centred beam's axis moves only with its bottom), `test_consistency.py` (a body moved off its cardinal point is caught).
+
+**Nov 1, a layered type made thicker for every wall** ([docs/editing-parity.md](../editing-parity.md)). Apply to the type now takes a face square to a wall's or slab's layers: the layer on that face grows in the type's own set and every other wall of the set has the face holding that layer pushed by as much (`parametric._grow_layers`, `manual._push_face`), reference lines kept; `parametric._layers` leaves layers that already add up. Checked: `test_parametric_edits.py` (W1's north face 50 mm: WT-250's insulation 85 mm, W2 50 mm thicker on its west face, both 300 mm wide in their quantities, undone; a plaster layer pulled through refused), schema-valid.
+
+**Nov 1, Muse's wall moves keep their joins** ([docs/editing-parity.md](../editing-parity.md)). A fix's plain move of a wall square to a wall path-joined at its end now brings that end along (`agent.joined_ends`, `follow_joined`, over the hand move's `manual._retrims`) instead of failing on the open join: tried, previewed (`edit.follow`), kept (`plans._keep_move`) and checked with other fixes (`_in_trial_move`), the end's file held with the move's. Checked: `test_fix_consistency.py` (W2 moved 300 mm east: W1 4.3 m, its Length and join, one entry, undone; a move along W1's line still refused with the open join), fix kinds, plans and agent suites.
+
+**Nov 1, a carried move re-fits its neighbours** ([docs/editing-parity.md](../editing-parity.md)). A hand move with joined parts re-fits a level straight it goes square to, when that straight is joined at its far end too: its joined end goes with the move and a pair of bends and a riser take it back to the rest, which stays (`connections.plan_move(refit=True)`, `Jog`, `edits.apply_jog`, `jog_fits`; `_build_chain(shift_ends=)` moves the joined end's port frame). Free-ended straights are still taken along whole; Muse's moves plan as before. Checked: `test_mep_edits.py` (DA lifted 400 mm with an air terminal beyond DB: refused before, now every joint held, the terminal unmoved, schema-valid, undone; a free-ended DB still taken whole), the move, journal, STEP, chat and MCP suites; on Northbank 664 carried 400 mm plans keep their joints 370 times (102 before), and 40 applied in trials hold every joint.
+
+**Nov 1, Muse's moves re-fit too** ([docs/editing-parity.md](../editing-parity.md)). The fix agent's moves plan with re-fits (`connections.refit_moves`, `SIGHTLINE_MOVE_REFIT`, on unless `off`): the re-fit's pieces are checked as stretched segments are (`baseline`, `check_applied`), drawn in the preview, carried in the option (`edit.jogs`) and kept by `Workspace.apply` with the pieces in `changed`; combined fixes' move steps do not re-fit yet. Two joints-fixture tests now see a lift tried and failing on the column it runs through, where before it was refused untried for the filter beyond; with the switch off they read as before. Checked: `test_mep_edits.py` (Muse's lift of DA re-fits DB, kept as tried, the terminal still joined, 4 parts made, undone; refused with the switch off), `test_connected_moves.py`, fix kinds, plans and agent suites.
+
+**Nov 1, the answer key after the editing program** (`evals/answer_key.py --runs 1`, Muse Spark 1.3, effort low, re-fits on for Muse's moves). 3/3: each first candidate passed at Rev04's own height, #042 +0.40 m, #057 +0.25 m, #061 +0.28 m, with 50, 50 and 53 mm clearance, as the last recorded run; 19, 19 and 24 s. #042's second candidate, the same offset on 45° slopes, passed too. The whole-run lifts and drops Muse also tried failed on what they hit (ducts, dampers, walls, lights), so the re-fit stays on (`SIGHTLINE_MOVE_REFIT`). Rows in `evals/results.csv`.
+
+**Nov 1, hand edits on real Revit models** ([docs/editing-parity.md](../editing-parity.md), "Real Revit models"). Every hand edit checked on Autodesk's Snowdon Towers sample (six IFC2X3 files, Revit 2027, feet; local only): 1,644 checks, 1,493 made, 91 refused in words, 60 errors (one bug) and a native crash. Fixed: IFC2X3 ducts and pipes (`IfcFlowSegment` by type: `edits.segment_kind`, `fitting_class`, fittings as faceted breps, `mesh_item`); side branches kept on the piece that stays or refused naming them (`_branch_home`); a split of a surface body (Revit's toilets) crashed OpenCASCADE, now refused in words, and a sweep of 75 edits on 25 surface-bodied elements in a crash-restarting process found no other; IFC2X3 classification codes (`property_edits.ref_code`) and owner history; a void's fallback depth overwrote its direction; named refusals for joined walls and layerless siblings. Clash checks: threads (`SIGHTLINE_GEOM_THREADS`), a digest-keyed cache of heavy neighbours, one edit's neighbours shared before and after: a type of 100 fittings 66 s to 13 s, a toposolid's 19 s once. Checked: the harness on all six files, tests for each fix (`test_mep_edits.py` IFC2X3 and branches, `test_parametric_edits.py`, `test_property_edits.py`), 848 server tests.
+
+**Nov 1, the Edit tool shows what else changes** ([docs/manual-edits.md](../manual-edits.md)). Take joined parts along and Apply to the type show only where they do something (`manual.choices_for` on the picked face; "Apply to type FT-BOX · 1 other"); a check reads as the edit, then a line per thing it brings along (`effects`), then Also changes N other elements by why (`manual.also`, `alsoGroups`) with Show them; a type-wide check says how many it checks. A floating Properties panel closes when the Edit tool opens (`DockHandle.closeFloating`); an editable row's pencil shows muted without a hover. Checked: web tests (228), build; in Chromium on the parametric fixture, F1's top offered only Apply to type FT-BOX · 1 other, its check listed F2 by why, W2's side offered both choices, the floating Properties closed and the pencils showed at 45%.

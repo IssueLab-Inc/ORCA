@@ -285,3 +285,33 @@ def test_an_agents_pattern_reading_costs_one_proposal_once(server, monkeypatch):
                                                                 for k in ("verdict", "cause", "action", "rule")}}
     pats[:] = [_pattern(2)]   # a new reading: the hour's one proposal is spent
     assert "this hour" in rpc(server, token, "find_patterns")["error"] and reader.calls == 1
+
+
+def test_an_agent_edits_by_hand_through_the_log_and_the_page_follows(server):
+    token, link = _link(server)
+    rpc(server, token, "open_models", {"names": ["fixture-clash.ifc"]})
+    page = link.subscribe()
+    beam = rpc(server, token, "find_elements", {"query": "beam", "ifc_class": "IfcBeam"})["elements"][0]["global_id"]
+    names = {f["name"] for f in rpc(server, token, "list_faces", {"element": beam})["faces"]}
+    assert {"east end", "west end", "top"} <= names
+    op = {"op": "push_pull", "element": beam, "face": "east end", "by_m": -0.5}
+    checked = rpc(server, token, "check_edit", {"op": op})
+    assert checked["blocked"] is None and "preview" not in checked
+    kept = rpc(server, token, "apply_edit", {"op": op})
+    assert kept["kept"] == "E1" and kept["files_changed"] == 1
+    log = rpc(server, token, "list_edits")
+    assert log["entries"][0]["source"] == "agent" and log["entries"][0]["actor"].startswith("agent link")
+    assert rpc(server, token, "undo_edit")["state"] == "undone"
+    assert rpc(server, token, "redo_edit")["state"] == "kept"
+    events = []
+    while not page.empty():
+        events.append(page.get_nowait())
+    actions = [e.get("action") for e in events if e.get("type") == "ui"]
+    assert actions.count("edit_preview") == 1 and "edit_kept" in actions and actions.count("edit_stepped") == 2
+    kept_event = next(e for e in events if e.get("action") == "edit_kept")
+    assert kept_event["kept"]["meshes"] and kept_event["kept"]["revision"] == 1
+    tools = asyncio.run(mcp_server.build(Workspace()).list_tools())
+    read_only = {t.name for t in tools if t.annotations and t.annotations.read_only_hint}
+    assert {"list_faces", "check_edit", "list_edits"} <= read_only and not read_only & {"apply_edit", "undo_edit", "redo_edit"}
+    apply_tool = next(t for t in tools if t.name == "apply_edit")
+    assert {"accept_clashes", "accept_joints"} <= set(apply_tool.input_schema["properties"])

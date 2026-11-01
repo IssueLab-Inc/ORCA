@@ -16,6 +16,7 @@ Every step is reported through `emit` as it happens, so the UI can show the agen
 from __future__ import annotations
 
 import json
+import re
 import threading
 import uuid
 from collections import Counter, OrderedDict
@@ -24,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import checks, context_planner, domains, edits, facets, plans, settings
+from . import checks, context_planner, domains, edits, faces, facets, journal, manual, plans, property_edits, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 from .limits import env_int
@@ -186,7 +187,93 @@ TOOLS = [
             "grey_rest": {"type": "boolean", "description": "grey what no filter colours"},
             "hide_rest": {"type": "boolean", "description": "hide everything no filter colours or isolates"}}, ["filters"]),
     _fn("clear_filters", "Remove the filters you set; the user's own come back."),
+    _fn("list_faces", "The faces of an element there are to edit by hand, named as people say them (east end, north face, "
+        "top), with what each allows (push_pull, align, clip, void) and its size. `element`: a GlobalId, or \"selected\" "
+        "for the element the user has selected.", {"element": {"type": "string"}}, ["element"]),
+    _fn("edit_check", "Check a hand edit without keeping it; the page shows its preview and its result. `op` is one of: "
+        "{op: push_pull, element, face, by_m} (a face out + or in -, metres), {op: align, element, face, to: {element, "
+        "face}, gap_m, how: stretch|move}, {op: move, element, delta_m: [dx, dy, dz]}, {op: void, element, face, at: "
+        "[x, y, z], shape: rect|round, width_m, height_m | diameter_m, depth_m (omit to go through)}, {op: cut_by, "
+        "element, cutter, gap_m}, {op: split, element, at}, {op: remove_section, element, from, to}, {op: delete, "
+        "element}, {op: clip, element, to: {element, face}, gap_m}, {op: offset, element, from, to, toward: "
+        "up|down|north|south|east|west, by_m, bend_deg?: 45 for a slope with angled bends} (a section of a level duct, pipe or tray between two points along it, "
+        "with bends), {op: join, element, to: {element}} (two segments' free ends: in line, or square with a 90° bend), "
+        "{op: disconnect, element, from: element} (leave that joint open). `element` may be \"selected\", and `face` \"selected\" "
+        "for the face the user chose in the Edit tool; other faces by name from list_faces. An edit changes only that "
+        "face or element: a joint it leaves open is listed. Add carry: true to push_pull, align or move only when the "
+        "user asks to take joined parts along (a joined straight follows a pushed end; a move takes its run and "
+        "fittings). Add scope: \"type\" to push_pull or align only when the user asks to change the type, or every "
+        "element of it: the shape, section or layer thickness its type gives changes for all of them, each checked "
+        "(a length or an element without a type is refused). The result says what it clears, what it would hit (clashes), its warnings, or why it cannot be made.",
+        {"op": {"type": "object"}}, ["op"]),
+    _fn("edit_keep", "Keep the hand edit you checked last, only when the user's own latest message says to keep it "
+        "(keep it, apply it, do it, yes). When it makes clashes, only when they said to keep it with the clashes; pass "
+        "accept_clashes = that number. When its check lists joints it leaves open, only when they said to keep it with "
+        "the open joint. Never on your own initiative.", {"accept_clashes": {"type": "integer"}}),
+    _fn("undo_edit", "Undo the newest kept edit (a hand edit or a fix), only when the user's own latest message asks to "
+        "undo it."),
+    _fn("edit_property", "Change what the model says about an element, not its shape, only when the user's own latest "
+        "message asks for it and says the new value (or names the type, material, storey or classification): `change` is "
+        "{kind: attribute, name: Name|Description|ObjectType|Tag|PredefinedType, value} | {kind: property, pset, name, "
+        "value} (a property in one of its own sets; base quantities follow its body and are refused) | {kind: type, type: "
+        "GlobalId} | {kind: material, material: id} | {kind: classification, reference: id, remove? | replace?: the "
+        "id of one it has, swapped in one change} | {kind: container, container: GlobalId}. Kept in the edit log at once; undo_edit takes it back.",
+        {"element": {"type": "string"}, "change": {"type": "object"}}, ["change"]),
+    _fn("list_edits", "Every edit kept to the model, newest last: who kept it, what it did, the clash it is for and the "
+        "fix it follows.", {"limit": {"type": "integer"}}),
 ]
+
+# The person's own words: what keeps or undoes an edit from chat or voice (docs/manual-edits.md). Muse never keeps.
+# A bare "keep" is not consent: in this domain it mostly means maintain ("keep 25 mm clear").
+_CONSENT = re.compile(r"\b(keep\s+(it|that|this|them)|apply(\s+(it|that))?|do\s+it|go\s+ahead|yes|yep|"
+                      r"confirm(ed)?|accept(\s+(it|that))?|commit(\s+it)?|make\s+it\s+so|save\s+it)\b", re.I)
+_REFUSE = re.compile(r"\b(don'?t|do\s+not|never|cancel|stop|wait)\b|^\s*no\b", re.I)
+_UNDO = re.compile(r"\b(undo|revert|take\s+(it|that)\s+back|put\s+it\s+back)\b", re.I)
+# "keep it" and little else: kept even when Muse checked it this same turn (the person said only that)
+_ONLY_KEEP = re.compile(r"^\s*(ok(ay)?[, ]+|yes[, ]+|please[, ]+)*(keep|apply)\s+(it|that|this)(\s+please)?\s*[.!]?\s*$", re.I)
+
+
+def consents(text: str, undo: bool = False) -> bool:
+    """Whether the person's own message says to keep (or undo) an edit: plain words, no refusal anywhere in them."""
+    t = text or ""
+    return bool((_UNDO if undo else _CONSENT).search(t)) and not _REFUSE.search(t)
+
+
+def accepts(text: str, what: str) -> bool:
+    """Whether the person's message keeps the edit *with* its clashes (`what` "clash") or open joints ("joint"): said
+    as such ("keep it with the clash", "apply it with 2 clashes", "keep it with the open joint"), and not ruled out
+    ("keep it if it makes no clashes", "not if it clashes", "without the joint")."""
+    t = text or ""
+    said = re.search(rf"\b(keep|apply|accept|do)\s+(it|that|this|them)?\s*(anyway\s+)?with\s+(the|its|those|these|an?|one|"
+                     rf"two|three|\d+)?\s*(open\s+)?{what}", t, re.I)
+    ruled_out = re.search(rf"\b(no|not|doesn'?t|don'?t|without|unless|if|any)\b[^.?!]{{0,25}}\b{what}", t, re.I)
+    return bool(said) and not ruled_out
+
+
+def _said(text: str, scene, gid: str, change: dict) -> bool:
+    """Whether the person's own message names the property change Muse is making: the new value (a removal: the
+    property's name), or the type, material, storey or classification by its name; and refuses nothing."""
+    t = (text or "").lower()
+    if not t or _REFUSE.search(text or ""):
+        return False
+    kind = change.get("kind")
+    model = scene.models[scene.index_of(gid)]
+    try:
+        if kind in ("attribute", "property"):
+            v = change.get("value")
+            if v in (None, ""):
+                return str(change.get("name") or "").lower() in t
+            if isinstance(v, bool):
+                return bool(re.search(r"\b(yes|no|true|false)\b", t))
+            if isinstance(v, (int, float)):
+                return any(abs(float(x) - float(v)) < 1e-9 for x in re.findall(r"-?\d+(?:\.\d+)?", t))
+            return str(v).lower() in t
+        target = {"type": lambda: model.by_guid(change["type"]).Name, "container": lambda: model.by_guid(change["container"]).Name,
+                  "material": lambda: model.by_id(int(change["material"])).Name,
+                  "classification": lambda: property_edits.ref_code(model.by_id(int(change["reference"])))}[kind]()
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return False
+    return bool(target) and str(target).lower() in t
 
 
 def _coloured(idx: dict, rule: dict, hit: set[int]) -> dict:
@@ -224,6 +311,9 @@ class Context:
     filters: list[dict] = field(default_factory=list)
     filter_view: dict = field(default_factory=dict)
     check: str | None = None   # the kept check the user's list shows (its key; None: every kept check)
+    # What the user has selected on the page: {element, face?, pick?} (the Edit tool's face, when one is chosen, and the
+    # point and normal picked on it).
+    selected: dict | None = None
 
 
 def page_view(ctx: Context) -> dict:
@@ -269,6 +359,9 @@ class Chat:
         self.propose_allowed_many: Callable[[int], str | None] = lambda n: None
         self.escalate_allowed: Callable[[], str | None] = lambda: None
         self.detect_allowed: Callable[[], str | None] = lambda: None
+        # Per session, the hand edit Muse checked last (edit_keep keeps only that one, on the person's own words).
+        self.pending: dict[str, dict] = {}
+        self._turn = threading.local()
 
     @property
     def model(self) -> ToolModel:
@@ -310,6 +403,7 @@ class Chat:
             voice = domains.prompt("chat", domains.of(self.ws, ctx.scene_id))
             session.messages[0] = {"role": "system", "content": voice}
         session.messages.append({"role": "user", "content": f"{self._context_line(ctx)}\n\n{text}"})
+        self._turn.state = {"session": target.id, "turn": turn_number, "text": text}
         answer = ""
         for _ in range(MAX_STEPS):
             if cancel.is_set():
@@ -441,6 +535,121 @@ class Chat:
                                                        **({"rooms_not_checked": c["rooms"]} if c["rooms"] else {})}
         return test, {"a": told(a_name, c_a), "b": {"name": b_name, "elements": None} if c_b is None else told(b_name, c_b)}
 
+    def _selected(self, ctx: Context, gid):
+        if gid in (None, "", "selected", "this", "it"):
+            sel = (ctx.selected or {}).get("element")
+            if not sel:
+                raise ValueError("nothing is selected: ask the user to click the element, or name it")
+            return sel
+        return gid
+
+    @staticmethod
+    def _chosen_face(ctx: Context, gid, face):
+        """The face the user chose in the Edit tool, as its pick, when Muse means it ("selected", or its name on the
+        element selected): a face only a pick places (an I-section's side, a fitting's face) works from chat too."""
+        sel = ctx.selected or {}
+        pick = sel.get("pick")
+        if not isinstance(face, str) or not isinstance(pick, dict) or sel.get("element") != gid:
+            return face
+        if face.strip().lower() in ("selected", "this", "this face", "it", "chosen") or face == sel.get("face"):
+            return {"point": pick.get("point"), "normal": pick.get("normal")}
+        return face
+
+    def _edit_tool(self, name: str, args: dict, ctx: Context, emit) -> tuple[dict, str, list[Path]]:
+        """The hand-edit tools (docs/manual-edits.md): Muse checks, the person keeps."""
+        ws, sid = self.ws, self._scene(ctx)
+        state = getattr(self._turn, "state", None) or {}
+        session = state.get("session") or "direct"
+        if name == "list_faces":
+            gid = self._selected(ctx, args.get("element"))
+            listed = [{k: v for k, v in f.to_dict().items() if k in ("id", "name", "kind", "size_m", "allows", "why_not")}
+                      for f in faces.faces(ws.scene(sid), gid)]
+            return {"element": gid, "label": manual.label(ws.scene(sid), gid), "faces": listed}, f"{len(listed)} faces", []
+        if name == "list_edits":
+            j = ws.journal(sid)
+            limit = max(1, min(int(args.get("limit") or 10), 30))
+            rows = [{k: e.to_dict()[k] for k in ("id", "when", "source", "kind", "summary", "clashes", "follows", "state", "warnings")}
+                    for e in j.entries[-limit:]]
+            return {"edits": rows, "can_undo": j.summary()["can_undo"]}, f"{len(rows)} edits", []
+        if name == "edit_check":
+            op = dict(args.get("op") or {})
+            op["element"] = self._selected(ctx, op.get("element"))
+            op["face"] = self._chosen_face(ctx, op["element"], op.get("face"))
+            r = manual.check(ws, sid, op)
+            # What keeping needs (not the preview's meshes, which can be large)
+            self.pending[session] = {"check": {k: v for k, v in r.items() if k not in ("preview", "before")},
+                                     "turn": state.get("turn"), "scene": sid}
+            emit({"type": "ui", "action": "edit_preview", "check": r})
+            told = {k: v for k, v in r.items() if k not in ("preview", "before", "targets")}
+            return told, ("cannot: " + r["blocked"]) if r.get("blocked") else (
+                f"makes {r['clashes']} clash(es)" if r["clashes"] else "clear"), []
+        if name == "edit_keep":
+            pend = self.pending.get(session)
+            text = state.get("text") or ""
+            if not pend or pend.get("scene") != sid:
+                return {"error": "there is no checked edit to keep: check one first"}, "nothing to keep", []
+            r = pend["check"]
+            if r.get("blocked"):
+                return {"error": f"that edit cannot be made: {r['blocked']}"}, "refused", []
+            if not consents(text):
+                return {"error": "only the user can keep an edit: ask them to say keep it"}, "waiting for the user", []
+            if pend.get("turn") == state.get("turn") and not _ONLY_KEEP.match(text):
+                # Checked this turn: the person has not seen its preview yet ("push it up 100 mm and keep 50 mm clear")
+                return {"error": "show the user the check first: keep it only when they say so after seeing it"}, \
+                    "waiting for the user", []
+            n = int(args.get("accept_clashes") or 0)
+            if r["clashes"] and (n < r["clashes"] or not accepts(text, "clash")):
+                return {"error": f"it makes {r['clashes']} clash(es): keep it only if the user says to keep it with the clashes"}, \
+                    "waiting for the user", []
+            joints = len(r.get("joints") or [])
+            if joints and not accepts(text, "joint"):
+                return {"error": f"it leaves {joints} joint(s) open: keep it only if the user says to keep it with the open "
+                                 "joint"}, "waiting for the user", []
+            scene = ws.scene(sid)
+            with ws.lock:
+                before = scene.revision
+                kept = manual.apply(ws, sid, r["op"], key=r.get("key"), accept_clashes=n, accept_joints=joints, source="muse",
+                                    clash_id=ctx.clash_id, pair=self._pair(ctx))
+                patch = ws.patch(sid, kept["changed"], before, removed=kept["removed"])
+            self.pending.pop(session, None)
+            emit({"type": "ui", "action": "edit_kept", "kept": {**kept, **patch}})
+            return {"kept": kept["entry"]["id"] if kept["entry"] else None, "summary": kept["entry"]["summary"] if kept["entry"] else ""}, "kept", []
+        if name == "edit_property":
+            gid = self._selected(ctx, args.get("element"))
+            change = dict(args.get("change") or {})
+            if not _said(state.get("text") or "", ws.scene(sid), gid, change):
+                return {"error": "only change a property the user asked for, with its new value in their own words"}, \
+                    "waiting for the user", []
+            scene = ws.scene(sid)
+            try:
+                with ws.lock:
+                    before = scene.revision
+                    r = property_edits.edit(ws, sid, gid, change, source="muse")
+                    patch = ws.patch(sid, [gid], before)
+            except (edits.Unsupported, ValueError, TypeError) as e:
+                return {"error": f"that change cannot be made: {e}"}, "refused", []
+            entry = r["entry"] or {}
+            emit({"type": "ui", "action": "edit_kept", "kept": {"entry": entry, "files": entry.get("files", []), "changed": [gid],
+                                                               "created": [], "removed": [], "pieces": [], "check": {}, **patch}})
+            return {"kept": entry.get("id"), "summary": entry.get("summary")}, "kept", []
+        if name == "undo_edit":
+            if not consents(state.get("text") or "", undo=True):
+                return {"error": "only the user can undo an edit: ask them to say undo"}, "waiting for the user", []
+            scene = ws.scene(sid)
+            with ws.lock:
+                before = scene.revision
+                r = ws.undo_edit(sid)
+                patch = ws.patch(sid, r["changed"], before, removed=r["removed"])
+            emit({"type": "ui", "action": "edit_stepped", "step": {**r, **patch}})
+            return {"undone": r["entry"]["id"], "summary": r["entry"]["summary"]}, "undone", []
+        raise ValueError(name)
+
+    def _pair(self, ctx: Context) -> list[str] | None:
+        if not ctx.clash_id or not ctx.report_id:
+            return None
+        m = self._matches(ctx).get(ctx.clash_id, {})
+        return [m["a"], m["b"]] if m.get("a") and m.get("b") else None
+
     def _context_line(self, ctx: Context) -> str:
         parts = ["[context]"]
         parts.append("a model is open" if ctx.scene_id in self.ws.scenes else "no model is open")
@@ -458,6 +667,18 @@ class Chat:
             parts.append("no clash report is open")
         if ctx.clash_id:
             parts.append(f"the user has clash {ctx.clash_id} selected")
+        sel = (ctx.selected or {}).get("element")
+        if sel and ctx.scene_id in self.ws.scenes:
+            try:
+                scene = self.ws.scene(ctx.scene_id)
+                face = (ctx.selected or {}).get("face")
+                parts.append(f"the user has element {manual.label(scene, sel)} selected ({sel})"
+                             + (f", its {face} chosen in the Edit tool" if face else ""))
+            except KeyError:
+                pass
+        if ctx.scene_id in self.ws.journals and self.ws.journals[ctx.scene_id].entries:
+            lines = journal.entry_lines(self.ws.journals[ctx.scene_id].entries, 3)
+            parts.append("edits kept so far (newest last): " + " | ".join(lines))
         if ctx.fixed:
             parts.append(f"fixed so far: {', '.join(ctx.fixed[:30])}")
         if ctx.filters:
@@ -836,6 +1057,8 @@ class Chat:
         if name == "set_view":
             emit({"type": "ui", "action": "set_view", **{k: args[k] for k in ("mode", "section_box") if k in args}})
             return {"done": True}, "view changed", []
+        if name in ("list_faces", "edit_check", "edit_keep", "undo_edit", "list_edits", "edit_property"):
+            return self._edit_tool(name, args, ctx, emit)
         if name == "set_filters":
             idx = ws.facets(self._scene(ctx))
             try:

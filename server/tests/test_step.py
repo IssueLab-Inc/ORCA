@@ -193,3 +193,65 @@ def test_parts_from_older_conversions_still_read_their_group():
     pset = ifcopenshell.api.run("pset.add_pset", model, product=part, name="Sightline_STEP")
     ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={"Group": "Frame", "Label": "0:1:1:2"})
     assert step_source(part) == {"Group": "Frame", "Label": "0:1:1:2", "id": pset.id()}
+
+
+def test_a_part_deleted_by_hand_leaves_the_step_and_a_pushed_box_changes_shape(tmp_path):
+    from sightline import manual
+    write_step(tmp_path / "Test-cell.step")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["Test-cell.step"])
+    scene = ws.scene(sid)
+    ids = {scene.entity(g).Name: g for g in scene.bounds()}
+    kept = manual.apply(ws, sid, {"op": "delete", "element": ids["Block K1"]})
+    assert kept["removed"][0] == ids["Block K1"]
+    post = next(f for f in manual.faces.faces(scene, ids["Post P1"]) if f.kind == "cap" and f.name == "top")
+    manual.apply(ws, sid, {"op": "push_pull", "element": ids["Post P1"], "face": post.id, "by_m": 0.2}, accept_clashes=9)
+    out = ws.export(sid, tmp_path / "export")
+    after = {p.name: p for p in step.parts(next(p for p in out if p.suffix == ".step"))[0]}
+    assert "Block K1" not in after and "Post P1" in after
+
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    box = Bnd_Box(); BRepBndLib.Add_s(after["Post P1"].shape, box)
+    before = {p.name: p for p in step.parts(tmp_path / "Test-cell.step")[0]}
+    box0 = Bnd_Box(); BRepBndLib.Add_s(before["Post P1"].shape, box0)
+    assert box.CornerMax().Z() - box0.CornerMax().Z() == pytest.approx(200, abs=0.5)
+
+
+def test_a_part_clipped_by_hand_leaves_the_step_clipped(tmp_path):
+    from sightline import manual
+    from sightline.service import reshaped
+    write_step(tmp_path / "Test-cell.step")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["Test-cell.step"])
+    scene = ws.scene(sid)
+    ids = {scene.entity(g).Name: g for g in scene.bounds()}
+    lo, hi = scene.bounds()[ids["Block K1"]]
+    mid = (lo + hi) / 2
+    r = manual.check(ws, sid, {"op": "clip", "element": ids["Block K1"], "to": {"point": mid.tolist(), "normal": [-1, 0, 0]}})
+    assert r["blocked"] is None
+    manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"])
+    assert ids["Block K1"] in reshaped(ws.journal(sid))
+    out = ws.export(sid, tmp_path / "export")
+    after = {p.name: p for p in step.parts(next(p for p in out if p.suffix == ".step"))[0]}
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    box = Bnd_Box(); BRepBndLib.Add_s(after["Block K1"].shape, box)
+    assert box.CornerMax().X() / 1000 == pytest.approx(mid[0], abs=0.002)   # millimetres in the STEP
+    manual.apply(ws, sid, {"op": "move", "element": ids["Post P1"], "delta_m": [0.1, 0, 0]}, accept_clashes=9)
+    assert ids["Post P1"] not in reshaped(ws.journal(sid))
+
+
+def test_a_machine_part_classed_as_a_beam_is_not_a_buildings_structure(tmp_path):
+    from sightline import hosts, manual
+    write_step(tmp_path / "Test-cell.step")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["Test-cell.step"])
+    scene = ws.scene(sid)
+    ids = {scene.entity(g).Name: g for g in scene.bounds()}
+    import ifcopenshell.api
+    part = ifcopenshell.api.run("root.reassign_class", scene.models[0], product=scene.entity(ids["Beam B1"]), ifc_class="IfcBeam")
+    beam = part.GlobalId
+    assert scene.entity(beam).is_a("IfcBeam")   # a machine's frame member classed as a beam (the cell's classes come from a model)
+    assert not hosts.structural(scene, beam) and hosts.transfer(scene, beam) is None
+    assert not [w for w in manual.structure_warnings(scene, beam) if w["review"] == "structure"]

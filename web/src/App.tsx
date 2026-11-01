@@ -6,7 +6,7 @@ import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, 
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, BuiltResult, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, BuiltResult, EditCheck, EditKept, EscalationInfo, Journal, JournalEntry, Stepped, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -37,6 +37,8 @@ import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./
 import { escStep, type DrawingsShow, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
 import { ViewPanes } from "./ViewPanes";
 import { MeasurePanel } from "./MeasurePanel";
+import { EditPanel } from "./EditPanel";
+import { EditTool, type EditToolHandle } from "./EditTool";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
@@ -129,7 +131,12 @@ export function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [a, setA] = useState<string | null>(null);
   const [b, setB] = useState<string | null>(null);
-  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", style: "shaded", ortho: false, grey: true, edges: true, section: false, measure: false, links: false, hiddenModels: [] });
+  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", style: "shaded", ortho: false, grey: true, edges: true, section: false, measure: false, edit: false, links: false, hiddenModels: [] });
+  const editTool = useRef<EditToolHandle | null>(null);
+  // A hand edit Muse or an agent checked, for the Edit tool to preview; and the element and face the tool has chosen
+  // (chat's context: "this face").
+  const [incomingEdit, setIncomingEdit] = useState<{ check: EditCheck; n: number } | null>(null);
+  const editPick = useRef<{ element: string; face: string | null; pick?: { point: number[]; normal: number[] } } | null>(null);
   // Free navigation (docs/views.md): every clash picked takes the views to it unless turned off; visibility filters and
   // what is hidden for now (viewing only); saved views and Home per project, in this browser.
   const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
@@ -250,6 +257,9 @@ export function App() {
   // `fixes`: report clash id → the fix accepted for it.
   const [edits, setEdits] = useState<Record<string, string[]>>({});
   const [fixes, setFixes] = useState<Record<string, string>>({});
+  // The scene's edit log (journal.py): every kept edit, by whom and for which clash; undo and redo walk it.
+  const [journal, setJournal] = useState<Journal | null>(null);
+  const journalAsk = useRef(0);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [now, setNow] = useState(Date.now());
   const [compare, setCompare] = useState<"before" | "after" | "both">("after");
@@ -485,11 +495,13 @@ export function App() {
     const gid = selected?.globalId;
     if (!gid || !sceneId) { setElementProps(null); return; }
     let live = true;
-    setElementProps({ gid, data: null, loading: true });
+    // Read again after every keep, undo and redo (`infoRev`): an edit, a fix or a property change may have changed what
+    // the model says about it. The values shown stay until the new ones come.
+    setElementProps((p) => (p?.gid === gid && p.data ? { ...p, loading: false } : { gid, data: null, loading: true }));
     api.properties(sceneId, gid).then((data) => { if (live) setElementProps({ gid, data, loading: false }); })
-      .catch(() => { if (live) setElementProps({ gid, data: null, loading: false }); });
+      .catch(() => { if (live) setElementProps((p) => (p?.gid === gid && p.data ? p : { gid, data: null, loading: false })); });
     return () => { live = false; };
-  }, [selected?.globalId, sceneId]);
+  }, [selected?.globalId, sceneId, infoRev]);
   useEffect(() => { viewer.current?.setFilters(filters); }, [filters]);
   // The filters, with the one being edited shown live (in its place, or on top while new), drawn in every view.
   const prepared = useMemo(() => (facetIndex ? prepare(facetIndex) : null), [facetIndex]);
@@ -563,6 +575,7 @@ export function App() {
   // What the filters read: each element's class (the server's) and storey (datums). Read again after a kept fix (same
   // scene, new elements: `infoRev`); filters and hides start clean only with a new scene.
   useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); setIsolating(false); setFacetIndex(null); }, [sceneId]);
+  useEffect(() => { setJournal(null); if (sceneId) void refreshJournal(sceneId); }, [sceneId]);
   useEffect(() => {
     if (!sceneId) return;
     let live = true;
@@ -1394,7 +1407,7 @@ export function App() {
 
   /** Find the clashes in the open models and open them as the report. `tests` null: the server's defaults. Marks on
    * clashes that are still there (by design, for the author) survive a rerun: their ids stay the same. */
-  async function runDetect(tests: DetectTest[] | null, sid: string | null = sceneId, again: { check?: string; all?: boolean } = {}) {
+  async function runDetect(tests: DetectTest[] | null, sid: string | null = sceneId, again: { check?: string; all?: boolean; after_edit?: string } = {}) {
     if (!sid || busy || detecting) return;
     const epoch = sceneEpoch.current;
     const keep = report?.origin === "sightline" ? reviewed : {};
@@ -1554,6 +1567,7 @@ export function App() {
       viewsChanged();   // the panel says what to click next
       return;
     }
+    if (tool.edit) { editTool.current?.click(ev.nativeEvent); return; }
     // Any element can be selected: in a see-through view a click that meets nothing in focus takes what is behind.
     const picked = hit ?? viewer.current?.pickAt(ev.nativeEvent, { ghosts: true }) ?? null;
     if (!picked) { setSelected(null); return; }
@@ -1608,8 +1622,9 @@ export function App() {
     if (p && !p.fired) { window.clearTimeout(p.timer); longPress.current = null; }
   }
 
-  function toggle(k: "edges" | "section" | "measure" | "links" | "ortho" | "grey") {
-    setTool((t) => ({ ...t, [k]: !t[k] }));
+  function toggle(k: "edges" | "section" | "measure" | "edit" | "links" | "ortho" | "grey") {
+    // Editing and measuring each take the clicks: one at a time.
+    setTool((t) => ({ ...t, [k]: !t[k], ...(k === "edit" && !t.edit ? { measure: false } : k === "measure" && !t.measure ? { edit: false } : {}) }));
     if (k === "links") clearHover();
   }
 
@@ -1682,6 +1697,7 @@ export function App() {
     pressMove(e);
     // On a touch screen a tap does it (some browsers also send a mouse-type move with the tap): hover only with Alt.
     if (e.pointerType === "touch" || e.buttons || (coarse && !e.altKey)) return;
+    if (tool.edit) editTool.current?.hover(e.nativeEvent);
     if (tool.measure) {   // what the pointer snaps to, once a frame
       const at = { clientX: e.clientX, clientY: e.clientY } as MouseEvent;
       cancelAnimationFrame(measureFrame.current);
@@ -1825,13 +1841,20 @@ export function App() {
   // forward, S section, E edges, M measure, L links, Esc one thing at a time.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
+      const typing = (e.target as HTMLElement).closest("input, textarea, select, [contenteditable]");
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && !document.querySelector('[aria-modal="true"]')) {
+        const key = e.key.toLowerCase();   // Ctrl+Z undoes the newest kept edit; Ctrl+Shift+Z or Ctrl+Y redoes it
+        if (key === "z" || key === "y") { e.preventDefault(); void stepEdit(key === "z" && !e.shiftKey ? "undo" : "redo"); }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey || typing) return;
       // A modal over the page (About ORCA, the report, the agent link, requirements) has its own keys: Esc closes it,
       // and must not also leave the clash underneath.
       if (document.querySelector('[aria-modal="true"]')) return;
       const views: Record<string, Preset> = { "1": "top", "2": "front", "3": "right", "4": "iso" };
       const modes: Record<string, ViewMode> = { x: "xray", c: "context", i: "isolate", v: "shaded" };
       const k = e.key.toLowerCase();
+      if (tool.edit && k !== "p" && k !== "escape" && editTool.current?.key(k)) { e.preventDefault(); return; }
       if (views[k]) viewer.current?.view(views[k]);
       else if (k === "h") viewer.current?.home();
       else if (k === "g") setTool((t) => ({ ...t, style: STYLES[(STYLES.findIndex((s) => s.id === t.style) + 1) % STYLES.length].id }));
@@ -1844,6 +1867,7 @@ export function App() {
       else if (k === "s") toggle("section");
       else if (k === "e") toggle("edges");
       else if (k === "m") toggle("measure");
+      else if (k === "p" && sceneId) toggle("edit");
       else if (k === "n" && tool.measure) setSnapping((on) => !on);
       else if (k === "l") toggle("links");
       else if (k === "w" && workings.on && !compact) setActivityView(workings.view === "work" ? "steps" : "work");
@@ -1851,9 +1875,10 @@ export function App() {
         // One thing at a time: the measure, the image dialog, the selected element, then the clash.
         unpin(); clearHover();
         // The clash is left only where its chip shows: a clash plan or a wider fix keeps it (their own panels close them).
-        const step = escStep({ measuring: tool.measure, lightbox: !!lightbox, selection: !!selected,
+        const step = escStep({ editing: !!tool.edit, measuring: tool.measure, lightbox: !!lightbox, selection: !!selected,
           clash: !!(clash || a || b) && !viewPlan && !activeContext, working: clashBusy });
-        if (step === "measure") { if (viewer.current?.measureCancel()) viewsChanged(); else toggle("measure"); }
+        if (step === "edit") { if (!editTool.current?.escape()) toggle("edit"); }
+        else if (step === "measure") { if (viewer.current?.measureCancel()) viewsChanged(); else toggle("measure"); }
         else if (step === "lightbox") setLightbox(null);
         else if (step === "selection") setSelected(null);
         else if (step === "clash") leaveClash();
@@ -2181,7 +2206,8 @@ export function App() {
     });
     try {
       // Each fix names its clash: the server tries them again, alone and together, before keeping any.
-      const kept = await api.applyPlan(sceneId, items.map((i) => ({ ...i.option!, pair: [i.element_a, i.element_b], others: i.others ?? [] })));
+      const kept = await api.applyPlan(sceneId, items.map((i) => ({ ...i.option!, pair: [i.element_a, i.element_b], others: i.others ?? [] })),
+        items.map((i) => i.clash_ids?.[0] ?? null));
       const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
@@ -2221,9 +2247,10 @@ export function App() {
   async function applyToViewer(sid: string, kept: { files: number[] } & Patch, pieces: string[][] | undefined, live: () => boolean) {
     const origin = new Map((pieces ?? []).flatMap((ps) => ps.slice(1).map((g) => [g, ps[0]] as const)));
     if (kept.meshes && kept.scene_id === sid && kept.revision_before != null && kept.revision_before === sceneRevision.current
-        && viewer.current?.patch(kept.meshes, origin)) {
+        && viewer.current?.patch(kept.meshes, origin, kept.removed ?? [])) {
       sceneRevision.current = kept.revision ?? null;
       setInfoRev((n) => n + 1);   // the fix's new pieces: their classes and storeys for the filters
+      void refreshJournal(sid);
       return;
     }
     // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
@@ -2235,7 +2262,94 @@ export function App() {
       if (!live()) return;
       await viewer.current!.replace(i, bytes, live);
     }
-    if (live()) { sceneRevision.current = kept.revision ?? null; setInfoRev((n) => n + 1); }
+    if (live()) { sceneRevision.current = kept.revision ?? null; setInfoRev((n) => n + 1); void refreshJournal(sid); }
+  }
+
+  /** Read the scene's edit log again (after any keep, undo or redo). The Edits panel comes into its side bar, behind
+   * the tab in front, the first time there is something in it. */
+  async function refreshJournal(sid: string) {
+    const ask = ++journalAsk.current;
+    try {
+      const j = await api.journal(sid);
+      if (ask !== journalAsk.current) return;
+      setJournal(j);
+      if (j.entries.length) dock.current?.place("edits");
+    } catch { /* the scene went: the next one starts its own log */ }
+  }
+
+  /** Undo or redo the newest edit in the log (Ctrl+Z, Ctrl+Shift+Z, the Edits panel). A fix undone leaves its clash
+   * open again; redone, fixed again. */
+  async function stepEdit(dir: "undo" | "redo", entry?: string): Promise<boolean> {
+    if (!sceneId || busy) return false;
+    const sid = sceneId, epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
+    setBusy(dir === "undo" ? "Undoing…" : "Redoing…"); setError(null);
+    try {
+      const r = dir === "undo" ? await api.undo(sid, entry) : await api.redo(sid, entry);
+      if (!live()) return false;
+      return await afterStep(r);
+    } catch (e) { if (live()) setError((e as Error).message); return false; } finally { if (live()) setBusy(null); }
+  }
+
+  /** What follows an undo or redo, from this page, chat or an agent: the model patched, a fix's clash open again (or
+   * fixed again), the log read again. */
+  async function afterStep(r: Stepped): Promise<boolean> {
+    if (!sceneId) return false;
+    const sid = sceneId, epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
+    viewer.current?.preview([]);
+    if (selected && (r.removed ?? []).includes(selected.globalId)) setSelected(null);
+    await applyToViewer(sid, r, [], live);
+    if (!live()) return false;
+    // Each clash as the server measured it after the step, whoever kept the entry: open again, or fixed (again)
+    const states = r.clash_states ?? [];
+    const open = states.filter((c) => !c.resolved).map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
+    const fixed = states.filter((c) => c.resolved).map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
+    if (open.length) {
+      const ids = new Set(clashIdsOf(open).flat());
+      setFixes((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !ids.has(id))));
+      setEvidence((ev) => Object.fromEntries(Object.entries(ev).map(([id, x]) => [id, ids.has(id) && x.status === "accepted" ? { ...x, status: "proposed" } : x])));
+    }
+    if (fixed.length) markFixed(fixed, fixed.map(() => r.entry.summary || r.entry.title));
+    staleContext(); setRemeasure((n) => n + 1);
+    return true;
+  }
+
+  /** A hand edit kept (the Edit tool): the model patched, the log read again, a clash it resolved marked fixed, and
+   * the kept checks run again when it was kept with clashes, so they join the list. */
+  async function keptEdit(k: EditKept) {
+    if (!sceneId) return;
+    const sid = sceneId, epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
+    if (selected && (k.removed ?? []).includes(selected.globalId)) setSelected(null);
+    await applyToViewer(sid, k, k.pieces?.length ? [k.pieces] : [], live);
+    if (!live()) return;
+    if (k.entry) {   // the edit as it now looks, for the report ("After the edits")
+      const pic = viewer.current?.capture(560);
+      if (pic) void api.editPicture(sid, k.entry.id, pic).catch(() => undefined);
+    }
+    staleContext(); setRemeasure((n) => n + 1);
+    const st = k.entry?.status as (JournalEntry["status"] & { pair?: string[] }) | null | undefined;
+    if (st?.resolved && st.pair?.length === 2) markFixed([[st.pair[0], st.pair[1]]], [k.entry?.summary ?? "Edited by hand"]);
+    setKept({ text: "Edit kept in the model", detail: k.entry ? `${k.entry.id}: ${k.entry.summary}` : "Checked again first", n: Date.now() });
+    window.clearTimeout(keptTimer.current);
+    keptTimer.current = window.setTimeout(() => setKept(null), 3200);
+    if ((k.check?.clashes ?? 0) > 0) {
+      if (report?.origin === "sightline") void runDetect(null, sid, { all: true, ...(k.entry ? { after_edit: k.entry.id } : {}) });
+      else flash("Kept with its clashes. Run ORCA's check to list them.");
+    }
+  }
+
+  /** Undo every edit newer than `e`, then `e` itself, newest first. */
+  async function undoTo(e: JournalEntry) {
+    const newer = (journal?.entries ?? []).filter((x) => x.state === "kept" && x.seq >= e.seq).sort((x, y) => y.seq - x.seq);
+    for (const x of newer) if (!(await stepEdit("undo", x.id))) return;
+  }
+
+  /** The label the clash list shows for a clash id ("#042"), for the log's rows. */
+  function clashTag(id: string): string | null {
+    const c = report?.clashes.find((x) => x.id === id);
+    return c ? clashLabel(c) : null;
   }
 
   /** Mark every report clash of these element pairs as fixed (one pair can be reported by several tests). */
@@ -2410,6 +2524,9 @@ export function App() {
       const tracker = chatContext.current ?? trackContext(null);
       chatContext.current = tracker; tracker.onEvent(e.event); planThisTurn.current = true;
     }
+    if (e.type === "ui" && e.action === "edit_preview") { setTool((t) => ({ ...t, edit: true, measure: false })); setIncomingEdit({ check: e.check, n: Date.now() }); }
+    if (e.type === "ui" && e.action === "edit_kept") { setIncomingEdit(null); void keptEdit(e.kept); }
+    if (e.type === "ui" && e.action === "edit_stepped") void afterStep(e.step);
     if (e.type === "ui" && e.action === "select_clash") {
       const c = report?.clashes.find((x) => x.id === e.clash_id);
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
@@ -2737,7 +2854,7 @@ export function App() {
     const built = pair && canBuild(o) && builtDone.current[builtKey(pair, o)]?.status !== "done"
       && !builtPending.current.has(builtKey(pair, o)) ? builtPasses(builtFix(o, false), pair) : null;
     try {
-      const kept = await api.accept(sceneId, o, pair);
+      const kept = await api.accept(sceneId, o, pair, ids[0] ?? null);
       // Each split run's pieces, the original first (a combined fix can split several runs).
       const groups = kept.groups ?? (kept.pieces?.length ? [kept.pieces] : []);
       if (!live()) return;
@@ -2874,6 +2991,9 @@ export function App() {
   }, [dockCover]);
   // Selecting an element shows its Properties panel (floating at first, wherever the user put it after).
   useEffect(() => { if (selected?.globalId && docked) dock.current?.show("properties"); }, [selected?.globalId, docked]);
+  // The Edit tool works over the model: a Properties panel floating there closes (one docked in a side bar stays), and
+  // the next selection brings it back.
+  useEffect(() => { if (tool.edit && docked) dock.current?.closeFloating("properties"); }, [tool.edit, docked]);
   const pickedDemo = demos.find((d) => d.files.length === picked.length && d.files.every((f) => picked.includes(f)));
   const startLabel = pickedDemo?.label ?? "Open the models";
   const planning = !!planRun && planRun.phase !== "done";
@@ -3249,6 +3369,18 @@ export function App() {
         else { setIsolating(false); setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
       },
       load: (ref) => (sceneId && ref.global_id ? api.properties(sceneId, ref.global_id, ref.file) : Promise.reject(new Error("No scene"))),
+      // What the model says about it, changed and kept in the edit log (docs/editing-parity.md, Tier 3): no shape
+      // changes, so the page only moves its drawn revision on, shows the new properties and reads the log again.
+      editor: sceneId ? {
+        choices: () => api.propertyChoices(sceneId, gid),
+        save: async (change) => {
+          const r = await api.editProperty(sceneId, gid, change);
+          setElementProps({ gid, data: r.properties, loading: false });
+          if (sceneRevision.current === r.revision_before) sceneRevision.current = r.revision;
+          setInfoRev((n) => n + 1);
+          void refreshJournal(sceneId);
+        },
+      } : undefined,
       rows: prepared ? {
         facets: facetKeys,
         onFilter: (row) => openFilters(blankRule([{ facet: row.facet!, op: "is", values: [row.raw!] }], "colour")),
@@ -3343,7 +3475,7 @@ export function App() {
             </div>}
       </aside>)}
 
-      {inSlot(slots.model, <main className={`stage ${tool.measure ? "measuring" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
+      {inSlot(slots.model, <main className={`stage ${tool.measure ? "measuring" : ""} ${tool.edit ? "editing" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
         onPointerDown={pressStart} onPointerMove={stageMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
         onPointerLeave={() => { if (hover.current.gid) clearHover(); if (tool.measure) viewer.current?.measureHover(null); }}
         onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
@@ -3403,6 +3535,13 @@ export function App() {
         {tool.measure && viewer.current && <MeasurePanel measures={viewer.current.measurements} open={viewer.current.measureOpen} snap={snapping} coarse={coarse}
           at={layout === "phone" ? null : measureAt} onMove={setMeasureAt} onSnap={setSnapping} onCopy={(text, what) => void copyToClipboard(text).then((ok) => flash(ok ? `Copied ${what}.` : "Could not copy: the browser said no."))}
           onRemove={(id) => viewer.current?.removeMeasurement(id)} onClear={() => viewer.current?.clearMeasurements()} onClose={() => toggle("measure")} />}
+        {tool.edit && sceneId && <EditTool ref={editTool} viewer={() => viewer.current} sceneId={sceneId} busy={!!busy} coarse={coarse}
+          clash={clash ? { id: clash.id, pair: a && b ? [a, b] : null } : a && b ? { id: null, pair: [a, b] } : null}
+          journal={journal} csvUrl={api.journalCsvUrl(sceneId)} clashLabel={clashTag} showLog={!docked}
+          onKept={keptEdit} onUndo={() => void stepEdit("undo")} onRedo={() => void stepEdit("redo")} onUndoTo={(e) => void undoTo(e)}
+          onShow={(e) => { const v = viewer.current; v?.frameEverywhere([...e.elements, ...e.created].filter((g) => v.isShown(g))); }}
+          incoming={incomingEdit} onFace={(f) => { editPick.current = f; }}
+          onError={(m) => setError(m)} onClose={() => { editPick.current = null; toggle("edit"); }} />}
         {!docked && selected && !tool.measure && (
           <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             {elementCard(true, true)}
@@ -3484,7 +3623,8 @@ export function App() {
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${chatReport}`} voiceModel={labels.voice} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
-            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView, check: viewCheck })} />
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView, check: viewCheck,
+              selected: editPick.current ?? (selected ? { element: selected.globalId, face: null } : null) })} />
         </div>)}
       {inSlot(slots.plan, <div className="plan-slot" hidden={!docked && tab !== "plan"}>
         {(docked || tab === "plan") && <>
@@ -3679,6 +3819,9 @@ export function App() {
           draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }} check={filterCheck}
           drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}
+      {docked && inSlot(slots.edits, <EditPanel journal={journal} busy={!!busy} csvUrl={sceneId ? api.journalCsvUrl(sceneId) : null}
+        clashLabel={clashTag} onUndo={() => void stepEdit("undo")} onRedo={() => void stepEdit("redo")} onUndoTo={(e) => void undoTo(e)}
+        onShow={(e) => { const v = viewer.current; v?.frameEverywhere([...e.elements, ...e.created].filter((g) => v.isShown(g))); }} />)}
       {docked && inSlot(slots.properties, <div className="props in-panel">
         {selected ? elementCard(false, false) : <p className="hint">Click any element in the model to see its properties.</p>}
       </div>)}

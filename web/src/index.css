@@ -90,6 +90,10 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .prow-tools { display: none; gap: 0; flex: none; margin: -3px 0; }
 .prow-tools .ibtn { width: 22px; height: 22px; }
 .kv dd.prow:hover .prow-tools, .kv dd.prow:focus-within .prow-tools { display: inline-flex; }
+/* A row that can be changed shows its pencil, muted, without a hover: editing is found, not stumbled on */
+.kv dd.prow.editable .prow-tools { display: inline-flex; }
+.kv dd.prow.editable:not(:hover):not(:focus-within) .prow-tools .ibtn:not(.pencil) { display: none; }
+.kv dd.prow.editable:not(:hover):not(:focus-within) .prow-tools .pencil { opacity: .45; }
 @media (pointer: coarse) { .kv dd.prow .prow-tools { display: inline-flex; } }
 .pset-link { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .slot-properties.in-dock { padding: 10px 12px; }
@@ -2096,3 +2100,131 @@ a.pop-item { color: inherit; }
 .filter-chip span { display: inline-flex; align-items: center; gap: 5px; }
 .filter-chip:hover { border-color: var(--accent); }
 .app.phone .filter-chip { right: auto; left: 8px; bottom: 76px; max-width: calc(100% - 16px); }
+
+/* The Edit tool (EditTool.tsx): beside the rail while it is on, like Measure. */
+.viewer-label.edit-label { background: #f5a623; color: #11161b; font: 600 12px var(--mono); padding: 2px 7px; border-radius: 10px;
+  transform: translate(-50%, -130%); white-space: nowrap; pointer-events: none; box-shadow: var(--shadow); }
+.stage.editing canvas { cursor: crosshair; }
+.edit-panel { position: absolute; left: 64px; top: 104px; z-index: 5; width: 316px; max-width: calc(100% - 80px); max-height: calc(100% - 120px);
+  overflow: auto; display: flex; flex-direction: column; gap: 7px; padding: 8px 10px 10px; background: var(--surface); border-radius: 10px;
+  box-shadow: var(--shadow); font-size: 12.5px; }
+.edit-panel header { display: flex; align-items: center; gap: 6px; user-select: none; }
+.edit-panel header b { font-size: 13px; }
+.edit-panel header .why { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edit-panel header .ibtn { width: 24px; height: 24px; }
+.edit-palette { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; padding: 3px; background: var(--raised); border: 1px solid var(--line-soft); border-radius: 9px; }
+.edit-palette .ibtn { width: 100%; height: 32px; border-radius: 7px; color: var(--ink); }
+.edit-palette .ibtn.on { background: var(--accent); color: #fff; }
+.edit-palette .ibtn:disabled { opacity: .35; }
+.edit-panel .hint { margin: 0; }
+.edit-face { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: 7px; background: #fff6e8; color: #7a4d00; }
+.edit-offer { display: grid; gap: 6px; padding: 7px 8px; border-radius: 7px; background: #f4f5f7; border: 1px solid #e3e6ea; }
+.edit-offer p { margin: 0; color: #4a5260; font-size: 12px; line-height: 1.4; }
+.edit-offer-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.edit-offer-tools .btn { display: inline-flex; align-items: center; gap: 5px; }
+.edit-row-in { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.edit-row-in label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.edit-row-in input { width: 74px; font: inherit; font-family: var(--mono); padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.edit-row-in .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.edit-row-in .seg button { border: 0; background: none; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+.edit-row-in .seg button.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.edit-target { flex-basis: 100%; color: var(--ok); }
+.edit-status { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 7px; background: var(--raised); }
+.edit-status.ok { background: var(--ok-soft); color: var(--ok); } .edit-status.warn { background: var(--warn-soft); color: var(--warn); }
+.edit-status.bad { background: var(--fail-soft); color: var(--fail); }
+.edit-summary { margin: 0; color: var(--ink); }
+.edit-effects { margin: 2px 0 0; padding-left: 16px; font-size: 12px; color: var(--ink); }
+.edit-effects li { margin: 1px 0; }
+.edit-also { margin-top: 4px; padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--accent-soft);
+  font-size: 12px; }
+.edit-also-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.edit-also ul { margin: 2px 0 0; padding-left: 16px; }
+.edit-also li { margin: 1px 0; overflow-wrap: anywhere; }
+.edit-panel .edit-warn { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.edit-actions { display: flex; gap: 6px; align-items: center; }
+.edit-actions .btn.primary, .edit-actions .btn.danger { display: inline-flex; align-items: center; gap: 6px; }
+.edit-actions .btn.danger { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.edit-log summary { cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.edit-log .edits-panel { padding: 6px 0 0; height: auto; max-height: 260px; }
+.app.phone .edit-panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-width: none; max-height: 55%; }
+
+/* The Edits panel (EditPanel.tsx): the edit log, newest first. */
+.edits-panel { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; height: 100%; overflow: auto; }
+.edits-bar { display: flex; align-items: center; gap: 6px; }
+.edits-bar .why { margin-left: auto; font-size: 12px; }
+.edits-bar .ibtn { width: 28px; height: 28px; }
+.ebtn { display: inline-flex; align-items: center; gap: 5px; }
+.edits-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.edit-row { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); display: flex; flex-direction: column; }
+.edit-row.undone { opacity: .55; }
+.edit-row.undone .edit-text { text-decoration: line-through; }
+.edit-row-actions { display: flex; justify-content: flex-end; gap: 6px; padding: 0 9px 7px; }
+.chip.undone-chip { background: var(--line-soft); color: var(--muted); font-weight: 600; }
+.edit-main { all: unset; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 7px 9px; font-size: 12.5px; }
+.edit-main:hover { background: var(--raised); }
+.edit-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius); }
+.edit-main .chip { font-size: 11px; }
+.edit-text { flex-basis: 100%; line-height: 1.4; }
+.edit-check { flex-basis: 100%; font-size: 11.5px; color: var(--muted); }
+.edit-check.ok { color: var(--ok); } .edit-check.warn { color: var(--warn); } .edit-check.bad { color: var(--fail); }
+.edit-warn { flex-basis: 100%; font-size: 11.5px; color: var(--warn); background: var(--warn-soft); border-radius: 5px; padding: 2px 6px; }
+.chip.src-you { background: #eef1f4; } .chip.src-muse { background: var(--spark-soft); color: var(--spark); }
+.chip.src-agent { background: var(--wonder-soft); color: var(--wonder-ink); } .chip.src-fix, .chip.src-plan, .chip.src-wider { background: var(--ok-soft); color: var(--ok); }
+.chip.follows { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* Edit tool icons (editIcons.tsx, docs/manual-edits.md): each acts out its tool once on hover or focus, and loops
+   while its tool is on. Only the parts named ei-* move; at rest (and under reduced motion) every icon is still. */
+.eicon [class^="ei-"] { transform-box: fill-box; transform-origin: center; animation-duration: 1.1s; animation-iteration-count: 1;
+  animation-timing-function: cubic-bezier(.4, 0, .2, 1); animation-fill-mode: both; }
+.eicon .ei-grow, .eicon .ei-reach { transform-origin: left center; }
+:is(.ibtn:hover, .ibtn:focus-visible, .ebtn:hover, .ebtn:focus-visible, .ibtn.on, .ebtn.on) .eicon [class^="ei-"],
+.eicon.play [class^="ei-"], .eicon.loop [class^="ei-"] { animation-name: var(--a, none); }
+:is(.ibtn.on, .ebtn.on) .eicon [class^="ei-"], .eicon.loop [class^="ei-"] { animation-duration: 2.2s; animation-iteration-count: infinite; }
+.ei-lift { --a: ei-lift; } .ei-grow { --a: ei-grow; } .ei-slide { --a: ei-slide; } .ei-reach { --a: ei-reach; }
+.ei-guide { --a: ei-guide; } .ei-travel { --a: ei-travel; } .ei-iris { --a: ei-iris; } .ei-gap { --a: ei-gap; }
+.ei-blade, .ei-blades { --a: ei-blade; } .ei-left { --a: ei-left; } .ei-right { --a: ei-right; } .ei-drop { --a: ei-drop; }
+.ei-plane { --a: ei-plane; } .ei-corner { --a: ei-corner; } .ei-fade { --a: ei-fade; } .ei-dust { --a: ei-dust; opacity: 0; }
+.eicon-undo .ei-curl { --a: ei-undo; } .eicon-redo .ei-curl { --a: ei-redo; }
+.ei-raise { --a: ei-raise; } .ei-up { --a: ei-up; } .ei-part-l { --a: ei-part-l; } .ei-part-r { --a: ei-part-r; }
+@keyframes ei-raise { 0%, 100% { transform: none; } 45%, 65% { transform: translateY(-2.6px); } }
+@keyframes ei-up { 0%, 35% { transform: none; } 60%, 85% { transform: translateY(1.6px); } 100% { transform: none; } }
+@keyframes ei-part-l { 0%, 100% { transform: none; } 45%, 65% { transform: translateX(-1.8px); } }
+@keyframes ei-part-r { 0%, 100% { transform: none; } 45%, 65% { transform: translateX(1.8px); } }
+.eicon-checking [class^="ei-"] { animation: 2.4s ease-in-out infinite both; animation-name: var(--a); }
+.ei-in-l { --a: ei-in-l; } .ei-in-r { --a: ei-in-r; }
+.eicon .ei-tick { stroke-dasharray: 1; stroke-dashoffset: 0; --a: none; }
+.eicon-keep.play { animation: orca-settle .76s cubic-bezier(.2, .8, .2, 1) 1 both; }
+.eicon-keep.play .ei-tick { animation: ei-tick .5s .18s ease-out 1 both; }
+@keyframes ei-lift { 0%, 100% { transform: none; } 40%, 60% { transform: translateY(-2.6px); } }
+@keyframes ei-grow { 0%, 100% { transform: none; } 45%, 60% { transform: scaleX(1.4); } }
+@keyframes ei-slide { 0%, 100% { transform: none; } 45%, 60% { transform: translateX(4px); } }
+@keyframes ei-reach { 0%, 15% { transform: none; } 55%, 85% { transform: scaleX(1.834); } 100% { transform: none; } }
+@keyframes ei-guide { 0%, 50% { stroke-dasharray: 2 2; } 58%, 85% { stroke-dasharray: none; stroke-width: 2.3; } 100% { stroke-dasharray: 2 2; } }
+@keyframes ei-travel { 0% { transform: none; } 55% { transform: translate(11.5px, -11.5px) scale(.55); } 65% { transform: translate(11.5px, -11.5px) scale(.68); }
+  80% { transform: translate(11.5px, -11.5px) scale(.55); } 100% { transform: none; } }
+@keyframes ei-iris { 0% { transform: scale(.15); opacity: .4; } 55%, 85% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes ei-gap { 0% { opacity: 0; transform: scaleX(.4); } 60%, 100% { opacity: 1; transform: none; } }
+@keyframes ei-blade { 0% { transform: translateY(-7px); opacity: 0; } 35%, 100% { transform: none; opacity: 1; } }
+@keyframes ei-left { 0%, 35% { transform: none; } 60%, 85% { transform: translateX(-1.6px); } 100% { transform: none; } }
+@keyframes ei-right { 0%, 35% { transform: none; } 60%, 85% { transform: translateX(1.6px); } 100% { transform: none; } }
+@keyframes ei-drop { 0%, 35% { transform: none; opacity: 1; } 75%, 90% { transform: translateY(6px); opacity: .1; } 100% { transform: none; opacity: 1; } }
+@keyframes ei-plane { 0% { transform: translateX(6px); opacity: 0; } 35%, 100% { transform: none; opacity: 1; } }
+@keyframes ei-corner { 0%, 40% { transform: none; opacity: 1; } 75%, 90% { transform: translate(2px, 5px) rotate(18deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes ei-fade { 0%, 15% { transform: none; opacity: 1; } 55%, 85% { transform: scale(.7); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes ei-dust { 0%, 20% { opacity: 0; transform: none; } 50% { opacity: 1; } 85% { opacity: 0; transform: translateY(-3px); } 100% { opacity: 0; } }
+@keyframes ei-undo { 0%, 100% { transform: none; } 45%, 60% { transform: rotate(-24deg); } }
+@keyframes ei-redo { 0%, 100% { transform: none; } 45%, 60% { transform: rotate(24deg); } }
+@keyframes ei-in-l { 0%, 100% { transform: translateX(-1.5px); opacity: .55; } 50% { transform: translateX(1.2px); opacity: 1; } }
+@keyframes ei-in-r { 0%, 100% { transform: translateX(1.5px); opacity: .55; } 50% { transform: translateX(-1.2px); opacity: 1; } }
+@keyframes ei-tick { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .eicon, .eicon [class^="ei-"], .eicon-keep.play, .eicon-keep.play .ei-tick { animation: none !important; }
+}
+/* Editing a property in place (Properties.tsx, docs/editing-parity.md Tier 3) */
+.pset-edit { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+.pset-edit input, .pset-edit select { flex: 1; min-width: 0; font: inherit; padding: 1px 4px; }
+.pset-edit .ibtn { width: 22px; height: 22px; flex: none; }
+.prow-edit { flex-direction: column; align-items: stretch; }
+.pset-add { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 2px; padding: 2px 6px; font: inherit; font-size: 12px;
+  color: var(--muted); background: none; border: 1px dashed var(--line); border-radius: var(--radius); cursor: pointer; }
+.pset-add:hover, .pset-add:focus-visible { color: var(--ink); border-color: var(--accent); }

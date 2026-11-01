@@ -99,22 +99,32 @@ def _profile_size(profile) -> tuple[float, float]:
     raise Unsupported(f"{profile.is_a()} profiles are not supported yet")
 
 
-def _body(element):
+def _body(element, clipped: bool = False, item: int | None = None):
+    """The element's Body representation and its one straight extrusion. With `clipped`, an extrusion cut by
+    half-space clips (a hand edit's clip) counts too: the extrusion under the clips is returned. With `item`, the
+    body may hold several solids and that one (by its place in the Body) is returned (a hand edit's face on a fitting,
+    a door, a desk)."""
     rep = element.Representation
     bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
-    if len(bodies) != 1 or len(bodies[0].Items) != 1 or not bodies[0].Items[0].is_a("IfcExtrudedAreaSolid"):
+    if item is not None:
+        items = bodies[0].Items if len(bodies) == 1 else ()
+        item = items[item] if 0 <= item < len(items) else None
+    else:
+        item = bodies[0].Items[0] if len(bodies) == 1 and len(bodies[0].Items) == 1 else None
+    while clipped and item is not None and item.is_a("IfcBooleanClippingResult"):
+        item = item.FirstOperand
+    if item is None or not item.is_a("IfcExtrudedAreaSolid"):
         raise Unsupported("only a body made of one straight extrusion can be split")
-    item = bodies[0].Items[0]
     if np.linalg.norm(np.asarray(item.ExtrudedDirection.DirectionRatios) - (0, 0, 1)) > 1e-9:
         raise Unsupported("the extrusion is not along its own axis")
     return bodies[0], item
 
 
-def _frames(scene: IfcScene, element):
+def _frames(scene: IfcScene, element, clipped: bool = False, item: int | None = None):
     """Element placement (file units) and the extrusion's world frame: origin, run direction, profile X, profile Y."""
     i = scene.index_of(element.GlobalId)
     place = ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
-    _, item = _body(element)
+    _, item = _body(element, clipped, item)
     world = place @ ifcopenshell.util.placement.get_axis2placement(item.Position)
     return i, place, item, world[:3, 3], world[:3, 2], world[:3, 0], world[:3, 1]
 
@@ -161,6 +171,34 @@ def _ports(element):
 # Fittings for a segment's bends, by segment class (IFC4). Anything else gets square corners.
 FITTING_CLASS = {"IfcDuctSegment": "IfcDuctFitting", "IfcPipeSegment": "IfcPipeFitting",
                  "IfcCableCarrierSegment": "IfcCableCarrierFitting", "IfcCableSegment": "IfcCableFitting"}
+# IFC2X3 (Revit's 2x3 exports) draws every segment as IfcFlowSegment and every fitting as IfcFlowFitting: what it is,
+# and a fitting's bend or transition, are its type's.
+SEGMENT_TYPE_2X3 = {"IfcDuctSegmentType": "IfcDuctSegment", "IfcPipeSegmentType": "IfcPipeSegment",
+                    "IfcCableCarrierSegmentType": "IfcCableCarrierSegment", "IfcCableSegmentType": "IfcCableSegment"}
+FITTING_TYPE_2X3 = {"IfcDuctSegment": "IfcDuctFittingType", "IfcPipeSegment": "IfcPipeFittingType",
+                    "IfcCableCarrierSegment": "IfcCableCarrierFittingType"}
+
+
+def segment_kind(element) -> str | None:
+    """What a flow segment is, as IFC4 names it (IfcDuctSegment, IfcPipeSegment…): its class, or in IFC2X3 its
+    type's; None for anything else."""
+    if element.is_a() in FITTING_CLASS:
+        return element.is_a()
+    if element.is_a() == "IfcFlowSegment":
+        t = ifcopenshell.util.element.get_type(element)
+        return SEGMENT_TYPE_2X3.get(t.is_a()) if t is not None else None
+    return None
+
+
+def fitting_class(element) -> str | None:
+    """The class of the fittings (bends, transitions) a segment gets, or None when it has none: IFC2X3's
+    IfcFlowFitting for a typed duct, pipe or tray (cables have no fitting type in IFC2X3)."""
+    kind = segment_kind(element)
+    if kind is None:
+        return None
+    if element.is_a() == "IfcFlowSegment":
+        return "IfcFlowFitting" if kind in FITTING_TYPE_2X3 else None
+    return FITTING_CLASS[kind]
 RISER_MIN_M = 0.04       # straight riser left between two bends when the rise allows (Rev04: 40-172 mm)
 BEND_STEPS = 8           # facets per 90° bend
 OFFSET_AXIS_TOL = 1e-9   # numerical residue, metres; shared by validation and generation
@@ -176,20 +214,24 @@ def default_corners() -> str:
     return "square" if os.environ.get("SIGHTLINE_OFFSET_CORNERS", "bends").lower().startswith("sq") else "bends"
 
 
-def bend_radius(depth_m: float, dz_m: float) -> float | None:
+def bend_radius(depth_m: float, dz_m: float, bend_deg: float = 90.0) -> float | None:
     """Centreline radius of an offset's bends: one profile depth, smaller when the rise is too short for two bends and
-    a riser (Rev04: duct 300 deep rising 400 mm gets 180 mm). None when even that would fold the inside of the bend."""
-    r = min(depth_m, (abs(dz_m) - RISER_MIN_M) / 2)
+    a riser (Rev04: duct 300 deep rising 400 mm gets 180 mm). Two bends of `bend_deg` rise 2 r (1 − cos θ) between
+    them (2 r at 90°), the riser the rest. None when even that would fold the inside of the bend."""
+    th = np.radians(bend_deg)
+    k = 2 * (1 - np.cos(th))     # the rise two bends of radius 1 make
+    r = min(depth_m, (abs(dz_m) - RISER_MIN_M * np.sin(th)) / k)
     if r - depth_m / 2 < 0.005:  # the inside radius: below 5 mm the bend would fold on itself
-        r = abs(dz_m) / 2         # no riser: two bends meet
-    return r if r - depth_m / 2 >= 0.005 else None
+        r = abs(dz_m) / k         # no riser: two bends meet
+    return float(r) if r - depth_m / 2 >= 0.005 else None
 
 
 def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, dz_m: float,
-                 corners: str | None = None, *, lateral_m: float = 0.0) -> Offset:
+                 corners: str | None = None, *, lateral_m: float = 0.0, bend_deg: float = 90.0) -> Offset:
     """Split `global_id` at `start_m` and `end_m` (metres along it) and take the middle piece `dz_m` up or down.
     Alternatively, `lateral_m` offsets along cross(world Z, run direction); the two offsets cannot be combined.
-    Edits the model in place; wrap in `trial` to try it and undo.
+    `bend_deg` under 90 (15 to 90) takes it there along a slope, with bends of that angle either end of it: Rev04's
+    "short angled pieces with bends either side". Edits the model in place; wrap in `trial` to try it and undo.
 
     `corners` "bends" (default): each turn is a 90° bend fitting (IfcDuctFitting, IfcPipeFitting... of type BEND)
     with a radius of about one profile depth, joined by short risers, the way Northbank's Rev04 does it. "square":
@@ -231,8 +273,37 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     sign = 1.0 if dz > 0 else -1.0
     u = offset_axis * sign
 
-    r_m = bend_radius(t * s, amount) if (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS else None
-    if r_m is not None:
+    angled = abs(bend_deg - 90.0) > 1e-6
+    if angled and not 15.0 <= bend_deg < 90.0:
+        raise Unsupported("bends turn between 15° and 90°")
+    r_m = (bend_radius(t * s, amount, bend_deg) if (corners or default_corners()) == "bends" and fitting_class(element)
+           else None)
+    if angled and r_m is None:
+        raise Unsupported(f"the offset is too small for {bend_deg:.0f}° bends of this section")
+    if r_m is not None and angled:
+        # Each side: a bend of θ onto the slope, a straight riser along it, a bend of θ back; the run it takes (2 R sin θ +
+        # the riser's run) centred on the split point. The riser runs (A − 2 R (1 − cos θ)) / sin θ.
+        R, th = r_m / s, np.radians(bend_deg)
+        rise_run = max((abs(dz) - 2 * R * (1 - np.cos(th))) / np.sin(th), 0.0)
+        half = (2 * R * np.sin(th) + rise_run * np.cos(th)) / 2
+        if a - half < MIN_PIECE_M / s or L - b - half < MIN_PIECE_M / s or b - a - 2 * half < MIN_PIECE_M / s:
+            raise Unsupported(f"the split points leave a piece shorter than {MIN_PIECE_M * 1000:.0f} mm "
+                              f"(run {L * s:.2f} m, each {bend_deg:.0f}° slope takes {2 * half * s:.2f} m of run)")
+        up_slope, down_slope = np.cos(th) * d + np.sin(th) * u, np.cos(th) * d - np.sin(th) * u
+        pieces, p = [("straight", origin, d, a - half)], origin + d * (a - half)
+        for go, back, run_to in ((up_slope, d, b - half), (down_slope, d, L)):
+            pieces.append(("bend", p, d, go, R, w, t))
+            p = bend_end(p, d, go, R)
+            if rise_run > 1e-3 / s:
+                pieces.append(("straight", p, go, rise_run))
+                p = p + go * rise_run
+            pieces.append(("bend", p, go, back, R, w, t))
+            p = bend_end(p, go, back, R)
+            here = float((p - origin) @ d)
+            pieces.append(("straight", p, d, run_to - here))
+            p = p + d * (run_to - here)
+        used = f"bends {bend_deg:.0f}°"
+    elif r_m is not None:
         R = r_m / s
         if a - R < MIN_PIECE_M / s or L - b - R < MIN_PIECE_M / s or b - a - 2 * R < MIN_PIECE_M / s:
             raise Unsupported(f"the split points leave a piece shorter than {MIN_PIECE_M * 1000:.0f} mm "
@@ -265,6 +336,99 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
         used = "square"
     gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces)
     return Offset(global_id, start_m, end_m, dz_m, gids, used, lateral_m)
+
+
+JOG_STUB_M = 0.15   # what a re-fit moves with the joint, before its first bend
+
+
+def apply_jog(scene: IfcScene, global_id: str, end: str, delta_m) -> Offset:
+    """Re-fit a level straight segment to what its `end` ("start" or "end") is joined to, moved `delta_m` square to it
+    (up, down or sideways, one at a time): a short piece at that end (JOG_STUB_M) goes the same way, a pair of bends
+    and a riser take it back to the rest, which stays where it is with its far joint (docs/editing-parity.md, "A
+    carried move re-fits"). Edits the model in place; wrap in a trial to undo."""
+    element = scene.entity(global_id)
+    place, item, d, px, profile_x, pieces, shift, at, dz_m, lateral_m = _jog(scene, global_id, end, delta_m)
+    gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces, shift_ends=shift)
+    return Offset(global_id, at, at, dz_m, gids, "bends", lateral_m)
+
+
+def jog_fits(scene: IfcScene, global_id: str, end: str, delta_m) -> str | None:
+    """Why `apply_jog` cannot re-fit this segment, in words, or None when it can. Edits nothing."""
+    try:
+        _jog(scene, global_id, end, delta_m)
+    except Unsupported as e:
+        return str(e)
+    return None
+
+
+def _jog(scene: IfcScene, global_id: str, end: str, delta_m):
+    """A re-fit's pieces, read from the model without editing it (see `apply_jog`)."""
+    element = scene.entity(global_id)
+    if fitting_class(element) is None:
+        raise Unsupported(f"a {element.is_a()} has no bend fittings to re-fit it with")
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    model, s = scene.models[i], scene.unit_scales[i]
+    delta = np.asarray(delta_m, float)
+    if abs(d @ UP) > 1e-3:
+        raise Unsupported("the segment is not level")
+    if abs(delta @ d) > 1e-4:
+        raise Unsupported("the move runs along it")
+    side = np.cross(UP, d)
+    side /= np.linalg.norm(side)
+    dz_m, lateral_m = offset_components(float(delta @ UP), float(delta @ side))
+    if dz_m and lateral_m:
+        raise Unsupported("a move both up and across cannot be re-fitted with one pair of bends")
+    if not (dz_m or lateral_m):
+        raise Unsupported("nothing to re-fit")
+    amount = lateral_m or dz_m
+    offset_axis = side if lateral_m else UP
+    sx, sy = _profile_size(item.SweptArea)
+    if abs(py @ UP) > 0.999:
+        t, w = sy, sx
+    elif abs(px @ UP) > 0.999:
+        t, w = sx, sy
+    else:
+        raise Unsupported("the profile is tilted")
+    if lateral_m:
+        t, w = w, t
+    profile_x = px.copy()
+    pos = getattr(item.SweptArea, "Position", None)
+    if pos is not None and pos.RefDirection is not None:
+        lx = np.asarray(pos.RefDirection.DirectionRatios, float)
+        lx /= np.linalg.norm(lx)
+        profile_x = px * lx[0] + py * lx[1]
+    r_m = bend_radius(t * s, amount)
+    if r_m is None:
+        raise Unsupported(f"{abs(amount) * 1000:.0f} mm is too little for a pair of bends of this section")
+    R, dz, L, m = r_m / s, amount / s, item.Depth, JOG_STUB_M / s
+    if L - m - 2 * R < MIN_PIECE_M / s:
+        raise Unsupported(f"it is too short to re-fit ({L * s:.2f} m; the bends and the piece moved take "
+                          f"{(m + 2 * R) * s:.2f} m)")
+    moving = (0.0, m + 2 * R) if end == "start" else (L - m - 2 * R, L)
+    for b, t in side_ports(scene, element, origin, d, L):   # a branch on the end that goes with the move
+        if moving[0] - 0.005 / s <= t <= moving[1] + 0.005 / s:
+            raise Unsupported(f"a branch {t * s:.2f} m along it is on the end that would move")
+    u = offset_axis * (1.0 if dz > 0 else -1.0)
+    rise = abs(dz) - 2 * R
+    riser = rise > 1e-3 / s
+    if end == "start":
+        pieces = [("straight", origin + offset_axis * dz, d, m),
+                  ("bend", origin + d * m + offset_axis * dz, d, -u, R, w, t)]
+        pieces += [("straight", origin + d * (m + R) + offset_axis * dz - u * R, -u, rise)] if riser else []
+        pieces += [("bend", origin + d * (m + R) + u * R, -u, d, R, w, t),
+                   ("straight", origin + d * (m + 2 * R), d, L - m - 2 * R)]
+        shift = (delta, None)
+    elif end == "end":
+        a = L - m - R
+        pieces = [("straight", origin, d, a - R), ("bend", origin + d * (a - R), d, u, R, w, t)]
+        pieces += [("straight", origin + d * a + u * R, u, rise)] if riser else []
+        pieces += [("bend", origin + d * a + u * (abs(dz) - R), u, d, R, w, t),
+                   ("straight", origin + d * (a + R) + offset_axis * dz, d, m)]
+        shift = (None, delta)
+    else:
+        raise Unsupported(f"no end called {end!r}")
+    at = JOG_STUB_M + r_m if end == "start" else L * s - JOG_STUB_M - r_m
+    return place, item, d, px, profile_x, pieces, shift, at, dz_m, lateral_m
 
 
 ROUTE_STEPS = 3                      # most steps one route may take
@@ -416,7 +580,7 @@ def apply_route(scene: IfcScene, global_id: str, steps: list[dict], corners: str
             moves.append((at, up * np.sign(du), abs(du), (across, vertical)))
         else:
             moves.append((at, side * np.sign(dv), abs(dv), (vertical, across)))
-    use_bends = (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS
+    use_bends = (corners or default_corners()) == "bends" and fitting_class(element) is not None
     radii = [bend_radius(wt[1] * s, jump) for _, _, jump, wt in moves] if use_bends else []
     use_bends = use_bends and all(r is not None for r in radii)
     # Room along the run: each transition takes its bend radius (or half the section, square) before and after it.
@@ -481,8 +645,9 @@ def equivalent_diameter(width: float, depth: float) -> float:
 def _resizable(scene: IfcScene, element):
     """(file index, placement, item, origin, run direction, profile X, profile Y, width m, depth m, up, side) of a
     level, straight, rectangular duct or tray; else Unsupported with why."""
-    if not any(element.is_a(c) for c in RESIZABLE):
-        what = "a pipe's size is set by its flow" if element.is_a("IfcPipeSegment") else f"{element.is_a()} is not a duct or tray"
+    if segment_kind(element) not in RESIZABLE:
+        what = ("a pipe's size is set by its flow" if segment_kind(element) == "IfcPipeSegment"
+                else f"{element.is_a()} is not a duct or tray")
         raise Unsupported(f"only rectangular ducts and cable trays are resized here ({what})")
     if step_source(element):
         raise Unsupported("a part from STEP keeps its section (its file has no profile to change)")
@@ -597,6 +762,131 @@ def _loft(p0, d, length, side, up, a: tuple, b: tuple) -> tuple[np.ndarray, list
     return verts, out
 
 
+@dataclass
+class Section:
+    """A straight segment's section where it runs (world metres): its centreline ends, direction, profile axes and size
+    (width along profile X, depth along profile Y; a circle's diameter both)."""
+    start: np.ndarray
+    end: np.ndarray
+    d: np.ndarray
+    px: np.ndarray
+    py: np.ndarray
+    w: float
+    h: float
+    round_: bool
+
+
+def section_of(scene: IfcScene, global_id: str) -> Section:
+    """The section of a straight segment of one rectangular or round extrusion; else Unsupported."""
+    element = scene.entity(global_id)
+    i, _, item, origin, d, px, py = _frames(scene, element)
+    s = scene.unit_scales[i]
+    prof = item.SweptArea
+    if prof.is_a("IfcCircleProfileDef"):
+        w = h = 2 * prof.Radius * s
+    elif prof.is_a() == "IfcRectangleProfileDef":
+        w, h = prof.XDim * s, prof.YDim * s
+    else:
+        raise Unsupported("only a rectangular or round section takes a transition")
+    c = prof.Position.Location.Coordinates if getattr(prof, "Position", None) is not None else (0.0, 0.0)
+    start = (origin + px * c[0] + py * c[1]) * s
+    return Section(start, start + d * item.Depth * s, d, px, py, w, h, prof.is_a("IfcCircleProfileDef"))
+
+
+def _loft_any(p0, d, length, side, up, a: tuple, b: tuple, round_: bool) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
+    """A closed lofted transition between two sections square to `d`, rectangles or circles (16-gons): `a` = (width
+    across `side`, depth along `up`, centre offset up, centre offset across) at `p0`, `b` at p0 + d·length. Faces
+    point outward."""
+    if round_:
+        ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
+        unit = list(zip(np.cos(ang), np.sin(ang)))
+    else:
+        unit = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+    m = len(unit)
+    verts = np.array([p0 + d * t + side * (off_s + ux * w / 2) + up * (off_u + uy * h / 2)
+                      for t, (w, h, off_u, off_s) in ((0.0, a), (length, b)) for ux, uy in unit])
+    faces = [(k, (k + 1) % m, m + (k + 1) % m) for k in range(m)] + [(k, m + (k + 1) % m, m + k) for k in range(m)]
+    faces += [(0, j, j + 1) for j in range(1, m - 1)] + [(m, m + j, m + j + 1) for j in range(1, m - 1)]
+    centre = verts.mean(axis=0)
+    out = []
+    for f in faces:   # convex: a face points outward when its normal leaves the centre
+        n = np.cross(verts[f[1]] - verts[f[0]], verts[f[2]] - verts[f[0]])
+        out.append(f if n @ (verts[list(f)].mean(axis=0) - centre) > 0 else (f[0], f[2], f[1]))
+    return verts, out
+
+
+def joined_caps(scene: IfcScene, global_id: str) -> list[str]:
+    """Which ends ("start", "end") of a straight segment are joined by a port to something."""
+    try:
+        sec = section_of(scene, global_id)
+    except Unsupported:
+        return []
+    out = []
+    for port in ifcopenshell.util.system.get_ports(scene.entity(global_id)):
+        if ifcopenshell.util.system.get_connected_port(port) is None or port.ObjectPlacement is None:
+            continue
+        at = scene.placement(port.GlobalId)[:3, 3]
+        for end, p in (("start", sec.start), ("end", sec.end)):
+            if np.linalg.norm(at - p) <= 0.005 and end not in out:
+                out.append(end)
+    return out
+
+
+def add_transitions(scene: IfcScene, global_id: str, before: Section, ends: list[str]) -> list[str]:
+    """After a segment's section changed (a side pushed out, a radius grown): at each joined end in `ends`, the segment
+    shortened by a transition's length (no face turning more than 30°) and a transition fitting from its new section
+    back to the one it had, joined between it and what that end was joined to, so the joint still meets the same size.
+    Returns the transitions' GlobalIds."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    place = ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+    inv = np.linalg.inv(place)
+    made = []
+    for end in ends:
+        cur = section_of(scene, global_id)
+        out = cur.d if end == "end" else -cur.d
+        old_c = before.end if end == "end" else before.start
+        new_line = cur.end if end == "end" else cur.start
+        shift = new_line - old_c - out * float((new_line - old_c) @ out)   # the new centreline off the old one
+        moves = [abs(cur.w - before.w) / 2 + abs(float(shift @ cur.px)), abs(cur.h - before.h) / 2 + abs(float(shift @ cur.py))]
+        lt = max(max(moves) / np.tan(TRANSITION_ANGLE), MIN_PIECE_M)
+        if np.linalg.norm(cur.end - cur.start) - lt < MIN_PIECE_M:
+            raise Unsupported(f"it is too short for a {lt * 1000:.0f} mm transition at its {end}")
+        port = next((p for p in ifcopenshell.util.system.get_ports(element) if p.ObjectPlacement is not None
+                     and np.linalg.norm(scene.placement(p.GlobalId)[:3, 3] - old_c) <= 0.005), None)
+        peer = ifcopenshell.util.system.get_connected_port(port) if port is not None else None
+        if peer is not None:
+            ifcopenshell.api.run("system.disconnect_port", model, port=port)
+        stretch(scene, global_id, end, -lt, unique=True)
+        cur = section_of(scene, global_id)
+        new_c = cur.end if end == "end" else cur.start
+        verts, tris = _loft_any((old_c - out * lt) / s, out, lt / s, cur.px, cur.py,
+                                (cur.w / s, cur.h / s, float(shift @ cur.py) / s, float(shift @ cur.px) / s),
+                                (before.w / s, before.h / s, 0.0, 0.0), cur.round_)
+        part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} transition",
+                            f"{element.Tag}-TR{end[0].upper()}" if element.Tag else None,
+                            TRANSITION_TYPE[segment_kind(element)])
+        local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
+        solid, kind = mesh_item(model, local, tris)
+        body = next(r for r in element.Representation.Representations if r.RepresentationIdentifier == "Body")
+        part.Representation = model.createIfcProductDefinitionShape(None, None, [model.createIfcShapeRepresentation(
+            body.ContextOfItems, "Body", kind, [solid])])
+        for st in [x for it in body.Items for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
+            model.createIfcStyledItem(solid, st.Styles, st.Name)
+        near, far = _ports(part)
+        _place_port(model, near, new_c / s, s, -out, cur.px)   # its end at the segment, its other at the old joint
+        _place_port(model, far, old_c / s, s, out, cur.px)
+        if port is not None:
+            _place_port(model, port, new_c / s, s, out, cur.px)   # the segment's own end port, on its new centreline
+            ifcopenshell.api.run("system.connect_port", model, port1=port, port2=near, direction=port.FlowDirection or "NOTDEFINED")
+        if peer is not None:
+            ifcopenshell.api.run("system.connect_port", model, port1=far, port2=peer, direction=far.FlowDirection or "NOTDEFINED")
+        made.append(part.GlobalId)
+    scene.refresh_bounds([global_id, *made])
+    return made
+
+
 def apply_resize(scene: IfcScene, global_id: str, split_m: list[float], depth_m: float, keep: str = "bottom") -> Resize:
     """Resize a stretch of a level rectangular duct or tray: from `split_m[0]` to `split_m[1]` (metres along it) it
     takes the section `resize_size` gives at `depth_m`, with the `keep` face level ("bottom", "top" or "centre") and
@@ -673,7 +963,8 @@ def _label_resize(scene: IfcScene, gids: list[str], name: str | None, before: tu
         "ResizedFrom": old_size, "Size": new_size, "KeepLevel": keep, "Performance": performance})
 
 
-def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple]) -> list[str]:
+def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple],
+                 shift_ends: tuple = (None, None)) -> list[str]:
     """Turn `element` into the chain of `pieces` (world, file units): the first piece is the element itself, shortened
     (it must be the straight from its origin along `d`); straights are copies of it with the same profile, bends are
     new fittings. Ports are added and chained in order, the last piece takes over the element's far connection, and
@@ -701,9 +992,15 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
     styles = [x for x in model.get_inverse(item) if x.is_a("IfcStyledItem")]
     round_ = item.SweptArea.is_a("IfcCircleProfileDef")
 
-    first_ports = _ports(element)
+    # A branch off its side (a Revit tap, a grille on a duct) is not an end: it stays with the piece that keeps its
+    # place where it is, and an edit that would move it is refused. Out of the element while its copies are made.
+    branches = side_ports(scene, element, origin, d, L)
+    homes = [_branch_home(scene, b, t, pieces, origin, d, s) for b, t in branches]   # before anything is edited
+    first_ports = [p for p in _ports(element) if p not in {b for b, _ in branches}]
     if len(first_ports) > 2:
-        raise Unsupported('a branched segment with more than two ports cannot be offset')
+        raise Unsupported('a segment with more than two end ports cannot be split into pieces')
+    for b, _ in branches:
+        ifcopenshell.api.run('system.unassign_port', model, element=element, port=b)
     first_ports.sort(key=lambda p: float(scene.placement(p.GlobalId)[:3, 3] @ d) if p.ObjectPlacement else 0.)
     original_flows = [p.FlowDirection for p in first_ports] if len(first_ports) == 2 else ['NOTDEFINED','NOTDEFINED']
     external_frames = [scene.placement(p.GlobalId) if p.ObjectPlacement else None
@@ -734,6 +1031,12 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
     if far is not None:
         ifcopenshell.api.run("system.disconnect_port", model, port=first_ports[-1])
 
+    first_start = np.asarray(pieces[0][1], float)
+    if np.linalg.norm(first_start - origin) > 1e-9:   # the first piece starts elsewhere: a re-fit's end, moved
+        local = ifcopenshell.util.placement.get_axis2placement(item.Position)
+        local[:3, 3] = (inv @ np.append(first_start, 1.0))[:3]
+        item.Position = model.createIfcAxis2Placement3D(
+            _point(model, local[:3, 3]), _dir(model, local[:3, 2]), _dir(model, local[:3, 0]))
     item.Depth = pieces[0][3]
     chain, ends = [element], [(pieces[0][1], pieces[0][1] + pieces[0][2] * pieces[0][3])]
     straights = bends = transitions = 0
@@ -758,12 +1061,10 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
             transitions += 1
             part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} transition",
                                 f"{element.Tag}-TR{transitions}" if element.Tag else None,
-                                TRANSITION_TYPE[element.is_a()])
+                                TRANSITION_TYPE[segment_kind(element)])
             local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
-            solid = model.createIfcTriangulatedFaceSet(
-                model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]), None, True,
-                [[int(x) + 1 for x in f] for f in faces], None)
-            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "Tessellation", [solid])
+            solid, kind = mesh_item(model, local, faces)
+            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", kind, [solid])
             ends.append((start + shift[0], start + axis * length + shift[1]))
         else:
             _, start, t0, t1, R, w, t = piece
@@ -772,11 +1073,9 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
                                 f"{element.Tag}-BR{bends}" if element.Tag else None)
             verts, faces = _bend_mesh(start, t0, t1, R, w, t, round_)
             local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
-            solid = model.createIfcTriangulatedFaceSet(
-                model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]), None, True,
-                [[int(x) + 1 for x in f] for f in faces], None)
-            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "Tessellation", [solid])
-            ends.append((start, start + (t0 + t1) * R))
+            solid, kind = mesh_item(model, local, faces)
+            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", kind, [solid])
+            ends.append((start, bend_end(start, t0, t1, R)))   # start + (t0 + t1) R at 90°
         part.Representation = model.createIfcProductDefinitionShape(None, None, [rep])
         for st in styles:
             model.createIfcStyledItem(solid, st.Styles, st.Name)
@@ -822,20 +1121,81 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
         _place_port(model,ports[0],p0,s,-t0,section_ref(t0,profile_x))
         _place_port(model,ports[-1],p1,s,t1,section_ref(t1,profile_x))
     if external_frames:
-        for port, frame in zip((chain_ports[0][0], chain_ports[-1][-1]), external_frames):
+        # An end the chain moves with what it is joined to (a re-fit, `apply_jog`): its frame goes the same way
+        for port, frame, shift in zip((chain_ports[0][0], chain_ports[-1][-1]), external_frames, shift_ends):
             if frame is not None:
+                if shift is not None:
+                    frame = frame.copy()
+                    frame[:3, 3] += np.asarray(shift, float)
                 ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=frame, is_si=True)
+
+    for (b, _), k in zip(branches, homes):   # each branch to the straight that holds where it was
+        ifcopenshell.api.run('system.assign_port', model, element=chain[k], port=b)
 
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)
     return gids
 
 
+def _branch_home(scene: IfcScene, port, t: float, pieces: list[tuple], origin, d, s: float) -> int:
+    """Which of a chain's pieces holds a branch `t` along the run (file units): a straight on the run's own line that
+    spans it. Unsupported, naming what it feeds, when the edit would move it (an offset's middle, a re-fit's end)."""
+    tol = 0.005 / s
+    for k, shape in enumerate(pieces):
+        if shape[0] != "straight" or abs(float(np.asarray(shape[2], float) @ d)) < 0.999:
+            continue
+        rel = np.asarray(shape[1], float) - origin
+        if np.linalg.norm(rel - d * float(rel @ d)) > tol:
+            continue   # moved off the line
+        a0 = float(rel @ d)
+        a1 = a0 + float(shape[3]) * float(np.asarray(shape[2], float) @ d)
+        if min(a0, a1) - tol <= t <= max(a0, a1) + tol:
+            return k
+    peer = ifcopenshell.util.system.get_connected_port(port)
+    owner = ifcopenshell.util.system.get_port_element(peer) if peer is not None else None
+    what = f"'{owner.Name}'" if owner is not None and owner.Name else "a branch"
+    raise Unsupported(f"{what} branches off it {t * s:.2f} m along, where it would move: keep the edit clear of the branch")
+
+
+def side_ports(scene: IfcScene, element, origin, d, length) -> list[tuple]:
+    """The ports along a straight segment's side, not at its ends (a branch: a Revit tap, a grille fed from the duct),
+    with how far along the run each is (file units), in the segment's frame of `origin`, `d` and `length`."""
+    s = scene.unit_scales[scene.index_of(element.GlobalId)]
+    tol = 0.005 / s
+    out = []
+    for p in _ports(element):
+        if p.ObjectPlacement is None:
+            continue
+        t = float((scene.placement(p.GlobalId)[:3, 3] / s - np.asarray(origin, float)) @ np.asarray(d, float))
+        if tol < t < length - tol:
+            out.append((p, t))
+    return out
+
+
+def mesh_item(model, verts, faces):
+    """A closed triangle mesh (file units, the element's frame) as the file's schema writes one: an
+    IfcTriangulatedFaceSet (IFC4), or an IfcFacetedBrep of triangles (IFC2X3 has no face sets: Revit's 2x3 exports).
+    Returns (item, the representation type: "Tessellation" or "Brep")."""
+    if model.schema == "IFC2X3":
+        pts = [model.createIfcCartesianPoint(tuple(float(c) for c in v)) for v in verts]
+        shell = model.createIfcClosedShell([
+            model.createIfcFace([model.createIfcFaceOuterBound(model.createIfcPolyLoop([pts[int(i)] for i in f]), True)])
+            for f in faces])
+        return model.createIfcFacetedBrep(shell), "Brep"
+    return (model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D([[float(c) for c in v] for v in verts]),
+                                               None, True, [[int(x) + 1 for x in f] for f in faces], None), "Tessellation")
+
+
 def _new_fitting(model, segment, place, name: str, tag: str | None, predefined: str = "BEND"):
     """A fitting for `segment` (a bend, or a transition): its fitting class, in the same storey and systems, with two
     ports and its own placement (the segment's frame, so the fitting's vertices share the segment's local coordinates)."""
-    fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=FITTING_CLASS[segment.is_a()],
-                                   predefined_type=predefined, name=name)
+    cls = fitting_class(segment)
+    if cls == "IfcFlowFitting":   # IFC2X3: what it is (a duct bend…) is its type's
+        fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("type.assign_type", model, related_objects=[fitting], should_map_representations=False,
+                             relating_type=_fitting_type(model, FITTING_TYPE_2X3[segment_kind(segment)], predefined))
+    else:
+        fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, predefined_type=predefined, name=name)
     if tag:
         fitting.Tag = tag
     container = ifcopenshell.util.element.get_container(segment)
@@ -856,18 +1216,45 @@ def _new_fitting(model, segment, place, name: str, tag: str | None, predefined: 
         port.Name = f"Port {n}"
         if len(old) >= 2:
             port.FlowDirection = old[n].FlowDirection
-            port.PredefinedType = old[n].PredefinedType
-            port.SystemType = old[n].SystemType
+            for attr in ("PredefinedType", "SystemType"):   # IFC4 only
+                if hasattr(port, attr):
+                    setattr(port, attr, getattr(old[n], attr))
     return fitting
 
 
+def _fitting_type(model, cls: str, predefined: str):
+    """ORCA's own fitting type of this class and kind (an IFC2X3 "ORCA bend" duct fitting type…), made once."""
+    name = f"ORCA {predefined.lower()}"
+    for t in model.by_type(cls):
+        if t.Name == name and t.PredefinedType == predefined:
+            return t
+    t = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+    t.PredefinedType = predefined
+    return t
+
+
+def bend_turn(t0, t1) -> tuple[np.ndarray, float]:
+    """A bend from `t0` to `t1`: the unit direction square to `t0` it turns towards (in their plane), and its angle."""
+    t0, t1 = np.asarray(t0, float), np.asarray(t1, float)
+    n = t1 - t0 * float(t1 @ t0)
+    return n / np.linalg.norm(n), float(np.arccos(np.clip(t0 @ t1, -1.0, 1.0)))
+
+
+def bend_end(p0, t0, t1, r) -> np.ndarray:
+    """Where a bend of centreline radius `r` from `p0` along `t0` ends, running along `t1` (any angle under 180°)."""
+    n, th = bend_turn(t0, t1)
+    return np.asarray(p0, float) + r * np.sin(th) * np.asarray(t0, float) + r * (1.0 - np.cos(th)) * n
+
+
 def _bend_mesh(p0, t0, t1, r, width, depth, round_: bool) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
-    """A closed triangulated 90° bend (world coordinates): the section swept from `p0` going along `t0` round a radius
-    `r` until it runs along `t1`. Width stays across the bend plane; depth lies in it. Faces point outward."""
+    """A closed triangulated bend (world coordinates): the section swept from `p0` going along `t0` round a radius `r`
+    until it runs along `t1`, at whatever angle they make (90° in an offset's square bends, 45° in an angled one).
+    Width stays across the bend plane; depth lies in it. Faces point outward."""
     t0, t1 = np.asarray(t0, float), np.asarray(t1, float)
     side = np.cross(t0, t1)
     side /= np.linalg.norm(side)
-    centre = np.asarray(p0, float) + r * t1
+    n, turn = bend_turn(t0, t1)
+    centre = np.asarray(p0, float) + r * n
     if round_:
         ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
         section = np.c_[np.cos(ang) * width / 2, np.sin(ang) * depth / 2]
@@ -876,9 +1263,9 @@ def _bend_mesh(p0, t0, t1, r, width, depth, round_: bool) -> tuple[np.ndarray, l
     m = len(section)
     rings = []
     for k in range(BEND_STEPS + 1):
-        th = (np.pi / 2) * k / BEND_STEPS
-        p = centre - r * np.cos(th) * t1 + r * np.sin(th) * t0
-        tangent = np.cos(th) * t0 + np.sin(th) * t1
+        th = turn * k / BEND_STEPS
+        p = centre - r * np.cos(th) * n + r * np.sin(th) * t0
+        tangent = np.cos(th) * t0 + np.sin(th) * n
         across = np.cross(tangent, side)
         rings.append([p + x * side + y * across for x, y in section])
     verts = np.array([v for ring in rings for v in ring])
@@ -974,7 +1361,7 @@ def butt_trim(scene: IfcScene, global_id: str, other: str) -> Trim:
     return Trim(global_id, end, round(by, 4))
 
 
-def apply_trim(scene: IfcScene, global_id: str, end: str, by_m: float) -> Trim:
+def apply_trim(scene: IfcScene, global_id: str, end: str, by_m: float, least_m: float = MIN_PIECE_M) -> Trim:
     """Shorten (or, with a negative `by_m`, lengthen) a member at one end of its long axis (`member_axis`). Edits the
     model in place; wrap in `trial` to try it and undo. A port at that end moves with it."""
     element = scene.entity(global_id)
@@ -984,8 +1371,8 @@ def apply_trim(scene: IfcScene, global_id: str, end: str, by_m: float) -> Trim:
     by = by_m / s
     if end not in ("start", "end"):
         raise Unsupported("say which end to trim: start or end")
-    if length / s - by < MIN_PIECE_M / s:
-        raise Unsupported(f"trimming {by_m * 1000:.0f} mm would leave less than {MIN_PIECE_M * 1000:.0f} mm of it")
+    if length / s - by < least_m / s:
+        raise Unsupported(f"trimming {by_m * 1000:.0f} mm would leave less than {least_m * 1000:.0f} mm of it")
     pos = item.Position
     local = ifcopenshell.util.placement.get_axis2placement(pos)
     sign = 1.0 if end == "start" else -1.0
@@ -1496,6 +1883,24 @@ def kept_files(scene: IfcScene, indexes: set[int]):
 
 
 @contextmanager
+def scratch(scene: IfcScene, indexes: set[int]):
+    """Edits that never stay (a move there and back): inside a transaction that is always undone, so they do not
+    break the undo of kept edits (an untracked placement change leaves the history pointing at entities that are
+    gone). A file already holding a transaction is left to it. Boxes are put back."""
+    before = dict(scene.bounds())
+    models = [scene.models[i] for i in sorted(indexes) if scene.models[i].transaction is None]
+    for m in models:
+        m.begin_transaction()
+    try:
+        yield
+    finally:
+        for m in models:
+            m.end_transaction()
+            m.undo()
+        scene._bounds = before
+
+
+@contextmanager
 def trial_files(scene: IfcScene, indexes: set[int]):
     """Edit several files of a scene (a plan, or one fix that changes two models), then undo every edit, cached boxes
     included. Never nest it inside `trial`: a file holds one transaction at a time."""
@@ -1520,28 +1925,34 @@ class Stretched:
     size_m: float         # its length (a cap) or its size across that side, after
 
 
-def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None) -> Stretched:
+def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None, clipped: bool = False,
+            item: int | None = None, least_m: float = MIN_PIECE_M, unique: bool = False,
+            sections: bool = False) -> Stretched:
     """Make a straight segment longer (+) or shorter (-) by moving one face outward by `by_m` metres: its "start" or
     "end" cap (the extrusion's depth, and its start when the start moves), or, for a rectangular one, a "side" whose
     outward world `normal` is given (the profile grows to that side: a ladder riser a bend sits on). Ports at that face
-    move with it without turning. Edits the model in place; wrap in a trial to undo."""
+    move with it without turning. Edits the model in place; wrap in a trial to undo. Hand edits (manual.py) name the
+    `item` of a body of several solids, keep `least_m` (5 mm), give a shared body its own copy (`unique`), and may
+    push an I, U, C, L or T section's outer side (`sections`: its overall width or depth, the opposite side held)."""
     element = scene.entity(global_id)
-    i, place, item, origin, d, px, py = _frames(scene, element)
-    model, s = scene.models[i], scene.unit_scales[i]
+    k = item
+    i = scene.index_of(global_id)
+    model = scene.models[i]
+    if unique:
+        make_unique(model, element)
+    i, place, item, origin, d, px, py = _frames(scene, element, clipped, k)
+    s = scene.unit_scales[i]
     by_m = float(by_m)
     if not np.isfinite(by_m):
         raise Unsupported("a stretch must be a finite length")
-    body, _ = _body(element)
-    users = (len([x for x in model.get_inverse(item) if x.is_a("IfcShapeRepresentation")]),
-             len([x for x in model.get_inverse(body) if x.is_a("IfcProductRepresentation") or x.is_a("IfcRepresentationMap")]),
-             len([x for x in model.get_inverse(element.Representation) if x.is_a("IfcProduct")]))
-    if max(users) > 1:   # another element's shape would change too
+    body, _ = _body(element, clipped, k)
+    if shared(model, element, body, item):   # another element's shape would change too
         raise Unsupported("its body is shared with other elements")
     inv = np.linalg.inv(place)
     if face in ("start", "end"):
         size = item.Depth * s + by_m
-        if size < MIN_PIECE_M - 1e-9:
-            raise Unsupported(f"it would be {size * 1000:.0f} mm long (at least {MIN_PIECE_M * 1000:.0f} mm stays)")
+        if size < least_m - 1e-9:
+            raise Unsupported(f"it would be {size * 1000:.0f} mm long (at least {least_m * 1000:.0f} mm stays)")
         out = -d if face == "start" else d
         old_centre = (origin if face == "start" else origin + d * item.Depth) * s
         if face == "start":   # the start moves out: a new place for the extrusion (placements can be shared)
@@ -1552,27 +1963,46 @@ def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None
         item.Depth = float(item.Depth + by_m / s)
     elif face == "side":
         prof = item.SweptArea
-        if prof.is_a() != "IfcRectangleProfileDef" or (prof.Position is not None and (
-                np.linalg.norm(np.asarray(prof.Position.Location.Coordinates)) > 1e-9
-                or (prof.Position.RefDirection is not None
-                    and abs(abs(prof.Position.RefDirection.DirectionRatios[0]) - 1) > 1e-9))):
-            raise Unsupported("only a centred rectangular segment grows sideways")
+        dims_of = {"IfcRectangleProfileDef": ("XDim", "YDim"), **(SECTION_DIMS if sections else {})}
+        if prof.is_a() not in dims_of:
+            raise Unsupported("only a rectangular section grows sideways")
+        xa, ya = dims_of[prof.is_a()]
+        # A rectangle may sit off the solid's axis (a box drawn from its corner) and be turned in its plane: its own
+        # axes are the solid's turned by its RefDirection.
+        loc = np.asarray(prof.Position.Location.Coordinates[:2], float) if prof.Position is not None else np.zeros(2)
+        ref = (np.asarray(prof.Position.RefDirection.DirectionRatios[:2], float)
+               if prof.Position is not None and prof.Position.RefDirection is not None else np.array([1.0, 0.0]))
+        ref = ref / np.linalg.norm(ref)
+        ax = px * ref[0] + py * ref[1]
+        ay = -px * ref[1] + py * ref[0]
         out = np.asarray(normal, float)
         out /= np.linalg.norm(out)
-        if abs(out @ px) > 0.999:
-            attr, across = "XDim", prof.XDim
-        elif abs(out @ py) > 0.999:
-            attr, across = "YDim", prof.YDim
+        if abs(out @ ax) > 0.999:
+            attr = xa
+        elif abs(out @ ay) > 0.999:
+            attr = ya
         else:
             raise Unsupported("that side is not square to the segment's profile")
+        across = _section_dim(prof, attr)
         size = across * s + by_m
-        if size < MIN_PIECE_M - 1e-9:
-            raise Unsupported(f"it would be {size * 1000:.0f} mm across (at least {MIN_PIECE_M * 1000:.0f} mm stays)")
-        mid = origin * s + d * (item.Depth * s / 2)
+        if size < least_m - 1e-9:
+            raise Unsupported(f"it would be {size * 1000:.0f} mm across (at least {least_m * 1000:.0f} mm stays)")
+        inner = _section_least(prof, attr)
+        if size <= inner * s + 1e-6:
+            raise Unsupported(f"its {'flanges' if attr in ('OverallDepth', 'Depth') else 'web'} would not fit: at least "
+                              f"{inner * s * 1000:.0f} mm stays")
+        mid = (origin + px * loc[0] + py * loc[1]) * s + d * (item.Depth * s / 2)
         old_centre = mid + out * (across * s / 2)
-        dims = {"XDim": prof.XDim, "YDim": prof.YDim, attr: float(size / s)}
-        item.SweptArea = model.createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
-                                                            dims["XDim"], dims["YDim"])
+        if prof.is_a() == "IfcRectangleProfileDef":
+            dims = {"XDim": prof.XDim, "YDim": prof.YDim, attr: float(size / s)}
+            item.SweptArea = model.createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+                                                                dims["XDim"], dims["YDim"])
+        else:   # a copy (profiles are shared, often by every beam of a size), the one size changed
+            new = ifcopenshell.util.element.copy(model, prof)
+            if prof.is_a("IfcLShapeProfileDef") and new.Width is None:
+                new.Width = new.Depth
+            setattr(new, attr, float(size / s))
+            item.SweptArea = new
         local = ifcopenshell.util.placement.get_axis2placement(item.Position)
         local[:3, 3] = (inv @ np.append(origin + out * (by_m / s / 2), 1.0))[:3]
         item.Position = model.createIfcAxis2Placement3D(
@@ -1844,3 +2274,1190 @@ def passages(scene: IfcScene, run_gid: str, obstacle_gid: str, clearance_m: floa
         else:
             i += 1
     return out
+
+
+# ----------------------------------------------------------------------------------------- hand edits (manual.py)
+
+MIN_EDGE_M = 0.01   # an outline edge left shorter than this by moving its neighbour is refused
+
+
+def shared(model, element, body, item) -> bool:
+    """Whether editing this solid would change another element's shape too (a shared item, body or representation)."""
+    return max(len([x for x in model.get_inverse(item) if x.is_a("IfcShapeRepresentation") or x.is_a("IfcBooleanResult")]),
+               len([x for x in model.get_inverse(body) if x.is_a("IfcProductRepresentation") or x.is_a("IfcRepresentationMap")]),
+               len([x for x in model.get_inverse(element.Representation) if x.is_a("IfcProduct")])) > 1
+
+
+def make_unique(model, element) -> bool:
+    """Give the element its own copy of a shape other elements share (copy_deep, contexts kept), its styles copied
+    onto the new solids so it keeps its colour. Returns whether it copied. A body drawn from its type (a mapped item)
+    becomes the element's own copy of the type's shape where its map puts it (`unmap`): the type, and every other
+    element of it, stay as they were (docs/editing-parity.md)."""
+    rep = element.Representation
+    bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
+    if not bodies:
+        return False
+    if any(it.is_a("IfcMappedItem") for it in bodies[0].Items):
+        unmap(model, element)
+        return True
+    if not any(shared(model, element, bodies[0], it) for it in bodies[0].Items):
+        return False
+    import ifcopenshell.util.element as ue
+    new = ue.copy_deep(model, rep, exclude=["IfcGeometricRepresentationContext"])
+    for old_r, new_r in zip(rep.Representations, new.Representations):
+        for old_i, new_i in zip(old_r.Items, new_r.Items):
+            for st in [x for x in model.get_inverse(old_i) if x.is_a("IfcStyledItem")]:
+                model.createIfcStyledItem(new_i, st.Styles, st.Name)
+    element.Representation = new
+    return True
+
+
+def mapping(item) -> np.ndarray:
+    """Where a mapped item puts its type's shape in the element's frame (file units): its target after its origin.
+    Refused when the target scales it (the copy would need its sizes scaled too)."""
+    target = item.MappingTarget
+    if target is not None and (not target.is_a("IfcCartesianTransformationOperator3D")
+                               or abs(float(target.Scale if target.Scale is not None else 1.0) - 1.0) > 1e-9
+                               or target.is_a("IfcCartesianTransformationOperator3DnonUniform")):
+        raise Unsupported("its type's shape is scaled where it is placed: ORCA cannot copy it for this element alone")
+    return np.asarray(ifcopenshell.util.placement.get_mappeditem_transformation(item), float)
+
+
+def unmap(model, element) -> None:
+    """Replace the mapped items of the element's Body by its own copy of what they draw, where they draw it (`mapping`
+    composed into each solid's position, a mesh's points or a brep's points), styles copied: the element keeps its type,
+    and the type keeps its shape. Refused for a solid drawn some other way."""
+    import ifcopenshell.util.element as ue
+    rep = element.Representation
+    body = next(r for r in rep.Representations if r.RepresentationIdentifier == "Body")
+    items, kind = [], body.RepresentationType
+    for it in body.Items:
+        if not it.is_a("IfcMappedItem"):
+            items.append(it)
+            continue
+        m = mapping(it)
+        source = it.MappingSource.MappedRepresentation
+        kind = source.RepresentationType if kind == "MappedRepresentation" else kind
+        for inner in source.Items:
+            copy = ue.copy_deep(model, inner, exclude=["IfcGeometricRepresentationContext"])
+            _move_item(model, copy, m)
+            for st in [x for x in model.get_inverse(inner) if x.is_a("IfcStyledItem")]:
+                model.createIfcStyledItem(copy, st.Styles, st.Name)
+            items.append(copy)
+    new_body = model.createIfcShapeRepresentation(body.ContextOfItems, "Body",
+                                                  kind if kind != "MappedRepresentation" else "SweptSolid", items)
+    element.Representation = model.createIfcProductDefinitionShape(
+        rep.Name, rep.Description, [new_body if r == body else r for r in rep.Representations])
+    if not model.get_inverse(rep):   # the old shape and its mapped body go; the type's map, used by its type, stays
+        ue.remove_deep2(model, rep)
+
+
+def _placement(model, m: np.ndarray):
+    return model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(float(x) for x in m[:3, 3])),
+                                           _dir(model, m[:3, 2]), _dir(model, m[:3, 0]))
+
+
+def _move_item(model, item, m: np.ndarray) -> None:
+    """Move a solid (its own copy) by the 4 x 4 `m`, in file units."""
+    if item.is_a("IfcBooleanResult"):
+        _move_item(model, item.FirstOperand, m)
+        _move_item(model, item.SecondOperand, m)
+    elif item.is_a("IfcSweptAreaSolid") or item.is_a("IfcCsgPrimitive3D"):
+        old = (ifcopenshell.util.placement.get_axis2placement(item.Position) if item.Position is not None else np.eye(4))
+        item.Position = _placement(model, m @ old)
+    elif item.is_a("IfcHalfSpaceSolid"):
+        plane = item.BaseSurface
+        plane.Position = _placement(model, m @ ifcopenshell.util.placement.get_axis2placement(plane.Position))
+        if item.is_a("IfcPolygonalBoundedHalfSpace"):
+            item.Position = _placement(model, m @ ifcopenshell.util.placement.get_axis2placement(item.Position))
+    elif item.is_a("IfcTessellatedFaceSet"):
+        pts = np.asarray(item.Coordinates.CoordList, float)
+        item.Coordinates.CoordList = [tuple(float(x) for x in p) for p in (pts @ m[:3, :3].T + m[:3, 3])]
+        if getattr(item, "Normals", None) is not None:
+            item.Normals = None
+    elif item.is_a("IfcFacetedBrep") or item.is_a("IfcShellBasedSurfaceModel") or item.is_a("IfcFaceBasedSurfaceModel"):
+        for p in {e for e in model.traverse(item) if e.is_a("IfcCartesianPoint")}:
+            p.Coordinates = tuple(float(x) for x in m[:3, :3] @ np.asarray(p.Coordinates, float) + m[:3, 3])
+    else:
+        raise Unsupported(f"its type's shape is drawn as {item.is_a()}: ORCA cannot copy it for this element alone")
+
+
+# ----------------------------------------------------------------------------------------------------- join
+
+
+@dataclass
+class JoinPlan:
+    """How two straight segments' nearest ends meet (metres, world): `line` (A's end stretched `stretch_a` to B's) or
+    `bend` (both brought to where their axes meet, less `radius`, and a 90° bend fitting between)."""
+    kind: str
+    a: str
+    b: str
+    end_a: str              # "start" or "end": the cap of A that moves
+    end_b: str
+    stretch_a: float
+    stretch_b: float
+    radius: float = 0.0
+    corner: list[float] | None = None
+
+
+def _free_end_port(scene: IfcScene, element, point):
+    """The port at a segment's end (within 5 mm of `point`, world metres): refused when it is already joined."""
+    near = [p for p in ifcopenshell.util.system.get_ports(element) if p.ObjectPlacement is not None
+            and np.linalg.norm(scene.placement(p.GlobalId)[:3, 3] - point) <= 0.005]
+    if any(ifcopenshell.util.system.get_connected_port(p) is not None for p in near):
+        raise Unsupported(f"its end at {', '.join(f'{c:.2f}' for c in point)} is already joined: disconnect it first")
+    return near[0] if near else None
+
+
+def _section_across(scene: IfcScene, gid: str, side) -> tuple[float, float, bool]:
+    """A segment's section as (across the plane `side` is square to, in it, round), metres."""
+    e = scene.entity(gid)
+    _, _, item, _, _, px, py = _frames(scene, e)
+    s = scene.unit_scales[scene.index_of(gid)]
+    sx, sy = _profile_size(item.SweptArea)
+    round_ = item.SweptArea.is_a("IfcCircleProfileDef")
+    if round_ or abs(px @ side) > 0.999:
+        return sx * s, sy * s, round_
+    if abs(py @ side) > 0.999:
+        return sy * s, sx * s, round_
+    raise Unsupported("its section is turned to the bend: join it in line, or turn it first")
+
+
+def join_plan(scene: IfcScene, a_gid: str, b_gid: str) -> JoinPlan:
+    """How the nearest free ends of two straight segments meet, without editing anything (see `JoinPlan`)."""
+    if a_gid == b_gid:
+        raise Unsupported("join it to another segment")
+    if segment_kind(scene.entity(a_gid)) != segment_kind(scene.entity(b_gid)):
+        raise Unsupported("join segments of one kind (a duct to a duct, a pipe to a pipe)")
+    ra, rb = run_of(scene, a_gid), run_of(scene, b_gid)
+    da, db = np.asarray(ra.direction, float), np.asarray(rb.direction, float)
+    ends_a = {"start": (np.asarray(ra.start, float), -da), "end": (np.asarray(ra.end, float), da)}
+    ends_b = {"start": (np.asarray(rb.start, float), -db), "end": (np.asarray(rb.end, float), db)}
+    ea, eb = min(((x, y) for x in ends_a for y in ends_b),
+                 key=lambda k: float(np.linalg.norm(ends_a[k[0]][0] - ends_b[k[1]][0])))
+    (pa, ta), (pb, tb) = ends_a[ea], ends_b[eb]
+    _free_end_port(scene, scene.entity(a_gid), pa)
+    _free_end_port(scene, scene.entity(b_gid), pb)
+    cos = float(ta @ tb)
+    if cos < -np.cos(np.radians(1)):     # facing each other: one line?
+        gap = float((pb - pa) @ ta)
+        if np.linalg.norm((pb - pa) - ta * gap) > 0.005:
+            raise Unsupported("they are not on one line: offset one first, or join them square with a bend")
+        if gap < -0.001:
+            raise Unsupported("their ends overlap: shorten one first")
+        sa, sb = run_of(scene, a_gid), run_of(scene, b_gid)
+        if abs(sa.width_m - sb.width_m) > 0.001 or abs(sa.depth_m - sb.depth_m) > 0.001:
+            raise Unsupported("they are not the same size: a transition is needed between them")
+        return JoinPlan("line", a_gid, b_gid, ea, eb, gap, 0.0)
+    if cos > np.cos(np.radians(1)):
+        raise Unsupported("their ends point the same way: they run side by side, so offset one onto the other's line")
+    if abs(cos) > np.sin(np.radians(1)):
+        raise Unsupported("join ends in line or square to each other: other angles are not in this build")
+    # Square: where the two axes meet (closest points), within 5 mm of each other to be one plane.
+    w = pa - pb
+    m = np.array([[ta @ ta, -(ta @ tb)], [ta @ tb, -(tb @ tb)]])
+    s_, t_ = np.linalg.solve(m, [-(w @ ta), -(w @ tb)])
+    xa, xb = pa + ta * s_, pb + tb * t_
+    if np.linalg.norm(xa - xb) > 0.005:
+        raise Unsupported("their axes do not meet: they are not in one plane")
+    side = np.cross(ta, -tb)
+    side /= np.linalg.norm(side)
+    wa, ha, round_a = _section_across(scene, a_gid, side)
+    wb, hb, _ = _section_across(scene, b_gid, side)
+    if abs(wa - wb) > 0.001 or abs(ha - hb) > 0.001:
+        raise Unsupported("they are not the same size: a transition is needed between them")
+    radius = ha
+    if s_ - radius < -0.001 or t_ - radius < -0.001:
+        raise Unsupported(f"an end runs past the corner or within a bend's radius ({radius * 1000:.0f} mm) of it: "
+                          "pull it back first")
+    for gid, by in ((a_gid, s_ - radius), (b_gid, t_ - radius)):
+        if run_of(scene, gid).length_m + by < MIN_PIECE_M:
+            raise Unsupported(f"a piece would be under {MIN_PIECE_M * 1000:.0f} mm")
+    return JoinPlan("bend", a_gid, b_gid, ea, eb, float(s_ - radius), float(t_ - radius), float(radius),
+                    ((xa + xb) / 2).tolist())
+
+
+def join_segments(scene: IfcScene, plan: JoinPlan) -> list[str]:
+    """Make a `join_plan`: stretch the ends, add the bend, connect the ports. Returns the bend's GlobalId, if any."""
+    a, b = scene.entity(plan.a), scene.entity(plan.b)
+    model = scene.models[scene.index_of(plan.a)]
+    s = scene.unit_scales[scene.index_of(plan.a)]
+    if abs(plan.stretch_a) > 1e-6:
+        stretch(scene, plan.a, plan.end_a, plan.stretch_a, unique=True)
+    if abs(plan.stretch_b) > 1e-6:
+        stretch(scene, plan.b, plan.end_b, plan.stretch_b, unique=True)
+    ra, rb = run_of(scene, plan.a), run_of(scene, plan.b)
+    pa = np.asarray(ra.end if plan.end_a == "end" else ra.start, float)
+    pb = np.asarray(rb.end if plan.end_b == "end" else rb.start, float)
+    port_a, port_b = _free_end_port(scene, a, pa), _free_end_port(scene, b, pb)
+    made = []
+    if plan.kind == "bend":
+        ta = np.asarray(ra.direction, float) * (1 if plan.end_a == "end" else -1)
+        tb = np.asarray(rb.direction, float) * (1 if plan.end_b == "end" else -1)
+        side = np.cross(ta, -tb)
+        side /= np.linalg.norm(side)
+        width, depth, round_ = _section_across(scene, plan.a, side)
+        i, place, item, _, _, px, _ = _frames(scene, a)
+        part = _new_fitting(model, a, place, f"{a.Name or 'Segment'} bend", f"{a.Tag}-BJ" if a.Tag else None)
+        verts, tris = _bend_mesh(pa / s, ta, -tb, plan.radius / s, width / s, depth / s, round_)
+        local = (np.linalg.inv(place) @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
+        solid, kind = mesh_item(model, local, tris)
+        body = next(r for r in a.Representation.Representations if r.RepresentationIdentifier == "Body")
+        part.Representation = model.createIfcProductDefinitionShape(None, None, [model.createIfcShapeRepresentation(
+            body.ContextOfItems, "Body", kind, [solid])])
+        for st in [x for it in body.Items for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
+            model.createIfcStyledItem(solid, st.Styles, st.Name)
+        p0, p1 = _ports(part)
+        px_b = _frames(scene, b)[5]
+        _place_port(model, p0, pa / s, s, -ta, px)     # as a chain's pieces: back out of its start, on out of its end
+        _place_port(model, p1, pb / s, s, -tb, px_b)   # (the bend leaves along -tb, into B's end: B's section axes)
+        if port_a is not None:
+            ifcopenshell.api.run("system.connect_port", model, port1=port_a, port2=p0, direction=port_a.FlowDirection or "NOTDEFINED")
+        if port_b is not None:
+            ifcopenshell.api.run("system.connect_port", model, port1=p1, port2=port_b, direction=p1.FlowDirection or "NOTDEFINED")
+        made.append(part.GlobalId)
+        scene.refresh_bounds([part.GlobalId])
+    elif port_a is not None and port_b is not None:
+        ifcopenshell.api.run("system.connect_port", model, port1=port_a, port2=port_b, direction=port_a.FlowDirection or "NOTDEFINED")
+    return made
+
+
+SECTION_DIMS = {   # an I, U, C, L or T section's overall width (profile x) and depth (profile y)
+    "IfcIShapeProfileDef": ("OverallWidth", "OverallDepth"), "IfcUShapeProfileDef": ("FlangeWidth", "Depth"),
+    "IfcCShapeProfileDef": ("Width", "Depth"), "IfcLShapeProfileDef": ("Width", "Depth"),
+    "IfcTShapeProfileDef": ("FlangeWidth", "Depth")}
+MESH_ITEMS = ("IfcTriangulatedFaceSet", "IfcPolygonalFaceSet", "IfcFacetedBrep")
+PLANE_COS = 0.9998     # triangles within ~1° of each other on one plane are one face of a mesh
+PLANE_TOL_M = 0.001    # and within 1 mm of its plane
+
+
+def _section_dim(prof, attr: str) -> float:
+    v = getattr(prof, attr)
+    return float(prof.Depth if v is None and prof.is_a("IfcLShapeProfileDef") else v)
+
+
+def _section_least(prof, attr: str) -> float:
+    """What a section's width or depth must stay above: its flanges (twice their thickness) or its web."""
+    g = lambda a: float(getattr(prof, a, None) or 0.0)
+    t = prof.is_a()
+    if t == "IfcIShapeProfileDef":
+        return 2 * g("FlangeThickness") if attr == "OverallDepth" else g("WebThickness")
+    if t == "IfcUShapeProfileDef":
+        return 2 * g("FlangeThickness") if attr == "Depth" else g("WebThickness")
+    if t == "IfcCShapeProfileDef":
+        return 2 * g("WallThickness") if attr == "Depth" else g("WallThickness")
+    if t == "IfcLShapeProfileDef":
+        return g("Thickness")
+    if t == "IfcTShapeProfileDef":
+        return g("FlangeThickness") if attr == "Depth" else g("WebThickness")
+    return 0.0
+
+
+@dataclass
+class Solid:
+    """One solid of an element's Body, as hand edits see it."""
+    k: int | None          # its place in the Body; None when the Body is one solid (face ids carry no prefix)
+    kind: str              # extrusion (straight, along its own axis), mesh, other
+    item: object           # the extrusion or mesh, under any clips
+    top: object            # the Body's item itself: a clip result when clipped
+    world: np.ndarray      # file units: an extrusion's own frame, else the representation's (the element's placement)
+    clipped: bool
+
+
+def solids(scene: IfcScene, element, through_maps: bool = False) -> list[Solid]:
+    """Every solid of the element's Body, each with what it is and its world frame. Empty without one Body.
+    `through_maps` reads a body drawn from its type (mapped items) as the solids it draws, in the order `unmap` copies
+    them: for listing and resolving faces only; an edit unmaps first (`make_unique`), so it never changes the type."""
+    rep = element.Representation
+    bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
+    if len(bodies) != 1:
+        return []
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    items: list = []
+    for top in bodies[0].Items:
+        if through_maps and top.is_a("IfcMappedItem"):
+            try:
+                m = mapping(top)
+            except Unsupported:
+                items.append((top, place))
+                continue
+            items += [(inner, place @ m) for inner in top.MappingSource.MappedRepresentation.Items]
+        else:
+            items.append((top, place))
+    out = []
+    for k, (top, frame) in enumerate(items):
+        item = top
+        while item.is_a("IfcBooleanClippingResult"):
+            item = item.FirstOperand
+        key = k if len(items) > 1 else None
+        if (item.is_a("IfcExtrudedAreaSolid") and item.Position is not None
+                and np.linalg.norm(np.asarray(item.ExtrudedDirection.DirectionRatios) - (0, 0, 1)) <= 1e-9):
+            out.append(Solid(key, "extrusion", item, top, frame @ ifcopenshell.util.placement.get_axis2placement(item.Position),
+                             top is not item))
+        elif any(item.is_a(c) for c in MESH_ITEMS):
+            out.append(Solid(key, "mesh", item, top, frame, top is not item))
+        else:
+            out.append(Solid(key, "other", item, top, place, top is not item))
+    return out
+
+
+def solid(scene: IfcScene, element, k: int | None, through_maps: bool = False) -> Solid:
+    """The solid a face id's prefix names (None: the Body's one solid); `through_maps` as `solids`, for reading."""
+    sol = solids(scene, element, through_maps)
+    found = next((x for x in sol if x.k == k), None) if k is not None else (sol[0] if len(sol) == 1 else None)
+    if found is None:
+        raise Unsupported("it has no such solid in its body")
+    return found
+
+
+def item_verts(scene: IfcScene, element, top) -> np.ndarray:
+    """One solid's triangulated vertices, world metres (its clips applied)."""
+    i = scene.index_of(element.GlobalId)
+    s = scene.unit_scales[i]
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    shape = ifcopenshell.geom.create_shape(ifcopenshell.geom.settings(), top)
+    v = np.asarray(shape.verts, float).reshape(-1, 3)    # metres, in the representation's frame
+    return v @ place[:3, :3].T + place[:3, 3] * s
+
+
+def mesh_data(item) -> tuple[np.ndarray, np.ndarray]:
+    """A mesh's vertices (file units, its representation's frame) and its triangles (index triples into them)."""
+    if item.is_a("IfcTriangulatedFaceSet") or item.is_a("IfcPolygonalFaceSet"):
+        pts = np.asarray(item.Coordinates.CoordList, float)
+        pn = getattr(item, "PnIndex", None)
+        at = (lambda k: pn[k - 1] - 1) if pn else (lambda k: k - 1)
+        if item.is_a("IfcTriangulatedFaceSet"):
+            tris = [tuple(at(k) for k in t) for t in item.CoordIndex]
+        else:
+            tris = []
+            for f in item.Faces:
+                loop = [at(k) for k in f.CoordIndex]
+                tris += [(loop[0], loop[j], loop[j + 1]) for j in range(1, len(loop) - 1)]
+        return pts, np.asarray(tris, int).reshape(-1, 3)
+    index: dict[int, int] = {}
+    pts, tris = [], []
+    for f in item.Outer.CfsFaces:
+        bounds = [b for b in f.Bounds if b.is_a("IfcFaceOuterBound")] or list(f.Bounds[:1])
+        for b in bounds:
+            loop = []
+            for p in b.Bound.Polygon:
+                if p.id() not in index:
+                    index[p.id()] = len(pts)
+                    pts.append(p.Coordinates)
+                loop.append(index[p.id()])
+            if not b.Orientation:
+                loop = loop[::-1]
+            tris += [(loop[0], loop[j], loop[j + 1]) for j in range(1, len(loop) - 1)]
+    return np.asarray(pts, float), np.asarray(tris, int).reshape(-1, 3)
+
+
+def mesh_patches(pts: np.ndarray, tris: np.ndarray) -> list[dict]:
+    """A mesh's flat faces: triangles joined through shared corners (by position) that lie on one plane, within ~1° and
+    1 mm (`pts` in metres). Each: its triangles, area-weighted normal (from the winding), centroid and area."""
+    if not len(tris):
+        return []
+    a, b, c = pts[tris[:, 0]], pts[tris[:, 1]], pts[tris[:, 2]]
+    cr = np.cross(b - a, c - a)
+    area = np.linalg.norm(cr, axis=1) / 2
+    n = cr / np.maximum(np.linalg.norm(cr, axis=1), 1e-15)[:, None]
+    cen = (a + b + c) / 3
+    keys = np.round(pts / 1e-6).astype(np.int64)
+    corner: dict[tuple, list[int]] = {}
+    for t, tri in enumerate(tris):
+        for v in tri:
+            corner.setdefault(tuple(keys[v]), []).append(t)
+    parent = list(range(len(tris)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for ts in corner.values():
+        for x in ts:
+            for y in ts:
+                if x < y and area[x] > 0 and area[y] > 0 and n[x] @ n[y] > PLANE_COS \
+                        and abs(n[x] @ (cen[y] - cen[x])) < PLANE_TOL_M:
+                    parent[find(x)] = find(y)
+    groups: dict[int, list[int]] = {}
+    for t in range(len(tris)):
+        if area[t] > 0:
+            groups.setdefault(find(t), []).append(t)
+    out = []
+    for ts in groups.values():
+        w = area[ts]
+        nn = (n[ts] * w[:, None]).sum(axis=0)
+        out.append({"tris": ts, "normal": nn / (np.linalg.norm(nn) or 1.0), "point": (cen[ts] * w[:, None]).sum(axis=0) / w.sum(),
+                    "area": float(w.sum())})
+    return sorted(out, key=lambda x: -x["area"])
+
+
+def mesh_world(scene: IfcScene, element, so: Solid) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A mesh solid's vertices in its own frame (file units) and in the world (metres), and its triangles."""
+    s = scene.unit_scales[scene.index_of(element.GlobalId)]
+    local, tris = mesh_data(so.item)
+    world = (local @ so.world[:3, :3].T + so.world[:3, 3]) * s
+    return local, world, tris
+
+
+def patch_at(world: np.ndarray, tris: np.ndarray, point, normal) -> dict:
+    """The flat face of a mesh under a pick: the patch holding the triangle nearest the point, square to the normal
+    (either winding). Refused on a curved surface (its patch under 1% of the mesh's area) or when nothing is there."""
+    P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    patches = mesh_patches(world, tris)
+    total = sum(x["area"] for x in patches) or 1.0
+    best = None
+    for x in patches:
+        if abs(x["normal"] @ N) < 0.99:
+            continue
+        off = abs((P - x["point"]) @ x["normal"])
+        if off > NEAR_PICK_M:
+            continue
+        a, b, c = world[tris[x["tris"], 0]], world[tris[x["tris"], 1]], world[tris[x["tris"], 2]]
+        d = float(np.min(np.linalg.norm((a + b + c) / 3 - P, axis=1)))
+        if best is None or d < best[0]:
+            best = (d, x)
+    if best is None:
+        raise Unsupported("there is no flat face of it under the pick")
+    if best[1]["area"] < 0.01 * total:
+        raise Unsupported("that is a curved surface: ORCA pushes and pulls flat faces")
+    return best[1]
+
+
+NEAR_PICK_M = 0.005
+
+
+def push_mesh_face(scene: IfcScene, global_id: str, point, normal, by_m: float, item: int | None = None,
+                   least_m: float = MIN_PIECE_M, unique: bool = False) -> float:
+    """Push (+) or pull (−) a mesh's flat face along its outward `normal` (the pick's) by `by_m` metres: the face's
+    corners move, the faces round it stretch. Ports on that face go with it. Refused when it would fold through the
+    mesh's other side. Returns how thick it is behind the face after, metres."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    if unique:
+        make_unique(model, element)
+    so = solid(scene, element, item)
+    if so.kind != "mesh":
+        raise Unsupported("that solid is not a mesh")
+    if shared(model, element, _body_rep(element), so.top):
+        raise Unsupported("its body is shared with other elements")
+    by = float(by_m)
+    if not np.isfinite(by):
+        raise Unsupported("a push must be a finite length")
+    local, world, tris = mesh_world(scene, element, so)
+    P, n = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    patch = patch_at(world, tris, P, n)
+    plane = patch["point"]
+    keys = np.round(local * s / 1e-6).astype(np.int64)    # corners by position, to the micrometre
+    on = {tuple(keys[v]) for t in patch["tris"] for v in tris[t]}
+    moving = np.array([tuple(k) in on for k in keys])
+    depth = (plane - world) @ n
+    behind = depth[~moving & (depth > 1e-4)]
+    thick = float(depth.max())
+    near = float(behind.min()) if len(behind) else thick
+    if by < 0 and -by > near - least_m + 1e-9:
+        raise Unsupported(f"it would fold through its other side: at most {max(near - least_m, 0) * 1000:.0f} mm in")
+    step = (so.world[:3, :3].T @ (n * by)) / s           # the move in the mesh's own frame, file units
+    if so.item.is_a("IfcFacetedBrep"):
+        made: dict[tuple, object] = {}
+        for f in so.item.Outer.CfsFaces:
+            for b in f.Bounds:
+                loop = b.Bound
+                new = []
+                for p in loop.Polygon:
+                    k = tuple(np.round(np.asarray(p.Coordinates, float) * s / 1e-6).astype(np.int64))
+                    if k in on:
+                        if k not in made:
+                            made[k] = model.createIfcCartesianPoint(tuple(float(c) for c in np.asarray(p.Coordinates) + step))
+                        new.append(made[k])
+                    else:
+                        new.append(p)
+                loop.Polygon = new
+    else:
+        moved = local.copy()
+        moved[moving] += step
+        so.item.Coordinates = model.createIfcCartesianPointList3D([tuple(float(c) for c in r) for r in moved])
+        if getattr(so.item, "Normals", None) is not None:
+            so.item.Normals = None
+    for port in ifcopenshell.util.system.get_ports(element):   # ports on that face go with it
+        if port.ObjectPlacement is None:
+            continue
+        m = scene.placement(port.GlobalId)
+        if abs((m[:3, 3] - plane) @ n) <= 0.002:
+            m[:3, 3] += n * by
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+    scene.refresh_bounds([global_id])
+    return thick + by
+
+
+def _body_rep(element):
+    rep = element.Representation
+    return next(r for r in rep.Representations if r.RepresentationIdentifier == "Body")
+
+
+def clip_chain(top) -> list:
+    """The clip results over a solid, outermost first (the last clip made is first)."""
+    out = []
+    while top is not None and top.is_a("IfcBooleanClippingResult"):
+        out.append(top)
+        top = top.FirstOperand
+    return out
+
+
+def clip_planes(scene: IfcScene, element, so: Solid) -> list[tuple[object, np.ndarray, np.ndarray]]:
+    """Each clip over a solid: the clip result, a point on its plane (world metres) and its outward normal (out of
+    what is left, into what it took away)."""
+    i = scene.index_of(element.GlobalId)
+    s = scene.unit_scales[i]
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    out = []
+    for res in clip_chain(so.top):
+        half = res.SecondOperand
+        if not half.is_a("IfcHalfSpaceSolid") or not half.BaseSurface.is_a("IfcPlane"):
+            continue
+        m = ifcopenshell.util.placement.get_axis2placement(half.BaseSurface.Position)
+        n = m[:3, 2] * (-1.0 if half.AgreementFlag else 1.0)   # the flag: the normal points away from the half-space
+        n = place[:3, :3] @ n
+        out.append((res, (place @ np.append(m[:3, 3], 1.0))[:3] * s, n / np.linalg.norm(n)))
+    return out
+
+
+def move_clip(scene: IfcScene, global_id: str, j: int, by_m: float, item: int | None = None,
+              least_m: float = MIN_PIECE_M) -> float:
+    """Move a clip's plane out (+, it takes less away) or in (−, more) along its outward normal by `by_m` metres: a
+    clipped end pushed or pulled. Refused when it would leave less than `least_m`. Returns the move, metres."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    so = solid(scene, element, item)
+    planes = clip_planes(scene, element, so)
+    if not 0 <= j < len(planes):
+        raise Unsupported("it has no such clip")
+    res, P, n = planes[j]
+    by = float(by_m)
+    v = item_verts(scene, element, so.top)
+    left = float(((P - v) @ n).max())
+    if by < 0 and left + by < least_m - 1e-9:
+        raise Unsupported(f"less than {least_m * 1000:.0f} mm of it would be left")
+    half = res.SecondOperand
+    pos = half.BaseSurface.Position
+    m = ifcopenshell.util.placement.get_axis2placement(pos)
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    step = place[:3, :3].T @ (n * by) / s
+    loc = m[:3, 3] + step
+    half.BaseSurface = model.createIfcPlane(model.createIfcAxis2Placement3D(
+        _point(model, loc), pos.Axis, pos.RefDirection))
+    scene.refresh_bounds([global_id])
+    return by
+
+
+def _sole_body(model, element, unique: bool = False, item: int | None = None):
+    """The element's one extrusion (or the `item`th solid of its body), refusing a body other elements share (editing
+    it would change them too) unless `unique` gives this element its own copy first (hand edits)."""
+    if unique:
+        make_unique(model, element)
+    body, it = _body(element, item=item)
+    if shared(model, element, body, it):
+        raise Unsupported("its body is shared with other elements")
+    return body, it
+
+
+def stretch_radius(scene: IfcScene, global_id: str, by_m: float, unique: bool = False, item: int | None = None) -> float:
+    """A round element's radius `by_m` larger (or smaller): a new circle profile (profiles can be shared), the axis
+    and ports where they were. Returns the new diameter in metres."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    _, item = _sole_body(model, element, unique, item)
+    prof = item.SweptArea
+    if not prof.is_a("IfcCircleProfileDef"):
+        raise Unsupported("only a round section changes its radius")
+    r = prof.Radius + float(by_m) / s
+    if not np.isfinite(r) or r * s < 0.005:
+        raise Unsupported(f"it would be {max(r * s * 2000, 0):.0f} mm across (at least 10 mm stays)")
+    if prof.is_a("IfcCircleHollowProfileDef"):
+        if r <= prof.WallThickness:
+            raise Unsupported("its wall would be thicker than its radius")
+        item.SweptArea = model.createIfcCircleHollowProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+                                                               float(r), prof.WallThickness)
+    else:
+        item.SweptArea = model.createIfcCircleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position, float(r))
+    scene.refresh_bounds([global_id])
+    return float(2 * r * s)
+
+
+def _line_cross(p, d, q, e):
+    """Where the lines p + t·d and q + u·e meet, or None when they are parallel."""
+    den = d[0] * e[1] - d[1] * e[0]
+    if abs(den) < 1e-12:
+        return None
+    t = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / den
+    return p + d * t
+
+
+def _simple(pts: list[np.ndarray]) -> bool:
+    """No two edges of the closed outline cross (neighbours share their corner)."""
+    n = len(pts)
+    segs = [(pts[k], pts[(k + 1) % n]) for k in range(n)]
+
+    def cross(a, b, c, d):
+        def o(p, q, r):
+            return np.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]))
+        return o(a, b, c) != o(a, b, d) and o(c, d, a) != o(c, d, b)
+
+    for x in range(n):
+        for y in range(x + 1, n):
+            if y == x + 1 or (x == 0 and y == n - 1):
+                continue
+            if cross(*segs[x], *segs[y]):
+                return False
+    return True
+
+
+def inside(pts: list[np.ndarray], q) -> bool:
+    """Whether 2D point `q` lies in the closed outline (on its edge counts as inside)."""
+    x, y = q
+    hit = False
+    n = len(pts)
+    for k in range(n):
+        (x0, y0), (x1, y1) = pts[k], pts[(k + 1) % n]
+        if abs((x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)) < 1e-9 and min(x0, x1) - 1e-9 <= x <= max(x0, x1) + 1e-9 \
+                and min(y0, y1) - 1e-9 <= y <= max(y0, y1) + 1e-9:
+            return True
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+            hit = not hit
+    return hit
+
+
+def _write_outline(model, prof, pts: list[np.ndarray], closed_repeat: bool):
+    """A new outline profile with these points, keeping its kind, name and holes (profiles and curves can be shared)."""
+    curve = prof.OuterCurve
+    if curve.is_a("IfcIndexedPolyCurve"):
+        coords = [tuple(float(c) for c in p) for p in pts]
+        new = model.createIfcIndexedPolyCurve(model.createIfcCartesianPointList2D(coords + [coords[0]]), None, False)
+    else:
+        cps = [_point(model, p) for p in pts]
+        new = model.createIfcPolyline(cps + [cps[0]] if closed_repeat else cps)
+    if prof.is_a("IfcArbitraryProfileDefWithVoids"):
+        return model.createIfcArbitraryProfileDefWithVoids(prof.ProfileType, prof.ProfileName, new, prof.InnerCurves)
+    return model.createIfcArbitraryClosedProfileDef(prof.ProfileType, prof.ProfileName, new)
+
+
+def offset_edge(scene: IfcScene, global_id: str, k: int, by_m: float, keep_inside: list[np.ndarray] = (),
+                unique: bool = False, item: int | None = None) -> float:
+    """Move straight edge `k` of the element's outline profile out (+) or in (−) by `by_m`, square to itself; the
+    edges either side run on to meet it (a wall's end moves, its top and bottom get longer or shorter). Refused when
+    a neighbour is parallel to it, would turn back or fall under 10 mm, the outline would cross itself, or a hole in
+    it or any of `keep_inside` (2D points in the profile's plane, file units: an opening's corners) would be left
+    outside. Returns the edge's distance moved, metres."""
+    from .faces import ccw, edge_normal, outline
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    _, item = _sole_body(model, element, unique, item)
+    prof = item.SweptArea
+    pts = outline(prof)
+    if pts is None:
+        raise Unsupported("its outline is not straight edges")
+    n = len(pts)
+    if not 0 <= k < n:
+        raise Unsupported(f"its outline has no edge {k}")
+    by = float(by_m) / s
+    if not np.isfinite(by) or abs(by_m) < 1e-4:
+        raise Unsupported("an edge moves at least 0.1 mm")
+    a, b = pts[k], pts[(k + 1) % n]
+    d = b - a
+    nrm = edge_normal(a, b, ccw(pts))
+    prev_a, next_b = pts[k - 1], pts[(k + 2) % n]
+    na = _line_cross(a + nrm * by, d, prev_a, a - prev_a)
+    nb = _line_cross(a + nrm * by, d, b, next_b - b)
+    if na is None or nb is None:
+        raise Unsupported("an edge beside it runs the same way, so it cannot follow")
+    for old_far, old, new in ((prev_a, a, na), (next_b, b, nb)):
+        before, after = old - old_far, new - old_far
+        if np.linalg.norm(after) * s < MIN_EDGE_M or before @ after <= 0:
+            raise Unsupported(f"an edge beside it would be shorter than {MIN_EDGE_M * 1000:.0f} mm or turn back")
+    new_pts = list(pts)
+    new_pts[k], new_pts[(k + 1) % n] = na, nb
+    if not _simple(new_pts):
+        raise Unsupported("its outline would cross itself")
+    from .faces import curve_points
+    holes = []
+    for c in getattr(prof, "InnerCurves", None) or ():   # a polyline or an indexed poly curve
+        holes += curve_points(c) or []
+    for q in [*holes, *keep_inside]:
+        if not inside(new_pts, q):
+            raise Unsupported("it would cut through an opening in it" if any(q is x for x in keep_inside)
+                              else "it would cut through a hole in its outline")
+    curve = prof.OuterCurve
+    repeat = curve.is_a("IfcPolyline") and len(curve.Points) > n
+    item.SweptArea = _write_outline(model, prof, new_pts, repeat)
+    scene.refresh_bounds([global_id])
+    return float(by * s)
+
+
+def face_axes(n) -> tuple[np.ndarray, np.ndarray]:
+    """Two axes in a face's plane: across (u, level when the face is not) and up it (v)."""
+    n = np.asarray(n, float) / np.linalg.norm(n)
+    z = np.array([0.0, 0.0, 1.0])
+    if abs(n @ z) < 0.9:
+        v = z - (z @ n) * n
+        v /= np.linalg.norm(v)
+        return np.cross(v, n), v
+    x = np.array([1.0, 0.0, 0.0])
+    u = x - (x @ n) * n
+    u /= np.linalg.norm(u)
+    return u, np.cross(n, u)
+
+
+def through_depth(scene: IfcScene, host: str, at, n, offsets: list[np.ndarray]) -> float | None:
+    """How far an opening on a face at `at` (outward normal `n`, world metres) must go to pass through the host:
+    from just inside each point of its outline to where it comes out, the deepest of them. None when no ray comes out
+    (the host is not closed there, or deeper than MAX_THROUGH_M)."""
+    tris = _host_tris(scene, host)
+    n = np.asarray(n, float) / np.linalg.norm(n)
+    origins = np.array([np.asarray(at, float) + o - n * 0.001 for o in offsets])
+    t = _first_hit(origins, -n, tris)
+    t = t[np.isfinite(t)]
+    if not len(t) or t.max() + 0.001 > MAX_THROUGH_M:
+        return None
+    return float(t.max() + 0.001)
+
+
+def misses(scene: IfcScene, host: str, at, n, offsets: list[np.ndarray]) -> bool:
+    """Whether any of these points on the face (from outside, along −n) misses the host: the outline reaches its edge."""
+    tris = _host_tris(scene, host)
+    n = np.asarray(n, float) / np.linalg.norm(n)
+    origins = np.array([np.asarray(at, float) + o + n * 0.05 for o in offsets])
+    t = _first_hit(origins, -n, tris)
+    return bool(np.any(~np.isfinite(t) | (t > 0.05 + 0.01)))
+
+
+def cut_void(scene: IfcScene, host: str, shape: str, width_m: float, height_m: float, start, axis, xdir,
+             depth_m: float, recess: bool = False, name: str | None = None) -> str:
+    """An opening (or a recess) voiding `host`: a box or cylinder from `start` along `axis` for `depth_m`, its width
+    along `xdir` (world metres). Returns its GlobalId."""
+    i = scene.index_of(host)
+    m, s = scene.models[i], scene.unit_scales[i]
+    element = scene.entity(host)
+    opening = ifcopenshell.api.run("root.create_entity", m, ifc_class="IfcOpeningElement", name=name or "Opening")
+    if m.schema != "IFC2X3":
+        opening.PredefinedType = "RECESS" if recess else "OPENING"
+    elif recess:
+        opening.ObjectType = "Recess"
+    pen = Penetration(host, host, shape, float(width_m), float(height_m), float(depth_m), list(map(float, start)),
+                      list(map(float, axis)), list(map(float, xdir)))
+    rep, _ = _void_rep(m, s, pen, _body_context(element))
+    ifcopenshell.api.run("geometry.assign_representation", m, product=opening, representation=rep)
+    _void_place(m, opening, s, pen)
+    ifcopenshell.api.run("feature.add_feature", m, feature=opening, element=element)
+    scene.refresh_bounds([host])
+    return opening.GlobalId
+
+
+def _vertex_normals(verts: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    n = np.zeros_like(verts)
+    fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
+    for k in range(3):
+        np.add.at(n, faces[:, k], fn)
+    length = np.linalg.norm(n, axis=1, keepdims=True)
+    return n / np.where(length > 0, length, 1.0)
+
+
+def _grown_solid(m, sx: float, item, world_y: np.ndarray, sy: float, gap: float):
+    """One extrusion of the cutter, in the cut element's file (units `sx`), grown by `gap` metres all round and
+    placed in world axes; None when its profile is not one ORCA grows exactly."""
+    if np.linalg.norm(np.asarray(item.ExtrudedDirection.DirectionRatios) - (0, 0, 1)) > 1e-9:
+        return None
+    k, g = sy / sx, gap / sx
+    prof = item.SweptArea
+    pos2 = getattr(prof, "Position", None)
+    loc = np.asarray(pos2.Location.Coordinates[:2], float) * k if pos2 is not None else np.zeros(2)
+    ref = (pos2.RefDirection.DirectionRatios[:2] if pos2 is not None and pos2.RefDirection is not None else (1.0, 0.0))
+    at2 = m.createIfcAxis2Placement2D(_point(m, loc), m.createIfcDirection(tuple(float(x) for x in ref)))
+    if prof.is_a("IfcCircleProfileDef"):
+        new = m.createIfcCircleProfileDef("AREA", None, at2, float(prof.Radius * k + g))
+    elif prof.is_a() == "IfcRectangleProfileDef":
+        new = m.createIfcRectangleProfileDef("AREA", None, at2, float(prof.XDim * k + 2 * g), float(prof.YDim * k + 2 * g))
+    elif prof.is_a("IfcArbitraryClosedProfileDef"):
+        from .faces import outline
+        pts = outline(prof)
+        if pts is None:
+            return None
+        grown = _grown([list(p * k) for p in pts], g)
+        cps = [_point(m, p) for p in grown]
+        new = m.createIfcArbitraryClosedProfileDef("AREA", None, m.createIfcPolyline(cps + [cps[0]]))
+    else:
+        try:
+            w, h = _profile_size(prof)   # an I, U, C or L section: its bounding rectangle (the gap is at least that)
+        except Unsupported:
+            return None
+        new = m.createIfcRectangleProfileDef("AREA", None, at2, float(w * k + 2 * g), float(h * k + 2 * g))
+    world = world_y @ ifcopenshell.util.placement.get_axis2placement(item.Position)
+    rot, origin = world[:3, :3], world[:3, 3] * k - world[:3, 2] / np.linalg.norm(world[:3, 2]) * g
+    pos = m.createIfcAxis2Placement3D(_point(m, origin), _dir(m, rot[:, 2]), _dir(m, rot[:, 0]))
+    return m.createIfcExtrudedAreaSolid(new, pos, m.createIfcDirection((0.0, 0.0, 1.0)), float(item.Depth * k + 2 * g))
+
+
+def cut_by_shape(scene: IfcScene, element: str, cutter: str, gap_m: float) -> tuple[str, bool]:
+    """Cut `element` where `cutter` is, plus `gap_m` all round: an opening shaped as the cutter's body grown by the gap
+    (exact for extrusions; a mesh pushed out along its normals otherwise). Returns the opening and whether it is exact."""
+    i, j = scene.index_of(element), scene.index_of(cutter)
+    m, sx, sy = scene.models[i], scene.unit_scales[i], scene.unit_scales[j]
+    host, tool = scene.entity(element), scene.entity(cutter)
+    bodies = [r for r in (tool.Representation.Representations if tool.Representation else []) if r.RepresentationIdentifier == "Body"]
+    items = list(bodies[0].Items) if bodies else []
+    world_y = ifcopenshell.util.placement.get_local_placement(tool.ObjectPlacement)
+    solids = [] if not items or not all(it.is_a("IfcExtrudedAreaSolid") for it in items) else \
+        [_grown_solid(m, sx, it, world_y, sy, gap_m) for it in items]
+    exact = bool(solids) and all(x is not None for x in solids)
+    if exact:
+        rep = m.createIfcShapeRepresentation(_body_context(host), "Body", "SweptSolid", solids)
+    else:
+        settings = ifcopenshell.geom.settings()
+        settings.set("use-world-coords", True)
+        geo = ifcopenshell.geom.create_shape(settings, tool).geometry
+        verts = np.asarray(geo.verts, float).reshape(-1, 3)
+        faces = np.asarray(geo.faces, int).reshape(-1, 3)
+        if not len(faces):
+            raise Unsupported("the cutter has no shape to cut with")
+        # Weld coincident vertices first: a box's corners then push out along the corner's mean normal.
+        keys, inverse = np.unique(np.round(verts, 6), axis=0, return_inverse=True)
+        faces = inverse.reshape(-1)[faces]
+        grown = (keys + _vertex_normals(keys, faces) * gap_m) / sx
+        mesh, kind = mesh_item(m, grown, faces)
+        rep = m.createIfcShapeRepresentation(_body_context(host), "Body", kind, [mesh])
+    opening = ifcopenshell.api.run("root.create_entity", m, ifc_class="IfcOpeningElement",
+                                   name=f"Cut for {tool.Name or tool.is_a()[3:]}")
+    if m.schema != "IFC2X3":
+        opening.PredefinedType = "OPENING"
+    ifcopenshell.api.run("geometry.assign_representation", m, product=opening, representation=rep)
+    ifcopenshell.api.run("geometry.edit_object_placement", m, product=opening, matrix=np.eye(4), is_si=False)
+    ifcopenshell.api.run("feature.add_feature", m, feature=opening, element=host)
+    scene.refresh_bounds([element])
+    return opening.GlobalId, exact
+
+
+def _assign_solid(model, source, part, solid) -> None:
+    """Give `part` a Body of its own holding `solid`, in `source`'s context and styles."""
+    body, item = _body(source, clipped=True)
+    styles = [x for x in model.get_inverse(item) if x.is_a("IfcStyledItem")]
+    rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "SweptSolid", [solid])
+    part.Representation = model.createIfcProductDefinitionShape(None, None, [rep])
+    for st in styles:
+        model.createIfcStyledItem(solid, st.Styles, st.Name)
+
+
+def _copy_part(model, element, solid, n: int):
+    """A copy of `element` (class, type, properties, container, systems, placement) with `solid` as its body; the
+    openings `copy_class` duplicated are dropped (the split sends each opening to the piece that holds it)."""
+    part = ifcopenshell.api.run("root.copy_class", model, product=element)
+    for rel in list(getattr(part, "HasOpenings", None) or []):
+        ifcopenshell.api.run("root.remove_product", model, product=rel.RelatedOpeningElement)
+    if element.Name:
+        part.Name = f"{element.Name} (part {n})"
+    if getattr(element, "Tag", None):
+        part.Tag = f"{element.Tag}-P{n}"
+    _assign_solid(model, element, part, solid)
+    return part
+
+
+def _clip_polygon(pts: list[np.ndarray], axis: int, c: float, keep_low: bool) -> list[np.ndarray]:
+    """The part of a closed outline on one side of the line where coordinate `axis` is `c` (Sutherland–Hodgman)."""
+    inside = (lambda p: p[axis] <= c + 1e-12) if keep_low else (lambda p: p[axis] >= c - 1e-12)
+    out = []
+    for k in range(len(pts)):
+        a, b = pts[k - 1], pts[k]
+        if inside(b):
+            if not inside(a):
+                out.append(a + (b - a) * ((c - a[axis]) / (b[axis] - a[axis])))
+            out.append(b)
+        elif inside(a):
+            out.append(a + (b - a) * ((c - a[axis]) / (b[axis] - a[axis])))
+    dedup = []
+    for p in out:
+        if not dedup or np.linalg.norm(p - dedup[-1]) > 1e-9:
+            dedup.append(p)
+    if len(dedup) > 1 and np.linalg.norm(dedup[0] - dedup[-1]) < 1e-9:
+        dedup.pop()
+    return dedup
+
+
+def _opening_centres(scene: IfcScene, element) -> list[tuple]:
+    out = []
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    for rel in getattr(element, "HasOpenings", None) or []:
+        o = rel.RelatedOpeningElement
+        try:
+            v = np.asarray(ifcopenshell.geom.create_shape(settings, o).geometry.verts, float).reshape(-1, 3)
+        except RuntimeError:
+            continue
+        out.append((rel, v.min(axis=0), v.max(axis=0)))
+    return out
+
+
+def split_axis(scene: IfcScene, global_id: str):
+    """How an element splits: ("run", start, direction, length) along its long axis (an extrusion or a long profile),
+    or ("outline", axis 0/1 in the outline's plane, world matrix) for an outline profile (a wall drawn as its
+    elevation, a slab): cut square to its longer side."""
+    from .faces import outline
+    element = scene.entity(global_id)
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    s = scene.unit_scales[i]
+    pts = outline(item.SweptArea)
+    if pts is not None:
+        ext = np.ptp(np.asarray(pts), axis=0)
+        world = place @ ifcopenshell.util.placement.get_axis2placement(item.Position)
+        return ("outline", int(np.argmax(ext)), world)
+    axis, start, direction, length = member_axis(scene, element)
+    return ("run", start, direction, length)
+
+
+def split(scene: IfcScene, global_id: str, at, least_m: float = MIN_PIECE_M, unique: bool = False) -> list[str]:
+    """Split the element in two where the plane square to its long axis passes through `at` (world metres). The
+    element keeps the first piece (and its GlobalId); the second is a copy. A run's ports are chained across the cut
+    (`_build_chain`); its openings go to the piece that holds them; one the cut would pass through is refused."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    at = np.asarray(at, float)
+    if unique:
+        make_unique(model, element)
+    how = split_axis(scene, global_id)
+    holes = _opening_centres(scene, element)
+    if how[0] == "outline":
+        from .faces import outline
+        _, ax, world = how
+        _, item = _sole_body(model, element)
+        pts = outline(item.SweptArea)
+        inv = np.linalg.inv(world)
+        q = (inv @ np.append(at / s, 1.0))[:2]
+        c = float(q[ax])
+        lo, hi = min(p[ax] for p in pts), max(p[ax] for p in pts)
+        if c - lo < least_m / s or hi - c < least_m / s:
+            raise Unsupported(f"a piece would be under {least_m * 1000:.0f} mm")
+        sides = []
+        for rel, a, b in holes:
+            corners = [(inv @ np.append(np.array([x, y, z]) / s, 1.0))[ax] for x in (a[0], b[0]) for y in (a[1], b[1]) for z in (a[2], b[2])]
+            if min(corners) < c < max(corners):
+                raise Unsupported("the cut would pass through an opening: split it either side")
+            sides.append((rel, min(corners) >= c))
+        if getattr(item.SweptArea, "InnerCurves", None):
+            raise Unsupported("its outline has holes: split it where there are none")
+        left, right = _clip_polygon(pts, ax, c, True), _clip_polygon(pts, ax, c, False)
+        if len(left) < 3 or len(right) < 3:
+            raise Unsupported("the cut misses it")
+        repeat = item.SweptArea.OuterCurve.is_a("IfcPolyline")
+        right_prof = _write_outline(model, item.SweptArea, right, repeat)
+        solid = model.createIfcExtrudedAreaSolid(right_prof, item.Position, item.ExtrudedDirection, item.Depth)
+        part = _copy_part(model, element, solid, 2)
+        item.SweptArea = _write_outline(model, item.SweptArea, left, repeat)
+    else:
+        _, start, d, length = how
+        a = float((at - start) @ d)
+        if a < least_m or length - a < least_m:
+            raise Unsupported(f"a piece would be under {least_m * 1000:.0f} mm")
+        sides = []
+        for rel, lo_, hi_ in holes:
+            ends = [float((np.array([x, y, z]) - start) @ d) for x in (lo_[0], hi_[0]) for y in (lo_[1], hi_[1]) for z in (lo_[2], hi_[2])]
+            if min(ends) < a < max(ends):
+                raise Unsupported("the cut would pass through an opening: split it either side")
+            sides.append((rel, min(ends) >= a))
+        axis = member_axis(scene, element)[0]
+        if axis == "depth" and _ports(element):
+            _, place, item, origin, dd, px, _ = _frames(scene, element)
+            gids = _build_chain(scene, element, place, item, dd, px, px,
+                                [("straight", origin, dd, a / s), ("straight", origin + dd * (a / s), dd, (length - a) / s)])
+            part = scene.entity(gids[1])
+            for rel in list(getattr(part, "HasOpenings", None) or []):
+                ifcopenshell.api.run("root.remove_product", model, product=rel.RelatedOpeningElement)
+            if element.Name:
+                part.Name = f"{element.Name} (part 2)"
+        else:
+            _, item = _sole_body(model, element)
+            twin = model.createIfcExtrudedAreaSolid(item.SweptArea, item.Position, item.ExtrudedDirection, item.Depth)
+            part = _copy_part(model, element, twin, 2)
+            scene.refresh_bounds([part.GlobalId])
+            apply_trim(scene, global_id, "end", length - a, least_m)
+            apply_trim(scene, part.GlobalId, "start", a, least_m)
+    for rel, beyond in sides:   # each opening to the piece that holds it
+        if beyond:
+            rel.RelatingBuildingElement = part
+    scene.refresh_bounds([global_id, part.GlobalId])
+    return [global_id, part.GlobalId]
+
+
+def remove_product_with(scene: IfcScene, global_id: str) -> list[str]:
+    """Remove an element and what cannot stand without it: its openings and what fills them, the parts it aggregates,
+    its ports. Returns every physical element removed (the element first). Peers its ports joined are left open."""
+    i = scene.index_of(global_id)
+    model = scene.models[i]
+    element = scene.entity(global_id)
+    gone = [global_id]
+    for rel in list(getattr(element, "HasOpenings", None) or []):
+        o = rel.RelatedOpeningElement
+        for f in list(getattr(o, "HasFillings", None) or []):
+            gone.append(f.RelatedBuildingElement.GlobalId)
+            ifcopenshell.api.run("root.remove_product", model, product=f.RelatedBuildingElement)
+        ifcopenshell.api.run("root.remove_product", model, product=o)
+    for rel in list(getattr(element, "IsDecomposedBy", None) or []):
+        for part in list(rel.RelatedObjects):
+            if part.is_a("IfcElement"):
+                gone.append(part.GlobalId)
+                ifcopenshell.api.run("root.remove_product", model, product=part)
+    for port in list(ifcopenshell.util.system.get_ports(element)):
+        ifcopenshell.api.run("root.remove_product", model, product=port)
+    ifcopenshell.api.run("root.remove_product", model, product=element)
+    scene.forget(gone)
+    return gone
+
+
+def long_axis(scene: IfcScene, global_id: str) -> tuple[np.ndarray, np.ndarray, float]:
+    """The element's long axis, world metres: a start, a unit direction and a length. Its extrusion's (`split_axis`)
+    when it has one; else the axis of its placement it is longest along (a fitting, a door, a mesh)."""
+    try:
+        how = split_axis(scene, global_id)
+    except Unsupported:
+        how = None
+    if how is not None and how[0] == "run":
+        return np.asarray(how[1], float), np.asarray(how[2], float), float(how[3])
+    v = _mesh_verts(scene.entity(global_id))
+    c = v.mean(axis=0)
+    if how is not None:
+        d = how[2][:3, how[1]] / np.linalg.norm(how[2][:3, how[1]])
+    else:
+        element = scene.entity(global_id)
+        place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+                 if element.ObjectPlacement is not None else np.eye(4))
+        axes = [place[:3, k] / np.linalg.norm(place[:3, k]) for k in range(3)]
+        d = max(axes, key=lambda a: float(np.ptp(v @ a)))
+    proj = (v - c) @ d
+    return c + d * proj.min(), d, float(proj.max() - proj.min())
+
+
+def _surface(item) -> bool:
+    """Whether a body item is a surface rather than a solid (through clips): nothing can be cut out of it."""
+    while item.is_a("IfcBooleanResult"):
+        item = item.FirstOperand
+    return (item.is_a("IfcFaceBasedSurfaceModel") or item.is_a("IfcShellBasedSurfaceModel")
+            or (item.is_a("IfcTessellatedFaceSet") and getattr(item, "Closed", True) is False))
+
+
+def _clip_items(scene: IfcScene, element, point, normal) -> None:
+    """Clip every solid of the element's Body with the half-space on the side `normal` points to (world metres):
+    meshes and extrusions alike. A solid wholly kept is left as it is; one wholly taken away is dropped."""
+    i = scene.index_of(element.GlobalId)
+    model, s = scene.models[i], scene.unit_scales[i]
+    body = _body_rep(element)
+    if any(it.is_a("IfcMappedItem") for it in body.Items):
+        raise Unsupported("its shape comes from its type: editing it would change every element of that type")
+    # Only a solid can be clipped: a surface (Revit's toilets and lamps: IfcFaceBasedSurfaceModel) has no inside, and
+    # clipping one is not valid IFC (OpenCASCADE dies on it)
+    if any(_surface(it) for it in body.Items):
+        raise Unsupported("its shape is a surface, not a solid: it cannot be split or clipped")
+    P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    inv = np.linalg.inv(place)
+    loc = (inv @ np.append(P / s, 1.0))[:3] * s          # the representation's frame, SI metres
+    nl = inv[:3, :3] @ N
+    nl = nl / np.linalg.norm(nl)
+    new = []
+    for top in body.Items:
+        side = (item_verts(scene, element, top) - P) @ N
+        if side.max() <= 1e-6:
+            new.append(top)
+        elif side.min() < -1e-6:
+            new.append(ifcopenshell.api.run("geometry.clip_solid", model, item=top, location=loc.tolist(), normal=nl.tolist()))
+    if not new:
+        raise Unsupported("the plane takes all of it away")
+    body.Items = tuple(new)
+    body.RepresentationType = "Clipping"
+
+
+def split_by_clip(scene: IfcScene, global_id: str, at, least_m: float = MIN_PIECE_M, unique: bool = False,
+                  axis: tuple | None = None) -> list[str]:
+    """Split any body in two square to its long axis (`long_axis`) at `at`, by half-space clips: the element keeps the
+    first piece, clipped beyond the plane; a copy (its class, properties, openings, its own body) is clipped before it.
+    The copy's ports are dropped: its joints stay with the first piece. `axis` (a start and a direction) cuts square
+    to another axis than its own (a section taken out of a fitting: both cuts square to the whole's axis). Returns both
+    GlobalIds."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    if unique:
+        make_unique(model, element)
+    if axis is None:
+        start, d, length = long_axis(scene, global_id)
+    else:
+        d = np.asarray(axis[1], float) / np.linalg.norm(axis[1])
+        proj = _mesh_verts(element) @ d
+        start, length = np.asarray(axis[0], float) + d * (proj.min() - np.asarray(axis[0], float) @ d), float(np.ptp(proj))
+    a = float((np.asarray(at, float) - start) @ d)
+    if a < least_m or length - a < least_m:
+        raise Unsupported(f"a piece would be under {least_m * 1000:.0f} mm")
+    P = start + d * a
+    part = ifcopenshell.api.run("root.copy_class", model, product=element)
+    import ifcopenshell.util.element as ue
+    part.Representation = ue.copy_deep(model, element.Representation, exclude=["IfcGeometricRepresentationContext"])
+    for old_r, new_r in zip(element.Representation.Representations, part.Representation.Representations):
+        for old_i, new_i in zip(old_r.Items, new_r.Items):
+            for st in [x for x in model.get_inverse(old_i) if x.is_a("IfcStyledItem")]:
+                model.createIfcStyledItem(new_i, st.Styles, st.Name)
+    for port in list(ifcopenshell.util.system.get_ports(part)):
+        ifcopenshell.api.run("root.remove_product", model, product=port)
+    if element.Name:
+        part.Name = f"{element.Name} (part 2)"
+    if getattr(element, "Tag", None):
+        part.Tag = f"{element.Tag}-P2"
+    _clip_items(scene, element, P, d)
+    _clip_items(scene, part, P, -d)
+    scene.refresh_bounds([global_id, part.GlobalId])
+    return [global_id, part.GlobalId]
+
+
+def clip_to_plane(scene: IfcScene, global_id: str, point, normal, least_m: float = MIN_PIECE_M, unique: bool = False) -> None:
+    """Cut away the element's material on the side of the plane (world metres) its `normal` points to: an
+    IfcBooleanClippingResult with a half-space, as authoring tools clip a beam's end to a sloping face. Refused when the
+    plane misses it, or leaves less than 50 mm of its run."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    if unique:
+        make_unique(model, element)
+    P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    v = _mesh_verts(element)
+    side = (v - P) @ N
+    if side.max() <= 1e-4 or side.min() >= -1e-4:
+        raise Unsupported("the plane does not cross it")
+    if (-side.min()) < least_m:
+        raise Unsupported(f"less than {least_m * 1000:.0f} mm of it would be left")
+    if shared(model, element, _body_rep(element), _body_rep(element).Items[0]):
+        raise Unsupported("its body is shared with other elements")
+    _clip_items(scene, element, P, N)   # every solid of its body, meshes too
+    scene.refresh_bounds([global_id])
+
+
+def _is_clipped(element, item: int | None = None) -> bool:
+    """Whether the Body's one solid (or its `item`th) is under a clip."""
+    rep = element.Representation
+    bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
+    if not bodies:
+        return False
+    items = bodies[0].Items
+    if item is None:
+        return len(items) == 1 and items[0].is_a("IfcBooleanClippingResult")
+    return 0 <= item < len(items) and items[item].is_a("IfcBooleanClippingResult")
+
+
+def _mesh_verts(element) -> np.ndarray:
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    return np.asarray(ifcopenshell.geom.create_shape(settings, element).geometry.verts, float).reshape(-1, 3)

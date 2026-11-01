@@ -36,6 +36,12 @@ INLINE = ("IfcValve", "IfcDamper", "IfcFlowMeter")              # controllers th
 INLINE_TYPES = ("IfcValveType", "IfcDamperType", "IfcFlowMeterType")   # IFC2X3: an IfcFlowController by its type
 
 
+def refit_moves() -> bool:
+    """Whether Muse's moves re-fit a straight segment square to them instead of taking it along (`plan_move(refit=)`):
+    SIGHTLINE_MOVE_REFIT, on unless "off". Hand moves with joined parts always do."""
+    return os.environ.get("SIGHTLINE_MOVE_REFIT", "on").strip().lower() not in ("off", "0", "no", "false")
+
+
 def mode() -> str:
     """How moves treat joints (SIGHTLINE_CONNECTED_MOVES): "carry" the parts beyond a joint along (or stretch the
     segment there), "refuse" a move that would leave one apart, or "off" (moves as before joints were known: a run up
@@ -64,6 +70,13 @@ class Stretch:
 
 
 @dataclass
+class Jog:
+    global_id: str
+    end: str                   # "start" / "end": the cap joined to what moves; that end goes with it (edits.apply_jog)
+    pieces: list[str] = field(default_factory=list)   # once applied: the segment first, then what the re-fit made
+
+
+@dataclass
 class MovePlan:
     moved: list[str]                                   # what is translated: what was asked, then what it carries
     delta_m: list[float]
@@ -74,6 +87,8 @@ class MovePlan:
     refused: str | None = None                         # why the move can't keep its joints, in plain words
     refused_at: list[str] = field(default_factory=list)  # the elements whose joints it would break
     code: str | None = None                            # "stays" | "short" | "branch" | "many" | "joined" (refuse mode)
+    jogs: list[Jog] = field(default_factory=list)      # straight segments re-fitted at their joined end (`refit`)
+    made: list[str] = field(default_factory=list)      # what the re-fits made (bends, risers, the rest), once applied
 
     @property
     def ok(self) -> bool:
@@ -81,15 +96,17 @@ class MovePlan:
 
     @property
     def plain(self) -> bool:
-        """Nothing taken along or stretched: a move as it always was."""
-        return not self.carried and not self.stretched
+        """Nothing taken along, stretched or re-fitted: a move as it always was."""
+        return not self.carried and not self.stretched and not self.jogs
 
     def changed(self) -> list[str]:
-        return self.moved + [st.global_id for st in self.stretched]
+        """What the move changes: what it translates, stretches and re-fits, and (once applied) what the re-fits made."""
+        return self.moved + [st.global_id for st in self.stretched] + [j.global_id for j in self.jogs] + list(self.made)
 
     def key(self) -> str:
         return json.dumps([sorted(self.moved), [round(v, 4) for v in self.delta_m],
-                           sorted([st.global_id, st.face, round(st.by_m, 4)] for st in self.stretched)])
+                           sorted([st.global_id, st.face, round(st.by_m, 4)] for st in self.stretched),
+                           sorted([j.global_id, j.end] for j in self.jogs)])
 
     def edit(self, scene: IfcScene, run: list[str] | None = None) -> dict | None:
         """What an option carries about a move that takes parts along or stretches segments (None: a plain move)."""
@@ -99,7 +116,8 @@ class MovePlan:
                 "carried": list(self.carried), "joints": len(self.kept),
                 "stretched": [{"global_id": st.global_id, "face": st.face, "by_m": round(st.by_m, 4),
                                "size_m": round(st.size_m, 4), "normal": [round(v, 6) for v in st.normal]}
-                              for st in self.stretched]}
+                              for st in self.stretched],
+                "jogs": [{"global_id": j.global_id, "end": j.end} for j in self.jogs]}
 
 
 # ---------------------------------------------------------------------------------------------------- classes
@@ -365,14 +383,19 @@ def _covered(scene: IfcScene, seg: str, normal: np.ndarray, point, by: str) -> b
     return hits >= COVER * 25
 
 
-def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
+def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -> MovePlan:
     """Plan moving `moved` by `delta_m` with its joints. Each element ends up translated, stretched at one face, or
     where it is, and both sides of every joint must move alike. Going out from what moves ("carry"): a fitting or
     in-line valve is taken along; a straight segment the move runs along is made longer or shorter at the joined end
     (a riser a bend sits on, taller); any other straight segment is taken along; equipment, terminals, structure,
     anything kept fixed, a branch off a segment's side, a segment that would get too short, or more than CARRY_MAX
     parts taken along: refused, naming the joint. "refuse" refuses at the first joint that would come apart. Nothing
-    is edited."""
+    is edited.
+
+    `refit` (a hand move with joined parts): a level straight segment the move goes square to, joined at its other end
+    too, is re-fitted instead of taken along: its joined end goes with the move and a pair of bends takes it back to
+    the rest, which stays with its far joint (`edits.apply_jog`). One that cannot be (too short, a move too small for
+    a pair of bends, up and across at once) is taken along as before."""
     moved = list(dict.fromkeys(moved))
     asked = list(moved)
     delta = np.asarray([float(v) for v in delta_m])
@@ -382,6 +405,7 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
     carry = mode() == "carry"
     inside = set(moved)
     stretched: dict[str, Stretch] = {}
+    jogs: dict[str, Jog] = {}
     via: dict[str, str] = {}             # what took a part along (for the words of a refusal)
     queue = list(moved)
     breaks: list[str] = []
@@ -418,6 +442,9 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
             cls = classify(scene, n)
             if cls != "stays" and context_eval.element_constraints(scene, n):
                 cls = "stays"
+            if n in jogs:                      # reached at its other end too: it moves whole
+                del jogs[n]
+                cls = "rigid"
             st = stretched.get(n)
             if st is not None:
                 face = j.end_b if j.end_b in ("start", "end") else "side"
@@ -446,6 +473,12 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
                                                       f"{max(size, 0) * 1000:.0f} mm long (it can lose at most "
                                                       f"{(run.length_m - edits.MIN_PIECE_M) * 1000:.0f} mm)")
                         stretched[n] = Stretch(n, j.end_b, by, tuple(normal.tolist()), size)
+                        plan.kept.append(j)
+                        continue
+                    far = "end" if j.end_b == "start" else "start"
+                    if (refit and any(k.end_a == far for k in joints_of(scene, n))
+                            and edits.jog_fits(scene, n, j.end_b, delta.tolist()) is None):
+                        jogs[n] = Jog(n, j.end_b)   # its far joint stays: re-fitted at this end, not taken along
                         plan.kept.append(j)
                         continue
                 elif j.end_b == "side":
@@ -484,6 +517,7 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
         plan.refused_at, plan.code = breaks, "joined"
         return plan
     plan.stretched = list(stretched.values())
+    plan.jogs = list(jogs.values())
     for st in plan.stretched:
         plan.partners[st.global_id] = {j.b for j in joints_of(scene, st.global_id)}
     return plan
@@ -499,6 +533,9 @@ def summary(scene: IfcScene, plan: MovePlan) -> str:
         by_change.setdefault((st.by_m > 0, round(abs(st.by_m) * 1000)), []).append(st.global_id)
     for (longer, mm), gids in by_change.items():
         parts.append(f"{_names(scene, gids)} {mm} mm {'longer' if longer else 'shorter'}")
+    if plan.jogs:
+        parts.append(f"{_names(scene, [j.global_id for j in plan.jogs])} re-fitted with a pair of bends at the joined "
+                     "end, the rest where it is")
     return "; ".join(parts)
 
 
@@ -508,6 +545,17 @@ def apply_move(scene: IfcScene, plan: MovePlan) -> dict[str, list[float]]:
     placements = scene.translate(plan.moved, tuple(plan.delta_m))
     for st in plan.stretched:
         edits.stretch(scene, st.global_id, st.face, st.by_m, st.normal if st.face == "side" else None)
+    plan.made = []
+    for jog in plan.jogs:
+        pieces = edits.apply_jog(scene, jog.global_id, jog.end, plan.delta_m).pieces
+        jog.pieces = list(pieces)
+        plan.made += pieces[1:]
+        # what was joined to it is now joined to the piece at that end: check the joints as they are now
+        for g, before in plan.partners.items():
+            if jog.global_id in before:
+                plan.partners[g] = (before - {jog.global_id}) | ({k.b for k in joints_of(scene, g)} & set(pieces))
+        for p in pieces:
+            plan.partners[p] = {k.b for k in joints_of(scene, p)}
     return placements
 
 
@@ -537,7 +585,7 @@ BASELINE_M = 0.1   # what a stretched segment comes this close to before a move 
 def baseline(scene: IfcScene, plan: MovePlan, clearance_m: float = BASELINE_M) -> dict[str, float]:
     """What the segments a move stretches touch or come close to now (a riser on its gland plate): only contacts new or
     worse than these count against the move."""
-    stretched = [st.global_id for st in plan.stretched]
+    stretched = [st.global_id for st in plan.stretched] + [j.global_id for j in plan.jogs]
     if not stretched:
         return {}
     joined = {b for g in stretched for b in plan.partners.get(g, ())}
@@ -554,7 +602,8 @@ def check_applied(scene: IfcScene, plan: MovePlan, clearance_m: float,
     ignore = set(plan.changed()) | joined
     v = verify.check(scene, plan.moved, clearance_m=clearance_m, ignore=ignore)
     hits, least, checked = list(v.hits), v.min_clearance_m, v.checked_against
-    stretched = [st.global_id for st in plan.stretched]
+    # Stretched and re-fitted segments (and what the re-fits made) are where they were, mostly: only new or worse counts
+    stretched = [st.global_id for st in plan.stretched] + [p for j in plan.jogs for p in (j.pieces or [j.global_id])]
     if stretched:   # what they touched already (a riser on its plate) is neither a hit nor this move's clearance
         already = {o for o, gap in base.items() if gap < clearance_m}   # too close before the move: not its doing
         w = verify.check(scene, stretched, clearance_m=clearance_m, ignore=ignore, touching=already)
@@ -578,10 +627,10 @@ class MoveTrial:
 
 def trial_move(scene: IfcScene, plan: MovePlan, clearance_m: float, on_trial=None, preview: bool = False) -> MoveTrial:
     """Try a planned move that takes parts along or stretches segments, check it, undo it."""
-    stretched = [st.global_id for st in plan.stretched]
     base = baseline(scene, plan)
     with edits.trial_files(scene, {scene.index_of(g) for g in plan.changed()}):
         placements = apply_move(scene, plan)
+        stretched = [st.global_id for st in plan.stretched] + [p for j in plan.jogs for p in j.pieces]
         shape = edits.meshes(scene, stretched) if stretched and (on_trial or preview) else None
         if on_trial:
             on_trial({"kind": "move", "moved": plan.moved, "delta_m": plan.delta_m, "pieces": shape,
@@ -637,12 +686,15 @@ def describe(scene: IfcScene, label: str, gid: str, memo: dict | None = None) ->
             else:
                 by_outcome: dict[str, list[str]] = {}
                 for name, vec in DIRECTIONS:
-                    plan = plan_move(scene, mine, np.asarray(vec, float) * 0.1)
+                    plan = plan_move(scene, mine, np.asarray(vec, float) * 0.1, refit=refit_moves())
                     by_outcome.setdefault(_outcome(scene, plan), []).append(name)
+                refit = (" A straight segment beyond them that the move goes square to and that is joined further on "
+                         "gets a pair of bends at that end instead (a re-fit; the move needs to be at least about its "
+                         "depth for the bends), and the rest of it stays." if refit_moves() else "")
                 lines.append(f"Element {label}{run_words} is joined to {', '.join(ends)}. A move keeps its joints: "
                              f"fittings and valves beyond it go along, and a straight segment beyond them gets longer "
                              f"or shorter when the move runs along it; equipment, terminals and structure never "
-                             f"move, so a move that would pull them is refused.")
+                             f"move, so a move that would pull them is refused.{refit}")
                 lines.append(f"Moving {label} (tried at 100 mm): " + "; ".join(
                     f"{' / '.join(dirs)}: {what}" for what, dirs in by_outcome.items()))
     if memo is not None:

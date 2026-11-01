@@ -10,6 +10,7 @@ import threading
 import uuid
 from collections import Counter
 
+import ifcopenshell.api
 import ifcopenshell.geom
 import ifcopenshell.util.element
 import ifcopenshell.util.system
@@ -17,7 +18,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, checks, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, properties, reports, requirements, settings, spend, step, verify
+from . import agent, checks, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, journal, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -64,6 +65,8 @@ class Workspace:
         # and the scene's own temporary folder (uploads, conversions), deleted when the scene is dropped.
         self.sources: dict[str, dict[int, dict]] = {}
         self._roots: dict[str, Path] = {}
+        # Scene id → its edit log: every kept edit, by whom, for which clash (journal.py, docs/manual-edits.md).
+        self.journals: dict[str, journal.Journal] = {}
         # Geometry trials edit the model and undo; anything touching a scene's geometry holds this.
         self.lock = threading.RLock()
         self._model = model
@@ -175,6 +178,7 @@ class Workspace:
             register = self.checks.pop(old, None)
             if register is not None:
                 register.drop()
+            self.journals.pop(old, None)
             self._stays.pop(old, None)
             with self._last_lock:
                 for key in [k for k in self._last if k[0] == old]:
@@ -213,6 +217,12 @@ class Workspace:
 
     def scene(self, scene_id: str) -> IfcScene:
         return self.scenes[scene_id]
+
+    def journal(self, scene_id: str) -> journal.Journal:
+        """The scene's edit log (journal.py), made on first use."""
+        self.scene(scene_id)
+        with self.lock:
+            return self.journals.setdefault(scene_id, journal.Journal())
 
     def classes(self, scene_id: str) -> dict[str, list[str]]:
         """GlobalId → [IFC class, name] of every physical element (what has a box)."""
@@ -299,7 +309,7 @@ class Workspace:
         if clearance_m is None:
             clearance_m = self.clearance(scene_id, moved[0] if moved else None, obstacles[0] if obstacles else None)
         with self.lock:
-            plan = connections.plan_move(s, moved, delta_m)
+            plan = connections.plan_move(s, moved, delta_m, refit=connections.refit_moves())
             if not plan.ok:
                 return {"passed": False, "hits": [], "min_clearance_m": None, "checked_against": 0, "placements": {},
                         "reason": plan.refused, "joints": {"refused_at": plan.refused_at}}
@@ -309,15 +319,16 @@ class Workspace:
                         "checked_against": t.checked, "placements": t.placements, "preview": t.preview,
                         "reason": None, "joints": plan.edit(s, moved)}
             sup = verify.supports(s, moved, set(obstacles), clearance_m) if obstacles else None
-            placements = s.translate(moved, tuple(delta_m))
-            try:
-                v = verify.check(s, moved, clearance_m=clearance_m)
-                hits, held, why = verify.keep_supports(s, sup, v.hits) if sup else (v.hits, set(), None)
-                if held and not hits and not why:
-                    v = verify.check(s, moved, clearance_m=clearance_m, ignore=held)
-                    hits = v.hits
-            finally:
-                s.translate(moved, tuple(-d for d in delta_m))
+            with edits.scratch(s, {s.index_of(g) for g in moved}):   # undone: kept edits stay undoable
+                placements = s.translate(moved, tuple(delta_m))
+                try:
+                    v = verify.check(s, moved, clearance_m=clearance_m)
+                    hits, held, why = verify.keep_supports(s, sup, v.hits) if sup else (v.hits, set(), None)
+                    if held and not hits and not why:
+                        v = verify.check(s, moved, clearance_m=clearance_m, ignore=held)
+                        hits = v.hits
+                finally:
+                    s.translate(moved, tuple(-d for d in delta_m))
         return {**asdict(v), "passed": not hits and not why, "hits": [asdict(h) for h in hits], "reason": why,
                 "placements": placements}
 
@@ -468,8 +479,22 @@ class Workspace:
             seen = " Images are views of this clash." if pics else ""
             notes = "\n".join(filter(None, [notes, source + seen]))
             nearby = self._nearby(scene_id, self.report(report_id), element_a, element_b) if scene_id in self.scenes else {}
-            return agent.Clash(element_a, element_b, distance_m, pics, notes, nearby=nearby)
-        return agent.Clash(element_a, element_b, distance_m, pics, notes)
+            return agent.Clash(element_a, element_b, distance_m, pics, self._with_edits(notes, scene_id, element_a, element_b),
+                               nearby=nearby)
+        return agent.Clash(element_a, element_b, distance_m, pics, self._with_edits(notes, scene_id, element_a, element_b))
+
+    def _with_edits(self, notes: str, scene_id: str | None, element_a: str, element_b: str) -> str:
+        """The clash's notes, plus the edits already kept or undone on its elements (the edit log), so Muse builds on
+        them and does not propose an edit the person took back. Nothing when there are none."""
+        j = self.journals.get(scene_id or "")
+        if j is None:
+            return notes
+        touching = j.for_elements([element_a, element_b], kept_only=False)
+        if not touching:
+            return notes
+        lines = journal.entry_lines(touching, 4)
+        return "\n".join(filter(None, [notes, "Edits already made to these elements (newest last; [undone] were taken back): "
+                                        + " | ".join(lines)]))
 
     NEARBY_M = 3.0   # how close another clash of the same element must be to be worth telling Muse about
     NOT_PHYSICAL_CLASSES = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
@@ -513,18 +538,18 @@ class Workspace:
         since it was checked is refused."""
         s = self.scene(scene_id)
         with self.lock:
-            plan = connections.plan_move(s, moved, delta_m)
+            plan = connections.plan_move(s, moved, delta_m, refit=connections.refit_moves())
             if not plan.ok:
                 raise edits.Unsupported(plan.refused)
             if expect and expect.get("key") and expect["key"] != plan.key():
                 raise edits.Unsupported("the model changed since this move was checked: propose it again")
-            changed = plan.changed()
-            files = {s.index_of(g) for g in changed}
+            files = {s.index_of(g) for g in plan.changed()}
             with edits.kept_files(s, files):
                 placements = connections.apply_move(s, plan)
                 broken = connections.check_joints(s, plan)
                 if broken:   # never kept: undone with the rest
                     raise edits.Unsupported("a joint would not hold: " + "; ".join(w for *_, w in broken))
+            changed = plan.changed()   # with what its re-fits made: the page draws them
             for g in changed:  # kept: export writes these files
                 s.mark_edited(g)
             s.bump(files)
@@ -533,18 +558,62 @@ class Workspace:
 
     PATCH_MAX_VERTS = 500_000   # past this, the page reloads the files instead
 
-    def patch(self, scene_id: str, changed: list[str], revision_before: int) -> dict:
+    def undo_edit(self, scene_id: str, entry_id: str | None = None) -> dict:
+        """Undo the newest kept edit in the log (journal.Fenced when it cannot be undone). What it made is gone again
+        (`removed`), what it changed or removed is back (`changed`)."""
+        s = self.scene(scene_id)
+        with self.lock:
+            e = self.journal(scene_id).undo(s, entry_id)
+            states = _manual().clash_states(s, self.journal(scene_id), e)
+        return {"entry": e.to_dict(), "files": e.files, "changed": [*e.elements, *e.removed], "removed": e.created,
+                "clash_states": states,
+                **self._journal_flags(scene_id)}
+
+    def redo_edit(self, scene_id: str, entry_id: str | None = None) -> dict:
+        s = self.scene(scene_id)
+        with self.lock:
+            e = self.journal(scene_id).redo(s, entry_id)
+            states = _manual().clash_states(s, self.journal(scene_id), e)
+        return {"entry": e.to_dict(), "files": e.files, "changed": [*e.elements, *e.created], "removed": e.removed,
+                "clash_states": states,
+                **self._journal_flags(scene_id)}
+
+    def _journal_flags(self, scene_id: str) -> dict:
+        j = self.journal(scene_id).summary()
+        return {k: j[k] for k in ("can_undo", "can_redo", "undo", "redo")}
+
+    def edits_csv(self, scene_id: str) -> str:
+        """The edit log as CSV, one row per entry (kept and undone), for a spreadsheet or an issue tracker."""
+        import csv
+        import io
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["id", "when", "source", "kind", "title", "summary", "clashes", "follows", "changed", "created",
+                    "removed", "warnings", "state"])
+        for e in self.journal(scene_id).entries:
+            d = e.to_dict()
+            w.writerow([e.id, d["when"], e.source, e.kind, e.title, e.summary,
+                        " ".join(str(c.get("id") or "/".join(c.get("pair") or [])) for c in e.clashes),
+                        " ".join(e.follows), " ".join(e.names.get(g, g) for g in e.elements),
+                        " ".join(e.names.get(g, g) for g in e.created), " ".join(e.names.get(g, g) for g in e.removed),
+                        "; ".join(w_["text"] for w_ in e.warnings), e.state])
+        return out.getvalue()
+
+    def patch(self, scene_id: str, changed: list[str], revision_before: int, removed: list[str] = ()) -> dict:
         """What a page needs to update its model in place after a kept fix, instead of reloading whole files: the
         scene's revision before and after the request, and the changed or new elements' triangles (`edits.meshes`,
         render), taken after every edit of it. A page whose model is not at `revision_before` (it missed an edit), or
         that gets no meshes (an element that would not triangulate, or too much to send), reloads the files."""
         s = self.scene(scene_id)
+        gone = list(dict.fromkeys(removed))
         out = {"scene_id": scene_id, "revision_before": revision_before, "revision": s.revision, "meshes": None,
                # which files each revision changed: a page behind `revision_before` reloads what it missed
-               "history": [[rev, files] for rev, files in s.history]}
+               "history": [[rev, files] for rev, files in s.history], "removed": gone}
         with self.lock:
+            # Openings and provisions are not drawn as elements: the host's new shape is what changes.
+            here = [g for g in dict.fromkeys(changed) if g not in gone and s.has(g) and not _void(s, g)]
             try:
-                meshes = edits.meshes(s, list(dict.fromkeys(changed)), render=True)
+                meshes = edits.meshes(s, here, render=True)
             except (RuntimeError, KeyError):
                 return out
         if sum(len(m["verts"]) for m in meshes) // 3 <= self.PATCH_MAX_VERTS:
@@ -562,11 +631,11 @@ class Workspace:
                 "min_clearance_m": option.min_clearance_m if option else None,
                 "preview": option.preview if option else None}
 
-    def apply_offset(self, scene_id: str, element: str, split_m: list[float], dz_m: float) -> dict:
-        """Keep a local offset: the element is shortened and new pieces are added to its file."""
+    def apply_offset(self, scene_id: str, element: str, split_m: list[float], dz_m: float, bend_deg: float = 90.0) -> dict:
+        """Keep a local offset: the element is shortened and new pieces are added to its file (bends of `bend_deg`)."""
         s = self.scene(scene_id)
         with self.lock:
-            off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
+            off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m, bend_deg=bend_deg)
             s.mark_edited(element)
             s.bump([s.index_of(element)])
         return {**asdict(off), "files": [s.index_of(element)], "changed": list(off.pieces)}
@@ -726,15 +795,28 @@ class Workspace:
         also written back as STEP, each moved part translated in the original file (`step.export`)."""
         with self.lock:
             s = self.scene(scene_id)
-            out = s.write_edited(out_dir)
+            j = self.journals.get(scene_id)
+            # Each edited element names the log's entries that made it so (ORCA_Edit), written with the files only:
+            # inside a transaction undone after, so the log's own undo stays as it was.
+            with edits.scratch(s, set(s._edited)):
+                if j is not None:
+                    _stamp_edits(s, j)
+                out = s.write_edited(out_dir)
             for i in sorted(s._edited):
                 src = self.sources.get(scene_id, {}).get(i)
                 if not src:
                     continue
                 parts = json.loads(Path(src["manifest"]).read_text())["parts"]
-                moves, replace, add = step_changes(s, i, parts)
+                moves, replace, add = step_changes(s, i, parts, reshaped(j))
                 stem = Path(src["step"]).stem
-                out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.orca.step", moves, replace, add))
+                out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.orca.step", moves, replace, add,
+                                       step_removed(s, i, parts)))
+            if j is not None and j.kept() and len(out) > 1:   # a zip: the log beside the models
+                (out_dir / "orca-edits.json").write_text(json.dumps([e.to_dict() for e in j.entries], indent=1, default=str),
+                                                         encoding="utf-8")
+                # UTF-8 on every host (names carry arrows and dashes); the CSV's own line ends, not the platform's
+                (out_dir / "orca-edits.csv").write_text(self.edits_csv(scene_id), encoding="utf-8", newline="")
+                out += [out_dir / "orca-edits.json", out_dir / "orca-edits.csv"]
             return out
 
     # Clash reports (Navisworks XML).
@@ -1079,6 +1161,42 @@ def project_name(files: list[str]) -> str | None:
     return cut if len(cut) >= 3 else None
 
 
+EDIT_PSET = "ORCA_Edit"
+
+
+def _stamp_edits(scene: IfcScene, log) -> None:
+    """An ORCA_Edit property set on every element the kept edits changed or made: which entries (E1, E2), what they
+    did, who kept them, when, and the clashes they were for. Read by anyone who opens the exported IFC."""
+    by_element: dict[str, list] = {}
+    for e in log.kept():
+        for gid in [*e.elements, *e.created]:
+            by_element.setdefault(gid, []).append(e)
+    for gid, entries in by_element.items():
+        try:
+            element = scene.entity(gid)
+        except KeyError:
+            continue
+        i = scene.index_of(gid)
+        if i not in scene._edited:
+            continue
+        model = scene.models[i]
+        ids = [c.get("id") for x in entries for c in x.clashes if c.get("id")]
+        pset = ifcopenshell.api.run("pset.add_pset", model, product=element, name=EDIT_PSET)
+        ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={
+            "EntryIds": ", ".join(x.id for x in entries),
+            "Ops": ", ".join(dict.fromkeys(x.kind for x in entries)),
+            "Summary": " | ".join(x.summary or x.title for x in entries)[:2000],
+            "Source": ", ".join(dict.fromkeys(x.source for x in entries)),
+            "When": ", ".join(x.to_dict()["when"] for x in entries),
+            "Clashes": ", ".join(dict.fromkeys(str(c) for c in ids)) or "",
+        })
+
+
+def _void(scene: IfcScene, gid: str) -> bool:
+    return scene.entity(gid).is_a("IfcFeatureElement")
+
+
+
 def _spec(scene: IfcScene, element) -> dict:
     """An element's body for `step.export`, in metres and world axes: its extrusion when it is one, else its mesh."""
     try:
@@ -1101,11 +1219,40 @@ def _spec(scene: IfcScene, element) -> dict:
                 "faces": np.asarray(geom.faces, int).reshape(-1, 3).tolist()}
 
 
-def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, list]:
+def _manual():
+    from . import manual   # manual reads the scene's services; imported when first needed
+    return manual
+
+
+def step_removed(scene: IfcScene, index: int, parts: dict) -> list[str]:
+    """The STEP parts no longer in the model (a hand edit deleted them): `step.export` takes them out."""
+    model, gone = scene.models[index], []
+    for gid in parts:
+        try:
+            model.by_guid(gid)
+        except RuntimeError:
+            gone.append(gid)
+    return gone
+
+
+RESHAPES = {"push_pull", "clip", "void", "cut_by", "split", "remove_section", "offset", "join"}   # hand edits that change a body's shape
+
+
+def reshaped(journal) -> set[str]:
+    """Elements a kept hand edit gave a new shape (not only a new place): a pushed face, a clip, a cut, a split."""
+    out: set[str] = set()
+    for e in (journal.kept() if journal is not None else []):
+        if e.kind in RESHAPES or (e.kind == "align" and (e.params or {}).get("how") != "move"):
+            out |= set(e.elements)
+    return out
+
+
+def step_changes(scene: IfcScene, index: int, parts: dict, reshaped: set[str] = frozenset()) -> tuple[dict, dict, list]:
     """What changed in a model converted from STEP, for `step.export`: moved parts (placement against the manifest's
-    origin), parts whose extrusion changed (an offset's first piece, a trimmed member) or that were cut for a service,
-    and new parts (the rest of an offset, a provision for void), each new part tied to the STEP part it came from
-    through its `ORCA_STEP` label."""
+    origin), parts whose extrusion changed (an offset's first piece, a trimmed member), that were cut for a service or
+    that a hand edit reshaped (`reshaped`: a mesh's face pushed, a clip), and new parts (the rest of an offset, a
+    provision for void, a split's second piece), each new part tied to the STEP part it came from through its
+    `ORCA_STEP` label."""
     model = scene.models[index]
     moves, replace, add = {}, {}, []
     for gid, info in parts.items():
@@ -1123,9 +1270,14 @@ def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, 
             now = _spec(scene, element)
             moved_start = np.asarray(prism["start"]) + delta
             if now["kind"] != "prism" or abs(now["depth"] - prism["depth"]) > 1e-6 \
-                    or np.linalg.norm(np.asarray(now["start"]) - moved_start) > 1e-6:
+                    or np.linalg.norm(np.asarray(now["start"]) - moved_start) > 1e-6 \
+                    or now["profile"][0] != prism["profile"][0] \
+                    or not np.allclose(now["profile"][1:], list(prism["profile"])[1:], atol=1e-6):   # a side pushed, a radius
                 replace[gid] = now
                 continue
+        if gid in reshaped:   # its shape as it is now (a mesh), in place of the STEP part's
+            replace[gid] = _spec(scene, element)
+            continue
         if np.any(np.abs(delta) > 1e-6):
             moves[gid] = delta.tolist()
     known = set(parts)

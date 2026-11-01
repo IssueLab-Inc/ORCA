@@ -32,7 +32,8 @@ from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
 from . import (agents, built, chat, checks, context_planner, demos, detect, document, domains, edits, escalation,
-               mcp_server, meta_client, owner, plans, requirements, settings, spend, step, titles, triage, voice_live)
+               faces, journal, manual, mcp_server, meta_client, owner, plans, property_edits, requirements, settings, spend,
+               step, titles, triage, voice_live)
 from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
@@ -179,6 +180,9 @@ title_limit = ProposeLimit(env_int("SIGHTLINE_TITLES_PER_HOUR", 0),
 # Detection runs cost no model call but take the server's CPU for seconds: SIGHTLINE_DETECT_PER_HOUR per visitor.
 detect_limit = ProposeLimit(env_int("SIGHTLINE_DETECT_PER_HOUR", 0),
                             env_int("SIGHTLINE_DETECT_PER_DAY", 0), noun="detection runs")
+# The run that lists what a hand edit was kept with is not a detection run's charge, but it has a cap of its own, three
+# times the detection cap, so keep, run, undo, keep again cannot be farmed for free runs.
+edit_rerun_limit = ProposeLimit(3 * detect_limit.per_client_hour, 3 * detect_limit.per_day, noun="runs after hand edits")
 voice_limit = ProposeLimit(env_int("SIGHTLINE_VOICE_PER_HOUR", 0),
                            env_int("SIGHTLINE_VOICE_PER_DAY", 0), noun="voice messages")
 # Model uploads (IFC or STEP): each takes disk, memory and, for STEP, a conversion and one model call to name its parts.
@@ -292,6 +296,7 @@ class ChatTurn(BaseModel):
     filters: list[PageFilter] = Field(default_factory=list, max_length=100)
     filter_view: FilterView = Field(default_factory=FilterView)
     check: str | None = None   # the kept check the page's list shows (None: all of them)
+    selected: dict | None = None   # what the user has selected: {element, face?, pick?} (the Edit tool's face)
 
 
 class PlanRequest(BaseModel):
@@ -303,6 +308,7 @@ class PlanRequest(BaseModel):
 
 class PlanApply(BaseModel):
     options: list[dict]
+    clash_ids: list[str | None] | None = None   # per option, the clash it was accepted for (the edit log ties them)
 
 
 class OpenReport(BaseModel):
@@ -313,6 +319,7 @@ class DetectRequest(BaseModel):
     tests: list[dict] | None = None  # None: the default tests (GET /detect/tests); see detect.Test.from_dict
     check: str | None = None         # a kept check, by key: run it again with the tests it ran with
     all: bool = False                # run every kept check again, one after another (one detection run)
+    after_edit: str | None = None    # the hand edit kept with clashes this run lists (its entry): that one run is free
 
 
 # Uploaded clash reports: XML plus the images it links to, kept in a temp folder while the report is open.
@@ -633,6 +640,36 @@ def element_properties(scene_id: str, global_id: str, file: int | None = None):
         raise HTTPException(404, "No such element in these models.")
 
 
+class PropertyEdit(BaseModel):
+    change: dict   # {kind: attribute|property|type|material|classification|container, ...} (property_edits.plan)
+
+
+@app.get("/api/scenes/{scene_id}/elements/{global_id}/property-choices")
+def element_property_choices(scene_id: str, global_id: str):
+    """What an element's properties can be set to from its own model (property_edits.choices): its editable attributes
+    and predefined types, the types of its kind, materials, storeys and spaces, classification references."""
+    sid = _scene(scene_id)
+    try:
+        with ws.lock:
+            return property_edits.choices(ws.scene(sid), global_id)
+    except KeyError:
+        raise HTTPException(404, "No such element in these models.")
+
+
+@app.post("/api/scenes/{scene_id}/elements/{global_id}/properties")
+def edit_element_property(scene_id: str, global_id: str, body: PropertyEdit):
+    """Change one thing the model says about an element, not its shape (property_edits.edit): kept through the edit
+    log; 422 with why when it cannot be made. Returns the entry and the element's properties now."""
+    try:
+        return property_edits.edit(ws, _scene(scene_id), global_id, body.change, source="you")
+    except KeyError:
+        raise HTTPException(404, "No such element in these models.")
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot make this change: {e}")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, f"Not a change ORCA can make: {e}")
+
+
 @app.get("/api/scenes/{scene_id}/facets")
 def scene_facets(scene_id: str):
     """The filters' index (facets.py, docs/filters.md): each facet (file, class, storey, type, material, attributes,
@@ -803,15 +840,15 @@ def _with_patch(scene_id: str, kept) -> dict:
     with ws.lock:   # one request's edits between `before` and the patch, never another tab's
         before = ws.scene(scene_id).revision
         r = kept()
-        return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
+        return {**r, **ws.patch(scene_id, r.get("changed", []), before, removed=r.get("removed", []))}
 
 
-def _keep(scene_id: str, options: list[dict], what: str) -> dict:
+def _keep(scene_id: str, options: list[dict], what: str, clash_ids: list[str | None] | None = None) -> dict:
     """Keep fixes through `plans.apply`, which tries each again first (as its proposal did, with the clearance and
     requirements of its clash) and keeps all or none, plus what the page needs to patch its model. A fix that no longer
     passes is a 409 with why; one that cannot be made a 422; one that is not a fix ORCA knows a 400."""
     try:
-        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, options))
+        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, options, clash_ids=clash_ids))
     except plans.NotVerified as e:
         raise HTTPException(409, str(e))
     except edits.Unsupported as e:
@@ -925,6 +962,7 @@ def apply_offset(scene_id: str, body: Offset):
 
 class FixApply(BaseModel):
     option: dict
+    clash_id: str | None = None   # the clash it was accepted for (the edit log ties them)
 
 
 @app.post("/api/scenes/{scene_id}/fix/apply")
@@ -937,7 +975,123 @@ def fix_apply(scene_id: str, body: FixApply):
     o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
     if not isinstance(o.get("moved"), list) or not o["moved"]:
         raise HTTPException(400, "The fix names no element.")
-    return _one(_keep(scene_id, [o], "this fix"))
+    return _one(_keep(scene_id, [o], "this fix", [body.clash_id]))
+
+
+class FacePick(BaseModel):
+    element: str
+    point: list[float]
+    normal: list[float]
+
+
+class EditBody(BaseModel):
+    op: dict
+    key: str | None = None             # the check's: refused (409) when the model changed since
+    accept_clashes: int = 0            # how many new clashes the person accepted ("Keep with N clashes")
+    accept_joints: int = 0             # how many joints it may leave open ("Keep with N open joints")
+    clash_id: str | None = None        # the clash on screen when it was made: the log ties the edit to it
+    pair: list[str] | None = None      # that clash's two elements
+
+
+@app.post("/api/scenes/{scene_id}/edit/face")
+def edit_face(scene_id: str, body: FacePick):
+    """The face of an element under a pick (faces.resolve): its kind, its name in words, what it allows."""
+    s = ws.scene(_scene(scene_id))
+    try:
+        with ws.lock:
+            face = faces.resolve(s, body.element, body.point, body.normal)
+            return {**face.to_dict(), "label": manual.label(s, body.element),
+                    "choices": manual.choices_for(s, body.element, face)}
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'\""))
+
+
+@app.get("/api/scenes/{scene_id}/elements/{global_id}/faces")
+def element_faces(scene_id: str, global_id: str):
+    """Every face of an element there is to edit, named (faces.faces): what Muse and a person can point at."""
+    s = ws.scene(_scene(scene_id))
+    try:
+        with ws.lock:
+            return {"element": global_id, "faces": [f.to_dict() for f in faces.faces(s, global_id)]}
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'\""))
+
+
+@app.post("/api/scenes/{scene_id}/edit/check")
+def edit_check(scene_id: str, body: EditBody):
+    """Try a hand edit without keeping it (manual.check): what it clears, what it would hit, the nearest gap, its
+    warnings, and the preview meshes. A refusal comes back as `blocked` with why, not as an error."""
+    return manual.check(ws, _scene(scene_id), body.op)
+
+
+@app.post("/api/scenes/{scene_id}/edit/apply")
+def edit_apply(scene_id: str, body: EditBody):
+    """Keep a hand edit (manual.apply): checked again here first; 409 when the requirements refuse it, the model
+    changed since its check, or it would make more clashes than `accept_clashes` or leave more joints open than
+    `accept_joints`. Logged, then the patch."""
+    try:
+        return _with_patch(_scene(scene_id), lambda: manual.apply(ws, scene_id, body.op, key=body.key,
+                                                                  accept_clashes=body.accept_clashes,
+                                                                  accept_joints=body.accept_joints,
+                                                                  clash_id=body.clash_id, pair=body.pair))
+    except manual.NotKept as e:
+        raise HTTPException(409, str(e))
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot make this edit: {e}")
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, f"Not an edit ORCA can make: {e}")
+
+
+class EditStep(BaseModel):
+    entry: str | None = None   # the entry the page means: refused (409) when it is not the one next in line
+
+
+@app.get("/api/scenes/{scene_id}/edits")
+def edits_log(scene_id: str, format: str = "json"):
+    """The scene's edit log (journal.py): every kept edit, by whom, for which clash, oldest first, with whether undo
+    and redo can go now. `?format=csv` gives it as a spreadsheet."""
+    _scene(scene_id)
+    if format == "csv":
+        return Response(ws.edits_csv(scene_id), media_type="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="orca-edits.csv"'})
+    return ws.journal(scene_id).summary()
+
+
+def _step(scene_id: str, go) -> dict:
+    try:
+        return _with_patch(_scene(scene_id), go)
+    except journal.Fenced as e:
+        raise HTTPException(409, f"Cannot do that: {e}.")
+
+
+class EditPicture(BaseModel):
+    png: str   # a data:image/ URL the page took of the edit, kept (at most journal.PICTURE_MAX_BYTES)
+
+
+@app.post("/api/scenes/{scene_id}/edits/{entry_id}/picture")
+def edits_picture(scene_id: str, entry_id: str, body: EditPicture):
+    """A picture of a kept edit, taken by the page right after it (the server draws nothing): the report shows it
+    as "After the edits" on its clash's page."""
+    _scene(scene_id)
+    try:
+        ws.journal(scene_id).attach_picture(entry_id, body.png)
+    except KeyError:
+        raise HTTPException(404, f"No edit {entry_id} in this scene's log.")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/scenes/{scene_id}/edits/undo")
+def edits_undo(scene_id: str, body: EditStep):
+    """Undo the newest kept edit: an agent fix, a plan, a wider fix or a hand edit. 409 when another edit came after
+    it outside the log, or `entry` is not the newest."""
+    return _step(scene_id, lambda: ws.undo_edit(scene_id, body.entry))
+
+
+@app.post("/api/scenes/{scene_id}/edits/redo")
+def edits_redo(scene_id: str, body: EditStep):
+    return _step(scene_id, lambda: ws.redo_edit(scene_id, body.entry))
 
 
 @app.get("/api/scenes/{scene_id}/export")
@@ -1076,7 +1230,10 @@ def detect_stream(scene_id: str, body: DetectRequest, request: Request):
         register = ws.checks.get(scene_id)
         if register is None or body.check not in register.checks:
             raise HTTPException(404, "That check is no longer kept: run it from the Filters panel again.")
-    refused = _take(detect_limit, request)   # Run all again is one detection run too
+    # Run all again is one detection run too. Once, after a hand edit kept with clashes, it is not charged as one: the
+    # person accepted those clashes, and the list must show them (docs/manual-edits.md). It has its own, larger cap.
+    after_edit = ws.journal(scene_id).free_rerun(body.after_edit)
+    refused = _take(edit_rerun_limit if after_edit else detect_limit, request)
     if refused:
         raise HTTPException(429, refused)
     events: queue.Queue = queue.Queue()
@@ -1646,7 +1803,7 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
 @app.post("/api/scenes/{scene_id}/plan/apply")
 def plan_apply(scene_id: str, body: PlanApply):
     """Keep a plan's fixes, all or none: each tried again alone and all together first (plans.apply)."""
-    return _keep(scene_id, body.options, "the plan")
+    return _keep(scene_id, body.options, "the plan", body.clash_ids)
 
 
 _chat: chat.Chat | None = None
@@ -1678,7 +1835,7 @@ def chat_turn(body: ChatTurn, request: Request):
     detect_allowed = lambda: None if no_caps else detect_limit.take(who)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed, [f.model_dump() for f in body.filters],
-                       body.filter_view.model_dump(), body.check)
+                       body.filter_view.model_dump(), body.check, body.selected)
     events = _RequestEvents(request)
     events.put({"type": "session", "id": session.id})
 
@@ -1790,7 +1947,8 @@ def _build_document(report, verdicts: dict, scene_id: str | None, scope: str, *,
     data, name, media = document.generate(
         report, verdicts, ws.model, scope=scope, model_teams=teams or {}, matches=matches, scene=scene,
         evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None),
-        triage_info=triage_info, domain=domains.of(ws, scene_id if scene is not None else None))
+        triage_info=triage_info, domain=domains.of(ws, scene_id if scene is not None else None),
+        journal=ws.journals.get(scene_id) if scene is not None else None)
     doc_id = uuid.uuid4().hex
     _documents[doc_id] = (data, name, media)
     while len(_documents) > 24:

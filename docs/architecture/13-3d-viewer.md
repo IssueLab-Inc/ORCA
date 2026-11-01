@@ -27,6 +27,7 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 | `viewer/cube.ts` | The view cube: a labelled cube in the 3D view's corner, click a face, edge or corner (26 views), drag to orbit, Home | `ViewCube`, `CUBE_PX` | `viewer/Viewer.ts` |
 | `viewer/drawing.ts` | A drawing view's orthographic camera, clip planes and crop (`DrawingView`), and the drawing style: paper fills, stencil caps for cut faces, the hidden pair, the composite shader that draws linework and the heavy cut outline | `DrawingView`, `DrawingStyle`, `farBehind`, `toIfc`, `CUT`, `CAP_LAYER`, `PAPER` | `viewer/Viewer.ts`, `viewer/annotate.ts` (types) |
 | `viewer/measure.ts` | Measuring's pure parts ([docs/measure.md](../measure.md)): where a plane cuts triangles and the cut joined into straight runs, clipping an edge to a view's planes, choosing the snap (end, midpoint, edge), the words and the line to copy | `cutSegments`, `mergeRuns`, `clipSegment`, `candidatesOf`, `pickSnap`, `measureText`, `copyLine`, `copyText`, types `Measurement`, `Candidates`, `SnapKind` | `viewer/Viewer.ts`, `MeasurePanel.tsx` |
+| `viewer/edit.ts` | The Edit tool's pure parts ([docs/manual-edits.md](../manual-edits.md)): the live push/pull preview's matrix (a stretch along the face's normal holding its far side), a face's coplanar triangles for its highlight, a drag in pixels as metres along a face, the palette's tools, their keys and what each can act on, how far an align moves a face (to a face or through a point), how an op names a face (its id or its pick), the keep button's words, the ways an offset can go between two points (up, down, the compass sides square to the run) | `stretchMatrix`, `pushMatrix`, `depthBehind`, `coplanar`, `dragMetres`, `snapTo`, `signedMm`, `EDIT_TOOLS`, `toolState`, `toolForKey`, `toThree`, `toIfcAxes`, `alignDistance`, `pointDistance`, `faceRef`, `PICKED_KINDS`, `keepLabel`, `OFFER`, `SNAP_WORDS`, `offsetWays`, type `EditToolId` | `viewer/Viewer.ts`, `EditTool.tsx` |
 | `viewer/annotate.ts` | A drawing pane's 2D layer: grids and bubbles, levels, the clash's revision cloud, other views' marks (section box, plan cuts, elevation markers, the 3D camera), title, scale bar, north; returns the handles a user can drag | `annotate`, `Handle`, `AnnotateInput` | `viewer/Viewer.ts` |
 | `viewer/patch.ts` | Swaps a kept fix's changed and new elements into the batches in place | `patchModel`, `makeRoom`, `toGeometry`, `ROOM`, `ElementMesh` | `viewer/Viewer.ts`, `viewer/ifcLoader.ts` (`ROOM`), `api.ts` (`ElementMesh`) |
 
@@ -436,6 +437,23 @@ drawing's ticks at the ends), labels moved up off each other, the measurement un
 its length, and the snap glyph (square end, triangle midpoint, cross edge, dot surface). It shows only while measuring,
 is never in a capture, and is in the Screenshot. Opening other models clears the measurements.
 
+### The Edit tool ([docs/manual-edits.md](../manual-edits.md))
+
+- `pickAt` returns the hit's world `normal` too; `pickFace(ev)` gives `{globalId, point, normal}` in IFC axes, through
+  see-through context to the clash pair first, as a click selects.
+- `showEditFaces(list)` lights faces on `editLayer` (layer 1, over everything): each face's coplanar triangles
+  (`viewer/edit.ts`, `coplanar`, from the element's own range of the batch), orange for the face to edit (with an
+  `ArrowHelper` to drag, scaled per frame like the grips), green for a target, faint blue under the pointer.
+- `pushPreview(gid, point, normal, by)` is the live push/pull: a stretch along the face's normal holding the element's
+  far side (`pushMatrix`), one instance matrix through `moved`, which `syncDrawings` gives every drawing of the element
+  (its batch instance, its focus mesh and edges, since a clash pair is drawn by the focus layer with its instance
+  hidden, the selection and the Edit tool's lit face, tagged with its GlobalId); the distance shows at the arrow's tip
+  (`viewer-label edit-label`). The server's check meshes replace it (`showOption`). `EditDrag.onStart` runs once when
+  a press becomes a drag.
+- `setEditDrag(d)`: a press on the chosen face or its arrow (in `press`, before the section grips) drags it along its
+  normal (the grips' screen projection), 5 mm steps, 1 mm with Shift, `onMove` then `onEnd` on release.
+- `snapPoint(ev)`: what measuring snaps to under the pointer, for a move's two points, a split and a section's ends.
+
 ### Captures
 
 | Method | What it returns | Used for |
@@ -475,7 +493,9 @@ When a fix is kept (single accept, plan, wider fix, or an agent's `applied` even
 `Workspace.patch` ([07](07-fixes-and-edits.md)): `scene_id`, `revision_before`, `revision`, `meshes` (the changed and
 new elements' triangles, world metres, Z up, unwelded, with normals, style colour and file index) and `history`.
 `App.applyToViewer` patches only when the page's model is at the revision the fix started from; otherwise it reloads
-the files the fix changed plus every file changed by an edit the page missed.
+the files the fix changed plus every file changed by an edit the page missed. A patch may also carry `removed`
+(elements an edit or an undo took out): `patch.removeElements` deletes their instances and geometry and forgets them;
+openings are never sent as meshes (the host's new shape is the change).
 
 ```mermaid
 sequenceDiagram
@@ -546,7 +566,8 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 | E | Outlines | M | Measure (N: snap on or off while measuring) |
 | G | Next visual style | L | Connections |
 | O | Perspective / orthographic | Q | Layout: Single, Two, Quad (Two at most on a tablet; none on a phone) |
-| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight. With a menu open it closes only the menu |
+| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the Edit tool's preview, target and face, then the tool; the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight. With a menu open it closes only the menu |
+| P | The Edit tool (inside it: P push/pull, A align, T move, O void, K cut by shape, B split, R remove a section, J clip, D or Delete delete) | Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y | Undo / redo the newest kept edit (not while typing or in a dialog) |
 
 - **Mouse:** a single click selects the element and shows its properties card (with Set as A / Set as B and its view
   actions) or, in measure mode, adds a point; a double click picks A, then B (a third pick starts over at A); a drag of

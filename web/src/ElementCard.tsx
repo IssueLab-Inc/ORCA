@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, Box, ChevronRight, Ellipsis, EyeOff, Focus, ListFilter, LocateFixed, Waypoints, X } from "lucide-react";
 import type { ElementProperties, ObjectRef } from "./api";
 import { LINK_COLOURS, LINK_ORDER, LINK_WORDS, type LinkKind } from "./links";
-import { classWords, PropertySets, type RowActions } from "./Properties";
+import { classWords, PropertySets, type PropEditor, type RowActions } from "./Properties";
 import { IconButton, Popover } from "./ui";
 
 /** The selected element's card (docs/panels.md, "Properties"): what it is, where it sits (breadcrumbs up to the
@@ -27,6 +27,8 @@ export interface CardActions {
   load: (ref: ObjectRef) => Promise<ElementProperties>;
   /** What a value's row offers (filter by it, colour by it, isolate all with it): only for the element itself. */
   rows?: RowActions;
+  /** Change what the model says about the element (its pencil rows): only for the element itself. */
+  editor?: PropEditor;
 }
 
 export function ElementCard({ gid, info, props, loading, actions: act, fold = false }: {
@@ -50,7 +52,8 @@ export function ElementCard({ gid, info, props, loading, actions: act, fold = fa
   const shown = parent ? parent.data : props;
   const shownClass = parent ? parent.ref.ifc_class : cls;
   const isStorey = parent?.ref.ifc_class === "IfcBuildingStorey";
-  const sets = <PropertySets data={shown} loading={parent ? parent.loading : loading} rows={parent ? undefined : act.rows} onOpen={open} />;
+  const sets = <PropertySets data={shown} loading={parent ? parent.loading : loading} rows={parent ? undefined : act.rows} onOpen={open}
+    editor={parent ? undefined : act.editor} />;
   return (
     <div className="ecard">
       <div className="ecard-head">

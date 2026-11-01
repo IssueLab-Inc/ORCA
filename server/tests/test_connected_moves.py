@@ -90,11 +90,11 @@ def test_stretch_moves_the_face_and_its_port_without_turning_it(scene):
         assert scene.bounds()[s2][1][1] == pytest.approx(1.1 + 0, abs=1e-3)
     with pytest.raises(edits.Unsupported, match="it would be 0 mm long"):
         edits.stretch(scene, s2, "end", -0.95)
-    with pytest.raises(edits.Unsupported, match="only a centred rectangular segment grows sideways"):
+    with pytest.raises(edits.Unsupported, match="only a rectangular section grows sideways"):
         edits.stretch(scene, s2, "side", 0.1, normal=(0, 0, 1))
 
 
-def test_the_agent_offers_it_with_what_it_takes_along(scene):
+def test_the_agent_offers_it_with_what_it_takes_along(scene, monkeypatch):
     s3a, column = gid(scene, "S3A"), gid(scene, "Column C3")
     trials = []
     attempt, option = agent._try_move(scene, {"title": "Shift north", "delta_m": [0, 0.5, 0]}, s3a, 0.025,
@@ -103,6 +103,11 @@ def test_the_agent_offers_it_with_what_it_takes_along(scene):
     assert option.edit["summary"].startswith("move north 500 mm; takes 'Bend B2' and 'Bend B3' along")
     assert sorted(m["global_id"] for m in option.preview) == sorted(st["global_id"] for st in option.edit["stretched"])
     assert trials[0]["pieces"] and trials[0]["summary"] == option.edit["summary"]
+    # Lifted, S4 beyond the bend is re-fitted (the filter past it stays): planned, tried, and failed for what it
+    # really hits, the column it runs through
+    attempt, option = agent._try_move(scene, {"title": "Lift", "delta_m": [0, 0, 0.3]}, s3a, 0.025)
+    assert option is None and attempt.reason.startswith("collision with IfcColumn")
+    monkeypatch.setenv("SIGHTLINE_MOVE_REFIT", "off")   # without re-fits: refused before it is tried, with why
     attempt, option = agent._try_move(scene, {"title": "Lift", "delta_m": [0, 0, 0.3]}, s3a, 0.025)
     assert option is None and attempt.reason.startswith("cannot keep its joints: moving 'Pipe S3A' (with 1 more) up")
     text = agent._describe(scene, agent.Clash(s3a, column))
@@ -147,7 +152,7 @@ def test_the_page_keeps_only_the_move_it_was_shown(tmp_path, monkeypatch):
     assert kept.status_code == 200 and scene.revision == 1 and ports_meet(scene)
 
 
-def test_a_plan_checks_a_connected_move_with_its_joints(tmp_path):
+def test_a_plan_checks_a_connected_move_with_its_joints(tmp_path, monkeypatch):
     path = build_joints_fixture(tmp_path / "samples" / "joints.ifc")
     ws = Workspace(path.parent)
     sid = ws.open([path.name])
@@ -157,6 +162,9 @@ def test_a_plan_checks_a_connected_move_with_its_joints(tmp_path):
     item = plans.Item(f"{s3a}|{column}", s3a, column, "pair", [], option=plans.asdict(option))
     assert plans.verify_together(ws, sid, [item])["passed"]
     up = {**plans.asdict(option), "delta_m": [0, 0, 0.3], "edit": None}
+    out = plans.verify_together(ws, sid, [plans.Item(item.key, s3a, column, "pair", [], option=up)])
+    assert out["items"][item.key]["reason"].startswith("collision with IfcColumn"), "re-fitted, it still hits the column"
+    monkeypatch.setenv("SIGHTLINE_MOVE_REFIT", "off")
     out = plans.verify_together(ws, sid, [plans.Item(item.key, s3a, column, "pair", [], option=up)])
     assert out["items"][item.key]["reason"] == "breaks its joint with IfcFilter"
 

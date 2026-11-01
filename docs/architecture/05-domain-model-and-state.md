@@ -390,6 +390,8 @@ Navisworks reports and ORCA's own detection produce the same objects, so everyth
 | Id | Format | Made by | Stable across |
 |---|---|---|---|
 | Scene id | 12 hex characters (`uuid4().hex[:12]`) | `Workspace.open_paths` | The scene's life on this server. Opening the same files again makes a new scene, with no edits |
+| Edit log entry id | `E` + its place in the scene's log (`E1`, `E2`) | `Journal.record` | The scene's life; never reused, undone entries keep theirs |
+| Face id | `cap:start`, `cap:end`, `side:+x`… `side:-y`, `radial`, `flank`, `edge:k`, `clip`, `other` | `faces.resolve`, `faces.faces` | The element's shape: an outline edge's number changes when its outline gains or loses a corner |
 | Report id | 12 hex characters | `Workspace.open_report_sample`, `open_report_folder`, `detect.run` | The report's life. Every detection run is a new report with a new id |
 | Navisworks clash id | `c` + 4-digit position (`c0053`) | `reports.load`, after duplicates are dropped | Every load of the same files (so every visitor's copy of a sample report has the same ids) |
 | Detected clash id | `s` + the first 9 hex of sha1 of test id and the two GlobalIds sorted | `detect.clash_id` | Reruns, visitors and servers, while the test id and both GlobalIds stay the same |
@@ -546,6 +548,8 @@ stateDiagram-v2
 | Open scenes, their in-memory models and edits, boxes, revisions | `Workspace.scenes` (`IfcScene`) | `SIGHTLINE_MAX_SCENES` (code default 0, no limit; Modal 8) and `SIGHTLINE_SCENE_BUDGET_MB` (default 0, by count only; Modal 300), by `Workspace._evict`; live links' last (`Workspace.keep`) |
 | Per-scene facts | `Workspace.sizes`, `names`, `sources`, `_roots`, `_last` | Dropped with the scene; `_last` also capped at `LAST_KEPT` (200) |
 | Kept checks per scene, and what each clash keeps (ids, numbers, titles, views, triage readings) | `Workspace.checks` (`checks.Register`) | `SIGHTLINE_MAX_CHECKS` (12) checks per scene, two lists of them; dropped with the scene |
+| The edit log per scene: one `journal.Entry` per kept edit (who, what, clashes, follows, check, warnings, picture), the lineage (element → entries), the undone entries for redo, each entry's IfcOpenShell transactions (or a wider fix's state before and after) | `Workspace.journals` (`journal.Journal`), on the Workspace because a wider fix replaces the scene's `__dict__` | Dropped with the scene; each model keeps `scene.HISTORY_SIZE` (1,024) transactions |
+| The hand edit Muse checked last, per chat conversation (what `edit_keep` may keep) | `Chat.pending` | Replaced by the next check; kept edits clear it |
 | Clash reports, titles on their clashes | `Workspace.reports` | `SIGHTLINE_MAX_REPORTS` (default 0; Modal 8), by `Workspace._keep`; live links' last |
 | Report-to-model matches | `Workspace._matches` | Not bounded |
 | Wider-fix proposals | `Workspace._context_proposals` | 24 per scene, 16 scenes |

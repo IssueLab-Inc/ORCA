@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
-from . import agent, connections, domains, edits, owner, requirements, verify
+from . import agent, connections, consistency, domains, edits, owner, parametric, requirements, verify
 from .service import PATTERNS_KEPT, Workspace
 from .limits import env_int
 
@@ -67,13 +67,14 @@ _trial = edits.trial_files
 
 
 def _in_trial_move(scene, it: Item, o: dict):
-    plan = connections.plan_move(scene, o["moved"], o["delta_m"])
+    plan = connections.plan_move(scene, o["moved"], o["delta_m"], refit=connections.refit_moves())
     if not plan.ok:   # never tried: it would pull a joint apart (the check reports which)
         broken = [verify.Hit(g, scene.entity(g).is_a(), "joint", 0.0) for g in plan.refused_at]
         return list(o["moved"]), set(o["moved"]), lambda clearance_m, owner: (broken, None)
     if plan.plain:
         scene.translate(o["moved"], tuple(o["delta_m"]))
-        return list(o["moved"]), set(o["moved"]), None
+        followed = agent.follow_joined(scene, o["moved"], o["delta_m"]) if (o.get("edit") or {}).get("follow") else []
+        return [*o["moved"], *followed], set(o["moved"]) | set(followed), None
     base = connections.baseline(scene, plan)   # what its stretched segments touch now, before the edit
     connections.apply_move(scene, plan)
 
@@ -139,7 +140,8 @@ IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_tria
             "resize": _in_trial_resize, "penetration": _in_trial_penetration, "seat": _in_trial_seat,
             "combined": _in_trial_combined}
 # The files a fix changes beyond its moved elements' (a penetration's provision for void goes in the service's file).
-EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]]}
+EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]],
+                                                        "move": lambda o: (o.get("edit") or {}).get("follow") or []}
 # Kinds whose element keeps the contacts it had (a trimmed member is framed into its neighbours, a service through a
 # wall stays where it is): only contacts new or worse count, and the partner must clear (a trim may touch it).
 KEEPS_CONTACTS = {"trim": lambda o: o["moved"], "seat": lambda o: o["moved"], "penetration": lambda o: [o["edit"]["service"]]}
@@ -569,11 +571,20 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
 
 
 def _keep_move(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
-    return ws.apply(scene_id, o["moved"], o["delta_m"], expect=o.get("edit")), []
+    r = ws.apply(scene_id, o["moved"], o["delta_m"], expect=o.get("edit"))
+    if (o.get("edit") or {}).get("follow"):   # the joined walls' ends follow, as the trial had them
+        scene = ws.scene(scene_id)
+        followed = agent.follow_joined(scene, o["moved"], o["delta_m"])
+        files = {scene.index_of(g) for g in followed}
+        scene._edited.update(files)
+        scene.bump(files)
+        r = {**r, "changed": list(dict.fromkeys([*r["changed"], *followed])), "files": sorted({*r["files"], *files})}
+    return r, []
 
 
 def _keep_offset(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
-    r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2])
+    r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2],
+                        bend_deg=float((o.get("edit") or {}).get("bend_deg") or 90.0))
     return r, r["pieces"]
 
 
@@ -626,7 +637,7 @@ def _candidate_move(o: dict, a: str, b: str) -> tuple[dict, str]:
 
 
 def _candidate_offset(o: dict, a: str, b: str) -> tuple[dict, str]:
-    return {"split_m": o["split_m"], "dz_m": o["delta_m"][2]}, o["moved"][0]
+    return {"split_m": o["split_m"], "dz_m": o["delta_m"][2], "bend_deg": (o.get("edit") or {}).get("bend_deg")}, o["moved"][0]
 
 
 def _candidate_trim(o: dict, a: str, b: str) -> tuple[dict, str]:
@@ -729,7 +740,18 @@ def _check_together(ws: Workspace, scene_id: str, checked: list[dict]) -> None:
                               "the requirements may have changed since the plan was checked: plan again.", k)
 
 
-def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
+def _words(o: dict) -> str:
+    """A kept fix in words, for the edit log: its title and what the edit does."""
+    edit = o.get("edit") or {}
+    what = edit.get("summary")
+    if not what and (o.get("kind") or "move") == "move" and o.get("delta_m"):
+        what = "move " + agent.move_words(o["delta_m"])
+    title = o.get("title") or o.get("kind") or "fix"
+    return f"{title}: {what}" if what and what not in title else title
+
+
+def apply(ws: Workspace, scene_id: str, options: list[dict], *, source: str | None = None, actor: str | None = None,
+          clash_ids: list[str | None] | None = None) -> dict:
     """Keep every fix of an accepted plan (or one accepted option), all or nothing. Each is tried again first, as its
     proposal tried it (`recheck`), and several are checked together (`verify_together`): a fix that no longer passes
     (the model changed since, or it was never verified) raises NotVerified and nothing is kept; what the trials make,
@@ -749,18 +771,40 @@ def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
         if len(checked) > 1:
             _check_together(ws, scene_id, checked)
         scene = ws.scene(scene_id)
+        ids = list(clash_ids or []) + [None] * len(checked)
+        kind = (checked[0].get("kind") or "move") if len(checked) == 1 else "plan"
+        log = ws.journal(scene_id).record(scene, source or ("fix" if len(checked) == 1 else "plan"), kind, actor=actor,
+                                          requirements=requirements.current_id())
         # All or nothing: a fix refused part way (a penetration whose host may no longer take it) undoes the others.
-        with edits.kept_files(scene, set().union(*(option_files(scene, o) for o in checked))):
+        with log as rec, edits.kept_files(scene, set().union(*(option_files(scene, o) for o in checked))):
+            rec.title = checked[0].get("title") or kind if len(checked) == 1 else f"Plan of {len(checked)} fixes"
+            rec.summary = "; ".join(_words(o) for o in checked)
+            rec.params = {"options": [{k: v for k, v in o.items() if k not in ("preview", "before", "placements")}
+                                      for o in checked]}
+            rec.clashes = [{"id": ids[k], "pair": list(option_pair(o)[:2])} for k, o in enumerate(checked)]
+            rec.check = {"verified": True, "min_clearance_m": min((o["min_clearance_m"] for o in checked
+                                                                   if o.get("min_clearance_m") is not None), default=None)}
+            moved = list(dict.fromkeys(g for o in checked for g in [*o["moved"], *EXTRA_FILES.get(
+                o.get("kind", "move"), lambda _: [])(o)]))
+            was = parametric.snapshot(scene, moved)   # what the model says besides the shape (docs/editing-parity.md)
+            readings = consistency.measure(scene, moved) if was else {}
             for k, o in enumerate(checked):
                 r, made = KEEP[o["kind"]](ws, scene_id, o)
                 runs = made if made and isinstance(made[0], list) else [made] if made else []
                 pieces += runs or [[]]
                 groups.append(runs)
                 files.update(r["files"])
-                changed += r.get("changed", [g for run in runs for g in run] or o["moved"])
+                mine = r.get("changed", [g for run in runs for g in run] or o["moved"])
+                changed += mine
+                if was:   # brought along with the body as the trial did; still untrue: nothing is kept
+                    why = agent._keeps_true(scene, was, readings, list(dict.fromkeys([*o["moved"], *mine])), o["moved"][0])
+                    if why:
+                        raise NotVerified(f"'{o.get('title') or o['kind']}' would leave the model saying two things ({why}), "
+                                          "so nothing was kept", k)
                 if r.get("cut") is False:   # a penetration its host's team must cut: the clash stays open
                     not_cut.append({"index": k, "blocked_by": r["blocked_by"]})
-    return {"files": sorted(files), "pieces": pieces, "groups": groups, "changed": list(dict.fromkeys(changed)),
+            rec.changed = list(dict.fromkeys(changed))
+    return {"entry": rec.entry.to_dict() if rec.entry else None, "files": sorted(files), "pieces": pieces, "groups": groups, "changed": list(dict.fromkeys(changed)),
             "not_cut": not_cut, "verified": [{"min_clearance_m": o["min_clearance_m"],
                                               "checked_against": o["checked_against"]} for o in checked]}
 

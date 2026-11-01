@@ -155,7 +155,7 @@ class Inspection:
         try:
             run = asdict(edits.run_of(scene, gid))
             context_eval.check_offset_profile(scene, gid)
-            if scene.entity(gid).is_a() in edits.FITTING_CLASS and abs(run['direction'][2]) < 1e-6:
+            if edits.fitting_class(scene.entity(gid)) is not None and abs(run['direction'][2]) < 1e-6:
                 capabilities.append('offset')
         except (edits.Unsupported, RuntimeError, ValueError) as exc:
             unsupported.append(str(exc))
@@ -418,8 +418,16 @@ def accept(ws, scene_id, proposal_id, acknowledged_conditions):
             resolved = _resolved_pairs(ws, scene_id, private, proposal['objective'], result)
         except Exception as exc:
             raise ContextError(409, f'Fresh proposal checks failed: {exc}') from exc
-        scene.__dict__ = private.__dict__.copy()
         changed = list(dict.fromkeys([*(g for ps in result['pieces'] for g in ps),
                                       *(g for e in result['edits'] for g in e.get('moved', []))]))
+        words = '; '.join(f"{e.get('kind', 'edit')} {', '.join(e.get('moved', [])[:1])}: {e.get('label') or ''}".strip(': ')
+                          for e in result['edits'])
+        with ws.journal(scene_id).record(scene, 'wider', 'wider', title='Wider fix', summary=words) as rec:
+            scene.__dict__ = private.__dict__.copy()
+            rec.changed, rec.files = changed, list(result['files'])
+            rec.params = {'proposal': proposal_id, 'operations': record['operations']}
+            rec.clashes = [{'id': objective_clash, 'pair': [proposal['objective']['element_a'], proposal['objective']['element_b']]}
+                           for objective_clash in [proposal['objective'].get('clash_id')]]
+            rec.clashes += [{'id': None, 'pair': [r['element_a'], r['element_b']]} for r in resolved[1:]]
         return dict(files=result['files'], pieces=result['pieces'], edits=result['edits'],
                     resolved_pairs=resolved, checks=result['checks'], changed=changed)

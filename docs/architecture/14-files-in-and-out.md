@@ -288,6 +288,17 @@ what it compiles into and how pages send it: [15](15-requirements-settings-and-c
   "PC-03-Palletising-Cell-RevA-orca.zip"), and `orca-export.zip` when the files share none.
 - MCP's stdio server writes the same files to a new `$TMP/orca-export-*` folder and returns their paths
   ([11](11-mcp-and-agent-links.md)).
+- **The edit log goes with them** ([docs/manual-edits.md](../manual-edits.md)): every element a kept entry changed or
+  made carries an `ORCA_Edit` pset (EntryIds, Ops, Summary, Source, When, Clashes) in the written IFC, written inside
+  `edits.scratch` around the write (the live models never hold it, so the log's undo is untouched); a zip also holds
+  `orca-edits.json` and `orca-edits.csv` (a single file stays a bare IFC). From STEP, a part a hand edit deleted is
+  taken out of its assembly with its own shape (`step.export(remove=)`, `service.step_removed`), and a box or cylinder
+  whose side or radius was pushed is written with its new profile (`step_changes` compares profiles too).
+- **What the IFC says besides the shape is written true** ([docs/editing-parity.md](../editing-parity.md)): a hand
+  edit brings an element's layer or profile set, `Axis`, base quantities and path joins along with its body before it
+  is kept, so the exported file carries them as the edit left them. An element whose layer set its type shared is
+  written with its own type ("… (ORCA)"); a type's mapped shape edited for one element is that element's own copy, the
+  type's other elements still mapped. The UTF-8 log files keep the CSV's own line ends on every host.
 
 ## Out: the coordination report (PDF) and BCF
 
@@ -377,6 +388,14 @@ flowchart TB
   `orca-report[-<team or model>].pdf` files and `orca-issues.bcfzip`. `_build_document` keeps the bytes in
   `_documents` (the 24 newest) for `GET /api/documents/{doc_id}` (404 "That report has expired. Build it again."
   after), and writes a copy to `$TMP/sightline-exports/<doc id>-<name>` (the temp folder keeps the internal name).
+
+- **The edit log in the report** ([docs/manual-edits.md](../manual-edits.md)): `generate(journal=)` (the page's
+  route and MCP's `generate_report` both pass the scene's log through `_build_document`). A clash's page gets **What
+  was done** (`timeline_html`: each entry, who and when, its check in words, warnings with reviewers, "after E1"; its
+  state from `edit_state`: "Fix applied, then edited by hand, still resolved" or "…, clash back"; the last entry's
+  picture as "After the edits"), and a clash with entries gets a page even without the page's evidence. `_facts` gives
+  Muse the same timeline. **Changes to the model** (`changes_html`) lists every kept entry after the summary. BCF: a
+  comment per entry on its clash's topic, and a Request topic for a hand edit on no page that needs review.
 
 ## Out: built-view pictures
 

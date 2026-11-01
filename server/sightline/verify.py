@@ -5,6 +5,7 @@ millimetre or so; the UI always displays these numbers, never its own.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import ifcopenshell.geom
@@ -40,9 +41,54 @@ def _settings():
     return s
 
 
+def geometry_threads() -> int:
+    """Threads that triangulate a check's neighbourhood (SIGHTLINE_GEOM_THREADS, default up to 8): an edit to a type
+    with 100 elements across a building checks against most of it, 33 s on one thread, 10 s on eight."""
+    try:
+        n = int(os.environ.get("SIGHTLINE_GEOM_THREADS", "0"))
+    except ValueError:
+        n = 0
+    return max(1, n) if n > 0 else max(1, min(8, os.cpu_count() or 1))
+
+
+BREP_ITEMS = ("IfcFacetedBrep", "IfcShellBasedSurfaceModel", "IfcFaceBasedSurfaceModel", "IfcAdvancedBrep")
+
+
+def _heavy(e) -> bool:
+    """A neighbour slow to triangulate again and again: a faceted or surface body with openings cut through it (a
+    Revit toposolid with a pad cut: 19 s in OpenCASCADE, every check near it)."""
+    if not getattr(e, "HasOpenings", None) or e.Representation is None:
+        return False
+    items = []
+    for r in e.Representation.Representations:
+        if r.RepresentationIdentifier == "Body":
+            for i in r.Items:
+                items += list(i.MappingSource.MappedRepresentation.Items) if i.is_a("IfcMappedItem") else [i]
+    return any(i.is_a(c) for i in items for c in BREP_ITEMS)
+
+
+def _cached_shape(scene: IfcScene, e):
+    """A heavy neighbour's world triangles, made once per shape: kept on the scene by a digest of everything that
+    draws it (its body, placement and openings), so any change to it is triangulated afresh. None when it cannot be."""
+    from . import consistency   # its digest of everything under some entities
+    model = scene.models[scene.index_of(e.GlobalId)]
+    roots = [e.ObjectPlacement, e.Representation]
+    for rel in e.HasOpenings:
+        o = rel.RelatedOpeningElement
+        roots += [o.ObjectPlacement, o.Representation]
+    key = (scene.index_of(e.GlobalId), e.GlobalId, consistency._digest(model, [r for r in roots if r is not None]))
+    cache = scene.__dict__.setdefault("_heavy_shapes", {})
+    if key not in cache:
+        try:
+            cache[key] = ifcopenshell.geom.create_shape(_settings(), e)
+        except RuntimeError:
+            cache[key] = None
+    return cache[key]
+
+
 def check(scene: IfcScene, moved: list[str], clearance_m: float = DEFAULT_CLEARANCE_M,
           ignore: set[str] | None = None, *, exclude_connected: bool = True,
-          touching: set[str] | None = None) -> Verdict:
+          touching: set[str] | None = None, neighbours: dict | None = None) -> Verdict:
     """Check the moved elements against every other element in the model.
 
     A fix passes when nothing penetrates the moved elements and nothing sits closer than
@@ -53,6 +99,10 @@ def check(scene: IfcScene, moved: list[str], clearance_m: float = DEFAULT_CLEARA
 
     Context evaluation calls this for each changed piece with `exclude_connected=False`.
     Its validated `touching` pairs waive clearance only, never penetration checks.
+
+    `neighbours`: a dict one caller keeps across the checks of one edit (before it, then after it): the triangles of
+    what did not change are made once. Only for what the edit does not touch: what it changes is `moved` or `ignore`
+    in the check after, so never read from here.
     """
     if not moved:
         return Verdict(True, [], None, 0)
@@ -68,10 +118,28 @@ def check(scene: IfcScene, moved: list[str], clearance_m: float = DEFAULT_CLEARA
     # The default "opencascade.brep" tree has no *_many clash queries; the triangle BVH tree does.
     tree = ifcopenshell.geom.tree(backend="opencascade.trianglebvh")
     by_file: dict[int, list] = {}
-    for e in others + targets:  # one iterator per federated file, over just the elements we need
+    keep = neighbours if neighbours is not None else {}
+    for e in others:   # what is slow to triangulate comes from the scene's cache (what moves never does)
+        shape = keep.get(e.GlobalId) or (_cached_shape(scene, e) if _heavy(e) else None)
+        if shape is not None:
+            tree.add_element(shape)
+        else:
+            by_file.setdefault(scene.index_of(e.GlobalId), []).append(e)
+    for e in targets:  # one iterator per federated file, over just the elements we need
         by_file.setdefault(scene.index_of(e.GlobalId), []).append(e)
+    mine = {e.GlobalId for e in targets}
     for i, include in by_file.items():
-        tree.add_iterator(ifcopenshell.geom.iterator(_settings(), scene.models[i], include=include))
+        threads = geometry_threads() if len(include) > 50 else 1   # threads cost more than they save on a few
+        it = ifcopenshell.geom.iterator(_settings(), scene.models[i], threads, include=include)
+        if not it.initialize():
+            continue
+        while True:
+            shape = it.get()
+            tree.add_element(shape)
+            if neighbours is not None and shape.guid not in mine:
+                neighbours[shape.guid] = shape
+            if not it.next():
+                break
 
     def other_of(c):
         return c.b if c.a.GlobalId in moved else c.a

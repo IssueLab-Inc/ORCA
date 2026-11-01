@@ -52,7 +52,9 @@ reason → rank**. Nothing reaches `Result.options` without passing the geometry
   line to `notes` ("Found by ORCA's own detection: test, name." or "From a Navisworks clash report: ..."; "Images are
   views of this clash." when there are some), and fills `nearby` from `Workspace._nearby`: per side that can move,
   up to 3 of its other hard clashes with physical partners, within 3 m of where A and B meet (`NEARBY_M`,
-  `NEARBY_MAX`), never the fixed side's partners.
+  `NEARBY_MAX`), never the fixed side's partners. With an edit log for the scene, `Workspace._with_edits` adds to
+  `notes` the edits already kept or undone on A or B (`journal.entry_lines`: "E2 (you, 14:05): …; follows E1",
+  "[undone]"), so Muse builds on them and does not propose again what the person took back; nothing when there are none.
 - **`Workspace.fix_settings`**: with coordination requirements in force, the `clearance_m` the pair must keep, a
   `policy` per element (`requirements.Policy`), the `guidance` lines (`requirements.prompt_text(doc, "fixes")`), the
   `doc`, and `recommend` (why nothing may be edited) when neither side may be edited. With none, `{}`: today's
@@ -516,7 +518,9 @@ Muse Spark with tools over the open report and model. The tools are the same ope
    `domain_packs/chat.md`.
 2. `Chat.turn` works on a deep copy of the session's messages, so a turn in flight never sees another's tool history.
    It appends the user message with a `[context]` line from `chat.Context` (whether a model is open, the report with
-   its size and source, the selected clash, what is fixed).
+   its size and source, the selected clash, what is fixed, the element the user has selected and the Edit tool's
+   chosen face (`selected`), the last three edits kept, from the edit log). The turn remembers whose it is and what
+   the user said, for the hand-edit consent gate (`edit_keep`, `undo_edit`; [docs/manual-edits.md](../manual-edits.md)).
 3. Up to `MAX_STEPS` (8) model calls: emit `thinking`, call `model.chat(messages, TOOLS)`. No tool calls: that text is
    the answer. Otherwise run each call through `_run`, emit `tool` and `tool_result` (a one-line summary), and append
    the result (JSON, at most 12,000 characters). A tool that raises returns `{"error": ...}` to the model, which keeps
@@ -543,6 +547,11 @@ take proposals as their routes do, `find_patterns` the pattern route's one propo
 | `describe_element`, `find_elements` | An element (and its run); a search by name, tag or class | none | none |
 | `find_openings` | Openings through an obstacle on a segment's line, with the `dz` that passes | none | none |
 | `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`, `check_seat` | A specific idea checked against the whole model, not kept | none | none |
+| `list_faces` | An element's faces to edit by hand, named (east end, north face, top), with what each allows; "selected" for the user's selection | none | none |
+| `edit_check` | A hand edit checked (`manual.check`), not kept; remembered as the conversation's pending edit. `carry` and `scope: "type"` only when the user asks to take joined parts along or to change the type, or every element of it (`domain_packs/chat.md`) | none | ui `edit_preview` (the Edit tool shows it with Keep) |
+| `edit_keep` | Keeps the pending edit (`manual.apply`, source `muse`) only when the user's own message this turn says so (`chat.consents`); never in the turn Muse checked it unless the message is only "keep it"; one with clashes also needs `accept_clashes` and the person to say it with them ("keep it with the clash", `chat.accepts`, not "keep it if it makes no clashes"), one that leaves a joint open likewise ("keep it with the open joint") | none | ui `edit_kept` (with the patch) |
+| `undo_edit`, `list_edits` | The newest kept edit undone, only when the user's message asks ("undo", "revert", "take it back"); the log | none | ui `edit_stepped` (undo) |
+| `edit_property` | What the model says about an element changed and kept at once (`property_edits.edit`, source `muse`), only when the user's own message this turn says the new value, or names the type, material, storey or classification (`chat._said`; refused when it also says don't, cancel, stop, wait) | none | ui `edit_kept` |
 | `propose_fixes` (`escalate`) | `Workspace.propose`, or `Workspace.escalate` with `escalate: true`; the reply lists verified options and failed ideas, and suggests a second try when nothing (or only a resize or an opening) passed | one proposal; a second try's caps and budget | `ui` `select_clash`, `agent` (each agent event), `proposal` |
 | `find_root_causes` | `plans.root_causes` | none | none |
 | `find_patterns` | `plans.patterns`, then the shared reading (`plans.read_patterns`) | one proposal for a reading not made yet (as the route); a kept reading is free | none |

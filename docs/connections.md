@@ -109,6 +109,7 @@ every joint must move alike. It goes out from what was asked to move, one joint 
 | a straight segment joined by a cap, when the move runs along it (less than 0.5 mm across, absolute: 1° would leave 4 mm at 250 mm) | stretched at that end by the along part; refused when it would be shorter than 50 mm ("it can lose at most …") |
 | a rectangular segment joined end-on by its side (80% of the face covered: a ladder bend sitting on its riser), when the move runs along the side's normal | grows to that side |
 | anything joined to a segment's side that does not cover it | a branch, refused ("it branches off") |
+| a level straight segment joined by a cap, the move square to it, and joined at its far end too (`refit`: hand moves, and Muse's unless `SIGHTLINE_MOVE_REFIT=off`) | re-fitted: its joined end goes with the move, a pair of bends and a riser take it back to the rest, which stays (`edits.apply_jog`); too short, a move too small for the bends, or up and across at once: taken along |
 | any other straight segment | taken along |
 | a segment reached at a second face | moves whole |
 | more than `SIGHTLINE_CARRY_MAX` (12) parts taken along | refused |

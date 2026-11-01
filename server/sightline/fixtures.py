@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import ifcopenshell
 import ifcopenshell.api
+import ifcopenshell.util.element
+import ifcopenshell.util.system
 import ifcopenshell.util.unit
 
 
@@ -744,6 +746,319 @@ def build_seat_fixture(path: Path, millimetres: bool = False) -> Path:
     block("IfcWall", "Upstand U2", 8.9, 9.1, -1, 1, -0.5, 0.5)
     block("IfcPipeSegment", "Riser R1", 0.2, 0.3, 0.2, 0.3, -0.3, 2.0)
     block("IfcColumn", "Block K2", 0.1, 0.5, 1.2, 1.6, -0.55, 0.06)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path
+
+
+def build_edit_fixture(path: Path) -> Path:
+    """Elements for hand edits (manual.py), drawn the way Northbank draws them, in metres:
+
+    - W1, a wall drawn as its elevation (a 4 x 3 m outline) extruded 0.2 m through its thickness, with a 1 x 1 m window
+      opening (x 1-2, z 1-2); its east end at x = 4.
+    - C1, a column whose west face is at x = 5 (the wall's end aligns to it).
+    - S1, a slab drawn as its plan outline (x 0-3, y 4-7) and extruded 0.2 m up from z = 3.
+    - B1, an I-section beam along x at y = 2.5 (z 2.5-2.9), with C2, a column standing on it (a transfer element).
+    - P1, a round pipe (radius 50 mm) along x at y = -1, z = 1.5, from x = 0 to 4.
+    - T1, a 0.4 x 0.2 m post turned 30° in its plan (its rectangle's RefDirection), 1 m tall, centred on (10, 0).
+    - D1 and D2, two 0.3 x 0.3 x 2 m columns sharing one body (one IfcShapeRepresentation), at x = 12 and x = 13.
+    - K1, a duct fitting of two solids: a 1 x 0.3 x 0.3 m box along x (x 20-21, y 0-0.3, z 1-1.3) and a 0.3 x 0.3 x
+      0.6 m box standing on its east end (x 20.7-21, z 1.3-1.9).
+    - M1, a 0.6 x 0.4 x 0.3 m box drawn as a triangulated mesh (x 24-24.6, y 0-0.4, z 1-1.3).
+    - WP, a wall drawn in plan: a 3 x 0.2 m rectangle (x 30-33, y 0-0.2) extruded 3 m up, with a 1 x 2 m door opening
+      through it (x 31-32, y -0.1 to 0.3, z 0-2).
+    - BW, a 0.2 x 0.5 m rectangular beam along x (x 30-34, y 10-10.2, z 3-3.5) with a web opening across it (x 31-31.4,
+      y 9.9-10.3, z 3.1-3.4).
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA edit fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model", context_identifier="Body",
+                                target_view="MODEL_VIEW", parent=ctx)
+    site = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcSite", name="Site")
+    building = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuilding", name="Building")
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 01")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[site])
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=site, products=[building])
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=building, products=[storey])
+
+    def place(e, origin):
+        m = np.eye(4)
+        m[:3, 3] = origin
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e, matrix=m, is_si=True)
+
+    def element(cls, name, profile, depth, origin, axis=(0.0, 0.0, 1.0), ref=(1.0, 0.0, 0.0)):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        pos = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint((0.0, 0.0, 0.0)),
+                                              model.createIfcDirection(axis), model.createIfcDirection(ref))
+        solid = model.createIfcExtrudedAreaSolid(profile, pos, model.createIfcDirection((0.0, 0.0, 1.0)), float(depth))
+        rep = model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])
+        ifcopenshell.api.run("geometry.assign_representation", model, product=e, representation=rep)
+        place(e, origin)
+        return e
+
+    def outline(points):
+        cps = [model.createIfcCartesianPoint((float(x), float(y))) for x, y in points]
+        return model.createIfcArbitraryClosedProfileDef("AREA", None, model.createIfcPolyline(cps + [cps[0]]))
+
+    # The wall: its elevation outline in the solid's XY (x along the wall, y up), extruded 0.2 m towards -y.
+    wall = element("IfcWall", "W1", outline([(0, 0), (4, 0), (4, 3), (0, 3)]), 0.2, (0.0, 0.0, 0.0),
+                   axis=(0.0, -1.0, 0.0), ref=(1.0, 0.0, 0.0))
+    opening = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcOpeningElement", name="Window opening")
+    _box(model, body, opening, (1.0, 0.4, 1.0), (1.0, -0.3, 1.0))
+    ifcopenshell.api.run("feature.add_feature", model, feature=opening, element=wall)
+    column = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcColumn", name="C1")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[column])
+    _box(model, body, column, (0.3, 0.3, 3.0), (5.0, -0.25, 0.0))
+    element("IfcSlab", "S1", outline([(0, 4), (3, 4), (3, 7), (0, 7)]), 0.2, (0.0, 0.0, 3.0))
+    ishape = model.createIfcIShapeProfileDef("AREA", "UB 406x178", None, 0.2, 0.4, 0.01, 0.015)
+    element("IfcBeam", "B1", ishape, 4.0, (0.0, 2.5, 2.7), axis=(1.0, 0.0, 0.0), ref=(0.0, 1.0, 0.0))
+    on = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcColumn", name="C2")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[on])
+    _box(model, body, on, (0.2, 0.2, 1.0), (1.9, 2.4, 2.9))
+    element("IfcPipeSegment", "P1", model.createIfcCircleProfileDef("AREA", None, None, 0.05), 4.0, (0.0, -1.0, 1.5),
+            axis=(1.0, 0.0, 0.0), ref=(0.0, 1.0, 0.0))
+    c30, s30 = float(np.cos(np.radians(30))), float(np.sin(np.radians(30)))
+    turned = model.createIfcRectangleProfileDef("AREA", None, model.createIfcAxis2Placement2D(
+        model.createIfcCartesianPoint((0.0, 0.0)), model.createIfcDirection((c30, s30))), 0.4, 0.2)
+    element("IfcMember", "T1", turned, 1.0, (10.0, 0.0, 0.0))
+    d1 = element("IfcColumn", "D1", model.createIfcRectangleProfileDef("AREA", None, None, 0.3, 0.3), 2.0, (12.0, 0.0, 0.0))
+    d2 = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcColumn", name="D2")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[d2])
+    d2.Representation = model.createIfcProductDefinitionShape(None, None, d1.Representation.Representations)
+    place(d2, (13.0, 0.0, 0.0))
+
+    def box_solid(size, corner):
+        sx, sy, sz = size
+        prof = model.createIfcRectangleProfileDef("AREA", None, model.createIfcAxis2Placement2D(
+            model.createIfcCartesianPoint((sx / 2, sy / 2)), None), float(sx), float(sy))
+        pos = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(float(c) for c in corner)), None, None)
+        return model.createIfcExtrudedAreaSolid(prof, pos, model.createIfcDirection((0.0, 0.0, 1.0)), float(sz))
+
+    fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcDuctFitting", name="K1")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[fitting])
+    rep = model.createIfcShapeRepresentation(body, "Body", "SweptSolid",
+                                             [box_solid((1.0, 0.3, 0.3), (0, 0, 0)), box_solid((0.3, 0.3, 0.6), (0.7, 0, 0.3))])
+    ifcopenshell.api.run("geometry.assign_representation", model, product=fitting, representation=rep)
+    place(fitting, (20.0, 0.0, 1.0))
+    mesh = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingElementProxy", name="M1")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[mesh])
+    corners = [(x, y, z) for z in (0.0, 0.3) for y in (0.0, 0.4) for x in (0.0, 0.6)]
+    quads = [(1, 3, 4, 2), (5, 6, 8, 7), (1, 2, 6, 5), (3, 7, 8, 4), (1, 5, 7, 3), (2, 4, 8, 6)]   # outward, 1-based
+    tris = [t for a, b, c, d in quads for t in ((a, b, c), (a, c, d))]
+    faceset = model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D(corners), None, True, tris, None)
+    rep = model.createIfcShapeRepresentation(body, "Body", "Tessellation", [faceset])
+    ifcopenshell.api.run("geometry.assign_representation", model, product=mesh, representation=rep)
+    place(mesh, (24.0, 0.0, 1.0))
+    for name, cls, size, corner, hole, hole_at in (
+            ("WP", "IfcWall", (3.0, 0.2, 3.0), (30.0, 0.0, 0.0), (1.0, 0.4, 2.0), (31.0, -0.1, 0.0)),
+            ("BW", "IfcBeam", (4.0, 0.2, 0.5), (30.0, 10.0, 3.0), (0.4, 0.4, 0.3), (31.0, 9.9, 3.1))):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        _box(model, body, e, size, corner)
+        o = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcOpeningElement", name=f"{name} opening")
+        _box(model, body, o, hole, hole_at)
+        ifcopenshell.api.run("feature.add_feature", model, feature=o, element=e)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path
+
+
+def build_parametric_fixture(path: Path) -> Path:
+    """Elements drawn the way authoring tools export them, with the data that must stay true after an edit
+    (docs/editing-parity.md), in metres:
+
+    - W1 and W2, walls of one type (WT-250, a 250 mm layer set: 15 plaster, 200 block, 35 insulation), each with a
+      layer set usage along its thickness (AXIS2), an `Axis` and a plan-drawn body (`geometry.add_wall_representation`):
+      W1 along x from (0, 0) for 4 m, W2 along y from (4, 0) for 3 m, both 3 m high, joined W1's end to W2's start
+      (`IfcRelConnectsPathElements`).
+    - SL1, a 6 x 4 m slab (x 0-6, y 5-9, top at z = 3.2) with a 200 mm layer set usage up its depth (AXIS3).
+    - BM1 and BM2, beams of one type (BT-UB, an I-section profile set: 200 wide x 400 deep), each with a profile set
+      usage (cardinal point 5), an `Axis` and a 5 m body along x: BM1 at y = 12, BM2 at y = 14, both centred at z = 3.
+    - F1 and F2, duct fittings of one type (FT-BOX) whose body is the type's (`IfcMappedItem`): a 0.6 x 0.4 x 0.3 m
+      box. F1 at (10, 0, 1); F2 at (12, 0, 1), its map turned 90° about z and moved 0.2 m along x (`MappingTarget`).
+    - Base quantities on W1, W2, SL1 and BM1 (`Qto_*BaseQuantities`), written from their sizes.
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA parametric fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model", context_identifier="Body",
+                                target_view="MODEL_VIEW", parent=ctx)
+    axis_ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model", context_identifier="Axis",
+                                    target_view="GRAPH_VIEW", parent=ctx)
+    site = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcSite", name="Site")
+    building = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuilding", name="Building")
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 01")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[site])
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=site, products=[building])
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=building, products=[storey])
+
+    def element(cls, name, matrix):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e, matrix=matrix, is_si=True)
+        return e
+
+    def at(origin, x=(1.0, 0.0, 0.0), z=(0.0, 0.0, 1.0)):
+        m = np.eye(4)
+        x, z = np.asarray(x, float), np.asarray(z, float)
+        m[:3, 0], m[:3, 1], m[:3, 2], m[:3, 3] = x, np.cross(z, x), z, origin
+        return m
+
+    def material(name):
+        return ifcopenshell.api.run("material.add_material", model, name=name)
+
+    def qto(e, name, values):
+        q = ifcopenshell.api.run("pset.add_qto", model, product=e, name=name)
+        ifcopenshell.api.run("pset.edit_qto", model, qto=q, properties=values)
+
+    # Walls: a type with a layer set; each wall's usage runs along its thickness.
+    wall_type = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcWallType", name="WT-250")
+    layers = ifcopenshell.api.run("material.add_material_set", model, name="Wall 250", set_type="IfcMaterialLayerSet")
+    for mat, t in (("Plaster", 0.015), ("Block", 0.2), ("Insulation", 0.035)):
+        layer = ifcopenshell.api.run("material.add_layer", model, layer_set=layers, material=material(mat))
+        ifcopenshell.api.run("material.edit_layer", model, layer=layer, attributes={"LayerThickness": t})
+    ifcopenshell.api.run("material.assign_material", model, products=[wall_type], type="IfcMaterialLayerSet", material=layers)
+    walls = []
+    for name, origin, x, length in (("W1", (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), 4.0), ("W2", (4.0, 0.0, 0.0), (0.0, 1.0, 0.0), 3.0)):
+        w = element("IfcWall", name, at(origin, x))
+        ifcopenshell.api.run("type.assign_type", model, related_objects=[w], relating_type=wall_type)
+        ifcopenshell.api.run("geometry.assign_representation", model, product=w, representation=ifcopenshell.api.run(
+            "geometry.add_wall_representation", model, context=body, length=length, height=3.0, thickness=0.25))
+        ifcopenshell.api.run("geometry.assign_representation", model, product=w, representation=ifcopenshell.api.run(
+            "geometry.add_axis_representation", model, context=axis_ctx, axis=((0.0, 0.0), (length, 0.0))))
+        qto(w, "Qto_WallBaseQuantities", {"Length": length, "Width": 0.25, "Height": 3.0, "GrossSideArea": length * 3.0,
+                                          "NetSideArea": length * 3.0, "GrossVolume": length * 0.75, "NetVolume": length * 0.75})
+        walls.append(w)
+    ifcopenshell.api.run("geometry.connect_path", model, relating_element=walls[0], related_element=walls[1],
+                         relating_connection="ATEND", related_connection="ATSTART")
+
+    # The slab: a layer set usage up its depth.
+    slab = element("IfcSlab", "SL1", at((0.0, 5.0, 3.0)))
+    slab_layers = ifcopenshell.api.run("material.add_material_set", model, name="Slab 200", set_type="IfcMaterialLayerSet")
+    for mat, t in (("Concrete", 0.15), ("Screed", 0.05)):
+        layer = ifcopenshell.api.run("material.add_layer", model, layer_set=slab_layers, material=material(mat))
+        ifcopenshell.api.run("material.edit_layer", model, layer=layer, attributes={"LayerThickness": t})
+    ifcopenshell.api.run("material.assign_material", model, products=[slab], type="IfcMaterialLayerSetUsage",
+                         material=slab_layers)
+    ifcopenshell.api.run("material.edit_layer_usage", model, usage=ifcopenshell.util.element.get_material(slab),
+                         attributes={"LayerSetDirection": "AXIS3", "DirectionSense": "POSITIVE"})
+    _box(model, body, slab, (6.0, 4.0, 0.2), (0.0, 5.0, 3.0))
+    qto(slab, "Qto_SlabBaseQuantities", {"Width": 0.2, "Length": 6.0, "GrossArea": 24.0, "GrossVolume": 4.8,
+                                         "NetVolume": 4.8})
+
+    # Beams: a type with an I-section profile set; each body is the profile along the beam's own z.
+    beam_type = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBeamType", name="BT-UB")
+    ishape = model.createIfcIShapeProfileDef("AREA", "UB 400x200", None, 0.2, 0.4, 0.01, 0.015)
+    profiles = ifcopenshell.api.run("material.add_material_set", model, name="UB 400x200", set_type="IfcMaterialProfileSet")
+    ifcopenshell.api.run("material.add_profile", model, profile_set=profiles, material=material("Steel"), profile=ishape)
+    ifcopenshell.api.run("material.assign_material", model, products=[beam_type], type="IfcMaterialProfileSet", material=profiles)
+    for name, y in (("BM1", 12.0), ("BM2", 14.0)):
+        b = element("IfcBeam", name, at((0.0, y, 3.0), x=(0.0, 1.0, 0.0), z=(1.0, 0.0, 0.0)))
+        ifcopenshell.api.run("type.assign_type", model, related_objects=[b], relating_type=beam_type)
+        ifcopenshell.api.run("material.edit_profile_usage", model, usage=ifcopenshell.util.element.get_material(b),
+                             attributes={"CardinalPoint": 5})
+        ifcopenshell.api.run("geometry.assign_representation", model, product=b, representation=ifcopenshell.api.run(
+            "geometry.add_profile_representation", model, context=body, profile=ishape, depth=5.0, cardinal_point=5))
+        ifcopenshell.api.run("geometry.assign_representation", model, product=b, representation=ifcopenshell.api.run(
+            "geometry.add_axis_representation", model, context=axis_ctx, axis=((0.0, 0.0, 0.0), (0.0, 0.0, 5.0))))
+        if name == "BM1":
+            area = 2 * 0.2 * 0.015 + (0.4 - 2 * 0.015) * 0.01
+            qto(b, "Qto_BeamBaseQuantities", {"Length": 5.0, "CrossSectionArea": area, "GrossVolume": area * 5.0,
+                                              "NetVolume": area * 5.0})
+
+    # Fittings: a type whose map is the body of each fitting.
+    fitting_type = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcDuctFittingType", name="FT-BOX")
+    prof = model.createIfcRectangleProfileDef("AREA", None, model.createIfcAxis2Placement2D(
+        model.createIfcCartesianPoint((0.3, 0.2)), None), 0.6, 0.4)
+    solid = model.createIfcExtrudedAreaSolid(prof, model.createIfcAxis2Placement3D(model.createIfcCartesianPoint((0.0, 0.0, 0.0)), None, None),
+                                             model.createIfcDirection((0.0, 0.0, 1.0)), 0.3)
+    ifcopenshell.api.run("geometry.assign_representation", model, product=fitting_type,
+                         representation=model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid]))
+    for name, x in (("F1", 10.0), ("F2", 12.0)):
+        f = element("IfcDuctFitting", name, at((x, 0.0, 1.0)))
+        ifcopenshell.api.run("type.assign_type", model, related_objects=[f], relating_type=fitting_type)
+        if name == "F2":
+            (mapped,) = [i for r in f.Representation.Representations for i in r.Items if i.is_a("IfcMappedItem")]
+            mapped.MappingTarget = model.createIfcCartesianTransformationOperator3D(
+                model.createIfcDirection((0.0, 1.0, 0.0)), model.createIfcDirection((-1.0, 0.0, 0.0)),
+                model.createIfcCartesianPoint((0.2, 0.0, 0.0)), 1.0, model.createIfcDirection((0.0, 0.0, 1.0)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path
+
+
+def build_mep_fixture(path: Path, schema: str = "IFC4") -> Path:
+    """Free duct ends for MEP hand edits (docs/editing-parity.md, Tier 2), 400 wide x 300 deep, centreline z = 2.8,
+    each straight with a port at both ends, none joined:
+
+    - DA along x from 0 to 3 (y = 0); DC along x from 4.5 to 6 on the same line: a gap of 1.5 m to join in line.
+    - DB along y from 1 to 4 (x = 4): square to DA in plan, the axes meeting at (4, 0): a corner to join with a bend.
+    - PA, a 100 mm round pipe along x from 0 to 3 at y = -2, z = 2.8, joined at its end to PB (3 to 4.5).
+
+    `schema` "IFC2X3" draws them as Revit's 2x3 exports do: IfcFlowSegment, what each is given by its type
+    (IfcDuctSegmentType, IfcPipeSegmentType).
+    """
+    model = ifcopenshell.api.run("project.create_file", version=schema)
+    if schema == "IFC2X3":   # every 2x3 root has an owner history: who made it, with what (as Revit's exports do)
+        person = ifcopenshell.api.run("owner.add_person", model, identification="ORCA", family_name="Fixture", given_name="ORCA")
+        org = ifcopenshell.api.run("owner.add_organisation", model, identification="ORCA", name="ORCA")
+        ifcopenshell.api.run("owner.add_person_and_organisation", model, person=person, organisation=org)
+        ifcopenshell.api.run("owner.add_application", model, application_developer=org, version="1",
+                             application_full_name="ORCA fixtures", application_identifier="ORCA")
+    kinds = {}
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA MEP fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model", context_identifier="Body",
+                                target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 02")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+    def segment(cls, name, start, direction, run, profile):
+        if schema == "IFC2X3":   # the class is generic; the type says duct or pipe
+            if cls not in kinds:
+                kinds[cls] = ifcopenshell.api.run("root.create_entity", model, ifc_class=f"{cls}Type", name=cls[3:])
+                kinds[cls].PredefinedType = "RIGIDSEGMENT"
+            e = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcFlowSegment", name=name)
+            ifcopenshell.api.run("type.assign_type", model, related_objects=[e], relating_type=kinds[cls],
+                                 should_map_representations=False)
+        else:
+            e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+        d = np.asarray(direction, float)
+        ref = np.cross((0.0, 0.0, 1.0), d)      # profile X across the run, level; profile Y up
+        position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(float(c) for c in start)),
+                                                   model.createIfcDirection(tuple(float(c) for c in d)),
+                                                   model.createIfcDirection(tuple(float(c) for c in ref)))
+        solid = model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)), float(run))
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+        for n, at in enumerate((np.asarray(start, float), np.asarray(start, float) + d * run)):
+            port = ifcopenshell.api.run("system.add_port", model, element=e)
+            port.Name, port.FlowDirection = f"Port {n}", ("SINK" if n == 0 else "SOURCE")
+            m = np.eye(4)
+            z = d if n else -d
+            m[:3, :3] = np.column_stack([ref, np.cross(z, ref), z])
+            m[:3, 3] = at
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+        return e
+
+    # IFC2X3 asks every profile for its position (IFC4 may leave it out)
+    at = lambda: model.createIfcAxis2Placement2D(model.createIfcCartesianPoint((0.0, 0.0))) if schema == "IFC2X3" else None
+    rect = lambda: model.createIfcRectangleProfileDef("AREA", None, at(), 0.4, 0.3)
+    segment("IfcDuctSegment", "DA", (0.0, 0.0, 2.8), (1.0, 0.0, 0.0), 3.0, rect())
+    segment("IfcDuctSegment", "DC", (4.5, 0.0, 2.8), (1.0, 0.0, 0.0), 1.5, rect())
+    segment("IfcDuctSegment", "DB", (4.0, 1.0, 2.8), (0.0, 1.0, 0.0), 3.0, rect())
+    pa = segment("IfcPipeSegment", "PA", (0.0, -2.0, 2.8), (1.0, 0.0, 0.0), 3.0, model.createIfcCircleProfileDef("AREA", None, at(), 0.05))
+    pb = segment("IfcPipeSegment", "PB", (3.0, -2.0, 2.8), (1.0, 0.0, 0.0), 1.5, model.createIfcCircleProfileDef("AREA", None, at(), 0.05))
+    out = next(p for p in ifcopenshell.util.system.get_ports(pa) if p.Name == "Port 1")
+    into = next(p for p in ifcopenshell.util.system.get_ports(pb) if p.Name == "Port 0")
+    ifcopenshell.api.run("system.connect_port", model, port1=out, port2=into, direction="SOURCE")
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path

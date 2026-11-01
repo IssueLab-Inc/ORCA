@@ -1,7 +1,38 @@
 import { Fragment, useState } from "react";
-import { ChevronsDownUp, ChevronsUpDown, Copy, Focus, ListFilter, Palette } from "lucide-react";
-import type { ElementProperties, ObjectRef, PropRow } from "./api";
+import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Focus, ListFilter, Palette, Pencil, Plus, X } from "lucide-react";
+import type { ElementProperties, ObjectRef, PropertyChange, PropertyChoices, PropRow } from "./api";
 import { IconButton } from "./ui";
+
+/** What a row's pencil changes (property_edits.py, docs/editing-parity.md Tier 3): an attribute, a value in one of the
+ * element's own property sets, its type, its storey, its material. Base quantities and what its type gives are not
+ * edited here: they follow the body, or belong to every element of the type. */
+export type RowEdit = { kind: "attribute"; name: string } | { kind: "property"; pset: string; name: string }
+  | { kind: "type" } | { kind: "container" } | { kind: "material" }
+  /** A classification reference it has (`current`) swapped or taken off, or (none) one added. */
+  | { kind: "classification"; current?: number };
+export const EDITABLE_ATTRIBUTES = new Set(["Name", "Description", "ObjectType", "Tag", "PredefinedType"]);
+
+/** The change a row's edit makes with the value typed or chosen (`draft`), as the server takes it. */
+export function changeFor(edit: RowEdit, draft: string, raw?: unknown): PropertyChange {
+  if (edit.kind === "attribute") return { kind: "attribute", name: edit.name, value: draft.trim() || null };
+  if (edit.kind === "property") {
+    const value = typeof raw === "boolean" ? draft === "yes" : typeof raw === "number" && draft.trim() !== "" ? Number(draft) : draft.trim() || null;
+    return { kind: "property", pset: edit.pset, name: edit.name, value };
+  }
+  if (edit.kind === "material") return { kind: "material", material: Number(draft) };
+  if (edit.kind === "classification") {
+    if (!draft && edit.current === undefined) throw new Error("Pick the classification to add.");
+    if (!draft) return { kind: "classification", reference: edit.current!, remove: true };
+    return { kind: "classification", reference: Number(draft), ...(edit.current !== undefined ? { replace: edit.current } : {}) };
+  }
+  return edit.kind === "type" ? { kind: "type", type: draft } : { kind: "container", container: draft };
+}
+
+/** Edit what the model says (the element's own card): its choices from the server, and saving one change. */
+export interface PropEditor {
+  choices: () => Promise<PropertyChoices>;
+  save: (change: PropertyChange) => Promise<void>;
+}
 
 /** The selected object's properties (docs/panels.md, "Properties"): what it is and where it sits, its type, materials,
  * classifications, groups and documents, then each property set and quantity set as the model has them
@@ -17,6 +48,8 @@ export type Row = {
   /** An object the row points at (the storey, the container): the panel can open its own properties. */
   link?: ObjectRef;
   href?: string;
+  /** What its pencil changes, when it can be edited. */
+  edit?: RowEdit;
 };
 export type Section = { title: string; rows: Row[]; fromType?: boolean };
 
@@ -46,8 +79,9 @@ export const classWords = (cls: string) => {
 const matchable = (v: unknown): v is string | number | boolean =>
   typeof v === "string" ? v !== "" : typeof v === "number" || typeof v === "boolean";
 
-/** One value of any kind as a row (a complex property's parts become rows of their own, after it). */
-function valueRows(p: PropRow, facet: string | undefined, fromType: boolean | undefined, prefix = ""): Row[] {
+/** One value of any kind as a row (a complex property's parts become rows of their own, after it). `edit`: what its
+ * pencil changes, for a plain value of the element's own (not a part, a range or a table, not its type's). */
+function valueRows(p: PropRow, facet: string | undefined, fromType: boolean | undefined, prefix = "", edit?: RowEdit): Row[] {
   const name = prefix ? `${prefix} › ${p.name}` : p.name;
   const from = fromType || p.from_type || undefined;
   if (p.kind === "complex") {
@@ -68,6 +102,10 @@ function valueRows(p: PropRow, facet: string | undefined, fromType: boolean | un
   }
   const row: Row = { name, value, fromType: from };
   if (facet && matchable(p.value) && p.kind !== "table" && p.kind !== "bounded") { row.facet = facet; row.raw = p.value; }
+  if (edit && !from && !prefix && p.kind !== "table" && p.kind !== "bounded") {
+    row.edit = edit;
+    if (row.raw === undefined && matchable(p.value)) row.raw = p.value;
+  }
   return [row];
 }
 
@@ -77,12 +115,14 @@ const href = (s: string | null | undefined) => (s && /^https?:\/\//i.test(s) ? s
  * size), its type, materials, classification, systems and groups, documents, then each property and quantity set and
  * each material's own sets. Empty ones are left out. */
 export function sections(p: ElementProperties): Section[] {
-  const attr = (a: PropRow) => valueRows(a, `attr:${a.name}`, undefined).map((r) => ({ ...r, name: words(r.name) }));
+  const attr = (a: PropRow) => valueRows(a, `attr:${a.name}`, undefined, "",
+    EDITABLE_ATTRIBUTES.has(a.name) ? { kind: "attribute", name: a.name } : undefined).map((r) => ({ ...r, name: words(r.name) }));
   const element: Row[] = [
     { name: "Class", value: p.ifc_class, raw: p.ifc_class, facet: "class" },
     ...p.attributes.flatMap(attr),
     ...(p.global_id ? [{ name: "GlobalId", value: p.global_id }] : []),
-    ...(p.storey ? [{ name: "Storey", value: p.storey.name, raw: p.storey.name, facet: "storey", link: p.storey }] : []),
+    ...(p.storey ? [{ name: "Storey", value: p.storey.name, raw: p.storey.name, facet: "storey", link: p.storey,
+      edit: { kind: "container" } as RowEdit }] : []),
     ...(p.container && p.container.global_id !== p.storey?.global_id
       ? [{ name: classWords(p.container.ifc_class), value: p.container.name, link: p.container }] : []),
     { name: "File", value: p.source, raw: p.source, facet: "file" },
@@ -90,7 +130,7 @@ export function sections(p: ElementProperties): Section[] {
   ];
   const type: Row[] = p.type ? [
     { name: "Class", value: p.type.ifc_class },
-    ...(p.type.name ? [{ name: "Name", value: p.type.name, raw: p.type.name, facet: "type" }] : []),
+    ...(p.type.name ? [{ name: "Name", value: p.type.name, raw: p.type.name, facet: "type", edit: { kind: "type" } as RowEdit }] : []),
     ...p.type.attributes.filter((a) => a.name !== "Name").map((a) => ({ name: words(a.name), value: shown(a.value, a.unit) })),
   ] : [];
   const materials: Row[] = p.materials.flatMap((m) => {
@@ -100,7 +140,8 @@ export function sections(p: ElementProperties): Section[] {
         i.fraction !== undefined ? `${num(i.fraction * 100)} %` : null, i.category].filter(Boolean);
       const label = m.usage === "layers" ? `Layer ${n + 1}${i.name ? ` · ${i.name}` : ""}`
         : m.usage === "single" ? "Material" : i.name || (m.usage === "profiles" ? "Profile" : "Material");
-      return { name: label, value: parts.join(" · ") || "—", fromType: from, ...(i.material ? { raw: i.material, facet: "material" } : {}) };
+      return { name: label, value: parts.join(" · ") || "—", fromType: from, ...(i.material ? { raw: i.material, facet: "material" } : {}),
+        ...(m.usage === "single" && !from ? { edit: { kind: "material" } as RowEdit } : {}) };
     };
     const head: Row[] = m.usage === "single" ? [] : [{ name: classWords(m.usage), value: m.name, fromType: from }];
     const total: Row[] = m.total_m !== undefined ? [{ name: "Total thickness", value: shown(m.total_m, "m"), fromType: from }] : [];
@@ -110,12 +151,14 @@ export function sections(p: ElementProperties): Section[] {
     name: c.system ?? "Classification", value: [c.identification, c.name].filter(Boolean).join(" ") || "—",
     ...(c.identification || c.name ? { raw: (c.identification ?? c.name)!, facet: `classif:${c.system ?? ""}` } : {}),
     href: href(c.location),
+    ...(c.id !== undefined ? { edit: { kind: "classification", current: c.id } as RowEdit } : {}),
   }));
   const groups: Row[] = p.groups.map((g) => ({ name: classWords(g.ifc_class), value: g.name, raw: g.name, facet: `group:${g.ifc_class}` }));
   const documents: Row[] = p.documents.map((d) => ({ name: d.identification ?? "Document", value: d.name ?? d.location ?? "—", href: href(d.location) }));
   const sets: Section[] = p.sets.map((s) => ({
     title: s.name, fromType: s.from_type || undefined,
-    rows: s.props.flatMap((r) => valueRows(r, `${s.kind}:${s.name}/${r.name}`, s.from_type)),
+    rows: s.props.flatMap((r) => valueRows(r, `${s.kind}:${s.name}/${r.name}`, s.from_type, "",
+      s.kind === "pset" && !s.from_type ? { kind: "property", pset: s.name, name: r.name } : undefined)),
   }));
   const materialSets: Section[] = p.materials.flatMap((m) => m.sets.map((s) => ({
     title: `${s.material ?? m.name} · ${s.name}`, fromType: m.from_type || undefined,
@@ -150,12 +193,87 @@ export interface RowActions {
   onIsolate: (row: Row) => void;
 }
 
-export function PropertySets({ data, loading, rows: acts, onOpen }: { data: ElementProperties | null; loading: boolean;
-  rows?: RowActions; onOpen?: (ref: ObjectRef) => void }) {
+/** The choices a row's edit picks from (a type, a storey, a material, a predefined type), as value and words; none for
+ * a value typed in. */
+export function editOptions(edit: RowEdit, c: PropertyChoices | null): { value: string; label: string }[] | null {
+  if (!c) return null;
+  if (edit.kind === "type") return c.types.map((t) => ({ value: t.global_id, label: t.name }));
+  if (edit.kind === "container") return c.containers.map((x) => ({ value: x.global_id, label: x.name }));
+  if (edit.kind === "material") return c.materials.map((m) => ({ value: String(m.id), label: m.name }));
+  if (edit.kind === "attribute" && edit.name === "PredefinedType") return c.predefined.map((v) => ({ value: v, label: v }));
+  if (edit.kind === "classification") return c.classifications.filter((r) => !r.on || r.id === edit.current)
+    .map((r) => ({ value: String(r.id), label: [r.system, r.identification, r.name].filter(Boolean).join(" ") || `#${r.id}` }));
+  return null;
+}
+
+const ADD_CLASSIFICATION = "+classification";
+const ADDING: Row = { name: "Classification", value: "", edit: { kind: "classification" } };
+
+export function PropertySets({ data, loading, rows: acts, onOpen, editor }: { data: ElementProperties | null; loading: boolean;
+  rows?: RowActions; onOpen?: (ref: ObjectRef) => void;
+  /** Edit what the model says (the element's own card only). */ editor?: PropEditor }) {
   const [filter, setFilter] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [closed, setClosed] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<{ key: string; draft: string; error?: string; saving?: boolean } | null>(null);
+  const [choices, setChoices] = useState<PropertyChoices | null>(null);
   if (!data) return <p className="hint">{loading ? "Reading its properties…" : "No properties to show."}</p>;
+  const begin = (key: string, r: Row) => {
+    const current = r.edit?.kind === "type" ? choices?.type : r.edit?.kind === "container" ? choices?.container
+      : r.edit?.kind === "material" ? (choices?.material != null ? String(choices.material) : "")
+      : r.edit?.kind === "classification" ? (r.edit.current !== undefined ? String(r.edit.current) : "") : undefined;
+    setEditing({ key, draft: current ?? (typeof r.raw === "boolean" ? (r.raw ? "yes" : "no") : r.raw !== undefined ? String(r.raw) : "") });
+    if (editor && !choices && r.edit && r.edit.kind !== "property") {
+      void editor.choices().then((c) => {
+        setChoices(c);
+        setEditing((e) => (e && e.key === key && !e.draft ? { ...e, draft: r.edit!.kind === "type" ? c.type ?? ""
+          : r.edit!.kind === "container" ? c.container ?? "" : r.edit!.kind === "material" ? String(c.material ?? "") : e.draft } : e));
+      }).catch(() => undefined);
+    }
+  };
+  const save = async (r: Row) => {
+    if (!editor || !editing || !r.edit) return;
+    setEditing({ ...editing, saving: true, error: undefined });
+    try {
+      await editor.save(changeFor(r.edit, editing.draft, r.raw));
+      setEditing(null); setChoices(null);
+    } catch (err) { setEditing((e) => (e ? { ...e, saving: false, error: (err as Error).message } : e)); }
+  };
+  /** The inline editor of one row (or of the classification being added): a list to pick from, yes/no, or a value. */
+  const form = (key: string, r: Row) => {
+    if (!editing || !r.edit) return null;
+    const opts = editOptions(r.edit, choices);
+    const choosing = r.edit.kind !== "property" && (r.edit.kind !== "attribute" || r.edit.name === "PredefinedType");
+    const had = r.edit.kind === "classification" ? r.edit.current : undefined;
+    return <Fragment key={key}><dt>{r.name}</dt>
+      <dd className="prow prow-edit">
+        <form className="pset-edit" noValidate onSubmit={(e) => { e.preventDefault(); void save(r); }}>
+          {choosing ? (
+            <select value={editing.draft} aria-label={`New ${r.name}`} disabled={!opts || editing.saving}
+              onChange={(e) => setEditing({ ...editing, draft: e.target.value, error: undefined })}>
+              {!opts && <option value={editing.draft}>Reading the choices…</option>}
+              {r.edit.kind === "attribute" && <option value="">(none)</option>}
+              {r.edit.kind === "classification" && <option value="">{had !== undefined ? "(take it off)" : "Pick one…"}</option>}
+              {opts?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          ) : typeof r.raw === "boolean" ? (
+            <select value={editing.draft} aria-label={`New ${r.name}`} onChange={(e) => setEditing({ ...editing, draft: e.target.value })}>
+              <option value="yes">Yes</option><option value="no">No</option>
+            </select>
+          ) : (
+            <input autoFocus type={typeof r.raw === "number" ? "number" : "text"} value={editing.draft} aria-label={`New ${r.name}`}
+              onChange={(e) => setEditing({ ...editing, draft: e.target.value, error: undefined })}
+              onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
+          )}
+          <button type="submit" className="ibtn" aria-label={`Keep the new ${r.name}`} data-tip="Keep it (in the edit log)" data-tip-side="left"
+            disabled={editing.saving}><Check size={14} aria-hidden /></button>
+          <IconButton icon={X} label="Cancel" size={14} tip="left" onClick={() => setEditing(null)} />
+        </form>
+        {editing.error && <p className="edit-warn">{editing.error}</p>}
+        {r.edit.kind === "classification" && opts && !opts.some((o) => o.value !== String(had))
+          && <p className="hint">Its model has no other classification reference to give it.</p>}
+      </dd></Fragment>;
+  };
   const all = sections(data);
   const list = filtered(all, filter);
   // The panel may be in a window of its own: copy with that window's clipboard.
@@ -182,14 +300,17 @@ export function PropertySets({ data, loading, rows: acts, onOpen }: { data: Elem
             {s.rows.map((r, i) => {
               const key = `${s.title}/${r.name}/${i}`;
               const usable = !!acts && !!r.facet && acts.facets.has(r.facet) && r.raw !== undefined;
+              if (editor && r.edit && editing?.key === key) return form(key, r);
               return <Fragment key={key}><dt>{r.name}{r.fromType && !s.fromType && <span className="from-type" data-tip="Given by its type">Type</span>}</dt>
-                <dd className="prow">
+                <dd className={`prow${editor && r.edit ? " editable" : ""}`}>
                   {r.link && onOpen ? <button type="button" className="pset-link" onClick={() => onOpen(r.link!)} data-tip="Its own properties">{r.value}</button>
                     : r.href ? <a href={r.href} target="_blank" rel="noreferrer">{r.value}</a>
                     : <button type="button" className="pset-value" title="Click to copy" onClick={(e) => copy(e, r.value, key)}>
                       {copied === key ? "Copied" : r.value}</button>}
                   <span className="prow-tools">
                     <button type="button" className="ibtn" aria-label={`Copy ${r.name}`} data-tip="Copy" onClick={(e) => copy(e, r.value, key)}><Copy size={13} aria-hidden /></button>
+                    {editor && r.edit && <button type="button" className="ibtn pencil" aria-label={`Change ${r.name}`} data-tip="Change it (kept in the edit log)"
+                      onClick={() => begin(key, r)}><Pencil size={13} aria-hidden /></button>}
                     {usable && <>
                       <button type="button" className="ibtn" aria-label={`Filter by ${r.name} = ${r.value}`} data-tip="Filter by this value" onClick={() => acts!.onFilter(r)}><ListFilter size={13} aria-hidden /></button>
                       <button type="button" className="ibtn" aria-label={`Colour by ${r.name}`} data-tip={`Colour by ${r.name}`} onClick={() => acts!.onColourBy(r)}><Palette size={13} aria-hidden /></button>
@@ -202,6 +323,9 @@ export function PropertySets({ data, loading, rows: acts, onOpen }: { data: Elem
         </details>
       ))}
       {!list.length && <p className="hint">{filter ? `Nothing matches “${filter}”.` : "The model gives this element no properties."}</p>}
+      {editor && !filter && (editing?.key === ADD_CLASSIFICATION ? <dl className="kv">{form(ADD_CLASSIFICATION, ADDING)}</dl>
+        : <button type="button" className="pset-add" onClick={() => begin(ADD_CLASSIFICATION, ADDING)}
+          data-tip="Classify it with a reference its model has (kept in the edit log)"><Plus size={13} aria-hidden /> Add a classification</button>)}
     </div>
   );
 }

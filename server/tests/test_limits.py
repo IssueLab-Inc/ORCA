@@ -102,3 +102,24 @@ def test_a_spoofed_forwarded_for_does_not_reset_a_visitors_caps(tmp_path, monkey
     monkeypatch.setattr(app_module, "detect_limit", ProposeLimit(1, 0, noun="detection runs"))
     assert detect("3.3.3.3").status_code == 200
     assert detect("4.4.4.4").status_code == 429
+
+
+def test_runs_after_hand_edits_have_their_own_cap_so_undo_and_keep_again_cannot_farm_them(tmp_path, monkeypatch):
+    from sightline import manual
+    from sightline.fixtures import build_edit_fixture
+    build_edit_fixture(tmp_path / "edit.ifc")
+    ws = Workspace(samples=tmp_path)
+    monkeypatch.setattr(app_module, "ws", ws)
+    monkeypatch.setattr(app_module, "detect_limit", ProposeLimit(1, 0, noun="detection runs"))
+    monkeypatch.setattr(app_module, "edit_rerun_limit", ProposeLimit(1, 0, noun="runs after hand edits"))
+    c = TestClient(app_module.app)
+    sid = c.post("/api/scenes", json={"samples": ["edit.ifc"]}).json()["id"]
+    wall = next(e.GlobalId for e in ws.scene(sid).model.by_type("IfcWall") if e.Name == "W1")
+    op = {"op": "push_pull", "element": wall, "face": "east end", "by_m": 1.2}
+    manual.apply(ws, sid, op, accept_clashes=1)
+    detect = lambda body: c.post(f"/api/scenes/{sid}/detect/stream", json=body)
+    assert detect({"after_edit": "E1"}).status_code == 200
+    ws.undo_edit(sid)
+    manual.apply(ws, sid, op, accept_clashes=1)
+    assert detect({"after_edit": "E2"}).status_code == 429      # farmed: its own cap is spent
+    assert detect({}).status_code == 200                         # the detection cap is untouched
