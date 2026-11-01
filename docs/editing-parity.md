@@ -34,7 +34,7 @@ Northbank has none of what real exports carry, so these paths were never exercis
 |---|---|---|
 | 0a | This face or element only by default; `carry` to take joined parts along | done (Nov 1) |
 | 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | done (Nov 1) |
-| 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | done (Nov 1), but for a type edited for all its elements and a joined wall's neighbour re-trimmed |
+| 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | done (Nov 1): own copies by default, Apply to the type, a carried wall's joined neighbour re-trimmed |
 | 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | offset, join and disconnect done (Nov 1); bends at other angles, transitions on a carried resize and re-fitting a carried move later |
 | 3 | Editable properties: attributes, psets, type, material, classification, container | done (Nov 1); classifications from the panel too |
 
@@ -96,7 +96,16 @@ and again for each element). The edit changes what the type gives, for every ele
 - **Refused in words:** a layered type (its layers change in the authoring tool), an element without a type, an edit
   that changes nothing the type gives (a length is each element's own), and every op but push/pull and align.
 
-Not yet (later): a joined wall's neighbour re-trimmed when its join is carried; a profile's cardinal point re-centred when a section grows on one side (the body grows to the side
+**A carried wall end** (`manual._retrims`). A wall moved with Take joined parts along brings each wall whose end is
+joined to it (a path join, ATSTART or ATEND on that wall's side) along: that end is pushed along its own axis so it meets
+the moved wall as it did, in plan, through the hand edits' own push (its axis, layers, quantities and openings follow;
+refused as that push would be). W2 moved 500 mm east makes W1 500 mm longer at its east end; W1 moved 500 mm north makes
+W2 500 mm shorter at its south end; the join holds in both. A wall moved along its own line, or a join in line with
+it, is left open and listed, as for a move on its own. The fix agent's moves keep refusing a move off a join.
+IfcOpenShell's `geometry.regenerate_wall_representation` was not used: it redraws a wall from its layers, dropping
+a body ORCA or the authoring tool shaped some other way.
+
+Not yet (later): a profile's cardinal point re-centred when a section grows on one side (the body grows to the side
 pushed, as people expect); quantities ORCA does not work out (weights, surface areas, perimeters) are left and named.
 
 ## MEP by hand (Tier 2)

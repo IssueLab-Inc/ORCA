@@ -245,3 +245,45 @@ def test_applied_to_its_type_what_the_type_does_not_give_is_refused_in_words(par
     ws, sid, scene, g = param
     r = manual.check(ws, sid, {**op, "element": g[name], "scope": "type"})
     assert r["blocked"] and words in r["blocked"], r["blocked"]
+
+
+# ----------------------------------------------------------------------------------------------------- a carried wall end
+
+
+def _axis_length(scene, gid):
+    a = consistency._world_axis(scene, scene.entity(gid))
+    return float(((a[1] - a[0]) ** 2).sum() ** 0.5)
+
+
+def test_a_wall_moved_with_joined_parts_brings_the_joined_wall_s_end_along(param):
+    ws, sid, scene, g = param
+    before = untouched(scene, g, "")
+    op = {"op": "move", "element": g["W2"], "delta_m": [0.5, 0, 0], "carry": True}
+    r = manual.check(ws, sid, op)
+    assert r["blocked"] is None and r["joints"] == [] and r["passed"]
+    assert "the east end of wall 'W1' follows it (500 mm longer)" in r["summary"]
+    manual.apply(ws, sid, op)
+    assert _axis_length(scene, g["W1"]) == pytest.approx(4.5)
+    assert scene.bounds()[g["W1"]][1][0] == pytest.approx(4.5)
+    assert ue.get_pset(scene.entity(g["W1"]), "Qto_WallBaseQuantities", "Length") == pytest.approx(4.5)
+    (rel,) = [x for x in scene.entity(g["W1"]).ConnectedTo if x.is_a("IfcRelConnectsPathElements")]
+    assert consistency._join_gap(scene, rel) == pytest.approx(0.0, abs=1e-6), "the join holds"
+    assert_consistent(scene)
+    after = untouched(scene, g, "")
+    assert {k for k in before if before[k] != after[k]} == {"W1"}, "W2 only moved (its placement): nothing else changed"
+    ws.journal(sid).undo(scene)
+    assert untouched(scene, g, "") == before
+
+
+def test_a_wall_moved_across_the_joined_wall_s_line_shortens_it(param):
+    ws, sid, scene, g = param
+    manual.apply(ws, sid, {"op": "move", "element": g["W1"], "delta_m": [0, 0.5, 0], "carry": True})
+    assert _axis_length(scene, g["W2"]) == pytest.approx(2.5)
+    assert scene.bounds()[g["W2"]][0][1] == pytest.approx(0.5)
+    assert_consistent(scene)
+
+
+def test_a_wall_moved_along_its_own_line_leaves_its_join_open_even_with_joined_parts(param):
+    ws, sid, scene, g = param
+    r = manual.check(ws, sid, {"op": "move", "element": g["W1"], "delta_m": [-0.2, 0, 0], "carry": True})
+    assert [j["name"] for j in r["joints"]] == ["wall 'W2'"] and "follows" not in r["summary"]

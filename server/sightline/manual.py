@@ -438,6 +438,62 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
 
 # ----------------------------------------------------------------------------------------------------- move
 
+RETRIM_MIN_COS = 0.2   # a joined wall this close to in line with the moved one cannot follow a move across it
+
+
+def _retrims(scene: IfcScene, gid: str, delta) -> list[Plan]:
+    """A carried move of an element with path joins (a wall drawn with an axis): each wall whose end is joined to it
+    (ATSTART or ATEND on that wall's side) has that end pushed along its own axis so it meets the moved one as it did, in
+    plan (docs/editing-parity.md, "A carried wall end"). Done with the hand edits' own push, so its axis, layers,
+    quantities and openings come along, and refused as a push would be. Ends in line with the moved wall, or that only
+    a pick could place, are left: their joins open as for a move on its own."""
+    e = scene.entity(gid)
+    mine = consistency._world_axis(scene, e)
+    if mine is None:
+        return []
+    dm = mine[1][:2] - mine[0][:2]
+    if np.linalg.norm(dm) < 1e-9:
+        return []
+    n_m = np.array([-dm[1], dm[0]]) / np.linalg.norm(dm)
+    d = np.asarray(delta, float)[:2]
+    out = []
+    for rel in [*getattr(e, "ConnectedTo", []), *getattr(e, "ConnectedFrom", [])]:
+        if not rel.is_a("IfcRelConnectsPathElements"):
+            continue
+        other, at = ((rel.RelatedElement, rel.RelatedConnectionType) if rel.RelatingElement == e
+                     else (rel.RelatingElement, rel.RelatingConnectionType))
+        if at not in ("ATSTART", "ATEND") or not scene.has(other.GlobalId):
+            continue
+        theirs = consistency._world_axis(scene, other)
+        if theirs is None:
+            continue
+        du = theirs[1][:2] - theirs[0][:2]
+        if np.linalg.norm(du) < 1e-9:
+            continue
+        u = du / np.linalg.norm(du)
+        cos = float(u @ n_m)
+        if abs(cos) < RETRIM_MIN_COS:
+            continue
+        t = float(d @ n_m) / cos   # how far along its axis its end goes to stay where it met the moved one's
+        if abs(t) < LEAST_M:
+            continue
+        end = theirs[0] if at == "ATSTART" else theirs[1]
+        outward = -u if at == "ATSTART" else u
+        box = scene.bounds()[other.GlobalId]
+        middle = box.mean(axis=0)
+        across = middle[:2] - end[:2]
+        across = across - (across @ u) * u          # the end face's middle: the axis end, across to the body's middle
+        point = np.array([*(end[:2] + across), middle[2]])
+        try:
+            face = faces.resolve(scene, other.GlobalId, point, np.array([*outward, 0.0]))
+        except (edits.Unsupported, ValueError, KeyError):
+            continue
+        if float(np.asarray(face.normal, float) @ np.array([*outward, 0.0])) < 0.99 or "push_pull" not in face.allows:
+            continue
+        out.append(_resolve_push(scene, {"op": "push_pull", "element": other.GlobalId, "face": spec(face),
+                                         "by_m": t if at == "ATEND" else -t}))
+    return out
+
 
 def _resolve_move(scene: IfcScene, op: dict) -> Plan:
     gid = op["element"]
@@ -468,10 +524,14 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
     changed = plan.changed()
     with_run = f" with its run ({len(run)} pieces)" if len(run) > 1 else ""
     params = {**params, "carry": True}
-    return Plan("move", gid, params, {scene.index_of(g) for g in changed}, changed,
-                f"{label(scene, gid)} moved {words}{with_run}", "move",
-                float(np.linalg.norm(delta)), gated=list(run), warnings=structure_warnings(scene, gid, "the move"),
-                extra={"plan": plan})
+    retrim = [r for r in _retrims(scene, gid, delta) if r.element not in changed]
+    follows = "".join(f"; the {r.face.name} of {label(scene, r.element)} follows it "
+                      f"({_mm(r.params['by_m'])} {'longer' if r.params['by_m'] > 0 else 'shorter'})" for r in retrim)
+    return Plan("move", gid, params, {scene.index_of(g) for g in [*changed, *(r.element for r in retrim)]},
+                [*changed, *(r.element for r in retrim)], f"{label(scene, gid)} moved {words}{with_run}{follows}", "move",
+                float(np.linalg.norm(delta)), gated=[*run, *(r.element for r in retrim)],
+                warnings=[*structure_warnings(scene, gid, "the move"), *(w for r in retrim for w in r.warnings)],
+                extra={"plan": plan, "retrim": retrim})
 
 
 def _make_move(scene: IfcScene, plan: Plan) -> Made:
@@ -489,7 +549,8 @@ def _make_move(scene: IfcScene, plan: Plan) -> Made:
     broken = connections.check_joints(scene, mp)
     if broken:
         raise edits.Unsupported("a joint would not hold: " + "; ".join(w for *_, w in broken))
-    return Made(changed=list(mp.changed()))
+    followed = [g for r in plan.extra.get("retrim", []) for g in _make_push(scene, r).changed]
+    return Made(changed=list(dict.fromkeys([*mp.changed(), *followed])))
 
 
 # ----------------------------------------------------------------------------------------------------- align
