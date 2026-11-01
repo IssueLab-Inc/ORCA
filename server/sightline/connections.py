@@ -77,6 +77,14 @@ class Jog:
 
 
 @dataclass
+class Tilt:
+    global_id: str
+    held: str                  # "start" / "end": the cap it turns about, joined to what stays (edits.tilt)
+    turn_deg: float = 0.0      # how far it turns: each joint turns this much
+    fall: float = 0.0          # rise over run toward its outlet, after
+
+
+@dataclass
 class MovePlan:
     moved: list[str]                                   # what is translated: what was asked, then what it carries
     delta_m: list[float]
@@ -89,6 +97,7 @@ class MovePlan:
     code: str | None = None                            # "stays" | "short" | "branch" | "many" | "joined" (refuse mode)
     jogs: list[Jog] = field(default_factory=list)      # straight segments re-fitted at their joined end (`refit`)
     made: list[str] = field(default_factory=list)      # what the re-fits made (bends, risers, the rest), once applied
+    tilts: list[Tilt] = field(default_factory=list)    # drains turned about the cap that stays (`refit`)
 
     @property
     def ok(self) -> bool:
@@ -96,17 +105,22 @@ class MovePlan:
 
     @property
     def plain(self) -> bool:
-        """Nothing taken along, stretched or re-fitted: a move as it always was."""
-        return not self.carried and not self.stretched and not self.jogs
+        """Nothing taken along, stretched, re-fitted or tilted: a move as it always was."""
+        return not self.carried and not self.stretched and not self.jogs and not self.tilts
 
     def changed(self) -> list[str]:
-        """What the move changes: what it translates, stretches and re-fits, and (once applied) what the re-fits made."""
-        return self.moved + [st.global_id for st in self.stretched] + [j.global_id for j in self.jogs] + list(self.made)
+        """What the move changes: what it translates, stretches, re-fits and tilts, and (once applied) what the re-fits
+        made."""
+        return (self.moved + [st.global_id for st in self.stretched] + [j.global_id for j in self.jogs]
+                + [t.global_id for t in self.tilts] + list(self.made))
 
     def key(self) -> str:
-        return json.dumps([sorted(self.moved), [round(v, 4) for v in self.delta_m],
-                           sorted([st.global_id, st.face, round(st.by_m, 4)] for st in self.stretched),
-                           sorted([j.global_id, j.end] for j in self.jogs)])
+        parts = [sorted(self.moved), [round(v, 4) for v in self.delta_m],
+                 sorted([st.global_id, st.face, round(st.by_m, 4)] for st in self.stretched),
+                 sorted([j.global_id, j.end] for j in self.jogs)]
+        if self.tilts:   # only then: the keys of moves without tilts read as they always did
+            parts.append(sorted([t.global_id, t.held] for t in self.tilts))
+        return json.dumps(parts)
 
     def edit(self, scene: IfcScene, run: list[str] | None = None) -> dict | None:
         """What an option carries about a move that takes parts along or stretches segments (None: a plain move)."""
@@ -117,7 +131,9 @@ class MovePlan:
                 "stretched": [{"global_id": st.global_id, "face": st.face, "by_m": round(st.by_m, 4),
                                "size_m": round(st.size_m, 4), "normal": [round(v, 6) for v in st.normal]}
                               for st in self.stretched],
-                "jogs": [{"global_id": j.global_id, "end": j.end} for j in self.jogs]}
+                "jogs": [{"global_id": j.global_id, "end": j.end} for j in self.jogs],
+                **({"tilts": [{"global_id": t.global_id, "held": t.held, "turn_deg": round(t.turn_deg, 2),
+                               "fall": round(t.fall, 4)} for t in self.tilts]} if self.tilts else {})}
 
 
 # ---------------------------------------------------------------------------------------------------- classes
@@ -395,7 +411,12 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -
     `refit` (a hand move with joined parts): a level straight segment the move goes square to, joined at its other end
     too, is re-fitted instead of taken along: its joined end goes with the move and a pair of bends takes it back to
     the rest, which stays with its far joint (`edits.apply_jog`). One that cannot be (too short, a move too small for
-    a pair of bends, up and across at once) is taken along as before."""
+    a pair of bends, up and across at once) is taken along as before.
+
+    A drain under `refit` keeps falling (docs/connections.md, "A drain tilts"): moved straight up or down, it is never
+    re-fitted with a pair of bends (that would trap what it carries) but tilted about its far cap (`edits.tilt`) when
+    it can be, else taken along. A drain asked to move on its own that is held at one cap by something that stays (a
+    fixture) tilts about that cap the same way, instead of being refused."""
     moved = list(dict.fromkeys(moved))
     asked = list(moved)
     delta = np.asarray([float(v) for v in delta_m])
@@ -406,9 +427,17 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -
     inside = set(moved)
     stretched: dict[str, Stretch] = {}
     jogs: dict[str, Jog] = {}
+    tilts: dict[str, Tilt] = {}
     via: dict[str, str] = {}             # what took a part along (for the words of a refusal)
     queue = list(moved)
     breaks: list[str] = []
+    up_or_down = abs(float(delta[2])) >= 0.0005 and float(np.linalg.norm(delta[:2])) <= PARALLEL_M
+    if refit and carry and up_or_down and len(asked) == 1:
+        held = _held_cap(scene, asked[0])
+        info = edits.tilt_info(scene, asked[0], held, delta) if held else None
+        if info is not None:   # it turns about the cap that stays; its other cap moves, and the walk goes on from there
+            tilts[asked[0]] = Tilt(asked[0], held, info.turn_deg, info.fall)
+            plan.moved.remove(asked[0])
 
     def refuse(at: str, code: str, why: str) -> MovePlan:
         plan.refused, plan.refused_at, plan.code = why, [at], code
@@ -432,7 +461,7 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -
         for j in joints_of(scene, x):
             n = j.b
             plan.partners[x].add(n)
-            if n in inside:
+            if n in inside or (x in tilts and j.end_a == tilts[x].held):   # a tilted drain's held cap stays put
                 plan.kept.append(j)
                 continue
             if not carry:
@@ -444,6 +473,9 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -
                 cls = "stays"
             if n in jogs:                      # reached at its other end too: it moves whole
                 del jogs[n]
+                cls = "rigid"
+            if n in tilts:
+                del tilts[n]
                 cls = "rigid"
             st = stretched.get(n)
             if st is not None:
@@ -476,8 +508,15 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -
                         plan.kept.append(j)
                         continue
                     far = "end" if j.end_b == "start" else "start"
-                    if (refit and any(k.end_a == far for k in joints_of(scene, n))
-                            and edits.jog_fits(scene, n, j.end_b, delta.tolist()) is None):
+                    joined_far = refit and any(k.end_a == far for k in joints_of(scene, n))
+                    if joined_far and up_or_down and edits.is_gravity(scene.entity(n)):
+                        info = edits.tilt_info(scene, n, far, delta)
+                        if info is not None:   # its far joint stays: it turns about that cap, this one goes along
+                            tilts[n] = Tilt(n, far, info.turn_deg, info.fall)
+                            plan.kept.append(j)
+                            continue
+                        # never a pair of bends up or down on a drain (it would trap what it carries): taken along
+                    elif joined_far and edits.jog_fits(scene, n, j.end_b, delta.tolist()) is None:
                         jogs[n] = Jog(n, j.end_b)   # its far joint stays: re-fitted at this end, not taken along
                         plan.kept.append(j)
                         continue
@@ -518,9 +557,39 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -
         return plan
     plan.stretched = list(stretched.values())
     plan.jogs = list(jogs.values())
-    for st in plan.stretched:
-        plan.partners[st.global_id] = {j.b for j in joints_of(scene, st.global_id)}
+    plan.tilts = list(tilts.values())
+    for g in [st.global_id for st in plan.stretched] + [t.global_id for t in plan.tilts]:
+        plan.partners[g] = {j.b for j in joints_of(scene, g)}
     return plan
+
+
+def _holds(scene: IfcScene, gid: str) -> bool:
+    """Whether a part never moves with a move: it stays (equipment, a terminal, structure) or is kept fixed."""
+    return classify(scene, gid) == "stays" or bool(context_eval.element_constraints(scene, gid))
+
+
+def _held_cap(scene: IfcScene, gid: str) -> str | None:
+    """The one cap of a straight segment joined to something that stays ("start" / "end"), else None (neither, both,
+    or not straight)."""
+    if classify(scene, gid) != "straight":
+        return None
+    caps = {j.end_a for j in joints_of(scene, gid) if j.end_a in ("start", "end") and _holds(scene, j.b)}
+    return next(iter(caps)) if len(caps) == 1 else None
+
+
+def _at_cap(scene: IfcScene, gid: str, cap: str) -> str | None:
+    """What a straight segment's cap is joined to, in words for a sentence ("'Washer box WT'"), or None."""
+    joined = [j.b for j in joints_of(scene, gid) if j.end_a == cap]
+    return _names(scene, joined) if joined else None
+
+
+def tilt_words(scene: IfcScene, t: Tilt, past: bool = False) -> str:
+    """"'arm' tilts about its end at 'washer': falls 3.3° (5.8%) toward 'bend'" (`past`: "tilted …, falling …")."""
+    free = "end" if t.held == "start" else "start"
+    held_at, free_at = _at_cap(scene, t.global_id, t.held), _at_cap(scene, t.global_id, free)
+    how = f"{np.degrees(np.arctan(t.fall)):.1f}° ({t.fall * 100:.1f}%) toward {free_at or 'its other end'}"
+    return (f"{_names(scene, [t.global_id])} {'tilted' if past else 'tilts'} about its end at "
+            f"{held_at or 'its ' + t.held}{', falling ' if past else ': falls '}{how}")
 
 
 def summary(scene: IfcScene, plan: MovePlan) -> str:
@@ -536,15 +605,18 @@ def summary(scene: IfcScene, plan: MovePlan) -> str:
     if plan.jogs:
         parts.append(f"{_names(scene, [j.global_id for j in plan.jogs])} re-fitted with a pair of bends at the joined "
                      "end, the rest where it is")
+    parts += [tilt_words(scene, t) for t in plan.tilts]
     return "; ".join(parts)
 
 
 def apply_move(scene: IfcScene, plan: MovePlan) -> dict[str, list[float]]:
-    """Make a planned move (inside a trial, or for good): translate what moves, stretch what stretches. Returns the
-    new world placements of what was translated."""
+    """Make a planned move (inside a trial, or for good): translate what moves, stretch what stretches, tilt what
+    tilts. Returns the new world placements of what was translated."""
     placements = scene.translate(plan.moved, tuple(plan.delta_m))
     for st in plan.stretched:
         edits.stretch(scene, st.global_id, st.face, st.by_m, st.normal if st.face == "side" else None)
+    for t in plan.tilts:
+        edits.tilt(scene, t.global_id, t.held, plan.delta_m)
     plan.made = []
     for jog in plan.jogs:
         pieces = edits.apply_jog(scene, jog.global_id, jog.end, plan.delta_m).pieces
@@ -597,10 +669,11 @@ def check_applied(scene: IfcScene, plan: MovePlan, clearance_m: float,
                   base: dict[str, float]) -> tuple[list[verify.Hit], float | None, int]:
     """Check a planned move in place (`apply_move` done): what moves against everything but what it changes and what
     those are joined to (their joints hold: `check_joints`), and the stretched segments for anything new or worse than
-    `base`. Broken joints come back as "joint" hits. → (hits, least clearance, elements checked against)."""
+    `base`. A tilted drain is checked as what moves: it turns along its whole length. Broken joints come back as
+    "joint" hits. → (hits, least clearance, elements checked against)."""
     joined = {b for g in plan.changed() for b in plan.partners.get(g, ())}
     ignore = set(plan.changed()) | joined
-    v = verify.check(scene, plan.moved, clearance_m=clearance_m, ignore=ignore)
+    v = verify.check(scene, plan.moved + [t.global_id for t in plan.tilts], clearance_m=clearance_m, ignore=ignore)
     hits, least, checked = list(v.hits), v.min_clearance_m, v.checked_against
     # Stretched and re-fitted segments (and what the re-fits made) are where they were, mostly: only new or worse counts
     stretched = [st.global_id for st in plan.stretched] + [p for j in plan.jogs for p in (j.pieces or [j.global_id])]
@@ -630,7 +703,8 @@ def trial_move(scene: IfcScene, plan: MovePlan, clearance_m: float, on_trial=Non
     base = baseline(scene, plan)
     with edits.trial_files(scene, {scene.index_of(g) for g in plan.changed()}):
         placements = apply_move(scene, plan)
-        stretched = [st.global_id for st in plan.stretched] + [p for j in plan.jogs for p in j.pieces]
+        stretched = ([st.global_id for st in plan.stretched] + [p for j in plan.jogs for p in j.pieces]
+                     + [t.global_id for t in plan.tilts])
         shape = edits.meshes(scene, stretched) if stretched and (on_trial or preview) else None
         if on_trial:
             on_trial({"kind": "move", "moved": plan.moved, "delta_m": plan.delta_m, "pieces": shape,
@@ -646,16 +720,17 @@ DIRECTIONS = (("north", (0, 1, 0)), ("south", (0, -1, 0)), ("east", (1, 0, 0)), 
 def _outcome(scene: IfcScene, plan: MovePlan) -> str:
     """A dry plan's outcome, in a few words for Muse."""
     if plan.ok:
-        bits = []
+        bits = [f"tilts {_names(scene, [t.global_id])} about its held end" for t in plan.tilts]
         if plan.carried:
             bits.append(f"takes {_names(scene, plan.carried)} along")
         shorter = [st for st in plan.stretched if st.by_m < 0]
         if plan.stretched:
             one = len(plan.stretched) == 1
             bits.append(f"{_names(scene, [st.global_id for st in plan.stretched])} get{'s' if one else ''} longer or shorter")
-        if shorter:   # how far before the first of them gets too short
-            room = min(st.size_m - edits.MIN_PIECE_M for st in shorter) + abs(shorter[0].by_m)
-            bits.append(f"up to {room:.2f} m")
+        rooms = [st.size_m - edits.MIN_PIECE_M + abs(st.by_m) for st in shorter]   # before the first gets too short
+        rooms += [edits.tilt_room(scene, t.global_id, t.held, plan.delta_m[2]) for t in plan.tilts]   # or turns too far
+        if rooms:
+            bits.append(f"up to {min(rooms):.2f} m")
         return "keeps its joints" + (f" ({'; '.join(bits)})" if bits else "")
     n = plan.refused_at[0] if plan.refused_at else None
     name = _names(scene, [n]) if n else "a joint"
@@ -663,6 +738,26 @@ def _outcome(scene: IfcScene, plan: MovePlan) -> str:
            "short": f"{name} would get too short", "branch": f"it would slide along {name}, which it branches off",
            "many": f"it would take more than {CARRY_MAX} parts along"}.get(plan.code or "", plan.refused or "")
     return f"cannot ({why})"
+
+
+def _tilt_lines(scene: IfcScene, label: str, mine: list[str]) -> list[str]:
+    """For a drain held at one cap by something that stays: which way a move tilts it, and how far."""
+    if len(mine) != 1 or not edits.is_gravity(scene.entity(mine[0])):
+        return []
+    held = _held_cap(scene, mine[0])
+    if held is None:
+        return []
+    ways = [(word, room) for word, sign in (("down", -1.0), ("up", 1.0))
+            if (room := edits.tilt_room(scene, mine[0], held, sign)) > 0]
+    if not ways:
+        return []
+    at = [j.b for j in joints_of(scene, mine[0]) if j.end_a == held]
+    what = f"{kind_words(scene, at[0])} {_names(scene, at[:1])}" if at else f"its {held}"
+    how = " or ".join(f"{word} up to {round(room * 1000)} mm" for word, room in ways)
+    first = " / ".join(word for word, _ in ways)
+    return [f"Moving {label} {first} tilts it about its end at {what} instead (a drain held by what stays: it falls "
+            f"more toward its outlet, and what is joined at its other end goes with it): {how} (each joint turns at "
+            f"most {edits.TILT_TURN_MAX_DEG:.0f}°)."]
 
 
 def describe(scene: IfcScene, label: str, gid: str, memo: dict | None = None) -> list[str]:
@@ -697,6 +792,7 @@ def describe(scene: IfcScene, label: str, gid: str, memo: dict | None = None) ->
                              f"move, so a move that would pull them is refused.{refit}")
                 lines.append(f"Moving {label} (tried at 100 mm): " + "; ".join(
                     f"{' / '.join(dirs)}: {what}" for what, dirs in by_outcome.items()))
+                lines += _tilt_lines(scene, label, mine) if refit_moves() else []
     if memo is not None:
         memo[("joints", gid)] = lines
     return lines

@@ -494,7 +494,9 @@ keep them. Deeper design: [docs/edits.md](../edits.md).
 - **Main symbols:** `Unsupported`; results `Run`, `Offset`, `Route`, `Resize`, `Trim`, `Penetration`; `run_of`,
   `apply_offset`, `bend_radius`, `apply_route`, `run_frame`, `route_steps`, `is_gravity`, `resize_size`,
   `apply_resize`, `face_move`, `butt_trim`, `apply_trim`, `member_axis`, `penetration`, `apply_penetration`,
-  `stretch` / `Stretched` (a segment's cap or rectangular side moved, ports with it: connected moves), `seat` /
+  `stretch` / `Stretched` (a segment's cap or rectangular side moved, ports with it: connected moves), `tilt` /
+  `Tilted` / `tilt_fits` / `tilt_info` / `tilt_room` (a drain turned about one cap, more fall toward its outlet,
+  `drain_outlet`, `TILT_TURN_MAX_DEG`), `seat` /
   `Seat` / `seat_summary` / `apply_seat` (an element cut to bear on its support: a recess shaped by the support's top,
   `_top_outline`, `_footprint_profile`; `SEAT_ABOVE_M`, `SEAT_BELOW_M`, `SEAT_MAX_SHARE`, `SEAT_PSET`),
   `provision_for`, `not_penetrable`; transactions `trial`, `trial_files`, `kept_files`; `meshes` (with `render=True`
@@ -518,7 +520,8 @@ What is joined to what, so a fix that moves something never leaves a joint apart
   `refused_at`, `key`, `edit`), `summary`, `apply_move`, `check_joints`, `baseline` / `check_applied`, `trial_move`
   (`MoveTrial`), `describe` (Muse's text), `graph` / `links_of` (every link by kind for the viewer and the properties
   card, cached on the scene), `move_words`, `mode` (`SIGHTLINE_CONNECTED_MOVES`), `refit_moves`
-  (`SIGHTLINE_MOVE_REFIT`), `Jog` (a re-fit, `plan_move(refit=)`), `CARRY_MAX`,
+  (`SIGHTLINE_MOVE_REFIT`), `Jog` (a re-fit, `plan_move(refit=)`), `Tilt` (a drain turned about the cap that stays,
+  `MovePlan.tilts`, `tilt_words`, `_held_cap`), `CARRY_MAX`,
   `PARALLEL_M`, `COVER`, `TOUCH_M`, `FACING`, `INLINE`.
 - **Imports:** `edits.py`, `scene.py`. **Imported by:** `agent.py`, `plans.py`, `service.py`.
 - **Rules:** every path that moves something plans first (`agent._try_move`, combined steps, `plans` joint hits,
