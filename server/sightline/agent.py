@@ -13,7 +13,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import connections, domains, edits, hosts, meta_client, requirements, verify
+from . import connections, consistency, domains, edits, hosts, meta_client, parametric, requirements, verify
 from .meta_client import ChatModel
 from .requirements import DEFAULT_CLEARANCE_M
 from .limits import env_int
@@ -681,9 +681,13 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
     sup = verify.supports(scene, run, set(partners), clearance_m, ignore=neighbours) if partners else None
     if on_trial:
         on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
+    was = parametric.snapshot(scene, run)                    # a joined wall moved off its join: refused with why
+    readings = consistency.measure(scene, run) if was else {}
+    untrue = None
     with edits.scratch(scene, {scene.index_of(g) for g in run}):   # undone: kept edits stay undoable
         placements = scene.translate(run, tuple(delta))
         try:
+            untrue = _keeps_true(scene, was, readings, list(run), target) if was else None
             v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
             hits, held, why = verify.keep_supports(scene, sup, v.hits) if sup else (v.hits, set(), None)
             if held and not why and not hits:   # its clearance is to what is near it, not to what it stands on
@@ -691,6 +695,7 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
                 hits = v.hits
         finally:   # also when the file already holds a transaction (scratch then leaves it alone)
             scene.translate(run, tuple(-d for d in delta))
+    why = why or (f"cannot move it: {untrue}" if untrue else None)
     passed = not hits and not why
     attempt = Attempt(cand.get("title", "move"), delta, passed, why or _reason(hits), hit_ids=_hit_ids(hits),
                       where=_where(hits))
@@ -738,6 +743,45 @@ def _keep(options: list[Option], new: Option) -> None:
     options.append(new)
 
 
+def _keeps_true(scene: IfcScene, was: dict, readings: dict, changed: list[str], made_from: str) -> str | None:
+    """After a fix's edit, inside its trial: what the model says besides the shape is brought along with the body
+    (parametric.sync: layers, profile, axis, quantities, a split's join), then read again (consistency). Why not, in
+    words, when it still disagrees, or when it would leave a wall's join open: a fix never does
+    (docs/editing-parity.md)."""
+    name = lambda s, gid: f"'{s.element(gid).name}'"   # as the fix agent names elements to Muse
+    try:
+        synced = parametric.sync(scene, was, changed, (), made_from=made_from, label=name)
+    except edits.Unsupported as e:
+        return str(e)
+    if synced.opened:
+        return (f"it would leave its join with {synced.opened[0]['name']} open: keep the end where it meets, or ask the "
+                "person to edit it by hand")
+    issues = consistency.compare(scene, readings, consistency.measure(scene, [g for g in changed if scene.has(g)], name),
+                                 made_from=made_from)
+    blocks = [i for i in issues if i.severity == "block"]
+    return blocks[0].text if blocks else None
+
+
+@contextlib.contextmanager
+def _fix_trial(scene: IfcScene, target: str):
+    """A fix's trial (edits.trial) that also keeps the model true (`_keeps_true`): the caller sets `made` to what the
+    edit changed or made; after the block `why` says why not, or is None. Elements that carry nothing to keep (all of
+    Northbank's) cost nothing."""
+    was = parametric.snapshot(scene, [target])
+    readings = consistency.measure(scene, [target]) if was else {}
+    t = _Trial()
+    with edits.trial(scene, target):
+        yield t
+        if was:
+            t.why = _keeps_true(scene, was, readings, list(dict.fromkeys([target, *t.made])), target)
+
+
+@dataclass
+class _Trial:
+    made: list[str] = field(default_factory=list)
+    why: str | None = None
+
+
 def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
                 on_trial: Callable[[dict], None] | None = None, *, others: list[str] = ()) -> tuple[Attempt, Option | None]:
     """Split `target` around the obstacle and raise or lower the middle, check it, undo it.
@@ -748,12 +792,14 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_
     title = cand.get("title", "local offset")
     split = [float(v) for v in cand.get("split_m", [])]
     dz = float(cand.get("dz_m", 0.0))
+    bend = float(cand.get("bend_deg") or 90.0)   # 45: up a slope with angled bends (Rev04's angled pieces)
     delta = [0.0, 0.0, dz]
     if len(split) != 2:
         return Attempt(title, delta, False, "an offset needs two split points", "offset", split), None
     try:
-        with edits.trial(scene, target):
-            off = edits.apply_offset(scene, target, split[0], split[1], dz)
+        with _fix_trial(scene, target) as ft:
+            off = edits.apply_offset(scene, target, split[0], split[1], dz, bend_deg=bend)
+            ft.made = off.pieces
             shape = edits.meshes(scene, off.pieces) if on_trial else None
             if on_trial:
                 on_trial({"kind": "offset", "moved": [target], "delta_m": delta, "pieces": shape})
@@ -764,12 +810,15 @@ def _try_offset(scene: IfcScene, cand: dict, target: str, other: str, clearance_
             preview = (shape or edits.meshes(scene, off.pieces)) if not hits else None
     except edits.Unsupported as e:
         return Attempt(title, delta, False, f"cannot offset this element: {e}", "offset", split), None
+    if ft.why:
+        return Attempt(title, delta, False, f"cannot offset this element: {ft.why}", "offset", split), None
     reason = _reason(hits)
     attempt = Attempt(title, delta, not hits, reason, "offset", split, _hit_ids(hits), where=_where(hits))
     if hits:
         return attempt, None
     return attempt, Option(title, [target], delta, cand.get("rationale", ""), cand.get("also_needs", ""),
-                           v.min_clearance_m, {}, "offset", split, preview, checked_against=v.checked_against)
+                           v.min_clearance_m, {}, "offset", split, preview, checked_against=v.checked_against,
+                           edit={"bend_deg": bend} if bend != 90.0 else {})
 
 
 def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m: float,
@@ -793,7 +842,7 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
         _, _, d, _ = edits.member_axis(scene, scene.entity(target))
         delta = [round(float(v), 4) for v in (d * by if cut.end == "start" else -d * by)]
         before = {h.other: h.distance_m for h in verify.check(scene, [target], clearance_m=clearance_m).hits}
-        with edits.trial(scene, target):
+        with _fix_trial(scene, target) as ft:
             edits.apply_trim(scene, target, cut.end, by)
             shape = edits.meshes(scene, [target])
             if on_trial:
@@ -801,6 +850,8 @@ def _try_trim(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
             v = verify.check(scene, [target], clearance_m=clearance_m)
     except edits.Unsupported as e:
         return Attempt(title, [0.0, 0.0, 0.0], False, f"cannot trim this element: {e}", "trim"), None
+    if ft.why:
+        return Attempt(title, delta, False, f"cannot trim this element: {ft.why}", "trim"), None
     hits = [h for h in v.hits
             if (h.distance_m < -tol if h.other == other else h.other not in before or h.distance_m < before[h.other] - tol)]
     trim = {"end": cut.end, "by_m": round(by, 4)}
@@ -840,12 +891,14 @@ def _try_seat(scene: IfcScene, cand: dict, target: str, other: str, clearance_m:
     edit = {"support": other, "summary": summary, "size_m": st.size_m, "share": st.share, "top_m": st.top_m,
             "key": json.dumps([other, [[round(v, 2) for v in corner] for corner in st.cut]])}
     before = {h.other: h.distance_m for h in verify.check(scene, [target], clearance_m=clearance_m, ignore={other}).hits}
-    with edits.trial(scene, target):
+    with _fix_trial(scene, target) as ft:
         edits.apply_seat(scene, st)
         shape = edits.meshes(scene, [target])
         if on_trial:
             on_trial({"kind": "seat", "moved": [target], "delta_m": zero, "pieces": shape, "summary": summary})
         v = verify.check(scene, [target], clearance_m=clearance_m, ignore={other})
+    if ft.why:
+        return Attempt(title, zero, False, f"cannot seat this element: {ft.why}", "seat", edit=edit), None
     meant, tol = set(others) - {other}, 0.002
     hits = [h for h in v.hits if h.other in meant or h.other not in before or h.distance_m < before[h.other] - tol]
     attempt = Attempt(title, zero, not hits, _reason(hits), "seat", None, _hit_ids(hits), edit=edit, where=_where(hits))
@@ -885,8 +938,9 @@ def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m
     edit = {"steps": steps, "summary": edits.route_summary(steps, side),
             "key": json.dumps([[round(st[k], 2) for k in ("from_m", "to_m", "up_m", "side_m")] for st in steps])}
     try:
-        with edits.trial(scene, target):
+        with _fix_trial(scene, target) as ft:
             r = edits.apply_route(scene, target, steps)
+            ft.made = r.pieces
             shape = edits.meshes(scene, r.pieces) if on_trial else None
             if on_trial:
                 on_trial({"kind": "route", "moved": [target], "delta_m": delta, "pieces": shape, "summary": edit["summary"]})
@@ -897,6 +951,8 @@ def _try_route(scene: IfcScene, cand: dict, target: str, other: str, clearance_m
             preview = (shape or edits.meshes(scene, r.pieces)) if not hits else None
     except edits.Unsupported as e:
         return Attempt(title, delta, False, f"cannot reroute this element: {e}", "route", edit=edit), None
+    if ft.why:
+        return Attempt(title, delta, False, f"cannot reroute this element: {ft.why}", "route", edit=edit), None
     attempt = Attempt(title, delta, not hits, _reason(hits), "route", None, _hit_ids(hits), edit=edit, where=_where(hits))
     if hits:
         return attempt, None
@@ -1019,8 +1075,9 @@ def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_
             "performance": size["performance"], "summary": edits.resize_summary(sorted(split), w1, h1, keep),
             "key": json.dumps([round(x, 2) for x in sorted(split)] + [round(h1, 3), keep])}
     try:
-        with edits.trial(scene, target):
+        with _fix_trial(scene, target) as ft:
             r = edits.apply_resize(scene, target, split, depth, keep)
+            ft.made = r.pieces
             shape = edits.meshes(scene, r.pieces) if on_trial else None
             if on_trial:
                 on_trial({"kind": "resize", "moved": [target], "delta_m": delta, "pieces": shape, "summary": edit["summary"]})
@@ -1031,6 +1088,8 @@ def _try_resize(scene: IfcScene, cand: dict, target: str, other: str, clearance_
             preview = (shape or edits.meshes(scene, r.pieces)) if not hits else None
     except edits.Unsupported as e:
         return Attempt(title, delta, False, f"cannot resize this element: {e}", "resize", split, edit=edit), None
+    if ft.why:
+        return Attempt(title, delta, False, f"cannot resize this element: {ft.why}", "resize", split, edit=edit), None
     attempt = Attempt(title, delta, not hits, _reason(hits), "resize", split, _hit_ids(hits), edit=edit, where=_where(hits))
     if hits:
         return attempt, None
@@ -1258,7 +1317,7 @@ TRIES: dict[str, Callable] = {"move": _try_move_fix, "offset": _try_offset, "tri
                               "resize": _try_resize, "penetration": _try_penetration, "seat": _try_seat,
                               "combined": _try_combined}
 # The candidate fields each kind is described by, carried into a recommendation (never tried) as its "edit".
-PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m"), "trim": ("by_m",),
+PARAMS: dict[str, tuple[str, ...]] = {"move": ("delta_m",), "offset": ("split_m", "dz_m", "bend_deg"), "trim": ("by_m",),
                                       "route": ("steps",), "resize": ("split_m", "depth_m", "keep"), "penetration": (),
                                       "seat": (), "combined": ("steps",)}
 

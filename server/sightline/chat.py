@@ -196,7 +196,7 @@ TOOLS = [
         "[x, y, z], shape: rect|round, width_m, height_m | diameter_m, depth_m (omit to go through)}, {op: cut_by, "
         "element, cutter, gap_m}, {op: split, element, at}, {op: remove_section, element, from, to}, {op: delete, "
         "element}, {op: clip, element, to: {element, face}, gap_m}, {op: offset, element, from, to, toward: "
-        "up|down|north|south|east|west, by_m} (a section of a level duct, pipe or tray between two points along it, "
+        "up|down|north|south|east|west, by_m, bend_deg?: 45 for a slope with angled bends} (a section of a level duct, pipe or tray between two points along it, "
         "with bends), {op: join, element, to: {element}} (two segments' free ends: in line, or square with a 90° bend), "
         "{op: disconnect, element, from: element} (leave that joint open). `element` may be \"selected\", and `face` \"selected\" "
         "for the face the user chose in the Edit tool; other faces by name from list_faces. An edit changes only that "

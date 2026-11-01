@@ -631,11 +631,11 @@ class Workspace:
                 "min_clearance_m": option.min_clearance_m if option else None,
                 "preview": option.preview if option else None}
 
-    def apply_offset(self, scene_id: str, element: str, split_m: list[float], dz_m: float) -> dict:
-        """Keep a local offset: the element is shortened and new pieces are added to its file."""
+    def apply_offset(self, scene_id: str, element: str, split_m: list[float], dz_m: float, bend_deg: float = 90.0) -> dict:
+        """Keep a local offset: the element is shortened and new pieces are added to its file (bends of `bend_deg`)."""
         s = self.scene(scene_id)
         with self.lock:
-            off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m)
+            off = edits.apply_offset(s, element, split_m[0], split_m[1], dz_m, bend_deg=bend_deg)
             s.mark_edited(element)
             s.bump([s.index_of(element)])
         return {**asdict(off), "files": [s.index_of(element)], "changed": list(off.pieces)}

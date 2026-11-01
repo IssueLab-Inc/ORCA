@@ -32,7 +32,9 @@ Seven kinds of fix:
 - "offset": a local offset, which is what designers do when a long straight run meets a frame member or beam. Split the segment at two
   points either side of the obstacle (metres along it from its start, given in the element data) and take the middle
   piece up or down by dz; vertical risers join it to the rest. Choose the split points just outside the obstacle and
-  dz so the middle piece clears it (or passes through an opening in it) with margin.
+  dz so the middle piece clears it (or passes through an opening in it) with margin. "bend_deg": 45 (15 to 90) takes
+  it there along a slope with angled bends either end, as designers do where a square riser does not fit; it needs
+  more run either side of the obstacle than a square one.
 - "route": a detour in up to 3 steps, for when one offset up or down cannot clear: the room is only beside the
   obstacle (a column, a post), or a run meets obstacles that need different detours. Each step holds a stretch of the
   segment (from_m to to_m, metres along it from its start) at an offset on the run's own axes: up_m (+ up) and side_m

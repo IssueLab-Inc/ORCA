@@ -76,6 +76,7 @@ export const EditTool = forwardRef<EditToolHandle, {
   const [cutter, setCutter] = useState<{ globalId: string; label: string } | null>(null);
   const [span, setSpan] = useState<[number[], number[]] | null>(null);       // an offset's two points along the run
   const [way, setWay] = useState(0);                                           // which of offsetWays(span)
+  const [bendDeg, setBendDeg] = useState<90 | 45>(90);                         // an offset's bends: square, or a 45° slope
   const [check, setCheck] = useState<EditCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [keeping, setKeeping] = useState(false);
@@ -176,8 +177,8 @@ export const EditTool = forwardRef<EditToolHandle, {
     ...(recess != null ? { depth_m: recess } : {}) });
   const cutOp = (c = cutter, g = gap): EditOp => ({ op: "cut_by", element: element!, cutter: c!.globalId, gap_m: g });
   const clipOp = (t = target!, tp = targetPick!, g = gap): EditOp => ({ op: "clip", element: face!.element, gap_m: g, to: toFace(t, tp) });
-  const offsetOp = (s = span!, w = way, m = by): EditOp => ({ op: "offset", element: element!, from: s[0], to: s[1],
-    toward: offsetWays(s[0], s[1])[w].toward, by_m: m });
+  const offsetOp = (s = span!, w = way, m = by, deg = bendDeg): EditOp => ({ op: "offset", element: element!, from: s[0], to: s[1],
+    toward: offsetWays(s[0], s[1])[w].toward, by_m: m, ...(deg !== 90 ? { bend_deg: deg } : {}) });
 
   async function run(op: EditOp) {
     if (!sceneId) return;
@@ -470,6 +471,11 @@ export const EditTool = forwardRef<EditToolHandle, {
             </div>
             <label>By <input type="number" step={10} min={1} value={mmIn(by)} aria-label="How far, mm"
               onChange={(e) => { setBy(Math.abs(Number(e.target.value)) / 1000); setCheck(null); }} /> mm</label>
+            <div className="seg" role="group" aria-label="Bends">
+              {([90, 45] as const).map((deg) => (
+                <button key={deg} type="button" className={bendDeg === deg ? "on" : ""} data-tip={deg === 90 ? "Square bends, a straight riser" : "Up a 45° slope, with 45° bends either end"}
+                  onClick={() => { setBendDeg(deg); if (by > 0) void run(offsetOp(span, way, by, deg)); }}>{deg}°</button>))}
+            </div>
             <button type="submit" className="btn small" disabled={!(by > 0) || checking}>Check</button>
           </form>)}
         {(checking || check) && (

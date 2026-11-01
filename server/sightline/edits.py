@@ -186,20 +186,24 @@ def default_corners() -> str:
     return "square" if os.environ.get("SIGHTLINE_OFFSET_CORNERS", "bends").lower().startswith("sq") else "bends"
 
 
-def bend_radius(depth_m: float, dz_m: float) -> float | None:
+def bend_radius(depth_m: float, dz_m: float, bend_deg: float = 90.0) -> float | None:
     """Centreline radius of an offset's bends: one profile depth, smaller when the rise is too short for two bends and
-    a riser (Rev04: duct 300 deep rising 400 mm gets 180 mm). None when even that would fold the inside of the bend."""
-    r = min(depth_m, (abs(dz_m) - RISER_MIN_M) / 2)
+    a riser (Rev04: duct 300 deep rising 400 mm gets 180 mm). Two bends of `bend_deg` rise 2 r (1 − cos θ) between
+    them (2 r at 90°), the riser the rest. None when even that would fold the inside of the bend."""
+    th = np.radians(bend_deg)
+    k = 2 * (1 - np.cos(th))     # the rise two bends of radius 1 make
+    r = min(depth_m, (abs(dz_m) - RISER_MIN_M * np.sin(th)) / k)
     if r - depth_m / 2 < 0.005:  # the inside radius: below 5 mm the bend would fold on itself
-        r = abs(dz_m) / 2         # no riser: two bends meet
-    return r if r - depth_m / 2 >= 0.005 else None
+        r = abs(dz_m) / k         # no riser: two bends meet
+    return float(r) if r - depth_m / 2 >= 0.005 else None
 
 
 def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, dz_m: float,
-                 corners: str | None = None, *, lateral_m: float = 0.0) -> Offset:
+                 corners: str | None = None, *, lateral_m: float = 0.0, bend_deg: float = 90.0) -> Offset:
     """Split `global_id` at `start_m` and `end_m` (metres along it) and take the middle piece `dz_m` up or down.
     Alternatively, `lateral_m` offsets along cross(world Z, run direction); the two offsets cannot be combined.
-    Edits the model in place; wrap in `trial` to try it and undo.
+    `bend_deg` under 90 (15 to 90) takes it there along a slope, with bends of that angle either end of it: Rev04's
+    "short angled pieces with bends either side". Edits the model in place; wrap in `trial` to try it and undo.
 
     `corners` "bends" (default): each turn is a 90° bend fitting (IfcDuctFitting, IfcPipeFitting... of type BEND)
     with a radius of about one profile depth, joined by short risers, the way Northbank's Rev04 does it. "square":
@@ -241,8 +245,37 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     sign = 1.0 if dz > 0 else -1.0
     u = offset_axis * sign
 
-    r_m = bend_radius(t * s, amount) if (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS else None
-    if r_m is not None:
+    angled = abs(bend_deg - 90.0) > 1e-6
+    if angled and not 15.0 <= bend_deg < 90.0:
+        raise Unsupported("bends turn between 15° and 90°")
+    r_m = (bend_radius(t * s, amount, bend_deg) if (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS
+           else None)
+    if angled and r_m is None:
+        raise Unsupported(f"the offset is too small for {bend_deg:.0f}° bends of this section")
+    if r_m is not None and angled:
+        # Each side: a bend of θ onto the slope, a straight riser along it, a bend of θ back; the run it takes (2 R sin θ +
+        # the riser's run) centred on the split point. The riser runs (A − 2 R (1 − cos θ)) / sin θ.
+        R, th = r_m / s, np.radians(bend_deg)
+        rise_run = max((abs(dz) - 2 * R * (1 - np.cos(th))) / np.sin(th), 0.0)
+        half = (2 * R * np.sin(th) + rise_run * np.cos(th)) / 2
+        if a - half < MIN_PIECE_M / s or L - b - half < MIN_PIECE_M / s or b - a - 2 * half < MIN_PIECE_M / s:
+            raise Unsupported(f"the split points leave a piece shorter than {MIN_PIECE_M * 1000:.0f} mm "
+                              f"(run {L * s:.2f} m, each {bend_deg:.0f}° slope takes {2 * half * s:.2f} m of run)")
+        up_slope, down_slope = np.cos(th) * d + np.sin(th) * u, np.cos(th) * d - np.sin(th) * u
+        pieces, p = [("straight", origin, d, a - half)], origin + d * (a - half)
+        for go, back, run_to in ((up_slope, d, b - half), (down_slope, d, L)):
+            pieces.append(("bend", p, d, go, R, w, t))
+            p = bend_end(p, d, go, R)
+            if rise_run > 1e-3 / s:
+                pieces.append(("straight", p, go, rise_run))
+                p = p + go * rise_run
+            pieces.append(("bend", p, go, back, R, w, t))
+            p = bend_end(p, go, back, R)
+            here = float((p - origin) @ d)
+            pieces.append(("straight", p, d, run_to - here))
+            p = p + d * (run_to - here)
+        used = f"bends {bend_deg:.0f}°"
+    elif r_m is not None:
         R = r_m / s
         if a - R < MIN_PIECE_M / s or L - b - R < MIN_PIECE_M / s or b - a - 2 * R < MIN_PIECE_M / s:
             raise Unsupported(f"the split points leave a piece shorter than {MIN_PIECE_M * 1000:.0f} mm "
@@ -786,7 +819,7 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
                 model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]), None, True,
                 [[int(x) + 1 for x in f] for f in faces], None)
             rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "Tessellation", [solid])
-            ends.append((start, start + (t0 + t1) * R))
+            ends.append((start, bend_end(start, t0, t1, R)))   # start + (t0 + t1) R at 90°
         part.Representation = model.createIfcProductDefinitionShape(None, None, [rep])
         for st in styles:
             model.createIfcStyledItem(solid, st.Styles, st.Name)
@@ -871,13 +904,28 @@ def _new_fitting(model, segment, place, name: str, tag: str | None, predefined: 
     return fitting
 
 
+def bend_turn(t0, t1) -> tuple[np.ndarray, float]:
+    """A bend from `t0` to `t1`: the unit direction square to `t0` it turns towards (in their plane), and its angle."""
+    t0, t1 = np.asarray(t0, float), np.asarray(t1, float)
+    n = t1 - t0 * float(t1 @ t0)
+    return n / np.linalg.norm(n), float(np.arccos(np.clip(t0 @ t1, -1.0, 1.0)))
+
+
+def bend_end(p0, t0, t1, r) -> np.ndarray:
+    """Where a bend of centreline radius `r` from `p0` along `t0` ends, running along `t1` (any angle under 180°)."""
+    n, th = bend_turn(t0, t1)
+    return np.asarray(p0, float) + r * np.sin(th) * np.asarray(t0, float) + r * (1.0 - np.cos(th)) * n
+
+
 def _bend_mesh(p0, t0, t1, r, width, depth, round_: bool) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
-    """A closed triangulated 90° bend (world coordinates): the section swept from `p0` going along `t0` round a radius
-    `r` until it runs along `t1`. Width stays across the bend plane; depth lies in it. Faces point outward."""
+    """A closed triangulated bend (world coordinates): the section swept from `p0` going along `t0` round a radius `r`
+    until it runs along `t1`, at whatever angle they make (90° in an offset's square bends, 45° in an angled one).
+    Width stays across the bend plane; depth lies in it. Faces point outward."""
     t0, t1 = np.asarray(t0, float), np.asarray(t1, float)
     side = np.cross(t0, t1)
     side /= np.linalg.norm(side)
-    centre = np.asarray(p0, float) + r * t1
+    n, turn = bend_turn(t0, t1)
+    centre = np.asarray(p0, float) + r * n
     if round_:
         ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
         section = np.c_[np.cos(ang) * width / 2, np.sin(ang) * depth / 2]
@@ -886,9 +934,9 @@ def _bend_mesh(p0, t0, t1, r, width, depth, round_: bool) -> tuple[np.ndarray, l
     m = len(section)
     rings = []
     for k in range(BEND_STEPS + 1):
-        th = (np.pi / 2) * k / BEND_STEPS
-        p = centre - r * np.cos(th) * t1 + r * np.sin(th) * t0
-        tangent = np.cos(th) * t0 + np.sin(th) * t1
+        th = turn * k / BEND_STEPS
+        p = centre - r * np.cos(th) * n + r * np.sin(th) * t0
+        tangent = np.cos(th) * t0 + np.sin(th) * n
         across = np.cross(tangent, side)
         rings.append([p + x * side + y * across for x, y in section])
     verts = np.array([v for ring in rings for v in ring])

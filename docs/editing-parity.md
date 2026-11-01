@@ -105,8 +105,16 @@ Ctrl+Z puts it back. On `fixtures.build_mep_fixture`: DA and DB square to each o
 to (4.2, 0.4), both 3.6 m; DA and DC join in line, DA 4.5 m; every edit leaves the file schema-valid and comes back on
 undo.
 
-Later: bends at other angles (45° offsets), transitions when a carried resize meets a neighbour of the old size, a carried
-move that re-fits its neighbours instead of carrying them.
+**Bends at any angle** (Nov 1, second program): `edits._bend_mesh` and `bend_end` sweep any angle under 180° (a 90°
+bend is drawn as before), `bend_radius` takes the angle (two bends of θ rise 2 r (1 − cos θ)), and `apply_offset(bend_deg=)`
+takes the section up a slope: a bend of θ, a straight riser along the slope, a bend of θ back, the run it takes centred on
+the split point. The Edit tool's offset has **90° / 45°**; Muse's offset candidate takes `"bend_deg": 45` (the prompt
+says when), carried in the option's `edit` to its recheck and keep. Measured on the run fixture: 400 mm up over 1.5 to
+4.5 m with 45° bends clears the beam: 1.18 m straight, bend, a 0.32 m riser on the slope, bend, 2.35 m 400 mm up, and
+back down; one joined chain, schema-valid.
+
+Later: transitions when a carried resize meets a neighbour of the old size, a carried move that re-fits its neighbours
+instead of carrying them.
 
 ## What the model says, edited (Tier 3)
 
@@ -142,8 +150,18 @@ base quantity matches its body, and every other element, type, set and map is as
 | Clip | | | | kept |
 | Delete | kept | | | kept |
 
-Not yet read: the fix agent's own edits (offsets, routes, resizes) go through `plans.apply`, not `manual.check`; on a
-model with these constructs they are not yet checked or brought along.
+## Muse's fixes keep it true too (Nov 1, second program)
+
+The fix kinds (offset, trim, seat, route, resize, and a plain move) try their edit inside `agent._fix_trial`: after the
+edit, `agent._keeps_true` brings the data along (`parametric.sync`) and reads the model again (`consistency`). A fix that
+still makes it disagree, or would leave a wall's join open (a fix never does), fails its trial with the reason, so Muse
+hears it in the next round ("cannot move it: it would leave its join with 'W2' open…"). Keeping a fix (`plans.apply`,
+every keep route) does the same after each fix's edit and refuses all of them (`NotVerified`) when one still
+disagrees. Elements that carry nothing to keep (all of Northbank's) skip it and cost nothing. Penetrations only add an
+opening, and a combined fix's steps are fix kinds above.
+
+Measured on the fixture with a column at BM1's end: Muse's trim of the typed beam back to the column is kept with its
+`Axis` ending at 4.8 m and its `Qto_BeamBaseQuantities` Length 4.8 m, BM2 as it was.
 
 ## When to update this doc
 

@@ -109,3 +109,35 @@ def test_a_joint_is_left_open_only_when_kept_with_it(mep):
     manual.apply(ws, sid, op, accept_joints=1)
     assert scene.element(g["DA"]).connected == [] and not valid(scene)
     assert "not joined to anything" in manual.check(ws, sid, op, preview=False)["blocked"]
+
+
+def test_an_offset_with_45_degree_bends_climbs_a_slope_and_stays_one_joined_chain(run):
+    ws, sid, scene, main = run
+    op = {"op": "offset", "element": main, "from": [1.5, 0, 2.8], "to": [4.5, 0, 2.8], "toward": "up", "by_m": 0.4,
+          "bend_deg": 45}
+    r = manual.check(ws, sid, op, preview=False)
+    assert r["blocked"] is None and r["clashes"] == 0 and "with 45° bends" in r["summary"]
+    kept = manual.apply(ws, sid, op)
+    pcs = kept["pieces"]
+    assert [scene.entity(g).is_a() for g in pcs] == ["IfcDuctSegment", "IfcDuctFitting"] * 4 + ["IfcDuctSegment"]
+    assert all(pcs[k + 1] in scene.element(pcs[k]).connected for k in range(len(pcs) - 1))
+    riser, middle = scene.bounds()[pcs[2]], scene.bounds()[pcs[4]]
+    assert riser[1][0] - riser[0][0] > 0.2 and riser[1][2] - riser[0][2] > 0.2        # it runs along and up: a slope
+    assert (middle[0][2] + middle[1][2]) / 2 == pytest.approx(3.2, abs=1e-3)          # the middle 400 mm up
+    assert sum(edits.run_of(scene, g).length_m for g in pcs if scene.entity(g).is_a("IfcDuctSegment")) < 6.0
+    assert not valid(scene)
+
+
+def test_muse_s_offset_can_ask_for_45_degree_bends_and_keeps_them(run):
+    from sightline import agent, plans
+    ws, sid, scene, main = run
+    beam = scene.model.by_type("IfcBeam")[0].GlobalId
+    cand = {"title": "Offset up on a slope", "split_m": [1.5, 4.5], "dz_m": 0.4, "bend_deg": 45}
+    attempt, option = agent.TRIES["offset"](scene, cand, main, beam, 0.025)
+    assert option is not None, attempt.reason
+    assert option.edit == {"bend_deg": 45.0}
+    kept = plans.apply(ws, sid, [{**agent.asdict(option), "pair": [main, beam]}])
+    (run_pieces,) = kept["pieces"]
+    assert len(run_pieces) == 9 and scene.entity(run_pieces[2]).is_a("IfcDuctSegment")
+    riser = scene.bounds()[run_pieces[2]]
+    assert riser[1][0] - riser[0][0] > 0.2   # kept as tried: up a slope, not a square riser

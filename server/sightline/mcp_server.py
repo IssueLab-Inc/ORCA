@@ -567,7 +567,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         delta_m} | {op: void, element, face, at, shape: rect|round, width_m, height_m | diameter_m, depth_m?} |
         {op: cut_by, element, cutter, gap_m} | {op: split, element, at} | {op: remove_section, element, from, to} |
         {op: delete, element} | {op: clip, element, to: {element, face}, gap_m} | {op: offset, element, from, to,
-        toward: up|down|north|south|east|west, by_m} (a section of a level duct, pipe or tray, with bends) |
+        toward: up|down|north|south|east|west, by_m, bend_deg?} (a section of a level duct, pipe or tray, with bends;
+        bend_deg 45 takes it up a slope with angled bends) |
         {op: join, element, to: {element}} (two free ends: in line, or square with a 90° bend) |
         {op: disconnect, element, from} (leave that joint open). An edit changes only that face or
         element and lists the joints it leaves open; add `carry: true` to push_pull, align or move only when the person

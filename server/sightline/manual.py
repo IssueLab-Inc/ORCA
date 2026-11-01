@@ -788,13 +788,17 @@ def _resolve_offset(scene: IfcScene, op: dict) -> Plan:
     length = float(edits._body(e)[1].Depth) * s
     if a < -LEAST_M or b > length + LEAST_M or b - a < 0.01:
         raise edits.Unsupported("pick where the offset starts and ends along it")
+    bend = float(op.get("bend_deg") or 90.0)   # 45: up a slope with angled bends either end
+    if not 15.0 <= bend <= 90.0:
+        raise ValueError("bend_deg is between 15 and 90")
     words = connections.move_words((vec * by).tolist())
     params = {"op": "offset", "element": gid, "from": [round(float(c), 4) for c in p], "to": [round(float(c), 4) for c in q],
-              "toward": [round(float(c), 6) for c in vec], "by_m": by}
+              "toward": [round(float(c), 6) for c in vec], "by_m": by, **({"bend_deg": bend} if bend != 90.0 else {})}
     plan = Plan("offset", gid, params, {scene.index_of(gid)}, [gid],
-                f"{label(scene, gid)} offset {words} for {b - a:.2f} m, {a:.2f} m along it, with bends", "offset", by,
+                f"{label(scene, gid)} offset {words} for {b - a:.2f} m, {a:.2f} m along it, with "
+                f"{'bends' if bend == 90.0 else f'{bend:.0f}° bends'}", "offset", by,
                 warnings=structure_warnings(scene, gid, "the offset"))
-    plan.extra.update(start_m=a, end_m=b, up_m=up_m, side_m=side_m)
+    plan.extra.update(start_m=a, end_m=b, up_m=up_m, side_m=side_m, bend_deg=bend)
     return plan
 
 
@@ -868,7 +872,8 @@ def _make_disconnect(scene: IfcScene, plan: Plan) -> Made:
 
 def _make_offset(scene: IfcScene, plan: Plan) -> Made:
     x = plan.extra
-    off = edits.apply_offset(scene, plan.element, x["start_m"], x["end_m"], x["up_m"], lateral_m=x["side_m"])
+    off = edits.apply_offset(scene, plan.element, x["start_m"], x["end_m"], x["up_m"], lateral_m=x["side_m"],
+                             bend_deg=x.get("bend_deg", 90.0))
     return Made(changed=[plan.element], created=[g for g in off.pieces if g != plan.element], pieces=list(off.pieces))
 
 

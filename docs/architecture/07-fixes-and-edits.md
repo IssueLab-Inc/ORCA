@@ -578,6 +578,12 @@ its state before and after) and `manual.apply` (hand edits: `you`, `muse`, `agen
 transactions on each file, so `Workspace.undo_edit` and `redo_edit` take the newest entry back or forward (routes
 `/edits/undo`, `/edits/redo`). `plans.apply` returns the `entry`.
 
+**Fixes keep the model true** ([docs/editing-parity.md](../editing-parity.md)): the offset, trim, seat, route and resize
+trials run in `agent._fix_trial`, and a plain move's in its scratch transaction: after the edit, `agent._keeps_true`
+brings layer and profile sets, `Axis`, base quantities and a split's join along (`parametric.sync`) and reads
+`consistency` again; still untrue, or a wall's join left open, the trial fails with the reason Muse reads next round.
+`plans.apply` does the same after each kept fix's edit and refuses them all (`NotVerified`) when one still disagrees.
+
 ### Hand edits: `manual.py` and `faces.py`
 
 The Edit tool, chat, voice and MCP edit elements directly through ops (push_pull, align, move, void, cut_by, split,

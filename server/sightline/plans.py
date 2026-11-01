@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
-from . import agent, connections, domains, edits, owner, requirements, verify
+from . import agent, connections, consistency, domains, edits, owner, parametric, requirements, verify
 from .service import PATTERNS_KEPT, Workspace
 from .limits import env_int
 
@@ -573,7 +573,8 @@ def _keep_move(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
 
 
 def _keep_offset(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
-    r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2])
+    r = ws.apply_offset(scene_id, o["moved"][0], o["split_m"], o["delta_m"][2],
+                        bend_deg=float((o.get("edit") or {}).get("bend_deg") or 90.0))
     return r, r["pieces"]
 
 
@@ -626,7 +627,7 @@ def _candidate_move(o: dict, a: str, b: str) -> tuple[dict, str]:
 
 
 def _candidate_offset(o: dict, a: str, b: str) -> tuple[dict, str]:
-    return {"split_m": o["split_m"], "dz_m": o["delta_m"][2]}, o["moved"][0]
+    return {"split_m": o["split_m"], "dz_m": o["delta_m"][2], "bend_deg": (o.get("edit") or {}).get("bend_deg")}, o["moved"][0]
 
 
 def _candidate_trim(o: dict, a: str, b: str) -> tuple[dict, str]:
@@ -773,13 +774,22 @@ def apply(ws: Workspace, scene_id: str, options: list[dict], *, source: str | No
             rec.clashes = [{"id": ids[k], "pair": list(option_pair(o)[:2])} for k, o in enumerate(checked)]
             rec.check = {"verified": True, "min_clearance_m": min((o["min_clearance_m"] for o in checked
                                                                    if o.get("min_clearance_m") is not None), default=None)}
+            moved = list(dict.fromkeys(g for o in checked for g in o["moved"]))
+            was = parametric.snapshot(scene, moved)   # what the model says besides the shape (docs/editing-parity.md)
+            readings = consistency.measure(scene, moved) if was else {}
             for k, o in enumerate(checked):
                 r, made = KEEP[o["kind"]](ws, scene_id, o)
                 runs = made if made and isinstance(made[0], list) else [made] if made else []
                 pieces += runs or [[]]
                 groups.append(runs)
                 files.update(r["files"])
-                changed += r.get("changed", [g for run in runs for g in run] or o["moved"])
+                mine = r.get("changed", [g for run in runs for g in run] or o["moved"])
+                changed += mine
+                if was:   # brought along with the body as the trial did; still untrue: nothing is kept
+                    why = agent._keeps_true(scene, was, readings, list(dict.fromkeys([*o["moved"], *mine])), o["moved"][0])
+                    if why:
+                        raise NotVerified(f"'{o.get('title') or o['kind']}' would leave the model saying two things ({why}), "
+                                          "so nothing was kept", k)
                 if r.get("cut") is False:   # a penetration its host's team must cut: the clash stays open
                     not_cut.append({"index": k, "blocked_by": r["blocked_by"]})
             rec.changed = list(dict.fromkeys(changed))
