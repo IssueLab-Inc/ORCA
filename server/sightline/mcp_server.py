@@ -573,6 +573,9 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         {op: disconnect, element, from} (leave that joint open). An edit changes only that face or
         element and lists the joints it leaves open; add `carry: true` to push_pull, align or move only when the person
         asks to take joined parts along (a joined straight follows a pushed end; a move takes its run and fittings).
+        Add `scope: "type"` to push_pull or align only when the person asks to change the element's type: the shape
+        (a mapped body) or section (a profile set) its type gives changes for every element of it, each checked; by
+        default an edit to shared data gives the element its own copy.
         Returns what it clears, the clashes it would make, its warnings (who must review), or why it cannot be made
         (`blocked`)."""
         link = call(ctx, "check_edit", {"op": op.get("op") if isinstance(op, dict) else None})

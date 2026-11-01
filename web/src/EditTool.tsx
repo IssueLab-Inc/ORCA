@@ -92,6 +92,11 @@ export const EditTool = forwardRef<EditToolHandle, {
   const [joined, setJoined] = useState(() => { try { return sessionStorage.getItem(CARRY_KEY) === "1"; } catch { return false; } });
   useEffect(() => { try { sessionStorage.setItem(CARRY_KEY, joined ? "1" : "0"); } catch { /* private window */ } }, [joined]);
   const along = () => (joined ? { carry: true } : {});
+  /** Apply to the type (`scope: "type"`): the shape or section its type gives changes for every element of the type,
+   * each checked. Off by default and again for each element, so a type's other elements never change by accident. */
+  const [toType, setToType] = useState(false);
+  useEffect(() => { setToType(false); }, [element]);
+  const typeScope = () => (toType ? { scope: "type" } : {});
 
   /** Back to picking (the tool stays): previews and highlights go. */
   function reset(keepTool = true) {
@@ -168,9 +173,9 @@ export const EditTool = forwardRef<EditToolHandle, {
     const r = faceRef(t, tp);
     return typeof r === "string" ? { element: t.element, face: r } : { element: t.element, ...r };
   };
-  const pushOp = (m: number): EditOp => ({ op: "push_pull", element: face!.element, face: own(), by_m: m, ...along() });
+  const pushOp = (m: number): EditOp => ({ op: "push_pull", element: face!.element, face: own(), by_m: m, ...along(), ...typeScope() });
   const alignOp = (t = target!, tp = targetPick!, g = gap, h = how): EditOp => ({ op: "align", element: face!.element, face: own(),
-    gap_m: g, how: h, to: toFace(t, tp), ...along() });
+    gap_m: g, how: h, to: toFace(t, tp), ...along(), ...typeScope() });
   const moveOp = (d: number[]): EditOp => ({ op: "move", element: element!, delta_m: d, ...along() });
   const voidOp = (at = pick!.point): EditOp => ({ op: "void", element: face!.element, face: own(), at, shape: voidShape,
     ...(voidShape === "round" ? { diameter_m: voidSize[0] } : { width_m: voidSize[0], height_m: voidSize[1] }),
@@ -397,6 +402,11 @@ export const EditTool = forwardRef<EditToolHandle, {
             : "This face or element only: joints it leaves open are listed, for you to keep"} data-tip-side="bottom">
             <input type="checkbox" checked={joined} onChange={(e) => { setJoined(e.target.checked); setCheck(null); viewer()?.preview([]); }} />
             {" "}Take joined parts along</label>)}
+        {(tool === "push_pull" || tool === "align") && face && !refused && (
+          <label className="check-in edit-carry" data-tip={toType ? "Its type changes: every element of the type takes the new shape or section, each checked"
+            : "This element only: a shape or section its type gives becomes its own"} data-tip-side="bottom">
+            <input type="checkbox" checked={toType} onChange={(e) => { setToType(e.target.checked); setCheck(null); viewer()?.preview([]); }} />
+            {" "}Apply to the type</label>)}
         {face && refused && (
           <div className="edit-offer" role="status">
             <p>{refused}{face.why_not ? `: ${face.why_not}` : ""}.</p>

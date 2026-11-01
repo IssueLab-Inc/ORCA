@@ -7,7 +7,9 @@ only what the edit moved is moved with it.
 
 Shared data is copied for the edited element first (owner decision, Nov 1): a layer or profile set its type gives
 other elements too means a copy of the type ("… (ORCA)") with the element reassigned to it; a set shared some other
-way, a copy of the set. Other elements of the type never change.
+way, a copy of the set. Other elements of the type never change, unless the person chose to apply the edit to the type
+(`scope: "type"`, `type_share` and `to_type`): then the type's shape or section is what the edit made of this element's,
+and every element of the type follows.
 """
 from __future__ import annotations
 
@@ -137,6 +139,133 @@ def own_usage(scene: IfcScene, gid: str, label=consistency._label):
     for a, val in keep.items():
         setattr(usage, a, val)
     return usage, words
+
+
+# ----------------------------------------------------------------------------------------------------- the type itself
+
+
+@dataclass
+class TypeShare:
+    """What an edit applied to the element's type (`scope: "type"`) changes for every element of it."""
+    kind: str               # "map": the shape its type draws for it; "profile": its type's profile set's section
+    type_name: str
+    others: list[str]       # the type's other elements in the scene: they follow
+
+
+def _maps_from(e, rmap) -> bool:
+    body = consistency._body(e)
+    return body is not None and any(it.is_a("IfcMappedItem") and it.MappingSource == rmap for it in body.Items)
+
+
+def type_share(scene: IfcScene, gid: str, face_kind: str, label=consistency._label) -> TypeShare:
+    """What of its type an edit to this face would change, when the person applies it to the type: the shape the type
+    draws (a mapped body: any face) or the type's profile set (a side or radius: the section). Raises
+    `edits.Unsupported` in words when the edit changes nothing the type gives, or what it changes is not ORCA's to
+    change for every element (a layered type's layers)."""
+    e = scene.entity(gid)
+    model = scene.models[scene.index_of(gid)]
+    rtype = ifcopenshell.util.element.get_type(e)
+    if rtype is None:
+        raise edits.Unsupported(f"{label(scene, gid)} has no type: the edit can only be its own")
+    name = rtype.Name or rtype.is_a()
+    usage = ifcopenshell.util.element.get_material(e, should_skip_usage=False)
+    if usage is not None and usage.is_a("IfcMaterialLayerSetUsage"):
+        raise edits.Unsupported(f"the layers of {name} are changed for every element in the authoring tool: leave "
+                                "Apply to the type off to change this one alone")
+    body = consistency._body(e)
+    mapped = [it for it in (body.Items if body is not None else ()) if it.is_a("IfcMappedItem")]
+    if mapped:
+        if len(body.Items) != 1 or mapped[0].MappingSource not in (rtype.RepresentationMaps or ()):
+            raise edits.Unsupported(f"its body is more than the shape its type {name} draws: leave Apply to the type off")
+        edits.mapping(mapped[0])   # refused when its type's shape is scaled where it is placed
+        rmap = mapped[0].MappingSource
+        others = [o.GlobalId for o in ifcopenshell.util.element.get_types(rtype)
+                  if o != e and scene.has(o.GlobalId) and _maps_from(o, rmap)]
+        return TypeShare("map", name, others)
+    if usage is not None and usage.is_a("IfcMaterialProfileSetUsage") and face_kind in ("side", "radial"):
+        ps = usage.ForProfileSet
+        if ps is None or ifcopenshell.util.element.get_material(rtype, should_skip_usage=True) != ps:
+            raise edits.Unsupported("its profile set is its own, not its type's: leave Apply to the type off")
+        if ps.CompositeProfile is not None or len(ps.MaterialProfiles) != 1:
+            raise edits.Unsupported(f"{name} has a section of several profiles: ORCA changes one profile only")
+        others = [o.GlobalId for o in consistency.users(model, ps) if o != e and scene.has(o.GlobalId)]
+        return TypeShare("profile", name, others)
+    own = ", and a length is each element's own" if usage is not None else ""
+    raise edits.Unsupported(f"this edit changes nothing its type {name} gives (its shape is its own{own}): leave "
+                            "Apply to the type off")
+
+
+def hold(scene: IfcScene, gid: str, share: TypeShare) -> dict:
+    """Before the edit, inside its transaction: what `to_type` needs of the shape the type draws for the element (the
+    map, where it puts it, a copy of its target: the edit replaces the mapped body with the element's own)."""
+    if share.kind != "map":
+        return {}
+    e = scene.entity(gid)
+    model = scene.models[scene.index_of(gid)]
+    (mi,) = consistency._body(e).Items
+    target = ifcopenshell.util.element.copy_deep(model, mi.MappingTarget) if mi.MappingTarget is not None else None
+    return {"map": mi.MappingSource, "m": edits.mapping(mi), "target": target}
+
+
+def _drop(model, root) -> None:
+    """Remove a representation or item and what only it uses, with the styles on its items."""
+    items = root.Items if root.is_a("IfcShapeRepresentation") else [root]
+    for it in items:
+        for st in [x for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
+            model.remove(st)
+    ifcopenshell.util.element.remove_deep2(model, root)
+
+
+def to_type(scene: IfcScene, gid: str, share: TypeShare, held: dict) -> list[str]:
+    """After the edit, inside its transaction: what the edit made of the element's shape or section becomes its type's,
+    and every element of the type follows. A mapped body: the element's new solids, moved back into the map's own
+    frame, are the type's shape, and the element draws it through its map again. A profile set: the new section is
+    the set's, and each other element's body takes it about its own placement (its cardinal point kept). Returns the
+    other elements that changed."""
+    e = scene.entity(gid)
+    model = scene.models[scene.index_of(gid)]
+    if share.kind == "map":
+        body = consistency._body(e)
+        rmap, inv = held["map"], np.linalg.inv(held["m"])
+        items = []
+        for it in body.Items:
+            copy = ifcopenshell.util.element.copy_deep(model, it, exclude=["IfcGeometricRepresentationContext"])
+            edits._move_item(model, copy, inv)
+            for st in [x for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
+                model.createIfcStyledItem(copy, st.Styles, st.Name)
+            items.append(copy)
+        shape = rmap.MappedRepresentation
+        old = list(shape.Items)
+        shape.Items = items
+        shape.RepresentationType = body.RepresentationType
+        for it in old:
+            if not [x for x in model.get_inverse(it) if not x.is_a("IfcStyledItem")]:
+                _drop(model, it)
+        mapped = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "MappedRepresentation",
+                                                    [model.createIfcMappedItem(rmap, held["target"])])
+        e.Representation.Representations = [mapped if r == body else r for r in e.Representation.Representations]
+        _drop(model, body)
+    else:
+        usage = ifcopenshell.util.element.get_material(e, should_skip_usage=False)
+        ps = usage.ForProfileSet
+        swept = consistency._swept_area(e)
+        if swept is None:
+            raise edits.Unsupported("its section is no longer one profile: it cannot be its type's")
+        old = ps.MaterialProfiles[0].Profile
+        ps.MaterialProfiles[0].Profile = swept
+        for other in share.others:
+            o = scene.entity(other)
+            body = consistency._body(o)
+            if body is not None and any(edits.shared(model, o, body, it) for it in body.Items):
+                edits.make_unique(model, o)
+            _set_swept(o, swept)
+            if consistency._swept_area(o) != swept:
+                raise edits.Unsupported(f"{consistency._label(scene, other)} is not drawn from its section: it cannot "
+                                        "follow its type")
+        if old is not None and old != swept and not model.get_inverse(old):
+            ifcopenshell.util.element.remove_deep2(model, old)
+    scene.refresh_bounds([gid, *share.others])
+    return list(share.others)
 
 
 # ----------------------------------------------------------------------------------------------------- the rules

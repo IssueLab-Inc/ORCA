@@ -83,8 +83,20 @@ pushed 50 mm gets "BT-UB (ORCA)" with a 450 mm section, cardinal point 5 kept, B
 two 2 m axes and quantities, the join handed to "W1 (part 2)"; F1's top pushed 100 mm is its own extrusion, F2 still
 mapped, FT-BOX's map 300 mm deep.
 
-Not yet (later): "apply to the type" (an edit to a type for all its elements); a joined wall's neighbour re-trimmed when
-its join is carried; a profile's cardinal point re-centred when a section grows on one side (the body grows to the side
+**Apply to the type** (`scope: "type"`, the Edit tool's **Apply to the type** for push/pull and align: off by default
+and again for each element). The edit changes what the type gives, for every element of it, each one checked (the
+`type` or `shared` rule is kept on purpose, everything else still read; requirements gate every element):
+- **A shape the type draws** (a mapped body): the element's new solids, moved back into the map's own frame
+  (`parametric.to_type`, the inverse of where its map puts it), become the type's shape, and the element draws it
+  through its map again. Every element mapped from it follows, each where its own map puts it: F2's north end pushed
+  100 mm makes F1 100 mm longer along x, F2's map being turned 90°.
+- **A section the type's profile set gives** (a side or radius): the new profile is the set's, and each other element
+  takes it about its own placement, its cardinal point kept: BM1's top pushed 50 mm makes BT-UB 450 mm deep, BM1's top
+  at 3.25 m (the face pushed), BM2 25 mm deeper above and below its axis. No "(ORCA)" copy.
+- **Refused in words:** a layered type (its layers change in the authoring tool), an element without a type, an edit
+  that changes nothing the type gives (a length is each element's own), and every op but push/pull and align.
+
+Not yet (later): a joined wall's neighbour re-trimmed when its join is carried; a profile's cardinal point re-centred when a section grows on one side (the body grows to the side
 pushed, as people expect); quantities ORCA does not work out (weights, surface areas, perimeters) are left and named.
 
 ## MEP by hand (Tier 2)

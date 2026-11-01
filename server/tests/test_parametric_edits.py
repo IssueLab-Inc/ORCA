@@ -173,3 +173,75 @@ def test_undo_puts_type_set_axis_and_quantities_back(param):
     log.undo(scene)
     log.undo(scene)
     assert untouched(scene, g, "") == before
+
+
+# ----------------------------------------------------------------------------------------------------- Apply to the type
+
+
+def _mapped(e):
+    (item,) = e.Representation.Representations[0].Items
+    assert item.is_a("IfcMappedItem")
+    return item.MappingSource
+
+
+def test_applied_to_its_type_a_mapped_fitting_changes_every_fitting_of_it(param):
+    ws, sid, scene, g = param
+    before = untouched(scene, g, "")
+    f2 = scene.bounds()[g["F2"]].copy()
+    op = {"op": "push_pull", "element": g["F1"], "face": "top", "by_m": 0.1, "scope": "type"}
+    r = manual.check(ws, sid, op)
+    assert r["blocked"] is None and g["F2"] in r["changed"] and g["F2"] in r["targets"]
+    assert "its type FT-BOX too, and the 1 other element of it" in r["summary"]
+    manual.apply(ws, sid, op)
+    f1e, f2e = scene.entity(g["F1"]), scene.entity(g["F2"])
+    rmap = ue.get_type(f1e).RepresentationMaps[0]
+    assert _mapped(f1e) == _mapped(f2e) == rmap, "both still draw their type's shape"
+    assert rmap.MappedRepresentation.Items[0].Depth == pytest.approx(0.4)
+    assert scene.bounds()[g["F1"]][1][2] == pytest.approx(1.4)
+    assert scene.bounds()[g["F2"]][1][2] == pytest.approx(f2[1][2] + 0.1)
+    assert scene.bounds()[g["F2"]][:, :2] == pytest.approx(f2[:, :2]), "only its height changed"
+    assert ue.get_type(f1e).Name == "FT-BOX" and not [t for t in scene.models[0].by_type("IfcTypeObject")
+                                                       if t.Name and t.Name.endswith("(ORCA)")]
+    assert_consistent(scene)
+    ws.journal(sid).undo(scene)
+    assert untouched(scene, g, "") == before
+
+
+def test_applied_to_its_type_a_turned_fitting_s_end_moves_the_others_in_their_own_frame(param):
+    ws, sid, scene, g = param
+    f1 = scene.bounds()[g["F1"]].copy()
+    f2 = scene.bounds()[g["F2"]].copy()
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["F2"], "face": "north end", "by_m": 0.1, "scope": "type"})
+    assert scene.bounds()[g["F2"]][1][1] == pytest.approx(f2[1][1] + 0.1)
+    # F2's map is turned 90 degrees: what is north in it is along x in F1
+    size = lambda b: b[1] - b[0]
+    assert size(scene.bounds()[g["F1"]]) == pytest.approx(size(f1) + [0.1, 0.0, 0.0])
+    assert _mapped(scene.entity(g["F1"])) == _mapped(scene.entity(g["F2"]))
+    assert_consistent(scene)
+
+
+def test_applied_to_its_type_a_deeper_section_deepens_every_beam_of_it_about_its_own_axis(param):
+    ws, sid, scene, g = param
+    bm2 = scene.bounds()[g["BM2"]].copy()
+    r = manual.apply(ws, sid, {"op": "push_pull", "element": g["BM1"], "face": "top", "by_m": 0.05, "scope": "type"})
+    assert g["BM2"] in r["changed"]
+    b1, b2 = scene.entity(g["BM1"]), scene.entity(g["BM2"])
+    u1, u2 = ue.get_material(b1), ue.get_material(b2)
+    assert u1.ForProfileSet == u2.ForProfileSet and u1.ForProfileSet.MaterialProfiles[0].Profile.OverallDepth == pytest.approx(0.45)
+    assert ue.get_type(b1).Name == ue.get_type(b2).Name == "BT-UB", "the type itself, not a copy"
+    assert u2.CardinalPoint == 5 and consistency._swept_area(b2).OverallDepth == pytest.approx(0.45)
+    assert scene.bounds()[g["BM2"]][:, 2] == pytest.approx(bm2[:, 2] + [-0.025, 0.025]), "about its own axis"
+    assert scene.bounds()[g["BM1"]][1][2] == pytest.approx(3.25), "the face pushed"
+    assert_consistent(scene)
+
+
+@pytest.mark.parametrize("name,op,words", [
+    ("W1", {"op": "push_pull", "face": "north face", "by_m": 0.05}, "layers of WT-250 are changed for every element"),
+    ("SL1", {"op": "push_pull", "face": "top", "by_m": 0.05}, "has no type"),
+    ("BM1", {"op": "push_pull", "face": "east end", "by_m": 0.5}, "changes nothing its type BT-UB gives"),
+    ("F1", {"op": "move", "delta_m": [0, 0, 0.1]}, "only a push, pull or align changes what its type gives"),
+], ids=["layered type", "no type", "a length", "a move"])
+def test_applied_to_its_type_what_the_type_does_not_give_is_refused_in_words(param, name, op, words):
+    ws, sid, scene, g = param
+    r = manual.check(ws, sid, {**op, "element": g[name], "scope": "type"})
+    assert r["blocked"] and words in r["blocked"], r["blocked"]

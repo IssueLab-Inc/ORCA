@@ -53,6 +53,15 @@ def carries(op: dict) -> bool:
     return bool(op.get("carry")) and not op.get("alone")
 
 
+def to_type(op: dict) -> bool:
+    """Whether the person applies the edit to the element's type (`scope: "type"`): the shape or section its type gives
+    changes for every element of the type, each checked. By default an edit is the element's own (owner decision)."""
+    return op.get("scope") == "type"
+
+
+TYPE_OPS = ("push_pull", "align")   # the edits that change what a type gives: its shape, its section
+
+
 class Offered(edits.Unsupported):
     """Refused as asked, with another way the page can offer (an op): "Move it on its own"."""
 
@@ -308,15 +317,25 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
                              f"{' and '.join(resized_ends)}: take joined parts along to add transitions"})
     if carries(op):
         params["carry"] = True
+    share = parametric.type_share(scene, gid, face.kind, label) if to_type(op) else None
+    if share is not None:
+        params["scope"] = "type"
     if opened:
         warn.append(_open_joint_words(scene, gid, opened))
     kept = f"; {', '.join(label(scene, p) for p, _ in follow)} {'shorter' if by > 0 else 'longer'} so the joint holds" if follow else ""
     if transitions:
         kept += f"; a transition back to its old size at its {' and '.join(transitions)}"
+    others = share.others if share is not None else []
+    if share is not None:
+        n = len(others)
+        kept += (f"; its type {share.type_name} too" + (f", and the {n} other element{'s' if n > 1 else ''} of it"
+                                                         if n else ""))
     plan = Plan("push_pull", gid, params, {scene.index_of(gid), *(scene.index_of(p) for p, _ in follow)},
-                [gid, *(p for p, _ in follow)], f"{face.name} of {label(scene, gid)} pushed {change}{sizes}{kept}", "resize",
-                abs(by), gated=[gid, *(p for p, _ in follow)], face=face, warnings=warn)
+                [gid, *(p for p, _ in follow), *others], f"{face.name} of {label(scene, gid)} pushed {change}{sizes}{kept}",
+                "resize", abs(by), gated=[gid, *(p for p, _ in follow), *others], face=face, warnings=warn)
     plan.extra.update(follow=follow, open_joints=opened, transitions=transitions)
+    if share is not None:   # what the edit changes of the type is changed on purpose: every element of it is checked
+        plan.extra.update(type_share=share, consistent=("type",) if share.kind == "map" else ("shared",))
     return plan
 
 
@@ -385,6 +404,8 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
     # rectangle's side, a plan outline's edge), takes them with it
     through = _openings_on(scene, gid, face) if k is None and by > 0 and face.kind in ("cap", "side", "edge") else []
     before = edits.section_of(scene, gid) if plan.extra.get("transitions") else None
+    share = plan.extra.get("type_share")
+    held = parametric.hold(scene, gid, share) if share is not None else None
     if face.kind == "cap":
         edits.stretch(scene, gid, own.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid), k), item=k, **hand)
     elif face.kind == "side":
@@ -402,6 +423,7 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
     else:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled")
     _stretch_openings(scene, through, face, by)
+    followed = parametric.to_type(scene, gid, share, held) if share is not None else []
     made = edits.add_transitions(scene, gid, before, plan.extra["transitions"]) if before is not None else []
     for peer, cap in plan.extra.get("follow", []):   # its joined segment's end goes the same way: the joint holds
         edits.stretch(scene, peer, cap, -by, **hand)
@@ -410,7 +432,7 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
         port = model.by_guid(j["port"])
         if ifcopenshell.util.system.get_connected_port(port) is not None:
             ifcopenshell.api.run("system.disconnect_port", model, port=port)
-    return Made(changed=[gid, *(p for p, _ in plan.extra.get("follow", []))], created=made,
+    return Made(changed=[gid, *(p for p, _ in plan.extra.get("follow", [])), *followed], created=made,
                 open_ends=[gid, *(j["element"] for j in plan.extra.get("open_joints", []))] if plan.extra.get("open_joints") else [])
 
 
@@ -518,9 +540,12 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     if how == "stretch":
         if "push_pull" not in face.allows:
             raise edits.Unsupported(f"its {face.name} cannot be stretched: move it instead")
-        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t, "carry": carries(op)})
+        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t, "carry": carries(op),
+                                     **({"scope": "type"} if to_type(op) else {})})
         plan.summary = f"{face.name} of {label(scene, gid)} stretched {_mm(t)} {'out' if t > 0 else 'in'}, {where} the {target}{meets}"
     elif how == "move":
+        if to_type(op):
+            raise edits.Unsupported("moving it is its own: Apply to the type changes the shape or section its type gives")
         try:
             plan = _resolve_move(scene, {"op": "move", "element": gid, "delta_m": (na * t).tolist(), "carry": carries(op)})
         except Offered as e:   # the align itself, on its own
@@ -531,7 +556,7 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     plan.op = "align"
     plan.params = {"op": "align", "element": gid, "face": spec(face), "to": op.get("to"), "gap_m": gap, "how": how,
                    "by_m": t, **({"delta_m": plan.params["delta_m"]} if how == "move" else {}),
-                   **({"carry": True} if carries(op) else {})}
+                   **({"carry": True} if carries(op) else {}), **({"scope": "type"} if to_type(op) else {})}
     if other:
         plan.touching.add(other)
     plan.extra["how"] = how
@@ -999,6 +1024,10 @@ def resolve(scene: IfcScene, op: dict) -> Plan:
     if not isinstance(gid, str) or not gid:
         raise ValueError("say which element (its GlobalId)")
     scene.index_of(gid)
+    if to_type(op) and name not in TYPE_OPS:
+        raise edits.Unsupported("only a push, pull or align changes what its type gives: leave Apply to the type off")
+    if op.get("scope") not in (None, "element", "type"):
+        raise ValueError("scope is element (the default) or type")
     return OPS[name].resolve(scene, op)
 
 

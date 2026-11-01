@@ -35,6 +35,9 @@ Muse and agents know what changed, not only the geometry. It is new work, writte
     STEP part its touching group. The element's own openings still grow with a pushed face: they belong to it. The old
     opt-out `alone` is still read (it never carries). The fix agent's moves are unchanged: they carry
     (`SIGHTLINE_CONNECTED_MOVES`). The wider program this starts is [editing-parity.md](editing-parity.md).
+    A shape or section its type gives becomes the element's own when edited; **Apply to the type** (`scope: "type"`,
+    push/pull and align only, off by default and again for each element) changes the type instead, for every element
+    of it, each checked ([editing-parity.md](editing-parity.md), "Apply to the type").
 
 ## The edit log (`server/sightline/journal.py`)
 
@@ -238,7 +241,8 @@ back.
   (`alignDistance`, `pointDistance`) before the server's check replaces it; move takes a vector or two snapped points.
   Keep, or **Keep with N clashes** / **Keep with 1 clash · 1 open joint** (`keepLabel`); a check's offer is a button
   (**Clip it flush**, **Move it on its own**, which also turns carrying off). **Take joined parts along** (push/pull,
-  align and move; off by default, remembered for the visit in `sessionStorage` `orca.edit.carry`) sends `carry`. Esc
+  align and move; off by default, remembered for the visit in `sessionStorage` `orca.edit.carry`) sends `carry`;
+  **Apply to the type** (push/pull and align; off by default and again for each element) sends `scope: "type"`. Esc
   steps back one thing at a time.
 - **No dead ends**: a face the tool cannot take is still chosen and lit; the panel says why and offers the tools it does
   take as buttons ("Align it", "Move it", "Cut a void"), keeping the face across the change of tool.

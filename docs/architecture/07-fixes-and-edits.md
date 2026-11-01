@@ -592,7 +592,9 @@ again ([docs/manual-edits.md](../manual-edits.md)). An edit changes the face or 
 (`manual.carries`) takes joined parts along: `manual._follows` for a pushed cap, `connections.run` and `plan_move` for
 a move, as the fix kinds always do (owner decision, Nov 1; [docs/editing-parity.md](../editing-parity.md)). After the
 edit, inside its transaction, `parametric.sync` brings what the model says besides the shape along (layer and profile
-sets, `Axis`, base quantities, path joins; shared sets and a type's mapped shape copied for the element alone), and the
+sets, `Axis`, base quantities, path joins; shared sets and a type's mapped shape copied for the element alone, or with
+`scope: "type"` (`manual.to_type`, push/pull and align) written to the type for every element of it:
+`parametric.type_share`, `hold`, `to_type`, its other elements among the targets), and the
 check reads `consistency` before and after: what still disagrees is refused in words. They share the fix kinds' primitives (`edits.stretch`,
 `apply_trim`, `_build_chain`, `_void_rep`/`_void_place`, `_grown`, the ray casts) and add `stretch_radius`,
 `offset_edge`, `face_axes`, `through_depth`, `misses`, `cut_void`, `cut_by_shape`, `split_axis`, `split`,

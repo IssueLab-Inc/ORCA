@@ -202,7 +202,9 @@ TOOLS = [
         "for the face the user chose in the Edit tool; other faces by name from list_faces. An edit changes only that "
         "face or element: a joint it leaves open is listed. Add carry: true to push_pull, align or move only when the "
         "user asks to take joined parts along (a joined straight follows a pushed end; a move takes its run and "
-        "fittings). The result says what it clears, what it would hit (clashes), its warnings, or why it cannot be made.",
+        "fittings). Add scope: \"type\" to push_pull or align only when the user asks to change the type, or every "
+        "element of it: the shape or section its type gives changes for all of them, each checked (a layered type, a "
+        "length or an element without a type is refused). The result says what it clears, what it would hit (clashes), its warnings, or why it cannot be made.",
         {"op": {"type": "object"}}, ["op"]),
     _fn("edit_keep", "Keep the hand edit you checked last, only when the user's own latest message says to keep it "
         "(keep it, apply it, do it, yes). When it makes clashes, only when they said to keep it with the clashes; pass "
