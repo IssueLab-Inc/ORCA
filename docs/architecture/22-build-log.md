@@ -1864,3 +1864,19 @@ sharing either element; code `ReportList` `RowActions` / `sameElements`, App's `
 - **Checked:** `web/tests/row-actions.test.mjs` (3), 204 web tests, build clean; in Chromium on Northbank against a
   local server, hovering #1 shows the three actions over the depth with the title still readable, and Same elements
   shows the 15 clashes on the supply air main or the transfer girder.
+
+A clash row shows its proposal (Nov 1; owner: "something needs to show on the clash that a proposal is being generated
+and that it's ready when it is with a link to bring up the proposal section to view if its not"; owner decision: it
+runs on in the background for its own clash, one at a time, and a finished one is kept per clash; code App's
+`trackAgent` / `running` / `runState` / `doneProposals` / `viewProposal`, `ReportList`'s row status):
+- **Found on the way:** opening another clash while a proposal ran let that run's progress and result land on the new
+  clash's panel (`resetWork` cleared the panel, but the tracker kept writing to it), and a finished proposal was lost
+  when another clash was opened.
+- **What:** a proposal belongs to its clash. The tracker keeps its own progress, proposal and thoughts and writes the
+  panel only while that clash is on screen (the pilot too); its row says Proposing…, then "N fixes ready" or "No fix
+  found", with View when it is not on screen (another clash, or another panel in front), and View in the hover actions
+  instead of Propose. Opening the clash again shows its proposal without a new request. A second proposal waits
+  ("Waiting for #N"); the notch says "Fixing #N" for the running clash.
+- **Checked:** `web/tests/proposal-status.test.mjs` (2), 208 web tests, build clean. In Chromium on Northbank against
+  a local server with Muse Spark: #1 proposed from its row showed Proposing…, kept it with #2 open (whose panel stayed
+  empty), then "1 fix ready · View"; View brought up #1's Verified options.

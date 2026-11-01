@@ -231,6 +231,14 @@ export function App() {
   const aboutPushed = useRef(false);   // this page added the #about history entry, so closing goes Back over it
   // Muse Spark's reasoning summaries for the current proposal, as they stream in.
   const [thoughts, setThoughts] = useState<{ round: number; text: string }[]>([]);
+  // A proposal runs on in the background for its own clash while others are opened (one at a time): the clash it is
+  // for (`run`: its tracker), its own progress, proposal and thoughts as they stand, and each clash's last finished
+  // proposal, kept for the session so going back shows it without proposing again.
+  const [running, setRunningState] = useState<{ id: string; number: number; run: number } | null>(null);
+  const runningNow = useRef<{ id: string; number: number; run: number } | null>(null);
+  const setRunning = (v: { id: string; number: number; run: number } | null) => { runningNow.current = v; setRunningState(v); };
+  const runState = useRef<{ id: string | null; progress: Progress; proposal: Proposal | null; thoughts: { round: number; text: string }[] } | null>(null);
+  const [doneProposals, setDoneProposals] = useState<Record<string, { proposal: Proposal; progress: Progress; thoughts: { round: number; text: string }[] }>>({});
   const [lightbox, setLightbox] = useState<{ clash: ReportClash; index: number } | null>(null);
   useEffect(() => { setLightbox(null); }, [report]);
   const [remeasure, setRemeasure] = useState(0);
@@ -594,7 +602,7 @@ export function App() {
   useEffect(() => { try { if (measureAt) localStorage.setItem("sightline.measure.at", JSON.stringify(measureAt)); } catch { /* kept for this visit */ } }, [measureAt]);
 
   // A clock for the live status lines while an agent works.
-  const working = (!!progress && progress.phase !== "done") || (!!planRun && planRun.phase !== "done")
+  const working = (!!progress && progress.phase !== "done") || !!running || (!!planRun && planRun.phase !== "done")
     || (!!triageRun && !triageRun.done) || contextWorking || !!loading;
   useEffect(() => {
     if (!working) return;
@@ -1170,7 +1178,7 @@ export function App() {
   function retireDirectWork() {
     directAgent.current?.retire(); directPlan.current?.retire(); directContext.current?.retire();
     directAgent.current = null; directPlan.current = null; directContext.current = null;
-    ++agentRun.current; ++planRequest.current; pilot.current?.cancel();
+    ++agentRun.current; ++planRequest.current; pilot.current?.cancel(); setRunning(null);
     setReplaying(false);
   }
 
@@ -1227,6 +1235,7 @@ export function App() {
       setTool((t) => ({ ...t, hiddenModels: [] }));
       setEdits({}); setFixes({}); setReviewed({}); setVerdicts(null); setPlan(null); setPlanRun(null); setPlanError(null); setChecked(new Set());
       setChecks([]); setViewCheck(null); setRanCheck(null); unionSerial.current = 0;
+      setDoneProposals({}); runState.current = null; setRunning(null);
       openedLoad.current = load;
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
       setStepFiles(Object.values(stepMap ?? {})); setSceneFiles(files); setResumable(null); sceneUploaded.current = upload;
@@ -1265,11 +1274,22 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, sceneId, matches, clash, a, b]);
 
+  // Each clash's finished proposal, as its row says it: how many verified fixes (0: none found).
+  const readyCounts = useMemo(() => Object.fromEntries(Object.entries(doneProposals).map(([id, d]) => [id, d.proposal.options.length])),
+    [doneProposals]);
+  /** A row's View: its clash on screen with the Clash panel in front, scrolled to its options. */
+  function viewProposal(c: ReportClash) {
+    if (c.id !== clash?.id) selectClash(c);
+    setTab("clash");
+    landed.current = null;
+    setTimeout(() => { if (optionsHead.current) scrollInPane(optionsHead.current); }, 80);
+  }
+
   // A row's Propose fixes (the list's quick actions): select it, then propose once its pair is picked, as the panel's
   // button would. On the clash already proposed for, it only shows that proposal.
   const [proposeNext, setProposeNext] = useState<string | null>(null);
   function proposeFromList(c: ReportClash) {
-    if (busy || planning) return;
+    if (busy || planning || runningNow.current) return;
     setTab("clash");
     if (c.id === clash?.id && (proposal || proposing)) return;
     setProposeNext(c.id);
@@ -1469,7 +1489,16 @@ export function App() {
   /** Select a report clash and take the view to it, or (`keepPlan`) only select it while a plan stays on screen. */
   function selectClash(c: ReportClash, keepPlan = false) {
     if (!keepPlan) clearManual();
-    if (c.id !== clash?.id) { setClash(c); resetWork(keepPlan); setLightbox(null); }
+    if (c.id !== clash?.id) {
+      setClash(c); clashRef.current = c; resetWork(keepPlan); setLightbox(null);
+      // Its own work comes back: the proposal running for it, else the one it finished (kept for the session). A run
+      // for another clash goes on in the background, without driving the view.
+      const live = runningNow.current?.id === c.id ? runState.current : null;
+      const done = doneProposals[c.id];
+      if (live) { setProgress(live.progress); setProposal(live.proposal); setThoughts(live.thoughts); }
+      else if (done) { setProgress(done.progress); setProposal(done.proposal); setThoughts(done.thoughts); setChosen(done.proposal.options.length ? 0 : null); }
+      if (runningNow.current && runningNow.current.id !== c.id) pilot.current?.cancel();
+    }
     if (keepPlan) return;
     setViewPlan(false); setViewContext(false);
     if (tab === "plan" && !planRun) setTab("clash");
@@ -1809,7 +1838,7 @@ export function App() {
 
   /** Start showing the agent's progress; returns the handler for its events and a function to call when done. With
    * `first` (a second try), the first try's ideas stay in the activity table and the second's are numbered after them. */
-  function trackAgent(first: Proposal | null = null, origin: Origin = "you", title = "") {
+  function trackAgent(first: Proposal | null = null, origin: Origin = "you", title = "", forClash: ReportClash | null = clashRef.current) {
     directContext.current?.retire();
     clearManual();
     const trace = traceStart("propose", origin, title, { second: !!first, scene: sceneId });
@@ -1817,46 +1846,58 @@ export function App() {
     const run = ++agentRun.current;
     const epoch = sceneEpoch.current;
     const live = () => agentRun.current === run && sceneEpoch.current === epoch;
+    // The run is for one clash: its progress, proposal and thoughts are its own (`runState`) and reach the panel only
+    // while that clash is on screen, so opening another clash meanwhile shows that one's work, not this run's.
+    const forId = forClash?.id ?? null;
+    const here = () => forId === null || (clashRef.current?.id ?? null) === forId;
     setError(null); setChosen(null); setViewPlan(false); setViewContext(false); setReplaying(false);
     const t = Date.now();
     let p: Progress = { started: t, round: 1, phase: "thinking", thinkingSince: t, modelSeconds: [], ideas: 0, checking: null,
       ...(first ? { model: wonder, offset: first.attempts.length } : {}) };
-    setProgress(p); setNow(t);
-    setProposal(first ? { understanding: first.understanding, options: [], attempts: first.attempts, advice: first.advice }
-      : { understanding: "", options: [], attempts: [] });
-    setThoughts([]);
+    let q: Proposal | null = first ? { understanding: first.understanding, options: [], attempts: first.attempts, advice: first.advice }
+      : { understanding: "", options: [], attempts: [] };
+    let th: { round: number; text: string }[] = [];
+    const own: { id: string | null; progress: Progress; proposal: Proposal | null; thoughts: { round: number; text: string }[] } =
+      { id: forId, progress: p, proposal: q, thoughts: th };
+    runState.current = own;
+    const keep = () => { own.progress = p; own.proposal = q; own.thoughts = th; };
+    setRunning(forClash ? { id: forClash.id, number: forClash.number, run } : null);
+    setProgress(p); setNow(t); setProposal(q); setThoughts(th);
     pilot.current?.start(first ? wonder : undefined);
-    const update = (next: Partial<Progress>) => { p = { ...p, ...next }; setProgress(p); };
+    const update = (next: Partial<Progress>) => { p = { ...p, ...next }; keep(); if (here()) setProgress(p); };
+    const setQ = (f: (x: Proposal) => Proposal) => { if (!q) return; q = f(q); keep(); if (here()) setProposal(q); };
+    const setTh = (f: (x: { round: number; text: string }[]) => { round: number; text: string }[]) => { th = f(th); keep(); if (here()) setThoughts(th); };
+    const ended = () => { const r = runningNow.current; if (r && r.run === run) setRunning(null); };
     let attempts = first?.attempts.length ?? 0;
     // Work that took over ends this run's record too (a plan, a wider fix, other models), whichever of these sees it first.
-    const superseded = () => { if (live()) return false; trace.end("Stopped when newer work took over"); return true; };
+    const superseded = () => { if (live()) return false; trace.end("Stopped when newer work took over"); ended(); return true; };
     const onEvent = (e: AgentEvent) => {
       if (superseded()) return;
       trace.add(e);
-      pilot.current?.event(e);
+      if (here()) pilot.current?.event(e);
       // A second try starting in the same stream (automatic): its ideas are numbered after the first's.
       if (e.type === "escalating") {
         const seed = !first && !attempts && e.first_try?.attempts.length ? e.first_try : null;
         if (seed) {   // a try the page didn't watch (a plan's item): its ideas lead the table
           attempts = seed.attempts.length;
-          setProposal((q) => q && { ...q, understanding: seed.understanding, advice: seed.advice, attempts: seed.attempts });
+          setQ((x) => ({ ...x, understanding: seed.understanding, advice: seed.advice, attempts: seed.attempts }));
         }
-        update({ model: e.model, offset: attempts, round: 1, modelSeconds: [] }); setThoughts([]);
-        pilot.current?.model(e.model, attempts);
+        update({ model: e.model, offset: attempts, round: 1, modelSeconds: [] }); setTh(() => []);
+        if (here()) pilot.current?.model(e.model, attempts);
       }
       else if (e.model && e.model !== p.model && p.offset == null) update({ model: e.model });
       if (e.type === "attempt") attempts += 1;
-      if (e.type === "note") setThoughts((t) => [...t, { round: p.round, text: e.text }]);   // e.g. why no second try
-      if (e.type === "reasoning") setThoughts((t) => [...t, { round: e.round, text: e.text }]);
+      if (e.type === "note") setTh((x) => [...x, { round: p.round, text: e.text }]);   // e.g. why no second try
+      if (e.type === "reasoning") setTh((x) => [...x, { round: e.round, text: e.text }]);
       if (e.type === "thinking") update({ round: e.round, phase: "thinking", thinkingSince: Date.now(), checking: null });
       if (e.type === "ideas") {
         update({ phase: "checking", modelSeconds: [...p.modelSeconds, e.seconds], ideas: e.count });
-        setProposal((q) => q && { ...q, understanding: e.understanding });
+        setQ((x) => ({ ...x, understanding: e.understanding }));
       }
       if (e.type === "checking") update({ checking: { index: e.index, title: e.title, kind: e.kind } });
       if (e.type === "attempt") {
         const { type: _t, index: _i, ...attempt } = e;
-        setProposal((q) => q && { ...q, attempts: [...q.attempts, attempt] });
+        setQ((x) => ({ ...x, attempts: [...x.attempts, attempt] }));
       }
     };
     const finish = (result: Proposal | null) => {
@@ -1864,19 +1905,25 @@ export function App() {
       if (result) trace.add({ ...result, type: "result" });
       trace.end(result ? null : "Stopped before a result");
       const show = () => {
-        if (!live()) return;
-        if (result) { setProposal(result); setChosen(result.options.length ? 0 : null); }
+        if (!live()) { ended(); return; }
         // A second try that failed or was refused: the first try's fixes stand.
-        else if (first) { setProposal(first); setChosen(first.options.length ? 0 : null); }
+        const final = result ?? first;
+        if (final) q = final;
         if (result?.recommendation) noteRecommendation(result.recommendation, [a, b] as const);
-        update({ phase: "done", checking: null }); setNow(Date.now());
+        p = { ...p, phase: "done", checking: null }; keep();
+        // Kept for its clash (a result, or the first try's that stands): its row says it is ready, and opening it
+        // again shows it.
+        if (forId && final) { const doneP = p, doneTh = th; setDoneProposals((k) => ({ ...k, [forId]: { proposal: final, progress: doneP, thoughts: doneTh } })); }
+        ended();
+        if (here()) { if (final) { setProposal(final); setChosen(final.options.length ? 0 : null); } setProgress(p); }
+        setNow(Date.now());
       };
-      if (pilot.current) pilot.current.finish(show); else show();
+      if (pilot.current && here()) pilot.current.finish(show); else show();
     };
     const retire = () => {
       if (superseded()) return;
       trace.end("Stopped");
-      ++agentRun.current; pilot.current?.cancel();
+      ++agentRun.current; pilot.current?.cancel(); ended();
       const owned = p;
       if (owned.phase !== "done") {
         const retired: Progress = { ...owned, phase: "done", checking: null };
@@ -1938,9 +1985,9 @@ export function App() {
   /** `pick`: a pair other than the one shown (a plan's item; the page's selection catches up as this runs). */
   async function runProposal(second: boolean, pick?: { a: string; b: string; clash: ReportClash | null }) {
     const ea = pick ? pick.a : a, eb = pick ? pick.b : b, on = pick ? pick.clash : clash;
-    if (!sceneId || !ea || !eb || busy) return;
+    if (!sceneId || !ea || !eb || busy || runningNow.current) return;   // one proposal at a time
     replaceChatWork();
-    const tracker = trackAgent(second && !pick ? proposal : null, "you", pairTitle(on, ea, eb)); directAgent.current = tracker;
+    const tracker = trackAgent(second && !pick ? proposal : null, "you", pairTitle(on, ea, eb), on); directAgent.current = tracker;
     const { onEvent, finish } = tracker;
     const run = agentRun.current;
     const from = on && report ? { report_id: report.id, clash_id: on.id } : undefined;
@@ -2034,7 +2081,7 @@ export function App() {
     const trace = traceStart("plan", origin, title, { kind });
     const epoch = sceneEpoch.current, request = ++planRequest.current;
     const live = () => sceneEpoch.current === epoch && planRequest.current === request;
-    ++agentRun.current; pilot.current?.cancel();
+    ++agentRun.current; pilot.current?.cancel(); setRunning(null);
     resetWork(); setPlan(null); setError(null); setPlanError(null);
     setViewPlan(true); setViewContext(false); setPlanKind("batch");
     const t = Date.now();
@@ -2194,7 +2241,7 @@ export function App() {
     const controller = new AbortController();
     const epoch = sceneEpoch.current, request = ++contextRequest.current;
     const live = () => sceneEpoch.current === epoch && contextRequest.current === request;
-    ++agentRun.current; pilot.current?.cancel();
+    ++agentRun.current; pilot.current?.cancel(); setRunning(null);
     resetWork(); setViewPlan(false); setViewContext(true); setPlanKind("context"); setCompare("after");
     setContextChosen(null); setAcknowledged([]);
     const started = Date.now(); setNow(started);
@@ -3003,7 +3050,8 @@ export function App() {
       : null)
     : busy ? { title: busy.replace(/…$/, "") }
     : detecting ? { title: "Checking the models", detail: detecting.phase }
-    : proposing ? { title: clash ? `Fixing #${clash.number}` : "Proposing fixes", detail: statusLine(progress, now, proposal?.attempts ?? []) }
+    : proposing || running ? { title: running ? `Fixing #${running.number}` : clash ? `Fixing #${clash.number}` : "Proposing fixes",
+      detail: proposing ? statusLine(progress, now, proposal?.attempts ?? []) : statusLine(runState.current?.progress ?? null, now, runState.current?.proposal?.attempts ?? []) }
     : planning ? { title: "Building a plan" }
     : contextWorking ? { title: "Exploring a wider fix" }
     : triageRun && !triageRun.done ? { title: "Triage is sorting the clashes" }
@@ -3048,6 +3096,7 @@ export function App() {
     busy ? { text: busy, live: true }
       : detecting ? { text: detecting.phase, live: true }
       : proposing ? { text: statusLine(progress, now, proposal?.attempts ?? []), live: true }
+      : running ? { text: `#${running.number}: ${statusLine(runState.current?.progress ?? null, now, runState.current?.proposal?.attempts ?? [])}`, live: true }
       : planning ? { text: "ORCA is building a plan…", live: true }
       : contextWorking ? { text: "Exploring a wider fix…", live: true }
       : viewPlan && plan ? { text: planOptions.length ? `Plan: ${planOptions.length} fix${planOptions.length === 1 ? "" : "es"} ready to review` : "Plan: nothing to accept yet",
@@ -3218,7 +3267,8 @@ export function App() {
           ? <ReportList report={listReport ?? shownReport ?? report} naming={naming} matches={matches}
               thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb}
               focus={listFocus} onClearFocus={() => setListFocus(null)} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={(c) => { if (compact && tab === "chat") setTab("clash"); selectClash(c); }} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
-              reviewed={reviewed} checked={checked} busy={planning || proposing} triage={listTriage} triageFilter={triageFilter}
+              reviewed={reviewed} checked={checked} busy={planning || proposing || !!running} triage={listTriage} triageFilter={triageFilter}
+              proposing={running?.id ?? null} ready={readyCounts} panel={tab === "clash"} onViewProposal={viewProposal}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
               onPropose={sceneId ? proposeFromList : undefined} onSetAside={(c, note) => review([c.id], "by_design", note)}
@@ -3467,8 +3517,10 @@ export function App() {
             </div>
           )}
           <div className="actions">
-            {!hideFix && <button className="btn primary big" data-tour="propose" disabled={!a || !b || !sceneId || !!busy || proposing} onClick={propose}>
-              {proposing ? <><i className="spinner" aria-hidden /> Working…</> : <><Sparkles size={16} aria-hidden /> Propose fixes</>}</button>}
+            {!hideFix && <button className="btn primary big" data-tour="propose" disabled={!a || !b || !sceneId || !!busy || proposing || (!!running && running.id !== clash?.id)} onClick={propose}>
+              {proposing ? <><i className="spinner" aria-hidden /> Working…</>
+                : running && running.id !== clash?.id ? <><i className="spinner" aria-hidden /> {`Waiting for #${running.number}`}</>
+                : <><Sparkles size={16} aria-hidden /> Propose fixes</>}</button>}
             <button className="btn" disabled={!a || !b || a === b || !sceneId || !!busy || contextWorking || proposing || planning}
               onClick={() => void exploreContext()}><Network size={15} aria-hidden /> Explore wider fix</button>
             <button className="btn" disabled={!a && !b} onClick={focusNow}><LocateFixed size={15} aria-hidden /> Go to the clash</button>

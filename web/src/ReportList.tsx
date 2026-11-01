@@ -62,7 +62,7 @@ export function sameElements(clashes: ReportClash[], matches: Matches | null): M
 
 export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, triageCard, insights,
   insightsCount = null, view = "clashes", onView, status, picker, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus,
-  onPropose, onSetAside, onFocus }: {
+  onPropose, onSetAside, onFocus, proposing = null, ready = {}, panel = false, onViewProposal }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
@@ -84,6 +84,9 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
    * not a clash, and narrow the list to the clashes sharing an element with it (`onFocus`, as Insights does). */
   onPropose?: (c: ReportClash) => void; onSetAside?: (c: ReportClash, note: string) => void;
   onFocus?: (f: { label: string; ids: string[] }) => void;
+  /** A proposal on a row: the clash one is being made for (`proposing`), each clash's finished one (`ready`: how many
+   * verified fixes, 0 for none found), whether the Clash panel is in front (`panel`), and bringing it up (`onViewProposal`). */
+  proposing?: string | null; ready?: Record<string, number>; panel?: boolean; onViewProposal?: (c: ReportClash) => void;
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -233,10 +236,19 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                         aria-label={`Triage: ${TRIAGE[tv.verdict].label}`}>{TRIAGE[tv.verdict].label}</span>}
                       {fixes[c.id] ? <span className="fixed-label">fixed</span>
                         : rv ? <span className={`review-label ${rv.kind}`}>{rv.kind === "by_design" ? "by design" : "for author"}</span>
-                          : <span className="mono dist">{mm(c.distance_m)}</span>}
+                          : proposing === c.id ? <span className="row-status run" role="status"><i className="spinner" aria-hidden /> Proposing…</span>
+                            : ready[c.id] != null ? <span className={`row-status ${ready[c.id] ? "ok" : ""}`}>{ready[c.id]
+                              ? `${ready[c.id]} fix${ready[c.id] === 1 ? "" : "es"} ready` : "No fix found"}</span>
+                              : <span className="mono dist">{mm(c.distance_m)}</span>}
                     </button>
+                    {/* Bring its proposal up when it is not on screen (another clash, or another panel in front) */}
+                    {onViewProposal && !fixes[c.id] && !rv && (proposing === c.id || ready[c.id] != null) && !(selected === c.id && panel) &&
+                      <button className="row-view" onClick={() => onViewProposal(c)}
+                        aria-label={`View the proposal for ${clashLabel(c)}`}>View</button>}
                     <RowActions clash={c} label={clashLabel(c)} related={related.get(c.id) ?? []}
                       canFix={fixable(c) && !nc && !busy} canSetAside={!fixes[c.id] && !rv}
+                      onView={onViewProposal && !fixes[c.id] && !rv && (proposing === c.id || ready[c.id] != null) && !(selected === c.id && panel)
+                        ? onViewProposal : undefined}
                       note={nc?.why ?? (tv?.verdict === "by_design" ? tv.understanding : undefined) ?? "Set aside from the clash list"}
                       onPropose={onPropose} onSetAside={onSetAside}
                       onSame={onFocus && ((ids) => onFocus({ label: `Clashes with ${shortName(c.a)} or ${shortName(c.b)}`, ids: [c.id, ...ids] }))} />
@@ -265,15 +277,18 @@ const shortName = (e: ReportClash["a"]) => (e.name || e.ifc_class || "an element
 
 /** A row's quick actions (docs/architecture/12-web-app.md, ReportList): shown on hover, keyboard focus, and on the
  * selected row, so a touch screen has them too. Each is left out when it cannot apply. */
-function RowActions({ clash, label, related, canFix, canSetAside, note, onPropose, onSetAside, onSame }: {
+function RowActions({ clash, label, related, canFix, canSetAside, note, onPropose, onSetAside, onSame, onView }: {
   clash: ReportClash; label: string; related: string[]; canFix: boolean; canSetAside: boolean; note: string;
   onPropose?: (c: ReportClash) => void; onSetAside?: (c: ReportClash, note: string) => void; onSame?: (ids: string[]) => void;
+  onView?: (c: ReportClash) => void;   // it has a proposal (running or finished): View fixes instead of Propose
 }) {
-  if (!(onPropose && canFix) && !(onSetAside && canSetAside) && !(onSame && related.length)) return null;
+  if (!onView && !(onPropose && canFix) && !(onSetAside && canSetAside) && !(onSame && related.length)) return null;
   return (
     <span className="row-actions" role="group" aria-label={`Actions for ${label}`}>
-      {onPropose && canFix && <button className="ibtn" aria-label={`Propose fixes for ${label}`} data-tip="Propose fixes"
-        data-tip-side="left" onClick={() => onPropose(clash)}><Sparkles size={14} aria-hidden /></button>}
+      {/* The row's View stays where it was when the actions cover the row's end */}
+      {onView ? <button className="row-view" aria-label={`View the fixes for ${label}`} onClick={() => onView(clash)}>View</button>
+        : onPropose && canFix && <button className="ibtn" aria-label={`Propose fixes for ${label}`} data-tip="Propose fixes"
+          data-tip-side="left" onClick={() => onPropose(clash)}><Sparkles size={14} aria-hidden /></button>}
       {onSetAside && canSetAside && <button className="ibtn" aria-label={`Mark ${label} as not a clash`} data-tip="Mark as not a clash"
         data-tip-side="left" onClick={() => onSetAside(clash, note)}><CircleCheck size={14} aria-hidden /></button>}
       {onSame && related.length > 0 && <button className="ibtn same" aria-label={`${related.length} more clash${related.length === 1 ? "" : "es"} with the same elements as ${label}`}

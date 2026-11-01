@@ -519,6 +519,12 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .row-actions .ibtn:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
 .row-actions .same { width: auto; padding: 0 5px; display: inline-flex; gap: 3px; }
 .row-actions .same .n { font-size: 11px; font-variant-numeric: tabular-nums; }
+/* A row's proposal (ReportList): Proposing… while it runs, then how many fixes are ready, and View to bring it up */
+.row-status { font-size: 11.5px; color: var(--muted); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.row-status.ok { color: var(--ok); font-weight: 600; }
+.row-status .spinner { width: 10px; height: 10px; }
+.row-view { all: unset; cursor: pointer; flex: none; font-size: 11.5px; font-weight: 600; color: var(--accent-ink); padding: 2px 6px; margin-right: 4px; border-radius: 5px; }
+.row-view:hover { background: var(--surface); text-decoration: underline; }
 .clash-main { all: unset; cursor: pointer; flex: 1; min-width: 0; display: grid; grid-template-columns: 12px auto 1fr auto auto; gap: 6px; align-items: baseline; padding: 6px 6px 6px 0; font-size: 12.5px; }
 .clash-name { font-weight: 600; }
 .clash-pair { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
