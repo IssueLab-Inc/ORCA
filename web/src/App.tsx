@@ -1072,20 +1072,37 @@ export function App() {
     setIsolating(false); setIsolatedFor(null);
     setTemporary({ hidden: [], isolated: null });
   }
+  // What the kept edits for the clash on screen changed or made, from the edit log (fixes, plans, hand edits, chat and
+  // agents; an edit undone leaves it): isolated, a fix's carried fittings and stretched segments stay with the pair,
+  // or a moved drain would end in mid-air. An entry is the clash's by its id, or by its pair when kept without one.
+  const keptFor = useMemo(() => {
+    const m = clash ? matches?.[clash.id] : undefined;
+    if (!clash || !journal) return "";
+    const out = new Set<string>();
+    for (const e of journal.entries) {
+      if (e.state !== "kept" || !e.clashes.some((c) => c.id === clash.id
+        || (!!m?.a && !!m?.b && c.pair.length === 2 && c.pair.includes(m.a) && c.pair.includes(m.b)))) continue;
+      for (const g of [...e.elements, ...e.created]) out.add(g);
+    }
+    return [...out].join("\n");   // a key: the isolation is set again only when the parts change
+  }, [clash, matches, journal]);
   // While isolating, the clash on screen: its pair as the views draw it (stand-ins first), with the pieces a kept fix
-  // added to either element, and every view taken straight to it. A clash with nothing in the model leaves the last
+  // added to either element and what the kept edits for it changed, and every view taken straight to it once (the
+  // parts changing leaves the camera where the user has it). A clash with nothing in the model leaves the last
   // isolation (isolating nothing would blank the model).
+  const isolationFlown = useRef<string | null>(null);
   useEffect(() => {
-    if (!isolating || !clash || !matches) return;
+    if (!isolating) { isolationFlown.current = null; return; }
+    if (!clash || !matches) return;
     const m = matches[clash.id];
     const pair = [m?.show?.[0] ?? m?.a, m?.show?.[1] ?? m?.b].filter((g): g is string => !!g);
     if (!pair.length) return;
-    const ids = [...new Set([...pair, ...pair.flatMap((g) => edits[g] ?? [])])];
+    const ids = [...new Set([...pair, ...pair.flatMap((g) => edits[g] ?? []), ...(keptFor ? keptFor.split("\n") : [])])];
     setTemporary({ hidden: [], isolated: ids });
     setIsolatedFor(clash.number);
-    goToClash(clash, m, true);
+    if (isolationFlown.current !== clash.id) { isolationFlown.current = clash.id; goToClash(clash, m, true); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isolating, clash?.id, matches, edits]);
+  }, [isolating, clash?.id, matches, edits, keptFor]);
 
   /** Leave the clash (Esc, or ✕ on its chip): no pair, marker or preview; the camera, style and visibility stay. Not
    * while ORCA works on it. Fixes, reviews and triage are untouched. */

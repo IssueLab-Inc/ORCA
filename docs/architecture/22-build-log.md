@@ -2111,3 +2111,15 @@ clashes with it go too.": 451, E1 kept, the Visibility menu MEP and Structure; t
 carrying `ORCA_Edit`; the palletising cell's STEP refused in words on the page with nothing uploaded; both demo cards
 (464 and 112 clashes), the first three steps of both tours, Architecture added to Structure alone framed with it; and
 a model added through the API behind the page's back, then Ctrl+Z on the page: the page loaded all three files again.
+
+**Nov 1, an isolated clash shows what its fix moves** (`fix/isolate-shows-what-a-fix-moves`). The fittings a move
+carries are the model's own elements shifted by the preview (`Viewer.moved`), so a clash row's Isolate, the Isolate
+and Context modes and the filters hid them while the stretched and tilted segments (server meshes) showed: on Snowdon
+#20 isolated, the tilted drain ended in mid-air without its bend. `Viewer.applyMode` and `drawLinks` now always show
+what a preview moves, as `views.shownBy` already said. After Keep, the clash's isolation adds what the kept edits for
+it changed or made, from the edit log (`App.keptFor`: by clash id, else by pair; an undone entry drops out), and the
+views fly to the clash once, not again when those parts change. Checked: `viewer-filters.test.mjs` (+1),
+`isolate-clash.test.mjs` (+1), 253 web tests, build clean; in Chromium on Snowdon Towers plumbing, with
+`feature/drain-tilt` merged locally: #20 isolated, Muse Spark's "Tip drain down 65 mm at outlet end" (falls 4.4°,
+nearest +25 mm) drew the bend lit as joined in After and Both; kept, the tilted arm, the bend and the shortened stack
+stayed in the isolation ("Now: no overlap here") and the camera stayed; Ctrl+Z, the pair alone again.

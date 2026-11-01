@@ -234,7 +234,10 @@ every style.
   through the same call: `App.isolateClash`), then the filters (`setFilters({ classes, levels })`: classes and storeys
   left out, `views.shownBy`), then the filters' rules (`setRules`: what hide rules find is hidden; while an isolate
   rule is on, only what isolate rules find shows), then the mode round the focus. `isShown(gid)` answers for the card
-  and App (a filter that hides the selection clears it); the selection and lit links leave out what is hidden.
+  and App (a filter that hides the selection clears it); the selection and lit links leave out what is hidden. What a
+  preview moves (`moved`: the fittings a fix carries, a hand move, a trial) skips everything after the hidden model,
+  its lit link too, as a preview's own meshes do: hidden, the bend a tilted drain carries left the drain ending in
+  mid-air on an isolated clash (Nov 1).
 - **Colour:** `applyMode` sets each element's colour: a filter's colour (`setRules`' `paint`, the top rule winning),
   else the ghost, else grey (the grey context round a focus, or Grey the rest), else its own. One scratch `Vector4`
   for every element. The pair, selection, hits, links, previews and measure are their own layers over the batches,
