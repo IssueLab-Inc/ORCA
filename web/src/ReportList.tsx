@@ -1,4 +1,4 @@
-import { CircleCheck, Network, Search, Sparkles, Wand2, X } from "lucide-react";
+import { CircleCheck, Focus, Network, Search, Sparkles, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Matches, type Report, type ReportClash, type TriageKind, type TriageVerdict } from "./api";
 import { ClashThumb } from "./ClashPanel";
@@ -62,7 +62,7 @@ export function sameElements(clashes: ReportClash[], matches: Matches | null): M
 
 export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, triageCard, insights,
   insightsCount = null, view = "clashes", onView, status, picker, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus,
-  onPropose, onSetAside, onFocus, proposing = null, ready = {}, panel = false, onViewProposal }: {
+  onPropose, onSetAside, onFocus, proposing = null, ready = {}, panel = false, onViewProposal, isolating = false, onIsolate }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
@@ -87,6 +87,8 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   /** A proposal on a row: the clash one is being made for (`proposing`), each clash's finished one (`ready`: how many
    * verified fixes, 0 for none found), whether the Clash panel is in front (`panel`), and bringing it up (`onViewProposal`). */
   proposing?: string | null; ready?: Record<string, number>; panel?: boolean; onViewProposal?: (c: ReportClash) => void;
+  /** Isolate the clashing elements: on, each clash opened after is isolated in turn (`isolating`), until turned off. */
+  isolating?: boolean; onIsolate?: (c: ReportClash) => void;
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -249,6 +251,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                       canFix={fixable(c) && !nc && !busy} canSetAside={!fixes[c.id] && !rv}
                       onView={onViewProposal && !fixes[c.id] && !rv && (proposing === c.id || ready[c.id] != null) && !(selected === c.id && panel)
                         ? onViewProposal : undefined}
+                      onIsolate={matches && link !== "none" ? onIsolate : undefined} isolated={isolating && selected === c.id}
                       note={nc?.why ?? (tv?.verdict === "by_design" ? tv.understanding : undefined) ?? "Set aside from the clash list"}
                       onPropose={onPropose} onSetAside={onSetAside}
                       onSame={onFocus && ((ids) => onFocus({ label: `Clashes with ${shortName(c.a)} or ${shortName(c.b)}`, ids: [c.id, ...ids] }))} />
@@ -277,14 +280,19 @@ const shortName = (e: ReportClash["a"]) => (e.name || e.ifc_class || "an element
 
 /** A row's quick actions (docs/architecture/12-web-app.md, ReportList): shown on hover, keyboard focus, and on the
  * selected row, so a touch screen has them too. Each is left out when it cannot apply. */
-function RowActions({ clash, label, related, canFix, canSetAside, note, onPropose, onSetAside, onSame, onView }: {
+function RowActions({ clash, label, related, canFix, canSetAside, note, onPropose, onSetAside, onSame, onView, onIsolate, isolated = false }: {
   clash: ReportClash; label: string; related: string[]; canFix: boolean; canSetAside: boolean; note: string;
   onPropose?: (c: ReportClash) => void; onSetAside?: (c: ReportClash, note: string) => void; onSame?: (ids: string[]) => void;
   onView?: (c: ReportClash) => void;   // it has a proposal (running or finished): View fixes instead of Propose
+  onIsolate?: (c: ReportClash) => void; isolated?: boolean;   // its elements alone are drawn now
 }) {
-  if (!onView && !(onPropose && canFix) && !(onSetAside && canSetAside) && !(onSame && related.length)) return null;
+  if (!onView && !(onPropose && canFix) && !(onSetAside && canSetAside) && !(onSame && related.length) && !onIsolate) return null;
   return (
     <span className="row-actions" role="group" aria-label={`Actions for ${label}`}>
+      {onIsolate && <button className={`ibtn ${isolated ? "on" : ""}`} aria-pressed={isolated}
+        aria-label={isolated ? "Show everything again" : `Isolate the clashing elements of ${label}`}
+        data-tip={isolated ? "Show everything again" : "Isolate the clashing elements (each clash you open after, too)"}
+        data-tip-side="left" onClick={() => onIsolate(clash)}><Focus size={14} aria-hidden /></button>}
       {/* The row's View stays where it was when the actions cover the row's end */}
       {onView ? <button className="row-view" aria-label={`View the fixes for ${label}`} onClick={() => onView(clash)}>View</button>
         : onPropose && canFix && <button className="ibtn" aria-label={`Propose fixes for ${label}`} data-tip="Propose fixes"

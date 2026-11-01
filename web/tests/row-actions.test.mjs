@@ -13,7 +13,7 @@ const react = url("export const useState=(v)=>[typeof v==='function'?v():v,()=>{
 const TRIAGE = url(`export const TRIAGE={${["real_clash", "modelling_error", "by_design", "non_physical", "unknown"]
   .map((k) => `${k}:{label:"${k}",cls:"",tip:"",colour:"",long:"${k}"}`).join(",")}};`);
 const list = await import(await compiled("../src/ReportList.tsx", { react, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
-  "lucide-react": stub(["CircleCheck", "Eye", "Network", "Search", "Sparkles", "Wand2", "X"]), "./api": url("export const api={imageUrl:()=>''};"),
+  "lucide-react": stub(["CircleCheck", "Eye", "Focus", "Network", "Search", "Sparkles", "Wand2", "X"]), "./api": url("export const api={imageUrl:()=>''};"),
   "./ClashPanel": stub(["ClashThumb"]), "./Triage": TRIAGE, "./noClash": await compiled("../src/noClash.ts", {}),
   "./aiNames": await compiled("../src/aiNames.ts", {}) }));
 
@@ -98,4 +98,23 @@ test("on the page: Propose fixes from a row proposes for it; Mark sets it aside;
   host.render();
   assert.deepEqual(host.state.listFocus, { label: "Clashes with A or B", ids: [c.id] });
   host.unmount();
+});
+
+test("a row's Isolate: shown when an element is in the model, pressed on the selected row while isolating", () => {
+  const calls = [];
+  const draw2 = (selected, isolating, m = matches) => draw(list.ReportList({ report, matches: m, selected, onSelect() {}, onImage() {}, fixes: {},
+    reviewed: {}, checked: new Set(), onCheck() {}, onFixChecked() {}, insights: null, busy: false, triage: {}, triageFilter: null,
+    isolating, onIsolate: (c) => calls.push(c.id) }));
+  const isolate = (tree, id) => rowButtons(tree, id).find((b) => /^Isolate the clashing elements|^Show everything again/.test(b.props["aria-label"]));
+  const off = draw2("c1", false);
+  assert.equal(isolate(off, "c1").props["aria-label"], "Isolate the clashing elements of #1 Supply air main × Transfer plate girder 1000 deep - grid 3");
+  assert.equal(isolate(off, "c1").props["aria-pressed"], false);
+  isolate(off, "c2").props.onClick();
+  assert.deepEqual(calls, ["c2"]);
+  const on = draw2("c1", true);
+  assert.equal(isolate(on, "c1").props["aria-pressed"], true, "the clash isolated now");
+  assert.equal(isolate(on, "c1").props["aria-label"], "Show everything again");
+  assert.equal(isolate(on, "c2").props["aria-pressed"], false);
+  const gone = draw2(null, false, { ...matches, c9: { a: null, b: null, how: [] } });
+  assert.equal(isolate(gone, "c9"), undefined, "nothing of it in the model: nothing to isolate");
 });

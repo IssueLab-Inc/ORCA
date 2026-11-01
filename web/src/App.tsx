@@ -142,6 +142,10 @@ export function App() {
   const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
   const [filters, setFilters] = useState<Filters>({ classes: [], levels: [] });
   const [temporary, setTemporary] = useState<Temporary>({ hidden: [], isolated: null });
+  // A row's Isolate: only the clashing elements are drawn, and each clash opened after is isolated in turn, until the
+  // user shows everything again (`isolatedFor`: the clash whose pair is isolated now).
+  const [isolating, setIsolating] = useState(false);
+  const [isolatedFor, setIsolatedFor] = useState<number | null>(null);
   // Filters (docs/filters.md): the server's index of what each element is, the filters, and the one being edited.
   const [facetIndex, setFacetIndex] = useState<FacetIndex | null>(null);
   const [filterState, setFilterState] = useState<FilterState>(NO_FILTERS);
@@ -568,7 +572,7 @@ export function App() {
   }, [modelNames]);
   // What the filters read: each element's class (the server's) and storey (datums). Read again after a kept fix (same
   // scene, new elements: `infoRev`); filters and hides start clean only with a new scene.
-  useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); setFacetIndex(null); }, [sceneId]);
+  useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); setIsolating(false); setFacetIndex(null); }, [sceneId]);
   useEffect(() => { setJournal(null); if (sceneId) void refreshJournal(sceneId); }, [sceneId]);
   useEffect(() => {
     if (!sceneId) return;
@@ -1037,6 +1041,33 @@ export function App() {
     const point = c.point && c.point.every((v) => v != null) ? serverPointToViewer(c.point as number[]) : null;
     if (!viewer.current?.focusClash(ids, point, `#${c.number}`, fly || force)) setError("This clash has no geometry or point to show in the open model.");
   }
+
+  /** A row's Isolate: only that clash's elements are drawn, and every clash opened after goes straight to its own pair,
+   * isolated, until the user shows everything again; on the clash already isolated, it shows everything again. */
+  function isolateClash(c: ReportClash) {
+    if (isolating && clash?.id === c.id) { endIsolation(); return; }
+    setIsolating(true);
+    if (clash?.id !== c.id) selectClash(c);
+  }
+  /** Everything drawn again: the clash isolation (or any "for now" hide or isolate) ends. */
+  function endIsolation() {
+    setIsolating(false); setIsolatedFor(null);
+    setTemporary({ hidden: [], isolated: null });
+  }
+  // While isolating, the clash on screen: its pair as the views draw it (stand-ins first), with the pieces a kept fix
+  // added to either element, and every view taken straight to it. A clash with nothing in the model leaves the last
+  // isolation (isolating nothing would blank the model).
+  useEffect(() => {
+    if (!isolating || !clash || !matches) return;
+    const m = matches[clash.id];
+    const pair = [m?.show?.[0] ?? m?.a, m?.show?.[1] ?? m?.b].filter((g): g is string => !!g);
+    if (!pair.length) return;
+    const ids = [...new Set([...pair, ...pair.flatMap((g) => edits[g] ?? [])])];
+    setTemporary({ hidden: [], isolated: ids });
+    setIsolatedFor(clash.number);
+    goToClash(clash, m, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isolating, clash?.id, matches, edits]);
 
   /** Leave the clash (Esc, or ✕ on its chip): no pair, marker or preview; the camera, style and visibility stay. Not
    * while ORCA works on it. Fixes, reviews and triage are untouched. */
@@ -1760,7 +1791,7 @@ export function App() {
     saved: savedViews.map((v) => v.name), onSave: saveView, onApply: (i) => applyView(savedViews[i]),
     onDelete: (i) => storeViews({ saved: savedViews.filter((_, k) => k !== i) }),
     levels: counts.levels, classes: counts.classes, filters, onFilters: setFilters,
-    temporary: temporaryCount, onResetTemporary: () => setTemporary({ hidden: [], isolated: null }),
+    temporary: temporaryCount, onResetTemporary: () => endIsolation(),
     rulesOn: filterState.rules.filter((r) => r.on).length, onOpenFilters: () => openFilters(),
     layout: shownLayout, layouts: layout === "phone" ? ["single"] : layout === "tablet" ? ["single", "two"] : ["single", "two", "quad"],
     onLayout: setViewLayout, drawings: drawingsShow, onDrawings: setDrawingsShow,
@@ -3295,6 +3326,7 @@ export function App() {
    * model). */
   const isolateNow = (ids: string[]) => {
     if (!ids.length) return;
+    setIsolating(false);   // another isolation replaces the clash's
     setTemporary({ hidden: [], isolated: ids });
     viewer.current?.frameEverywhere(ids);
   };
@@ -3313,10 +3345,10 @@ export function App() {
       onSide: (side) => pickSide(gid, side),
       canB: !!a && a !== gid,
       onZoom: () => viewer.current?.frame([gid]),
-      onHide: () => { setTemporary((t) => ({ ...t, hidden: [...t.hidden, gid] })); setSelected(null); },
-      onIsolate: () => setTemporary({ hidden: [], isolated: [gid] }),
+      onHide: () => { setIsolating(false); setTemporary((t) => ({ ...t, hidden: [...t.hidden, gid] })); setSelected(null); },
+      onIsolate: () => { setIsolating(false); setTemporary({ hidden: [], isolated: [gid] }); },
       onSection: () => sectionRound(gid),
-      onHideClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); },
+      onHideClass: () => { const ids = viewer.current?.ofClass(cls) ?? []; setIsolating(false); setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); setSelected(null); },
       onIsolateClass: () => isolateNow(viewer.current?.ofClass(cls) ?? []),
       onFilterClass: () => openFilters(blankRule([{ facet: "class", op: "is", values: [cls] }], "isolate")),
       onLevel: (name, how) => {
@@ -3326,7 +3358,7 @@ export function App() {
         const ids = level.length ? level : idsWith("storey", name);
         if (!ids.length) return;
         if (how === "isolate") isolateNow(ids);
-        else { setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
+        else { setIsolating(false); setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
       },
       load: (ref) => (sceneId && ref.global_id ? api.properties(sceneId, ref.global_id, ref.file) : Promise.reject(new Error("No scene"))),
       rows: prepared ? {
@@ -3381,6 +3413,7 @@ export function App() {
               focus={listFocus} onClearFocus={() => setListFocus(null)} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={(c) => { if (compact && tab === "chat") setTab("clash"); selectClash(c); }} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing || !!running} triage={listTriage} triageFilter={triageFilter}
               proposing={running?.id ?? null} ready={readyCounts} panel={tab === "clash"} onViewProposal={viewProposal}
+              isolating={isolating} onIsolate={isolateClash}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
               onPropose={sceneId ? proposeFromList : undefined} onSetAside={(c, note) => review([c.id], "by_design", note)}
@@ -3451,8 +3484,8 @@ export function App() {
           </button>)}
         {stats && temporaryCount > 0 && (
           <div className="temp-chip" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-            {temporary.isolated ? "Isolated for now" : `${temporary.hidden.length} hidden for now`}
-            <button className="btn small" onClick={() => setTemporary({ hidden: [], isolated: null })}>Reset</button>
+            {isolating && isolatedFor != null ? `Clash #${isolatedFor} isolated` : temporary.isolated ? "Isolated for now" : `${temporary.hidden.length} hidden for now`}
+            <button className="btn small" onClick={endIsolation}>{isolating ? "Show all" : "Reset"}</button>
           </div>)}
         {!stats && !report && blank && (
           <ProjectStart busy={!!busy} maxMb={uploadMax} onModels={(files) => void openDemo(files)} onReport={(files) => upload(files)}
