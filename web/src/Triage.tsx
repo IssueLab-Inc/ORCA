@@ -1,4 +1,4 @@
-import { Brain, ChevronDown, CircleCheck, ClipboardCheck, Flag, Info, RotateCcw, ScanSearch } from "lucide-react";
+import { Brain, ChevronDown, CircleCheck, ClipboardCheck, Flag, Info, RotateCcw, ScanSearch, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { TriageKind, TriageModel, TriageVerdict } from "./api";
 import { aiName } from "./aiNames";
@@ -45,13 +45,15 @@ function storedCompact(): boolean | null {
 
 export interface TriageRun extends Omit<TriageModel, "requirements"> {
   total: number; started: number; done: boolean; seconds?: number; error?: string;
+  stopped?: boolean;             // stopped part way: what was read stays, triaging again reads only the rest
+  canStop?: boolean;             // this visitor started it (or is the owner): the run is shared, nobody else stops it
   requirements?: string | null;  // the requirements it was read under ("L3 · Strict"), when there were some
   queued?: boolean;              // waits for the triage already under way (ORCA's checks)
   following?: string | null;     // following the triage of an earlier list of the same checks
 }
 
 /** Bulk triage of the whole report, the first step: run it, watch it land, filter by verdict, set the noise aside. */
-export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, unread = 0, active, workers = null, forceCompact = false, requirements = null, stale = false, onRequirements }: {
+export function TriageCard({ run, results, now, filter, onFilter, onRun, onStop, onSetAside, onFlag, live = [], onOpen, resolved = () => false, total, unread = 0, active, workers = null, forceCompact = false, requirements = null, stale = false, onRequirements }: {
   run: TriageRun | null; results: Record<string, TriageVerdict>; now: number; total: number;
   unread?: number;              // ORCA's checks: clashes on screen no reading holds for (a check run since), to triage
 
@@ -60,6 +62,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   forceCompact?: boolean;       // the list is filtered to a pattern or root cause: give it the room (unless opened)
   live?: { id: string; name: string; text: string }[]; onOpen?: (id: string) => void;
   filter: TriageKind | null; onFilter: (k: TriageKind | null) => void; onRun: (rerun: boolean) => void;
+  onStop?: () => void;          // stop the run under way (shared on the server: it stops for everyone following it)
   onSetAside: (ids: string[]) => void; onFlag: (ids: string[]) => void;
   resolved?: (id: string) => boolean;  // fixed, set aside or flagged already
   open?: number;
@@ -70,6 +73,9 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
   const [chosen, setChosen] = useState<boolean | null>(storedCompact);
   const [openedAnyway, setOpenedAnyway] = useState(false);
   useEffect(() => { setOpenedAnyway(false); }, [forceCompact]);
+  // Asked to stop: the button waits for the run's last event (under a second).
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => { setStopping(false); }, [run?.started, run?.done]);
   const ids = Object.keys(results);
   const counts = Object.fromEntries(ORDER.map((k) => [k, ids.filter((id) => results[id].verdict === k).length])) as Record<TriageKind, number>;
   const noise = ids.filter((id) => ["by_design", "non_physical"].includes(results[id].verdict));
@@ -122,13 +128,20 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
         <div>
           <h3>Triage{state === "idle" && <span className="triage-step">Step 1</span>}</h3>
           {/* Folded, the count is the subtitle: the card is one line and its bar */}
-          {compact && state === "done" ? <span className="triage-sub count-sub">
+          {compact && state === "done" && run?.stopped ? <span className="triage-sub count-sub"><b>{ids.length}</b> of {n} sorted · stopped
+              <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></span>
+            : compact && state === "done" ? <span className="triage-sub count-sub">
               <b className={counts.real_clash ? "bad" : "ok"}>{counts.real_clash}</b>{counts.real_clash === 1 ? " needs a fix" : " need a fix"} of {n}
               <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></span>
             : compact && state === "running" ? <span className="triage-sub count-sub"><b>{ids.length}</b> of {n} sorted · {seconds} s
               <span className="triage-info" data-tip-tap data-tip={about} data-tip-side="bottom" aria-label={about}><Info size={13} aria-hidden /></span></span>
-            : <span className="triage-sub">{state === "idle" ? "Find the few that need a fix" : state === "running" ? "Sorting the clashes…" : "Every clash has a verdict"}</span>}
+            : <span className="triage-sub">{state === "idle" ? "Find the few that need a fix" : state === "running" ? "Sorting the clashes…"
+              : run?.stopped ? `Stopped: ${ids.length} of ${n} sorted` : "Every clash has a verdict"}</span>}
         </div>
+        {state === "running" && onStop && run?.canStop && <button className="ibtn triage-stop" aria-label={stopping ? "Stopping" : "Stop triage"}
+          data-tip={stopping ? "Stopping…" : "Stop: what is read stays, and triaging again reads only the rest"} data-tip-side="left"
+          disabled={stopping} onClick={() => { setStopping(true); onStop(); }}>
+          <Square size={13} aria-hidden /></button>}
         {run?.done && !compact && <button className="ibtn" aria-label="Triage again" data-tip="Triage again" data-tip-side="left" onClick={() => onRun(true)}>
           <RotateCcw size={14} aria-hidden /></button>}
         <button className="ibtn triage-fold" aria-expanded={!compact} aria-label={foldTip} data-tip={foldTip} data-tip-side="left" onClick={toggle}>
@@ -138,10 +151,11 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
       {/* The first step's one button, full width under the head, folded or not */}
       {state === "idle" && <button className="btn primary triage-go" onClick={() => onRun(false)}>
         <ScanSearch size={15} aria-hidden /> Triage all {n} clashes</button>}
-      {/* Readings follow their clashes from check to check: only the new ones are left to read (one proposal) */}
+      {/* Readings stay with their clashes (from check to check, and after a stop or a failed read): only the rest is
+          left to read (one proposal) */}
       {state === "done" && unread > 0 && <button className="btn small primary triage-unread" onClick={() => onRun(false)}
-        data-tip="Read only the clashes no triage holds for yet" data-tip-side="bottom">
-        <ScanSearch size={13} aria-hidden /> Triage {unread} unread</button>}
+        data-tip={run?.stopped ? "Read only the clashes the stopped triage left" : "Read only the clashes no triage holds for yet"} data-tip-side="bottom">
+        <ScanSearch size={13} aria-hidden /> {run?.stopped ? `Continue · ${unread} left` : `Triage ${unread} unread`}</button>}
       {compact && state !== "idle" && bar}
       {!compact && <>
 
@@ -155,6 +169,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onSetAs
       {state === "running" && run && <>
         {run.queued ? <p className="hint small">Waits for the triage already under way, then reads what it leaves.</p>
           : run.following && <p className="hint small">Following the triage of an earlier list of these checks.</p>}
+        {!run.canStop && run.model && <p className="hint small">Shared with whoever started it: only they can stop it.</p>}
         <div className="triage-stage done">
           <CircleCheck size={15} aria-hidden />
           <div>

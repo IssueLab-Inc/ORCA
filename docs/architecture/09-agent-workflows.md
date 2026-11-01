@@ -24,7 +24,7 @@ kind of fix is [07](07-fixes-and-edits.md); the wire format of every event is [1
 | Fix together | `plans.build_batch` | Muse Spark, one agent per item | `POST /api/scenes/{scene_id}/plan/stream` (`clash_ids`), chat `plan_fixes_together` | `plan_items`, `item`, `checking_plan`, then `plan` |
 | Root cause | `plans.root_causes`, `plans.build_root_cause` | Muse Spark | `GET .../root_causes/{scene_id}`, plan stream (`hub`), chat | `thinking`, `root_cause`, then as Fix together |
 | Patterns | `plans.patterns`, `plans.read_patterns` → `triage_patterns` | Muse Spark (one call, once) | `GET .../patterns/{scene_id}`, `POST .../patterns/{scene_id}/triage`, chat and MCP `find_patterns` | none (one reply) |
-| Bulk triage | `triage.Job` → `triage.triage_report` | triage model | `POST /api/reports/{report_id}/triage/stream` | `start`, `clash`, `reasoning`, `audit`, `done`, `ping` |
+| Bulk triage | `triage.Job` → `triage.triage_report` | triage model | `POST /api/reports/{report_id}/triage/stream`, `POST .../triage/stop` | `start`, `clash`, `reasoning`, `audit`, `done`, `ping` |
 | Titles | `titles.Job` → `titles.title_report` | triage model | `POST /api/reports/{report_id}/titles/stream` | `start`, `titles`, `batch_error`, `done`, `ping` |
 | Chat | `chat.Chat.turn` | Muse Spark with tools | `POST /api/chat`, and the MCP tools reuse `Chat._run` | `session`, `thinking`, `tool`, `tool_result`, `ui`, `agent`, `proposal`, `plan_*`, `detect_event`, `context_event`, `message`, `done` |
 | Wider fix | `context_planner.build` | Muse Spark with tools | `POST /api/scenes/{scene_id}/context/stream`, chat `explore_wider_fix` | `context_progress`, `context_result` |
@@ -417,11 +417,14 @@ noClash's geometry): [12](12-web-app.md).
 
 A model checked against itself repeats the same joint many times (48 holding-down bolts, 44 beam ends).
 `alike_groups` groups clashes by test, the sorted pair of (class, name stem) and a depth band
-(`DEPTH_BANDS_MM` 5, 20, 60, 150, 400). `_stem` drops grids, levels and tags but keeps section sizes ("UB
-457x191x67 - grid C" and "... - grid 4" are alike; a different section is not). A group of `ALIKE_MIN` (3) or more is
-read once, through its deepest member, with `_alike_note` telling the model its verdict applies to every one; the
-others get the same verdict with `alike_of` and `alike` (the group's size). Measured: a detected Northbank run of
-633 clashes took 98 model calls (Oct 28, [22](22-build-log.md)).
+(`DEPTH_BANDS_MM` 5, 20, 60, 150, 400). `_stem` drops grids, levels, tags and a trailing Revit element id
+(`_ELEMENT_ID`: Revit's IFC export names an element "Family:Type:ElementId", which made every Revit element its own
+kind and every clash its own call) but keeps section sizes ("UB 457x191x67 - grid C" and "... - grid 4" are alike; a
+different section is not). A group of `ALIKE_MIN` (3) or more is read once, through its deepest member, with
+`_alike_note` telling the model its verdict applies to every one; the others get the same verdict with `alike_of`
+and `alike` (the group's size). The biggest groups are asked first, so the most clashes land soonest and a run
+stopped early has settled what it could. Measured: a detected Northbank run of 633 clashes took 98 model calls
+(Oct 28, [22](22-build-log.md)).
 
 ### The model call
 
@@ -431,7 +434,28 @@ system; signed distance; clash point) and the A/B/C pictures when the host takes
 `complete_json_streamed`; `triage_report` passes a callback that batches the reasoning into `reasoning` events every
 `REASONING_EVERY_S` (0.6 s) per clash and keeps the whole of it on the verdict (`reasoning`, cut at
 `REASONING_KEPT`, 6,000 characters). Each group gets 3 attempts with 1, 2 and 4 s back-off; then `verdict:
-"unknown"` with the error. Workers: `SIGHTLINE_TRIAGE_WORKERS` (default 8).
+"unknown"` with the error. Workers: `SIGHTLINE_TRIAGE_WORKERS` (default `triage.WORKERS`, 24). The run is the model
+calls in waves of that many, each about 6-20 s on Muse Spark: Northbank's 464 detected clashes (39 calls) took 58 s
+at 8 workers and 23 s at 24, with no rate limit hit (Nov 1, [22](22-build-log.md)).
+
+### Stopping and going on
+
+`triage_report(stop=…)` takes a `threading.Event`. Once set, no new call starts (the pool's queue is cancelled), a
+back-off wakes, a streamed call is closed from its reasoning callback (`Stopped`), and the result loop, which polls
+every 0.5 s, returns what has landed; calls under way finish on their own and are never waited for. A dropped clash
+has no verdict (unread), never `unknown`. `Job.stop()` sets it (also while queued behind another run); the run makes
+no audit, and its `done` event and `state()` carry `stopped`. `POST .../triage/stop` stops the run under the
+report's key (else its latest) and a run it waits behind that the same visitor started. The run is shared, so only
+its starter may stop it (`Job.starter`, `Job.may_stop`): the visitor whose request started it (`limits.client_id`,
+the identity the caps use; for a run an agent started over MCP, the link's creator, `Link.visitor`), or the owner.
+Anyone else following gets a 403, and the stream's `start` and `GET .../triage` say `can_stop` per visitor. A stopped
+run can be gone on with by anyone, for a proposal of their own.
+
+Going on is the same for every report: a reading is never asked twice. ORCA's checks already keep each reading as it
+lands (below), so the next run asks only the unread. An imported or sample report's run that ended `stopped` or with
+a failed read (`app._unfinished`) is replaced on the next stream by a run seeded with its model readings that did not
+fail (`app._kept_readings`), which asks only the rest, for one proposal; a finished, complete run is followed as
+before. A stopped run is never a donor (it would read the rest free under new rules).
 
 ### The shared `Job`
 
@@ -482,7 +506,7 @@ settled with `audit: "disputed"` and `audit_note`; then an `audit` event with ev
 | `clash` | `id`, `source` (`rule` or `model`), the verdict fields, and any of `basis`, `rule`, `alike_of`, `alike`, `model_reading`, `model_verdict`, `reasoning`, `seconds`, `audit`, `audit_note`, `error` |
 | `reasoning` | `id`, `text` (what the model wrote since the last one) |
 | `audit` | `rules`: `{index: {answer, note, rule, samples, settled}}` |
-| `done` | `summary` (counts per verdict, `by_rule`, `by_model`), `seconds`, `error` |
+| `done` | `summary` (counts per verdict, `by_rule`, `by_model`), `seconds`, `error`, `stopped` (only when stopped) |
 | `ping` | none |
 
 ## Titles: `titles.py`
@@ -770,8 +794,8 @@ Two smaller model uses, owned by [14](14-files-in-and-out.md):
 - A new event type or field from `agent.resolve`, `Workspace.propose` / `escalate`, `plans`, `triage.Job`,
   `titles.Job`, `chat.Chat`, `context_planner` or `built` (also [10](10-http-api-and-streams.md)).
 - A change to plans: `merge_shared`, `MAX_ITEMS`, `verify_together`, root-cause ranking or strategies, patterns.
-- A change to triage: a new `basis`, the rule order, alike grouping, workers, retries, the Job's keys, donor, stale or
-  learn behaviour, or the audit.
+- A change to triage: a new `basis`, the rule order, alike grouping, the order groups are asked in, workers, retries,
+  stopping or going on, the Job's keys, donor, stale or learn behaviour, or the audit.
 - A new or removed chat tool, a change to `MAX_STEPS`, `MAX_HISTORY`, sessions, or what a tool costs.
 - A change to the escalation brief, `last_try`'s stamp, the modes, or how options are merged.
 - A change to Show it built's rounds, gate thresholds, judges or cache key.

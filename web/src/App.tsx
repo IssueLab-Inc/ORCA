@@ -687,7 +687,7 @@ export function App() {
         if (e.type !== "ping") trace.add(e);
         if (e.type === "done") trace.end(e.error ?? null);
         if (e.type === "start") setTriageRun({ model: e.model, open_weights: e.open_weights, note: e.note, images: e.images, total: e.total, started: Date.now(), done: false, requirements: e.requirements?.label ?? null,
-          queued: !!e.queued, following: e.following ?? null });
+          queued: !!e.queued, following: e.following ?? null, canStop: !!e.can_stop });
         else if (e.type === "asking") setTriageRun((r) => r && { ...r, queued: false });
         else if (e.type === "audit") setTriageAudit(e.rules);
         else if (e.type === "clash") {
@@ -696,10 +696,16 @@ export function App() {
           setTriageLive((l) => { if (!(id in l)) return l; const { [id]: _done, ...rest } = l; return rest; });
         }
         else if (e.type === "reasoning") setTriageLive((l) => ({ ...l, [e.id]: ((l[e.id] ?? "") + e.text).slice(-600) }));
-        else if (e.type === "done") { setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error }); setTriageLive({}); }
+        else if (e.type === "done") { setTriageRun((r) => r && { ...r, done: true, seconds: e.seconds, error: e.error, stopped: !!e.stopped }); setTriageLive({}); }
       }, rerun, scope);
     } catch (e) { setError((e as Error).message); trace.add({ type: "error", detail: (e as Error).message }); trace.end((e as Error).message); setTriageRun((r) => (r && r.model ? { ...r, done: true } : null)); }
     trace.end("The stream ended before triage finished");   // nothing if it ended with its done event
+  }
+
+  /** Stop the triage under way: its stream ends with a "done" that says stopped; what was read stays. */
+  async function stopTriage() {
+    if (!report) return;
+    try { await api.triageStop(report.id); } catch (e) { setError((e as Error).message); }
   }
 
   // The requirements in use: registered with the server (content-addressed), then their id goes with every call.
@@ -771,7 +777,7 @@ export function App() {
       setTriageAudit(s.audit ?? {}); setTriageStale(!!s.stale);
       if (s.done || s.stale) {
         setTriage(s.results);
-        setTriageRun({ model: s.model, open_weights: !!s.open_weights, note: s.note, total: s.total ?? 0, started: Date.now(), done: true, seconds: s.seconds ?? undefined, error: s.error ?? undefined, requirements: s.requirements?.label ?? null });
+        setTriageRun({ model: s.model, open_weights: !!s.open_weights, note: s.note, total: s.total ?? 0, started: Date.now(), done: true, seconds: s.seconds ?? undefined, error: s.error ?? undefined, requirements: s.requirements?.label ?? null, stopped: !!s.stopped });
       } else runTriage();
     }).catch(() => {});
     return () => { live = false; };
@@ -2945,8 +2951,9 @@ export function App() {
     const ids = new Set(listReport.clashes.map((c) => c.id));
     return Object.fromEntries(Object.entries(shownTriage).filter(([id]) => ids.has(id)));
   }, [listReport, shownReport, shownTriage]);
-  // Not read yet, or a read that failed (asked again): what "Triage N unread" reads.
-  const unread = listReport && report?.origin === "sightline" ? listReport.clashes.filter((c) => !listTriage[c.id] || listTriage[c.id].error).length : 0;
+  // Not read yet (a check run since, or a triage stopped part way), or a read that failed (asked again): what
+  // "Triage N unread" / "Continue · N left" reads. The server keeps every reading, so only these are asked.
+  const unread = listReport ? listReport.clashes.filter((c) => !listTriage[c.id] || listTriage[c.id].error).length : 0;
   // Until a report or the models are open, the page is the landing: no panels, just what ORCA is and the demo.
   const landing = !stats && !report && !blank;
   // A blank project before anything opens: the drop zone has the whole stage (no sheet on a phone).
@@ -3447,7 +3454,7 @@ export function App() {
               triageCard={<TriageCard run={triageRun} active={triageModel} workers={triageWorkers} forceCompact={!!listFocus} results={listTriage} now={now} filter={triageFilter} onFilter={setTriageFilter}
                 live={Object.entries(triageLive).map(([id, text]) => ({ id, text, name: (() => { const c = shownReport?.clashes.find((x) => x.id === id); return c ? clashLabel(c) : id; })() }))}
                 onOpen={(id) => { const c = report.clashes.find((x) => x.id === id); if (c) selectClash(c); }}
-                total={(listReport ?? report).clashes.length} unread={unread} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage}
+                total={(listReport ?? report).clashes.length} unread={unread} resolved={(id) => !!fixes[id] || !!reviewed[id]} onRun={runTriage} onStop={stopTriage}
                 onSetAside={(ids) => review(ids, "by_design", "Triage: by design or not physical")}
                 onFlag={(ids) => review(ids, "author", "Triage: modelling error")}
                 requirements={reqLabel} stale={triageStale} onRequirements={() => setReqOpen(true)} />}

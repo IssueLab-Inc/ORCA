@@ -434,7 +434,7 @@ check (Navisworks and IfcOpenShell report depth differently: #042 is −150 mm i
 
 **Triage all** gives every clash a verdict (real, by design, not physical, model error) before anyone
 opens one ([`server/sightline/triage.py`](server/sightline/triage.py)). Sure cases are settled by rule with no model call
-(a space, port or opening on either side; a touch within 1 mm); the rest go to the triage model, eight at a time, with
+(a space, port or opening on either side; a touch within 1 mm); the rest go to the triage model, 24 at a time, with
 their images. The list shows a tag per row and filters by verdict, the clash panel shows the reading, and **Set aside**
 marks the by-design and non-physical results as reviewed. One run per sample report is shared by every visitor.
 
@@ -447,7 +447,7 @@ Meta's API otherwise; the card says which one answered:
 | `TRIAGE_API_BASE_URL` | `https://inference.baseten.co/v1` |
 | `TRIAGE_MODEL` | `meta-models/muse-spark-open` |
 | `TRIAGE_IMAGES` | `1` (`0` for a text-only host) |
-| `SIGHTLINE_TRIAGE_WORKERS` | `8` |
+| `SIGHTLINE_TRIAGE_WORKERS` | `24` |
 
 A host without strict structured output gets JSON mode with the schema in the prompt (switched on the first 400).
 Alike clashes (the same kinds of element, named alike, about as deep; three or more) are read once, through the deepest:

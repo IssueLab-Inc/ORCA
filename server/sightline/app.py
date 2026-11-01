@@ -389,7 +389,7 @@ def models():
     """Which model this request's titles and triage would use (the owner's choice, else everyone's), for the copy, and
     how much a visitor may upload (the page checks before sending, and says so)."""
     return {"triage": triage_model_info(), "escalation": escalation_info(), "built_views": settings.built_views(),
-            "labels": model_labels(), "triage_workers": env_int("SIGHTLINE_TRIAGE_WORKERS", 8),
+            "labels": model_labels(), "triage_workers": env_int("SIGHTLINE_TRIAGE_WORKERS", triage.WORKERS),
             "model_upload_max_mb": MODEL_UPLOAD_MAX_MB, "model_upload_max_files": MODEL_UPLOAD_MAX_FILES}
 
 
@@ -1461,7 +1461,8 @@ def _triage_donor(report, doc) -> triage.Job | None:
     base = _triage_key(report)
     prefix = base if doc is None else f"{base}|{requirements.model_key(doc)}|"
     for key, job in reversed(list(_triage_jobs.items())):
-        if job.done and not job.error and (key.startswith(prefix) if doc is not None else key == base):
+        # Never a stopped run: what it left unread would then be read free under the new rules.
+        if job.done and not job.error and not job.stopped and (key.startswith(prefix) if doc is not None else key == base):
             return job
     return None
 
@@ -1552,13 +1553,26 @@ def _unread(report, doc, facts: dict, carried: dict, scope: str | None, rerun: b
     return out
 
 
+def _visitor(request) -> str | None:
+    """Who is asking (`limits.client_id`, as for the caps), or None without a request (an MCP tool's own call)."""
+    return client_id(request.headers, request.client.host if request.client else None) if request is not None else None
+
+
 @app.get("/api/reports/{report_id}/triage")
-def triage_state(report_id: str, scene_id: str | None = None):
+def triage_state(report_id: str, scene_id: str | None = None, request: Request = None):
     """The bulk triage of this report so far ({"results": {}} when it has not been run). Under requirements that only
     change rules since a finished run, a run under them starts at once from its readings (no model call for those,
     no charge); under a different prompt, the last run is returned marked "stale" until one is started. A list of
     ORCA's checks gets the readings that still hold for its clashes at once, free (docs/detection.md, "Kept checks"),
-    with `unread`: how many the model has not read."""
+    with `unread`: how many the model has not read. `can_stop`: whether this visitor may stop the run under way
+    (whoever started it, or the owner)."""
+    who = _visitor(request)
+    state, job = _triage_state(report_id, scene_id, who)
+    return {**state, "can_stop": job is not None and not job.done and job.may_stop(who, owner.is_owner())}
+
+
+def _triage_state(report_id: str, scene_id: str | None, who: str | None) -> tuple[dict, triage.Job | None]:
+    """`triage_state`'s answer, and the run it describes (None when there is none)."""
     report = ws.report(_report(report_id))
     doc = requirements.current()
     register = _register_of(report)
@@ -1567,15 +1581,15 @@ def triage_state(report_id: str, scene_id: str | None = None):
     if register is not None:
         if job is None or (job.done and job.report is not report):
             if register.carried(report, _model_key(doc)):
-                job = _start_triage(report, scene_id, lambda: None, ask=False)   # nothing new is read: free
+                job = _start_triage(report, scene_id, lambda: None, ask=False, who=who)   # nothing new is read: free
         if job is not None:
             job.learn(_triage_facts(report_id, scene_id))
-            return _for_report(job, report)
+            return _for_report(job, report), job
     elif job is None and doc is not None and _triage_donor(report, doc) is not None:
-        job = _start_triage(report, scene_id, lambda: None)
+        job = _start_triage(report, scene_id, lambda: None, who=who)
     if job:
         job.learn(_triage_facts(report_id, scene_id))
-        return job.state()
+        return job.state(), job
     latest = _triage_latest(report)
     if latest is not None:
         state = _for_report(latest, report) if register is not None else latest.state()
@@ -1583,9 +1597,9 @@ def triage_state(report_id: str, scene_id: str | None = None):
             state["results"] = {c.id: _ruled(doc, c, state["results"].get(c.id)) for c in report.clashes
                                 if c.id in state["results"] or requirements.settle(doc, c)}
             state["summary"] = triage.summary(state["results"])
-        return {**state, "stale": True}
+        return {**state, "stale": True}, latest
     return {"results": {}, "done": False, "started": False,
-            **({"unread": len(report.clashes)} if register is not None else {})}
+            **({"unread": len(report.clashes)} if register is not None else {})}, None
 
 
 @app.post("/api/reports/{report_id}/triage/stream")
@@ -1596,12 +1610,15 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
     proposal, following one already started is free. With `scene_id`, what the open model already settles (one
     element on both sides) is not asked of the model, and corrects a run that did ask. A list of ORCA's checks asks
     only about the clashes no reading holds for, in `scope` (a kept check's key) or all, and costs nothing when there
-    are none."""
+    are none. Its `start` event says `can_stop`: whether this visitor may stop the run (whoever started it, or the
+    owner)."""
     report = ws.report(_report(report_id))
+    who = _visitor(request)
     try:
-        job = _start_triage(report, scene_id, lambda: _take(propose_limit, request), rerun, scope)
+        job = _start_triage(report, scene_id, lambda: _take(propose_limit, request), rerun, scope, who=who)
     except PermissionError as e:
         raise HTTPException(429, str(e))
+    mine = job.may_stop(who, owner.is_owner())   # here: the owner is known in the request, not in the stream
     # Following a run over an earlier list of the same checks: only what it says of clashes unchanged here, and its
     # start says so (`following`), with this list's count.
     other = job.report is not report
@@ -1609,6 +1626,8 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
 
     def stream():
         for event in job.follow():
+            if event.get("type") == "start":
+                event = {**event, "can_stop": mine}
             if other:
                 if event.get("type") == "start":
                     event = {**event, "total": len(report.clashes), "following": job.report.id}
@@ -1617,6 +1636,25 @@ def triage_stream(report_id: str, request: Request, rerun: bool = False, scene_i
             yield json.dumps(event, default=str) + "\n"
 
     return _ndjson(stream())
+
+
+@app.post("/api/reports/{report_id}/triage/stop")
+def triage_stop(report_id: str, request: Request):
+    """Stop the report's triage under way, and a run it waits behind that this visitor also started. The run is
+    shared, so only whoever started it (or the owner) may stop it: 403 for anyone else following it. What the model
+    has read stays; triaging again asks only about the rest. Free. {"stopped": false} when nothing was running."""
+    report = ws.report(_report(report_id))
+    who, boss = _visitor(request), owner.is_owner()
+    job = _triage_jobs.get(_triage_key(report, requirements.current()))
+    if job is None or job.done:
+        job = _triage_latest(report)
+    if job is not None and not job.done and not job.may_stop(who, boss):
+        raise HTTPException(403, "Only whoever started this triage can stop it: it is shared with everyone following it.")
+    stopped = False
+    while job is not None and not job.done and job.may_stop(who, boss):
+        stopped = job.stop() or stopped
+        job = job.after
+    return {"stopped": stopped}
 
 
 def _keep_job(jobs: dict, key: str, job, cap: int) -> None:
@@ -1628,6 +1666,16 @@ def _keep_job(jobs: dict, key: str, job, cap: int) -> None:
         jobs.pop(next(iter(jobs)))
 
 
+def _unfinished(job: triage.Job) -> bool:
+    """A finished run that left clashes unread: stopped, or a read that failed (a run over a report reads them all)."""
+    return job.stopped or any(c.id not in job.results or job.results[c.id].get("error") for c in job.report.clashes)
+
+
+def _kept_readings(job: triage.Job) -> dict[str, dict]:
+    """What a run started after an unfinished one keeps of it: every model reading that did not fail."""
+    return {k: v for k, v in job.results.items() if v.get("source") == "model" and not v.get("error")}
+
+
 def _reading(job: triage.Job, report) -> set[str]:
     """The clashes of `report` a run under way will still read itself: those it asks about, unchanged here."""
     asking = job.only if job.only is not None else set(job._by_id)
@@ -1635,11 +1683,12 @@ def _reading(job: triage.Job, report) -> set[str]:
 
 
 def _start_triage(report, scene_id: str | None, charge, rerun: bool = False, scope: str | None = None,
-                  ask: bool = True) -> triage.Job:
+                  ask: bool = True, who: str | None = None) -> triage.Job:
     """The report's shared triage run: the one under way or done, else a new one (`charge` once: why not, or None).
     For a list of ORCA's checks, one run per scene: a reading the model made follows its clash to every later list
     while the clash is unchanged, so a new run asks only about the rest, in `scope` (charged only when it asks).
-    `ask` False: only carry what holds and what the rules settle, asking the model nothing."""
+    `ask` False: only carry what holds and what the rules settle, asking the model nothing. `who`: the visitor
+    asking, the starter of a run this starts (who may stop it)."""
     doc = requirements.current()
     register = _register_of(report)
     if register is not None:
@@ -1677,25 +1726,28 @@ def _start_triage(report, scene_id: str | None, charge, rerun: bool = False, sco
                     fresh = {k for k, v in before.results.items() if v.get("source") == "model" and not v.get("error")}
                     left = _unread(report, doc, facts, now, scope, rerun) - (fresh if rerun else set())
                     return {k: v for k, v in now.items() if k not in left}, left
-            job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", 8), requirements=doc,
-                             seed=seed if not running else None, domain=domains.of(ws, scene_id), teams=teams,
+            job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", triage.WORKERS),
+                             requirements=doc, seed=seed if not running else None, domain=domains.of(ws, scene_id), teams=teams,
                              only=unread, scope=scope, on_reading=lambda c, v: register.keep_reading(mk, c, v),
                              prior_audit=job.audit if job is not None and not running else None,
-                             after=job if running else None, prepare=prepare)
+                             after=job if running else None, prepare=prepare, starter=who)
             job.learn(facts)
             _keep_job(_triage_jobs, key, job.start(), 16)
             return job
-        if job is None or (rerun and job.done):
-            donor = None if rerun else _triage_donor(report, doc) if doc is not None else None
+        if job is None or (job.done and (rerun or _unfinished(job))):
+            # A run that stopped or failed some reads goes on from its readings: only the rest is asked (charged once).
+            resume = None if job is None or rerun else _kept_readings(job)
+            donor = None if rerun or resume is not None else _triage_donor(report, doc) if doc is not None else None
             refused = None if donor is not None else charge()  # carrying readings over to new rules is free
             if refused:
                 raise PermissionError(refused)
             model, info = triage_model()
             if doc is not None:
                 info = {**info, "requirements": ws.requirements_info(doc)}
-            job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", 8),
-                             requirements=doc, seed=donor.results if donor is not None else None,
-                             domain=domains.of(ws, scene_id), teams=teams)
+            seed = resume if resume is not None else donor.results if donor is not None else None
+            job = triage.Job(report, model, info, env_int("SIGHTLINE_TRIAGE_WORKERS", triage.WORKERS),
+                             requirements=doc, seed=seed, domain=domains.of(ws, scene_id), teams=teams,
+                             starter=who)
             job.learn(facts)
             _keep_job(_triage_jobs, key, job.start(), 16)
     job.learn(facts)
@@ -2168,7 +2220,8 @@ def mcp_hooks() -> mcp_server.Hooks:
         return None if link.owner else detect_limit.take(link.visitor)
 
     def start_triage(report_id: str, scene_id: str | None, link: agents.Link):
-        return _start_triage(ws.report(report_id), scene_id, lambda: charge(link, 1))
+        # Started by an agent: the link's creator is the starter, who may stop it from their page.
+        return _start_triage(ws.report(report_id), scene_id, lambda: charge(link, 1), who=link.visitor)
 
     def build_document(report_id: str, scene_id: str | None, scope: str, check: str | None = None) -> dict:
         whole = ws.report(report_id)

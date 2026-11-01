@@ -145,7 +145,7 @@ would not see the first one's scenes ("Model not loaded. Open it again."), which
 
 | Pool | Size | What runs in parallel |
 |---|---|---|
-| `triage.triage_report` | `SIGHTLINE_TRIAGE_WORKERS` (8) | one strict-JSON call per clash or group of alike clashes |
+| `triage.triage_report` | `SIGHTLINE_TRIAGE_WORKERS` (24) | one strict-JSON call per clash or group of alike clashes; a stop shuts the pool without waiting for calls under way |
 | `titles.title_report` | `titles.WORKERS` (8) | one call per 40 clashes (`titles.BATCH`) |
 | `plans._resolve_items` | 4 | one `agent.resolve` per plan item |
 | `document.explain` | 6 | Muse Spark's explanation of each report page |
