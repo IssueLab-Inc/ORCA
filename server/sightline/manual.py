@@ -703,7 +703,8 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
         except (edits.Unsupported, KeyError, ValueError, TypeError) as e:
             return {"op": op, "passed": False, "blocked": str(e).strip("'\""), "warnings": [], "clashes": 0}
         refused = gate(scene, plan)
-        base = {"op": plan.params, "summary": plan.summary, "face": plan.face.to_dict() if plan.face else None,
+        base = {"op": plan.params, "summary": plan.summary,
+                "face": {**plan.face.to_dict(), "label": label(scene, plan.element)} if plan.face else None,
                 "warnings": plan.warnings, "revision": scene.revision, "key": key_of(plan.params, scene.revision),
                 "targets": plan.targets}
         if refused:

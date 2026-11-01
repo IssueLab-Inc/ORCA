@@ -65,7 +65,8 @@ export function EditPanel({ journal, busy, csvUrl, clashLabel, onUndo, onRedo, o
                 <span className="edit-text">{e.summary || e.title}</span>
                 {line && <span className={`edit-check ${e.check?.verified ? "ok" : (e.check?.new?.length || e.check?.worse?.length) ? "warn" : ""}`}>{line}</span>}
                 {e.status && <span className={`edit-check ${e.status.resolved ? "ok" : "bad"}`}>
-                  {e.status.resolved ? "Its clash is still resolved" : `Its clash is back (${e.status.depth_m != null ? mm(e.status.depth_m) : "touching"})`}</span>}
+                  {e.status.resolved ? (e.follows.length ? "Its clash is still resolved" : "Its clash is resolved")
+                    : `${e.follows.length ? "Its clash is back" : "Its clash is still open"} (${e.status.depth_m != null ? mm(e.status.depth_m) : "touching"})`}</span>}
                 {e.warnings.map((w, i) => <span key={i} className="edit-warn">{w.text}{w.review ? ` · review: ${w.review}` : ""}</span>)}
               </button>
               {e.state === "kept" && kept[0]?.id !== e.id && (

@@ -1909,4 +1909,9 @@ or voice keeps; [docs/manual-edits.md](../manual-edits.md)):
   (5), an MCP and a STEP test, 750+ server tests; `web/tests/edit-helpers.test.mjs` (4) and a patch test, 213 web
   tests, build clean; answer key 3/3 first try at Rev04 heights after the trial-move change. In Chromium on Northbank:
   P, a click on clash #1's duct top (0.300 m), 50 mm typed, "Makes 1 clash: girder −350 mm", Keep with 1 clash, the
-  model patched and the kept checks run again.
+  model patched and the kept checks run again; the Edits panel, Ctrl+Z and Ctrl+Shift+Z. Chat with Muse Spark: "check
+  pushing the top face of its duct up 50 mm" opened the check in the Edit tool (Makes 1 clash), and "Keep it with the
+  clash." kept E1 as Muse's; with a bracing member selected instead, Muse said it has no top face and kept nothing.
+  Against the live server: Muse's fix for the duct and girder (offset +400 mm, 50 mm clear) kept as E1, then the middle
+  piece it made pulled 20 mm in by hand: E2 follows E1, carries the clash, and the clash is still resolved. Answer key
+  3/3 again at the end. `evals/step_cell.py` was not run: the demo-models checkout is not in this session.

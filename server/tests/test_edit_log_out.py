@@ -46,12 +46,12 @@ def test_a_fix_then_a_hand_edit_show_as_a_timeline_in_the_report(scene):
     rows = document.build_rows(_report(g), {}, {}, {"c1": {"a": g["W1"], "b": g["C1"]}}, s, {}, {}, {}, journal=j)
     (r,) = rows
     assert r.section == "page" and [e["id"] for e in r.edits] == ["E2"]
-    assert document.edit_state(r) == "Edited by hand, still resolved"
+    assert document.edit_state(r) == "Edited by hand, resolved"
     html = document.render_html("Report", "Edits", rows, {}, {}, changes=[e.to_dict() for e in j.kept()])
     assert "What was done" in html and "east end of wall &#x27;W1&#x27; pushed 300 mm in" in html
     assert "Changes to the model" in html and "<td>E1</td>" in html and "<td>#7</td>" in html
     assert "After the edits" in html and "checked, kept with 1 clash" in html
-    assert "What was done (Edited by hand, still resolved)" in document._facts(r)
+    assert "What was done (Edited by hand, resolved)" in document._facts(r)
     bcf = zipfile.ZipFile(io.BytesIO(document.bcf_zip(rows, {"c1": {"a": g["W1"], "b": g["C1"]}}, s,
                                                      changes=[e.to_dict() for e in j.kept()])))
     markups = [bcf.read(n).decode() for n in bcf.namelist() if n.endswith("markup.bcf")]

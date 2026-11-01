@@ -100,6 +100,10 @@ export const EditTool = forwardRef<EditToolHandle, {
     const c = incoming.check, f = c.face as Face | null | undefined;
     if (f) { setFace(f); setPick({ globalId: f.element, point: f.point as [number, number, number], normal: f.normal as [number, number, number] }); }
     setCheck(c);
+    const o = c.op as Record<string, unknown>;   // its numbers in the boxes, as if typed here
+    if (typeof o.by_m === "number" && c.op.op === "push_pull") setBy(o.by_m);
+    if (typeof o.gap_m === "number") setGap(o.gap_m);
+    if (Array.isArray(o.delta_m) && c.op.op === "move") setDelta(o.delta_m as [number, number, number]);
     const v = viewer();
     if (v && c.preview?.length) {
       v.showOption({ kind: "edit", moved: c.targets ?? [], deltaM: [0, 0, 0], pieces: c.preview, before: c.before ?? null, worldMeshes: true },

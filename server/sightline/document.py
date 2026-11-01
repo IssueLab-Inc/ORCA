@@ -252,8 +252,11 @@ def edit_state(r: Row) -> str | None:
     fixes = [e for e in r.edits if not is_hand(e)]
     state = ("Fix applied, then edited by hand" if fixes and hand else "Edited by hand" if hand else "Fix applied")
     last = next((e["status"] for e in reversed(r.edits) if e.get("status")), None)
-    if last is not None:
-        state += ", still resolved" if last.get("resolved") else (f", clash back ({_mm(last.get('depth_m'))})")
+    if last is not None:   # "back" only when a fix had resolved it; a hand edit alone leaves it "still open"
+        if last.get("resolved"):
+            state += ", still resolved" if fixes or len(hand) > 1 else ", resolved"
+        else:
+            state += f", clash back ({_mm(last.get('depth_m'))})" if fixes else f", clash still open ({_mm(last.get('depth_m'))})"
     return state
 
 
