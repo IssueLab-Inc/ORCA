@@ -1851,3 +1851,16 @@ the list of clashes. however, when i click on another item that isn't fixed, it 
   `noClash.shownVerdicts`, so it is tested with the real `noClash`), and the selected row stays while a verdict filter
   is on, as selecting a clash can change its shown verdict.
 - **Checked:** `web/tests/clash-list.test.mjs` (2; the old reading fails the first), 203 web tests, build clean.
+
+Quick actions on a clash row (Nov 1; owner: "when we hover on a clash in the list of clashes, i want to see control
+icons button to quickly propose fixes", "also when we hover, additional capability to see clashes with the same
+elements"; owner choices: Propose fixes, Mark as not a clash and Same elements, the last narrowing the list to clashes
+sharing either element; code `ReportList` `RowActions` / `sameElements`, App's `proposeFromList`):
+- **What:** hovering a row (or focusing it, or the selected row on a touch screen) shows icons over its right end:
+  Propose fixes (selects it and proposes once its own pair is picked; only when both elements are in the model and it
+  may need a fix), Mark as not a clash (as the panel's button), and the count of other clashes sharing an element with
+  it, which narrows the list to them with the list's focus chip ("Clashes with Supply air main L02 600x300 or Transfer
+  plate girder 1000 deep · 15").
+- **Checked:** `web/tests/row-actions.test.mjs` (3), 204 web tests, build clean; in Chromium on Northbank against a
+  local server, hovering #1 shows the three actions over the depth with the title still readable, and Same elements
+  shows the 15 clashes on the supply air main or the transfer girder.
