@@ -60,7 +60,8 @@ It is new work, written for ORCA during the event.
   `removeMeasurement`, `clearMeasurements`, `setMeasuring`, `setSnap`) and draws them, the rubber band and the snap
   glyph on one 2D canvas over the stage, again only when something on it changed. The old 3D measure (spheres, a line
   and one label) goes.
-- Candidates: an element's feature edges (`EdgesGeometry` at 25°, already cached for outlines), in world space. In a
+- Candidates: an element's feature edges (`EdgesGeometry` at the crease angle, 40° since Nov 1, already cached for
+  outlines), in world space: a curve's facets are not edges. In a
   drawing they are clipped to its planes and laid onto its plane; where it cuts, the element's triangles are cut by
   that plane and joined into runs. Both are cached per element and placement while the pointer moves.
 - In the 3D view an edge point is the closest point between the pointer's ray and the edge (exact in perspective); in a

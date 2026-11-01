@@ -4,8 +4,10 @@
 // is tested without a renderer; the Viewer redraws afterwards.
 import * as THREE from "three";
 import type { LoadedElement, LoadedModel } from "./ifcLoader";
+import { creased } from "./normals";
 
-/** One element's triangles from the server: world metres, IFC Z up, unwelded, with normals and its style's colour. */
+/** One element's triangles from the server: world metres, IFC Z up, unwelded, with normals (unused: `toGeometry`
+ * makes its own) and its style's colour. */
 export interface ElementMesh {
   global_id: string; verts: number[]; faces: number[]; normals?: number[]; color?: number[] | null; file?: number;
 }
@@ -15,19 +17,13 @@ const SEE_THROUGH = 0.99;
 /** Spare space in each batch for what kept fixes add (the loader reserves it; makeRoom grows past it when needed). */
 export const ROOM = { instances: 64, vertices: 16384, indices: 49152 };
 
-/** Server triangles as a batch-ready geometry: IFC Z up → three.js Y up, (x, y, z) → (x, z, −y), normals likewise. */
+/** Server triangles as a batch-ready geometry: IFC Z up → three.js Y up, (x, y, z) → (x, z, −y). Normals are made here,
+ * creased like the loader's (viewer/normals.ts), not taken from the server, so a kept element shades like the model
+ * round it. */
 export function toGeometry(m: ElementMesh): THREE.BufferGeometry {
-  const flip = (src: number[]) => {
-    const out = new Float32Array(src.length);
-    for (let i = 0; i < src.length; i += 3) { out[i] = src[i]; out[i + 1] = src[i + 2]; out[i + 2] = -src[i + 1]; }
-    return out;
-  };
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(flip(m.verts), 3));
-  g.setIndex(new THREE.BufferAttribute(new Uint32Array(m.faces), 1));
-  if (m.normals && m.normals.length === m.verts.length) g.setAttribute("normal", new THREE.BufferAttribute(flip(m.normals), 3));
-  else g.computeVertexNormals();
-  return g;
+  const pos = new Float32Array(m.verts.length);
+  for (let i = 0; i < pos.length; i += 3) { pos[i] = m.verts[i]; pos[i + 1] = m.verts[i + 2]; pos[i + 2] = -m.verts[i + 1]; }
+  return creased(pos, m.faces);
 }
 
 /** Make sure `batch` has room for `vertices`, `indices` and `instances` more: first by packing out what earlier patches
