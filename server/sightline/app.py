@@ -180,6 +180,9 @@ title_limit = ProposeLimit(env_int("SIGHTLINE_TITLES_PER_HOUR", 0),
 # Detection runs cost no model call but take the server's CPU for seconds: SIGHTLINE_DETECT_PER_HOUR per visitor.
 detect_limit = ProposeLimit(env_int("SIGHTLINE_DETECT_PER_HOUR", 0),
                             env_int("SIGHTLINE_DETECT_PER_DAY", 0), noun="detection runs")
+# The run that lists what a hand edit was kept with is not a detection run's charge, but it has a cap of its own, three
+# times the detection cap, so keep, run, undo, keep again cannot be farmed for free runs.
+edit_rerun_limit = ProposeLimit(3 * detect_limit.per_client_hour, 3 * detect_limit.per_day, noun="runs after hand edits")
 voice_limit = ProposeLimit(env_int("SIGHTLINE_VOICE_PER_HOUR", 0),
                            env_int("SIGHTLINE_VOICE_PER_DAY", 0), noun="voice messages")
 # Model uploads (IFC or STEP): each takes disk, memory and, for STEP, a conversion and one model call to name its parts.
@@ -1195,9 +1198,10 @@ def detect_stream(scene_id: str, body: DetectRequest, request: Request):
         register = ws.checks.get(scene_id)
         if register is None or body.check not in register.checks:
             raise HTTPException(404, "That check is no longer kept: run it from the Filters panel again.")
-    # Run all again is one detection run too. Once, after a hand edit kept with clashes, it is free: the person
-    # accepted those clashes, and the list must show them (docs/manual-edits.md).
-    refused = None if ws.journal(scene_id).free_rerun(body.after_edit) else _take(detect_limit, request)
+    # Run all again is one detection run too. Once, after a hand edit kept with clashes, it is not charged as one: the
+    # person accepted those clashes, and the list must show them (docs/manual-edits.md). It has its own, larger cap.
+    after_edit = ws.journal(scene_id).free_rerun(body.after_edit)
+    refused = _take(edit_rerun_limit if after_edit else detect_limit, request)
     if refused:
         raise HTTPException(429, refused)
     events: queue.Queue = queue.Queue()

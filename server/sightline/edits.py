@@ -2386,9 +2386,10 @@ def offset_edge(scene: IfcScene, global_id: str, k: int, by_m: float, keep_insid
     new_pts[k], new_pts[(k + 1) % n] = na, nb
     if not _simple(new_pts):
         raise Unsupported("its outline would cross itself")
+    from .faces import curve_points
     holes = []
-    for c in getattr(prof, "InnerCurves", None) or ():
-        holes += [np.asarray(p.Coordinates[:2], float) for p in getattr(c, "Points", [])]
+    for c in getattr(prof, "InnerCurves", None) or ():   # a polyline or an indexed poly curve
+        holes += curve_points(c) or []
     for q in [*holes, *keep_inside]:
         if not inside(new_pts, q):
             raise Unsupported("it would cut through an opening in it" if any(q is x for x in keep_inside)

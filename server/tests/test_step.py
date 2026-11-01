@@ -240,3 +240,18 @@ def test_a_part_clipped_by_hand_leaves_the_step_clipped(tmp_path):
     assert box.CornerMax().X() / 1000 == pytest.approx(mid[0], abs=0.002)   # millimetres in the STEP
     manual.apply(ws, sid, {"op": "move", "element": ids["Post P1"], "delta_m": [0.1, 0, 0]}, accept_clashes=9)
     assert ids["Post P1"] not in reshaped(ws.journal(sid))
+
+
+def test_a_machine_part_classed_as_a_beam_is_not_a_buildings_structure(tmp_path):
+    from sightline import hosts, manual
+    write_step(tmp_path / "Test-cell.step")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["Test-cell.step"])
+    scene = ws.scene(sid)
+    ids = {scene.entity(g).Name: g for g in scene.bounds()}
+    import ifcopenshell.api
+    part = ifcopenshell.api.run("root.reassign_class", scene.models[0], product=scene.entity(ids["Beam B1"]), ifc_class="IfcBeam")
+    beam = part.GlobalId
+    assert scene.entity(beam).is_a("IfcBeam")   # a machine's frame member classed as a beam (the cell's classes come from a model)
+    assert not hosts.structural(scene, beam) and hosts.transfer(scene, beam) is None
+    assert not [w for w in manual.structure_warnings(scene, beam) if w["review"] == "structure"]

@@ -38,6 +38,31 @@ def test_only_the_persons_own_words_keep_or_undo():
     for no in ("don't keep it", "what would that hit?", "no, wait", "cancel that", "make it longer", "looks good"):
         assert not consents(no), no
     assert consents("undo that", undo=True) and consents("take it back", undo=True) and not consents("keep it", undo=True)
+    # A bare "keep" means maintain here; every undo word is negated; "go back" is navigation
+    assert not consents("push the duct top up 100 mm and keep 50 mm clear of the slab")
+    for no in ("don't revert it", "never take it back", "go back to clash 3", "wait, undo that"):
+        assert not consents(no, undo=True), no
+
+
+def test_clashes_and_open_joints_are_accepted_only_when_said_as_such():
+    from sightline.chat import accepts
+    for yes in ("Keep it with the clash.", "apply it with 2 clashes", "ok keep it anyway with the clashes"):
+        assert accepts(yes, "clash"), yes
+    for no in ("Keep it if it makes no clashes", "keep it, but not if it clashes", "keep it without any clash",
+               "what clash does it make? keep it"):
+        assert not accepts(no, "clash"), no
+    assert accepts("yes keep it with the open joint", "joint") and not accepts("keep it, but no open joint", "joint")
+
+
+def test_an_edit_checked_this_turn_is_not_kept_this_turn_unless_keep_it_is_all_they_said(setup):
+    ws, sid, g = setup
+    op = {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 0.2}
+    model = Scripted([[("edit_check", {"op": op})], [("edit_keep", {})], "Checked: here it is."])
+    c = Chat(ws, model)
+    s = c.session(None)
+    c.turn(s, "yes, make the wall 200 mm longer at the east end and apply it", Context(sid), lambda e: None)
+    assert not ws.journal(sid).entries
+    assert any("show the user the check first" in m["content"] for m in s.messages if m["role"] == "tool")
 
 
 def test_muse_checks_the_page_previews_and_only_keep_it_keeps(setup):

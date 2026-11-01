@@ -564,14 +564,18 @@ class Workspace:
         s = self.scene(scene_id)
         with self.lock:
             e = self.journal(scene_id).undo(s, entry_id)
+            states = _manual().clash_states(s, self.journal(scene_id), e)
         return {"entry": e.to_dict(), "files": e.files, "changed": [*e.elements, *e.removed], "removed": e.created,
+                "clash_states": states,
                 **self._journal_flags(scene_id)}
 
     def redo_edit(self, scene_id: str, entry_id: str | None = None) -> dict:
         s = self.scene(scene_id)
         with self.lock:
             e = self.journal(scene_id).redo(s, entry_id)
+            states = _manual().clash_states(s, self.journal(scene_id), e)
         return {"entry": e.to_dict(), "files": e.files, "changed": [*e.elements, *e.created], "removed": e.removed,
+                "clash_states": states,
                 **self._journal_flags(scene_id)}
 
     def _journal_flags(self, scene_id: str) -> dict:
@@ -607,7 +611,7 @@ class Workspace:
                "history": [[rev, files] for rev, files in s.history], "removed": gone}
         with self.lock:
             # Openings and provisions are not drawn as elements: the host's new shape is what changes.
-            here = [g for g in dict.fromkeys(changed) if g not in gone and _exists(s, g) and not _void(s, g)]
+            here = [g for g in dict.fromkeys(changed) if g not in gone and s.has(g) and not _void(s, g)]
             try:
                 meshes = edits.meshes(s, here, render=True)
             except (RuntimeError, KeyError):
@@ -1190,13 +1194,6 @@ def _void(scene: IfcScene, gid: str) -> bool:
     return scene.entity(gid).is_a("IfcFeatureElement")
 
 
-def _exists(scene: IfcScene, gid: str) -> bool:
-    try:
-        scene.index_of(gid)
-        return True
-    except KeyError:
-        return False
-
 
 def _spec(scene: IfcScene, element) -> dict:
     """An element's body for `step.export`, in metres and world axes: its extrusion when it is one, else its mesh."""
@@ -1218,6 +1215,11 @@ def _spec(scene: IfcScene, element) -> dict:
         geom = ifcopenshell.geom.create_shape(settings, element).geometry
         return {"kind": "mesh", "verts": np.asarray(geom.verts, float).reshape(-1, 3).tolist(),
                 "faces": np.asarray(geom.faces, int).reshape(-1, 3).tolist()}
+
+
+def _manual():
+    from . import manual   # manual reads the scene's services; imported when first needed
+    return manual
 
 
 def step_removed(scene: IfcScene, index: int, parts: dict) -> list[str]:

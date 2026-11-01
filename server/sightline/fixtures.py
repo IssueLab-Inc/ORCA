@@ -763,6 +763,10 @@ def build_edit_fixture(path: Path) -> Path:
     - K1, a duct fitting of two solids: a 1 x 0.3 x 0.3 m box along x (x 20-21, y 0-0.3, z 1-1.3) and a 0.3 x 0.3 x
       0.6 m box standing on its east end (x 20.7-21, z 1.3-1.9).
     - M1, a 0.6 x 0.4 x 0.3 m box drawn as a triangulated mesh (x 24-24.6, y 0-0.4, z 1-1.3).
+    - WP, a wall drawn in plan: a 3 x 0.2 m rectangle (x 30-33, y 0-0.2) extruded 3 m up, with a 1 x 2 m door opening
+      through it (x 31-32, y -0.1 to 0.3, z 0-2).
+    - BW, a 0.2 x 0.5 m rectangular beam along x (x 30-34, y 10-10.2, z 3-3.5) with a web opening across it (x 31-31.4,
+      y 9.9-10.3, z 3.1-3.4).
     """
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
     project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA edit fixture")
@@ -846,6 +850,15 @@ def build_edit_fixture(path: Path) -> Path:
     rep = model.createIfcShapeRepresentation(body, "Body", "Tessellation", [faceset])
     ifcopenshell.api.run("geometry.assign_representation", model, product=mesh, representation=rep)
     place(mesh, (24.0, 0.0, 1.0))
+    for name, cls, size, corner, hole, hole_at in (
+            ("WP", "IfcWall", (3.0, 0.2, 3.0), (30.0, 0.0, 0.0), (1.0, 0.4, 2.0), (31.0, -0.1, 0.0)),
+            ("BW", "IfcBeam", (4.0, 0.2, 0.5), (30.0, 10.0, 3.0), (0.4, 0.4, 0.3), (31.0, 9.9, 3.1))):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        _box(model, body, e, size, corner)
+        o = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcOpeningElement", name=f"{name} opening")
+        _box(model, body, o, hole, hole_at)
+        ifcopenshell.api.run("feature.add_feature", model, feature=o, element=e)
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path

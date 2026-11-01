@@ -210,3 +210,26 @@ def test_a_move_that_cannot_keep_its_joints_offers_to_move_it_alone(client, monk
     y = scene.placement(tail)[1, 3]
     manual.apply(ws, sid, alone["op"], accept_clashes=alone["clashes"], accept_joints=1)
     assert scene.placement(tail)[1, 3] == pytest.approx(y + 0.3) and scene.element(tail).connected == []
+
+
+def test_undo_and_redo_say_where_each_clash_of_the_entry_stands_now(client):
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    offset(c, sid, main, beam)
+    undone = c.post(f"/api/scenes/{sid}/edits/undo", json={}).json()
+    (st,) = undone["clash_states"]
+    assert st["pair"] == [main, beam] and st["resolved"] is False and st["depth_m"] < 0
+    redone = c.post(f"/api/scenes/{sid}/edits/redo", json={}).json()
+    assert redone["clash_states"][0]["resolved"] is True
+
+
+def test_an_edit_away_from_the_clash_on_screen_is_not_tied_to_it(client):
+    from sightline import manual
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    slab = scene.model.by_type("IfcSlab")[0].GlobalId
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": slab, "face": "top", "by_m": 0.05}, clash_id="s1", pair=[main, beam])
+    assert kept["entry"]["clashes"] == []
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": main, "face": "top", "by_m": 0.01}, clash_id="s1", pair=[main, beam],
+                        accept_clashes=5)
+    assert kept["entry"]["clashes"] == [{"id": "s1", "pair": [main, beam]}]

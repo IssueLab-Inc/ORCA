@@ -265,6 +265,14 @@ class IfcScene:
         self.history.append((self.revision, sorted(set(files))))
         return self.revision
 
+    def has(self, global_id: str) -> bool:
+        """Whether an element with this GlobalId is in any of the open files (a removed one is not)."""
+        try:
+            self.index_of(global_id)
+            return True
+        except KeyError:
+            return False
+
     def forget(self, global_ids) -> None:
         """Drop the cached boxes of elements an edit removed."""
         if self._bounds is not None:

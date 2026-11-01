@@ -88,7 +88,8 @@ A body of several solids (a fitting's pieces, a door's frame and leaf, a desk) l
 prefixed with its place in the body (`i1:cap:end`, `faces.split_id`); a body of one solid keeps plain ids. A pick finds
 the solid it is on (`faces.resolve`: the nearest solid's box, then its face). Each face is named in words from its world
 normal and the element's box: "top" and "bottom", else a compass direction and "end" (along its longest size), "face" (a
-plate's or wall's big face) or "side"; repeated names are numbered. Muse can say "the east end" (`faces.by_name`). A body
+plate's or wall's big face) or "side"; repeated names are numbered. Muse can say "the east end" (`faces.by_name`; a partial name several faces fit, "end", is refused with the candidates, never
+the first of them). A body
 ORCA cannot read (a type's mapped shape, a swept disk) can still be moved, aligned by moving and clipped.
 
 **Faces only a pick places.** A section's inner faces, a mesh's face found by a pick, a round side and a face ORCA does
@@ -108,7 +109,7 @@ section warning) all check in 0.1–0.7 s.
 
 | Op | What it does | Requirements | ORCA's rules (warnings) |
 |---|---|---|---|
-| `push_pull` | A face out (+) or in (−) by metres. A face joined to another element by a port: when that element is a straight segment on the face's axis joined at its end, it stretches too (shorter when the face goes out) and the joint moves and holds; otherwise the joint is left open (`system.disconnect_port`, so the other element is checked as any other) and the check lists it under `joints`. `alone` leaves every joint open. A wall made thicker takes its openings with it (each grows on that face, drawn through the wall or across it); a wall end pulled in past an opening is refused, naming it. A shared body gets its own copy first (`edits.make_unique`, styles kept; a type's mapped shape is refused) | as a resize: "may only be moved whole" refuses it, the largest move applies; what stretches with it is gated too | structure (a column, beam, slab; a transfer element names what stands on it); a section changed (`section`); a pipe's radius asks the services designer; an open joint asks services |
+| `push_pull` | A face out (+) or in (−) by metres. A thicker wall takes the openings through the pushed face with it, however it is drawn (an elevation's cap, a plan rectangle's side, a plan outline's edge): an opening is through the face when its far side on that side is at the face's plane or stands up to 200 mm proud of it, measured before the push, so a beam's web openings stay as they are when its end is pushed, and a slab's soffit recess when its top is. A face joined to another element by a port: when that element is a straight segment on the face's axis joined at its end, it stretches too (shorter when the face goes out) and the joint moves and holds; otherwise the joint is left open (`system.disconnect_port`, so the other element is checked as any other) and the check lists it under `joints`. `alone` leaves every joint open. Each such opening grows on that face (drawn through the wall or across it); a wall end pulled in past an opening is refused, naming it. A shared body gets its own copy first (`edits.make_unique`, styles kept; a type's mapped shape is refused) | as a resize: "may only be moved whole" refuses it, the largest move applies; what stretches with it is gated too | structure (a building's column, beam, slab, footing or pile, never a machine's part: `hosts.structural`; a transfer element names what stands on it: `hosts.transfer`); a section changed (`section`); a pipe's radius asks the services designer; an open joint asks services |
 | `align` | One face flush with another (or a gap off it), by stretching it or by moving the element. Parallel faces: `t = ((pB − pA)·nB)/(nA·nB) − gap`. Faces up to 80° apart meet at the first corner of A (its corners from its solid's mesh, `faces.patch_vertices`): faces turned to each other end on B's outer side, faces turned the same way (level with) stay on the side A is on (`manual._first_contact`); the check offers **Clip it flush** (`offer`). Past 80° it says to clip instead. The target is a face of another element (by name or pick), a bare point and normal, or a **point** with no normal (a corner, an edge's midpoint or a point on an edge, snapped as a measure snaps: `snap` end, mid, edge): A's plane goes through it, the gap short of it. A face target is meant to be touched, so its clearance is waived | as push/pull or move | as those |
 | `move` | The element and the straight run it is in, by a vector or from one snapped point to another; joints kept (`connections.plan_move`). When they cannot be, the check offers **Move it alone** (`alone`: the element only, every joint left open, under `joints`) | as a move | structure; open joints → services |
 | `void` | A rectangular or round opening on any face with a plane (a cap, a side, an inner face, an outline edge, a mesh face, a clip's plane), centred where it was clicked (on the face's plane), across the face and up it (`edits.face_axes`). Through: rays from just inside each point of its outline find where it comes out (the deepest, refused past 1 m), plus 10 mm proud of each face; when no ray comes out, as deep as the element is behind the face (its mesh), refused past 1 m; or a recess to a given depth. An `IfcOpeningElement` (OPENING or RECESS) voiding the element (`edits.cut_void`, reusing the penetration's void builders) | a cut: only where the group may be edited in any way (`requirements.can_cut`) | ORCA's hard rules for hosts (`hosts.hard_rule`: a transfer element, a column, glazing…) and structure; an outline within 50 mm of the face's edge is "a notch more than a hole" |
@@ -133,9 +134,13 @@ are counted apart. A refusal is not an error: the check says `blocked` and why.
 requirements), or it would make more clashes than the person accepted (`accept_clashes`, "Keep with N clashes") or
 leave more joints open than they accepted (`accept_joints`, "Keep with 1 clash · 1 open joint"). Then it
 is made for good inside `journal.record` and `edits.kept_files`, the files marked edited, the revision bumped. When the
-edit names a clash (the one on screen) or follows a fix, the clash is measured again over its elements and everything a
-fix made from them (`made_from`), and the entry says whether it is still resolved; a hand edit that resolves the clash
-on screen marks it fixed. Kept with clashes, the page runs the kept checks again, so the new clash joins the list.
+edit names a clash (the one on screen, and only when the edit touches its elements or what a fix made of them) or
+follows a fix, the clash is measured again over its elements and everything a
+fix made from them (`made_from`, one index for all the pairs: `detect.measure_pairs`), and the entry says whether it is
+still resolved; a hand edit that resolves the clash on screen marks it fixed. Undo and redo measure each of the entry's
+clashes again the same way (`manual.clash_states`) and the page opens or marks fixed from that, for a fix and a hand edit
+alike. Kept with clashes, the page runs the kept checks again, so the new clash joins the list: that run is not a
+detection run's charge but has its own cap, three times larger (`app.edit_rerun_limit`).
 
 Measured on Northbank: a check takes about 1.1 s (a wall end pushed 200 mm into the curtain wall: four transoms and
 panels hit); clash #1's duct made 50 mm deeper reads "Makes 1 clash: girder −350 mm" and keeps only as "Keep with 1
@@ -152,10 +157,13 @@ joint is back.
   [context] line now says what the user has selected (and the Edit tool's chosen face) and the last three edits kept.
   `face: "selected"`, or the chosen face's name, sends that face's pick (`Chat._chosen_face`).
 - **Only the person keeps** (`chat.consents`): `edit_keep` keeps the edit Muse checked last for this conversation, only
-  when the person's own message in this turn says so ("keep it", "apply it", "do it", "yes", "go ahead"; refused when it
-  also says don't, cancel, stop, wait, or starts with no). An edit that makes clashes needs `accept_clashes` and the
-  word "clash" in their message ("keep it with the clash"); one that leaves a joint open needs the word "joint" ("keep it
-  with the open joint"). `undo_edit` needs "undo", "revert" or "take it back". The
+  when the person's own message in this turn says so ("keep it", "apply it", "do it", "yes", "go ahead"; a bare "keep"
+  is not consent, since "keep 25 mm clear" means maintain; refused when it also says don't, cancel, stop, wait, or
+  starts with no), and never in the turn Muse checked it unless "keep it" is all they said: the person sees the preview
+  first. An edit that makes clashes needs `accept_clashes` and the person to keep it *with* them (`chat.accepts`: "keep it
+  with the clash", not "keep it if it makes no clashes"); one that leaves a joint open likewise ("keep it with the open
+  joint"). `undo_edit` needs "undo", "revert", "take it back" or "put it back", with no refusal anywhere in the
+  message ("don't revert it" undoes nothing; "go back" is navigation). Reviewed on PR IssueLab-Inc/ORCA#92. The
   prompt (`domain_packs/chat.md`) says the same: never on Muse's own initiative. A kept edit is logged as `muse`.
 - **Voice** is chat with the words spoken (`voice_live.py` only transcribes), so "make this beam 200 mm longer at the
   east end" and then "keep it" work by voice.

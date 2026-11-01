@@ -18,7 +18,9 @@ export function checkLine(e: JournalEntry): string | null {
   if (!c) return null;
   if (c.verified) return c.min_clearance_m != null ? `Verified · nearest ${mm(c.min_clearance_m)}` : "Verified";
   const parts: string[] = [];
-  const cleared = c.cleared?.length ?? 0, made = (c.new?.length ?? 0) + (c.worse?.length ?? 0);
+  // Its clashes are its collisions: a hit only inside the clearance is not one (the server counts those apart)
+  const cleared = c.cleared?.length ?? 0;
+  const made = c.accepted_clashes ?? [...(c.new ?? []), ...(c.worse ?? [])].filter((h) => h.kind === "collision").length;
   if (cleared) parts.push(`cleared ${cleared}`);
   if (made) parts.push(`kept with ${made} clash${made === 1 ? "" : "es"}`);
   else parts.push(c.min_clearance_m != null ? `clear · nearest ${mm(c.min_clearance_m)}` : "clear");
@@ -64,7 +66,7 @@ export function EditPanel({ journal, busy, csvUrl, clashLabel, onUndo, onRedo, o
                 {[...new Set(clashes)].map((c) => <span key={c} className="chip">{c}</span>)}
                 {e.follows.length > 0 && <span className="chip follows" data-tip="Edited by hand after this fix">after {e.follows.join(", ")}</span>}
                 <span className="edit-text">{e.summary || e.title}</span>
-                {line && <span className={`edit-check ${e.check?.verified ? "ok" : (e.check?.new?.length || e.check?.worse?.length) ? "warn" : ""}`}>{line}</span>}
+                {line && <span className={`edit-check ${e.check?.verified ? "ok" : line.includes("kept with") ? "warn" : ""}`}>{line}</span>}
                 {e.status && e.state === "kept" && <span className={`edit-check ${e.status.resolved ? "ok" : "bad"}`}>
                   {e.status.resolved ? (e.follows.length ? "Its clash is still resolved" : "Its clash is resolved")
                     : `${e.follows.length ? "Its clash is back" : "Its clash is still open"} (${e.status.depth_m != null ? mm(e.status.depth_m) : "touching"})`}</span>}

@@ -165,8 +165,8 @@ export interface JournalEntry {
   id: string; seq: number; when: string; source: EditSource; kind: string; title: string; summary: string;
   actor: string | null; elements: string[]; created: string[]; removed: string[]; names: Record<string, string>;
   files: number[]; revision: number; clashes: { id: string | null; pair: string[] }[]; follows: string[];
-  check: { verified?: boolean; cleared?: unknown[]; new?: unknown[]; worse?: unknown[]; accepted_clashes?: number;
-    min_clearance_m?: number | null } | null;
+  check: { verified?: boolean; cleared?: unknown[]; new?: { kind?: string }[]; worse?: { kind?: string }[]; accepted_clashes?: number;
+    min_clearance_m?: number | null; open_joints?: { element: string; name: string }[] } | null;
   warnings: { rule: string; text: string; review: string | null }[]; status: { clash: string | null; resolved: boolean;
     depth_m: number | null } | null; state: "kept" | "undone"; has_picture: boolean; params: Record<string, unknown>;
 }
@@ -196,7 +196,9 @@ export type EditKept = { entry: JournalEntry | null; files: number[]; changed: s
   pieces: string[]; check: EditCheck } & Patch;
 /** Undo or redo: the entry, and how to patch the page (what came back in `changed`, what went in `removed`). */
 export type Stepped = { entry: JournalEntry; files: number[]; can_undo: boolean; can_redo: boolean;
-  undo: string | null; redo: string | null } & Patch;
+  undo: string | null; redo: string | null;
+  /** Each clash of the entry measured again after the step: what the page marks fixed or opens again. */
+  clash_states?: { clash: string | null; pair: string[]; resolved: boolean; depth_m: number | null }[] } & Patch;
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent = (
   | { type: "thinking"; round: number }

@@ -315,7 +315,8 @@ def test_a_delete_warns_for_what_it_held_and_undo_brings_it_back(scene):
     assert r["passed"] and any(w["rule"] == "support" and "C2" in w["text"] for w in r["warnings"])
     kept = manual.apply(ws, sid, {"op": "delete", "element": g["W1"]})
     assert kept["removed"] == [g["W1"]] and g["W1"] not in s.bounds()
-    assert not s.models[0].by_type("IfcOpeningElement") and kept["entry"]["names"][g["W1"]] == "IfcWall 'W1'"
+    assert not [o for o in s.models[0].by_type("IfcOpeningElement") if o.Name == "Window opening"]
+    assert kept["entry"]["names"][g["W1"]] == "IfcWall 'W1'"
     undone = ws.undo_edit(sid)
     assert g["W1"] in undone["changed"] and s.entity(g["W1"]).HasOpenings and g["W1"] in s.bounds()
     patch = ws.patch(sid, undone["changed"], 0, removed=undone["removed"])
@@ -493,3 +494,48 @@ def test_a_section_comes_out_of_a_mesh_and_a_mesh_is_clipped_and_cut(scene):
     hole = manual.check(ws, sid, {"op": "void", "element": g["K1"], "face": {"point": [20.3, 0.15, 1.3], "normal": [0, 0, 1]},
                                   "diameter_m": 0.1})
     assert hole["blocked"] is None and "opening cut in the top of duct fitting 'K1'" in hole["summary"]
+
+
+def opening_box(s, gid):
+    from sightline import edits
+    o = s.entity(gid).HasOpenings[0].RelatedOpeningElement
+    v = edits._mesh_verts(o)
+    return v.min(axis=0), v.max(axis=0)
+
+
+def test_a_wall_drawn_in_plan_takes_its_door_opening_when_it_gets_thicker(scene):
+    ws, sid, s, g = scene
+    side = faces.resolve(s, g["WP"], [31.5, 0.2, 2.5], [0, 1, 0])
+    assert side.kind == "side"
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["WP"], "face": side.id, "by_m": 0.1})
+    lo, hi = opening_box(s, g["WP"])
+    assert hi[1] == pytest.approx(0.4) and lo[1] == pytest.approx(-0.1)   # out with the north face, the south held
+
+
+def test_pushing_a_beams_end_leaves_its_web_opening_as_it_was(scene):
+    ws, sid, s, g = scene
+    before = opening_box(s, g["BW"])
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["BW"], "face": "east end", "by_m": 1.0}, accept_clashes=5)
+    assert s.bounds()[g["BW"]][1][0] == pytest.approx(35.0)
+    after = opening_box(s, g["BW"])
+    assert np.allclose(before[0], after[0]) and np.allclose(before[1], after[1])
+
+
+def test_a_partial_face_name_that_fits_several_asks_which(scene):
+    ws, sid, s, g = scene
+    with pytest.raises(KeyError, match="could be its east end, west end"):
+        faces.by_name(s, g["W1"], "end")
+    assert faces.by_name(s, g["W1"], "east").id == "edge:1"   # one face has that word
+    assert "say which" in manual.check(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "end", "by_m": 0.2})["blocked"]
+
+
+def test_holes_drawn_as_indexed_poly_curves_are_read():
+    import ifcopenshell
+    m = ifcopenshell.file(schema="IFC4")
+    pts = m.createIfcCartesianPointList2D([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])
+    curve = m.createIfcIndexedPolyCurve(pts, None, False)
+    got = faces.curve_points(curve)
+    assert [tuple(p) for p in got] == [(0, 0), (1, 0), (1, 1), (0, 1)]
+    poly = m.createIfcPolyline([m.createIfcCartesianPoint((0.0, 0.0)), m.createIfcCartesianPoint((2.0, 0.0)),
+                                m.createIfcCartesianPoint((2.0, 2.0)), m.createIfcCartesianPoint((0.0, 0.0))])
+    assert len(faces.curve_points(poly)) == 3

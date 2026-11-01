@@ -352,7 +352,7 @@ export const EditTool = forwardRef<EditToolHandle, {
             return (
               <button key={t.id} type="button" className={`ebtn ibtn ${tool === t.id ? "on" : ""}`} aria-pressed={tool === t.id} aria-label={t.label}
                 disabled={!READY.has(t.id)} onClick={() => setTool(t.id)}
-                data-tip={`${t.label}  ·  ${t.key.toUpperCase()}${state.why && READY.has(t.id) ? `\n${state.why}` : !READY.has(t.id) ? " · soon" : ""}`} data-tip-side="bottom">
+                data-tip={`${t.label}  ·  ${t.key.toUpperCase()}${t.id === "push_pull" ? " (P again stops editing)" : ""}${state.why && READY.has(t.id) ? `\n${state.why}` : !READY.has(t.id) ? " · soon" : ""}`} data-tip-side="bottom">
                 <Icon size={19} aria-hidden /></button>);
           })}
         </div>

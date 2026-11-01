@@ -1941,3 +1941,25 @@ push (was 1,324), listed in 1.6 s; a diffuser's side, a door's bottom and a UB 4
 the MEP model's mesh faces push cleanly, the rest are joined ends. Checked: 761 server tests, 218 web tests,
 `test_docs_map`, the answer key 3/3 first try at Rev04's heights (+0.40, +0.25, +0.28), and in Chromium the duct's top
 dragged up live ("+440 mm" at the arrow) then checked on release. Design: [docs/manual-edits.md](../manual-edits.md).
+
+**Nov 1, review of PR IssueLab-Inc/ORCA#92** (13 threads), and `main` merged in (its row Isolate; conflicts in
+App's scene reset and this log, both sides kept). Fixed:
+- **Openings:** a push takes only the openings through the pushed face, for caps, sides and outline edges (a plan-drawn
+  wall's door now goes with its face; a beam's web opening stays when its end is pushed).
+- **Chat consent gate** (`chat.consents`, `accepts`): a bare "keep" is not consent; nothing is kept in the turn Muse
+  checked it unless "keep it" is all that was said; clashes and open joints only when kept *with* them; every undo word
+  negated, "go back" dropped.
+- **Clash state:** undo and redo return each clash measured again (`clash_states`) and the page acts on that, not on
+  the entry's source. A hand edit is tied to the clash on screen only when it touches its elements.
+- **Caps:** the run after a hand edit has its own cap (`edit_rerun_limit`).
+- **Smaller:**
+  - a partial face name several faces fit is refused with the candidates;
+  - holes drawn as indexed poly curves are read (`faces.curve_points`);
+  - a fix's pieces are measured on one index (`detect.measure_pairs`);
+  - structure and transfer rules live in `hosts.py` (a machine's beam gets no structural review);
+  - `IfcScene.has` replaces two copies of `_exists`;
+  - chat keeps no preview meshes pending;
+  - clash ids in Muse's edit lines are no longer written as `#`;
+  - the palette says P again stops editing.
+
+Checked: 771 server tests, 222 web tests, build clean, `test_docs_map`.

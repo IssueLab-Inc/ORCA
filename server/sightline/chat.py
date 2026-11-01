@@ -209,18 +209,30 @@ TOOLS = [
 ]
 
 # The person's own words: what keeps or undoes an edit from chat or voice (docs/manual-edits.md). Muse never keeps.
-_CONSENT = re.compile(r"\b(keep(\s+(it|that|this|them))?|apply(\s+(it|that))?|do\s+it|go\s+ahead|yes|yep|"
+# A bare "keep" is not consent: in this domain it mostly means maintain ("keep 25 mm clear").
+_CONSENT = re.compile(r"\b(keep\s+(it|that|this|them)|apply(\s+(it|that))?|do\s+it|go\s+ahead|yes|yep|"
                       r"confirm(ed)?|accept(\s+(it|that))?|commit(\s+it)?|make\s+it\s+so|save\s+it)\b", re.I)
 _REFUSE = re.compile(r"\b(don'?t|do\s+not|never|cancel|stop|wait)\b|^\s*no\b", re.I)
-_UNDO = re.compile(r"\b(undo|revert|take\s+(it|that)\s+back|put\s+it\s+back|go\s+back)\b", re.I)
+_UNDO = re.compile(r"\b(undo|revert|take\s+(it|that)\s+back|put\s+it\s+back)\b", re.I)
+# "keep it" and little else: kept even when Muse checked it this same turn (the person said only that)
+_ONLY_KEEP = re.compile(r"^\s*(ok(ay)?[, ]+|yes[, ]+|please[, ]+)*(keep|apply)\s+(it|that|this)(\s+please)?\s*[.!]?\s*$", re.I)
 
 
 def consents(text: str, undo: bool = False) -> bool:
-    """Whether the person's own message says to keep (or undo) an edit: plain words, no refusal in them."""
+    """Whether the person's own message says to keep (or undo) an edit: plain words, no refusal anywhere in them."""
     t = text or ""
-    if undo:
-        return bool(_UNDO.search(t)) and not re.search(r"\b(don'?t|do\s+not|never)\s+undo\b", t, re.I)
-    return bool(_CONSENT.search(t)) and not _REFUSE.search(t)
+    return bool((_UNDO if undo else _CONSENT).search(t)) and not _REFUSE.search(t)
+
+
+def accepts(text: str, what: str) -> bool:
+    """Whether the person's message keeps the edit *with* its clashes (`what` "clash") or open joints ("joint"): said
+    as such ("keep it with the clash", "apply it with 2 clashes", "keep it with the open joint"), and not ruled out
+    ("keep it if it makes no clashes", "not if it clashes", "without the joint")."""
+    t = text or ""
+    said = re.search(rf"\b(keep|apply|accept|do)\s+(it|that|this|them)?\s*(anyway\s+)?with\s+(the|its|those|these|an?|one|"
+                     rf"two|three|\d+)?\s*(open\s+)?{what}", t, re.I)
+    ruled_out = re.search(rf"\b(no|not|doesn'?t|don'?t|without|unless|if|any)\b[^.?!]{{0,25}}\b{what}", t, re.I)
+    return bool(said) and not ruled_out
 
 
 def _coloured(idx: dict, rule: dict, hit: set[int]) -> dict:
@@ -523,7 +535,9 @@ class Chat:
             op["element"] = self._selected(ctx, op.get("element"))
             op["face"] = self._chosen_face(ctx, op["element"], op.get("face"))
             r = manual.check(ws, sid, op)
-            self.pending[session] = {"check": r, "turn": state.get("turn"), "scene": sid}
+            # What keeping needs (not the preview's meshes, which can be large)
+            self.pending[session] = {"check": {k: v for k, v in r.items() if k not in ("preview", "before")},
+                                     "turn": state.get("turn"), "scene": sid}
             emit({"type": "ui", "action": "edit_preview", "check": r})
             told = {k: v for k, v in r.items() if k not in ("preview", "before", "targets")}
             return told, ("cannot: " + r["blocked"]) if r.get("blocked") else (
@@ -538,12 +552,16 @@ class Chat:
                 return {"error": f"that edit cannot be made: {r['blocked']}"}, "refused", []
             if not consents(text):
                 return {"error": "only the user can keep an edit: ask them to say keep it"}, "waiting for the user", []
+            if pend.get("turn") == state.get("turn") and not _ONLY_KEEP.match(text):
+                # Checked this turn: the person has not seen its preview yet ("push it up 100 mm and keep 50 mm clear")
+                return {"error": "show the user the check first: keep it only when they say so after seeing it"}, \
+                    "waiting for the user", []
             n = int(args.get("accept_clashes") or 0)
-            if r["clashes"] and (n < r["clashes"] or not re.search(r"clash", text, re.I)):
+            if r["clashes"] and (n < r["clashes"] or not accepts(text, "clash")):
                 return {"error": f"it makes {r['clashes']} clash(es): keep it only if the user says to keep it with the clashes"}, \
                     "waiting for the user", []
             joints = len(r.get("joints") or [])
-            if joints and not re.search(r"joint", text, re.I):
+            if joints and not accepts(text, "joint"):
                 return {"error": f"it leaves {joints} joint(s) open: keep it only if the user says to keep it with the open "
                                  "joint"}, "waiting for the user", []
             scene = ws.scene(sid)

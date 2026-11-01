@@ -321,7 +321,7 @@ class Journal:
 
 
 def entry_lines(entries: list[Entry], limit: int = 3, names: bool = True) -> list[str]:
-    """Plain lines for Muse: "E4 (you, 14:05): east end of 'B-12' extended 150 mm; follows E2 (#042)"."""
+    """Plain lines for Muse: "E4 (you, 14:05): east end of 'B-12' extended 150 mm; follows E2 (clash s1a2b3c4d)"."""
     out = []
     for e in entries[-limit:]:
         when = datetime.fromtimestamp(e.at, timezone.utc).strftime("%H:%M UTC")
@@ -330,7 +330,7 @@ def entry_lines(entries: list[Entry], limit: int = 3, names: bool = True) -> lis
             tie = f"; follows {', '.join(e.follows)}"
         ids = [c["id"] for c in e.clashes if c.get("id")]
         if ids:
-            tie += f" ({', '.join('#' + str(i) for i in ids[:3])})"
+            tie += f" (clash {', '.join(str(i) for i in ids[:3])})"   # its id, not a #N number
         state = " [undone]" if e.state == "undone" else ""
         out.append(f"{e.id} ({e.source}, {when}): {e.summary or e.title}{tie}{state}")
     return out

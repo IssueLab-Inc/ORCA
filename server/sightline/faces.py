@@ -85,7 +85,12 @@ def _profile_frame(profile) -> np.ndarray:
 
 def outline(profile) -> list[np.ndarray] | None:
     """An arbitrary profile's outer outline as 2D points (no closing repeat), or None when it is not straight edges."""
-    curve = getattr(profile, "OuterCurve", None)
+    return curve_points(getattr(profile, "OuterCurve", None))
+
+
+def curve_points(curve) -> list[np.ndarray] | None:
+    """A closed curve of straight edges as 2D points (no closing repeat): a polyline or an indexed poly curve of
+    lines; None for anything else (arcs, a composite curve)."""
     if curve is None:
         return None
     if curve.is_a("IfcPolyline"):
@@ -446,7 +451,14 @@ def by_name(scene: IfcScene, gid: str, name: str) -> Face:
     for f in listed:
         if f.id == want or f.name == want:
             return f
-    for f in listed:   # "the east end" / "east" / "end"
-        if want.replace("the ", "") == f.name or (want in f.name.split()):
-            return f
+    bare = want.removeprefix("the ").strip()
+    exact = [f for f in listed if f.name == bare]
+    if len(exact) == 1:
+        return exact[0]
+    # "east" or "end" alone: only when one face has that word, never the first of several
+    found = [f for f in listed if bare in f.name.split()]
+    if len(found) == 1:
+        return found[0]
+    if found:
+        raise KeyError(f"{name!r} could be its {', '.join(f.name for f in found)}: say which")
     raise KeyError(f"no face called {name!r}: its faces are {', '.join(f.name for f in listed)}")

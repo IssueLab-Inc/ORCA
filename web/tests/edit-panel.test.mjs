@@ -33,3 +33,14 @@ test("an undone entry says so in its header, its stale clash state hidden; Redo 
   assert.ok(hasText(row(tree, "E1"), "Undo to here") && !hasText(row(tree, "E2"), "Undo to here"), "the newest kept has none: Undo does it");
   assert.ok(hasText(row(tree, "E2"), "Its clash is still open"));
 });
+
+test("a hand edit's check counts its collisions only: a hit inside the clearance is not a clash", async () => {
+  const { checkLine } = await import(await compiled("../src/EditPanel.tsx", {
+    "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+    "lucide-react": stub(["Bot", "Download", "Hand", "Network", "Sparkles", "Wand2", "Wrench"]),
+    "./editIcons": stub(["RedoIcon", "UndoIcon"]) }));
+  const near = entry("E1", "kept", { check: { verified: false, new: [{ kind: "clearance" }], worse: [], cleared: [], min_clearance_m: 0.01 } });
+  assert.equal(checkLine(near), "Checked · clear · nearest 10 mm");
+  const hit = entry("E2", "kept", { check: { verified: false, new: [{ kind: "collision" }], worse: [], cleared: [{}], accepted_clashes: 1 } });
+  assert.equal(checkLine(hit), "Checked · cleared 1 · kept with 1 clash");
+});

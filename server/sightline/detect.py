@@ -654,16 +654,23 @@ def _measure(ix: _Index, solids: _Solids, test: Test, pairs: list[tuple[str, str
 
 def measure_pair(scene: IfcScene, a: str, b: str) -> float | None:
     """How deep two elements overlap now, the way a run measures it (negative metres), or None when they don't."""
+    return measure_pairs(scene, [a], [b]).get(frozenset((a, b)))
+
+
+def measure_pairs(scene: IfcScene, left: list[str], right: list[str]) -> dict[frozenset, float]:
+    """How deep each element of `left` overlaps each of `right` now (negative metres), keyed by the pair; pairs that
+    do not overlap are left out. One index and one tree for all of them (a fix's pieces against the other side)."""
     ix = _Index(scene)
-    if a not in ix.entity or b not in ix.entity or a == b:
-        return None
-    test = Test(id="pair", name="pair", a=Selection(ids=[a]), b=Selection(ids=[b]), tolerance_m=0.0)
-    pairs = _candidates(ix, [a], [b], 0.0)
+    left = [g for g in dict.fromkeys(left) if g in ix.entity]
+    right = [g for g in dict.fromkeys(right) if g in ix.entity]
+    if not left or not right:
+        return {}
+    test = Test(id="pair", name="pair", a=Selection(ids=left), b=Selection(ids=right), tolerance_m=0.0)
+    pairs = [p for p in _candidates(ix, left, right, 0.0) if len(set(p)) == 2]
     if not pairs:
-        return None
-    hits, _ = _measure(ix, _Solids(ix), test, pairs, _tree(ix, {a, b}, _offset(ix)), _offset(ix))
-    hit = hits.get(frozenset((a, b)))
-    return None if hit is None else round(hit.distance_m, 6)
+        return {}
+    hits, _ = _measure(ix, _Solids(ix), test, pairs, _tree(ix, {*left, *right}, _offset(ix)), _offset(ix))
+    return {k: round(h.distance_m, 6) for k, h in hits.items()}
 
 
 def _sized(ix: _Index, ids: list[str], min_size_m: float) -> list[str]:

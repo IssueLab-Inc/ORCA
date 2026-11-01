@@ -222,13 +222,12 @@ def _world_verts(entity) -> np.ndarray:
 
 def structure_warnings(scene: IfcScene, gid: str, what: str = "this change") -> list[dict]:
     """ORCA's own rules about structure, as warnings with who must review (they never block a person's edit)."""
-    e = scene.entity(gid)
     name = label(scene, gid)
-    above = hosts.stands_on(scene, gid) if e.is_a("IfcBeam") or e.is_a("IfcMember") else None
+    above = hosts.transfer(scene, gid)   # the domain's own rules (hosts.py), never a class list here
     if above:
         return [{"rule": "transfer", "review": "structure",
                  "text": f"{name} is a transfer element ({above} stands on it): a structural engineer must confirm {what}"}]
-    if any(e.is_a(c) for c in ("IfcColumn", "IfcFooting", "IfcPile", "IfcBeam", "IfcSlab")):
+    if hosts.structural(scene, gid):
         return [{"rule": "structure", "review": "structure",
                  "text": f"{name} is structure: a structural engineer must confirm {what}"}]
     if scene.stays(gid):
@@ -250,7 +249,7 @@ def cut_warnings(scene: IfcScene, host: str) -> list[dict]:
 
 def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     gid = op["element"]
-    face = face_of(scene, gid, op.get("face") if not isinstance(op.get("face"), dict) else op["face"])
+    face = face_of(scene, gid, op.get("face"))
     if "push_pull" not in face.allows:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled" + (f": {face.why_not}" if face.why_not else
                                 ": an I, U or L section's sides are its section, not a size to stretch"))
@@ -320,12 +319,29 @@ def _opening_corners(scene: IfcScene, gid: str) -> list[np.ndarray]:
     return out
 
 
-def _stretch_openings(scene: IfcScene, gid: str, face: faces.Face, by: float) -> None:
-    """A wall made thicker: its openings' ends on that face go out with it, so they still pass through."""
+def _openings_on(scene: IfcScene, gid: str, face: faces.Face) -> list:
+    """The element's openings that reach this face (measured before the push): their far side on the face's side is at
+    its plane or stands proud of it (an opening is drawn 10 mm or more past the faces it passes through). A beam's web
+    opening is not on its end, nor a slab's soffit recess on its top."""
+    n = np.asarray(face.normal, float)
+    level = float(plane_point(scene, gid, face) @ n)
+    out = []
+    for o in _openings(scene.entity(gid)):
+        try:
+            v = _world_verts(o) @ n
+        except RuntimeError:
+            continue
+        if -faces.NEAR_M <= v.max() - level <= 0.2 and v.min() < level:
+            out.append(o)
+    return out
+
+
+def _stretch_openings(scene: IfcScene, openings: list, face: faces.Face, by: float) -> None:
+    """A wall made thicker: the openings through the pushed face go out with it, so they still pass through."""
     if by <= 0:
         return
     n = np.asarray(face.normal)
-    for o in _openings(scene.entity(gid)):
+    for o in openings:
         try:
             i, s, item, world = faces._world(scene, o)
         except (edits.Unsupported, RuntimeError):
@@ -344,10 +360,11 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
     gid, face, by = plan.element, plan.face, plan.params["by_m"]
     k, own = faces.split_id(face.id)    # which solid of the body (None: its one solid), and the face's own id
     hand = {"least_m": MIN_HAND_M, "unique": True}
+    # The openings through this face, found before it moves: a thicker wall, however drawn (an elevation's cap, a plan
+    # rectangle's side, a plan outline's edge), takes them with it
+    through = _openings_on(scene, gid, face) if k is None and by > 0 and face.kind in ("cap", "side", "edge") else []
     if face.kind == "cap":
         edits.stretch(scene, gid, own.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid), k), item=k, **hand)
-        if k is None:
-            _stretch_openings(scene, gid, face, by)
     elif face.kind == "side":
         edits.stretch(scene, gid, "side", by, normal=face.normal, clipped=edits._is_clipped(scene.entity(gid), k), item=k,
                       sections=True, **hand)
@@ -362,6 +379,7 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
         edits.move_clip(scene, gid, int(own.split(":")[1]), by, item=k, least_m=MIN_HAND_M)
     else:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled")
+    _stretch_openings(scene, through, face, by)
     for peer, cap in plan.extra.get("follow", []):   # its joined segment's end goes the same way: the joint holds
         edits.stretch(scene, peer, cap, -by, **hand)
     model = scene.models[scene.index_of(gid)]
@@ -857,13 +875,6 @@ def _hit(scene: IfcScene, h: verify.Hit) -> dict:
     return out
 
 
-def _exists(scene: IfcScene, gid: str) -> bool:
-    try:
-        scene.index_of(gid)
-        return True
-    except KeyError:
-        return False
-
 
 def key_of(op: dict, revision: int) -> str:
     raw = json.dumps({"op": op, "revision": revision, "requirements": requirements.current_id()}, sort_keys=True, default=str)
@@ -893,7 +904,7 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
         boxes = scene.bounds()
         targets = [g for g in plan.targets if g in boxes]
         before = {h.other: h for h in verify.check(scene, targets, clearance_m=clearance).hits} if targets else {}
-        shapes_before = edits.meshes(scene, [g for g in plan.targets if _exists(scene, g)]) if preview else None
+        shapes_before = edits.meshes(scene, [g for g in plan.targets if scene.has(g)]) if preview else None
         try:
             with edits.trial_files(scene, plan.files):
                 made = OPS[plan.op].make(scene, plan)
@@ -902,14 +913,14 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
                 v = (verify.check(scene, mine, clearance_m=clearance, ignore=set(mine), touching=plan.touching)
                      if mine else verify.Verdict(True, [], None, 0))
                 shapes = edits.meshes(scene, [g for g in dict.fromkeys([*made.changed, *made.created])
-                                              if _exists(scene, g) and not not_physical(scene.entity(g))]) if preview else None
+                                              if scene.has(g) and not not_physical(scene.entity(g))]) if preview else None
         except edits.Unsupported as e:
             return {**base, "passed": False, "blocked": str(e), "clashes": 0}
         hits = [h for h in v.hits if not (h.other in plan.touching and h.distance_m > -WORSE_M)]
         new = [h for h in hits if h.other not in before]
         worse = [h for h in hits if h.other in before and h.distance_m < before[h.other].distance_m - WORSE_M]
         still = {h.other for h in v.hits if h.kind == "collision"}   # closer than the clearance is no longer a clash
-        cleared = [{"other": g, "name": label(scene, g) if _exists(scene, g) else g, "was_m": before[g].distance_m}
+        cleared = [{"other": g, "name": label(scene, g) if scene.has(g) else g, "was_m": before[g].distance_m}
                    for g in before if g not in still and before[g].kind == "collision"]
         clashes = [h for h in new + worse if h.kind == "collision"]
         return {**base, "passed": not clashes and not base["joints"], "blocked": None, "clashes": len(clashes),
@@ -946,6 +957,10 @@ def apply(ws, scene_id: str, op: dict, *, key: str | None = None, accept_clashes
         plan = resolve(scene, op)
         clashes = [{"id": clash_id, "pair": list(pair)}] if pair and len(pair) == 2 else (
             [{"id": clash_id, "pair": None}] if clash_id else [])
+        if pair and len(pair) == 2:   # the clash on screen only when the edit touches its elements (or what a fix made of them)
+            near = {*log.made_from(pair[0]), *log.made_from(pair[1])}
+            if near.isdisjoint(plan.targets):
+                clashes = []
         with log.record(scene, source, plan.op, actor=actor, requirements=requirements.current_id()) as rec, \
                 edits.kept_files(scene, plan.files):
             made = OPS[plan.op].make(scene, plan)
@@ -966,16 +981,25 @@ def apply(ws, scene_id: str, op: dict, *, key: str | None = None, accept_clashes
 
 def _status(scene: IfcScene, log, entry) -> dict | None:
     """Where the entry's clash stands now: its elements, and everything a fix made from them, measured again."""
+    states = clash_states(scene, log, entry)
+    return states[0] if states else None
+
+
+def clash_states(scene: IfcScene, log, entry) -> list[dict]:
+    """Where each of the entry's clashes (with its pair) stands now, measured again over its two elements and everything
+    a fix made from them, one index for all: what undo and redo tell the page, whoever kept the entry."""
+    boxes = scene.bounds()
+    out = []
     for c in entry.clashes:
         pair = c.get("pair")
         if not pair or len(pair) != 2:
             continue
-        left = [g for g in log.made_from(pair[0]) if g in scene.bounds()]
-        right = [g for g in log.made_from(pair[1]) if g in scene.bounds()]
-        depths = [d for x in left for y in right if x != y for d in [detect.measure_pair(scene, x, y)] if d is not None]
+        left = [g for g in log.made_from(pair[0]) if g in boxes]
+        right = [g for g in log.made_from(pair[1]) if g in boxes]
+        depths = list(detect.measure_pairs(scene, left, right).values())
         worst = min(depths) if depths else None
-        return {"clash": c.get("id"), "pair": pair, "resolved": worst is None, "depth_m": worst}
-    return None
+        out.append({"clash": c.get("id"), "pair": pair, "resolved": worst is None, "depth_m": worst})
+    return out
 
 
 def describe() -> str:

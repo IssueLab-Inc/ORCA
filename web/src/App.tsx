@@ -2285,13 +2285,13 @@ export function App() {
     try {
       const r = dir === "undo" ? await api.undo(sid, entry) : await api.redo(sid, entry);
       if (!live()) return false;
-      return await afterStep(r, dir);
+      return await afterStep(r);
     } catch (e) { if (live()) setError((e as Error).message); return false; } finally { if (live()) setBusy(null); }
   }
 
   /** What follows an undo or redo, from this page, chat or an agent: the model patched, a fix's clash open again (or
    * fixed again), the log read again. */
-  async function afterStep(r: Stepped, dir: "undo" | "redo"): Promise<boolean> {
+  async function afterStep(r: Stepped): Promise<boolean> {
     if (!sceneId) return false;
     const sid = sceneId, epoch = sceneEpoch.current;
     const live = () => sceneEpoch.current === epoch;
@@ -2299,13 +2299,16 @@ export function App() {
     if (selected && (r.removed ?? []).includes(selected.globalId)) setSelected(null);
     await applyToViewer(sid, r, [], live);
     if (!live()) return false;
-    const pairs = r.entry.clashes.filter((c) => c.pair?.length === 2).map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
-    const fixLike = r.entry.source !== "you" && r.entry.source !== "muse";
-    if (fixLike && dir === "undo") {
-      const ids = new Set(clashIdsOf(pairs).flat());
+    // Each clash as the server measured it after the step, whoever kept the entry: open again, or fixed (again)
+    const states = r.clash_states ?? [];
+    const open = states.filter((c) => !c.resolved).map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
+    const fixed = states.filter((c) => c.resolved).map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
+    if (open.length) {
+      const ids = new Set(clashIdsOf(open).flat());
       setFixes((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !ids.has(id))));
       setEvidence((ev) => Object.fromEntries(Object.entries(ev).map(([id, x]) => [id, ids.has(id) && x.status === "accepted" ? { ...x, status: "proposed" } : x])));
-    } else if (fixLike) markFixed(pairs, pairs.map(() => r.entry.title));
+    }
+    if (fixed.length) markFixed(fixed, fixed.map(() => r.entry.summary || r.entry.title));
     staleContext(); setRemeasure((n) => n + 1);
     return true;
   }
@@ -2521,7 +2524,7 @@ export function App() {
     }
     if (e.type === "ui" && e.action === "edit_preview") { setTool((t) => ({ ...t, edit: true, measure: false })); setIncomingEdit({ check: e.check, n: Date.now() }); }
     if (e.type === "ui" && e.action === "edit_kept") { setIncomingEdit(null); void keptEdit(e.kept); }
-    if (e.type === "ui" && e.action === "edit_stepped") void afterStep(e.step, e.step.entry.state === "undone" ? "undo" : "redo");
+    if (e.type === "ui" && e.action === "edit_stepped") void afterStep(e.step);
     if (e.type === "ui" && e.action === "select_clash") {
       const c = report?.clashes.find((x) => x.id === e.clash_id);
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.

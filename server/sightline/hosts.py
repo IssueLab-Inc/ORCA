@@ -110,6 +110,24 @@ def stands_on(scene: IfcScene, host_gid: str) -> str | None:
     return None
 
 
+STRUCTURE = ("IfcColumn", "IfcFooting", "IfcPile", "IfcBeam", "IfcSlab")   # a building's frame and floors
+
+
+def structural(scene: IfcScene, gid: str) -> bool:
+    """Whether a building's structural engineer must confirm a change to it (a column, footing, pile, beam or slab).
+    A part converted from STEP is a machine's, whatever its class: not a building's structure."""
+    e = scene.entity(gid)
+    return not step_source(e) and any(e.is_a(c) for c in STRUCTURE)
+
+
+def transfer(scene: IfcScene, gid: str) -> str | None:
+    """What stands on a building's beam or member (a transfer element), or None; never for a machine's part."""
+    e = scene.entity(gid)
+    if step_source(e) or not (e.is_a("IfcBeam") or e.is_a("IfcMember")):
+        return None
+    return stands_on(scene, gid)
+
+
 def hard_rule(scene: IfcScene, host_gid: str) -> str | None:
     """Why `host` may never take an opening, whatever anyone says, or None."""
     e = scene.entity(host_gid)
