@@ -20,6 +20,7 @@ from typing import Callable
 import ifcopenshell
 import ifcopenshell.geom
 import ifcopenshell.util.element
+import ifcopenshell.util.placement
 import ifcopenshell.util.shape
 import numpy as np
 
@@ -123,6 +124,51 @@ def _axis_points(entity, scale: float) -> np.ndarray | None:
     return None
 
 
+SYMMETRIC = ("IfcIShapeProfileDef", "IfcRectangleProfileDef", "IfcRectangleHollowProfileDef",
+             "IfcRoundedRectangleProfileDef", "IfcCircleProfileDef", "IfcCircleHollowProfileDef", "IfcEllipseProfileDef")
+# Where each cardinal point sits on the section's box (IFC4: 1-9 its corners, edges and middle; 10-15 its centroid,
+# or in line with it: the box's middle only for a section symmetric both ways): (across, up), 0 low, 0.5 middle, 1 high
+CARDINAL = {1: (0, 0), 2: (.5, 0), 3: (1, 0), 4: (0, .5), 5: (.5, .5), 6: (1, .5), 7: (0, 1), 8: (.5, 1), 9: (1, 1),
+            10: (.5, .5), 11: (.5, 0), 12: (0, .5), 13: (1, .5), 14: (.5, 1), 15: (.5, .5)}
+
+
+def swept_item(entity):
+    """The body's one extrusion (through any clips), or None."""
+    body = _body(entity)
+    if body is None or len(body.Items) != 1:
+        return None
+    item = body.Items[0]
+    while item.is_a("IfcBooleanResult"):
+        item = item.FirstOperand
+    return item if item.is_a("IfcExtrudedAreaSolid") else None
+
+
+def cardinal_offset(entity, scale: float, verts=None):
+    """Where a profiled element's cardinal point is from its axis, across its section, in metres: (across, up) on the
+    extrusion's own x and y, and those two directions in the element's frame. None when it cannot say (no profile set
+    usage, no `Axis` along the extrusion, a centroid point on a section that is not symmetric both ways)."""
+    usage = ifcopenshell.util.element.get_material(entity, should_skip_usage=False)
+    if usage is None or not usage.is_a("IfcMaterialProfileSetUsage"):
+        return None
+    cp = int(usage.CardinalPoint or 5)
+    item = swept_item(entity)
+    if item is None or cp not in CARDINAL or (cp >= 10 and item.SweptArea.is_a() not in SYMMETRIC):
+        return None
+    ends = _axis_points(entity, scale)
+    v = _local_verts(entity) if verts is None else verts
+    if ends is None or v is None:
+        return None
+    p = ifcopenshell.util.placement.get_axis2placement(item.Position) if item.Position is not None else np.eye(4)
+    x, y, z = p[:3, 0], p[:3, 1], p[:3, 2]
+    run = ends[1] - ends[0]
+    if np.linalg.norm(run) < 1e-9 or abs(float(run @ z)) / np.linalg.norm(run) < 0.99:
+        return None   # its axis does not run along the extrusion
+    fx, fy = CARDINAL[cp]
+    xs, ys = v @ x, v @ y
+    at = np.array([xs.min() + fx * (xs.max() - xs.min()), ys.min() + fy * (ys.max() - ys.min())])
+    return at - np.array([ends[0] @ x, ends[0] @ y]), x, y
+
+
 def _digest(model, roots) -> str:
     """Everything under some entities, as a digest: changed when any of it changed."""
     h = hashlib.sha1()
@@ -198,6 +244,11 @@ def measure(scene: IfcScene, gids, label: Callable[[IfcScene, str], str] = _labe
                 a, b = _profile_sizes(swept, s), _profile_sizes(prof, s)
                 diff = tuple(round(x - y, 6) for x, y in zip(a[1:], b[1:])) if a[0] == b[0] and len(a) == len(b) else a
                 out[(gid, "profile")] = Reading(gid, "profile", diff, {"name": name, "profile": prof.ProfileName or prof.is_a()})
+        if mat is not None and mat.is_a("IfcMaterialProfileSetUsage"):
+            off = cardinal_offset(e, s, local())
+            if off is not None:
+                out[(gid, "cardinal")] = Reading(gid, "cardinal", tuple(round(float(c), 6) for c in off[0]),
+                                                 {"name": name, "cp": int(mat.CardinalPoint or 5)})
         ends = _axis_points(e, s)
         if ends is not None:
             v = local()
@@ -306,6 +357,11 @@ def _changed(scene: IfcScene, r: Reading, was: Reading | None) -> Issue | None:
             return Issue(r.element, "axis", "block",
                          f"the axis of {w['name']} ({w['axis']:.3f} m) would no longer run its body ({w['body']:.3f} m): "
                          "an element drawn with an axis cannot change its length by hand yet")
+    elif r.rule == "cardinal":
+        base = was.values if was else (0.0, 0.0)
+        if any(abs(a - b) > LENGTH_TOL_M for a, b in zip(r.values, base)):
+            return Issue(r.element, "cardinal", "block",
+                         f"the axis of {w['name']} would no longer be at its section's cardinal point ({w['cp']})")
     elif r.rule == "joins":
         base = was.values[0] if was else 0.0
         if r.values[0] - base > JOIN_TOL_M:

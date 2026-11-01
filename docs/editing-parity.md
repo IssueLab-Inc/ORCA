@@ -50,6 +50,7 @@ split's second piece) is compared with the element it came from.
 | `layers` | Σ LayerThickness less the body's extent along the usage's axis (AXIS2 the local y, AXIS3 the local z) | block |
 | `profile` | the body's swept profile less the material profile, size by size (or its class when they differ) | block |
 | `axis` | where the body starts and ends along the `Axis` (`IfcPolyline` or `IfcIndexedPolyCurve`), from its ends | block |
+| `cardinal` | where a profile set usage's cardinal point (1-9 on the section's box; 10-15 for a section symmetric both ways) is from the `Axis`, across the extrusion | block |
 | `joins` | how far a path join's ATSTART/ATEND end is from the other element's axis, in plan | block, past 5 mm |
 | `type` | a digest of everything under the type's maps | block (unless the edit is to the type) |
 | `quantities` | the body's volume and the `Qto_*BaseQuantities` values | warn, when the volume changed and they did not |
@@ -105,8 +106,13 @@ it, is left open and listed, as for a move on its own. The fix agent's moves kee
 IfcOpenShell's `geometry.regenerate_wall_representation` was not used: it redraws a wall from its layers, dropping
 a body ORCA or the authoring tool shaped some other way.
 
-Not yet (later): a profile's cardinal point re-centred when a section grows on one side (the body grows to the side
-pushed, as people expect); quantities ORCA does not work out (weights, surface areas, perimeters) are left and named.
+**A section grown on one side** (`parametric._cardinal`). The body grows to the side pushed, as people expect, and
+the element's axis goes back to its cardinal point: its placement moves across by the difference and its body back by
+as much, so what is placed in it stays where it is, and a tool that draws it again from its axis, profile and cardinal
+point draws the same body. BM1's top pushed 50 mm: the body 2.8 to 3.25 m, its axis at 3.025 m (cardinal point 5); a
+bottom-centred beam (2) keeps its axis when its top is pushed and takes it down with its bottom.
+
+Not yet (later): quantities ORCA does not work out (weights, surface areas, perimeters) are left and named.
 
 ## MEP by hand (Tier 2)
 

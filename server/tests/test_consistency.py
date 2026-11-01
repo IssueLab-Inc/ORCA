@@ -80,3 +80,15 @@ def test_a_path_join_is_measured_in_plan(scene):
         s.translate([g["W2"]], (0.3, 0.0, 0.0))
         (issue,) = consistency.compare(s, before, consistency.measure(s, [g["W1"]]))
         assert issue.rule == "joins" and "300 mm apart" in issue.text
+
+
+def test_a_body_moved_off_its_cardinal_point_is_caught(scene):
+    s, g = scene
+    assert consistency.measure(s, [g["BM1"]])[(g["BM1"], "cardinal")].values == (0.0, 0.0)
+    before = consistency.measure(s, [g["BM1"]])
+    with edits.trial_files(s, {0}):
+        item = consistency.swept_item(s.entity(g["BM1"]))
+        loc = item.Position.Location
+        item.Position.Location = s.models[0].createIfcCartesianPoint((loc.Coordinates[0], 0.05, loc.Coordinates[2]))
+        (issue,) = [i for i in consistency.compare(s, before, consistency.measure(s, [g["BM1"]])) if i.rule == "cardinal"]
+        assert issue.severity == "block" and "cardinal point (5)" in issue.text

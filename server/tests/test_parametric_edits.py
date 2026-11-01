@@ -164,6 +164,35 @@ def test_a_beam_given_a_deeper_section_keeps_its_cardinal_point_and_its_twin_its
     assert ue.get_type(scene.entity(g["BM1"])).Name == "BT-UB (ORCA)" and ue.get_type(scene.entity(g["BM2"])).Name == "BT-UB"
 
 
+def test_a_section_grown_on_one_side_keeps_its_body_where_pushed_and_its_axis_at_the_cardinal_point(param):
+    ws, sid, scene, g = param
+    r = manual.apply(ws, sid, {"op": "push_pull", "element": g["BM1"], "face": "top", "by_m": 0.05})
+    assert "the axis of beam 'BM1' back at its section's cardinal point (5)" in r["check"]["summary"]
+    box = scene.bounds()[g["BM1"]]
+    assert box[:, 2] == pytest.approx([2.8, 3.25]), "the body grew up only, as pushed"
+    assert scene.placement(g["BM1"])[2, 3] == pytest.approx(3.025), "its axis is the new section's middle"
+    axis = consistency._world_axis(scene, scene.entity(g["BM1"]))
+    assert axis[:, 2] == pytest.approx([3.025, 3.025])
+    off, *_ = consistency.cardinal_offset(scene.entity(g["BM1"]), 1.0)
+    assert off == pytest.approx([0.0, 0.0], abs=1e-6)
+    assert_consistent(scene)
+    ws.journal(sid).undo(scene)
+    assert scene.placement(g["BM1"])[2, 3] == pytest.approx(3.0)
+
+
+def test_a_bottom_centred_beam_moves_its_axis_only_when_its_bottom_moves(param):
+    ws, sid, scene, g = param
+    b = scene.entity(g["BM2"])
+    ue.get_material(b).CardinalPoint = 2    # its axis on its bottom flange: the body hangs 200 mm below the axis's middle
+    off0, *_ = consistency.cardinal_offset(b, 1.0)
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["BM2"], "face": "top", "by_m": 0.05})
+    assert scene.placement(g["BM2"])[2, 3] == pytest.approx(3.0), "its bottom stayed: so does its axis"
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["BM2"], "face": "bottom", "by_m": 0.05})
+    assert scene.placement(g["BM2"])[2, 3] == pytest.approx(2.95), "its bottom went down 50 mm: so did its axis"
+    off, *_ = consistency.cardinal_offset(scene.entity(g["BM2"]), 1.0)
+    assert off == pytest.approx(off0, abs=1e-6)
+
+
 def test_undo_puts_type_set_axis_and_quantities_back(param):
     ws, sid, scene, g = param
     before = untouched(scene, g, "")

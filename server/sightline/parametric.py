@@ -32,6 +32,7 @@ class Before:
     axis: tuple[float, float] | None = None       # where the body starts and ends along its Axis, from its ends
     volume: float | None = None
     joins: dict[int, float] = field(default_factory=dict)                  # path join id: its gap in plan
+    cardinal: tuple[float, float] | None = None   # its cardinal point from its axis, across its section
 
 
 @dataclass
@@ -61,6 +62,8 @@ def snapshot(scene: IfcScene, gids) -> dict[str, Before]:
         if (gid, "quantities") in mine:
             b.volume = mine[(gid, "quantities")].values[0]
         b.joins = {k[2]: r.values[0] for k, r in mine.items() if k[1] == "joins"}
+        if (gid, "cardinal") in mine:
+            b.cardinal = mine[(gid, "cardinal")].values
         out[gid] = b
     return out
 
@@ -88,6 +91,7 @@ def sync(scene: IfcScene, before: dict[str, Before], changed, created=(), made_f
         _layers(scene, gid, was, now, done, label)
         _profile(scene, gid, done, label)
         _axis(scene, gid, was, v, done)
+        _cardinal(scene, gid, was, v, done, label)
         todo.append((gid, was))
         if was.volume is not None:
             vol = consistency._volume(e)
@@ -365,6 +369,39 @@ def _axis(scene, gid, was: Before, verts, done: Synced):
         return
     a, b = ends[0] + u * s0, ends[0] + u * s1
     _write_axis(scene, e, a / s, b / s)
+
+
+def _cardinal(scene, gid, was: Before, verts, done: Synced, label):
+    """A section grown on one side (the body grows to the side pushed): the element's axis goes back to its cardinal
+    point, so a tool that draws it again from its axis, profile and cardinal point draws the same body. Its placement
+    moves across by the difference and its body back by as much (what is placed in it stays where it is)."""
+    if was.cardinal is None:
+        return
+    e = scene.entity(gid)
+    s = scene.unit_scales[scene.index_of(gid)]
+    off = consistency.cardinal_offset(e, s, verts)
+    if off is None:
+        return
+    now, x, y = off
+    d = now - np.asarray(was.cardinal, float)
+    if np.all(np.abs(d) <= consistency.LENGTH_TOL_M):
+        return
+    shift = x * d[0] + y * d[1]                     # metres, in the element's own frame
+    body = consistency._body(e)
+    if body is None or any(it.is_a("IfcMappedItem") for it in body.Items):
+        return
+    model = scene.models[scene.index_of(gid)]
+    m = scene.placement(gid)
+    m[:3, 3] += m[:3, :3] @ shift
+    back = np.eye(4)
+    back[:3, 3] = -shift / s
+    for it in body.Items:
+        edits._move_item(model, it, back)
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=e, matrix=m, is_si=True)
+    scene.refresh_bounds([gid])
+    usage = ifcopenshell.util.element.get_material(e, should_skip_usage=False)
+    done.notes.append(f"the axis of {label(scene, gid)} back at its section's cardinal point "
+                      f"({int(usage.CardinalPoint or 5)})")
 
 
 def _write_axis(scene, e, a, b):
