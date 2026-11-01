@@ -1209,7 +1209,11 @@ def _new_fitting(model, segment, place, name: str, tag: str | None, predefined: 
         pset = ifcopenshell.api.run("pset.add_pset", model, product=fitting, name=STEP_PSET)
         ifcopenshell.api.run("pset.edit_pset", model, pset=pset,
                              properties={k: v for k, v in source.items() if k in ("Group", "Label", "Source")})
-    ifcopenshell.api.run("geometry.edit_object_placement", model, product=fitting, matrix=place, is_si=False)
+    # A copy: with is_si=False IfcOpenShell scales the matrix it is given to SI in place, and `place` is the segment's
+    # frame, shared by every fitting of a run. Each fitting after the first landed scaled again (a thousandth of the way
+    # to the origin on a millimetre model, 0.3048 on feet) and the check passed it in empty space.
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=fitting, matrix=np.array(place, dtype=float),
+                         is_si=False)
     old = _ports(segment)
     for n in range(2):
         port = ifcopenshell.api.run("system.add_port", model, element=fitting)

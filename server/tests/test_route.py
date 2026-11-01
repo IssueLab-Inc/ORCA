@@ -285,3 +285,37 @@ def test_nearby_clashes_are_each_sides_own_and_near_where_they_meet(tmp_path):
     # On duct x pipe (both movable): each side hears of its own partners only.
     near = ws._nearby("s", NS(clashes=clashes), "duct", "pipe")
     assert near["pipe"] == ["wall"] and "wall" not in near["duct"] and near["duct"][0] == "beam1"
+
+
+def _placed_like_revit(path: Path) -> Path:
+    """The fixture's ducts with their position carried by their placement (as Revit writes them), not by their solid:
+    the same model, but a frame whose translation is not zero."""
+    import ifcopenshell
+    import ifcopenshell.api
+    m = ifcopenshell.open(path)
+    for e in m.by_type("IfcDuctSegment"):
+        solid = e.Representation.Representations[0].Items[0]
+        p = np.eye(4)
+        p[:3, 3] = solid.Position.Location.Coordinates
+        ifcopenshell.api.run("geometry.edit_object_placement", m, product=e, matrix=p, is_si=False)
+        solid.Position = m.createIfcAxis2Placement3D(m.createIfcCartesianPoint((0.0, 0.0, 0.0)), solid.Position.Axis,
+                                                     solid.Position.RefDirection)
+    m.write(str(path))
+    return path
+
+
+@pytest.mark.parametrize("millimetres", [False, True])
+def test_every_fitting_lands_on_the_run_whatever_the_units(tmp_path, millimetres):
+    """IfcOpenShell's `edit_object_placement` with `is_si=False` scales the matrix it is given in place. A route's
+    fittings shared one frame, so each fitting after the first was scaled again: on a millimetre (or feet) model they
+    landed a thousandth (0.3048) of the way to the model's origin, and the check passed them in empty space."""
+    scene = IfcScene(_placed_like_revit(build_run_fixture(tmp_path / "run.ifc", millimetres=millimetres)))
+    main = next(e.GlobalId for e in scene.model.by_type("IfcFlowSegment") if e.Name and "main" in e.Name.lower())
+    r = edits.apply_route(scene, main, edits.route_steps(TWO, edits.run_of(scene, main).length_m))
+    fittings = [g for g in r.pieces if scene.entity(g).is_a("IfcFlowFitting")]
+    assert len(fittings) >= 2
+    for gid in r.pieces:
+        v = np.asarray(edits.meshes(scene, [gid])[0]["verts"]).reshape(-1, 3)
+        lo, hi = v.min(0), v.max(0)
+        assert -0.1 <= lo[0] and hi[0] <= 6.1, (scene.entity(gid).Name, lo, hi)
+        assert 2.5 <= lo[2] and hi[2] <= 3.1, (scene.entity(gid).Name, lo, hi)   # the duct's 300 mm at z 2.8
