@@ -140,6 +140,12 @@ made, against everything): what it **clears** (collisions there before and gone)
 **worse** (2 mm deeper than before, the rule trims use). New or worse collisions are its clashes; shortfalls of clearance
 are counted apart. A refusal is not an error: the check says `blocked` and why.
 
+The trial is also read for **consistency** (`consistency.py`, [editing-parity.md](editing-parity.md)): what the model
+says besides the shape (a layered element's layers, a profile set's section, an `Axis`, a path join, a type's maps,
+base quantities), before and after. An edit that would leave it saying two things is refused in words with the numbers
+("the material layers of wall 'W1' add up to 250 mm but its body would be 300 mm thick…", under `consistency`); stale
+base quantities are a warning. Only what the edit makes worse counts.
+
 **Keeping** (`manual.apply`, `POST /edit/apply`) never trusts the page: the edit is checked again on the server, refused
 (409) when the requirements forbid it, the model changed since its check (`key`: a hash of the op, the revision and the
 requirements), or it would make more clashes than the person accepted (`accept_clashes`, "Keep with N clashes") or

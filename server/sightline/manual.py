@@ -32,7 +32,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.system
 import numpy as np
 
-from . import connections, detect, edits, faces, hosts, requirements, verify
+from . import connections, consistency, detect, edits, faces, hosts, requirements, verify
 from .scene import IfcScene, not_physical
 
 PARALLEL_COS = np.cos(np.radians(1))   # two faces this close to parallel meet all over when aligned
@@ -917,17 +917,28 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
         targets = [g for g in plan.targets if g in boxes]
         before = {h.other: h for h in verify.check(scene, targets, clearance_m=clearance).hits} if targets else {}
         shapes_before = edits.meshes(scene, [g for g in plan.targets if scene.has(g)]) if preview else None
+        readings = consistency.measure(scene, plan.targets, label)   # what the model says besides the shape, before
         try:
             with edits.trial_files(scene, plan.files):
                 made = OPS[plan.op].make(scene, plan)
                 boxes = scene.bounds()
                 mine = [g for g in dict.fromkeys([*made.changed, *made.created]) if g in boxes]
+                issues = consistency.compare(scene, readings, consistency.measure(scene, [
+                    g for g in dict.fromkeys([*plan.targets, *made.changed, *made.created]) if scene.has(g)], label),
+                    made_from=plan.element, allow=frozenset(plan.extra.get("consistent", ())))
                 v = (verify.check(scene, mine, clearance_m=clearance, ignore=set(mine), touching=plan.touching)
                      if mine else verify.Verdict(True, [], None, 0))
                 shapes = edits.meshes(scene, [g for g in dict.fromkeys([*made.changed, *made.created])
                                               if scene.has(g) and not not_physical(scene.entity(g))]) if preview else None
         except edits.Unsupported as e:
             return {**base, "passed": False, "blocked": str(e), "clashes": 0}
+        blocks = [i for i in issues if i.severity == "block"]
+        if blocks:   # the model would say two things: refused, in words (docs/editing-parity.md)
+            more = f" (and {len(blocks) - 1} more)" if len(blocks) > 1 else ""
+            return {**base, "passed": False, "blocked": blocks[0].text + more, "clashes": 0,
+                    "consistency": [i.to_dict() for i in issues]}
+        base["warnings"] = [*base["warnings"], *({"rule": i.rule, "review": "design", "text": i.text}
+                                                  for i in issues if i.severity == "warn")]
         hits = [h for h in v.hits if not (h.other in plan.touching and h.distance_m > -WORSE_M)]
         new = [h for h in hits if h.other not in before]
         worse = [h for h in hits if h.other in before and h.distance_m < before[h.other].distance_m - WORSE_M]

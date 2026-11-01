@@ -1974,3 +1974,16 @@ line ends (Windows wrote cp1252 and doubled carriage returns). Checked: 768 serv
 clean checkout of this branch on this machine fail the same: two detection, two PDF fonts, one voice socket), 222 web
 tests, build clean; in Chromium on Northbank, the supply main moved up 50 mm on its own (two tees left open, kept as
 E1 with "Keep with 2 open joints", Ctrl+Z undid it), and carried it is refused past 12 parts with the offer.
+
+**Nov 1, hand edits can no longer leave a model saying two things** ([docs/editing-parity.md](../editing-parity.md),
+slice 0b). Northbank carries none of what real exports do (layer and profile set usages, `Axis`, path joins, bodies
+from a type), so those paths were never exercised. New `fixtures.build_parametric_fixture` carries all of them, built
+with `ifcopenshell.api`. New `consistency.py` reads, per element and rule, what a consistent edit keeps, and
+`manual.check` compares the reading before an edit with the one in its trial: what it made worse is refused in words
+with the numbers ("the material layers of wall 'W1' add up to 250 mm but its body would be 300 mm thick…"), stale
+base quantities warn, and a model that was already inconsistent never blocks. `test_parametric_edits.py` runs every hand
+edit on every construct: kept consistent or refused, nothing in between. Measured: on a Northbank wall the check takes
+0.38 s with it and 0.40 s without (Northbank's only base quantities are on spaces, which are not edited). Checked: 796
+server tests pass (the same five environment failures), `test_docs_map`; on the running server, the fixture uploaded
+through `/api/models/upload`: a layered wall's thickness refused with its numbers, its height allowed with the
+quantities warning, a beam lengthened past its axis refused, and keeping a refused edit answers 409.

@@ -33,14 +33,47 @@ Northbank has none of what real exports carry, so these paths were never exercis
 | Tier | What | Status |
 |---|---|---|
 | 0a | This face or element only by default; `carry` to take joined parts along | done (Nov 1) |
-| 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | planned |
+| 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | done (Nov 1) |
 | 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | planned |
 | 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | planned |
 | 3 | Editable properties: attributes, psets, type, material, classification, container | planned |
 
+## The consistency check (Tier 0b)
+
+`consistency.py` reads, per element and rule, what a consistent edit keeps (`measure`), and `manual.check` reads it
+before the edit and again in its trial (`compare`). It compares the model with itself, never with an ideal, so a model
+that was already inconsistent never blocks an edit; only what the edit makes worse does. An element the edit made (a
+split's second piece) is compared with the element it came from.
+
+| Rule | Reads | When it changed |
+|---|---|---|
+| `layers` | Σ LayerThickness less the body's extent along the usage's axis (AXIS2 the local y, AXIS3 the local z) | block |
+| `profile` | the body's swept profile less the material profile, size by size (or its class when they differ) | block |
+| `axis` | where the body starts and ends along the `Axis` (`IfcPolyline` or `IfcIndexedPolyCurve`), from its ends | block |
+| `joins` | how far a path join's ATSTART/ATEND end is from the other element's axis, in plan | block, past 5 mm |
+| `type` | a digest of everything under the type's maps | block (unless the edit is to the type) |
+| `quantities` | the body's volume and the `Qto_*BaseQuantities` values | warn, when the volume changed and they did not |
+
+Geometry comes from `ifcopenshell.geom.create_shape` in the element's own placement, built only for elements that carry
+one of these. Northbank carries base quantities only (36 on the architecture model), so it sees the warning and nothing
+else.
+
 ## Test matrix
 
-Filled in as Tier 0b lands: each hand op against each construct, either kept consistent or refused in words.
+`server/tests/test_parametric_edits.py` on `fixtures.build_parametric_fixture` (walls W1, W2; slab SL1; beams BM1, BM2;
+mapped fittings F1, F2). "Refused" is the words of the refusal; Tier 1 turns refusals into consistent edits.
+
+| Edit | Wall (layers, axis, join, quantities) | Slab (layers, quantities) | Beam (profile, axis, quantities) | Mapped fitting |
+|---|---|---|---|---|
+| Push the top / an end / a side | height: kept, quantities warn · length: refused (axis) · thickness: refused (layers) | thickness: refused (layers) · size: kept, quantities warn | length: refused (axis) · section: refused (profile) | refused (from its type) |
+| Move | up: kept · off its join: refused (joins) | kept | kept | kept |
+| Void | kept, quantities warn | | | |
+| Split / remove a section | refused (axis) | kept, quantities warn on both pieces | refused (axis) | refused (from its type) |
+| Clip | | | | refused (from its type) |
+| Delete | kept | | | kept |
+
+Not yet read: the fix agent's own edits (offsets, routes, resizes) go through `plans.apply`, not `manual.check`; on a
+model with these constructs they are not yet checked for consistency.
 
 ## When to update this doc
 

@@ -104,6 +104,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `facets.py` | Geometry | The filters' index: every value the Properties panel shows each drawn element with that a filter can match (file, class, storey, type, material, attributes, property and quantity sets, classifications, groups), value → elements, kept on the scene until an edit; `matching` and `suggest` for chat and MCP ([docs/filters.md](../filters.md)) |
 | `datums.py` | Geometry | Levels, grid axes and each element's storey for the viewer's drawing views and level filter; a sample scene with no grid reads its project's `<prefix>-Grids.ifc` as context ([docs/views.md](../views.md)) |
 | `connections.py` | Geometry | Joints (connected ports, STEP flow parts face to face), element classes, runs, `plan_move` (moves that keep their joints: carry fittings, stretch segments, or are refused) and the connection graph |
+| `consistency.py` | Geometry | Model consistency: what an edit must keep true besides the shape (material layer and profile sets, `Axis`, path joins, a type's maps, base quantities), read per element and rule (`measure`) and compared before and after an edit (`compare`): what the edit made worse blocks or warns; a model already inconsistent never blocks ([docs/editing-parity.md](../editing-parity.md)) |
 | `context_eval.py` | Geometry | Whole-arrangement geometry and connection checks on a scene snapshot (wider fixes) |
 | `context_planner.py` | Workflows | The bounded, revision-pinned wider-fix search, and its accept |
 | `detect.py` | Geometry | ORCA's own clash detection: tests (sides by file, team, class, system, id or a filter), sort and sweep, triangle tree, exact box depth, stable ids (`_assign_ids`: a clash keeps the id first issued for its pair and kind, whatever check finds it, given what the scene `known`), rerun diff against the same check's last run |
@@ -112,7 +113,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `document.py` | Documents | Coordination reports: PDF (combined, per team, per model) and BCF 2.1, team guessing, who acts and reviews |
 | `edits.py` | Geometry | Model edits: offsets with bends, routes, resizes, trims, penetrations; trial and keep transactions; meshes |
 | `escalation.py` | Fix agent | The brief a second try on Muse Wonder reads (first try, neighbourhood, blockers) |
-| `fixtures.py` | Test support | Synthetic IFC models: clash, run, joint, context, detection, route, penetration, resize fixtures |
+| `fixtures.py` | Test support | Synthetic IFC models: clash, run, joint, context, detection, route, penetration, resize, edit and parametric fixtures |
 | `faces.py` | Geometry | The faces of an element's body as a person points at them: a pick (point and normal) resolved to a cap, a rectangle's side, a round face, an I-section's flank or an outline's edge, named in words ("east end", "north face", "top"), with what each allows ([docs/manual-edits.md](../manual-edits.md)) |
 | `hosts.py` | Fix agent | Which hosts may take an opening: hard rules, requirements, Muse's reading by kind, hole limits |
 | `journal.py` | State | The edit log: one `Entry` per kept edit (agent fixes, plans, wider fixes, hand edits), who and which clash, the fix a hand edit follows, undo and redo over each file's transactions ([docs/manual-edits.md](../manual-edits.md)) |
