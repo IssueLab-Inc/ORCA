@@ -2096,6 +2096,40 @@ a.pop-item { color: inherit; }
 .filter-chip:hover { border-color: var(--accent); }
 .app.phone .filter-chip { right: auto; left: 8px; bottom: 76px; max-width: calc(100% - 16px); }
 
+/* The Edit tool (EditTool.tsx): beside the rail while it is on, like Measure. */
+.stage.editing canvas { cursor: crosshair; }
+.edit-panel { position: absolute; left: 64px; top: 104px; z-index: 5; width: 316px; max-width: calc(100% - 80px); max-height: calc(100% - 120px);
+  overflow: auto; display: flex; flex-direction: column; gap: 7px; padding: 8px 10px 10px; background: var(--surface); border-radius: 10px;
+  box-shadow: var(--shadow); font-size: 12.5px; }
+.edit-panel header { display: flex; align-items: center; gap: 6px; user-select: none; }
+.edit-panel header b { font-size: 13px; }
+.edit-panel header .why { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edit-panel header .ibtn { width: 24px; height: 24px; }
+.edit-palette { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; padding: 3px; background: var(--raised); border: 1px solid var(--line-soft); border-radius: 9px; }
+.edit-palette .ibtn { width: 100%; height: 32px; border-radius: 7px; color: var(--ink); }
+.edit-palette .ibtn.on { background: var(--accent); color: #fff; }
+.edit-palette .ibtn:disabled { opacity: .35; }
+.edit-panel .hint { margin: 0; }
+.edit-face { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: 7px; background: #fff6e8; color: #7a4d00; }
+.edit-row-in { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.edit-row-in label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.edit-row-in input { width: 74px; font: inherit; font-family: var(--mono); padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.edit-row-in .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.edit-row-in .seg button { border: 0; background: none; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+.edit-row-in .seg button.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.edit-target { flex-basis: 100%; color: var(--ok); }
+.edit-status { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 7px; background: var(--raised); }
+.edit-status.ok { background: var(--ok-soft); color: var(--ok); } .edit-status.warn { background: var(--warn-soft); color: var(--warn); }
+.edit-status.bad { background: var(--fail-soft); color: var(--fail); }
+.edit-summary { margin: 0; color: var(--ink); }
+.edit-panel .edit-warn { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.edit-actions { display: flex; gap: 6px; align-items: center; }
+.edit-actions .btn.primary, .edit-actions .btn.danger { display: inline-flex; align-items: center; gap: 6px; }
+.edit-actions .btn.danger { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.edit-log summary { cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.edit-log .edits-panel { padding: 6px 0 0; height: auto; max-height: 260px; }
+.app.phone .edit-panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-width: none; max-height: 55%; }
+
 /* The Edits panel (EditPanel.tsx): the edit log, newest first. */
 .edits-panel { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; height: 100%; overflow: auto; }
 .edits-bar { display: flex; align-items: center; gap: 6px; }

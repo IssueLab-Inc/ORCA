@@ -59,8 +59,70 @@ its eight new pieces gone and back, the revision 1 → 2 → 3.
   redo list. The log holds its own transactions and commits them itself. Each file keeps 1,024 transactions
   (`scene.HISTORY_SIZE`; IfcOpenShell's default of 64 would drop old kept edits as trials come and go).
 
+## Faces (`server/sightline/faces.py`)
+
+ORCA edits parameters, not triangles: a pick (a point and a normal on the element's triangles) is resolved to a face of
+the body's one straight extrusion, and pushing that face changes one number in the IFC.
+
+| Face | Where | Push/pull changes | Also |
+|---|---|---|---|
+| `cap:start`, `cap:end` | the extrusion's ends: a beam's or duct's ends, a wall's two big faces, a slab's top and bottom | its depth (`edits.stretch`) | align, clip, void |
+| `side:±x`, `side:±y` | a rectangle profile's sides | its width (`edits.stretch` "side") | align, void |
+| `radial` | a circle profile's round face | its radius (`edits.stretch_radius`) | align by moving |
+| `flank` | any side of an I, U, C, L or T section | nothing: the section is a type | align by moving, void |
+| `edge:k` | one straight edge of an outline: a wall drawn as its elevation (its ends and top), a slab's edges | that edge, the edges either side running on to meet it (`edits.offset_edge`) | align |
+
+Each face is named in words from its world normal and the element's box: "top" and "bottom", else a compass direction and
+"end" (along its longest size), "face" (a plate's or wall's big face) or "side"; repeated names are numbered. Muse can
+say "the east end" (`faces.by_name`). A body that is not one straight extrusion (fittings, terminals, doors, meshes) has no
+faces to edit: it can be moved, and aligned by moving.
+
+Measured on Northbank (1,732 physical elements with a body): 76% are one straight extrusion, so their end faces push and
+pull; 66% have rectangle or circle profiles, so their sides do too; every beam and column is an I-section (ends only);
+the 47 walls are elevation outlines (5, 9 or 13 points) extruded through their thickness, so a wall's thickness is its
+caps and its length and height are outline edges; 24% are fittings, terminals, doors and furniture (move only).
+
+## The edits (`server/sightline/manual.py`)
+
+| Op | What it does | Requirements | ORCA's rules (warnings) |
+|---|---|---|---|
+| `push_pull` | A face out (+) or in (−) by metres. A cap joined to another element by a port is refused ("move the run instead, or split it first"). A wall made thicker takes its openings with it (each grows on that face, drawn through the wall or across it); a wall end pulled in past an opening is refused, naming it | as a resize: "may only be moved whole" refuses it, the largest move applies | structure (a column, beam, slab; a transfer element names what stands on it); a pipe's radius asks the services designer |
+| `align` | One face flush with another (or a gap off it), by stretching it or by moving the element: `t = ((pB − pA)·nB)/(nA·nB) − gap`. Faces more than 1° apart are refused with "clip its end to that face instead". The target is a face of another element, by name or pick, or a bare point and normal; it is meant to be touched, so its clearance is waived | as push/pull or move | as those |
+| `move` | The element and the straight run it is in, by a vector or from one snapped point to another; joints kept (`connections.plan_move`) or refused | as a move | structure |
+| `void` | A rectangular or round opening on a cap, side or flank, centred where it was clicked (on the face's plane), across the face and up it (`edits.face_axes`). Through: rays from just inside each point of its outline find where it comes out (the deepest, refused past 1 m), plus 10 mm proud of each face; or a recess to a given depth. An `IfcOpeningElement` (OPENING or RECESS) voiding the element (`edits.cut_void`, reusing the penetration's void builders) | a cut: only where the group may be edited in any way (`requirements.can_cut`) | ORCA's hard rules for hosts (`hosts.hard_rule`: a transfer element, a column, glazing…) and structure; an outline within 50 mm of the face's edge is "a notch more than a hole" |
+| `cut_by` | Cut an element where another one is, with a gap all round: an opening shaped as the cutter grown by the gap (`edits.cut_by_shape`). Exact for extrusions (a rectangle +2 gaps, a circle +1, an outline offset by `edits._grown`, an I, U or L section as its bounding rectangle, the depth +2 gaps), in the cut element's file and units; any other cutter (a fitting's mesh) is welded and pushed out along its vertex normals, and the warning says the gap is approximate. Refused when the cutter does not reach it | a cut | as a void |
+
+Measured on the fixture: a 400 x 300 mm opening through the wall lands at x 2.8–3.2, z 1.35–1.65 and comes 10 mm out of
+both faces; the wall pushed into the column and then cut round it with a 20 mm gap clears the clash at exactly 20 mm.
+
+Each op is resolved first (`resolve`: which face, how far, in words: "east end of wall 'W1' pushed 500 mm out"), gated by
+the requirements (`gate`), then made in a trial (`edits.trial_files`) and checked (`verify.check` on what it changed and
+made, against everything): what it **clears** (collisions there before and gone), what it hits **new**, and what it hits
+**worse** (2 mm deeper than before, the rule trims use). New or worse collisions are its clashes; shortfalls of clearance
+are counted apart. A refusal is not an error: the check says `blocked` and why.
+
+**Keeping** (`manual.apply`, `POST /edit/apply`) never trusts the page: the edit is checked again on the server, refused
+(409) when the requirements forbid it, the model changed since its check (`key`: a hash of the op, the revision and the
+requirements), or it would make more clashes than the person accepted (`accept_clashes`, "Keep with N clashes"). Then it
+is made for good inside `journal.record` and `edits.kept_files`, the files marked edited, the revision bumped. When the
+edit names a clash (the one on screen) or follows a fix, the clash is measured again over its elements and everything a
+fix made from them (`made_from`), and the entry says whether it is still resolved; a hand edit that resolves the clash
+on screen marks it fixed. Kept with clashes, the page runs the kept checks again, so the new clash joins the list.
+
+Measured on Northbank: a check takes about 1.1 s (a wall end pushed 200 mm into the curtain wall: four transoms and
+panels hit); clash #1's duct made 50 mm deeper reads "Makes 1 clash: girder −350 mm" and keeps only as "Keep with 1
+clash". The answer key still passes 3/3 first try at Rev04's heights after the trial moves moved into `edits.scratch`.
+
 ## On the page
 
+- **The Edit tool** (`web/src/EditTool.tsx`, **P** or the rail's Edit button; measuring and editing take turns): a panel
+  beside the rail with the palette (push/pull, align, move, void, cut by shape, split, remove a section, clip, delete;
+  inside the tool their keys are P, A, T, O, K, B, R, J and D). The face under the pointer is lit faintly; a click chooses
+  it (the server names it: "top of duct segment 'Supply air main L02 600x300' · 0.300 m") and lights it orange with an
+  arrow. Drag the face (5 mm steps, Shift for 1 mm) or type how far: the element stretches live, as one instance matrix
+  (`viewer/edit.ts`, `pushMatrix`), and on release the server checks it and draws what it would really be, green when
+  clear, amber with clashes. Align takes the face to move, then the target (lit green), a gap and stretch-or-move; move
+  takes a vector or two snapped points. Keep, or **Keep with N clashes**; Esc steps back one thing at a time.
 - **The Edits panel** (`web/src/EditPanel.tsx`, a tab in the right side bar beside Clash, Plan and Chat): the log,
   newest first. Each row says who kept it, when, its clashes, "after E1" when it follows a fix, what its check found and
   any warning with its reviewer; a click frames it. Undo, Redo, Undo to here, and the log as CSV. It comes into its bar,

@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
 import { patchModel, removeElements, ROOM, type ElementMesh } from "./patch";
+import { coplanar, pushMatrix, toIfcAxes, toThree } from "./edit";
 import { ViewCube } from "./cube";
 import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
 import { annotate, type Handle } from "./annotate";
@@ -74,7 +75,11 @@ export interface Focus {
 }
 
 /** A picked point on the model: the element and where on it (three.js world coordinates). */
-export interface Pick { globalId: string; point: THREE.Vector3 }
+export interface Pick { globalId: string; point: THREE.Vector3; normal?: THREE.Vector3 }
+/** A face picked for the Edit tool, in IFC axes (metres, Z up): the element, the point and the triangle's normal. */
+export interface FacePick { globalId: string; point: [number, number, number]; normal: [number, number, number] }
+/** What dragging the chosen face does: called with metres along its normal as the pointer moves, then on release. */
+export interface EditDrag { globalId: string; point: number[]; normal: number[]; onMove: (m: number) => void; onEnd: (m: number) => void }
 
 /** One pane of the layout: its view, its element over the canvas, where it sits (stage CSS pixels), and whether a
  * clash may move it. A drawing pane has its DrawingView. */
@@ -120,6 +125,10 @@ export class Viewer {
   private focus: Focus = { a: null, b: null };
   /** Elements in focus are drawn as their own meshes over shared GPU buffers, so any mode can keep them solid. */
   private focusLayer = new THREE.Group();
+  private editLayer = new THREE.Group();   // the Edit tool's face highlight and arrow (layer 1: over everything)
+  private editDrag: EditDrag | null = null;
+  private editDragging: { id: number; x: number; y: number; dir: THREE.Vector2; ppm: number; last: number } | null = null;
+  private editArrow: THREE.ArrowHelper | null = null;
   private focusMeshes = new Map<string, THREE.Mesh>();
   private focusGeometry = new Map<string, THREE.BufferGeometry>();
   private focusMaterials = { a: this.focusMaterial(RED), b: this.focusMaterial(GREEN), ab: this.focusMaterial(PURPLE) };
@@ -220,7 +229,7 @@ export class Viewer {
     this.controls.addEventListener("start", () => { this.flight = null; this.onUserCamera?.(); });
     // Before the controls see the press: a section box grip takes it, else orbiting turns about what is under it.
     this.pane3d.addEventListener("pointerdown", (e) => this.press(e), { capture: true });
-    this.pane3d.addEventListener("pointermove", (e) => { if (this.spin) this.spinMove(e); else this.dragGrip(e); });
+    this.pane3d.addEventListener("pointermove", (e) => { if (this.editDragging) this.dragEdit(e); else if (this.spin) this.spinMove(e); else this.dragGrip(e); });
     this.pane3d.addEventListener("pointerup", (e) => this.release(e));
     this.pane3d.addEventListener("pointercancel", (e) => this.release(e));
     this.pane3d.addEventListener("click", (e) => { if (this.swallowClick) { this.swallowClick = false; e.stopPropagation(); } }, { capture: true });
@@ -233,7 +242,7 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 60, 20);
     this.scene.add(sun);
-    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.selectionLayer, this.marker, this.grips);
+    this.scene.add(this.focusLayer, this.overlay, this.hitLayer, this.linkLayer, this.selectionLayer, this.marker, this.grips, this.editLayer);
     for (const m of [this.solid, this.ghost, this.glass, this.hitMaterial, this.consistent, this.xrayAll, this.selectionMaterial]) m.clippingPlanes = this.clipping;
     // Shaded with edges and Hidden line draw through the drawings' materials: the section box cuts them too (a drawing
     // view empties `clipping` while it draws, so it never does there).
@@ -1491,6 +1500,7 @@ export class Viewer {
     if (this.cube.el.contains(e.target as Node)) return;   // the view cube handles its own
     this.onUserCamera?.();
     if (e.button !== 0 || !this.models.length) return;
+    if (this.editDrag && this.startEditDrag(e)) return;
     const grip = this.gripAt(e);
     if (grip) {
       e.stopImmediatePropagation();
@@ -1519,6 +1529,15 @@ export class Viewer {
   }
 
   private release(e: PointerEvent) {
+    if (this.editDragging && e.pointerId === this.editDragging.id) {
+      const m = this.editDragging.last;
+      this.editDragging = null;
+      this.controls.enabled = true;
+      this.swallowClick = true;
+      if (this.pane3d.hasPointerCapture(e.pointerId)) this.pane3d.releasePointerCapture(e.pointerId);
+      this.editDrag?.onEnd(m);
+      return;
+    }
     if (this.spin && e.pointerId === this.spin.id) { this.spin = null; this.controls.enableRotate = true; }
     if (!this.grip) return;
     this.grip = null;
@@ -2280,6 +2299,107 @@ export class Viewer {
     this.markerLabel.textContent = label;
   }
 
+  // ---------------------------------------------------------------- the Edit tool (docs/manual-edits.md)
+
+  /** The face under the pointer: the element, the point and its triangle's normal, in IFC axes. */
+  pickFace(ev: MouseEvent): FacePick | null {
+    // As a click selects: through see-through context to the clash pair first, else whatever is under the pointer.
+    const hit = this.pickAt(ev) ?? this.pickAt(ev, { ghosts: true });
+    if (!hit?.normal) return null;
+    return { globalId: hit.globalId, point: toIfcAxes(hit.point), normal: toIfcAxes(hit.normal.clone().normalize()) };
+  }
+
+  /** Light faces (each one's coplanar triangles, over everything): the face to edit with an arrow to drag, a target
+   * in green, the one under the pointer faintly. An empty list clears them. Points and normals in IFC axes. */
+  showEditFaces(list: { globalId: string; point: number[]; normal: number[]; tone?: "hover" | "chosen" | "target"; arrow?: boolean }[]) {
+    for (const c of [...this.editLayer.children]) { this.editLayer.remove(c); if (c instanceof THREE.Mesh) c.geometry.dispose(); }
+    this.editArrow = null;
+    for (const face of list) {
+      const f = this.find(face.globalId);
+      const n = toThree(face.normal).normalize(), p = toThree(face.point);
+      if (f) {
+        const g = this.geometryOf(f), range = g.drawRange;
+        const tris = coplanar(g.getAttribute("position") as THREE.BufferAttribute, g.getIndex()!, range.start, range.count, n, p);
+        if (tris.length) {
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.BufferAttribute(tris, 3));
+          const colour = face.tone === "hover" ? "#7fb2e5" : face.tone === "target" ? "#1f9d3a" : "#f5a623";
+          const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: face.tone === "hover" ? 0.35 : 0.55,
+            depthTest: false, side: THREE.DoubleSide }));
+          mesh.matrixAutoUpdate = false;
+          mesh.matrix.copy(this.matrixOf(f.el));
+          mesh.renderOrder = 11; mesh.layers.set(1);
+          this.editLayer.add(mesh);
+        }
+      }
+      if (face.arrow) {
+        const arrow = new THREE.ArrowHelper(n, p, 1, 0xf5a623, 0.32, 0.18);
+        for (const m of [arrow.line.material, arrow.cone.material] as THREE.Material[]) { m.depthTest = false; m.transparent = true; }
+        arrow.line.renderOrder = arrow.cone.renderOrder = 12;
+        arrow.traverse((o) => o.layers.set(1));
+        this.editArrow = arrow;
+        this.editLayer.add(arrow);
+      }
+    }
+    this.version++;
+  }
+
+  /** The live push/pull preview: `globalId` stretched along the face's normal by `byM` metres, its far side still;
+   * 0 or null puts it back. Only a matrix: the server's check draws the real shape after. */
+  pushPreview(globalId: string, point: number[], normal: number[], byM: number | null) {
+    const f = this.find(globalId);
+    if (!f) return;
+    this.moved.delete(globalId);
+    if (byM) {
+      const box = this.instanceBox(f.el, new THREE.Box3());
+      const m = pushMatrix(box, toThree(point), toThree(normal), byM);
+      if (m) this.moved.set(globalId, m);
+    }
+    f.el.mesh.setMatrixAt(f.el.instanceId, this.matrixOf(f.el));
+    if (this.editArrow) {
+      const n = toThree(normal).normalize();
+      this.editArrow.position.copy(toThree(point)).addScaledVector(n, byM ?? 0);
+    }
+    this.drawSelection();
+    this.version++;
+  }
+
+  /** Drag the chosen face: a press on it (or on its arrow) pushes or pulls it along its normal; null stops. */
+  setEditDrag(d: EditDrag | null) { this.editDrag = d; if (!d) this.editDragging = null; }
+
+  private startEditDrag(e: PointerEvent): boolean {
+    const d = this.editDrag!;
+    const r = this.pane3d.getBoundingClientRect(), cam = this.activeCamera();
+    const p = toThree(d.point), n = toThree(d.normal).normalize();
+    const toPx = (v: THREE.Vector3) => { const q = v.clone().project(cam); return new THREE.Vector2((q.x + 1) / 2 * r.width, (1 - q.y) / 2 * r.height); };
+    const at = new THREE.Vector2(e.clientX - r.left, e.clientY - r.top);
+    const onArrow = this.editArrow && (() => {
+      const tip = this.editArrow!.position.clone().addScaledVector(n, this.editArrow!.scale.x);
+      const a = toPx(this.editArrow!.position), b = toPx(tip), ab = b.clone().sub(a);
+      const t = Math.max(0, Math.min(1, at.clone().sub(a).dot(ab) / Math.max(ab.lengthSq(), 1e-9)));
+      return a.clone().addScaledVector(ab, t).distanceTo(at) <= 10;
+    })();
+    const hit = onArrow ? null : this.pickAt(e, { ghosts: true });
+    if (!onArrow && !(hit?.globalId === d.globalId && hit.normal && hit.normal.clone().normalize().dot(n) > 0.99)) return false;
+    const q = toPx(p.clone().add(n)).sub(toPx(p));
+    const ppm = q.length();
+    if (ppm < 1e-3) return false;   // the face looks straight at the camera: type the distance instead
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    this.pane3d.setPointerCapture(e.pointerId);
+    this.controls.enabled = false;
+    this.editDragging = { id: e.pointerId, x: e.clientX, y: e.clientY, dir: q.normalize(), ppm, last: 0 };
+    return true;
+  }
+
+  private dragEdit(e: PointerEvent) {
+    const g = this.editDragging!;
+    const raw = new THREE.Vector2(e.clientX - g.x, e.clientY - g.y).dot(g.dir) / g.ppm;
+    const step = e.shiftKey ? 0.001 : 0.005;
+    g.last = Math.round(raw / step) * step;
+    this.editDrag?.onMove(g.last);
+  }
+
   // ---------------------------------------------------------------- picking and measuring
 
   /** The element (and point on it) under the pointer, including elements in focus. */
@@ -2297,14 +2417,15 @@ export class Viewer {
     let behindGlass: Pick | null = null;
     for (const hit of this.raycaster.intersectObjects(targets, false)) {
       if (this.clipping.length && !this.sectionBox?.containsPoint(hit.point)) continue;
-      if (hit.object.userData.globalId) return { globalId: hit.object.userData.globalId, point: hit.point };
+      const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : undefined;
+      if (hit.object.userData.globalId) return { globalId: hit.object.userData.globalId, point: hit.point, normal };
       if (ghostly) continue;  // see-through context is not pickable: click through it to the focus
       const solid = this.models.find((m) => m.mesh === hit.object);
       const glass = this.models.find((m) => m.glass === hit.object);
       if (hit.batchId === undefined) continue;
       const el = solid ? solid.byInstance.get(hit.batchId) : glass?.glassByInstance.get(hit.batchId);
-      if (el && solid) return { globalId: el.globalId, point: hit.point };
-      if (el) behindGlass ??= { globalId: el.globalId, point: hit.point };
+      if (el && solid) return { globalId: el.globalId, point: hit.point, normal };
+      if (el) behindGlass ??= { globalId: el.globalId, point: hit.point, normal };
     }
     return behindGlass;
   }
@@ -2393,6 +2514,13 @@ export class Viewer {
 
   /** What a measuring pointer lands on: in a drawing, on its plane; in 3D, on the model. Snapped to an end, a midpoint
    * or an edge when snapping is on and one is near, else the point under the pointer. */
+  /** A point to move from or to: what measuring snaps to under the pointer in the 3D view (an end, a midpoint, an
+   * edge, else the surface), in IFC axes. */
+  snapPoint(ev: MouseEvent): { point: [number, number, number]; kind: SnapKind } | null {
+    const hit = this.snap3d(ev);
+    return hit ? { point: toIfcAxes(hit.point), kind: hit.kind } : null;
+  }
+
   private snapAt(ev: MouseEvent): { point: THREE.Vector3; kind: SnapKind; pane: number | null } | null {
     const pane = this.panes.length > 1 ? this.paneAt(ev.clientX, ev.clientY) : null;
     return pane?.view ? this.snapDrawing(pane, ev) : this.snap3d(ev);
@@ -2567,6 +2695,7 @@ export class Viewer {
       this.marker.children[1].lookAt(cam.position);
     }
     for (const g of this.grips.children) g.scale.setScalar(Math.max(perPx(g.position) * 6, 1e-5));
+    if (this.editArrow?.visible) this.editArrow.scale.setScalar(Math.max(perPx(this.editArrow.position) * 70, 1e-5));
     const r = this.renderer;
     // Nothing open (the start page, models loading): one empty stage, not the layout's panes as patches of sky and
     // paper behind the load card. The layout stays chosen; its panes come back with the models.

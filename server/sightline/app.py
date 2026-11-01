@@ -32,7 +32,8 @@ from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
 from . import (agents, built, chat, checks, context_planner, demos, detect, document, domains, edits, escalation,
-               journal, mcp_server, meta_client, owner, plans, requirements, settings, spend, step, titles, triage, voice_live)
+               faces, journal, manual, mcp_server, meta_client, owner, plans, requirements, settings, spend, step, titles,
+               triage, voice_live)
 from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
@@ -940,6 +941,65 @@ def fix_apply(scene_id: str, body: FixApply):
     if not isinstance(o.get("moved"), list) or not o["moved"]:
         raise HTTPException(400, "The fix names no element.")
     return _one(_keep(scene_id, [o], "this fix", [body.clash_id]))
+
+
+class FacePick(BaseModel):
+    element: str
+    point: list[float]
+    normal: list[float]
+
+
+class EditBody(BaseModel):
+    op: dict
+    key: str | None = None             # the check's: refused (409) when the model changed since
+    accept_clashes: int = 0            # how many new clashes the person accepted ("Keep with N clashes")
+    clash_id: str | None = None        # the clash on screen when it was made: the log ties the edit to it
+    pair: list[str] | None = None      # that clash's two elements
+
+
+@app.post("/api/scenes/{scene_id}/edit/face")
+def edit_face(scene_id: str, body: FacePick):
+    """The face of an element under a pick (faces.resolve): its kind, its name in words, what it allows."""
+    s = ws.scene(_scene(scene_id))
+    try:
+        with ws.lock:
+            return {**faces.resolve(s, body.element, body.point, body.normal).to_dict(), "label": manual.label(s, body.element)}
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'\""))
+
+
+@app.get("/api/scenes/{scene_id}/elements/{global_id}/faces")
+def element_faces(scene_id: str, global_id: str):
+    """Every face of an element there is to edit, named (faces.faces): what Muse and a person can point at."""
+    s = ws.scene(_scene(scene_id))
+    try:
+        with ws.lock:
+            return {"element": global_id, "faces": [f.to_dict() for f in faces.faces(s, global_id)]}
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'\""))
+
+
+@app.post("/api/scenes/{scene_id}/edit/check")
+def edit_check(scene_id: str, body: EditBody):
+    """Try a hand edit without keeping it (manual.check): what it clears, what it would hit, the nearest gap, its
+    warnings, and the preview meshes. A refusal comes back as `blocked` with why, not as an error."""
+    return manual.check(ws, _scene(scene_id), body.op)
+
+
+@app.post("/api/scenes/{scene_id}/edit/apply")
+def edit_apply(scene_id: str, body: EditBody):
+    """Keep a hand edit (manual.apply): checked again here first; 409 when the requirements refuse it, the model
+    changed since its check, or it would make more clashes than `accept_clashes`. Logged, then the patch."""
+    try:
+        return _with_patch(_scene(scene_id), lambda: manual.apply(ws, scene_id, body.op, key=body.key,
+                                                                  accept_clashes=body.accept_clashes,
+                                                                  clash_id=body.clash_id, pair=body.pair))
+    except manual.NotKept as e:
+        raise HTTPException(409, str(e))
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot make this edit: {e}")
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, f"Not an edit ORCA can make: {e}")
 
 
 class EditStep(BaseModel):

@@ -34,7 +34,8 @@ export async function viewerModule(loader = "export const loadIfc=()=>null;") {
     "./drawing": await compiled("../src/viewer/drawing.ts", { three, "./views": views }),
     "./annotate": await compiled("../src/viewer/annotate.ts", { three, "./views": views }),
     "./measure": await compiled("../src/viewer/measure.ts", { three }),
-    "./patch": await compiled("../src/viewer/patch.ts", { three }) }));
+    "./patch": await compiled("../src/viewer/patch.ts", { three }),
+    "./edit": await compiled("../src/viewer/edit.ts", { three }) }));
 }
 export function find(node, predicate) {
   if (!node || typeof node !== "object") return;
@@ -99,7 +100,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   globalThis.setInterval = () => Symbol(); globalThis.clearInterval = () => {};
   const react = url(`const h=globalThis.${key}.hooks; export const useState=(...a)=>h.useState(...a),useRef=(...a)=>h.useRef(...a),useMemo=(...a)=>h.useMemo(...a),useEffect=(...a)=>h.useEffect(...a);`);
   const apiModule = url(`export const api=globalThis.${key}.api; export class ApiError extends Error { constructor(message,status){super(message);this.status=status;} } export const setRequirements=()=>{}; export const setGoneHandler=(fn)=>{globalThis.${key}.gone=fn;};`);
-  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "CheckPicker", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "DockHost", "SlotHost", "MeasurePanel", "PropertySets", "FiltersPanel", "blankRule", "ElementCard", "Wordmark", "AppIcon", "Notch", "LoadCard", "KeptToast", "OrcaMark", "EditPanel"];
+  const names = ["Activity", "editText", "statusLine", "ChatPanel", "ReportDialog", "ReviewBlock", "OwnerSettingsMenu", "Tour", "About", "AboutOrca", "AgentDialog", "timeLeft", "ClashPanel", "Lightbox", "PlanPanel", "Insights", "TriageCard", "ReportList", "ViewerToolbar", "Popover", "Tooltips", "DetectSetupCard", "DetectSummary", "CheckPicker", "RequirementsDialog", "ProjectStart", "addByDesign", "hasByDesign", "load", "save", "shortLabel", "useLayout", "useCoarse", "follow", "SheetBar", "MenuSheet", "addPenetration", "hasPenetration", "BuiltView", "builtStep", "cutText", "projectName", "ViewPanes", "DockHost", "SlotHost", "MeasurePanel", "PropertySets", "FiltersPanel", "blankRule", "ElementCard", "Wordmark", "AppIcon", "Notch", "LoadCard", "KeptToast", "OrcaMark", "EditPanel", "EditTool", "EditIcon"];
   // The page's layout is none (not desktop, phone or tablet) unless a test asks for one: appHost({ layout }).
   const mocks = url(`${names.filter((name) => name !== "useLayout").map((name) => `export function ${name}(){return null;}`).join("\n")}
     export function useLayout(){return globalThis.__hostLayout ?? null;}
@@ -123,7 +124,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": apiModule, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds, "./uploads": uploads, "./links": links,
     "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./names": fileNames, "./aiNames": aiNames, "./filters": filtersModule, "./checks": await compiled("../src/checks.ts", { "./filters": filtersModule }), "./runlog": await compiled("../src/runlog.ts"), "./viewer/views": views };
-  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel", "./Properties", "./FiltersPanel", "./ElementCard", "./Brand", "./EditPanel"]) dependencies[name] = mocks;
+  for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel", "./Properties", "./FiltersPanel", "./ElementCard", "./Brand", "./EditPanel", "./EditTool", "./editIcons"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   function render() {
     let passes = 0;

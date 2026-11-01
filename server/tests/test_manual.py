@@ -1,0 +1,253 @@
+"""Hand edits (manual.py, faces.py): faces named as people say them, push/pull, align and move, checked before they
+are kept, refused by the requirements, warned by ORCA's own rules, logged, and undone."""
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+
+from sightline import app as app_module
+from sightline import faces, manual, requirements
+from sightline.fixtures import build_edit_fixture
+from sightline.service import Workspace
+
+
+@pytest.fixture
+def ws(tmp_path):
+    build_edit_fixture(tmp_path / "edit.ifc")
+    return Workspace(samples=tmp_path)
+
+
+@pytest.fixture
+def scene(ws):
+    sid = ws.open(["edit.ifc"])
+    s = ws.scene(sid)
+    ids = {e.Name: e.GlobalId for e in s.models[0].by_type("IfcElement") if e.Name}
+    return ws, sid, s, ids
+
+
+@pytest.fixture()
+def using():
+    tokens = []
+    yield lambda doc: tokens.append(requirements.enter(requirements.register(doc)))
+    for t in reversed(tokens):
+        requirements.leave(t)
+
+
+def names(s, gid):
+    return {f.id: f.name for f in faces.faces(s, gid)}
+
+
+def test_faces_are_named_as_people_say_them_and_say_what_they_allow(scene):
+    ws, sid, s, g = scene
+    assert names(s, g["W1"]) == {"cap:start": "north face", "cap:end": "south face", "edge:0": "bottom",
+                                 "edge:1": "east end", "edge:2": "top", "edge:3": "west end"}
+    assert names(s, g["C1"])["side:-x"] == "west side" and names(s, g["C1"])["cap:end"] == "top"
+    assert names(s, g["B1"]) == {"cap:start": "west end", "cap:end": "east end", "flank": "sides"}
+    assert names(s, g["P1"])["radial"] == "round side"
+    wall = {f.id: f for f in faces.faces(s, g["W1"])}
+    assert wall["cap:start"].size_m == pytest.approx(0.2) and "void" in wall["cap:start"].allows
+    assert wall["edge:1"].allows == ["push_pull", "align"]
+    beam = {f.id: f for f in faces.faces(s, g["B1"])}
+    assert "push_pull" not in beam["flank"].allows
+    # A pick is resolved to its face; Muse can say the name instead
+    f = faces.resolve(s, g["W1"], [4.0, -0.1, 1.5], [1, 0, 0])
+    assert (f.id, f.name) == ("edge:1", "east end")
+    assert faces.resolve(s, g["C1"], [5.0, -0.1, 1.0], [-1, 0, 0]).id == "side:-x"
+    assert faces.by_name(s, g["W1"], "the east end").id == "edge:1"
+    with pytest.raises(KeyError):
+        faces.by_name(s, g["W1"], "roof")
+
+
+def test_a_wall_end_pushed_out_is_checked_kept_logged_and_undone(scene):
+    ws, sid, s, g = scene
+    op = {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 0.5}
+    r = manual.check(ws, sid, op)
+    assert r["passed"] and r["clashes"] == 0 and r["blocked"] is None
+    assert "east end of wall 'W1' pushed 500 mm out" in r["summary"] and r["preview"]
+    assert s.bounds()[g["W1"]][1][0] == pytest.approx(4.0)   # a check keeps nothing
+    kept = manual.apply(ws, sid, op, key=r["key"])
+    assert s.bounds()[g["W1"]][1][0] == pytest.approx(4.5)
+    e = kept["entry"]
+    assert e["source"] == "you" and e["kind"] == "push_pull" and e["elements"] == [g["W1"]]
+    assert e["check"]["verified"] is False and e["check"]["accepted_clashes"] == 0 and s._edited == {0}
+    ws.undo_edit(sid)
+    assert s.bounds()[g["W1"]][1][0] == pytest.approx(4.0)
+
+
+def test_an_edit_that_makes_a_clash_is_kept_only_when_the_person_accepts_it(scene):
+    ws, sid, s, g = scene
+    op = {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 1.2}
+    r = manual.check(ws, sid, op)
+    assert not r["passed"] and r["clashes"] == 1 and r["new"][0]["other"] == g["C1"] and r["new"][0]["name"] == "column 'C1'"
+    with pytest.raises(manual.NotKept, match="keep it with 1 clash"):
+        manual.apply(ws, sid, op)
+    kept = manual.apply(ws, sid, op, accept_clashes=1)
+    assert kept["entry"]["check"]["accepted_clashes"] == 1 and kept["entry"]["check"]["new"][0]["other"] == g["C1"]
+
+
+def test_a_stale_check_is_refused(scene):
+    ws, sid, s, g = scene
+    op = {"op": "push_pull", "element": g["W1"], "face": "top", "by_m": 0.1}
+    r = manual.check(ws, sid, op)
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["P1"], "face": "east end", "by_m": 0.1})
+    with pytest.raises(manual.NotKept, match="changed since"):
+        manual.apply(ws, sid, op, key=r["key"])
+
+
+def test_a_wall_end_aligns_to_a_column_face_with_a_gap(scene):
+    ws, sid, s, g = scene
+    op = {"op": "align", "element": g["W1"], "face": "east end", "to": {"element": g["C1"], "face": "west side"}, "gap_m": 0.025}
+    r = manual.check(ws, sid, op)
+    assert r["passed"] and r["op"]["by_m"] == pytest.approx(0.975) and "25 mm off the west side of column 'C1'" in r["summary"]
+    manual.apply(ws, sid, op)
+    assert s.bounds()[g["W1"]][1][0] == pytest.approx(4.975)
+    flush = manual.check(ws, sid, {**op, "gap_m": 0.0})
+    assert flush["passed"], flush.get("new")   # flush with its target: touching it is the point
+    moved = manual.check(ws, sid, {**op, "gap_m": 0.0, "how": "move"})
+    assert moved["op"]["delta_m"] == pytest.approx([0.025, 0.0, 0.0]) and "moved 25 mm" in moved["summary"]
+
+
+def test_faces_that_are_not_parallel_say_to_clip_instead(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "align", "element": g["W1"], "face": "east end",
+                               "to": {"point": [5, 0, 0], "normal": [-0.7071, 0, 0.7071]}})
+    assert "not parallel" in r["blocked"] and "clip" in r["blocked"]
+
+
+def test_a_wall_end_cannot_be_pulled_through_its_window(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "west end", "by_m": -1.5})
+    assert "opening" in r["blocked"]
+    ok = manual.check(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "west end", "by_m": -0.5})
+    assert ok["passed"], ok
+
+
+def test_a_thicker_wall_keeps_its_window_cut_through(scene):
+    ws, sid, s, g = scene
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "north face", "by_m": 0.3})
+    wall = s.entity(g["W1"])
+    assert s.bounds()[g["W1"]][1][1] == pytest.approx(0.3)
+    opening = wall.HasOpenings[0].RelatedOpeningElement
+    v = manual._world_verts(opening)
+    assert v[:, 1].max() >= 0.3 + 0.09   # still proud of the new face
+    assert v[:, 1].min() <= -0.2
+
+
+def test_a_pipe_gets_bigger_and_its_designer_is_asked(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["P1"], "face": "round side", "by_m": 0.025})
+    assert r["passed"] and "0.100 → 0.150 m across" in r["summary"]
+    assert any(w["review"] == "services" for w in r["warnings"])
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["P1"], "face": "radial", "by_m": 0.025})
+    box = s.bounds()[g["P1"]]
+    assert box[1][1] - box[0][1] == pytest.approx(0.15, abs=0.002)
+
+
+def test_a_transfer_beam_trimmed_warns_for_structure_but_is_not_refused(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "east end", "by_m": -0.2})
+    assert r["passed"] and r["warnings"][0]["rule"] == "transfer" and "C2" in r["warnings"][0]["text"]
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "east end", "by_m": -0.2})
+    assert kept["entry"]["warnings"][0]["review"] == "structure"
+    assert "an I, U or L" in manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "sides", "by_m": 0.1})["blocked"]
+
+
+def test_a_move_takes_the_element_and_is_logged(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "move", "element": g["C1"], "from": [5, 0, 0], "to": [5.5, 0, 0]})
+    assert r["passed"] and r["op"]["delta_m"] == [0.5, 0.0, 0.0] and "moved east 500 mm" in r["summary"]
+    manual.apply(ws, sid, r["op"])
+    assert s.bounds()[g["C1"]][0][0] == pytest.approx(5.5)
+
+
+def test_the_requirements_bind_a_hand_edit(scene, using):
+    ws, sid, s, g = scene
+    doc = requirements.default_doc(s)
+    group = requirements.Matcher(s, doc).group_of(g["W1"])
+    doc.who_moves = [requirements.Mover(group=m.group, edits="move" if m.group == group.id else m.edits)
+                     for m in doc.who_moves]
+    using(doc)
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 0.1})
+    assert r["blocked"].startswith("blocked by requirements") and "moved whole" in r["blocked"]
+    with pytest.raises(manual.NotKept):
+        manual.apply(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 0.1})
+
+
+def test_a_hand_edit_on_a_clash_says_whether_it_resolved_it(scene):
+    ws, sid, s, g = scene
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 1.2}, accept_clashes=1)
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": -0.3},
+                        clash_id="c7", pair=[g["W1"], g["C1"]])
+    e = kept["entry"]
+    assert e["clashes"] == [{"id": "c7", "pair": [g["W1"], g["C1"]]}] and e["follows"] == ["E1"]
+    assert e["status"]["resolved"] is True and e["status"]["clash"] == "c7"
+
+
+def test_the_routes(scene, monkeypatch):
+    ws, sid, s, g = scene
+    monkeypatch.setattr(app_module, "ws", ws)
+    c = TestClient(app_module.app)
+    f = c.post(f"/api/scenes/{sid}/edit/face", json={"element": g["W1"], "point": [4, -0.1, 1], "normal": [1, 0, 0]}).json()
+    assert f["id"] == "edge:1" and f["name"] == "east end"
+    assert len(c.get(f"/api/scenes/{sid}/elements/{g['C1']}/faces").json()["faces"]) == 6
+    op = {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 1.2}
+    chk = c.post(f"/api/scenes/{sid}/edit/check", json={"op": op}).json()
+    assert chk["clashes"] == 1
+    r = c.post(f"/api/scenes/{sid}/edit/apply", json={"op": op, "key": chk["key"]})
+    assert r.status_code == 409 and "1 clash" in r.json()["detail"]
+    kept = c.post(f"/api/scenes/{sid}/edit/apply", json={"op": op, "key": chk["key"], "accept_clashes": 1}).json()
+    assert kept["entry"]["id"] == "E1" and kept["revision"] == 1 and [m["global_id"] for m in kept["meshes"]] == [g["W1"]]
+    assert c.post(f"/api/scenes/{sid}/edit/apply", json={"op": {"op": "fly", "element": g["W1"]}}).status_code == 409
+    assert c.post(f"/api/scenes/{sid}/edit/check", json={"op": {"op": "fly", "element": g["W1"]}}).json()["blocked"]
+    assert c.post(f"/api/scenes/{sid}/edits/undo", json={}).json()["revision"] == 2
+    assert np.allclose(s.bounds()[g["W1"]][1], [4.0, 0.0, 3.0])
+
+
+def test_a_void_goes_through_the_wall_where_it_is_placed_and_is_undone(scene):
+    ws, sid, s, g = scene
+    op = {"op": "void", "element": g["W1"], "face": "north face", "at": [3.0, 0.0, 1.5], "shape": "rect", "width_m": 0.4, "height_m": 0.3}
+    r = manual.check(ws, sid, op)
+    assert r["passed"] and r["summary"] == "400 x 300 mm opening cut in the north face of wall 'W1'"
+    kept = manual.apply(ws, sid, r["op"])
+    wall = s.entity(g["W1"])
+    assert len(wall.HasOpenings) == 2 and kept["created"] and kept["entry"]["created"] == kept["created"]
+    v = manual._world_verts(s.entity(kept["created"][0]))
+    assert v[:, 0].min() == pytest.approx(2.8) and v[:, 0].max() == pytest.approx(3.2)
+    assert v[:, 2].min() == pytest.approx(1.35) and v[:, 2].max() == pytest.approx(1.65)
+    assert v[:, 1].max() >= 0.009 and v[:, 1].min() <= -0.209   # through, and proud of both faces
+    ws.undo_edit(sid)
+    assert len(s.entity(g["W1"]).HasOpenings) == 1
+
+
+def test_a_round_void_in_a_slab_a_recess_and_the_rules_that_warn(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "void", "element": g["S1"], "face": "top", "at": [1.5, 5.5, 3.2], "diameter_m": 0.15})
+    assert r["passed"] and "Ø150 mm opening" in r["summary"] and r["warnings"][0]["review"] == "structure"
+    recess = manual.check(ws, sid, {"op": "void", "element": g["S1"], "face": "top", "at": [1.5, 5.5, 3.2], "diameter_m": 0.15, "depth_m": 0.05})
+    assert "50 mm recess" in recess["summary"]
+    web = manual.check(ws, sid, {"op": "void", "element": g["B1"], "face": {"point": [1.0, 2.6, 2.7], "normal": [0, 1, 0]}, "diameter_m": 0.1})
+    rules = {w["rule"] for w in web["warnings"]}
+    assert web["passed"] and "hard_rule" in rules   # a transfer beam: ORCA would never cut it, a person may, for review
+    edge = manual.check(ws, sid, {"op": "void", "element": g["W1"], "face": "north face", "at": [3.95, 0.0, 1.5], "diameter_m": 0.06})
+    assert any(w["rule"] == "edge" for w in edge["warnings"])
+    assert "does not take an opening" in manual.check(ws, sid, {"op": "void", "element": g["W1"], "face": "east end", "diameter_m": 0.1})["blocked"]
+
+
+def test_cut_by_shape_leaves_the_gap_round_the_cutter(scene):
+    ws, sid, s, g = scene
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "east end", "by_m": 1.2}, accept_clashes=1)
+    r = manual.check(ws, sid, {"op": "cut_by", "element": g["W1"], "cutter": g["C1"], "gap_m": 0.02})
+    assert r["passed"] and r["clashes"] == 0 and r["cleared"][0]["other"] == g["C1"]
+    assert r["min_clearance_m"] == pytest.approx(0.02, abs=1e-6) and "cut round column 'C1' with a 20 mm gap" in r["summary"]
+    kept = manual.apply(ws, sid, r["op"])
+    assert kept["entry"]["kind"] == "cut_by" and len(s.entity(g["W1"]).HasOpenings) == 2
+    assert "does not reach it" in manual.check(ws, sid, {"op": "cut_by", "element": g["P1"], "cutter": g["S1"]})["blocked"]
+
+
+def test_a_cut_needs_the_requirements_to_allow_any_edit(scene, using):
+    ws, sid, s, g = scene
+    doc = requirements.default_doc(s)
+    group = requirements.Matcher(s, doc).group_of(g["S1"])
+    doc.who_moves = [requirements.Mover(group=m.group, edits="move" if m.group == group.id else m.edits) for m in doc.who_moves]
+    using(doc)
+    r = manual.check(ws, sid, {"op": "void", "element": g["S1"], "face": "top", "at": [1.5, 5.5, 3.2], "diameter_m": 0.15})
+    assert r["blocked"] and "may not be cut" in r["blocked"]

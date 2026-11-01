@@ -747,3 +747,68 @@ def build_seat_fixture(path: Path, millimetres: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path
+
+
+def build_edit_fixture(path: Path) -> Path:
+    """Elements for hand edits (manual.py), drawn the way Northbank draws them, in metres:
+
+    - W1, a wall drawn as its elevation (a 4 x 3 m outline) extruded 0.2 m through its thickness, with a 1 x 1 m window
+      opening (x 1-2, z 1-2); its east end at x = 4.
+    - C1, a column whose west face is at x = 5 (the wall's end aligns to it).
+    - S1, a slab drawn as its plan outline (x 0-3, y 4-7) and extruded 0.2 m up from z = 3.
+    - B1, an I-section beam along x at y = 2.5 (z 2.5-2.9), with C2, a column standing on it (a transfer element).
+    - P1, a round pipe (radius 50 mm) along x at y = -1, z = 1.5, from x = 0 to 4.
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA edit fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model", context_identifier="Body",
+                                target_view="MODEL_VIEW", parent=ctx)
+    site = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcSite", name="Site")
+    building = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuilding", name="Building")
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 01")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[site])
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=site, products=[building])
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=building, products=[storey])
+
+    def place(e, origin):
+        m = np.eye(4)
+        m[:3, 3] = origin
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e, matrix=m, is_si=True)
+
+    def element(cls, name, profile, depth, origin, axis=(0.0, 0.0, 1.0), ref=(1.0, 0.0, 0.0)):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        pos = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint((0.0, 0.0, 0.0)),
+                                              model.createIfcDirection(axis), model.createIfcDirection(ref))
+        solid = model.createIfcExtrudedAreaSolid(profile, pos, model.createIfcDirection((0.0, 0.0, 1.0)), float(depth))
+        rep = model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])
+        ifcopenshell.api.run("geometry.assign_representation", model, product=e, representation=rep)
+        place(e, origin)
+        return e
+
+    def outline(points):
+        cps = [model.createIfcCartesianPoint((float(x), float(y))) for x, y in points]
+        return model.createIfcArbitraryClosedProfileDef("AREA", None, model.createIfcPolyline(cps + [cps[0]]))
+
+    # The wall: its elevation outline in the solid's XY (x along the wall, y up), extruded 0.2 m towards -y.
+    wall = element("IfcWall", "W1", outline([(0, 0), (4, 0), (4, 3), (0, 3)]), 0.2, (0.0, 0.0, 0.0),
+                   axis=(0.0, -1.0, 0.0), ref=(1.0, 0.0, 0.0))
+    opening = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcOpeningElement", name="Window opening")
+    _box(model, body, opening, (1.0, 0.4, 1.0), (1.0, -0.3, 1.0))
+    ifcopenshell.api.run("feature.add_feature", model, feature=opening, element=wall)
+    column = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcColumn", name="C1")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[column])
+    _box(model, body, column, (0.3, 0.3, 3.0), (5.0, -0.25, 0.0))
+    element("IfcSlab", "S1", outline([(0, 4), (3, 4), (3, 7), (0, 7)]), 0.2, (0.0, 0.0, 3.0))
+    ishape = model.createIfcIShapeProfileDef("AREA", "UB 406x178", None, 0.2, 0.4, 0.01, 0.015)
+    element("IfcBeam", "B1", ishape, 4.0, (0.0, 2.5, 2.7), axis=(1.0, 0.0, 0.0), ref=(0.0, 1.0, 0.0))
+    on = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcColumn", name="C2")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[on])
+    _box(model, body, on, (0.2, 0.2, 1.0), (1.9, 2.4, 2.9))
+    element("IfcPipeSegment", "P1", model.createIfcCircleProfileDef("AREA", None, None, 0.05), 4.0, (0.0, -1.0, 1.5),
+            axis=(1.0, 0.0, 0.0), ref=(0.0, 1.0, 0.0))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path

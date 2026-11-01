@@ -113,9 +113,11 @@ Three edges go "up" and are worth knowing before you add an import:
 | `edits.py` | Geometry | Model edits: offsets with bends, routes, resizes, trims, penetrations; trial and keep transactions; meshes |
 | `escalation.py` | Fix agent | The brief a second try on Muse Wonder reads (first try, neighbourhood, blockers) |
 | `fixtures.py` | Test support | Synthetic IFC models: clash, run, joint, context, detection, route, penetration, resize fixtures |
+| `faces.py` | Geometry | The faces of an element's body as a person points at them: a pick (point and normal) resolved to a cap, a rectangle's side, a round face, an I-section's flank or an outline's edge, named in words ("east end", "north face", "top"), with what each allows ([docs/manual-edits.md](../manual-edits.md)) |
 | `hosts.py` | Fix agent | Which hosts may take an opening: hard rules, requirements, Muse's reading by kind, hole limits |
 | `journal.py` | State | The edit log: one `Entry` per kept edit (agent fixes, plans, wider fixes, hand edits), who and which clash, the fix a hand edit follows, undo and redo over each file's transactions ([docs/manual-edits.md](../manual-edits.md)) |
 | `limits.py` | Policy | `ProposeLimit`: rolling per-visitor and per-day caps; `client_id` |
+| `manual.py` | Operations | Hand edits as ops (push/pull, align, move, and the rest as they are built): `resolve`, the requirements' `gate`, ORCA's rules as warnings, `check` in a trial (cleared, new, worse, nearest), `apply` checked again and kept through the edit log, the clash measured again ([docs/manual-edits.md](../manual-edits.md)) |
 | `mcp_server.py` | Entry points | ORCA as an MCP server: remote at `/mcp` by link token, or local over stdio |
 | `meta_client.py` | Model client | `MetaChatModel` and the model factories: Muse Spark, Muse Spark Open, Muse Wonder; transcription; prices |
 | `owner.py` | Policy | The owner token, signed cookie, owner settings in context variables, `spawn` / `submit` that carry them |

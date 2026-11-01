@@ -171,6 +171,24 @@ export interface JournalEntry {
     depth_m: number | null } | null; state: "kept" | "undone"; has_picture: boolean; params: Record<string, unknown>;
 }
 export interface Journal { entries: JournalEntry[]; can_undo: boolean; can_redo: boolean; undo: string | null; redo: string | null }
+/** A face of an element as the server reads a pick (faces.py): its kind, its name in words, what it allows. */
+export interface EditFace {
+  element: string; id: string; kind: "cap" | "side" | "radial" | "flank" | "edge" | "other"; name: string;
+  normal: number[]; point: number[]; size_m: number | null; allows: string[]; why_not: string | null;
+}
+/** A hand edit, as the server takes it from the page, chat, voice and MCP (manual.py). */
+export type EditOp = { op: string; element: string } & Record<string, unknown>;
+export interface EditHit { other: string; other_class: string; kind: string; distance_m: number; name: string }
+/** What checking a hand edit found (manual.check): refused (`blocked`), or what it clears and hits, and its preview. */
+export interface EditCheck {
+  op: EditOp; passed: boolean; blocked: string | null; clashes: number; warnings: JournalEntry["warnings"];
+  summary?: string; face?: EditFace | null; key?: string; revision?: number; targets?: string[]; close?: number;
+  new?: EditHit[]; worse?: EditHit[]; cleared?: { other: string; name: string; was_m: number }[];
+  min_clearance_m?: number | null; checked_against?: number; changed?: string[]; created?: string[]; removed?: string[];
+  open_ends?: string[]; preview?: Piece[] | null; before?: Piece[] | null;
+}
+export type EditKept = { entry: JournalEntry | null; files: number[]; changed: string[]; created: string[]; removed: string[];
+  pieces: string[]; check: EditCheck } & Patch;
 /** Undo or redo: the entry, and how to patch the page (what came back in `changed`, what went in `removed`). */
 export type Stepped = { entry: JournalEntry; files: number[]; can_undo: boolean; can_redo: boolean;
   undo: string | null; redo: string | null } & Patch;
@@ -836,6 +854,16 @@ export const api = {
   accept: (id: string, o: Option, pair: string[] | null, clashId: string | null = null) =>
     call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST",
       body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null }, clash_id: clashId }) }),
+  /** The face of an element under a pick (IFC axes): its name, and what the Edit tool can do with it. */
+  editFace: (id: string, element: string, point: number[], normal: number[]) =>
+    call<EditFace>(`/scenes/${id}/edit/face`, { method: "POST", body: JSON.stringify({ element, point, normal }) }),
+  elementFaces: (id: string, element: string) => call<{ element: string; faces: EditFace[] }>(`/scenes/${id}/elements/${encodeURIComponent(element)}/faces`),
+  /** Try a hand edit without keeping it: what it clears and hits, its warnings, its preview; `blocked` says why not. */
+  editCheck: (id: string, op: EditOp) => call<EditCheck>(`/scenes/${id}/edit/check`, { method: "POST", body: JSON.stringify({ op }) }),
+  /** Keep a hand edit: checked again on the server (409 when it would make more clashes than accepted, or changed). */
+  editApply: (id: string, op: EditOp, key: string | undefined, acceptClashes: number, clash: { id: string | null; pair: string[] | null } | null) =>
+    call<EditKept>(`/scenes/${id}/edit/apply`, { method: "POST", body: JSON.stringify({ op, key: key ?? null, accept_clashes: acceptClashes,
+      clash_id: clash?.id ?? null, pair: clash?.pair ?? null }) }),
   /** The scene's edit log: every kept edit, oldest first, and whether undo and redo can go now. */
   journal: (id: string) => call<Journal>(`/scenes/${id}/edits`),
   journalCsvUrl: (id: string) => `/api/scenes/${id}/edits?format=csv`,

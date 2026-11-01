@@ -1570,11 +1570,12 @@ def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None
         item.Depth = float(item.Depth + by_m / s)
     elif face == "side":
         prof = item.SweptArea
+        # A rectangle may sit off the solid's axis (a box drawn from its corner), but not turned in its plane.
         if prof.is_a() != "IfcRectangleProfileDef" or (prof.Position is not None and (
-                np.linalg.norm(np.asarray(prof.Position.Location.Coordinates)) > 1e-9
-                or (prof.Position.RefDirection is not None
-                    and abs(abs(prof.Position.RefDirection.DirectionRatios[0]) - 1) > 1e-9))):
-            raise Unsupported("only a centred rectangular segment grows sideways")
+                prof.Position.RefDirection is not None
+                and abs(abs(prof.Position.RefDirection.DirectionRatios[0]) - 1) > 1e-9)):
+            raise Unsupported("only a rectangular section square to its axes grows sideways")
+        loc = np.asarray(prof.Position.Location.Coordinates[:2], float) if prof.Position is not None else np.zeros(2)
         out = np.asarray(normal, float)
         out /= np.linalg.norm(out)
         if abs(out @ px) > 0.999:
@@ -1586,7 +1587,7 @@ def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None
         size = across * s + by_m
         if size < MIN_PIECE_M - 1e-9:
             raise Unsupported(f"it would be {size * 1000:.0f} mm across (at least {MIN_PIECE_M * 1000:.0f} mm stays)")
-        mid = origin * s + d * (item.Depth * s / 2)
+        mid = (origin + px * loc[0] + py * loc[1]) * s + d * (item.Depth * s / 2)
         old_centre = mid + out * (across * s / 2)
         dims = {"XDim": prof.XDim, "YDim": prof.YDim, attr: float(size / s)}
         item.SweptArea = model.createIfcRectangleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
@@ -2010,3 +2011,146 @@ def offset_edge(scene: IfcScene, global_id: str, k: int, by_m: float, keep_insid
     item.SweptArea = _write_outline(model, prof, new_pts, repeat)
     scene.refresh_bounds([global_id])
     return float(by * s)
+
+
+def face_axes(n) -> tuple[np.ndarray, np.ndarray]:
+    """Two axes in a face's plane: across (u, level when the face is not) and up it (v)."""
+    n = np.asarray(n, float) / np.linalg.norm(n)
+    z = np.array([0.0, 0.0, 1.0])
+    if abs(n @ z) < 0.9:
+        v = z - (z @ n) * n
+        v /= np.linalg.norm(v)
+        return np.cross(v, n), v
+    x = np.array([1.0, 0.0, 0.0])
+    u = x - (x @ n) * n
+    u /= np.linalg.norm(u)
+    return u, np.cross(n, u)
+
+
+def through_depth(scene: IfcScene, host: str, at, n, offsets: list[np.ndarray]) -> float | None:
+    """How far an opening on a face at `at` (outward normal `n`, world metres) must go to pass through the host:
+    from just inside each point of its outline to where it comes out, the deepest of them. None when no ray comes out
+    (the host is not closed there, or deeper than MAX_THROUGH_M)."""
+    tris = _host_tris(scene, host)
+    n = np.asarray(n, float) / np.linalg.norm(n)
+    origins = np.array([np.asarray(at, float) + o - n * 0.001 for o in offsets])
+    t = _first_hit(origins, -n, tris)
+    t = t[np.isfinite(t)]
+    if not len(t) or t.max() + 0.001 > MAX_THROUGH_M:
+        return None
+    return float(t.max() + 0.001)
+
+
+def misses(scene: IfcScene, host: str, at, n, offsets: list[np.ndarray]) -> bool:
+    """Whether any of these points on the face (from outside, along −n) misses the host: the outline reaches its edge."""
+    tris = _host_tris(scene, host)
+    n = np.asarray(n, float) / np.linalg.norm(n)
+    origins = np.array([np.asarray(at, float) + o + n * 0.05 for o in offsets])
+    t = _first_hit(origins, -n, tris)
+    return bool(np.any(~np.isfinite(t) | (t > 0.05 + 0.01)))
+
+
+def cut_void(scene: IfcScene, host: str, shape: str, width_m: float, height_m: float, start, axis, xdir,
+             depth_m: float, recess: bool = False, name: str | None = None) -> str:
+    """An opening (or a recess) voiding `host`: a box or cylinder from `start` along `axis` for `depth_m`, its width
+    along `xdir` (world metres). Returns its GlobalId."""
+    i = scene.index_of(host)
+    m, s = scene.models[i], scene.unit_scales[i]
+    element = scene.entity(host)
+    opening = ifcopenshell.api.run("root.create_entity", m, ifc_class="IfcOpeningElement", name=name or "Opening")
+    if m.schema != "IFC2X3":
+        opening.PredefinedType = "RECESS" if recess else "OPENING"
+    elif recess:
+        opening.ObjectType = "Recess"
+    pen = Penetration(host, host, shape, float(width_m), float(height_m), float(depth_m), list(map(float, start)),
+                      list(map(float, axis)), list(map(float, xdir)))
+    rep, _ = _void_rep(m, s, pen, _body_context(element))
+    ifcopenshell.api.run("geometry.assign_representation", m, product=opening, representation=rep)
+    _void_place(m, opening, s, pen)
+    ifcopenshell.api.run("feature.add_feature", m, feature=opening, element=element)
+    scene.refresh_bounds([host])
+    return opening.GlobalId
+
+
+def _vertex_normals(verts: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    n = np.zeros_like(verts)
+    fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
+    for k in range(3):
+        np.add.at(n, faces[:, k], fn)
+    length = np.linalg.norm(n, axis=1, keepdims=True)
+    return n / np.where(length > 0, length, 1.0)
+
+
+def _grown_solid(m, sx: float, item, world_y: np.ndarray, sy: float, gap: float):
+    """One extrusion of the cutter, in the cut element's file (units `sx`), grown by `gap` metres all round and
+    placed in world axes; None when its profile is not one ORCA grows exactly."""
+    if np.linalg.norm(np.asarray(item.ExtrudedDirection.DirectionRatios) - (0, 0, 1)) > 1e-9:
+        return None
+    k, g = sy / sx, gap / sx
+    prof = item.SweptArea
+    pos2 = getattr(prof, "Position", None)
+    loc = np.asarray(pos2.Location.Coordinates[:2], float) * k if pos2 is not None else np.zeros(2)
+    ref = (pos2.RefDirection.DirectionRatios[:2] if pos2 is not None and pos2.RefDirection is not None else (1.0, 0.0))
+    at2 = m.createIfcAxis2Placement2D(_point(m, loc), m.createIfcDirection(tuple(float(x) for x in ref)))
+    if prof.is_a("IfcCircleProfileDef"):
+        new = m.createIfcCircleProfileDef("AREA", None, at2, float(prof.Radius * k + g))
+    elif prof.is_a() == "IfcRectangleProfileDef":
+        new = m.createIfcRectangleProfileDef("AREA", None, at2, float(prof.XDim * k + 2 * g), float(prof.YDim * k + 2 * g))
+    elif prof.is_a("IfcArbitraryClosedProfileDef"):
+        from .faces import outline
+        pts = outline(prof)
+        if pts is None:
+            return None
+        grown = _grown([list(p * k) for p in pts], g)
+        cps = [_point(m, p) for p in grown]
+        new = m.createIfcArbitraryClosedProfileDef("AREA", None, m.createIfcPolyline(cps + [cps[0]]))
+    else:
+        try:
+            w, h = _profile_size(prof)   # an I, U, C or L section: its bounding rectangle (the gap is at least that)
+        except Unsupported:
+            return None
+        new = m.createIfcRectangleProfileDef("AREA", None, at2, float(w * k + 2 * g), float(h * k + 2 * g))
+    world = world_y @ ifcopenshell.util.placement.get_axis2placement(item.Position)
+    rot, origin = world[:3, :3], world[:3, 3] * k - world[:3, 2] / np.linalg.norm(world[:3, 2]) * g
+    pos = m.createIfcAxis2Placement3D(_point(m, origin), _dir(m, rot[:, 2]), _dir(m, rot[:, 0]))
+    return m.createIfcExtrudedAreaSolid(new, pos, m.createIfcDirection((0.0, 0.0, 1.0)), float(item.Depth * k + 2 * g))
+
+
+def cut_by_shape(scene: IfcScene, element: str, cutter: str, gap_m: float) -> tuple[str, bool]:
+    """Cut `element` where `cutter` is, plus `gap_m` all round: an opening shaped as the cutter's body grown by the gap
+    (exact for extrusions; a mesh pushed out along its normals otherwise). Returns the opening and whether it is exact."""
+    i, j = scene.index_of(element), scene.index_of(cutter)
+    m, sx, sy = scene.models[i], scene.unit_scales[i], scene.unit_scales[j]
+    host, tool = scene.entity(element), scene.entity(cutter)
+    bodies = [r for r in (tool.Representation.Representations if tool.Representation else []) if r.RepresentationIdentifier == "Body"]
+    items = list(bodies[0].Items) if bodies else []
+    world_y = ifcopenshell.util.placement.get_local_placement(tool.ObjectPlacement)
+    solids = [] if not items or not all(it.is_a("IfcExtrudedAreaSolid") for it in items) else \
+        [_grown_solid(m, sx, it, world_y, sy, gap_m) for it in items]
+    exact = bool(solids) and all(x is not None for x in solids)
+    if exact:
+        rep = m.createIfcShapeRepresentation(_body_context(host), "Body", "SweptSolid", solids)
+    else:
+        settings = ifcopenshell.geom.settings()
+        settings.set("use-world-coords", True)
+        geo = ifcopenshell.geom.create_shape(settings, tool).geometry
+        verts = np.asarray(geo.verts, float).reshape(-1, 3)
+        faces = np.asarray(geo.faces, int).reshape(-1, 3)
+        if not len(faces):
+            raise Unsupported("the cutter has no shape to cut with")
+        # Weld coincident vertices first: a box's corners then push out along the corner's mean normal.
+        keys, inverse = np.unique(np.round(verts, 6), axis=0, return_inverse=True)
+        faces = inverse.reshape(-1)[faces]
+        grown = (keys + _vertex_normals(keys, faces) * gap_m) / sx
+        pts = m.createIfcCartesianPointList3D([tuple(float(c) for c in p) for p in grown])
+        mesh = m.createIfcTriangulatedFaceSet(pts, None, True, [tuple(int(x) + 1 for x in f) for f in faces], None)
+        rep = m.createIfcShapeRepresentation(_body_context(host), "Body", "Tessellation", [mesh])
+    opening = ifcopenshell.api.run("root.create_entity", m, ifc_class="IfcOpeningElement",
+                                   name=f"Cut for {tool.Name or tool.is_a()[3:]}")
+    if m.schema != "IFC2X3":
+        opening.PredefinedType = "OPENING"
+    ifcopenshell.api.run("geometry.assign_representation", m, product=opening, representation=rep)
+    ifcopenshell.api.run("geometry.edit_object_placement", m, product=opening, matrix=np.eye(4), is_si=False)
+    ifcopenshell.api.run("feature.add_feature", m, feature=opening, element=host)
+    scene.refresh_bounds([element])
+    return opening.GlobalId, exact

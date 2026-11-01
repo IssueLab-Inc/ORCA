@@ -1,4 +1,5 @@
 import { ArrowLeft, ArrowRight, Bookmark, Box, Camera, Columns2, Compass, Crop, Home, Layers, LayoutGrid, ListFilter, LocateFixed, Maximize, Palette, Radar, Ruler, ScanEye, Shapes, SlidersHorizontal, Square, Target, Trash2, Waypoints } from "lucide-react";
+import { EditIcon } from "./editIcons";
 import { useState } from "react";
 import { IconButton, Popover } from "./ui";
 import type { Preset, ViewMode, VisualStyle } from "./viewer/Viewer";
@@ -38,6 +39,8 @@ export interface ToolbarState {
   edges: boolean;
   section: boolean;
   measure: boolean;
+  /** The Edit tool: push/pull, align, move and the rest, checked before kept (docs/manual-edits.md). */
+  edit?: boolean;
   /** The connection highlight: pointing at an element (or tapping it) lights what it is linked to. */
   links: boolean;
   hiddenModels: number[];
@@ -55,7 +58,7 @@ export interface ViewsControls {
   layout: Layout; layouts: Layout[]; onLayout: (l: Layout) => void; drawings: DrawingsShow; onDrawings: (d: DrawingsShow) => void;
 }
 
-type Toggle = "edges" | "section" | "measure" | "links" | "ortho" | "grey";
+type Toggle = "edges" | "section" | "measure" | "edit" | "links" | "ortho" | "grey";
 
 /** The viewer's tools as a vertical icon rail: modes, then tools, then camera. Every icon has a tooltip. On a phone
  * (`compact`) a touch screen shows no tooltips, so the same tools sit in one labelled Tools menu (a sheet from the
@@ -168,6 +171,7 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, views,
     <div className="rail-group" role="group" aria-label="Every view">
       <IconButton icon={LocateFixed} label="Go to the clash, or frame the selected element" shortcut="F" disabled={!hasFocus} onClick={onFocus} />
       <IconButton icon={Ruler} label="Measure: in the 3D view or any drawing, snapping to corners and edges" shortcut="M" active={state.measure} onClick={() => onToggle("measure")} />
+      {state.edit !== undefined && <IconButton icon={EditIcon} className="ebtn" label="Edit the model: push and pull faces, align, move, cut, split; checked before it is kept" shortcut="P" active={state.edit} onClick={() => onToggle("edit")} />}
       {views.layouts.length > 1 && (
         <Popover icon={LayoutGrid} label="Views: plans, sections and elevations beside the 3D view" shortcut="Q">
           {(close) => <LayoutItems views={views} close={close} />}

@@ -261,10 +261,11 @@ export function shownBy(gid: string, cls: string | undefined, level: string | un
   return true;
 }
 
-/** What Esc clears, one thing at a time (docs/views.md): the measure, the image dialog, the selected element (and its
+/** What Esc clears, one thing at a time (docs/views.md): the Edit tool, the measure, the image dialog, the selected element (and its
  * card), then the clash. Null when nothing is left, or the clash can't be left while ORCA works on it. */
-export type EscStep = "measure" | "lightbox" | "selection" | "clash";
-export function escStep(s: { measuring: boolean; lightbox: boolean; selection: boolean; clash: boolean; working: boolean }): EscStep | null {
+export type EscStep = "edit" | "measure" | "lightbox" | "selection" | "clash";
+export function escStep(s: { editing?: boolean; measuring: boolean; lightbox: boolean; selection: boolean; clash: boolean; working: boolean }): EscStep | null {
+  if (s.editing) return "edit";   // the Edit tool: its preview, its target, its face, then the tool itself
   if (s.measuring) return "measure";
   if (s.lightbox) return "lightbox";
   if (s.selection) return "selection";

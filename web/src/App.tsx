@@ -6,7 +6,7 @@ import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, 
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, BuiltResult, EscalationInfo, Journal, JournalEntry, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, BuiltResult, EditKept, EscalationInfo, Journal, JournalEntry, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -38,6 +38,7 @@ import { escStep, type DrawingsShow, type Filters, type Layout, type Pose, type 
 import { ViewPanes } from "./ViewPanes";
 import { MeasurePanel } from "./MeasurePanel";
 import { EditPanel } from "./EditPanel";
+import { EditTool, type EditToolHandle } from "./EditTool";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
@@ -130,7 +131,8 @@ export function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [a, setA] = useState<string | null>(null);
   const [b, setB] = useState<string | null>(null);
-  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", style: "shaded", ortho: false, grey: true, edges: true, section: false, measure: false, links: false, hiddenModels: [] });
+  const [tool, setTool] = useState<ToolbarState>({ mode: "xray", style: "shaded", ortho: false, grey: true, edges: true, section: false, measure: false, edit: false, links: false, hiddenModels: [] });
+  const editTool = useRef<EditToolHandle | null>(null);
   // Free navigation (docs/views.md): every clash picked takes the views to it unless turned off; visibility filters and
   // what is hidden for now (viewing only); saved views and Home per project, in this browser.
   const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
@@ -1528,6 +1530,7 @@ export function App() {
       viewsChanged();   // the panel says what to click next
       return;
     }
+    if (tool.edit) { editTool.current?.click(ev.nativeEvent); return; }
     // Any element can be selected: in a see-through view a click that meets nothing in focus takes what is behind.
     const picked = hit ?? viewer.current?.pickAt(ev.nativeEvent, { ghosts: true }) ?? null;
     if (!picked) { setSelected(null); return; }
@@ -1582,8 +1585,9 @@ export function App() {
     if (p && !p.fired) { window.clearTimeout(p.timer); longPress.current = null; }
   }
 
-  function toggle(k: "edges" | "section" | "measure" | "links" | "ortho" | "grey") {
-    setTool((t) => ({ ...t, [k]: !t[k] }));
+  function toggle(k: "edges" | "section" | "measure" | "edit" | "links" | "ortho" | "grey") {
+    // Editing and measuring each take the clicks: one at a time.
+    setTool((t) => ({ ...t, [k]: !t[k], ...(k === "edit" && !t.edit ? { measure: false } : k === "measure" && !t.measure ? { edit: false } : {}) }));
     if (k === "links") clearHover();
   }
 
@@ -1656,6 +1660,7 @@ export function App() {
     pressMove(e);
     // On a touch screen a tap does it (some browsers also send a mouse-type move with the tap): hover only with Alt.
     if (e.pointerType === "touch" || e.buttons || (coarse && !e.altKey)) return;
+    if (tool.edit) editTool.current?.hover(e.nativeEvent);
     if (tool.measure) {   // what the pointer snaps to, once a frame
       const at = { clientX: e.clientX, clientY: e.clientY } as MouseEvent;
       cancelAnimationFrame(measureFrame.current);
@@ -1812,6 +1817,7 @@ export function App() {
       const views: Record<string, Preset> = { "1": "top", "2": "front", "3": "right", "4": "iso" };
       const modes: Record<string, ViewMode> = { x: "xray", c: "context", i: "isolate", v: "shaded" };
       const k = e.key.toLowerCase();
+      if (tool.edit && k !== "p" && k !== "escape" && editTool.current?.key(k)) { e.preventDefault(); return; }
       if (views[k]) viewer.current?.view(views[k]);
       else if (k === "h") viewer.current?.home();
       else if (k === "g") setTool((t) => ({ ...t, style: STYLES[(STYLES.findIndex((s) => s.id === t.style) + 1) % STYLES.length].id }));
@@ -1824,6 +1830,7 @@ export function App() {
       else if (k === "s") toggle("section");
       else if (k === "e") toggle("edges");
       else if (k === "m") toggle("measure");
+      else if (k === "p" && sceneId) toggle("edit");
       else if (k === "n" && tool.measure) setSnapping((on) => !on);
       else if (k === "l") toggle("links");
       else if (k === "w" && workings.on && !compact) setActivityView(workings.view === "work" ? "steps" : "work");
@@ -1831,9 +1838,10 @@ export function App() {
         // One thing at a time: the measure, the image dialog, the selected element, then the clash.
         unpin(); clearHover();
         // The clash is left only where its chip shows: a clash plan or a wider fix keeps it (their own panels close them).
-        const step = escStep({ measuring: tool.measure, lightbox: !!lightbox, selection: !!selected,
+        const step = escStep({ editing: !!tool.edit, measuring: tool.measure, lightbox: !!lightbox, selection: !!selected,
           clash: !!(clash || a || b) && !viewPlan && !activeContext, working: clashBusy });
-        if (step === "measure") { if (viewer.current?.measureCancel()) viewsChanged(); else toggle("measure"); }
+        if (step === "edit") { if (!editTool.current?.escape()) toggle("edit"); }
+        else if (step === "measure") { if (viewer.current?.measureCancel()) viewsChanged(); else toggle("measure"); }
         else if (step === "lightbox") setLightbox(null);
         else if (step === "selection") setSelected(null);
         else if (step === "clash") leaveClash();
@@ -2256,6 +2264,27 @@ export function App() {
       staleContext(); setRemeasure((n) => n + 1);
       return true;
     } catch (e) { if (live()) setError((e as Error).message); return false; } finally { if (live()) setBusy(null); }
+  }
+
+  /** A hand edit kept (the Edit tool): the model patched, the log read again, a clash it resolved marked fixed, and
+   * the kept checks run again when it was kept with clashes, so they join the list. */
+  async function keptEdit(k: EditKept) {
+    if (!sceneId) return;
+    const sid = sceneId, epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
+    if (selected && (k.removed ?? []).includes(selected.globalId)) setSelected(null);
+    await applyToViewer(sid, k, k.pieces?.length ? [k.pieces] : [], live);
+    if (!live()) return;
+    staleContext(); setRemeasure((n) => n + 1);
+    const st = k.entry?.status as (JournalEntry["status"] & { pair?: string[] }) | null | undefined;
+    if (st?.resolved && st.pair?.length === 2) markFixed([[st.pair[0], st.pair[1]]], [k.entry?.summary ?? "Edited by hand"]);
+    setKept({ text: "Edit kept in the model", detail: k.entry ? `${k.entry.id}: ${k.entry.summary}` : "Checked again first", n: Date.now() });
+    window.clearTimeout(keptTimer.current);
+    keptTimer.current = window.setTimeout(() => setKept(null), 3200);
+    if ((k.check?.clashes ?? 0) > 0) {
+      if (report?.origin === "sightline") void runDetect(null, sid, { all: true });
+      else flash("Kept with its clashes. Run ORCA's check to list them.");
+    }
   }
 
   /** Undo every edit newer than `e`, then `e` itself, newest first. */
@@ -3373,7 +3402,7 @@ export function App() {
             </div>}
       </aside>)}
 
-      {inSlot(slots.model, <main className={`stage ${tool.measure ? "measuring" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
+      {inSlot(slots.model, <main className={`stage ${tool.measure ? "measuring" : ""} ${tool.edit ? "editing" : ""} ${temporaryCount ? "temp-on" : ""}`} ref={host} onClick={onClick}
         onPointerDown={pressStart} onPointerMove={stageMove} onPointerUp={pressEnd} onPointerCancel={pressEnd}
         onPointerLeave={() => { if (hover.current.gid) clearHover(); if (tool.measure) viewer.current?.measureHover(null); }}
         onContextMenu={(e) => { if (coarse) e.preventDefault(); }}>
@@ -3433,6 +3462,12 @@ export function App() {
         {tool.measure && viewer.current && <MeasurePanel measures={viewer.current.measurements} open={viewer.current.measureOpen} snap={snapping} coarse={coarse}
           at={layout === "phone" ? null : measureAt} onMove={setMeasureAt} onSnap={setSnapping} onCopy={(text, what) => void copyToClipboard(text).then((ok) => flash(ok ? `Copied ${what}.` : "Could not copy: the browser said no."))}
           onRemove={(id) => viewer.current?.removeMeasurement(id)} onClear={() => viewer.current?.clearMeasurements()} onClose={() => toggle("measure")} />}
+        {tool.edit && sceneId && <EditTool ref={editTool} viewer={() => viewer.current} sceneId={sceneId} busy={!!busy} coarse={coarse}
+          clash={clash ? { id: clash.id, pair: a && b ? [a, b] : null } : a && b ? { id: null, pair: [a, b] } : null}
+          journal={journal} csvUrl={api.journalCsvUrl(sceneId)} clashLabel={clashTag} showLog={!docked}
+          onKept={keptEdit} onUndo={() => void stepEdit("undo")} onRedo={() => void stepEdit("redo")} onUndoTo={(e) => void undoTo(e)}
+          onShow={(e) => { const v = viewer.current; v?.frameEverywhere([...e.elements, ...e.created].filter((g) => v.isShown(g))); }}
+          onError={(m) => setError(m)} onClose={() => toggle("edit")} />}
         {!docked && selected && !tool.measure && (
           <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             {elementCard(true, true)}
