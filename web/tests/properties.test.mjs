@@ -5,7 +5,7 @@ import { compiled } from "./app-host.mjs";
 const react = `data:text/javascript;base64,${Buffer.from("export const useState=(v)=>[v,()=>{}];export const Fragment=()=>null;").toString("base64")}`;
 const stub = (names) => `data:text/javascript;base64,${Buffer.from(names.map((n) => `export function ${n}(){return null;}`).join("\n")).toString("base64")}`;
 const props = await import(await compiled("../src/Properties.tsx", { react, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
-  "lucide-react": stub(["Check", "ChevronsDownUp", "ChevronsUpDown", "Copy", "Focus", "ListFilter", "Palette", "Pencil", "X"]),
+  "lucide-react": stub(["Check", "ChevronsDownUp", "ChevronsUpDown", "Copy", "Focus", "ListFilter", "Palette", "Pencil", "Plus", "X"]),
   "./ui": stub(["IconButton"]) }));
 
 const storey = { global_id: "3DHpFFi5PGif08WLyvTtOv", ifc_class: "IfcBuildingStorey", name: "Level 02", file: 0 };
@@ -16,7 +16,7 @@ const girder = {
   type: { global_id: "t", ifc_class: "IfcBeamType", name: "PG 1000x400", attributes: [{ name: "Name", value: "PG 1000x400" }] },
   storey, container: storey, path: [{ global_id: "p", ifc_class: "IfcProject", name: "Northbank", file: 0 }, storey],
   materials: [{ usage: "single", name: "Steel S355", from_type: false, items: [{ material: "Steel S355" }], sets: [] }],
-  classifications: [{ system: "Uniclass 2015", identification: "Ss_20_10_75_35", name: "Steel beams", location: null }],
+  classifications: [{ id: 31, system: "Uniclass 2015", identification: "Ss_20_10_75_35", name: "Steel beams", location: null }],
   groups: [{ global_id: "g", ifc_class: "IfcBuildingSystem", name: "Frame" }],
   documents: [{ identification: "S-201", name: "Beam schedule", location: "https://example.com/s201.pdf" }],
   sets: [
@@ -108,6 +108,7 @@ test("a row's pencil changes what the element says of its own, never its type's 
   assert.equal(edit("Pset_BeamCommon", "Service temperature"), undefined, "a range");
   assert.equal(edit("Pset_BeamCommon", "Connection › Torque"), undefined, "a part");
   assert.equal(edit("Qto_BeamBaseQuantities", "Length"), undefined, "quantities follow the body");
+  assert.deepEqual(edit("Classification", "Uniclass 2015"), { kind: "classification", current: 31 });
 });
 
 test("a change is what the server takes: typed text, a number kept a number, yes and no, a choice", () => {
@@ -124,4 +125,20 @@ test("a change is what the server takes: typed text, a number kept a number, yes
   assert.deepEqual(props.editOptions({ kind: "material" }, choices), [{ value: "7", label: "Steel S355" }]);
   assert.deepEqual(props.editOptions({ kind: "attribute", name: "PredefinedType" }, choices).map((o) => o.value), ["BEAM", "JOIST"]);
   assert.equal(props.editOptions({ kind: "attribute", name: "Tag" }, choices), null);
+});
+
+test("a classification is swapped for another in one change, taken off, or one is added", () => {
+  const had = { kind: "classification", current: 31 };
+  assert.deepEqual(props.changeFor(had, "32"), { kind: "classification", reference: 32, replace: 31 });
+  assert.deepEqual(props.changeFor(had, ""), { kind: "classification", reference: 31, remove: true });
+  assert.deepEqual(props.changeFor({ kind: "classification" }, "32"), { kind: "classification", reference: 32 });
+  assert.throws(() => props.changeFor({ kind: "classification" }, ""), /Pick the classification/);
+  const choices = { classifications: [
+    { id: 31, system: "Uniclass 2015", identification: "Ss_20_10_75_35", name: "Steel beams", on: true },
+    { id: 32, system: "Uniclass 2015", identification: "Ss_20_10_75_45", name: "Steel columns", on: false },
+    { id: 33, system: null, identification: null, name: null, on: true }] };
+  // The one it has stays offered (so the list shows it); others it already has are not.
+  assert.deepEqual(props.editOptions(had, choices), [
+    { value: "31", label: "Uniclass 2015 Ss_20_10_75_35 Steel beams" }, { value: "32", label: "Uniclass 2015 Ss_20_10_75_45 Steel columns" }]);
+  assert.deepEqual(props.editOptions({ kind: "classification" }, choices).map((o) => o.value), ["32"]);
 });

@@ -157,17 +157,28 @@ def plan(scene: IfcScene, gid: str, change: dict):
         if ref is None or not ref.is_a("IfcClassificationReference"):
             raise ValueError("say which classification reference (its id, from the choices)")
         words = " ".join(str(x) for x in (ref.Identification, ref.Name) if x)
+        on = {r.id() for r in ifcopenshell.util.classification.get_references(e)}
         if change.get("remove"):
+            if ref.id() not in on:
+                raise edits.Unsupported(f"it is not classified {words}")
             return (f"{name} no longer classified {words}",
                     lambda: ifcopenshell.api.run("classification.remove_reference", model, reference=ref, products=[e]))
+        old = model.by_id(int(change["replace"])) if change.get("replace") is not None else None
+        if old is not None and (not old.is_a("IfcClassificationReference") or old.id() not in on):
+            raise ValueError("replace names a classification reference it has")
+        if ref.id() in on:
+            raise edits.Unsupported(f"it is already classified {words}")
 
         def add():
+            if old is not None:   # one change: the reference it had swapped for another
+                ifcopenshell.api.run("classification.remove_reference", model, reference=old, products=[e])
             rels = [r for r in model.get_inverse(ref) if r.is_a("IfcRelAssociatesClassification")]
             if rels:
                 rels[0].RelatedObjects = [*rels[0].RelatedObjects, e]
             else:
                 model.createIfcRelAssociatesClassification(ifcopenshell.guid.new(), None, None, None, [e], ref)
-        return f"{name} classified {words}", add
+        was = " ".join(str(x) for x in (old.Identification, old.Name) if x) if old is not None else None
+        return (f"{name} classified {words}" + (f" (was {was})" if was else "")), add
     if kind == "container":
         c = model.by_guid(change.get("container")) if change.get("container") else None
         if c is None or not c.is_a("IfcSpatialStructureElement"):

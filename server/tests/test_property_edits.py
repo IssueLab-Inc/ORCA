@@ -101,6 +101,32 @@ def test_a_fitting_moves_to_another_type_keeping_its_shape_and_a_classification_
     assert change(c, sid, g["W1"], kind="classification", reference=ref["id"], remove=True).status_code == 200
 
 
+def test_a_classification_is_swapped_in_one_change_and_never_given_twice(client):
+    c, ws, sid, scene, g = client
+    model = scene.models[0]
+    cl = ifcopenshell.api.run("classification.add_classification", model, classification="Uniclass")
+    walls = ifcopenshell.api.run("classification.add_reference", model, products=[scene.entity(g["W1"])],
+                                 identification="Ss_25_10", name="Walls", classification=cl)
+    beams = ifcopenshell.api.run("classification.add_reference", model, products=[scene.entity(g["W2"])],
+                                 identification="Ss_20_10", name="Beams", classification=cl)
+    # The panel reads which reference a row is, to swap or take it off.
+    (row,) = c.get(f"/api/scenes/{sid}/elements/{g['W1']}/properties").json()["classifications"]
+    assert row["id"] == walls.id() and row["identification"] == "Ss_25_10"
+    r = change(c, sid, g["W1"], kind="classification", reference=walls.id())
+    assert r.status_code == 422 and "already classified Ss_25_10 Walls" in r.json()["detail"]
+    r = change(c, sid, g["W1"], kind="classification", reference=beams.id(), remove=True)
+    assert r.status_code == 422 and "not classified Ss_20_10 Beams" in r.json()["detail"]
+    r = change(c, sid, g["W1"], kind="classification", reference=beams.id(), replace=walls.id())
+    assert r.status_code == 200
+    assert r.json()["entry"]["summary"] == "wall 'W1' classified Ss_20_10 Beams (was Ss_25_10 Walls)"
+    assert [x["identification"] for x in r.json()["properties"]["classifications"]] == ["Ss_20_10"]
+    assert len(ws.journal(sid).entries) == 1, "one change, one entry"
+    c.post(f"/api/scenes/{sid}/edits/undo", json={})
+    import ifcopenshell.util.classification as uc
+    assert [x.Identification for x in uc.get_references(scene.entity(g["W1"]))] == ["Ss_25_10"]
+    assert [x.Identification for x in uc.get_references(scene.entity(g["W2"]))] == ["Ss_20_10"], "W2 keeps its own"
+
+
 def test_muse_changes_a_property_only_when_the_person_said_the_new_value(client):
     from test_chat_edits import Scripted
     from sightline.chat import Chat, Context

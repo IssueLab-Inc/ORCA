@@ -425,7 +425,7 @@ class Reader:
                 system = ifcopenshell.util.classification.get_classification(r)
             except Exception:
                 system = None
-            out.append({"system": getattr(system, "Name", None),
+            out.append({"id": r.id(), "system": getattr(system, "Name", None),
                         "identification": getattr(r, "Identification", None) or getattr(r, "ItemReference", None),
                         "name": getattr(r, "Name", None), "location": getattr(r, "Location", None)})
         return out

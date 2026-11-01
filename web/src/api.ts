@@ -116,7 +116,7 @@ export type PropertyChange =
   | { kind: "attribute"; name: string; value: string | null }
   | { kind: "property"; pset: string; name: string; value: string | number | boolean | null }
   | { kind: "type"; type: string } | { kind: "material"; material: number } | { kind: "container"; container: string }
-  | { kind: "classification"; reference: number; remove?: boolean };
+  | { kind: "classification"; reference: number; remove?: boolean; replace?: number };
 /** What an element's properties can be set to from its own model (property_edits.choices). */
 export interface PropertyChoices {
   attributes: string[]; predefined: string[];
@@ -135,7 +135,7 @@ export interface ElementProperties {
   type: { global_id: string | null; ifc_class: string; name: string | null; attributes: PropRow[] } | null;
   storey: ObjectRef | null; container: ObjectRef | null; path: ObjectRef[];
   materials: MaterialUse[];
-  classifications: { system: string | null; identification: string | null; name: string | null; location: string | null }[];
+  classifications: { id?: number; system: string | null; identification: string | null; name: string | null; location: string | null }[];
   groups: { global_id: string | null; ifc_class: string; name: string }[];
   documents: { identification: string | null; name: string | null; location: string | null }[];
   sets: PropSet[];

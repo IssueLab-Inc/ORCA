@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Focus, ListFilter, Palette, Pencil, X } from "lucide-react";
+import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Focus, ListFilter, Palette, Pencil, Plus, X } from "lucide-react";
 import type { ElementProperties, ObjectRef, PropertyChange, PropertyChoices, PropRow } from "./api";
 import { IconButton } from "./ui";
 
@@ -7,7 +7,9 @@ import { IconButton } from "./ui";
  * element's own property sets, its type, its storey, its material. Base quantities and what its type gives are not
  * edited here: they follow the body, or belong to every element of the type. */
 export type RowEdit = { kind: "attribute"; name: string } | { kind: "property"; pset: string; name: string }
-  | { kind: "type" } | { kind: "container" } | { kind: "material" };
+  | { kind: "type" } | { kind: "container" } | { kind: "material" }
+  /** A classification reference it has (`current`) swapped or taken off, or (none) one added. */
+  | { kind: "classification"; current?: number };
 export const EDITABLE_ATTRIBUTES = new Set(["Name", "Description", "ObjectType", "Tag", "PredefinedType"]);
 
 /** The change a row's edit makes with the value typed or chosen (`draft`), as the server takes it. */
@@ -18,6 +20,11 @@ export function changeFor(edit: RowEdit, draft: string, raw?: unknown): Property
     return { kind: "property", pset: edit.pset, name: edit.name, value };
   }
   if (edit.kind === "material") return { kind: "material", material: Number(draft) };
+  if (edit.kind === "classification") {
+    if (!draft && edit.current === undefined) throw new Error("Pick the classification to add.");
+    if (!draft) return { kind: "classification", reference: edit.current!, remove: true };
+    return { kind: "classification", reference: Number(draft), ...(edit.current !== undefined ? { replace: edit.current } : {}) };
+  }
   return edit.kind === "type" ? { kind: "type", type: draft } : { kind: "container", container: draft };
 }
 
@@ -144,6 +151,7 @@ export function sections(p: ElementProperties): Section[] {
     name: c.system ?? "Classification", value: [c.identification, c.name].filter(Boolean).join(" ") || "—",
     ...(c.identification || c.name ? { raw: (c.identification ?? c.name)!, facet: `classif:${c.system ?? ""}` } : {}),
     href: href(c.location),
+    ...(c.id !== undefined ? { edit: { kind: "classification", current: c.id } as RowEdit } : {}),
   }));
   const groups: Row[] = p.groups.map((g) => ({ name: classWords(g.ifc_class), value: g.name, raw: g.name, facet: `group:${g.ifc_class}` }));
   const documents: Row[] = p.documents.map((d) => ({ name: d.identification ?? "Document", value: d.name ?? d.location ?? "—", href: href(d.location) }));
@@ -193,8 +201,13 @@ export function editOptions(edit: RowEdit, c: PropertyChoices | null): { value: 
   if (edit.kind === "container") return c.containers.map((x) => ({ value: x.global_id, label: x.name }));
   if (edit.kind === "material") return c.materials.map((m) => ({ value: String(m.id), label: m.name }));
   if (edit.kind === "attribute" && edit.name === "PredefinedType") return c.predefined.map((v) => ({ value: v, label: v }));
+  if (edit.kind === "classification") return c.classifications.filter((r) => !r.on || r.id === edit.current)
+    .map((r) => ({ value: String(r.id), label: [r.system, r.identification, r.name].filter(Boolean).join(" ") || `#${r.id}` }));
   return null;
 }
+
+const ADD_CLASSIFICATION = "+classification";
+const ADDING: Row = { name: "Classification", value: "", edit: { kind: "classification" } };
 
 export function PropertySets({ data, loading, rows: acts, onOpen, editor }: { data: ElementProperties | null; loading: boolean;
   rows?: RowActions; onOpen?: (ref: ObjectRef) => void;
@@ -207,7 +220,8 @@ export function PropertySets({ data, loading, rows: acts, onOpen, editor }: { da
   if (!data) return <p className="hint">{loading ? "Reading its properties…" : "No properties to show."}</p>;
   const begin = (key: string, r: Row) => {
     const current = r.edit?.kind === "type" ? choices?.type : r.edit?.kind === "container" ? choices?.container
-      : r.edit?.kind === "material" ? (choices?.material != null ? String(choices.material) : "") : undefined;
+      : r.edit?.kind === "material" ? (choices?.material != null ? String(choices.material) : "")
+      : r.edit?.kind === "classification" ? (r.edit.current !== undefined ? String(r.edit.current) : "") : undefined;
     setEditing({ key, draft: current ?? (typeof r.raw === "boolean" ? (r.raw ? "yes" : "no") : r.raw !== undefined ? String(r.raw) : "") });
     if (editor && !choices && r.edit && r.edit.kind !== "property") {
       void editor.choices().then((c) => {
@@ -224,6 +238,41 @@ export function PropertySets({ data, loading, rows: acts, onOpen, editor }: { da
       await editor.save(changeFor(r.edit, editing.draft, r.raw));
       setEditing(null); setChoices(null);
     } catch (err) { setEditing((e) => (e ? { ...e, saving: false, error: (err as Error).message } : e)); }
+  };
+  /** The inline editor of one row (or of the classification being added): a list to pick from, yes/no, or a value. */
+  const form = (key: string, r: Row) => {
+    if (!editing || !r.edit) return null;
+    const opts = editOptions(r.edit, choices);
+    const choosing = r.edit.kind !== "property" && (r.edit.kind !== "attribute" || r.edit.name === "PredefinedType");
+    const had = r.edit.kind === "classification" ? r.edit.current : undefined;
+    return <Fragment key={key}><dt>{r.name}</dt>
+      <dd className="prow prow-edit">
+        <form className="pset-edit" noValidate onSubmit={(e) => { e.preventDefault(); void save(r); }}>
+          {choosing ? (
+            <select value={editing.draft} aria-label={`New ${r.name}`} disabled={!opts || editing.saving}
+              onChange={(e) => setEditing({ ...editing, draft: e.target.value, error: undefined })}>
+              {!opts && <option value={editing.draft}>Reading the choices…</option>}
+              {r.edit.kind === "attribute" && <option value="">(none)</option>}
+              {r.edit.kind === "classification" && <option value="">{had !== undefined ? "(take it off)" : "Pick one…"}</option>}
+              {opts?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          ) : typeof r.raw === "boolean" ? (
+            <select value={editing.draft} aria-label={`New ${r.name}`} onChange={(e) => setEditing({ ...editing, draft: e.target.value })}>
+              <option value="yes">Yes</option><option value="no">No</option>
+            </select>
+          ) : (
+            <input autoFocus type={typeof r.raw === "number" ? "number" : "text"} value={editing.draft} aria-label={`New ${r.name}`}
+              onChange={(e) => setEditing({ ...editing, draft: e.target.value, error: undefined })}
+              onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
+          )}
+          <button type="submit" className="ibtn" aria-label={`Keep the new ${r.name}`} data-tip="Keep it (in the edit log)" data-tip-side="left"
+            disabled={editing.saving}><Check size={14} aria-hidden /></button>
+          <IconButton icon={X} label="Cancel" size={14} tip="left" onClick={() => setEditing(null)} />
+        </form>
+        {editing.error && <p className="edit-warn">{editing.error}</p>}
+        {r.edit.kind === "classification" && opts && !opts.some((o) => o.value !== String(had))
+          && <p className="hint">Its model has no other classification reference to give it.</p>}
+      </dd></Fragment>;
   };
   const all = sections(data);
   const list = filtered(all, filter);
@@ -251,35 +300,7 @@ export function PropertySets({ data, loading, rows: acts, onOpen, editor }: { da
             {s.rows.map((r, i) => {
               const key = `${s.title}/${r.name}/${i}`;
               const usable = !!acts && !!r.facet && acts.facets.has(r.facet) && r.raw !== undefined;
-              if (editor && r.edit && editing?.key === key) {
-                const opts = editOptions(r.edit, choices);
-                const choosing = r.edit.kind !== "property" && (r.edit.kind !== "attribute" || r.edit.name === "PredefinedType");
-                return <Fragment key={key}><dt>{r.name}</dt>
-                  <dd className="prow prow-edit">
-                    <form className="pset-edit" noValidate onSubmit={(e) => { e.preventDefault(); void save(r); }}>
-                      {choosing ? (
-                        <select value={editing.draft} aria-label={`New ${r.name}`} disabled={!opts || editing.saving}
-                          onChange={(e) => setEditing({ ...editing, draft: e.target.value, error: undefined })}>
-                          {!opts && <option value={editing.draft}>Reading the choices…</option>}
-                          {r.edit.kind === "attribute" && <option value="">(none)</option>}
-                          {opts?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
-                      ) : typeof r.raw === "boolean" ? (
-                        <select value={editing.draft} aria-label={`New ${r.name}`} onChange={(e) => setEditing({ ...editing, draft: e.target.value })}>
-                          <option value="yes">Yes</option><option value="no">No</option>
-                        </select>
-                      ) : (
-                        <input autoFocus type={typeof r.raw === "number" ? "number" : "text"} value={editing.draft} aria-label={`New ${r.name}`}
-                          onChange={(e) => setEditing({ ...editing, draft: e.target.value, error: undefined })}
-                          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
-                      )}
-                      <button type="submit" className="ibtn" aria-label={`Keep the new ${r.name}`} data-tip="Keep it (in the edit log)" data-tip-side="left"
-                        disabled={editing.saving}><Check size={14} aria-hidden /></button>
-                      <IconButton icon={X} label="Cancel" size={14} tip="left" onClick={() => setEditing(null)} />
-                    </form>
-                    {editing.error && <p className="edit-warn">{editing.error}</p>}
-                  </dd></Fragment>;
-              }
+              if (editor && r.edit && editing?.key === key) return form(key, r);
               return <Fragment key={key}><dt>{r.name}{r.fromType && !s.fromType && <span className="from-type" data-tip="Given by its type">Type</span>}</dt>
                 <dd className="prow">
                   {r.link && onOpen ? <button type="button" className="pset-link" onClick={() => onOpen(r.link!)} data-tip="Its own properties">{r.value}</button>
@@ -302,6 +323,9 @@ export function PropertySets({ data, loading, rows: acts, onOpen, editor }: { da
         </details>
       ))}
       {!list.length && <p className="hint">{filter ? `Nothing matches “${filter}”.` : "The model gives this element no properties."}</p>}
+      {editor && !filter && (editing?.key === ADD_CLASSIFICATION ? <dl className="kv">{form(ADD_CLASSIFICATION, ADDING)}</dl>
+        : <button type="button" className="pset-add" onClick={() => begin(ADD_CLASSIFICATION, ADDING)}
+          data-tip="Classify it with a reference its model has (kept in the edit log)"><Plus size={13} aria-hidden /> Add a classification</button>)}
     </div>
   );
 }

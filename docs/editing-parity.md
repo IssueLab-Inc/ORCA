@@ -36,7 +36,7 @@ Northbank has none of what real exports carry, so these paths were never exercis
 | 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | done (Nov 1) |
 | 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | done (Nov 1), but for a type edited for all its elements and a joined wall's neighbour re-trimmed |
 | 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | offset, join and disconnect done (Nov 1); bends at other angles, transitions on a carried resize and re-fitting a carried move later |
-| 3 | Editable properties: attributes, psets, type, material, classification, container | done (Nov 1); classifications by chat, MCP and the API, not yet from the panel |
+| 3 | Editable properties: attributes, psets, type, material, classification, container | done (Nov 1); classifications from the panel too |
 
 ## The consistency check (Tier 0b)
 
@@ -134,7 +134,9 @@ base quantities (they follow the body), a property its type gives (every element
 profiled element's material or type (its layers or profile come from its type).
 
 - **Panel:** a pencil on the element's own editable rows (docs/panels.md, "Properties"); the choices come from
-  `GET …/property-choices`, the change goes to `POST …/properties`.
+  `GET …/property-choices`, the change goes to `POST …/properties`. A classification row's pencil swaps the reference
+  for another in one change (`replace`) or takes it off; **Add a classification** gives it one more. A reference it
+  already has is refused, never given twice.
 - **Muse:** `edit_property`, kept at once, but only when the person's own message this turn says the new value or names
   the target (`chat._said`).
 - **Agents:** MCP `edit_property`, kept as the agent's.

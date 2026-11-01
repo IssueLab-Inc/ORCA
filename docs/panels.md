@@ -96,6 +96,8 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
   - **Change it** (a pencil on the rows of the element itself, Nov 1: [editing-parity.md](editing-parity.md), Tier 3):
     its Name, Description, Object type, Tag and Predefined type, a value in one of its own property sets (text, a
     number, yes or no), its type, its storey and its material, each from what its own model has (`property-choices`).
+    A classification's pencil swaps it for another of its model's references in one change, or takes it off
+    ("(take it off)"); **Add a classification** under the sets gives it one more (one it has is never offered).
     Enter or the tick keeps it in the edit log (Ctrl+Z takes it back); Esc or the cross leaves it. Base quantities
     (they follow the body), what its type gives (every element of the type has it), ranges, tables and the parts of a
     complex value have no pencil; the server refuses in words what would leave the model saying two things. The
