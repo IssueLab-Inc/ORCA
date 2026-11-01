@@ -151,7 +151,8 @@ def own_usage(scene: IfcScene, gid: str, label=consistency._label):
 @dataclass
 class TypeShare:
     """What an edit applied to the element's type (`scope: "type"`) changes for every element of it."""
-    kind: str               # "map": the shape its type draws for it; "profile": its type's profile set's section
+    kind: str               # "map": the shape its type draws; "profile": its profile set's section; "layers": its
+                            # layer set's thickness
     type_name: str
     others: list[str]       # the type's other elements in the scene: they follow
 
@@ -161,11 +162,12 @@ def _maps_from(e, rmap) -> bool:
     return body is not None and any(it.is_a("IfcMappedItem") and it.MappingSource == rmap for it in body.Items)
 
 
-def type_share(scene: IfcScene, gid: str, face_kind: str, label=consistency._label) -> TypeShare:
+def type_share(scene: IfcScene, gid: str, face, label=consistency._label) -> TypeShare:
     """What of its type an edit to this face would change, when the person applies it to the type: the shape the type
-    draws (a mapped body: any face) or the type's profile set (a side or radius: the section). Raises
-    `edits.Unsupported` in words when the edit changes nothing the type gives, or what it changes is not ORCA's to
-    change for every element (a layered type's layers)."""
+    draws (a mapped body: any face), the type's profile set (a side or radius: the section) or its layer set (a face
+    square to the layers: the thickness). Raises `edits.Unsupported` in words when the edit changes nothing the type
+    gives."""
+    face_kind = face.kind
     e = scene.entity(gid)
     model = scene.models[scene.index_of(gid)]
     rtype = ifcopenshell.util.element.get_type(e)
@@ -173,9 +175,19 @@ def type_share(scene: IfcScene, gid: str, face_kind: str, label=consistency._lab
         raise edits.Unsupported(f"{label(scene, gid)} has no type: the edit can only be its own")
     name = rtype.Name or rtype.is_a()
     usage = ifcopenshell.util.element.get_material(e, should_skip_usage=False)
-    if usage is not None and usage.is_a("IfcMaterialLayerSetUsage"):
-        raise edits.Unsupported(f"the layers of {name} are changed for every element in the authoring tool: leave "
-                                "Apply to the type off to change this one alone")
+    if usage is not None and usage.is_a("IfcMaterialLayerSetUsage") and usage.LayerSetDirection in consistency.AXES:
+        across = scene.placement(gid)[:3, consistency.AXES[usage.LayerSetDirection]]
+        if abs(float(np.asarray(face.normal, float) @ across)) > 0.99:   # a face square to its layers: its thickness
+            lset = usage.ForLayerSet
+            if ifcopenshell.util.element.get_material(rtype, should_skip_usage=True) != lset:
+                raise edits.Unsupported("its layer set is its own, not its type's: leave Apply to the type off")
+            others = [o.GlobalId for o in consistency.users(model, lset) if o != e and scene.has(o.GlobalId)]
+            for o in others:
+                ou = ifcopenshell.util.element.get_material(scene.entity(o), should_skip_usage=False)
+                if ou is None or not ou.is_a("IfcMaterialLayerSetUsage") or ou.LayerSetDirection not in consistency.AXES:
+                    raise edits.Unsupported(f"{label(scene, o)} has {name}'s layers without saying which way they run: "
+                                            "it cannot follow its type")
+            return TypeShare("layers", name, others)
     body = consistency._body(e)
     mapped = [it for it in (body.Items if body is not None else ()) if it.is_a("IfcMappedItem")]
     if mapped:
@@ -202,6 +214,14 @@ def type_share(scene: IfcScene, gid: str, face_kind: str, label=consistency._lab
 def hold(scene: IfcScene, gid: str, share: TypeShare) -> dict:
     """Before the edit, inside its transaction: what `to_type` needs of the shape the type draws for the element (the
     map, where it puts it, a copy of its target: the edit replaces the mapped body with the element's own)."""
+    if share.kind == "layers":
+        e = scene.entity(gid)
+        usage = ifcopenshell.util.element.get_material(e, should_skip_usage=False)
+        k = consistency.AXES[usage.LayerSetDirection]
+        v = consistency._local_verts(e)
+        if v is None:
+            raise edits.Unsupported("its body cannot be read: its type's layers cannot follow it")
+        return {"extent": (float(v[:, k].min()), float(v[:, k].max()))}
     if share.kind != "map":
         return {}
     e = scene.entity(gid)
@@ -220,14 +240,78 @@ def _drop(model, root) -> None:
     ifcopenshell.util.element.remove_deep2(model, root)
 
 
-def to_type(scene: IfcScene, gid: str, share: TypeShare, held: dict) -> list[str]:
+def _side_face(scene: IfcScene, gid: str, k: int, sign: int):
+    """A point in the middle of an element's face square to its local axis `k` (the high side for +1) and its outward
+    normal, world metres."""
+    v = consistency._local_verts(scene.entity(gid))
+    if v is None:
+        raise edits.Unsupported(f"the body of {consistency._label(scene, gid)} cannot be read")
+    p = (v.min(axis=0) + v.max(axis=0)) / 2
+    p[k] = v[:, k].max() if sign > 0 else v[:, k].min()
+    m = scene.placement(gid)
+    return m[:3, :3] @ p + m[:3, 3], m[:3, k] * sign
+
+
+def _grow_layers(scene, gid, share: TypeShare, held: dict, push) -> list[str]:
+    """The layer on each face the edit moved grows in the type's own set (its reference line kept, as for one wall),
+    and every other wall of the set has the face holding that layer pushed by as much, its reference line kept too."""
+    e = scene.entity(gid)
+    usage = ifcopenshell.util.element.get_material(e, should_skip_usage=False)
+    lset = usage.ForLayerSet
+    k = consistency.AXES[usage.LayerSetDirection]
+    s = scene.unit_scales[scene.index_of(gid)]
+    v = consistency._local_verts(e)
+    (lo0, hi0), lo1, hi1 = held["extent"], float(v[:, k].min()), float(v[:, k].max())
+    d_lo, d_hi = lo1 - lo0, hi1 - hi0
+    layers = list(lset.MaterialLayers)
+    positive = usage.DirectionSense != "NEGATIVE"
+    at_lo, at_hi = (layers[0], layers[-1]) if positive else (layers[-1], layers[0])
+    grow: dict[int, float] = {}
+    grow[at_lo.id()] = grow.get(at_lo.id(), 0.0) - d_lo
+    grow[at_hi.id()] = grow.get(at_hi.id(), 0.0) + d_hi
+    for layer in layers:
+        if layer.id() in grow:
+            t = float(layer.LayerThickness) * s + grow[layer.id()]
+            if t < MIN_LAYER_M:
+                n = layer.Material.Name if layer.Material else "a layer"
+                raise edits.Unsupported(f"its {n} layer would be {max(t, 0) * 1000:.0f} mm: pull it in less")
+            layer.LayerThickness = t / s
+    done = {usage.id()}
+    usage.OffsetFromReferenceLine = float(usage.OffsetFromReferenceLine or 0) + (d_lo if positive else d_hi) / s
+    # Each other wall: the face holding the first layer of the set grows by what that layer grew, the last likewise
+    g_first, g_last = grow.get(layers[0].id(), 0.0), grow.get(layers[-1].id(), 0.0)
+    if len(layers) == 1:   # one layer: on the side the edit moved, for every wall alike
+        g_first, g_last = (-d_lo if positive else d_hi), (d_hi if positive else -d_lo)
+    for other in share.others:
+        o = scene.entity(other)
+        ou = ifcopenshell.util.element.get_material(o, should_skip_usage=False)
+        ko, so = consistency.AXES[ou.LayerSetDirection], scene.unit_scales[scene.index_of(other)]
+        o_pos = ou.DirectionSense != "NEGATIVE"
+        g_lo, g_hi = (g_first, g_last) if o_pos else (g_last, g_first)
+        for sign, g in ((-1, g_lo), (1, g_hi)):
+            if abs(g) > consistency.LENGTH_TOL_M:
+                point, normal = _side_face(scene, other, ko, sign)
+                push(other, point, normal, g)
+        if ou.id() not in done:
+            done.add(ou.id())
+            ou.OffsetFromReferenceLine = float(ou.OffsetFromReferenceLine or 0) + (-g_lo if o_pos else g_hi) / so
+    return list(share.others)
+
+
+def to_type(scene: IfcScene, gid: str, share: TypeShare, held: dict, push=None) -> list[str]:
     """After the edit, inside its transaction: what the edit made of the element's shape or section becomes its type's,
     and every element of the type follows. A mapped body: the element's new solids, moved back into the map's own
     frame, are the type's shape, and the element draws it through its map again. A profile set: the new section is
-    the set's, and each other element's body takes it about its own placement (its cardinal point kept). Returns the
-    other elements that changed."""
+    the set's, and each other element's body takes it about its own placement (its cardinal point kept). A layer set:
+    the layer on the face moved grows, and each other wall's face holding that layer is pushed by as much (`push`:
+    the hand edits' own push, given an element, a point and normal on its face and how far). Returns the other
+    elements that changed."""
     e = scene.entity(gid)
     model = scene.models[scene.index_of(gid)]
+    if share.kind == "layers":
+        others = _grow_layers(scene, gid, share, held, push)
+        scene.refresh_bounds([gid, *others])
+        return others
     if share.kind == "map":
         body = consistency._body(e)
         rmap, inv = held["map"], np.linalg.inv(held["m"])
@@ -288,6 +372,9 @@ def _layers(scene, gid, was: Before, now, done: Synced, label):
     if abs(d_lo) <= consistency.LENGTH_TOL_M and abs(d_hi) <= consistency.LENGTH_TOL_M:
         return
     s = scene.unit_scales[scene.index_of(gid)]
+    total = sum(float(l.LayerThickness or 0) for l in usage.ForLayerSet.MaterialLayers) * s
+    if abs(total - (hi1 - lo1)) <= consistency.LENGTH_TOL_M:   # already true: an edit to its type grew them itself
+        return
     usage, words = own_usage(scene, gid, label)
     layers = list(usage.ForLayerSet.MaterialLayers)
     positive = usage.DirectionSense != "NEGATIVE"

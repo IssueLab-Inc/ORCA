@@ -264,12 +264,45 @@ def test_applied_to_its_type_a_deeper_section_deepens_every_beam_of_it_about_its
     assert_consistent(scene)
 
 
+def _layers(scene, gid):
+    usage = ue.get_material(scene.entity(gid), should_skip_usage=False)
+    return [round(float(l.LayerThickness), 6) for l in usage.ForLayerSet.MaterialLayers], usage
+
+
+def test_applied_to_its_type_a_thicker_wall_thickens_every_wall_of_it_on_the_same_layer(param):
+    ws, sid, scene, g = param
+    before = untouched(scene, g, "")
+    w2 = scene.bounds()[g["W2"]].copy()
+    op = {"op": "push_pull", "element": g["W1"], "face": "north face", "by_m": 0.05, "scope": "type"}
+    r = manual.check(ws, sid, op)
+    assert r["blocked"] is None and g["W2"] in r["changed"], r["blocked"]
+    assert "its type WT-250 too, and the 1 other element of it (each wall of it thicker on the same layer)" in r["summary"]
+    manual.apply(ws, sid, op)
+    (l1, u1), (l2, u2) = _layers(scene, g["W1"]), _layers(scene, g["W2"])
+    assert u1.ForLayerSet == u2.ForLayerSet and l1 == [0.015, 0.2, 0.085], "the insulation, on the face pushed"
+    assert ue.get_type(scene.entity(g["W1"])).Name == ue.get_type(scene.entity(g["W2"])).Name == "WT-250"
+    # W2 runs north with its layers running west (its local y): its insulation face is its west face
+    assert scene.bounds()[g["W2"]][:, 0] == pytest.approx([w2[0][0] - 0.05, w2[1][0]])
+    assert scene.bounds()[g["W2"]][:, 1:] == pytest.approx(w2[:, 1:])
+    for name in ("W1", "W2"):
+        assert ue.get_pset(scene.entity(g[name]), "Qto_WallBaseQuantities", "Width") == pytest.approx(0.3)
+    assert_consistent(scene)
+    ws.journal(sid).undo(scene)
+    assert untouched(scene, g, "") == before
+
+
+def test_applied_to_its_type_a_wall_pulled_in_through_a_layer_is_refused(param):
+    ws, sid, scene, g = param
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["W1"], "face": "south face", "by_m": -0.02, "scope": "type"})
+    assert r["blocked"] and "Plaster layer would be" in r["blocked"], r["blocked"]
+
+
 @pytest.mark.parametrize("name,op,words", [
-    ("W1", {"op": "push_pull", "face": "north face", "by_m": 0.05}, "layers of WT-250 are changed for every element"),
+    ("W1", {"op": "push_pull", "face": "top", "by_m": 0.2}, "changes nothing its type WT-250 gives"),
     ("SL1", {"op": "push_pull", "face": "top", "by_m": 0.05}, "has no type"),
     ("BM1", {"op": "push_pull", "face": "east end", "by_m": 0.5}, "changes nothing its type BT-UB gives"),
     ("F1", {"op": "move", "delta_m": [0, 0, 0.1]}, "only a push, pull or align changes what its type gives"),
-], ids=["layered type", "no type", "a length", "a move"])
+], ids=["a wall's height", "no type", "a length", "a move"])
 def test_applied_to_its_type_what_the_type_does_not_give_is_refused_in_words(param, name, op, words):
     ws, sid, scene, g = param
     r = manual.check(ws, sid, {**op, "element": g[name], "scope": "type"})

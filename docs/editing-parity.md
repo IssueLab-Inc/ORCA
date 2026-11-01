@@ -94,8 +94,15 @@ and again for each element). The edit changes what the type gives, for every ele
 - **A section the type's profile set gives** (a side or radius): the new profile is the set's, and each other element
   takes it about its own placement, its cardinal point kept: BM1's top pushed 50 mm makes BT-UB 450 mm deep, BM1's top
   at 3.25 m (the face pushed), BM2 25 mm deeper above and below its axis. No "(ORCA)" copy.
-- **Refused in words:** a layered type (its layers change in the authoring tool), an element without a type, an edit
-  that changes nothing the type gives (a length is each element's own), and every op but push/pull and align.
+- **A thickness the type's layer set gives** (a face square to the layers): the layer on that face grows in the
+  type's own set, the edited wall's reference line kept as for one wall, and every other wall of the set has the face
+  holding that layer pushed by as much through the hand edits' own push (`manual._push_face`: its openings, quantities
+  and refusals as a push's), its reference line kept too. W1's north face pushed 50 mm makes WT-250's insulation
+  85 mm; W2, whose layers run west, is 50 mm thicker on its west face; both 300 mm wide. A layer pulled in past
+  1 mm is refused, as for one wall.
+- **Refused in words:** an element without a type, an edit that changes nothing the type gives (a length or a height
+  is each element's own), a wall whose usage does not say which way its layers run, and every op but push/pull and
+  align.
 
 **A carried wall end** (`manual._retrims`). A wall moved with Take joined parts along brings each wall whose end is
 joined to it (a path join, ATSTART or ATEND on that wall's side) along: that end is pushed along its own axis so it meets

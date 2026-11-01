@@ -317,7 +317,7 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
                              f"{' and '.join(resized_ends)}: take joined parts along to add transitions"})
     if carries(op):
         params["carry"] = True
-    share = parametric.type_share(scene, gid, face.kind, label) if to_type(op) else None
+    share = parametric.type_share(scene, gid, face, label) if to_type(op) else None
     if share is not None:
         params["scope"] = "type"
     if opened:
@@ -336,7 +336,19 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     plan.extra.update(follow=follow, open_joints=opened, transitions=transitions)
     if share is not None:   # what the edit changes of the type is changed on purpose: every element of it is checked
         plan.extra.update(type_share=share, consistent=("type",) if share.kind == "map" else ("shared",))
+        if share.kind == "layers":
+            plan.summary += f" (each wall of it {'thicker' if by > 0 else 'thinner'} on the same layer)"
     return plan
+
+
+def _push_face(scene: IfcScene, gid: str, point, normal, by: float) -> list[str]:
+    """Push another element's face, found by a point and normal on it, as a hand push would (its own openings, layers
+    and quantities following): for an edit to a type that every element of it follows."""
+    face = faces.resolve(scene, gid, np.asarray(point, float), np.asarray(normal, float))
+    if float(np.asarray(face.normal, float) @ np.asarray(normal, float)) < 0.99:
+        raise edits.Unsupported(f"{label(scene, gid)} has no face there to follow its type")
+    sub = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": by})
+    return _make_push(scene, sub).changed
 
 
 def _opening_corners(scene: IfcScene, gid: str) -> list[np.ndarray]:
@@ -423,7 +435,8 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
     else:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled")
     _stretch_openings(scene, through, face, by)
-    followed = parametric.to_type(scene, gid, share, held) if share is not None else []
+    followed = parametric.to_type(scene, gid, share, held,
+                                     push=lambda g, p, n, by: _push_face(scene, g, p, n, by)) if share is not None else []
     made = edits.add_transitions(scene, gid, before, plan.extra["transitions"]) if before is not None else []
     for peer, cap in plan.extra.get("follow", []):   # its joined segment's end goes the same way: the joint holds
         edits.stretch(scene, peer, cap, -by, **hand)

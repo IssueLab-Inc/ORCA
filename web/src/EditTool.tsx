@@ -403,7 +403,7 @@ export const EditTool = forwardRef<EditToolHandle, {
             <input type="checkbox" checked={joined} onChange={(e) => { setJoined(e.target.checked); setCheck(null); viewer()?.preview([]); }} />
             {" "}Take joined parts along</label>)}
         {(tool === "push_pull" || tool === "align") && face && !refused && (
-          <label className="check-in edit-carry" data-tip={toType ? "Its type changes: every element of the type takes the new shape or section, each checked"
+          <label className="check-in edit-carry" data-tip={toType ? "Its type changes: every element of the type takes the new shape, section or thickness, each checked"
             : "This element only: a shape or section its type gives becomes its own"} data-tip-side="bottom">
             <input type="checkbox" checked={toType} onChange={(e) => { setToType(e.target.checked); setCheck(null); viewer()?.preview([]); }} />
             {" "}Apply to the type</label>)}
