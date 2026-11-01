@@ -166,7 +166,7 @@ Four layers, each applying to every open view (the toggle above covers only the 
 
 What wins: a hidden model, then a temporary hide or isolate, then the filters (the quick checkboxes), then the filters
 by property, then "round the focus". The clash pair, a fix preview and the agent's trials always show while they are on
-screen.
+screen, with the parts a fix carries along (a drain's bend, a duct's elbows), which are the model's own elements moved.
 
 **Selection.** A single click selects an element (as today) and now draws it in blue (`#2f8fdf`) with an outline in
 every view, a colour no other role uses. Its card adds Zoom to it, Hide, Isolate, Section box round it and Hide all /
