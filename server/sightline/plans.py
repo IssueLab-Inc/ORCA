@@ -66,8 +66,14 @@ class Plan:
 _trial = edits.trial_files
 
 
+def _move_asks(o: dict) -> list[str]:
+    """What to plan a move option again from: what it translates, or, when it translates nothing (a drain tilted
+    about its fixture with its other end free), the drain it tilts, which plans the same tilt."""
+    return list(o["moved"]) or [t["global_id"] for t in (o.get("edit") or {}).get("tilts", [])]
+
+
 def _in_trial_move(scene, it: Item, o: dict):
-    plan = connections.plan_move(scene, o["moved"], o["delta_m"], refit=connections.refit_moves())
+    plan = connections.plan_move(scene, _move_asks(o), o["delta_m"], refit=connections.refit_moves())
     if not plan.ok:   # never tried: it would pull a joint apart (the check reports which)
         broken = [verify.Hit(g, scene.entity(g).is_a(), "joint", 0.0) for g in plan.refused_at]
         return list(o["moved"]), set(o["moved"]), lambda clearance_m, owner: (broken, None)
@@ -571,7 +577,7 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
 
 
 def _keep_move(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
-    r = ws.apply(scene_id, o["moved"], o["delta_m"], expect=o.get("edit"))
+    r = ws.apply(scene_id, _move_asks(o), o["delta_m"], expect=o.get("edit"))
     if (o.get("edit") or {}).get("follow"):   # the joined walls' ends follow, as the trial had them
         scene = ws.scene(scene_id)
         followed = agent.follow_joined(scene, o["moved"], o["delta_m"])
@@ -632,8 +638,9 @@ class NotVerified(ValueError):
 
 
 def _candidate_move(o: dict, a: str, b: str) -> tuple[dict, str]:
-    # A move takes its whole run (agent._try_move): the side of the clash the run holds.
-    return {"delta_m": o["delta_m"]}, a if a in o["moved"] else b if b in o["moved"] else o["moved"][0]
+    # A move takes its whole run (agent._try_move): the side of the clash the run holds, or the drain it tilts.
+    changes = [*o["moved"], *(t["global_id"] for t in (o.get("edit") or {}).get("tilts", []))]
+    return {"delta_m": o["delta_m"]}, a if a in changes else b if b in changes else changes[0]
 
 
 def _candidate_offset(o: dict, a: str, b: str) -> tuple[dict, str]:
