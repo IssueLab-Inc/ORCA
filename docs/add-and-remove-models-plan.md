@@ -205,4 +205,5 @@ Work test-first: write the failing test, run it red, implement, run it green.
 | Nov 1 | 1.6 finish | PR #104 merged on the owner's word | `75dddf8` | 895 server tests (4 known failures), 240 web tests, build, runtime on port 8023 (build log) |
 | Nov 1 | 2.1 `api.ts`, 2.2 `Viewer.add` / `remove`, `sceneModels.ts` | done | `3d8c201` | `scene-models.test.mjs` (8), `viewer-load.test.mjs` (+3) |
 | Nov 1 | 2.3 App: the Open menu, remove with its question, waiting, another layout reloads | done | `5542aa1` | 251 web tests, build |
-| Nov 1 | 2.4 docs (01, 03, 12, 13, 18, 20, 22; spec; CLAUDE.md status) and 2.5 runtime checks | done | (the docs commit) | Chromium on port 8023: every check in the list above (build log) |
+| Nov 1 | 2.4 docs (01, 03, 12, 13, 18, 20, 22; spec; CLAUDE.md status) and 2.5 runtime checks | done | `0d60e14` | Chromium on port 8023: every check in the list above (build log) |
+| Nov 1 | 2.6 finish | PR #106 open, awaiting the owner | `0d60e14` | 251 web tests, build, 894 server tests (known failures), runtime (build log) |
