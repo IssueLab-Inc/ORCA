@@ -5,7 +5,8 @@ import { compiled } from "./app-host.mjs";
 
 const three = import.meta.resolve("three");
 const views = await compiled("../src/viewer/views.ts", { three });
-const d = await import(await compiled("../src/viewer/drawing.ts", { three, "./views": views }));
+const d = await import(await compiled("../src/viewer/drawing.ts", { three, "./views": views,
+  "./origin": await compiled("../src/viewer/origin.ts", { three }) }));
 const levels = [{ name: "Level 01", elevation_m: 0, height_m: 4 }, { name: "Level 02", elevation_m: 4, height_m: 4 }, { name: "Roof", elevation_m: 8, height_m: null }];
 const model = new THREE.Box3(new THREE.Vector3(-10, -1, -8), new THREE.Vector3(10, 12, 8));
 const rect = { x: 0, y: 0, w: 400, h: 300 };

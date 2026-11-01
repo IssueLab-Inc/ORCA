@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
 import { patchModel, removeElements, ROOM, type ElementMesh } from "./patch";
 import { creased, CREASE_DEGREES } from "./normals";
+import { origin, pointToIfc, pointToThree, serverVerts, setOrigin } from "./origin";
 import { coplanar, pushMatrix, signedMm, toIfcAxes, toThree } from "./edit";
 import { ViewCube } from "./cube";
 import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
@@ -20,11 +21,12 @@ const PURPLE = new THREE.Color("#8e44ad");  // one element on both sides: a port
 const GREY = new THREE.Color("#b9c2cc");
 const GHOST = new THREE.Color("#9aa7b4");
 
-// The server works in IFC axes (metres, Z up); web-ifc and three.js are Y up.
+// The server works in IFC axes (metres, Z up); web-ifc and three.js are Y up. A delta is only turned; a point is also
+// drawn relative to the models' origin (viewer/origin.ts).
 export function serverDeltaToViewer([dx, dy, dz]: number[]): THREE.Vector3 {
   return new THREE.Vector3(dx, dz, -dy);
 }
-export const serverPointToViewer = serverDeltaToViewer;
+export const serverPointToViewer = ([x, y, z]: number[]): THREE.Vector3 => pointToThree(x, y, z);
 
 type Found = { model: LoadedModel; el: LoadedElement };
 /** A model's batches: its solid mesh, and its see-through one when it has see-through elements. */
@@ -274,9 +276,13 @@ export class Viewer {
     onDrawn?: (count: number, elements: number) => void) {
     // Parse the entire replacement off-screen. A failed or superseded load leaves the usable scene intact.
     const staged: LoadedModel[] = [];
+    // The first file picks the origin the models are drawn from; the rest are placed from it, so they stay aligned.
+    let at: [number, number] | null = null;
     try {
       for (const bytes of files) {
-        staged.push(await loadIfc(bytes));
+        const m = await loadIfc(bytes, at);
+        at ??= m.origin ?? null;
+        staged.push(m);
         if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
         if (onDrawn) {
           onDrawn(staged.length, staged.reduce((n, m) => n + m.stats.elements, 0));
@@ -291,6 +297,7 @@ export class Viewer {
     this.clearFocusCache();
     for (const m of this.models) { this.scene.remove(...batches(m)); disposeBatches(m); }
     this.models = staged.map((m) => this.adopt(m));
+    setOrigin(at);
     this.pane3d.hidden = !this.models.length;
     for (const pane of this.panes) pane.el.hidden = !this.models.length;
     this.sceneChanged();
@@ -312,7 +319,7 @@ export class Viewer {
   /** Swap one federated file for a new version of it (after an edit was accepted on the server). */
   async replace(index: number, bytes: Uint8Array, isCurrent: () => boolean = () => true) {
     const old = this.models[index];
-    const loaded = await loadIfc(bytes);
+    const loaded = await loadIfc(bytes, origin());
     // IFC parsing yields; a scene replaced during that work must never receive the old file.
     if (!isCurrent()) { disposeBatches(loaded); return; }
     const m = this.adopt(loaded);
@@ -888,10 +895,7 @@ export class Viewer {
   private addMeshes(meshes: Mesh[], material: THREE.Material) {
     const capped = !material.transparent;   // a fix's solid pieces are cut like the model; ghosts are not
     for (const p of meshes) {
-      const pos = new Float32Array(p.verts.length);
-      for (let i = 0; i < p.verts.length; i += 3) {
-        pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; // IFC Z up → three.js Y up
-      }
+      const pos = serverVerts(p.verts);   // IFC Z up → three.js Y up, from the origin
       // The server welds a preview's corners: creased normals keep a box's faces flat and a round duct smooth.
       const g = creased(pos, p.faces);
       const mesh = new THREE.Mesh(g, material);
@@ -1051,8 +1055,7 @@ export class Viewer {
           const own = p.global_id ? this.find(p.global_id) : null;
           const origin = p.origin ? this.find(p.origin) : null;
           const colour = (own ?? origin ?? first)?.el.baseColor ?? GREY;
-          const pos = new Float32Array(p.verts.length);
-          for (let i = 0; i < p.verts.length; i += 3) { pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; }
+          const pos = serverVerts(p.verts);
           const welded = new THREE.BufferGeometry();
           welded.setAttribute("position", new THREE.BufferAttribute(pos, 3));
           welded.setIndex(p.faces);
@@ -2131,7 +2134,8 @@ export class Viewer {
     const model = this.modelBox();
     const p = toIfc(point ?? zone.getCenter(new THREE.Vector3()));
     const runBox = this.boxOf([this.runOf(ids)].filter((g): g is string => !!g));
-    const run = runBox.isEmpty() ? null : { min: [runBox.min.x, -runBox.max.z, runBox.min.y], max: [runBox.max.x, -runBox.min.z, runBox.max.y] };
+    const run = runBox.isEmpty() ? null : { min: pointToIfc(new THREE.Vector3(runBox.min.x, runBox.min.y, runBox.max.z)),
+      max: pointToIfc(new THREE.Vector3(runBox.max.x, runBox.max.y, runBox.min.z)) };
     const around = zone.clone().expandByScalar(Math.max(this.reach(2, 0.2), zone.getSize(new THREE.Vector3()).length() * 0.5));
     let look: [number, number] | null = null;
     const section = this.panes.find((q) => q.spec.kind === "section");
@@ -2310,7 +2314,7 @@ export class Viewer {
     // As a click selects: through see-through context to the clash pair first, else whatever is under the pointer.
     const hit = this.pickAt(ev) ?? this.pickAt(ev, { ghosts: true });
     if (!hit?.normal) return null;
-    return { globalId: hit.globalId, point: toIfcAxes(hit.point), normal: toIfcAxes(hit.normal.clone().normalize()) };
+    return { globalId: hit.globalId, point: pointToIfc(hit.point), normal: toIfcAxes(hit.normal.clone().normalize()) };
   }
 
   /** Light faces (each one's coplanar triangles, over everything): the face to edit with an arrow to drag, a target
@@ -2321,7 +2325,7 @@ export class Viewer {
     this.editLabel.textContent = "";
     for (const face of list) {
       const f = this.find(face.globalId);
-      const n = toThree(face.normal).normalize(), p = toThree(face.point);
+      const n = toThree(face.normal).normalize(), p = pointToThree(face.point[0], face.point[1], face.point[2]);
       if (f) {
         const g = this.geometryOf(f), range = g.drawRange;
         const tris = coplanar(g.getAttribute("position") as THREE.BufferAttribute, g.getIndex()!, range.start, range.count, n, p);
@@ -2359,13 +2363,13 @@ export class Viewer {
     this.moved.delete(globalId);
     if (byM) {
       const box = this.instanceBox(f.el, new THREE.Box3());
-      const m = pushMatrix(box, toThree(point), toThree(normal), byM);
+      const m = pushMatrix(box, pointToThree(point[0], point[1], point[2]), toThree(normal), byM);
       if (m) this.moved.set(globalId, m);
     }
     this.syncDrawings(globalId);
     if (this.editArrow) {
       const n = toThree(normal).normalize();
-      this.editArrow.position.copy(toThree(point)).addScaledVector(n, byM ?? 0);
+      this.editArrow.position.copy(pointToThree(point[0], point[1], point[2])).addScaledVector(n, byM ?? 0);
     }
     this.editLabel.textContent = byM ? signedMm(byM) : "";
     this.version++;
@@ -2394,7 +2398,7 @@ export class Viewer {
   private startEditDrag(e: PointerEvent): boolean {
     const d = this.editDrag!;
     const r = this.pane3d.getBoundingClientRect(), cam = this.activeCamera();
-    const p = toThree(d.point), n = toThree(d.normal).normalize();
+    const p = pointToThree(d.point[0], d.point[1], d.point[2]), n = toThree(d.normal).normalize();
     const toPx = (v: THREE.Vector3) => { const q = v.clone().project(cam); return new THREE.Vector2((q.x + 1) / 2 * r.width, (1 - q.y) / 2 * r.height); };
     const at = new THREE.Vector2(e.clientX - r.left, e.clientY - r.top);
     const onArrow = this.editArrow && (() => {
@@ -2543,7 +2547,7 @@ export class Viewer {
    * edge, else the surface), in IFC axes. */
   snapPoint(ev: MouseEvent): { point: [number, number, number]; kind: SnapKind } | null {
     const hit = this.snap3d(ev);
-    return hit ? { point: toIfcAxes(hit.point), kind: hit.kind } : null;
+    return hit ? { point: pointToIfc(hit.point), kind: hit.kind } : null;
   }
 
   private snapAt(ev: MouseEvent): { point: THREE.Vector3; kind: SnapKind; pane: number | null } | null {
@@ -2945,7 +2949,10 @@ export function meetingZone(a: THREE.Box3, b: THREE.Box3): THREE.Box3 {
 /** The box of server triangles (metres, Z up) in viewer coordinates. */
 function meshBox(meshes: Mesh[]): THREE.Box3 {
   const box = new THREE.Box3();
-  for (const m of meshes) for (let i = 0; i < m.verts.length; i += 3) box.expandByPoint(new THREE.Vector3(m.verts[i], m.verts[i + 2], -m.verts[i + 1]));
+  for (const m of meshes) {
+    const v = serverVerts(m.verts);
+    for (let i = 0; i < v.length; i += 3) box.expandByPoint(new THREE.Vector3(v[i], v[i + 1], v[i + 2]));
+  }
   return box;
 }
 
