@@ -143,7 +143,7 @@ def test_an_open_joint_is_kept_from_chat_only_when_the_person_says_joint(tmp_pat
     ws = Workspace(samples=tmp_path)
     sid = ws.open(["run.ifc"])
     main = next(e for e in ws.scene(sid).model.by_type("IfcDuctSegment") if e.Tag == "SA-1").GlobalId
-    op = {"op": "push_pull", "element": main, "face": "east end", "by_m": -0.2, "alone": True}
+    op = {"op": "push_pull", "element": main, "face": "east end", "by_m": -0.2}
     model = Scripted([[("edit_check", {"op": op})], "It leaves the joint open.", [("edit_keep", {})], "Say so.",
                       [("edit_keep", {})], "Kept."])
     c = Chat(ws, model)

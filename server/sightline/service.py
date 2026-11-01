@@ -812,8 +812,10 @@ class Workspace:
                 out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.orca.step", moves, replace, add,
                                        step_removed(s, i, parts)))
             if j is not None and j.kept() and len(out) > 1:   # a zip: the log beside the models
-                (out_dir / "orca-edits.json").write_text(json.dumps([e.to_dict() for e in j.entries], indent=1, default=str))
-                (out_dir / "orca-edits.csv").write_text(self.edits_csv(scene_id))
+                (out_dir / "orca-edits.json").write_text(json.dumps([e.to_dict() for e in j.entries], indent=1, default=str),
+                                                         encoding="utf-8")
+                # UTF-8 on every host (names carry arrows and dashes); the CSV's own line ends, not the platform's
+                (out_dir / "orca-edits.csv").write_text(self.edits_csv(scene_id), encoding="utf-8", newline="")
                 out += [out_dir / "orca-edits.json", out_dir / "orca-edits.csv"]
             return out
 

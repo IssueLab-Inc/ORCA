@@ -187,9 +187,10 @@ export interface EditCheck {
   min_clearance_m?: number | null; checked_against?: number; changed?: string[]; created?: string[]; removed?: string[];
   open_ends?: string[]; preview?: Piece[] | null; before?: Piece[] | null;
   /** A follow-up the check suggests, in a few words: an align that meets the other face at one edge offers to clip it
-   * flush; a move that cannot keep its joints offers to move it alone. */
+   * flush; a move carrying its joined parts that cannot keep its joints offers to move it on its own. */
   offer?: EditOp | null; offer_words?: string;
-  /** The joints it leaves open (a pushed end whose neighbour cannot follow, a move alone): kept only when said. */
+  /** The joints it leaves open (an edit changes the face or element picked only, unless `carry` takes joined parts
+   * along): kept only when said. */
   joints?: { element: string; name: string }[];
 }
 export type EditKept = { entry: JournalEntry | null; files: number[]; changed: string[]; created: string[]; removed: string[];

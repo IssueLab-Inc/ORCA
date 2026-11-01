@@ -12,6 +12,7 @@ import { EditPanel } from "./EditPanel";
 import { alignDistance, EDIT_TOOLS, faceRef, keepLabel, OFFER, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState, type EditToolId } from "./viewer/edit";
 import type { FacePick, Viewer } from "./viewer/Viewer";
 
+const CARRY_KEY = "orca.edit.carry";
 const ICON: Record<EditToolId, LucideIcon> = { push_pull: PushPullIcon, align: AlignIcon, move: MoveIcon, void: VoidIcon,
   cut_by: CutByIcon, split: SplitIcon, remove_section: RemoveSectionIcon, clip: ClipIcon, delete: DeleteIcon };
 /** The tools this build makes; the rest say so in the palette. */
@@ -79,6 +80,11 @@ export const EditTool = forwardRef<EditToolHandle, {
   const carry = useRef<{ face: Face; pick: FacePick; target?: Face | null; targetPick?: FacePick | null; then?: EditOp } | null>(null);
   const act = coarse ? "Tap" : "Click";
   const element = face?.element ?? pick?.globalId ?? null;
+  /** Take joined parts along (`carry`): off by default, so an edit changes the face or element picked only (owner
+   * decision, Nov 1); remembered for the visit. */
+  const [joined, setJoined] = useState(() => { try { return sessionStorage.getItem(CARRY_KEY) === "1"; } catch { return false; } });
+  useEffect(() => { try { sessionStorage.setItem(CARRY_KEY, joined ? "1" : "0"); } catch { /* private window */ } }, [joined]);
+  const along = () => (joined ? { carry: true } : {});
 
   /** Back to picking (the tool stays): previews and highlights go. */
   function reset(keepTool = true) {
@@ -155,10 +161,10 @@ export const EditTool = forwardRef<EditToolHandle, {
     const r = faceRef(t, tp);
     return typeof r === "string" ? { element: t.element, face: r } : { element: t.element, ...r };
   };
-  const pushOp = (m: number): EditOp => ({ op: "push_pull", element: face!.element, face: own(), by_m: m });
+  const pushOp = (m: number): EditOp => ({ op: "push_pull", element: face!.element, face: own(), by_m: m, ...along() });
   const alignOp = (t = target!, tp = targetPick!, g = gap, h = how): EditOp => ({ op: "align", element: face!.element, face: own(),
-    gap_m: g, how: h, to: toFace(t, tp) });
-  const moveOp = (d: number[]): EditOp => ({ op: "move", element: element!, delta_m: d });
+    gap_m: g, how: h, to: toFace(t, tp), ...along() });
+  const moveOp = (d: number[]): EditOp => ({ op: "move", element: element!, delta_m: d, ...along() });
   const voidOp = (at = pick!.point): EditOp => ({ op: "void", element: face!.element, face: own(), at, shape: voidShape,
     ...(voidShape === "round" ? { diameter_m: voidSize[0] } : { width_m: voidSize[0], height_m: voidSize[1] }),
     ...(recess != null ? { depth_m: recess } : {}) });
@@ -360,6 +366,11 @@ export const EditTool = forwardRef<EditToolHandle, {
         {face && <div className="edit-face">
           <Tool size={14} aria-hidden /><span><b>{face.name}</b>{face.label ? <> of {face.label}</> : null}
             {face.size_m != null && face.kind !== "edge" ? <span className="why mono"> · {metres(face.size_m)}</span> : null}</span></div>}
+        {(tool === "push_pull" || tool === "align" || tool === "move") && element && !refused && (
+          <label className="check-in edit-carry" data-tip={joined ? "Joined parts come along: a straight joined to a pushed end follows it; a move takes its run and fittings"
+            : "This face or element only: joints it leaves open are listed, for you to keep"} data-tip-side="bottom">
+            <input type="checkbox" checked={joined} onChange={(e) => { setJoined(e.target.checked); setCheck(null); viewer()?.preview([]); }} />
+            {" "}Take joined parts along</label>)}
         {face && refused && (
           <div className="edit-offer" role="status">
             <p>{refused}{face.why_not ? `: ${face.why_not}` : ""}.</p>
@@ -430,11 +441,11 @@ export const EditTool = forwardRef<EditToolHandle, {
           </div>)}
         {check && !check.blocked && check.summary && <p className="edit-summary">{check.summary}</p>}
         {check?.warnings.map((w, i) => <p key={i} className="edit-warn">{w.text}{w.review ? <span className="chip">review: {w.review}</span> : null}</p>)}
-        {check?.offer && (() => {   // another way: Clip it flush (another tool), Move it alone (this one, alone)
+        {check?.offer && (() => {   // another way: Clip it flush (another tool), Move it on its own (this one, joined parts left)
           const o = check.offer, other = o.op !== tool && READY.has(o.op as EditToolId);
           const Icon = o.op === "clip" ? ClipIcon : MoveIcon;
           return (o.op === tool || other) && <div className="edit-offer-tools"><button type="button" className="ebtn btn small"
-            onClick={() => other ? offer(o.op as EditToolId, o) : void run(o)}
+            onClick={() => { if (other) offer(o.op as EditToolId, o); else { setJoined(false); void run(o); } }}
             data-tip={o.op === "clip" ? "Clip its end to that face, so it is flush all along" : "Move this element only: its joints are left open, for you to keep"}>
             <Icon size={14} aria-hidden /> {check.offer_words ?? OFFER[o.op as EditToolId] ?? "Try it"}</button></div>;
         })()}

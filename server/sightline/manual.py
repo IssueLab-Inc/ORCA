@@ -6,6 +6,10 @@ Each edit is a small JSON op, the same from the page, chat, voice and MCP:
     {"op": "align", "element": gid, "face": "cap:end", "to": {"element": gid2, "face": "west face"}, "gap_m": 0.025}
     {"op": "move", "element": gid, "delta_m": [0, 0, 0.3]}            (or "from" and "to" points)
 
+An edit changes the face or element picked and nothing else (owner decision, Nov 1): a joint it leaves open is listed
+and kept only when the person says so. `"carry": true` takes joined parts along instead: a straight neighbour follows a
+pushed cap, a move takes its run and fittings.
+
 `resolve` reads the op against the model (which face, how far, what it changes) without editing anything; `make`
 edits in place, inside the caller's transaction, raising `edits.Unsupported` with a reason. `check` makes the edit in
 a trial and measures it: what it clears, what it hits that it did not before (or hits harder), the nearest gap. `apply`
@@ -43,8 +47,14 @@ class NotKept(ValueError):
     """The edit was not kept: refused, changed since its check, or it would make clashes nobody accepted."""
 
 
+def carries(op: dict) -> bool:
+    """Whether the edit takes joined parts along (`carry`); by default it changes the picked face or element only.
+    The old opt-out `alone` is still read: it never carries."""
+    return bool(op.get("carry")) and not op.get("alone")
+
+
 class Offered(edits.Unsupported):
-    """Refused as asked, with another way the page can offer (an op): "Move it alone"."""
+    """Refused as asked, with another way the page can offer (an op): "Move it on its own"."""
 
     def __init__(self, message: str, offer: dict, words: str):
         super().__init__(message)
@@ -259,7 +269,7 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     follow, opened = [], []
     if face.kind in ("cap", "plane", "side"):
         for port, other, peer in _joints_at(scene, gid, plane_point(scene, gid, face), face.normal):
-            cap = None if op.get("alone") else _follows(scene, gid, face, peer, other)
+            cap = _follows(scene, gid, face, peer, other) if carries(op) else None
             if cap is not None:   # a straight segment on its axis: it stretches too, and the joint moves and holds
                 length = edits.run_of(scene, peer).length_m
                 if length - by < MIN_HAND_M - 1e-9:
@@ -287,8 +297,8 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     if face.kind == "radial" and scene.entity(gid).is_a("IfcFlowSegment"):
         warn.append({"rule": "size", "review": "services",
                      "text": f"{label(scene, gid)} changes size: its designer must confirm what it carries"})
-    if op.get("alone"):
-        params["alone"] = True
+    if carries(op):
+        params["carry"] = True
     if opened:
         warn.append(_open_joint_words(scene, gid, opened))
     kept = f"; {', '.join(label(scene, p) for p, _ in follow)} {'shorter' if by > 0 else 'longer'} so the joint holds" if follow else ""
@@ -404,7 +414,7 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
         raise edits.Unsupported("move it at least 0.5 mm")
     params = {"op": "move", "element": gid, "delta_m": [round(float(x), 6) for x in delta]}
     words = connections.move_words(delta.tolist())
-    if op.get("alone"):   # the element only: every joint it has is left open, kept only when the person says so
+    if not carries(op):   # the element only: every joint it has is left open, kept only when the person says so
         opened = []
         for port in ifcopenshell.util.system.get_ports(scene.entity(gid)):
             other = ifcopenshell.util.system.get_connected_port(port)
@@ -412,15 +422,17 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
             if owner is not None:
                 opened.append({"element": owner.GlobalId, "name": label(scene, owner.GlobalId), "port": port.GlobalId})
         warn = structure_warnings(scene, gid, "the move") + ([_open_joint_words(scene, gid, opened)] if opened else [])
-        return Plan("move", gid, {**params, "alone": True}, {scene.index_of(gid)}, [gid],
-                    f"{label(scene, gid)} moved {words} on its own", "move", float(np.linalg.norm(delta)), gated=[gid],
+        return Plan("move", gid, params, {scene.index_of(gid)}, [gid],
+                    f"{label(scene, gid)} moved {words}{' on its own' if opened else ''}", "move",
+                    float(np.linalg.norm(delta)), gated=[gid],
                     warnings=warn, extra={"plan": connections.MovePlan([gid], [float(x) for x in delta]), "open_joints": opened})
     run = connections.run(scene, gid)
     plan = connections.plan_move(scene, run, delta.tolist())
     if not plan.ok:
-        raise Offered(f"it cannot keep its joints: {plan.refused}", {**params, "alone": True}, "Move it alone")
+        raise Offered(f"it cannot keep its joints: {plan.refused}", params, "Move it on its own")
     changed = plan.changed()
     with_run = f" with its run ({len(run)} pieces)" if len(run) > 1 else ""
+    params = {**params, "carry": True}
     return Plan("move", gid, params, {scene.index_of(g) for g in changed}, changed,
                 f"{label(scene, gid)} moved {words}{with_run}", "move",
                 float(np.linalg.norm(delta)), gated=list(run), warnings=structure_warnings(scene, gid, "the move"),
@@ -428,7 +440,7 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
 
 
 def _make_move(scene: IfcScene, plan: Plan) -> Made:
-    if plan.params.get("alone"):
+    if not plan.params.get("carry"):
         model = scene.models[scene.index_of(plan.element)]
         for j in plan.extra.get("open_joints", []):
             ifcopenshell.api.run("system.disconnect_port", model, port=model.by_guid(j["port"]))
@@ -493,20 +505,20 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     if how == "stretch":
         if "push_pull" not in face.allows:
             raise edits.Unsupported(f"its {face.name} cannot be stretched: move it instead")
-        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t, "alone": op.get("alone")})
+        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t, "carry": carries(op)})
         plan.summary = f"{face.name} of {label(scene, gid)} stretched {_mm(t)} {'out' if t > 0 else 'in'}, {where} the {target}{meets}"
     elif how == "move":
         try:
-            plan = _resolve_move(scene, {"op": "move", "element": gid, "delta_m": (na * t).tolist(), "alone": op.get("alone")})
-        except Offered as e:   # the align itself, alone
-            raise Offered(str(e), {**op, "alone": True}, e.words) from None
+            plan = _resolve_move(scene, {"op": "move", "element": gid, "delta_m": (na * t).tolist(), "carry": carries(op)})
+        except Offered as e:   # the align itself, on its own
+            raise Offered(str(e), {k: v for k, v in op.items() if k not in ("carry", "alone")}, e.words) from None
         plan.summary = f"{label(scene, gid)} moved {_mm(t)} so its {face.name} is {where} the {target}{meets}"
     else:
         raise ValueError("how is stretch or move")
     plan.op = "align"
     plan.params = {"op": "align", "element": gid, "face": spec(face), "to": op.get("to"), "gap_m": gap, "how": how,
                    "by_m": t, **({"delta_m": plan.params["delta_m"]} if how == "move" else {}),
-                   **({"alone": True} if op.get("alone") else {})}
+                   **({"carry": True} if carries(op) else {})}
     if other:
         plan.touching.add(other)
     plan.extra["how"] = how

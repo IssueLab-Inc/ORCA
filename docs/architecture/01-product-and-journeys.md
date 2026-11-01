@@ -233,8 +233,9 @@ model call, no API key. **Go to the clash** frames the pair.
 
 **The Edit tool** (P, [docs/manual-edits.md](../manual-edits.md)) edits any element by hand: push or pull a face,
 align a face to another, move, cut a void, cut by another element's shape, split, take a section out, clip an end,
-delete. Each edit is checked by geometry on the server before Keep; one that makes clashes keeps only as **Keep with N
-clashes**, never as verified. Muse can do the same in chat or by voice ("make this beam 200 mm longer at the east
+delete. An edit changes the face or element picked and nothing else unless **Take joined parts along** is on; a joint
+it leaves open keeps only as **Keep with N open joints**. Each edit is checked by geometry on the server before Keep;
+one that makes clashes keeps only as **Keep with N clashes**, never as verified. Muse can do the same in chat or by voice ("make this beam 200 mm longer at the east
 end"), and keeps it only on the person's own "keep it". Every kept edit (fixes too) goes in the **Edits** panel's log,
 tied to its clash and to the fix it follows, with Undo (Ctrl+Z) and Redo; the report, BCF and the exported IFC carry it.
 

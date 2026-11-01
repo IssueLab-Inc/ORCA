@@ -1963,3 +1963,14 @@ App's scene reset and this log, both sides kept). Fixed:
   - the palette says P again stops editing.
 
 Checked: 771 server tests, 222 web tests, build clean, `test_docs_map`.
+
+**Nov 1, hand edits change the face or element picked only** (owner: "when we are extending a face, it's pulling
+everything"; [docs/editing-parity.md](../editing-parity.md), slice 0a). Push/pull, align and move no longer take joined
+parts along by default: a joint they leave open is listed and kept only as **Keep with N open joints**. `carry: true`
+(`manual.carries`; the Edit tool's **Take joined parts along**, off by default, kept for the visit) brings back the
+following segment and the carried run; a carried move that cannot keep its joints offers **Move it on its own**. The
+fix agent's moves are unchanged. Also: the export's `orca-edits.csv`/`.json` are written as UTF-8 with the CSV's own
+line ends (Windows wrote cp1252 and doubled carriage returns). Checked: 768 server tests pass (the five that fail on a
+clean checkout of this branch on this machine fail the same: two detection, two PDF fonts, one voice socket), 222 web
+tests, build clean; in Chromium on Northbank, the supply main moved up 50 mm on its own (two tees left open, kept as
+E1 with "Keep with 2 open joints", Ctrl+Z undid it), and carried it is refused past 12 parts with the offer.

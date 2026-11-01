@@ -19,11 +19,22 @@ Muse and agents know what changed, not only the geometry. It is new work, writte
 **Second round (Nov 1, after the owner's testing: "too many restrictions on the editing features").**
 
 7. An edit that cannot keep a port joint is allowed behind a confirm, **Keep with 1 open joint**, logged with a services
-   review. Where it can, ORCA keeps the joint instead (the joined segment stretches with it).
+   review. ORCA keeps the joint instead (the joined segment stretches with it) only when joined parts are carried
+   (decision 10).
 8. Pushing an I, U, C, L or T section's outer side changes the section, with a structure review warning.
 9. Bodies that are not plain extrusions are split, have a section taken out and are clipped with half-space clips.
    Plain extrusions keep their exact path. People may leave 5 mm of a length or a width (`manual.MIN_HAND_M`); the fix
    agent keeps its 50 mm (`edits.MIN_PIECE_M`), and its paths are unchanged.
+
+**Third round (Nov 1, owner: "when we are extending a face, it's pulling everything").**
+
+10. **This face or element only, by default.** Push/pull, align and move change the face or element picked and nothing
+    else; a joint they leave open is listed under `joints` and kept only through **Keep with N open joints**. Taking
+    joined parts along is a choice (`carry: true`; the Edit tool's **Take joined parts along**, off by default): a
+    straight segment joined to a pushed cap follows it, a move takes its run and fittings (`connections.plan_move`), a
+    STEP part its touching group. The element's own openings still grow with a pushed face: they belong to it. The old
+    opt-out `alone` is still read (it never carries). The fix agent's moves are unchanged: they carry
+    (`SIGHTLINE_CONNECTED_MOVES`). The wider program this starts is [editing-parity.md](editing-parity.md).
 
 ## The edit log (`server/sightline/journal.py`)
 
@@ -109,9 +120,9 @@ section warning) all check in 0.1–0.7 s.
 
 | Op | What it does | Requirements | ORCA's rules (warnings) |
 |---|---|---|---|
-| `push_pull` | A face out (+) or in (−) by metres. A thicker wall takes the openings through the pushed face with it, however it is drawn (an elevation's cap, a plan rectangle's side, a plan outline's edge): an opening is through the face when its far side on that side is at the face's plane or stands up to 200 mm proud of it, measured before the push, so a beam's web openings stay as they are when its end is pushed, and a slab's soffit recess when its top is. A face joined to another element by a port: when that element is a straight segment on the face's axis joined at its end, it stretches too (shorter when the face goes out) and the joint moves and holds; otherwise the joint is left open (`system.disconnect_port`, so the other element is checked as any other) and the check lists it under `joints`. `alone` leaves every joint open. Each such opening grows on that face (drawn through the wall or across it); a wall end pulled in past an opening is refused, naming it. A shared body gets its own copy first (`edits.make_unique`, styles kept; a type's mapped shape is refused) | as a resize: "may only be moved whole" refuses it, the largest move applies; what stretches with it is gated too | structure (a building's column, beam, slab, footing or pile, never a machine's part: `hosts.structural`; a transfer element names what stands on it: `hosts.transfer`); a section changed (`section`); a pipe's radius asks the services designer; an open joint asks services |
+| `push_pull` | A face out (+) or in (−) by metres. A thicker wall takes the openings through the pushed face with it, however it is drawn (an elevation's cap, a plan rectangle's side, a plan outline's edge): an opening is through the face when its far side on that side is at the face's plane or stands up to 200 mm proud of it, measured before the push, so a beam's web openings stay as they are when its end is pushed, and a slab's soffit recess when its top is. A face joined to another element by a port: the joint is left open (`system.disconnect_port`, so the other element is checked as any other) and the check lists it under `joints`. With `carry`, when that element is a straight segment on the face's axis joined at its end, it stretches too (shorter when the face goes out) and the joint moves and holds; any other joint is still left open. Each such opening grows on that face (drawn through the wall or across it); a wall end pulled in past an opening is refused, naming it. A shared body gets its own copy first (`edits.make_unique`, styles kept; a type's mapped shape is refused) | as a resize: "may only be moved whole" refuses it, the largest move applies; what stretches with it is gated too | structure (a building's column, beam, slab, footing or pile, never a machine's part: `hosts.structural`; a transfer element names what stands on it: `hosts.transfer`); a section changed (`section`); a pipe's radius asks the services designer; an open joint asks services |
 | `align` | One face flush with another (or a gap off it), by stretching it or by moving the element. Parallel faces: `t = ((pB − pA)·nB)/(nA·nB) − gap`. Faces up to 80° apart meet at the first corner of A (its corners from its solid's mesh, `faces.patch_vertices`): faces turned to each other end on B's outer side, faces turned the same way (level with) stay on the side A is on (`manual._first_contact`); the check offers **Clip it flush** (`offer`). Past 80° it says to clip instead. The target is a face of another element (by name or pick), a bare point and normal, or a **point** with no normal (a corner, an edge's midpoint or a point on an edge, snapped as a measure snaps: `snap` end, mid, edge): A's plane goes through it, the gap short of it. A face target is meant to be touched, so its clearance is waived | as push/pull or move | as those |
-| `move` | The element and the straight run it is in, by a vector or from one snapped point to another; joints kept (`connections.plan_move`). When they cannot be, the check offers **Move it alone** (`alone`: the element only, every joint left open, under `joints`) | as a move | structure; open joints → services |
+| `move` | The element only, by a vector or from one snapped point to another; every joint it has is left open, under `joints`. With `carry`, the element and the straight run it is in, joints kept (`connections.plan_move`); when they cannot be, the check offers **Move it on its own** (the op without `carry`) | as a move | structure; open joints → services |
 | `void` | A rectangular or round opening on any face with a plane (a cap, a side, an inner face, an outline edge, a mesh face, a clip's plane), centred where it was clicked (on the face's plane), across the face and up it (`edits.face_axes`). Through: rays from just inside each point of its outline find where it comes out (the deepest, refused past 1 m), plus 10 mm proud of each face; when no ray comes out, as deep as the element is behind the face (its mesh), refused past 1 m; or a recess to a given depth. An `IfcOpeningElement` (OPENING or RECESS) voiding the element (`edits.cut_void`, reusing the penetration's void builders) | a cut: only where the group may be edited in any way (`requirements.can_cut`) | ORCA's hard rules for hosts (`hosts.hard_rule`: a transfer element, a column, glazing…) and structure; an outline within 50 mm of the face's edge is "a notch more than a hole" |
 | `cut_by` | Cut an element where another one is, with a gap all round: an opening shaped as the cutter grown by the gap (`edits.cut_by_shape`). Exact for extrusions (a rectangle +2 gaps, a circle +1, an outline offset by `edits._grown`, an I, U or L section as its bounding rectangle, the depth +2 gaps), in the cut element's file and units; any other cutter (a fitting's mesh) is welded and pushed out along its vertex normals, and the warning says the gap is approximate. Refused when the cutter does not reach it | a cut | as a void |
 
@@ -146,9 +157,10 @@ Measured on Northbank: a check takes about 1.1 s (a wall end pushed 200 mm into 
 panels hit); clash #1's duct made 50 mm deeper reads "Makes 1 clash: girder −350 mm" and keeps only as "Keep with 1
 clash". The answer key still passes 3/3 first try at Rev04's heights after the trial moves moved into `edits.scratch`.
 
-On the run fixture: the supply main's east end pushed 300 mm makes it 6.3 m and its end segment 0.7 m, still joined at
-x = 6.3; pulled in 200 mm alone it leaves the joint open, refused until "keep it with 1 open joint", and undone the
-joint is back.
+On the run fixture: the supply main's east end pushed 300 mm makes it 6.3 m and leaves its end segment as it was, the
+joint open (kept only with "keep it with 1 open joint"); carried, the end segment becomes 0.7 m, still joined at
+x = 6.3. Pulled in 200 mm it leaves the joint open, refused until "keep it with 1 open joint", and undone the joint is
+back.
 
 ## Muse, voice and agents
 
@@ -208,7 +220,9 @@ joint is back.
   a snapped corner, edge midpoint or edge point), a gap and stretch-or-move, and previews at once from the two picks
   (`alignDistance`, `pointDistance`) before the server's check replaces it; move takes a vector or two snapped points.
   Keep, or **Keep with N clashes** / **Keep with 1 clash · 1 open joint** (`keepLabel`); a check's offer is a button
-  (**Clip it flush**, **Move it alone**). Esc steps back one thing at a time.
+  (**Clip it flush**, **Move it on its own**, which also turns carrying off). **Take joined parts along** (push/pull,
+  align and move; off by default, remembered for the visit in `sessionStorage` `orca.edit.carry`) sends `carry`. Esc
+  steps back one thing at a time.
 - **No dead ends**: a face the tool cannot take is still chosen and lit; the panel says why and offers the tools it does
   take as buttons ("Align it", "Move it", "Cut a void"), keeping the face across the change of tool.
 - **The Edits panel** (`web/src/EditPanel.tsx`, a tab in the right side bar beside Clash, Plan and Chat): the log,

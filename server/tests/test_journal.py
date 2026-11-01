@@ -164,13 +164,29 @@ def test_one_detection_run_after_an_edit_kept_with_clashes_is_free(client):
     assert not j.free_rerun("E9") and j.free_rerun("E1") and not j.free_rerun("E1")
 
 
-def test_a_joined_end_pushed_moves_the_joint_with_it_when_its_peer_runs_on(client):
+def test_a_joined_end_pushed_changes_that_face_only_and_leaves_its_joint_open(client):
     from sightline import manual
     c, ws = client
     sid, scene, main, beam = open_run(c)
     tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    before = edits.run_of(scene, tail)
     r = manual.check(ws, sid, {"op": "push_pull", "element": main, "face": "east end", "by_m": 0.3})
+    assert r["blocked"] is None and [j["element"] for j in r["joints"]] == [tail] and not r["passed"]
+    assert r["targets"] == [main] and "shorter" not in r["summary"] and "carry" not in r["op"]
+    manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"], accept_joints=1)
+    after = edits.run_of(scene, tail)
+    assert edits.run_of(scene, main).length_m == pytest.approx(6.3)
+    assert after.length_m == pytest.approx(before.length_m) and np.allclose(after.start, before.start)
+
+
+def test_a_joined_end_pushed_moves_the_joint_with_it_when_its_peer_is_carried(client):
+    from sightline import manual
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    r = manual.check(ws, sid, {"op": "push_pull", "element": main, "face": "east end", "by_m": 0.3, "carry": True})
     assert r["blocked"] is None and r["joints"] == [] and "shorter so the joint holds" in r["summary"]
+    assert r["op"]["carry"] is True
     manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"])
     assert edits.run_of(scene, main).length_m == pytest.approx(6.3) and edits.run_of(scene, tail).length_m == pytest.approx(0.7)
     assert scene.element(main).connected == [tail]
@@ -183,7 +199,7 @@ def test_a_joint_left_open_is_kept_only_when_said_and_undone_with_the_edit(clien
     c, ws = client
     sid, scene, main, beam = open_run(c)
     tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
-    op = {"op": "push_pull", "element": main, "face": "east end", "by_m": -0.2, "alone": True}
+    op = {"op": "push_pull", "element": main, "face": "east end", "by_m": -0.2}
     r = manual.check(ws, sid, op)
     assert r["blocked"] is None and [j["element"] for j in r["joints"]] == [tail] and not r["passed"]
     assert any(w["rule"] == "open_joint" and w["review"] == "services" for w in r["warnings"])
@@ -196,15 +212,27 @@ def test_a_joint_left_open_is_kept_only_when_said_and_undone_with_the_edit(clien
     assert scene.element(main).connected == [tail] and edits.run_of(scene, main).length_m == pytest.approx(6.0)
 
 
-def test_a_move_that_cannot_keep_its_joints_offers_to_move_it_alone(client, monkeypatch):
+def test_a_move_takes_the_element_only_unless_its_run_is_carried(client):
+    from sightline import manual
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    r = manual.check(ws, sid, {"op": "move", "element": tail, "delta_m": [0, 0, 0.1]})
+    assert r["blocked"] is None and r["targets"] == [tail] and [j["element"] for j in r["joints"]] == [main]
+    assert "on its own" in r["summary"]
+    carried = manual.check(ws, sid, {"op": "move", "element": tail, "delta_m": [0, 0, 0.1], "carry": True})
+    assert carried["blocked"] is None and main in carried["targets"] and carried["joints"] == []
+
+
+def test_a_carried_move_that_cannot_keep_its_joints_offers_to_move_it_on_its_own(client, monkeypatch):
     from sightline import manual
     c, ws = client
     sid, scene, main, beam = open_run(c)
     tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
     refused = connections.MovePlan([tail], [0, 0.3, 0], refused="the main it runs from cannot follow", code="joined")
     monkeypatch.setattr(connections, "plan_move", lambda *a, **k: refused)
-    r = manual.check(ws, sid, {"op": "move", "element": tail, "delta_m": [0, 0.3, 0]})
-    assert "cannot keep its joints" in r["blocked"] and r["offer"]["alone"] is True and r["offer_words"] == "Move it alone"
+    r = manual.check(ws, sid, {"op": "move", "element": tail, "delta_m": [0, 0.3, 0], "carry": True})
+    assert "cannot keep its joints" in r["blocked"] and "carry" not in r["offer"] and r["offer_words"] == "Move it on its own"
     alone = manual.check(ws, sid, r["offer"])
     assert alone["blocked"] is None and [j["element"] for j in alone["joints"]] == [main] and "on its own" in alone["summary"]
     y = scene.placement(tail)[1, 3]

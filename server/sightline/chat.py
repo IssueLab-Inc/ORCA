@@ -196,7 +196,10 @@ TOOLS = [
         "[x, y, z], shape: rect|round, width_m, height_m | diameter_m, depth_m (omit to go through)}, {op: cut_by, "
         "element, cutter, gap_m}, {op: split, element, at}, {op: remove_section, element, from, to}, {op: delete, "
         "element}, {op: clip, element, to: {element, face}, gap_m}. `element` may be \"selected\", and `face` \"selected\" "
-        "for the face the user chose in the Edit tool; other faces by name from list_faces. The result says what it clears, what it would hit (clashes), its warnings, or why it cannot be made.",
+        "for the face the user chose in the Edit tool; other faces by name from list_faces. An edit changes only that "
+        "face or element: a joint it leaves open is listed. Add carry: true to push_pull, align or move only when the "
+        "user asks to take joined parts along (a joined straight follows a pushed end; a move takes its run and "
+        "fittings). The result says what it clears, what it would hit (clashes), its warnings, or why it cannot be made.",
         {"op": {"type": "object"}}, ["op"]),
     _fn("edit_keep", "Keep the hand edit you checked last, only when the user's own latest message says to keep it "
         "(keep it, apply it, do it, yes). When it makes clashes, only when they said to keep it with the clashes; pass "

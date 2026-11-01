@@ -566,8 +566,11 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         by_m} | {op: align, element, face, to: {element, face}, gap_m, how: stretch|move} | {op: move, element,
         delta_m} | {op: void, element, face, at, shape: rect|round, width_m, height_m | diameter_m, depth_m?} |
         {op: cut_by, element, cutter, gap_m} | {op: split, element, at} | {op: remove_section, element, from, to} |
-        {op: delete, element} | {op: clip, element, to: {element, face}, gap_m}. Returns what it clears, the clashes it
-        would make, its warnings (who must review), or why it cannot be made (`blocked`)."""
+        {op: delete, element} | {op: clip, element, to: {element, face}, gap_m}. An edit changes only that face or
+        element and lists the joints it leaves open; add `carry: true` to push_pull, align or move only when the person
+        asks to take joined parts along (a joined straight follows a pushed end; a move takes its run and fittings).
+        Returns what it clears, the clashes it would make, its warnings (who must review), or why it cannot be made
+        (`blocked`)."""
         link = call(ctx, "check_edit", {"op": op.get("op") if isinstance(op, dict) else None})
         r = manual.check(W(), link.ctx.scene_id, op)
         link.publish({"type": "ui", "action": "edit_preview", "check": r})
