@@ -53,6 +53,23 @@ def test_a_fix_that_moves_a_joined_wall_off_its_join_is_refused_with_why(param):
     assert not ws.journal(sid).entries
 
 
+def test_a_fix_that_moves_a_wall_across_brings_its_joined_wall_s_end_along(param):
+    ws, sid, scene, g = param
+    attempt, option = agent._try_move(scene, {"title": "slide it east", "delta_m": [0.3, 0, 0]}, g["W2"], 0.025)
+    assert option is not None, attempt.reason
+    assert option.edit["follow"] == [g["W1"]] and "'W1' follows it, so the join holds" in option.edit["summary"]
+    assert option.preview and scene.bounds()[g["W1"]][1][0] == pytest.approx(4.0), "the trial put everything back"
+    kept = plans.apply(ws, sid, [{**agent.asdict(option), "pair": [g["W2"], g["W1"]]}])
+    assert set(kept["changed"]) == {g["W1"], g["W2"]}
+    assert scene.bounds()[g["W1"]][1][0] == pytest.approx(4.3)
+    assert ue.get_pset(scene.entity(g["W1"]), "Qto_WallBaseQuantities", "Length") == pytest.approx(4.3)
+    (rel,) = [x for x in scene.entity(g["W1"]).ConnectedTo if x.is_a("IfcRelConnectsPathElements")]
+    assert consistency._join_gap(scene, rel) == pytest.approx(0.0, abs=1e-6)
+    (entry,) = ws.journal(sid).entries
+    ws.journal(sid).undo(scene)
+    assert scene.bounds()[g["W1"]][1][0] == pytest.approx(4.0) and scene.bounds()[g["W2"]][0][0] == pytest.approx(3.75)
+
+
 def test_a_kept_trim_of_a_typed_beam_brings_its_axis_and_quantities_along(param):
     ws, sid, scene, g = param
     attempt, option = agent.TRIES["trim"](scene, {"title": "trim the beam to the column"}, g["BM1"], g["C9"], 0.025)

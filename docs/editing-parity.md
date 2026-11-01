@@ -109,7 +109,7 @@ joined to it (a path join, ATSTART or ATEND on that wall's side) along: that end
 the moved wall as it did, in plan, through the hand edits' own push (its axis, layers, quantities and openings follow;
 refused as that push would be). W2 moved 500 mm east makes W1 500 mm longer at its east end; W1 moved 500 mm north makes
 W2 500 mm shorter at its south end; the join holds in both. A wall moved along its own line, or a join in line with
-it, is left open and listed, as for a move on its own. The fix agent's moves keep refusing a move off a join.
+it, is left open and listed, as for a move on its own. Muse's plain moves do the same (`agent.joined_ends`, below).
 IfcOpenShell's `geometry.regenerate_wall_representation` was not used: it redraws a wall from its layers, dropping
 a body ORCA or the authoring tool shaped some other way.
 
@@ -202,6 +202,13 @@ hears it in the next round ("cannot move it: it would leave its join with 'W2' o
 every keep route) does the same after each fix's edit and refuses all of them (`NotVerified`) when one still
 disagrees. Elements that carry nothing to keep (all of Northbank's) skip it and cost nothing. Penetrations only add an
 opening, and a combined fix's steps are fix kinds above.
+
+A plain move of a wall square to a wall path-joined at its end brings that end along, as a hand move with joined parts
+does (`agent.joined_ends`, `follow_joined` over `manual._retrims`): the trial pushes the end, checks both walls (each
+ignoring the other, as joined parts do), and the option carries `edit.follow` and the end's preview; its keep
+(`plans._keep_move`) and a plan's joint check (`_in_trial_move`) push it again, its file held with the move's
+(`EXTRA_FILES`). A move along the wall's own line still fails with the open join, so Muse hears why. Measured: W2 moved
+300 mm east by a fix makes W1 4.3 m, its quantity and join with it, one entry, undone whole.
 
 Measured on the fixture with a column at BM1's end: Muse's trim of the typed beam back to the column is kept with its
 `Axis` ending at 4.8 m and its `Qto_BeamBaseQuantities` Length 4.8 m, BM2 as it was.

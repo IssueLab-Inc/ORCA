@@ -73,7 +73,8 @@ def _in_trial_move(scene, it: Item, o: dict):
         return list(o["moved"]), set(o["moved"]), lambda clearance_m, owner: (broken, None)
     if plan.plain:
         scene.translate(o["moved"], tuple(o["delta_m"]))
-        return list(o["moved"]), set(o["moved"]), None
+        followed = agent.follow_joined(scene, o["moved"], o["delta_m"]) if (o.get("edit") or {}).get("follow") else []
+        return [*o["moved"], *followed], set(o["moved"]) | set(followed), None
     base = connections.baseline(scene, plan)   # what its stretched segments touch now, before the edit
     connections.apply_move(scene, plan)
 
@@ -139,7 +140,8 @@ IN_TRIAL = {"move": _in_trial_move, "offset": _in_trial_offset, "trim": _in_tria
             "resize": _in_trial_resize, "penetration": _in_trial_penetration, "seat": _in_trial_seat,
             "combined": _in_trial_combined}
 # The files a fix changes beyond its moved elements' (a penetration's provision for void goes in the service's file).
-EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]]}
+EXTRA_FILES: dict[str, Callable[[dict], list[str]]] = {"penetration": lambda o: [o["edit"]["service"]],
+                                                        "move": lambda o: (o.get("edit") or {}).get("follow") or []}
 # Kinds whose element keeps the contacts it had (a trimmed member is framed into its neighbours, a service through a
 # wall stays where it is): only contacts new or worse count, and the partner must clear (a trim may touch it).
 KEEPS_CONTACTS = {"trim": lambda o: o["moved"], "seat": lambda o: o["moved"], "penetration": lambda o: [o["edit"]["service"]]}
@@ -569,7 +571,15 @@ def build_root_cause(ws: Workspace, scene_id: str, report_id: str, hub: str, fix
 
 
 def _keep_move(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
-    return ws.apply(scene_id, o["moved"], o["delta_m"], expect=o.get("edit")), []
+    r = ws.apply(scene_id, o["moved"], o["delta_m"], expect=o.get("edit"))
+    if (o.get("edit") or {}).get("follow"):   # the joined walls' ends follow, as the trial had them
+        scene = ws.scene(scene_id)
+        followed = agent.follow_joined(scene, o["moved"], o["delta_m"])
+        files = {scene.index_of(g) for g in followed}
+        scene._edited.update(files)
+        scene.bump(files)
+        r = {**r, "changed": list(dict.fromkeys([*r["changed"], *followed])), "files": sorted({*r["files"], *files})}
+    return r, []
 
 
 def _keep_offset(ws: Workspace, scene_id: str, o: dict) -> tuple[dict, list[str]]:
@@ -774,7 +784,8 @@ def apply(ws: Workspace, scene_id: str, options: list[dict], *, source: str | No
             rec.clashes = [{"id": ids[k], "pair": list(option_pair(o)[:2])} for k, o in enumerate(checked)]
             rec.check = {"verified": True, "min_clearance_m": min((o["min_clearance_m"] for o in checked
                                                                    if o.get("min_clearance_m") is not None), default=None)}
-            moved = list(dict.fromkeys(g for o in checked for g in o["moved"]))
+            moved = list(dict.fromkeys(g for o in checked for g in [*o["moved"], *EXTRA_FILES.get(
+                o.get("kind", "move"), lambda _: [])(o)]))
             was = parametric.snapshot(scene, moved)   # what the model says besides the shape (docs/editing-parity.md)
             readings = consistency.measure(scene, moved) if was else {}
             for k, o in enumerate(checked):

@@ -643,6 +643,28 @@ def _recommend(scene: IfcScene | Path, clash: Clash, model: ChatModel, system: s
                   requirements=requirements.label(doc) if doc is not None else None, clearance_m=clearance_m)
 
 
+def joined_ends(scene: IfcScene, run: list[str], delta) -> list:
+    """The walls path-joined at their end to what a move takes (manual._retrims): each such end is pushed along its
+    own axis to meet the moved wall as it did, as a hand move with joined parts does. None when one cannot follow (an
+    opening in the way, an end in line with the move): its join then opens, and `_keeps_true` says so."""
+    from . import manual   # manual reads the fix kinds' primitives; it is read here only when a move is tried
+    out = []
+    try:
+        for g in run:
+            out += [r for r in manual._retrims(scene, g, delta) if r.element not in run and r.element not in
+                    {x.element for x in out}]
+    except (edits.Unsupported, ValueError, KeyError):
+        return []
+    return out
+
+
+def follow_joined(scene: IfcScene, run: list[str], delta) -> list[str]:
+    """After a move (inside its trial or its keep): the joined walls' ends follow it (`joined_ends`). Returns what
+    changed."""
+    from . import manual
+    return list(dict.fromkeys(g for r in joined_ends(scene, run, delta) for g in manual._make_push(scene, r).changed))
+
+
 def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
               on_trial: Callable[[dict], None] | None = None, partners: set[str] = frozenset()) -> tuple[Attempt, Option | None]:
     """Move `target`'s straight run, check it, undo it. Re-serialising a large model per attempt costs seconds. The move
@@ -678,17 +700,24 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
                                checked_against=t.checked, edit=edit)
     # The fittings at the run's ends are meant to stay attached, so they don't count as hits.
     neighbours = {c for g in run for c in scene.element(g).connected} - set(run)
+    # A wall path-joined at its end to the moved one: that end follows, as a hand move with joined parts does
+    follow = [r.element for r in joined_ends(scene, run, delta)]
+    neighbours |= set(follow)
     sup = verify.supports(scene, run, set(partners), clearance_m, ignore=neighbours) if partners else None
     if on_trial:
         on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
-    was = parametric.snapshot(scene, run)                    # a joined wall moved off its join: refused with why
-    readings = consistency.measure(scene, run) if was else {}
+    was = parametric.snapshot(scene, [*run, *follow])        # a joined wall moved off its join: refused with why
+    readings = consistency.measure(scene, [*run, *follow]) if was else {}
     untrue = None
-    with edits.scratch(scene, {scene.index_of(g) for g in run}):   # undone: kept edits stay undoable
+    preview = None
+    with edits.scratch(scene, {scene.index_of(g) for g in [*run, *follow]}):   # undone: kept edits stay undoable
         placements = scene.translate(run, tuple(delta))
         try:
-            untrue = _keeps_true(scene, was, readings, list(run), target) if was else None
-            v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
+            followed = follow_joined(scene, run, delta) if follow else []
+            untrue = _keeps_true(scene, was, readings, [*run, *followed], target) if was else None
+            v = verify.check(scene, [*run, *followed], clearance_m=clearance_m, ignore=neighbours | set(run))
+            if followed:
+                preview = edits.meshes(scene, followed)
             hits, held, why = verify.keep_supports(scene, sup, v.hits) if sup else (v.hits, set(), None)
             if held and not why and not hits:   # its clearance is to what is near it, not to what it stands on
                 v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours | held)
@@ -701,8 +730,12 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
                       where=_where(hits))
     if not passed:
         return attempt, None
+    edit = None
+    if follow:
+        ends = ", ".join(f"'{scene.element(g).name}'" for g in follow)
+        edit = {"summary": f"the end of {ends} follows it, so the join holds", "follow": follow}
     return attempt, Option(cand.get("title", "move"), run, delta, cand.get("rationale", ""), cand.get("also_needs", ""),
-                           v.min_clearance_m, placements, checked_against=v.checked_against)
+                           v.min_clearance_m, placements, checked_against=v.checked_against, preview=preview, edit=edit)
 
 
 def _reason(hits: list[verify.Hit]) -> str:
