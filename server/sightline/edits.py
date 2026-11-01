@@ -1134,7 +1134,30 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
 
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)
+    _check_meets(scene, gids)
     return gids
+
+
+MEET_M = 0.005   # how far apart two neighbouring pieces of a chain may be (box to box) and still meet
+
+
+def _check_meets(scene: IfcScene, gids: list[str]) -> None:
+    """Every piece of a chain touches the next one. Its ports are joined in the model whatever the bodies do, and the
+    clash check passes a piece left far away (it hits nothing), so this is what keeps a verified fix connected: a
+    chain that does not meet is refused before it is tried (inside a trial, which undoes it)."""
+    boxes = scene.bounds()
+    for x, y in zip(gids, gids[1:]):
+        a, b = boxes.get(x), boxes.get(y)
+        if a is None or b is None:
+            continue
+        gap = float(np.linalg.norm(np.maximum(0.0, np.maximum(a[0] - b[1], b[0] - a[1]))))
+        if gap > MEET_M:
+            raise Unsupported(f"its new pieces would not meet: '{scene.entity(y).Name}' would sit {_far(gap)} from "
+                              f"'{scene.entity(x).Name}' (ORCA's fault, not the model's)")
+
+
+def _far(gap_m: float) -> str:
+    return f"{gap_m:.1f} m" if gap_m >= 1 else f"{gap_m * 1000:.0f} mm"
 
 
 def _branch_home(scene: IfcScene, port, t: float, pieces: list[tuple], origin, d, s: float) -> int:

@@ -383,6 +383,11 @@ to, radius, width, depth)` and `("transition", start, axis, length, verts, faces
   the peers' flow directions are put back. Port axes follow the IFC convention (SINK into the product, SOURCE out),
   with references along the profile's X.
 - **Boxes:** `refresh_bounds` on every piece before it returns.
+- **The pieces must meet** (`_check_meets`): each piece's box is within `MEET_M` (5 mm) of the next one's, or the
+  chain raises `Unsupported` ("its new pieces would not meet: … would sit … from …", ORCA's fault, not the model's), so
+  the trial undoes it and the idea is never shown. The ports are joined whatever the bodies do, and the clash check
+  passes a piece left far away because it hits nothing: without this, a misplaced fitting passed as verified. That
+  happened on Snowdon Towers (feet) when the fittings shared one frame, which IfcOpenShell scaled in place (#100).
 
 ## Which hosts take an opening: `hosts.py`
 
