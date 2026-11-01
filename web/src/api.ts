@@ -111,6 +111,21 @@ export interface MaterialUse {
   items: { material: string | null; name?: string; thickness_m?: number; fraction?: number; profile?: string; category?: string }[];
   total_m?: number; sets: PropSet[];
 }
+/** One change to what the model says about an element (property_edits.plan). */
+export type PropertyChange =
+  | { kind: "attribute"; name: string; value: string | null }
+  | { kind: "property"; pset: string; name: string; value: string | number | boolean | null }
+  | { kind: "type"; type: string } | { kind: "material"; material: number } | { kind: "container"; container: string }
+  | { kind: "classification"; reference: number; remove?: boolean };
+/** What an element's properties can be set to from its own model (property_edits.choices). */
+export interface PropertyChoices {
+  attributes: string[]; predefined: string[];
+  types: { global_id: string; name: string; ifc_class: string }[]; type: string | null;
+  materials: { id: number; name: string }[]; material: number | null; material_fixed: string | null;
+  containers: { global_id: string; name: string; ifc_class: string }[]; container: string | null;
+  classifications: { id: number; identification: string | null; name: string | null; system: string | null; on: boolean }[];
+}
+export interface PropertyEdited { entry: JournalEntry | null; properties: ElementProperties; revision_before: number; revision: number }
 /** Everything the model says about one object (properties.py): every attribute, its type, every set (the type's
  * marked), materials, classifications, groups, documents, where it sits and the path up to the project; size in
  * metres (IFC axes), none for a storey or a building. */
@@ -858,6 +873,13 @@ export const api = {
   /** Everything the model says about one element, for the Properties panel (properties.py). */
   properties: (id: string, globalId: string, file?: number) =>
     call<ElementProperties>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties${file === undefined ? "" : `?file=${file}`}`),
+  /** What an element's properties can be set to from its own model (property_edits.choices). */
+  propertyChoices: (id: string, globalId: string) =>
+    call<PropertyChoices>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/property-choices`),
+  /** Change one thing the model says about an element, not its shape (property_edits.edit): kept in the edit log. */
+  editProperty: (id: string, globalId: string, change: PropertyChange) =>
+    call<PropertyEdited>(`/scenes/${id}/elements/${encodeURIComponent(globalId)}/properties`,
+      { method: "POST", body: JSON.stringify({ change }) }),
   /** What is linked to what in the open models (joints, assemblies, hosts, what rests on what, contacts from the last
    *  check): the connection highlight's graph (docs/connections.md). */
   connections: (id: string) => call<Graph>(`/scenes/${id}/connections`),

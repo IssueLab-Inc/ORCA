@@ -26,7 +26,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
 from mcp_types import ToolAnnotations
 
-from . import agents, chat, checks, edits, escalation, journal, manual, plans, requirements, settings, spend
+from . import agents, chat, checks, edits, escalation, journal, manual, plans, property_edits, requirements, settings, spend
 from .service import Workspace
 
 
@@ -604,6 +604,31 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         e = kept["entry"] or {}
         return {"kept": e.get("id"), "summary": e.get("summary"), "warnings": e.get("warnings"),
                 "accepted_clashes": (e.get("check") or {}).get("accepted_clashes", 0), "files_changed": len(kept["files"])}
+
+    @tool()
+    def edit_property(element: str, change: dict, ctx: Context) -> dict:
+        """Change what the model says about an element, not its shape, and keep it in the edit log as the agent's:
+        `change` is {kind: attribute, name: Name|Description|ObjectType|Tag|PredefinedType, value} | {kind: property,
+        pset, name, value} (one of its own sets; base quantities follow its body and are refused) | {kind: type, type:
+        GlobalId} | {kind: material, material: id} | {kind: classification, reference: id, remove?} | {kind:
+        container, container: GlobalId}. Refused in words when it would leave the model saying two things (a value its
+        type gives every element of the type, a layered element's material). undo_edit takes it back."""
+        link = call(ctx, "edit_property", {"kind": change.get("kind") if isinstance(change, dict) else None})
+        sid = link.ctx.scene_id
+        if not sid:
+            raise LookupError("no models are open on this link")
+        with W().lock:
+            before = W().scene(sid).revision
+            try:
+                r = property_edits.edit(W(), sid, element, change, source="agent", actor=f"agent link {link.id}")
+            except edits.Unsupported as e:
+                raise ValueError(str(e)) from e
+            patch = W().patch(sid, [element], before)
+        e = r["entry"] or {}
+        link.publish({"type": "ui", "action": "edit_kept", "kept": {"entry": e, "files": e.get("files", []), "changed": [element],
+                                                                    "created": [], "removed": [], "pieces": [], "check": {}, **patch}})
+        done(link, "edit_property", f"kept {e.get('id') or 'the change'}")
+        return {"kept": e.get("id"), "summary": e.get("summary")}
 
     @tool(read_only=True)
     def list_edits(ctx: Context, limit: int = 20) -> dict:

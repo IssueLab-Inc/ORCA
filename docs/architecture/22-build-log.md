@@ -2015,3 +2015,15 @@ only to the element picked), and the tool's number fields refused values off the
 op). Checked: 812 server tests pass (the four environment failures), 223 web tests, build clean; in Chromium on
 Northbank, clash #1 offset by hand 400 mm up over 2.48 m: "Clear · nearest 50 mm · clears 1 clash", kept as E1, the
 clash marked fixed ("no overlap here"), Ctrl+Z undid it.
+
+**Nov 1, what the model says, edited** ([docs/editing-parity.md](../editing-parity.md), Tier 3). New
+`property_edits.py`: an element's attributes, a value in its own property sets, its type, material, classification and
+storey changed through `ifcopenshell.api`, each an edit-log entry (kind `property`) undone and redone as any edit and
+stamped in the export; refused in words where the model would say two things (base quantities, a type's own values, a
+layered element's material or type). Routes `GET …/property-choices` and `POST …/properties`, MCP `edit_property`, and
+Muse's `edit_property`, kept only when the person's own message says the value. The Properties panel has a pencil on
+the element's editable rows (typed, or chosen from its own model), and now reads the element again after every keep,
+undo and redo: before, a hand edit's new size or an undone change stayed on screen until another selection. Checked:
+820 server tests pass (the four environment failures), 225 web tests, build clean; in Chromium on Northbank, the supply main's Tag
+changed in the panel, kept as E1, Ctrl+Z and Ctrl+Y followed by the panel; its storey moved Level 02 → Level 03 from
+the list.

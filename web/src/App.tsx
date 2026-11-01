@@ -495,11 +495,13 @@ export function App() {
     const gid = selected?.globalId;
     if (!gid || !sceneId) { setElementProps(null); return; }
     let live = true;
-    setElementProps({ gid, data: null, loading: true });
+    // Read again after every keep, undo and redo (`infoRev`): an edit, a fix or a property change may have changed what
+    // the model says about it. The values shown stay until the new ones come.
+    setElementProps((p) => (p?.gid === gid && p.data ? { ...p, loading: false } : { gid, data: null, loading: true }));
     api.properties(sceneId, gid).then((data) => { if (live) setElementProps({ gid, data, loading: false }); })
-      .catch(() => { if (live) setElementProps({ gid, data: null, loading: false }); });
+      .catch(() => { if (live) setElementProps((p) => (p?.gid === gid && p.data ? p : { gid, data: null, loading: false })); });
     return () => { live = false; };
-  }, [selected?.globalId, sceneId]);
+  }, [selected?.globalId, sceneId, infoRev]);
   useEffect(() => { viewer.current?.setFilters(filters); }, [filters]);
   // The filters, with the one being edited shown live (in its place, or on top while new), drawn in every view.
   const prepared = useMemo(() => (facetIndex ? prepare(facetIndex) : null), [facetIndex]);
@@ -3364,6 +3366,18 @@ export function App() {
         else { setIsolating(false); setTemporary((t) => ({ ...t, hidden: [...new Set([...t.hidden, ...ids])] })); if (ids.includes(gid)) setSelected(null); }
       },
       load: (ref) => (sceneId && ref.global_id ? api.properties(sceneId, ref.global_id, ref.file) : Promise.reject(new Error("No scene"))),
+      // What the model says about it, changed and kept in the edit log (docs/editing-parity.md, Tier 3): no shape
+      // changes, so the page only moves its drawn revision on, shows the new properties and reads the log again.
+      editor: sceneId ? {
+        choices: () => api.propertyChoices(sceneId, gid),
+        save: async (change) => {
+          const r = await api.editProperty(sceneId, gid, change);
+          setElementProps({ gid, data: r.properties, loading: false });
+          if (sceneRevision.current === r.revision_before) sceneRevision.current = r.revision;
+          setInfoRev((n) => n + 1);
+          void refreshJournal(sceneId);
+        },
+      } : undefined,
       rows: prepared ? {
         facets: facetKeys,
         onFilter: (row) => openFilters(blankRule([{ facet: row.facet!, op: "is", values: [row.raw!] }], "colour")),

@@ -36,7 +36,7 @@ Northbank has none of what real exports carry, so these paths were never exercis
 | 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | done (Nov 1) |
 | 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | done (Nov 1), but for a type edited for all its elements and a joined wall's neighbour re-trimmed |
 | 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | offset, join and disconnect done (Nov 1); bends at other angles, transitions on a carried resize and re-fitting a carried move later |
-| 3 | Editable properties: attributes, psets, type, material, classification, container | planned |
+| 3 | Editable properties: attributes, psets, type, material, classification, container | done (Nov 1); classifications by chat, MCP and the API, not yet from the panel |
 
 ## The consistency check (Tier 0b)
 
@@ -107,6 +107,25 @@ undo.
 
 Later: bends at other angles (45° offsets), transitions when a carried resize meets a neighbour of the old size, a carried
 move that re-fits its neighbours instead of carrying them.
+
+## What the model says, edited (Tier 3)
+
+`property_edits.py` changes what the model says about an element, not its shape, through `ifcopenshell.api`, one change
+at a time, each an entry in the edit log (kind `property`, undone and redone as any edit, stamped `ORCA_Edit` in the
+export): an attribute (Name, Description, ObjectType, Tag, PredefinedType from its schema's list), a property in one of
+its own sets (a number stays a number, yes and no stay booleans), its type (the body kept: a body drawn from the old type
+becomes its own first), its material, a classification reference from its model, its storey or space. Refused in words:
+base quantities (they follow the body), a property its type gives (every element of the type has it), a layered or
+profiled element's material or type (its layers or profile come from its type).
+
+- **Panel:** a pencil on the element's own editable rows (docs/panels.md, "Properties"); the choices come from
+  `GET …/property-choices`, the change goes to `POST …/properties`.
+- **Muse:** `edit_property`, kept at once, but only when the person's own message this turn says the new value or names
+  the target (`chat._said`).
+- **Agents:** MCP `edit_property`, kept as the agent's.
+
+Measured in Chromium on Northbank: the supply main's Tag SA-MAIN-L02-5 → SA-MAIN-L02-5R kept as E1, Ctrl+Z back,
+Ctrl+Y again, the panel following each; its storey Level 02 → Level 03 from the panel's list.
 
 ## Test matrix
 

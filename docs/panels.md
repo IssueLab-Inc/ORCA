@@ -93,6 +93,13 @@ meets nothing in focus selects the faded element behind (`pickAt` with `ghosts`)
     filter, on top) and **Isolate all with this value** (for now); applying a filter or isolating takes every view
     to what it acts on ([filters.md](filters.md), "Zoom"). The Storey row opens the storey. **Collapse all** /
     **Expand all** beside the filter.
+  - **Change it** (a pencil on the rows of the element itself, Nov 1: [editing-parity.md](editing-parity.md), Tier 3):
+    its Name, Description, Object type, Tag and Predefined type, a value in one of its own property sets (text, a
+    number, yes or no), its type, its storey and its material, each from what its own model has (`property-choices`).
+    Enter or the tick keeps it in the edit log (Ctrl+Z takes it back); Esc or the cross leaves it. Base quantities
+    (they follow the body), what its type gives (every element of the type has it), ranges, tables and the parts of a
+    complex value have no pencil; the server refuses in words what would leave the model saying two things. The
+    panel reads the element again after every keep, undo and redo, so it never shows what an edit changed.
 - **What it shows** under the card, **everything the model says** (owner request, Oct 31):
   - **Element:** its IFC class, every direct attribute (name, description, tag, predefined type, object type, a
     storey's elevation, a door's overall height…), GlobalId, its storey, its direct container when that is not a

@@ -5,7 +5,8 @@ import { compiled } from "./app-host.mjs";
 const react = `data:text/javascript;base64,${Buffer.from("export const useState=(v)=>[v,()=>{}];export const Fragment=()=>null;").toString("base64")}`;
 const stub = (names) => `data:text/javascript;base64,${Buffer.from(names.map((n) => `export function ${n}(){return null;}`).join("\n")).toString("base64")}`;
 const props = await import(await compiled("../src/Properties.tsx", { react, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
-  "lucide-react": stub(["ChevronsDownUp", "ChevronsUpDown", "Copy", "Focus", "ListFilter", "Palette"]), "./ui": stub(["IconButton"]) }));
+  "lucide-react": stub(["Check", "ChevronsDownUp", "ChevronsUpDown", "Copy", "Focus", "ListFilter", "Palette", "Pencil", "X"]),
+  "./ui": stub(["IconButton"]) }));
 
 const storey = { global_id: "3DHpFFi5PGif08WLyvTtOv", ifc_class: "IfcBuildingStorey", name: "Level 02", file: 0 };
 const girder = {
@@ -51,7 +52,8 @@ test("the element first, then its type, materials, classification, groups, docum
     ["Object type", "Plate girder"], ["GlobalId", "1eVHoPtl1IhAbbhivqVqb0"], ["Storey", "Level 02"],
     ["File", "Northbank-Structure.ifc"], ["Size", "400 × 12000 × 1000 mm"]]);
   assert.deepEqual(s[0].rows.find((r) => r.name === "Storey").link, storey);
-  assert.deepEqual(s[2].rows, [{ name: "Material", value: "Steel S355", fromType: undefined, raw: "Steel S355", facet: "material" }]);
+  assert.deepEqual(s[2].rows, [{ name: "Material", value: "Steel S355", fromType: undefined, raw: "Steel S355", facet: "material",
+    edit: { kind: "material" } }]);
   assert.equal(s[3].rows[0].value, "Ss_20_10_75_35 Steel beams");
   assert.equal(s[4].rows[0].name, "Building system");
   assert.equal(s[5].rows[0].href, "https://example.com/s201.pdf");
@@ -90,4 +92,36 @@ test("the filter keeps matching rows, or a whole set whose name matches", () => 
   assert.deepEqual(props.filtered(s, "WEBOPEN").map((x) => x.title), ["Model data"]);
   assert.deepEqual(props.filtered(s, "qto").map((x) => x.rows.length), [2]);
   assert.deepEqual(props.filtered(s, "nothing like it"), []);
+});
+
+test("a row's pencil changes what the element says of its own, never its type's values or its quantities", () => {
+  const s = props.sections(girder);
+  const edit = (title, name) => s.find((x) => x.title.startsWith(title)).rows.find((r) => r.name === name)?.edit;
+  assert.deepEqual(edit("Element", "Name"), { kind: "attribute", name: "Name" });
+  assert.deepEqual(edit("Element", "Predefined type"), { kind: "attribute", name: "PredefinedType" });
+  assert.deepEqual(edit("Element", "Storey"), { kind: "container" });
+  assert.equal(edit("Element", "Class"), undefined);
+  assert.deepEqual(edit("Type", "Name"), { kind: "type" });
+  assert.deepEqual(edit("Materials", "Material"), { kind: "material" });
+  assert.deepEqual(edit("Pset_BeamCommon", "Span"), { kind: "property", pset: "Pset_BeamCommon", name: "Span" });
+  assert.equal(edit("Pset_BeamCommon", "Reference"), undefined, "given by its type");
+  assert.equal(edit("Pset_BeamCommon", "Service temperature"), undefined, "a range");
+  assert.equal(edit("Pset_BeamCommon", "Connection › Torque"), undefined, "a part");
+  assert.equal(edit("Qto_BeamBaseQuantities", "Length"), undefined, "quantities follow the body");
+});
+
+test("a change is what the server takes: typed text, a number kept a number, yes and no, a choice", () => {
+  assert.deepEqual(props.changeFor({ kind: "attribute", name: "Tag" }, " TB-02 "), { kind: "attribute", name: "Tag", value: "TB-02" });
+  assert.deepEqual(props.changeFor({ kind: "attribute", name: "Description" }, ""), { kind: "attribute", name: "Description", value: null });
+  const span = { kind: "property", pset: "Pset_BeamCommon", name: "Span" };
+  assert.deepEqual(props.changeFor(span, "12.5", 12), { kind: "property", pset: "Pset_BeamCommon", name: "Span", value: 12.5 });
+  assert.equal(props.changeFor({ ...span, name: "LoadBearing" }, "no", true).value, false);
+  assert.deepEqual(props.changeFor({ kind: "material" }, "42"), { kind: "material", material: 42 });
+  assert.deepEqual(props.changeFor({ kind: "type" }, "3EaJ"), { kind: "type", type: "3EaJ" });
+  const choices = { types: [{ global_id: "t1", name: "PG 1000x400" }], containers: [{ global_id: "s2", name: "Level 02" }],
+    materials: [{ id: 7, name: "Steel S355" }], predefined: ["BEAM", "JOIST"] };
+  assert.deepEqual(props.editOptions({ kind: "type" }, choices), [{ value: "t1", label: "PG 1000x400" }]);
+  assert.deepEqual(props.editOptions({ kind: "material" }, choices), [{ value: "7", label: "Steel S355" }]);
+  assert.deepEqual(props.editOptions({ kind: "attribute", name: "PredefinedType" }, choices).map((o) => o.value), ["BEAM", "JOIST"]);
+  assert.equal(props.editOptions({ kind: "attribute", name: "Tag" }, choices), null);
 });

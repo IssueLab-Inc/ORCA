@@ -2209,3 +2209,8 @@ a.pop-item { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .eicon, .eicon [class^="ei-"], .eicon-keep.play, .eicon-keep.play .ei-tick { animation: none !important; }
 }
+/* Editing a property in place (Properties.tsx, docs/editing-parity.md Tier 3) */
+.pset-edit { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+.pset-edit input, .pset-edit select { flex: 1; min-width: 0; font: inherit; padding: 1px 4px; }
+.pset-edit .ibtn { width: 22px; height: 22px; flex: none; }
+.prow-edit { flex-direction: column; align-items: stretch; }

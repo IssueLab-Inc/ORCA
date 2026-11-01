@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import checks, context_planner, domains, edits, faces, facets, journal, manual, plans, settings
+from . import checks, context_planner, domains, edits, faces, facets, journal, manual, plans, property_edits, settings
 from .meta_client import ToolModel, image_part
 from .service import Workspace
 from .limits import env_int
@@ -210,6 +210,13 @@ TOOLS = [
         "the open joint. Never on your own initiative.", {"accept_clashes": {"type": "integer"}}),
     _fn("undo_edit", "Undo the newest kept edit (a hand edit or a fix), only when the user's own latest message asks to "
         "undo it."),
+    _fn("edit_property", "Change what the model says about an element, not its shape, only when the user's own latest "
+        "message asks for it and says the new value (or names the type, material, storey or classification): `change` is "
+        "{kind: attribute, name: Name|Description|ObjectType|Tag|PredefinedType, value} | {kind: property, pset, name, "
+        "value} (a property in one of its own sets; base quantities follow its body and are refused) | {kind: type, type: "
+        "GlobalId} | {kind: material, material: id} | {kind: classification, reference: id, remove?} | {kind: container, "
+        "container: GlobalId}. Kept in the edit log at once; undo_edit takes it back.",
+        {"element": {"type": "string"}, "change": {"type": "object"}}, ["change"]),
     _fn("list_edits", "Every edit kept to the model, newest last: who kept it, what it did, the clash it is for and the "
         "fix it follows.", {"limit": {"type": "integer"}}),
 ]
@@ -239,6 +246,32 @@ def accepts(text: str, what: str) -> bool:
                      rf"two|three|\d+)?\s*(open\s+)?{what}", t, re.I)
     ruled_out = re.search(rf"\b(no|not|doesn'?t|don'?t|without|unless|if|any)\b[^.?!]{{0,25}}\b{what}", t, re.I)
     return bool(said) and not ruled_out
+
+
+def _said(text: str, scene, gid: str, change: dict) -> bool:
+    """Whether the person's own message names the property change Muse is making: the new value (a removal: the
+    property's name), or the type, material, storey or classification by its name; and refuses nothing."""
+    t = (text or "").lower()
+    if not t or _REFUSE.search(text or ""):
+        return False
+    kind = change.get("kind")
+    model = scene.models[scene.index_of(gid)]
+    try:
+        if kind in ("attribute", "property"):
+            v = change.get("value")
+            if v in (None, ""):
+                return str(change.get("name") or "").lower() in t
+            if isinstance(v, bool):
+                return bool(re.search(r"\b(yes|no|true|false)\b", t))
+            if isinstance(v, (int, float)):
+                return any(abs(float(x) - float(v)) < 1e-9 for x in re.findall(r"-?\d+(?:\.\d+)?", t))
+            return str(v).lower() in t
+        target = {"type": lambda: model.by_guid(change["type"]).Name, "container": lambda: model.by_guid(change["container"]).Name,
+                  "material": lambda: model.by_id(int(change["material"])).Name,
+                  "classification": lambda: model.by_id(int(change["reference"])).Identification}[kind]()
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return False
+    return bool(target) and str(target).lower() in t
 
 
 def _coloured(idx: dict, rule: dict, hit: set[int]) -> dict:
@@ -579,6 +612,24 @@ class Chat:
             self.pending.pop(session, None)
             emit({"type": "ui", "action": "edit_kept", "kept": {**kept, **patch}})
             return {"kept": kept["entry"]["id"] if kept["entry"] else None, "summary": kept["entry"]["summary"] if kept["entry"] else ""}, "kept", []
+        if name == "edit_property":
+            gid = self._selected(ctx, args.get("element"))
+            change = dict(args.get("change") or {})
+            if not _said(state.get("text") or "", ws.scene(sid), gid, change):
+                return {"error": "only change a property the user asked for, with its new value in their own words"}, \
+                    "waiting for the user", []
+            scene = ws.scene(sid)
+            try:
+                with ws.lock:
+                    before = scene.revision
+                    r = property_edits.edit(ws, sid, gid, change, source="muse")
+                    patch = ws.patch(sid, [gid], before)
+            except (edits.Unsupported, ValueError, TypeError) as e:
+                return {"error": f"that change cannot be made: {e}"}, "refused", []
+            entry = r["entry"] or {}
+            emit({"type": "ui", "action": "edit_kept", "kept": {"entry": entry, "files": entry.get("files", []), "changed": [gid],
+                                                               "created": [], "removed": [], "pieces": [], "check": {}, **patch}})
+            return {"kept": entry.get("id"), "summary": entry.get("summary")}, "kept", []
         if name == "undo_edit":
             if not consents(state.get("text") or "", undo=True):
                 return {"error": "only the user can undo an edit: ask them to say undo"}, "waiting for the user", []
@@ -1004,7 +1055,7 @@ class Chat:
         if name == "set_view":
             emit({"type": "ui", "action": "set_view", **{k: args[k] for k in ("mode", "section_box") if k in args}})
             return {"done": True}, "view changed", []
-        if name in ("list_faces", "edit_check", "edit_keep", "undo_edit", "list_edits"):
+        if name in ("list_faces", "edit_check", "edit_keep", "undo_edit", "list_edits", "edit_property"):
             return self._edit_tool(name, args, ctx, emit)
         if name == "set_filters":
             idx = ws.facets(self._scene(ctx))

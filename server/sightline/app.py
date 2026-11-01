@@ -32,8 +32,8 @@ from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
 from . import (agents, built, chat, checks, context_planner, demos, detect, document, domains, edits, escalation,
-               faces, journal, manual, mcp_server, meta_client, owner, plans, requirements, settings, spend, step, titles,
-               triage, voice_live)
+               faces, journal, manual, mcp_server, meta_client, owner, plans, property_edits, requirements, settings, spend,
+               step, titles, triage, voice_live)
 from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
@@ -638,6 +638,36 @@ def element_properties(scene_id: str, global_id: str, file: int | None = None):
         return ws.properties(_scene(scene_id), global_id, file)
     except KeyError:
         raise HTTPException(404, "No such element in these models.")
+
+
+class PropertyEdit(BaseModel):
+    change: dict   # {kind: attribute|property|type|material|classification|container, ...} (property_edits.plan)
+
+
+@app.get("/api/scenes/{scene_id}/elements/{global_id}/property-choices")
+def element_property_choices(scene_id: str, global_id: str):
+    """What an element's properties can be set to from its own model (property_edits.choices): its editable attributes
+    and predefined types, the types of its kind, materials, storeys and spaces, classification references."""
+    sid = _scene(scene_id)
+    try:
+        with ws.lock:
+            return property_edits.choices(ws.scene(sid), global_id)
+    except KeyError:
+        raise HTTPException(404, "No such element in these models.")
+
+
+@app.post("/api/scenes/{scene_id}/elements/{global_id}/properties")
+def edit_element_property(scene_id: str, global_id: str, body: PropertyEdit):
+    """Change one thing the model says about an element, not its shape (property_edits.edit): kept through the edit
+    log; 422 with why when it cannot be made. Returns the entry and the element's properties now."""
+    try:
+        return property_edits.edit(ws, _scene(scene_id), global_id, body.change, source="you")
+    except KeyError:
+        raise HTTPException(404, "No such element in these models.")
+    except edits.Unsupported as e:
+        raise HTTPException(422, f"Cannot make this change: {e}")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, f"Not a change ORCA can make: {e}")
 
 
 @app.get("/api/scenes/{scene_id}/facets")
