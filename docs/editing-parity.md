@@ -35,7 +35,7 @@ Northbank has none of what real exports carry, so these paths were never exercis
 | 0a | This face or element only by default; `carry` to take joined parts along | done (Nov 1) |
 | 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | done (Nov 1) |
 | 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | done (Nov 1): own copies by default, Apply to the type, a carried wall's joined neighbour re-trimmed |
-| 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | offset, join and disconnect done (Nov 1); bends at other angles, transitions on a carried resize and re-fitting a carried move later |
+| 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | done (Nov 1): offset, join, disconnect, bends at any angle, transitions on a carried resize, a carried move re-fitting its neighbours |
 | 3 | Editable properties: attributes, psets, type, material, classification, container | done (Nov 1); classifications from the panel too |
 
 ## The consistency check (Tier 0b)
@@ -155,7 +155,20 @@ Pushed on its own, the check warns that its end no longer matches what it joins.
 main's north side out 100 mm, carried: the main 500 wide ends at 5.83 m, a 173 mm transition back to 400 wide meets
 the end segment at 6 m.
 
-Later: a carried move that re-fits its neighbours instead of carrying them.
+**A carried move re-fits** (Nov 1, second program). A hand move with Take joined parts along used to take every
+straight beyond the run's fittings along, and so on out until something stayed (a terminal, equipment: refused) or
+twelve parts were taken (refused). Now a level straight the move goes square to, joined at its far end too, is re-fitted
+instead (`connections.plan_move(refit=True)`, `Jog`; `edits.apply_jog`): its joined end goes with the move (a 150 mm
+piece), a pair of bends and a riser take it back to the rest, which stays with its far joint; the joint's port frames
+go with it. One with nothing at its far end is still taken along whole (fewer parts), and one that cannot be re-fitted
+(too short, a move too small for a pair of bends of its section, up and across at once, a branch) is taken along as
+before. Muse's moves (`agent._try_move`, `Workspace.apply`) plan as before: re-fits there wait for the answer-key eval.
+
+Measured: on the MEP fixture, DA lifted 400 mm with the bend to DB and an air terminal at DB's far end (refused before:
+"AT1 … stays where it is") keeps every joint: DB's start goes up with DA, bend, riser, bend, the rest at 2.8 m still on
+the terminal; schema-valid, undone. On Northbank, 400 mm up and down for each of 332 straight runs (664 plans): 102 kept
+their joints before, 370 with re-fits ("too many parts" refusals 187 to 0, "too short" 191 to 110; terminals and
+equipment on the run itself still 175); 40 of them, picked at random and made in trials, hold every joint.
 
 ## What the model says, edited (Tier 3)
 

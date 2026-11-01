@@ -531,7 +531,7 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
                     float(np.linalg.norm(delta)), gated=[gid],
                     warnings=warn, extra={"plan": connections.MovePlan([gid], [float(x) for x in delta]), "open_joints": opened})
     run = connections.run(scene, gid)
-    plan = connections.plan_move(scene, run, delta.tolist())
+    plan = connections.plan_move(scene, run, delta.tolist(), refit=True)   # a neighbour square to it re-fitted
     if not plan.ok:
         raise Offered(f"it cannot keep its joints: {plan.refused}", params, "Move it on its own")
     changed = plan.changed()
@@ -540,9 +540,11 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
     retrim = [r for r in _retrims(scene, gid, delta) if r.element not in changed]
     follows = "".join(f"; the {r.face.name} of {label(scene, r.element)} follows it "
                       f"({_mm(r.params['by_m'])} {'longer' if r.params['by_m'] > 0 else 'shorter'})" for r in retrim)
+    follows += "".join(f"; {label(scene, j.global_id)} re-fitted at its {j.end} with a pair of bends, the rest where it is"
+                       for j in plan.jogs)
     return Plan("move", gid, params, {scene.index_of(g) for g in [*changed, *(r.element for r in retrim)]},
                 [*changed, *(r.element for r in retrim)], f"{label(scene, gid)} moved {words}{with_run}{follows}", "move",
-                float(np.linalg.norm(delta)), gated=[*run, *(r.element for r in retrim)],
+                float(np.linalg.norm(delta)), gated=[*run, *(j.global_id for j in plan.jogs), *(r.element for r in retrim)],
                 warnings=[*structure_warnings(scene, gid, "the move"), *(w for r in retrim for w in r.warnings)],
                 extra={"plan": plan, "retrim": retrim})
 
@@ -555,7 +557,7 @@ def _make_move(scene: IfcScene, plan: Plan) -> Made:
         scene.translate([plan.element], tuple(plan.params["delta_m"]))
         opened = plan.extra.get("open_joints", [])
         return Made(changed=[plan.element], open_ends=[plan.element, *(j["element"] for j in opened)] if opened else [])
-    mp = connections.plan_move(scene, plan.extra["plan"].moved, plan.params["delta_m"])
+    mp = connections.plan_move(scene, plan.extra["plan"].moved, plan.params["delta_m"], refit=True)
     if not mp.ok:
         raise edits.Unsupported(f"it cannot keep its joints: {mp.refused}")
     connections.apply_move(scene, mp)
@@ -563,7 +565,7 @@ def _make_move(scene: IfcScene, plan: Plan) -> Made:
     if broken:
         raise edits.Unsupported("a joint would not hold: " + "; ".join(w for *_, w in broken))
     followed = [g for r in plan.extra.get("retrim", []) for g in _make_push(scene, r).changed]
-    return Made(changed=list(dict.fromkeys([*mp.changed(), *followed])))
+    return Made(changed=list(dict.fromkeys([*mp.changed(), *followed])), created=list(mp.made))
 
 
 # ----------------------------------------------------------------------------------------------------- align

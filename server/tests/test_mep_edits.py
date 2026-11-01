@@ -173,3 +173,62 @@ def test_a_pipe_made_bigger_carried_gets_a_round_transition_to_the_pipe_it_joins
     box = scene.bounds()[tr]
     assert box[1][1] - box[0][1] == pytest.approx(0.15, abs=0.005)   # 150 mm where it leaves PA, 100 mm at PB
     assert not valid(scene)
+
+
+# ----------------------------------------------------------------------------------------------------- a carried move re-fits
+
+
+def _corner_to_a_terminal(ws, sid, scene, g):
+    """DA joined to DB with a bend, and DB's far end (4, 4, 2.8) on an air terminal that stays where it is."""
+    import ifcopenshell.api
+    import ifcopenshell.util.system as us
+    from sightline.fixtures import _box
+    manual.apply(ws, sid, {"op": "join", "element": g["DA"], "to": {"element": g["DB"]}})
+    model = scene.models[0]
+    body = next(c for c in model.by_type("IfcGeometricRepresentationSubContext") if c.ContextIdentifier == "Body")
+    t = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcAirTerminal", name="AT1")
+    _box(model, body, t, (0.6, 0.3, 0.6), (3.7, 4.0, 2.5))
+    port = ifcopenshell.api.run("system.add_port", model, element=t)
+    m = np.eye(4)
+    m[:3, :3] = np.column_stack([(1.0, 0, 0), (0, 0, 1.0), (0, -1.0, 0)])
+    m[:3, 3] = (4.0, 4.0, 2.8)
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+    far = max(us.get_ports(scene.entity(g["DB"])), key=lambda p: scene.placement(p.GlobalId)[1, 3])
+    ifcopenshell.api.run("system.connect_port", model, port1=far, port2=port, direction="NOTDEFINED")
+    scene.refresh_bounds([t.GlobalId])
+    return t.GlobalId, port
+
+
+def test_a_carried_move_re_fits_the_neighbour_square_to_it_instead_of_pulling_the_terminal(mep):
+    import ifcopenshell.util.system as us
+    ws, sid, scene, g = mep
+    terminal, port = _corner_to_a_terminal(ws, sid, scene, g)
+    from sightline import connections
+    taken = connections.plan_move(scene, [g["DA"]], [0, 0, 0.4])   # as Muse's moves still plan it: taken along
+    assert not taken.ok and "AT1" in taken.refused and "stays where it is" in taken.refused
+    op = {"op": "move", "element": g["DA"], "delta_m": [0, 0, 0.4], "carry": True}
+    r = manual.check(ws, sid, op)
+    assert r["blocked"] is None, r["blocked"]
+    assert "duct segment 'DB' re-fitted at its start with a pair of bends, the rest where it is" in r["summary"]
+    kept = manual.apply(ws, sid, op)
+    made = kept["created"]
+    assert [scene.entity(p).is_a() for p in made] == ["IfcDuctFitting", "IfcDuctSegment", "IfcDuctFitting", "IfcDuctSegment"]
+    assert scene.bounds()[g["DA"]][:, 2] == pytest.approx([3.05, 3.35]), "the main went up 400 mm"
+    assert scene.bounds()[g["DB"]][:, 2] == pytest.approx([3.05, 3.35]), "DB's end went with it"
+    assert scene.bounds()[made[-1]][:, 2] == pytest.approx([2.65, 2.95]) and scene.bounds()[made[-1]][1][1] == pytest.approx(4.0)
+    assert scene.bounds()[terminal][0][2] == pytest.approx(2.5), "the terminal stayed"
+    peer = us.get_connected_port(port)
+    assert peer is not None and us.get_port_element(peer).GlobalId == made[-1], "still joined, to the piece that stays"
+    assert np.linalg.norm(scene.placement(peer.GlobalId)[:3, 3] - scene.placement(port.GlobalId)[:3, 3]) < 1e-6
+    assert not valid(scene)
+    ws.journal(sid).undo(scene)
+    assert all(not scene.has(p) for p in made) and scene.bounds()[g["DB"]][:, 2] == pytest.approx([2.65, 2.95])
+    assert us.get_port_element(us.get_connected_port(port)).GlobalId == g["DB"] and not valid(scene)
+
+
+def test_a_carried_move_still_takes_a_free_ended_neighbour_whole(mep):
+    ws, sid, scene, g = mep
+    manual.apply(ws, sid, {"op": "join", "element": g["DA"], "to": {"element": g["DB"]}})
+    r = manual.check(ws, sid, {"op": "move", "element": g["DA"], "delta_m": [0, 0, 0.4], "carry": True})
+    assert r["blocked"] is None and "re-fitted" not in r["summary"] and r["created"] == []
+    assert g["DB"] in r["changed"], "nothing beyond it: taken along, no new parts"

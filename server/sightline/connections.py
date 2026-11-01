@@ -64,6 +64,12 @@ class Stretch:
 
 
 @dataclass
+class Jog:
+    global_id: str
+    end: str                   # "start" / "end": the cap joined to what moves; that end goes with it (edits.apply_jog)
+
+
+@dataclass
 class MovePlan:
     moved: list[str]                                   # what is translated: what was asked, then what it carries
     delta_m: list[float]
@@ -74,6 +80,8 @@ class MovePlan:
     refused: str | None = None                         # why the move can't keep its joints, in plain words
     refused_at: list[str] = field(default_factory=list)  # the elements whose joints it would break
     code: str | None = None                            # "stays" | "short" | "branch" | "many" | "joined" (refuse mode)
+    jogs: list[Jog] = field(default_factory=list)      # straight segments re-fitted at their joined end (`refit`)
+    made: list[str] = field(default_factory=list)      # what the re-fits made (bends, risers, the rest), once applied
 
     @property
     def ok(self) -> bool:
@@ -81,15 +89,16 @@ class MovePlan:
 
     @property
     def plain(self) -> bool:
-        """Nothing taken along or stretched: a move as it always was."""
-        return not self.carried and not self.stretched
+        """Nothing taken along, stretched or re-fitted: a move as it always was."""
+        return not self.carried and not self.stretched and not self.jogs
 
     def changed(self) -> list[str]:
-        return self.moved + [st.global_id for st in self.stretched]
+        return self.moved + [st.global_id for st in self.stretched] + [j.global_id for j in self.jogs]
 
     def key(self) -> str:
         return json.dumps([sorted(self.moved), [round(v, 4) for v in self.delta_m],
-                           sorted([st.global_id, st.face, round(st.by_m, 4)] for st in self.stretched)])
+                           sorted([st.global_id, st.face, round(st.by_m, 4)] for st in self.stretched),
+                           sorted([j.global_id, j.end] for j in self.jogs)])
 
     def edit(self, scene: IfcScene, run: list[str] | None = None) -> dict | None:
         """What an option carries about a move that takes parts along or stretches segments (None: a plain move)."""
@@ -365,14 +374,19 @@ def _covered(scene: IfcScene, seg: str, normal: np.ndarray, point, by: str) -> b
     return hits >= COVER * 25
 
 
-def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
+def plan_move(scene: IfcScene, moved: list[str], delta_m, refit: bool = False) -> MovePlan:
     """Plan moving `moved` by `delta_m` with its joints. Each element ends up translated, stretched at one face, or
     where it is, and both sides of every joint must move alike. Going out from what moves ("carry"): a fitting or
     in-line valve is taken along; a straight segment the move runs along is made longer or shorter at the joined end
     (a riser a bend sits on, taller); any other straight segment is taken along; equipment, terminals, structure,
     anything kept fixed, a branch off a segment's side, a segment that would get too short, or more than CARRY_MAX
     parts taken along: refused, naming the joint. "refuse" refuses at the first joint that would come apart. Nothing
-    is edited."""
+    is edited.
+
+    `refit` (a hand move with joined parts): a level straight segment the move goes square to, joined at its other end
+    too, is re-fitted instead of taken along: its joined end goes with the move and a pair of bends takes it back to
+    the rest, which stays with its far joint (`edits.apply_jog`). One that cannot be (too short, a move too small for
+    a pair of bends, up and across at once) is taken along as before."""
     moved = list(dict.fromkeys(moved))
     asked = list(moved)
     delta = np.asarray([float(v) for v in delta_m])
@@ -382,6 +396,7 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
     carry = mode() == "carry"
     inside = set(moved)
     stretched: dict[str, Stretch] = {}
+    jogs: dict[str, Jog] = {}
     via: dict[str, str] = {}             # what took a part along (for the words of a refusal)
     queue = list(moved)
     breaks: list[str] = []
@@ -418,6 +433,9 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
             cls = classify(scene, n)
             if cls != "stays" and context_eval.element_constraints(scene, n):
                 cls = "stays"
+            if n in jogs:                      # reached at its other end too: it moves whole
+                del jogs[n]
+                cls = "rigid"
             st = stretched.get(n)
             if st is not None:
                 face = j.end_b if j.end_b in ("start", "end") else "side"
@@ -446,6 +464,12 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
                                                       f"{max(size, 0) * 1000:.0f} mm long (it can lose at most "
                                                       f"{(run.length_m - edits.MIN_PIECE_M) * 1000:.0f} mm)")
                         stretched[n] = Stretch(n, j.end_b, by, tuple(normal.tolist()), size)
+                        plan.kept.append(j)
+                        continue
+                    far = "end" if j.end_b == "start" else "start"
+                    if (refit and any(k.end_a == far for k in joints_of(scene, n))
+                            and edits.jog_fits(scene, n, j.end_b, delta.tolist()) is None):
+                        jogs[n] = Jog(n, j.end_b)   # its far joint stays: re-fitted at this end, not taken along
                         plan.kept.append(j)
                         continue
                 elif j.end_b == "side":
@@ -484,6 +508,7 @@ def plan_move(scene: IfcScene, moved: list[str], delta_m) -> MovePlan:
         plan.refused_at, plan.code = breaks, "joined"
         return plan
     plan.stretched = list(stretched.values())
+    plan.jogs = list(jogs.values())
     for st in plan.stretched:
         plan.partners[st.global_id] = {j.b for j in joints_of(scene, st.global_id)}
     return plan
@@ -499,6 +524,9 @@ def summary(scene: IfcScene, plan: MovePlan) -> str:
         by_change.setdefault((st.by_m > 0, round(abs(st.by_m) * 1000)), []).append(st.global_id)
     for (longer, mm), gids in by_change.items():
         parts.append(f"{_names(scene, gids)} {mm} mm {'longer' if longer else 'shorter'}")
+    if plan.jogs:
+        parts.append(f"{_names(scene, [j.global_id for j in plan.jogs])} re-fitted with a pair of bends at the joined "
+                     "end, the rest where it is")
     return "; ".join(parts)
 
 
@@ -508,6 +536,16 @@ def apply_move(scene: IfcScene, plan: MovePlan) -> dict[str, list[float]]:
     placements = scene.translate(plan.moved, tuple(plan.delta_m))
     for st in plan.stretched:
         edits.stretch(scene, st.global_id, st.face, st.by_m, st.normal if st.face == "side" else None)
+    plan.made = []
+    for jog in plan.jogs:
+        pieces = edits.apply_jog(scene, jog.global_id, jog.end, plan.delta_m).pieces
+        plan.made += pieces[1:]
+        # what was joined to it is now joined to the piece at that end: check the joints as they are now
+        for g, before in plan.partners.items():
+            if jog.global_id in before:
+                plan.partners[g] = (before - {jog.global_id}) | ({k.b for k in joints_of(scene, g)} & set(pieces))
+        for p in pieces:
+            plan.partners[p] = {k.b for k in joints_of(scene, p)}
     return placements
 
 

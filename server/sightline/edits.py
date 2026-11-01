@@ -310,6 +310,103 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     return Offset(global_id, start_m, end_m, dz_m, gids, used, lateral_m)
 
 
+JOG_STUB_M = 0.15   # what a re-fit moves with the joint, before its first bend
+
+
+def apply_jog(scene: IfcScene, global_id: str, end: str, delta_m) -> Offset:
+    """Re-fit a level straight segment to what its `end` ("start" or "end") is joined to, moved `delta_m` square to it
+    (up, down or sideways, one at a time): a short piece at that end (JOG_STUB_M) goes the same way, a pair of bends
+    and a riser take it back to the rest, which stays where it is with its far joint (docs/editing-parity.md, "A
+    carried move re-fits"). Edits the model in place; wrap in a trial to undo."""
+    element = scene.entity(global_id)
+    place, item, d, px, profile_x, pieces, shift, at, dz_m, lateral_m = _jog(scene, global_id, end, delta_m)
+    model = scene.models[scene.index_of(global_id)]
+    if end == "start":   # the segment keeps the first piece: it starts where the joint went
+        local = ifcopenshell.util.placement.get_axis2placement(item.Position)
+        local[:3, 3] = (np.linalg.inv(place) @ np.append(pieces[0][1], 1.0))[:3]
+        item.Position = model.createIfcAxis2Placement3D(
+            _point(model, local[:3, 3]), _dir(model, local[:3, 2]), _dir(model, local[:3, 0]))
+    gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces, shift_ends=shift)
+    return Offset(global_id, at, at, dz_m, gids, "bends", lateral_m)
+
+
+def jog_fits(scene: IfcScene, global_id: str, end: str, delta_m) -> str | None:
+    """Why `apply_jog` cannot re-fit this segment, in words, or None when it can. Edits nothing."""
+    try:
+        _jog(scene, global_id, end, delta_m)
+    except Unsupported as e:
+        return str(e)
+    return None
+
+
+def _jog(scene: IfcScene, global_id: str, end: str, delta_m):
+    """A re-fit's pieces, read from the model without editing it (see `apply_jog`)."""
+    element = scene.entity(global_id)
+    if element.is_a() not in FITTING_CLASS:
+        raise Unsupported(f"a {element.is_a()} has no bend fittings to re-fit it with")
+    if len(_ports(element)) > 2:
+        raise Unsupported("a branched segment cannot be re-fitted")
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    model, s = scene.models[i], scene.unit_scales[i]
+    delta = np.asarray(delta_m, float)
+    if abs(d @ UP) > 1e-3:
+        raise Unsupported("the segment is not level")
+    if abs(delta @ d) > 1e-4:
+        raise Unsupported("the move runs along it")
+    side = np.cross(UP, d)
+    side /= np.linalg.norm(side)
+    dz_m, lateral_m = offset_components(float(delta @ UP), float(delta @ side))
+    if dz_m and lateral_m:
+        raise Unsupported("a move both up and across cannot be re-fitted with one pair of bends")
+    if not (dz_m or lateral_m):
+        raise Unsupported("nothing to re-fit")
+    amount = lateral_m or dz_m
+    offset_axis = side if lateral_m else UP
+    sx, sy = _profile_size(item.SweptArea)
+    if abs(py @ UP) > 0.999:
+        t, w = sy, sx
+    elif abs(px @ UP) > 0.999:
+        t, w = sx, sy
+    else:
+        raise Unsupported("the profile is tilted")
+    if lateral_m:
+        t, w = w, t
+    profile_x = px.copy()
+    pos = getattr(item.SweptArea, "Position", None)
+    if pos is not None and pos.RefDirection is not None:
+        lx = np.asarray(pos.RefDirection.DirectionRatios, float)
+        lx /= np.linalg.norm(lx)
+        profile_x = px * lx[0] + py * lx[1]
+    r_m = bend_radius(t * s, amount)
+    if r_m is None:
+        raise Unsupported(f"{abs(amount) * 1000:.0f} mm is too little for a pair of bends of this section")
+    R, dz, L, m = r_m / s, amount / s, item.Depth, JOG_STUB_M / s
+    if L - m - 2 * R < MIN_PIECE_M / s:
+        raise Unsupported(f"it is too short to re-fit ({L * s:.2f} m; the bends and the piece moved take "
+                          f"{(m + 2 * R) * s:.2f} m)")
+    u = offset_axis * (1.0 if dz > 0 else -1.0)
+    rise = abs(dz) - 2 * R
+    riser = rise > 1e-3 / s
+    if end == "start":
+        pieces = [("straight", origin + offset_axis * dz, d, m),
+                  ("bend", origin + d * m + offset_axis * dz, d, -u, R, w, t)]
+        pieces += [("straight", origin + d * (m + R) + offset_axis * dz - u * R, -u, rise)] if riser else []
+        pieces += [("bend", origin + d * (m + R) + u * R, -u, d, R, w, t),
+                   ("straight", origin + d * (m + 2 * R), d, L - m - 2 * R)]
+        shift = (delta, None)
+    elif end == "end":
+        a = L - m - R
+        pieces = [("straight", origin, d, a - R), ("bend", origin + d * (a - R), d, u, R, w, t)]
+        pieces += [("straight", origin + d * a + u * R, u, rise)] if riser else []
+        pieces += [("bend", origin + d * a + u * (abs(dz) - R), u, d, R, w, t),
+                   ("straight", origin + d * (a + R) + offset_axis * dz, d, m)]
+        shift = (None, delta)
+    else:
+        raise Unsupported(f"no end called {end!r}")
+    at = JOG_STUB_M + r_m if end == "start" else L * s - JOG_STUB_M - r_m
+    return place, item, d, px, profile_x, pieces, shift, at, dz_m, lateral_m
+
+
 ROUTE_STEPS = 3                      # most steps one route may take
 ROUTE_SLOPE = np.sin(np.radians(15))  # steepest run a route may take, as |sin| of its slope
 GRAVITY_SYSTEMS = {"DRAINAGE", "RAINWATER", "SEWAGE", "STORMWATER", "WASTEWATER"}
@@ -841,7 +938,8 @@ def _label_resize(scene: IfcScene, gids: list[str], name: str | None, before: tu
         "ResizedFrom": old_size, "Size": new_size, "KeepLevel": keep, "Performance": performance})
 
 
-def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple]) -> list[str]:
+def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces: list[tuple],
+                 shift_ends: tuple = (None, None)) -> list[str]:
     """Turn `element` into the chain of `pieces` (world, file units): the first piece is the element itself, shortened
     (it must be the straight from its origin along `d`); straights are copies of it with the same profile, bends are
     new fittings. Ports are added and chained in order, the last piece takes over the element's far connection, and
@@ -990,8 +1088,12 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
         _place_port(model,ports[0],p0,s,-t0,section_ref(t0,profile_x))
         _place_port(model,ports[-1],p1,s,t1,section_ref(t1,profile_x))
     if external_frames:
-        for port, frame in zip((chain_ports[0][0], chain_ports[-1][-1]), external_frames):
+        # An end the chain moves with what it is joined to (a re-fit, `apply_jog`): its frame goes the same way
+        for port, frame, shift in zip((chain_ports[0][0], chain_ports[-1][-1]), external_frames, shift_ends):
             if frame is not None:
+                if shift is not None:
+                    frame = frame.copy()
+                    frame[:3, 3] += np.asarray(shift, float)
                 ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=frame, is_si=True)
 
     gids = [p.GlobalId for p in chain]
