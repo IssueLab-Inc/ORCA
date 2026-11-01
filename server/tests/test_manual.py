@@ -148,7 +148,7 @@ def test_a_transfer_beam_trimmed_warns_for_structure_but_is_not_refused(scene):
     assert r["passed"] and r["warnings"][0]["rule"] == "transfer" and "C2" in r["warnings"][0]["text"]
     kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "east end", "by_m": -0.2})
     assert kept["entry"]["warnings"][0]["review"] == "structure"
-    assert "an I, U or L" in manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "sides", "by_m": 0.1})["blocked"]
+    assert "need a pick" in manual.check(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "sides", "by_m": 0.1})["blocked"]
 
 
 def test_a_move_takes_the_element_and_is_logged(scene):
@@ -279,7 +279,7 @@ def test_a_beam_and_a_pipe_split_along_their_runs(scene):
     a, b = kept["pieces"]
     assert length_x(s, a) == pytest.approx(1.5) and length_x(s, b) == pytest.approx(2.5)
     assert s.entity(b).is_a("IfcBeam") and not getattr(s.entity(b), "HasOpenings", None)
-    assert "under 50 mm" in manual.check(ws, sid, {"op": "split", "element": g["P1"], "at": [0.01, -1, 1.5]})["blocked"]
+    assert "under 5 mm" in manual.check(ws, sid, {"op": "split", "element": g["P1"], "at": [0.003, -1, 1.5]})["blocked"]
 
 
 def test_a_section_is_taken_out_and_the_rest_stays_where_it_was(scene):
@@ -318,3 +318,51 @@ def test_a_beam_end_is_clipped_to_a_sloping_face_and_its_other_end_still_pushes(
     manual.apply(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "west end", "by_m": 0.2})
     assert s.bounds()[g["B1"]][0][0] == pytest.approx(-0.2)
     assert "nothing to clip" in manual.check(ws, sid, {"op": "clip", "element": g["P1"], "to": {"point": [10, 0, 0], "normal": [-1, 0, 0]}})["blocked"]
+
+
+def width_along(s, gid, u):
+    """The element's extent along the horizontal unit vector u (its mesh, metres)."""
+    from sightline import edits
+    v = edits._mesh_verts(s.entity(gid))
+    return float(np.ptp(v @ np.asarray(u, float)))
+
+
+def test_a_rectangle_turned_in_its_plan_pushes_along_its_own_sides(scene):
+    ws, sid, s, g = scene
+    u = [np.cos(np.radians(30)), np.sin(np.radians(30)), 0.0]
+    side = faces.resolve(s, g["T1"], [10 + 0.2 * u[0], 0.2 * u[1], 0.5], u)
+    assert side.id == "side:+x" and side.size_m == pytest.approx(0.4)
+    kept = manual.apply(ws, sid, {"op": "push_pull", "element": g["T1"], "face": side.id, "by_m": 0.1})
+    assert kept["entry"]["kind"] == "push_pull"
+    assert width_along(s, g["T1"], u) == pytest.approx(0.5, abs=1e-6)
+    assert width_along(s, g["T1"], [-u[1], u[0], 0.0]) == pytest.approx(0.2, abs=1e-6)
+
+
+def test_a_shared_body_gets_its_own_copy_so_only_that_element_changes(scene):
+    ws, sid, s, g = scene
+    assert s.entity(g["D1"]).Representation.Representations[0] == s.entity(g["D2"]).Representation.Representations[0]
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["D1"], "face": "top", "by_m": 0.5})
+    b1, b2 = s.bounds()[g["D1"]], s.bounds()[g["D2"]]
+    assert b1[1][2] == pytest.approx(2.5) and b2[1][2] == pytest.approx(2.0)
+    assert s.entity(g["D1"]).Representation.Representations[0] != s.entity(g["D2"]).Representation.Representations[0]
+    ws.undo_edit(sid)
+    assert s.entity(g["D1"]).Representation.Representations[0] == s.entity(g["D2"]).Representation.Representations[0]
+    assert s.bounds()[g["D1"]][1][2] == pytest.approx(2.0)
+
+
+def test_people_may_leave_5_mm_where_fixes_leave_50(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["C1"], "face": "west side", "by_m": -0.29})
+    assert r["passed"] or r["blocked"] is None
+    assert "at least 5 mm" in manual.check(ws, sid, {"op": "push_pull", "element": g["C1"], "face": "west side",
+                                                     "by_m": -0.298})["blocked"]
+
+
+def test_a_face_only_a_pick_can_place_is_refused_by_name_and_aligns_from_its_pick(scene):
+    ws, sid, s, g = scene
+    assert "need a pick" in manual.check(ws, sid, {"op": "align", "element": g["B1"], "face": "sides",
+                                                   "to": {"element": g["C1"], "face": "west side"}})["blocked"]
+    # From a pick on the beam's south flange tip (y = 2.4), not the profile's middle: moved 3.35 m to the pipe's top side.
+    r = manual.check(ws, sid, {"op": "align", "element": g["B1"], "face": {"point": [1.0, 2.4, 2.7], "normal": [0, -1, 0]},
+                               "to": {"element": g["P1"], "face": {"point": [1.0, -0.95, 1.5], "normal": [0, 1, 0]}}})
+    assert r["blocked"] is None and r["op"]["by_m"] == pytest.approx(3.35, abs=1e-6) and r["op"]["how"] == "move"

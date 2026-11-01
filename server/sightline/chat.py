@@ -195,8 +195,8 @@ TOOLS = [
         "face}, gap_m, how: stretch|move}, {op: move, element, delta_m: [dx, dy, dz]}, {op: void, element, face, at: "
         "[x, y, z], shape: rect|round, width_m, height_m | diameter_m, depth_m (omit to go through)}, {op: cut_by, "
         "element, cutter, gap_m}, {op: split, element, at}, {op: remove_section, element, from, to}, {op: delete, "
-        "element}, {op: clip, element, to: {element, face}, gap_m}. `element` may be \"selected\"; faces by name from "
-        "list_faces. The result says what it clears, what it would hit (clashes), its warnings, or why it cannot be made.",
+        "element}, {op: clip, element, to: {element, face}, gap_m}. `element` may be \"selected\", and `face` \"selected\" "
+        "for the face the user chose in the Edit tool; other faces by name from list_faces. The result says what it clears, what it would hit (clashes), its warnings, or why it cannot be made.",
         {"op": {"type": "object"}}, ["op"]),
     _fn("edit_keep", "Keep the hand edit you checked last, only when the user's own latest message says to keep it "
         "(keep it, apply it, do it, yes). When it makes clashes, only when they said to keep it with the clashes; pass "
@@ -257,7 +257,8 @@ class Context:
     filters: list[dict] = field(default_factory=list)
     filter_view: dict = field(default_factory=dict)
     check: str | None = None   # the kept check the user's list shows (its key; None: every kept check)
-    # What the user has selected on the page: {element, face?} (the Edit tool's face, when one is chosen).
+    # What the user has selected on the page: {element, face?, pick?} (the Edit tool's face, when one is chosen, and the
+    # point and normal picked on it).
     selected: dict | None = None
 
 
@@ -488,6 +489,18 @@ class Chat:
             return sel
         return gid
 
+    @staticmethod
+    def _chosen_face(ctx: Context, gid, face):
+        """The face the user chose in the Edit tool, as its pick, when Muse means it ("selected", or its name on the
+        element selected): a face only a pick places (an I-section's side, a fitting's face) works from chat too."""
+        sel = ctx.selected or {}
+        pick = sel.get("pick")
+        if not isinstance(face, str) or not isinstance(pick, dict) or sel.get("element") != gid:
+            return face
+        if face.strip().lower() in ("selected", "this", "this face", "it", "chosen") or face == sel.get("face"):
+            return {"point": pick.get("point"), "normal": pick.get("normal")}
+        return face
+
     def _edit_tool(self, name: str, args: dict, ctx: Context, emit) -> tuple[dict, str, list[Path]]:
         """The hand-edit tools (docs/manual-edits.md): Muse checks, the person keeps."""
         ws, sid = self.ws, self._scene(ctx)
@@ -507,6 +520,7 @@ class Chat:
         if name == "edit_check":
             op = dict(args.get("op") or {})
             op["element"] = self._selected(ctx, op.get("element"))
+            op["face"] = self._chosen_face(ctx, op["element"], op.get("face"))
             r = manual.check(ws, sid, op)
             self.pending[session] = {"check": r, "turn": state.get("turn"), "scene": sid}
             emit({"type": "ui", "action": "edit_preview", "check": r})

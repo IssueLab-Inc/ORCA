@@ -9,7 +9,7 @@ import { api, type EditCheck, type EditFace, type EditKept, type EditOp, type Jo
 import { AlignIcon, CheckingIcon, ClipIcon, CutByIcon, DeleteIcon, EditIcon, KeepIcon, LogIcon, MoveIcon, PushPullIcon,
   RemoveSectionIcon, SplitIcon, VoidIcon } from "./editIcons";
 import { EditPanel } from "./EditPanel";
-import { EDIT_TOOLS, signedMm, toolForKey, toolState, type EditToolId } from "./viewer/edit";
+import { alignDistance, EDIT_TOOLS, faceRef, OFFER, signedMm, toolForKey, toolState, type EditToolId } from "./viewer/edit";
 import type { FacePick, Viewer } from "./viewer/Viewer";
 
 const ICON: Record<EditToolId, LucideIcon> = { push_pull: PushPullIcon, align: AlignIcon, move: MoveIcon, void: VoidIcon,
@@ -49,7 +49,8 @@ export const EditTool = forwardRef<EditToolHandle, {
   onShow: (e: JournalEntry) => void; onError: (message: string) => void; onClose: () => void;
   /** A hand edit Muse or an agent checked: shown here as if it were checked on this page, with Keep. */
   incoming?: { check: EditCheck; n: number } | null;
-  /** The element and face chosen (for chat: "this face"). */ onFace?: (f: { element: string; face: string | null } | null) => void;
+  /** The element and face chosen (for chat: "this face"), with the pick on it. */
+  onFace?: (f: { element: string; face: string | null; pick?: { point: number[]; normal: number[] } } | null) => void;
 }>(function EditTool({ viewer, sceneId, busy, coarse, clash, journal, csvUrl, clashLabel, showLog, onKept, onUndo, onRedo,
   onUndoTo, onShow, onError, onClose, incoming, onFace }, ref) {
   const [tool, setTool] = useState<EditToolId>("push_pull");
@@ -73,6 +74,8 @@ export const EditTool = forwardRef<EditToolHandle, {
   const [keeping, setKeeping] = useState(false);
   const [settled, setSettled] = useState(0);
   const ask = useRef(0), frame = useRef(0);
+  /** A face kept across a change of tool (a face the last tool could not take: "Align it"). */
+  const carry = useRef<{ face: Face; pick: FacePick } | null>(null);
   const act = coarse ? "Tap" : "Click";
   const element = face?.element ?? pick?.globalId ?? null;
 
@@ -88,8 +91,13 @@ export const EditTool = forwardRef<EditToolHandle, {
     if (!keepTool) setTool("push_pull");
   }
   useEffect(() => () => { const v = viewer(); v?.showEditFaces([]); v?.setEditDrag(null); v?.preview([]); }, []);
-  useEffect(() => { reset(); }, [tool, sceneId]);
-  useEffect(() => { onFace?.(face ? { element: face.element, face: face.name } : null); }, [face]);
+  useEffect(() => {
+    const c = carry.current;
+    carry.current = null;
+    reset();
+    if (c) { setFace(c.face); setPick(c.pick); setHow(c.face.allows.includes("push_pull") ? "stretch" : "move"); }
+  }, [tool, sceneId]);
+  useEffect(() => { onFace?.(face ? { element: face.element, face: face.name, pick: pick ? { point: pick.point, normal: pick.normal } : undefined } : null); }, [face, pick]);
   // Muse's (or an agent's) check: its tool, its face, its result and its preview, as if checked here.
   const shown = useRef(0);
   useEffect(() => {
@@ -128,23 +136,25 @@ export const EditTool = forwardRef<EditToolHandle, {
     if (!v) return;
     if (tool === "push_pull" && face && pick && face.allows.includes("push_pull")) {
       v.setEditDrag({ globalId: face.element, point: pick.point, normal: face.normal,
-        onMove: (m) => { setCheck(null); v.preview([]); setBy(m); v.pushPreview(face.element, pick.point, face.normal, m); },
+        onStart: () => { ++ask.current; setCheck(null); setChecking(false); v.preview([]); },   // a check's drawing goes once
+        onMove: (m) => { setBy(m); v.pushPreview(face.element, pick.point, face.normal, m); },
         onEnd: (m) => { if (Math.abs(m) >= 0.0005) void run(pushOp(m)); } });
     } else v.setEditDrag(null);
     return () => v.setEditDrag(null);
   }, [tool, face, pick]);
 
-  const pushOp = (m: number): EditOp => ({ op: "push_pull", element: face!.element, face: face!.id, by_m: m });
-  const alignOp = (g = gap, h = how): EditOp => ({ op: "align", element: face!.element, face: face!.id, gap_m: g, how: h,
-    to: { element: target!.element, face: target!.kind === "other" ? undefined : target!.id,
-      ...(target!.kind === "other" && targetPick ? { point: targetPick.point, normal: targetPick.normal } : {}) } });
+  const own = () => faceRef(face!, pick ?? { point: face!.point, normal: face!.normal });
+  /** The face aimed at: by id, or by the pick on it when only a pick places it. */
+  const toFace = (t: Face, tp: FacePick) => { const r = faceRef(t, tp); return typeof r === "string" ? { element: t.element, face: r } : { element: t.element, ...r }; };
+  const pushOp = (m: number): EditOp => ({ op: "push_pull", element: face!.element, face: own(), by_m: m });
+  const alignOp = (t = target!, tp = targetPick!, g = gap, h = how): EditOp => ({ op: "align", element: face!.element, face: own(),
+    gap_m: g, how: h, to: toFace(t, tp) });
   const moveOp = (d: number[]): EditOp => ({ op: "move", element: element!, delta_m: d });
-  const voidOp = (at = pick!.point): EditOp => ({ op: "void", element: face!.element, face: face!.id, at, shape: voidShape,
+  const voidOp = (at = pick!.point): EditOp => ({ op: "void", element: face!.element, face: own(), at, shape: voidShape,
     ...(voidShape === "round" ? { diameter_m: voidSize[0] } : { width_m: voidSize[0], height_m: voidSize[1] }),
     ...(recess != null ? { depth_m: recess } : {}) });
   const cutOp = (c = cutter, g = gap): EditOp => ({ op: "cut_by", element: element!, cutter: c!.globalId, gap_m: g });
-  const clipOp = (t = target!, tp = targetPick!, g = gap): EditOp => ({ op: "clip", element: face!.element, gap_m: g,
-    to: t.kind === "other" ? { element: t.element, point: tp.point, normal: tp.normal } : { element: t.element, face: t.id } });
+  const clipOp = (t = target!, tp = targetPick!, g = gap): EditOp => ({ op: "clip", element: face!.element, gap_m: g, to: toFace(t, tp) });
 
   async function run(op: EditOp) {
     if (!sceneId) return;
@@ -197,21 +207,29 @@ export const EditTool = forwardRef<EditToolHandle, {
         if (face) void runAlign(f, p);
         return;
       }
-      const need = EDIT_TOOLS.find((t) => t.id === tool)!.needs === "face" ? tool : null;
-      if (as === "face" && need && !f.allows.includes(need)) {
-        onError(`Its ${f.name} cannot be ${need === "push_pull" ? "pushed or pulled" : need === "align" ? "aligned" : "used for that"}${f.why_not ? `: ${f.why_not}` : ""}.`);
-        return;
-      }
+      // A face this tool cannot take is still chosen: the panel says why and offers the tools it does take.
       setFace(f); setPick(p); setBy(0); setCheck(null);
       setHow(f.allows.includes("push_pull") ? "stretch" : "move");
       then?.(f);
     } catch (e) { if (n === ask.current) onError((e as Error).message); }
   }
 
-  function runAlign(t: Face, tp: FacePick) {
-    if (!face) return;
-    return run({ op: "align", element: face.element, face: face.id, gap_m: gap, how,
-      to: t.kind === "other" ? { element: t.element, point: tp.point, normal: tp.normal } : { element: t.element, face: t.id } });
+  /** Align to that face: at once a preview from the two picks (a stretch or a move), then the server's check. */
+  function runAlign(t: Face, tp: FacePick, g = gap, h = how) {
+    if (!face || !pick) return;
+    const v = viewer(), d = alignDistance(pick.point, face.normal, tp.point, t.normal, g);
+    if (v && d != null) {
+      v.preview([]);
+      if (h === "stretch" && face.allows.includes("push_pull")) v.pushPreview(face.element, pick.point, face.normal, d);
+      else { v.pushPreview(face.element, pick.point, face.normal, null); v.preview([{ globalIds: [face.element], deltaM: face.normal.map((x) => x * d) as [number, number, number] }]); }
+    }
+    return run(alignOp(t, tp, g, h));
+  }
+
+  /** Change tool, keeping the face chosen. */
+  function offer(t: EditToolId) {
+    if (face && pick) carry.current = { face, pick };
+    setTool(t);
   }
 
   useImperativeHandle(ref, () => ({
@@ -237,7 +255,9 @@ export const EditTool = forwardRef<EditToolHandle, {
         else void choose(p, "face", () => { setFrom(at); });
         return;
       }
-      if ((tool === "align" || tool === "cut_by" || tool === "clip") && face && p.globalId !== face.element) { void choose(p, "target"); return; }
+      if ((tool === "align" || tool === "cut_by" || tool === "clip") && face && toolState(tool, face, READY).ok && p.globalId !== face.element) {
+        void choose(p, "target"); return;
+      }
       if (tool === "void" && face && p.globalId === face.element && sameNormal(p.normal, pick?.normal)) {
         setPick(p); setCheck(null); viewer()?.preview([]);   // the same face: the opening goes where it was clicked
         return;
@@ -273,6 +293,7 @@ export const EditTool = forwardRef<EditToolHandle, {
   }), [tool, face, pick, target, element, from, check, checking, by, delta, sceneId, busy, keeping, gap, how, voidShape, voidSize, recess, cutter]);
 
   const hint = (() => {
+    if (face && !toolState(tool, face, READY).ok) return `${act} another face, or use one of these`;
     if (tool === "align") return !face ? `${act} the face to move` : !target ? `${act} the face to align it to` : null;
     if (tool === "move") return !element ? `${act} the element to move` : from ? `${act} where it goes` : `Type the move, or ${act.toLowerCase()} where it comes from, then where it goes`;
     if (tool === "push_pull") return !face ? `${act} a face to push or pull` : !check && !checking ? (coarse ? "Type how far" : "Drag the face (Shift: by the mm), or type how far") : null;
@@ -285,6 +306,11 @@ export const EditTool = forwardRef<EditToolHandle, {
     return EDIT_TOOLS.find((t) => t.id === tool)!.hint;
   })();
   const status = check ? checkStatus(check) : null;
+  const can = face ? toolState(tool, face, READY) : null;
+  const refused = can && !can.ok ? can.why : null;
+  /** What the face does take, when this tool cannot: its face tools, then a move. */
+  const offers = refused && face ? [...EDIT_TOOLS.filter((t) => t.needs === "face" && READY.has(t.id) && face.allows.includes(t.id)).map((t) => t.id),
+    ...(READY.has("move") ? ["move" as EditToolId] : [])] : [];
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const Tool = ICON[tool];
 
@@ -312,14 +338,22 @@ export const EditTool = forwardRef<EditToolHandle, {
         {face && <div className="edit-face">
           <Tool size={14} aria-hidden /><span><b>{face.name}</b>{face.label ? <> of {face.label}</> : null}
             {face.size_m != null && face.kind !== "edge" ? <span className="why mono"> · {metres(face.size_m)}</span> : null}</span></div>}
-        {tool === "push_pull" && face && (
+        {face && refused && (
+          <div className="edit-offer" role="status">
+            <p>{refused}{face.why_not ? `: ${face.why_not}` : ""}.</p>
+            {offers.length > 0 && <div className="edit-offer-tools">{offers.map((t) => {
+              const Icon = ICON[t];
+              return <button key={t} type="button" className="ebtn btn small" onClick={() => offer(t)}><Icon size={14} aria-hidden /> {OFFER[t]}</button>;
+            })}</div>}
+          </div>)}
+        {tool === "push_pull" && face && !refused && (
           <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); if (by) void run(pushOp(by)); }}>
             <label>{by >= 0 ? "Out" : "In"} <input type="number" step={5} value={mmIn(by)} aria-label="How far, mm (out is +)"
               onChange={(e) => { const m = Number(e.target.value) / 1000; setBy(m); setCheck(null); viewer()?.preview([]);
                 if (pick) viewer()?.pushPreview(face.element, pick.point, face.normal, m); }} /> mm</label>
             <button type="submit" className="btn small" disabled={!by || checking}>Check</button>
           </form>)}
-        {tool === "align" && face && target && (
+        {tool === "align" && face && target && !refused && (
           <div className="edit-row-in">
             <span className="edit-target"><b>{target.name}</b>{target.label ? <> of {target.label}</> : null}</span>
             <label>Gap <input type="number" step={5} min={0} value={mmIn(gap)} aria-label="Gap, mm"
@@ -328,7 +362,7 @@ export const EditTool = forwardRef<EditToolHandle, {
             <div className="seg" role="group" aria-label="How">
               {(["stretch", "move"] as const).map((h) => (
                 <button key={h} type="button" className={how === h ? "on" : ""} disabled={h === "stretch" && !face.allows.includes("push_pull")}
-                  onClick={() => { setHow(h); if (target && targetPick) void run(alignOpWith(h)); }}>{h === "stretch" ? "Stretch to it" : "Move to it"}</button>))}
+                  onClick={() => { setHow(h); if (target && targetPick) void runAlign(target, targetPick, gap, h); }}>{h === "stretch" ? "Stretch to it" : "Move to it"}</button>))}
             </div>
           </div>)}
         {tool === "move" && element && (
@@ -339,7 +373,7 @@ export const EditTool = forwardRef<EditToolHandle, {
                   viewer()?.preview([{ globalIds: [element], deltaM: d }]); }} /></label>))}
             <button type="submit" className="btn small" disabled={!delta.some((x) => x) || checking}>Check</button>
           </form>)}
-        {tool === "void" && face && pick && (
+        {tool === "void" && face && pick && !refused && (
           <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); void run(voidOp()); }}>
             <div className="seg" role="group" aria-label="Shape">
               {(["rect", "round"] as const).map((sh) => <button key={sh} type="button" className={voidShape === sh ? "on" : ""}
@@ -361,7 +395,7 @@ export const EditTool = forwardRef<EditToolHandle, {
               onChange={(e) => { setGap(Number(e.target.value) / 1000); setCheck(null); }} /> mm</label>
             <button type="submit" className="btn small" disabled={!cutter || checking}>Check</button>
           </form>)}
-        {tool === "clip" && face && target && (
+        {tool === "clip" && face && target && !refused && (
           <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); void run(clipOp()); }}>
             <span className="edit-target">to the <b>{target.name}</b>{target.label ? <> of {target.label}</> : null}</span>
             <label>Gap <input type="number" step={5} min={0} value={mmIn(gap)} aria-label="Gap, mm"
@@ -391,7 +425,6 @@ export const EditTool = forwardRef<EditToolHandle, {
     </section>
   );
 
-  function alignOpWith(h: "stretch" | "move"): EditOp { return alignOp(gap, h); }
 });
 
 function sameNormal(a: number[] | undefined, b: number[] | undefined): boolean {

@@ -293,7 +293,7 @@ class ChatTurn(BaseModel):
     filters: list[PageFilter] = Field(default_factory=list, max_length=100)
     filter_view: FilterView = Field(default_factory=FilterView)
     check: str | None = None   # the kept check the page's list shows (None: all of them)
-    selected: dict | None = None   # what the user has selected: {element, face?} (the Edit tool's face)
+    selected: dict | None = None   # what the user has selected: {element, face?, pick?} (the Edit tool's face)
 
 
 class PlanRequest(BaseModel):

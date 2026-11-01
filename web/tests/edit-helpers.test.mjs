@@ -49,3 +49,19 @@ test("the palette says what each tool can act on", () => {
   assert.equal(edit.toolForKey("A"), "align"); assert.equal(edit.toolForKey("z"), null);
   assert.deepEqual(edit.EDIT_TOOLS.map((t) => t.id), ["push_pull", "align", "move", "void", "cut_by", "split", "remove_section", "clip", "delete"]);
 });
+
+test("align previews from the two picks: how far the face moves to sit a gap off the other, parallel faces only", () => {
+  // A duct's top at z = 3 (normal up) to a slab's underside at z = 3.4 (normal down): up 0.4 m, 0.375 m with a 25 mm gap.
+  assert.ok(Math.abs(edit.alignDistance([1, 2, 3], [0, 0, 1], [5, 0, 3.4], [0, 0, -1]) - 0.4) < 1e-12);
+  assert.ok(Math.abs(edit.alignDistance([1, 2, 3], [0, 0, 1], [5, 0, 3.4], [0, 0, -1], 0.025) - 0.375) < 1e-12);
+  // A face past its target comes back (negative), and a target normal the same way round reads the same.
+  assert.ok(Math.abs(edit.alignDistance([0, 0, 4], [0, 0, 1], [0, 0, 3.4], [0, 0, 1]) + 0.6) < 1e-12);
+  assert.equal(edit.alignDistance([0, 0, 0], [1, 0, 0], [1, 0, 0], [Math.cos(0.1), Math.sin(0.1), 0]), null, "6° apart: not parallel");
+});
+
+test("a face only a pick places is named by its pick; a face ORCA sizes by its id", () => {
+  const p = { point: [1, 2, 3], normal: [0, -1, 0] };
+  for (const kind of ["other", "flank", "clip", "plane", "radial"]) assert.deepEqual(edit.faceRef({ id: kind, kind }, p), p, kind);
+  assert.equal(edit.faceRef({ id: "cap:end", kind: "cap" }, p), "cap:end");
+  assert.equal(edit.faceRef({ id: "edge:2", kind: "edge" }, p), "edge:2");
+});

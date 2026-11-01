@@ -136,7 +136,7 @@ export function App() {
   // A hand edit Muse or an agent checked, for the Edit tool to preview; and the element and face the tool has chosen
   // (chat's context: "this face").
   const [incomingEdit, setIncomingEdit] = useState<{ check: EditCheck; n: number } | null>(null);
-  const editPick = useRef<{ element: string; face: string | null } | null>(null);
+  const editPick = useRef<{ element: string; face: string | null; pick?: { point: number[]; normal: number[] } } | null>(null);
   // Free navigation (docs/views.md): every clash picked takes the views to it unless turned off; visibility filters and
   // what is hidden for now (viewing only); saved views and Home per project, in this browser.
   const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });

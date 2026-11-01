@@ -74,6 +74,30 @@ export function signedMm(m: number): string {
   return v === 0 ? "0 mm" : `${v > 0 ? "+" : "−"}${Math.abs(v).toLocaleString()} mm`;
 }
 
+/** Faces whose plane only a pick on them says (an I-section's sides, a clipped end, a round side, a fitting's face):
+ * an op names them by the pick, never by id. */
+export const PICKED_KINDS: ReadonlySet<string> = new Set(["other", "flank", "clip", "plane", "radial"]);
+
+/** How an op names a face: its id, or the pick on it (`PICKED_KINDS`). */
+export function faceRef(f: { id: string; kind: string }, p: { point: number[]; normal: number[] }):
+  string | { point: number[]; normal: number[] } {
+  return PICKED_KINDS.has(f.kind) ? { point: [...p.point], normal: [...p.normal] } : f.id;
+}
+
+/** How far face A (a point and outward normal on it) moves along its normal to sit `gap` metres off face B: the
+ * server's align, for the preview before its check. Null when the faces are more than 1° from parallel. */
+export function alignDistance(pa: ArrayLike<number>, na: ArrayLike<number>, pb: ArrayLike<number>, nb: ArrayLike<number>,
+                              gap = 0): number | null {
+  const unit = (v: ArrayLike<number>) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const a = unit(na), b = unit(nb), cos = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  if (Math.abs(cos) < Math.cos(Math.PI / 180)) return null;
+  return ((pb[0] - pa[0]) * b[0] + (pb[1] - pa[1]) * b[1] + (pb[2] - pa[2]) * b[2]) / cos - gap;
+}
+
+/** Short words for a tool offered on a face the current tool cannot take ("Align it"). */
+export const OFFER: Record<EditToolId, string> = { push_pull: "Push/pull it", align: "Align it", move: "Move it", void: "Cut a void",
+  cut_by: "Cut it by a shape", split: "Split it", remove_section: "Remove a section", clip: "Clip it", delete: "Delete it" };
+
 export type EditToolId = "push_pull" | "align" | "move" | "void" | "cut_by" | "split" | "remove_section" | "clip" | "delete";
 
 /** The edit tools in the palette's order: what each does, the key inside the tool, and what it needs picked. */

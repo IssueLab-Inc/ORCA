@@ -213,7 +213,14 @@ def resolve(scene: IfcScene, gid: str, point, normal) -> Face:
 
     def pick(face_id: str) -> Face:
         f = next(x for x in listed if x.id == face_id)
-        return Face(gid, f.id, f.kind, f.name, f.normal, P.tolist(), f.size_m, f.allows, f.why_not)
+        n = f.normal
+        if f.kind == "clip":     # the clip's own plane, as picked
+            n = N.tolist()
+        elif f.kind == "radial":  # the round side's normal where it was picked: square to the axis
+            ax = world[:3, 2] / np.linalg.norm(world[:3, 2])
+            r = N - (N @ ax) * ax
+            n = (r / np.linalg.norm(r)).tolist() if np.linalg.norm(r) > 1e-6 else f.normal
+        return Face(gid, f.id, f.kind, f.name, n, P.tolist(), f.size_m, f.allows, f.why_not)
 
     if abs(nl[2]) > CAP_COS:
         return pick("cap:end" if nl[2] > 0 else "cap:start")

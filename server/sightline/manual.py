@@ -34,6 +34,8 @@ from .scene import IfcScene, not_physical
 PARALLEL_COS = np.cos(np.radians(1))   # two faces this close to parallel align by a push or a move; else a clip
 LEAST_M = 0.0005                       # an edit shorter than this is already there
 WORSE_M = 0.002                        # a contact this much deeper than before counts as worse (agent._try_trim)
+MIN_HAND_M = 0.005                     # the least a hand edit leaves of a length or a width (fixes keep MIN_PIECE_M)
+PICKED = ("other", "flank", "clip", "plane")   # faces whose plane only a pick on them says: a name is not enough
 
 
 class NotKept(ValueError):
@@ -112,14 +114,36 @@ def _vec(v, what: str) -> np.ndarray:
 
 
 def face_of(scene: IfcScene, gid: str, spec) -> faces.Face:
-    """A face from what the op says: its id or name ("east end"), or a pick ({"point", "normal"})."""
+    """A face from what the op says: its id or name ("east end"), or a pick ({"point", "normal"}). A face only a pick
+    can place (an I-section's sides, a clipped end, a fitting's face) is refused by name: say where on it."""
     if isinstance(spec, dict):
         if spec.get("point") is not None and spec.get("normal") is not None:
             return faces.resolve(scene, gid, _vec(spec["point"], "point"), _vec(spec["normal"], "normal"))
         spec = spec.get("face") or spec.get("id")
     if not isinstance(spec, str) or not spec:
         raise ValueError("say which face: its name (east end, top) or a point and a normal on it")
-    return faces.by_name(scene, gid, spec)
+    f = faces.by_name(scene, gid, spec)
+    if f.kind in PICKED:
+        raise ValueError(f"its {f.name if f.kind != 'other' else 'faces'} need a pick: give a point and a normal on the face")
+    return f
+
+
+def spec(face: faces.Face):
+    """How the op as read names its face, so its check and its keep read the same face: its id, or the pick for a face
+    only a pick places (and a round side, whose normal is where it was picked)."""
+    if face.kind in PICKED or face.kind == "radial":
+        return {"point": [round(float(c), 6) for c in face.point], "normal": [round(float(c), 6) for c in face.normal]}
+    return face.id
+
+
+def plane_point(scene: IfcScene, gid: str, face: faces.Face) -> np.ndarray:
+    """A point on the face's plane: the listed face's middle for a face ORCA sizes (a cap, a rectangle's side, an
+    outline edge), else the pick itself (a flank, a clipped end, a round side, a fitting's face)."""
+    if face.kind in ("cap", "side", "edge"):
+        listed = next((x for x in faces.faces(scene, gid) if x.id == face.id), None)
+        if listed is not None and listed.point:
+            return np.asarray(listed.point, float)
+    return np.asarray(face.point, float)
 
 
 def _ports_at(scene: IfcScene, gid: str, point, normal) -> list[str]:
@@ -200,7 +224,7 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
             "side": "deep" if abs(face.normal[2]) > 0.9 else "wide", "radial": "across", "edge": "long"}.get(face.kind, "")
     change = f"{_mm(by)} {'out' if by > 0 else 'in'}"
     sizes = f" ({size:.3f} → {after:.3f} m {what})" if size is not None and after is not None and face.kind != "edge" else ""
-    params = {"op": "push_pull", "element": gid, "face": face.id, "by_m": by}
+    params = {"op": "push_pull", "element": gid, "face": spec(face), "by_m": by}
     warn = structure_warnings(scene, gid, "the new size")
     if face.kind == "radial" and scene.entity(gid).is_a("IfcFlowSegment"):
         warn.append({"rule": "size", "review": "services",
@@ -252,14 +276,15 @@ def _stretch_openings(scene: IfcScene, gid: str, face: faces.Face, by: float) ->
 def _make_push(scene: IfcScene, plan: Plan) -> Made:
     gid, face, by = plan.element, plan.face, plan.params["by_m"]
     if face.kind == "cap":
-        edits.stretch(scene, gid, face.id.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid)))
+        edits.stretch(scene, gid, face.id.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid)),
+                      least_m=MIN_HAND_M, unique=True)
         _stretch_openings(scene, gid, face, by)
     elif face.kind == "side":
-        edits.stretch(scene, gid, "side", by, normal=face.normal)
+        edits.stretch(scene, gid, "side", by, normal=face.normal, least_m=MIN_HAND_M, unique=True)
     elif face.kind == "radial":
-        edits.stretch_radius(scene, gid, by)
+        edits.stretch_radius(scene, gid, by, unique=True)
     elif face.kind == "edge":
-        edits.offset_edge(scene, gid, int(face.id.split(":")[1]), by, keep_inside=_opening_corners(scene, gid))
+        edits.offset_edge(scene, gid, int(face.id.split(":")[1]), by, keep_inside=_opening_corners(scene, gid), unique=True)
     else:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled")
     return Made(changed=[gid])
@@ -308,9 +333,7 @@ def _target_plane(scene: IfcScene, to: dict) -> tuple[np.ndarray, np.ndarray, st
     gid = to.get("element")
     if gid and (to.get("face") or (to.get("point") is not None and to.get("normal") is not None)):
         f = face_of(scene, gid, to if to.get("point") is not None else to["face"])
-        listed = next((x for x in faces.faces(scene, gid) if x.id == f.id and x.kind != "other"), None)
-        point = np.asarray(listed.point if listed is not None else f.point, float)
-        return point, np.asarray(f.normal, float), f"{f.name} of {label(scene, gid)}", gid
+        return plane_point(scene, gid, f), np.asarray(f.normal, float), f"{f.name} of {label(scene, gid)}", gid
     if to.get("point") is not None and to.get("normal") is not None:
         n = _vec(to["normal"], "normal")
         return _vec(to["point"], "point"), n / np.linalg.norm(n), "plane picked", gid
@@ -322,8 +345,7 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     face = face_of(scene, gid, op.get("face"))
     if "align" not in face.allows:
         raise edits.Unsupported(f"its {face.name} cannot be aligned")
-    listed = next((x for x in faces.faces(scene, gid) if x.id == face.id and x.kind != "other"), None)
-    pa = np.asarray(listed.point if listed is not None else face.point, float)
+    pa = plane_point(scene, gid, face)
     na = np.asarray(face.normal, float)
     pb, nb, target, other = _target_plane(scene, op.get("to") or {})
     if other == gid:
@@ -341,7 +363,7 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     if how == "stretch":
         if "push_pull" not in face.allows:
             raise edits.Unsupported(f"its {face.name} cannot be stretched: move it instead")
-        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": face.id, "by_m": t})
+        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t})
         plan.summary = f"{face.name} of {label(scene, gid)} stretched {_mm(t)} {'out' if t > 0 else 'in'}, {where} the {target}"
     elif how == "move":
         plan = _resolve_move(scene, {"op": "move", "element": gid, "delta_m": (na * t).tolist()})
@@ -349,7 +371,7 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     else:
         raise ValueError("how is stretch or move")
     plan.op = "align"
-    plan.params = {"op": "align", "element": gid, "face": face.id, "to": op.get("to"), "gap_m": gap, "how": how,
+    plan.params = {"op": "align", "element": gid, "face": spec(face), "to": op.get("to"), "gap_m": gap, "how": how,
                    "by_m": t, **({"delta_m": plan.params["delta_m"]} if how == "move" else {})}
     if other:
         plan.touching.add(other)
@@ -370,8 +392,7 @@ def _resolve_void(scene: IfcScene, op: dict) -> Plan:
     if "void" not in face.allows:
         raise edits.Unsupported(f"its {face.name} does not take an opening: pick one of its faces")
     n = np.asarray(face.normal, float)
-    listed = next((x for x in faces.faces(scene, gid) if x.id == face.id), None)
-    plane = np.asarray(listed.point if listed is not None and face.kind != "flank" else face.point, float)
+    plane = plane_point(scene, gid, face)
     at = _vec(op["at"], "at") if op.get("at") is not None else np.asarray(face.point, float)
     at = at - ((at - plane) @ n) * n   # on the face's plane
     shape = op.get("shape") or ("round" if op.get("diameter_m") is not None else "rect")
@@ -400,7 +421,7 @@ def _resolve_void(scene: IfcScene, op: dict) -> Plan:
                      "text": f"it comes within {edits.OPENING_EDGE_M * 1000:.0f} mm of the face's edge: a notch more than a hole"})
     size = f"Ø{w * 1000:.0f}" if shape == "round" else f"{w * 1000:.0f} x {h * 1000:.0f}"
     kind = f"{depth * 1000:.0f} mm recess" if blind is not None else "opening"
-    params = {"op": "void", "element": gid, "face": face.id, "at": [round(float(c), 4) for c in at], "shape": shape,
+    params = {"op": "void", "element": gid, "face": spec(face), "at": [round(float(c), 4) for c in at], "shape": shape,
               **({"diameter_m": w} if shape == "round" else {"width_m": w, "height_m": h}),
               **({"depth_m": depth} if blind is not None else {})}
     return Plan("void", gid, params, {scene.index_of(gid)}, [gid], f"{size} mm {kind} cut in the {face.name} of {label(scene, gid)}",
@@ -485,7 +506,7 @@ def _resolve_split(scene: IfcScene, op: dict) -> Plan:
 
 
 def _make_split(scene: IfcScene, plan: Plan) -> Made:
-    gids = edits.split(scene, plan.element, plan.params["at"])
+    gids = edits.split(scene, plan.element, plan.params["at"], least_m=MIN_HAND_M, unique=True)
     return Made(changed=[gids[0]], created=gids[1:], pieces=gids)
 
 
@@ -517,10 +538,10 @@ def _resolve_remove(scene: IfcScene, op: dict) -> Plan:
 
 def _make_remove(scene: IfcScene, plan: Plan) -> Made:
     gid = plan.element
-    first = edits.split(scene, gid, plan.params["from"])
+    first = edits.split(scene, gid, plan.params["from"], least_m=MIN_HAND_M, unique=True)
     if (np.asarray(plan.params["to"]) - np.asarray(plan.params["from"])) @ _axis_of(scene, gid) < 0:
         raise edits.Unsupported("pick the section's points along the element")
-    middle = edits.split(scene, first[1], plan.params["to"])
+    middle = edits.split(scene, first[1], plan.params["to"], least_m=MIN_HAND_M)
     name = scene.entity(gid).Name
     edits.remove_product_with(scene, middle[0])
     rest = scene.entity(middle[1])
@@ -617,7 +638,8 @@ def _clip_ok(scene: IfcScene, gid: str) -> bool:
 
 
 def _make_clip(scene: IfcScene, plan: Plan) -> Made:
-    edits.clip_to_plane(scene, plan.element, plan.params["plane"]["point"], plan.params["plane"]["normal"])
+    edits.clip_to_plane(scene, plan.element, plan.params["plane"]["point"], plan.params["plane"]["normal"],
+                        least_m=MIN_HAND_M, unique=True)
     return Made(changed=[plan.element])
 
 

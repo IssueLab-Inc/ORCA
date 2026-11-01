@@ -90,7 +90,7 @@ def test_stretch_moves_the_face_and_its_port_without_turning_it(scene):
         assert scene.bounds()[s2][1][1] == pytest.approx(1.1 + 0, abs=1e-3)
     with pytest.raises(edits.Unsupported, match="it would be 0 mm long"):
         edits.stretch(scene, s2, "end", -0.95)
-    with pytest.raises(edits.Unsupported, match="only a rectangular section square to its axes grows sideways"):
+    with pytest.raises(edits.Unsupported, match="only a rectangular section grows sideways"):
         edits.stretch(scene, s2, "side", 0.1, normal=(0, 0, 1))
 
 

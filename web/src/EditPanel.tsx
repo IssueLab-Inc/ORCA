@@ -60,19 +60,24 @@ export function EditPanel({ journal, busy, csvUrl, clashLabel, onUndo, onRedo, o
               <button type="button" className="edit-main" onClick={() => onShow(e)} data-tip="Show it in the model" data-tip-side="left">
                 <span className={`chip src-${e.source}`}><s.Icon size={11} aria-hidden /> {s.label}</span>
                 <b className="mono">{e.id}</b><span className="why mono">{timeOf(e)}</span>
+                {e.state === "undone" && <span className="chip undone-chip" data-tip="Taken back: not in the model now">Undone</span>}
                 {[...new Set(clashes)].map((c) => <span key={c} className="chip">{c}</span>)}
                 {e.follows.length > 0 && <span className="chip follows" data-tip="Edited by hand after this fix">after {e.follows.join(", ")}</span>}
                 <span className="edit-text">{e.summary || e.title}</span>
                 {line && <span className={`edit-check ${e.check?.verified ? "ok" : (e.check?.new?.length || e.check?.worse?.length) ? "warn" : ""}`}>{line}</span>}
-                {e.status && <span className={`edit-check ${e.status.resolved ? "ok" : "bad"}`}>
+                {e.status && e.state === "kept" && <span className={`edit-check ${e.status.resolved ? "ok" : "bad"}`}>
                   {e.status.resolved ? (e.follows.length ? "Its clash is still resolved" : "Its clash is resolved")
                     : `${e.follows.length ? "Its clash is back" : "Its clash is still open"} (${e.status.depth_m != null ? mm(e.status.depth_m) : "touching"})`}</span>}
                 {e.warnings.map((w, i) => <span key={i} className="edit-warn">{w.text}{w.review ? ` · review: ${w.review}` : ""}</span>)}
               </button>
-              {e.state === "kept" && kept[0]?.id !== e.id && (
-                <button type="button" className="btn small ghost" disabled={busy} onClick={() => onUndoTo(e)}
-                  data-tip={`Undo every edit back to ${e.id}, newest first`} data-tip-side="left">Undo to here</button>)}
-              {e.state === "undone" && <span className="why small">undone</span>}
+              {((e.state === "kept" && kept[0]?.id !== e.id) || (e.state === "undone" && journal?.redo === e.id)) && (
+                <div className="edit-row-actions">
+                  {e.state === "kept"
+                    ? <button type="button" className="btn small ghost" disabled={busy} onClick={() => onUndoTo(e)}
+                        data-tip={`Undo every edit back to ${e.id}, newest first`} data-tip-side="left">Undo to here</button>
+                    : <button type="button" className="ebtn btn small ghost" disabled={busy} onClick={onRedo}
+                        data-tip={`Redo ${e.id}  ·  Ctrl+Shift+Z`} data-tip-side="left"><RedoIcon size={13} aria-hidden /> Redo</button>}
+                </div>)}
             </li>
           );
         })}

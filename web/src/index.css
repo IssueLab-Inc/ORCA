@@ -2097,6 +2097,8 @@ a.pop-item { color: inherit; }
 .app.phone .filter-chip { right: auto; left: 8px; bottom: 76px; max-width: calc(100% - 16px); }
 
 /* The Edit tool (EditTool.tsx): beside the rail while it is on, like Measure. */
+.viewer-label.edit-label { background: #f5a623; color: #11161b; font: 600 12px var(--mono); padding: 2px 7px; border-radius: 10px;
+  transform: translate(-50%, -130%); white-space: nowrap; pointer-events: none; box-shadow: var(--shadow); }
 .stage.editing canvas { cursor: crosshair; }
 .edit-panel { position: absolute; left: 64px; top: 104px; z-index: 5; width: 316px; max-width: calc(100% - 80px); max-height: calc(100% - 120px);
   overflow: auto; display: flex; flex-direction: column; gap: 7px; padding: 8px 10px 10px; background: var(--surface); border-radius: 10px;
@@ -2111,6 +2113,10 @@ a.pop-item { color: inherit; }
 .edit-palette .ibtn:disabled { opacity: .35; }
 .edit-panel .hint { margin: 0; }
 .edit-face { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: 7px; background: #fff6e8; color: #7a4d00; }
+.edit-offer { display: grid; gap: 6px; padding: 7px 8px; border-radius: 7px; background: #f4f5f7; border: 1px solid #e3e6ea; }
+.edit-offer p { margin: 0; color: #4a5260; font-size: 12px; line-height: 1.4; }
+.edit-offer-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.edit-offer-tools .btn { display: inline-flex; align-items: center; gap: 5px; }
 .edit-row-in { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .edit-row-in label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 .edit-row-in input { width: 74px; font: inherit; font-family: var(--mono); padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
@@ -2140,7 +2146,8 @@ a.pop-item { color: inherit; }
 .edit-row { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); display: flex; flex-direction: column; }
 .edit-row.undone { opacity: .55; }
 .edit-row.undone .edit-text { text-decoration: line-through; }
-.edit-row > .btn { align-self: flex-end; margin: 0 6px 6px 0; }
+.edit-row-actions { display: flex; justify-content: flex-end; gap: 6px; padding: 0 9px 7px; }
+.chip.undone-chip { background: var(--line-soft); color: var(--muted); font-weight: 600; }
 .edit-main { all: unset; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 7px 9px; font-size: 12.5px; }
 .edit-main:hover { background: var(--raised); }
 .edit-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius); }

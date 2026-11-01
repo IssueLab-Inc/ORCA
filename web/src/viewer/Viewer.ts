@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
 import { patchModel, removeElements, ROOM, type ElementMesh } from "./patch";
-import { coplanar, pushMatrix, toIfcAxes, toThree } from "./edit";
+import { coplanar, pushMatrix, signedMm, toIfcAxes, toThree } from "./edit";
 import { ViewCube } from "./cube";
 import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
 import { annotate, type Handle } from "./annotate";
@@ -79,7 +79,9 @@ export interface Pick { globalId: string; point: THREE.Vector3; normal?: THREE.V
 /** A face picked for the Edit tool, in IFC axes (metres, Z up): the element, the point and the triangle's normal. */
 export interface FacePick { globalId: string; point: [number, number, number]; normal: [number, number, number] }
 /** What dragging the chosen face does: called with metres along its normal as the pointer moves, then on release. */
-export interface EditDrag { globalId: string; point: number[]; normal: number[]; onMove: (m: number) => void; onEnd: (m: number) => void }
+export interface EditDrag { globalId: string; point: number[]; normal: number[];
+  /** The press took: once a drag, before its first move. */ onStart?: () => void;
+  onMove: (m: number) => void; onEnd: (m: number) => void }
 
 /** One pane of the layout: its view, its element over the canvas, where it sits (stage CSS pixels), and whether a
  * clash may move it. A drawing pane has its DrawingView. */
@@ -129,6 +131,8 @@ export class Viewer {
   private editDrag: EditDrag | null = null;
   private editDragging: { id: number; x: number; y: number; dir: THREE.Vector2; ppm: number; last: number } | null = null;
   private editArrow: THREE.ArrowHelper | null = null;
+  private editArrowDir = new THREE.Vector3(0, 1, 0);
+  private editLabel: HTMLDivElement;   // the push's signed distance at the arrow's tip, while it shows
   private focusMeshes = new Map<string, THREE.Mesh>();
   private focusGeometry = new Map<string, THREE.BufferGeometry>();
   private focusMaterials = { a: this.focusMaterial(RED), b: this.focusMaterial(GREEN), ab: this.focusMaterial(PURPLE) };
@@ -253,6 +257,7 @@ export class Viewer {
     this.ortho.layers.enable(1);
     this.marker.layers.set(1);
     this.markerLabel = this.label("marker-label");
+    this.editLabel = this.label("edit-label");
     this.measureCanvas = document.createElement("canvas");
     this.measureCanvas.className = "measure-layer";
     host.appendChild(this.measureCanvas);
@@ -2314,6 +2319,7 @@ export class Viewer {
   showEditFaces(list: { globalId: string; point: number[]; normal: number[]; tone?: "hover" | "chosen" | "target"; arrow?: boolean }[]) {
     for (const c of [...this.editLayer.children]) { this.editLayer.remove(c); if (c instanceof THREE.Mesh) c.geometry.dispose(); }
     this.editArrow = null;
+    this.editLabel.textContent = "";
     for (const face of list) {
       const f = this.find(face.globalId);
       const n = toThree(face.normal).normalize(), p = toThree(face.point);
@@ -2329,11 +2335,13 @@ export class Viewer {
           mesh.matrixAutoUpdate = false;
           mesh.matrix.copy(this.matrixOf(f.el));
           mesh.renderOrder = 11; mesh.layers.set(1);
+          mesh.userData.globalId = face.globalId;
           this.editLayer.add(mesh);
         }
       }
       if (face.arrow) {
         const arrow = new THREE.ArrowHelper(n, p, 1, 0xf5a623, 0.32, 0.18);
+        this.editArrowDir.copy(n);
         for (const m of [arrow.line.material, arrow.cone.material] as THREE.Material[]) { m.depthTest = false; m.transparent = true; }
         arrow.line.renderOrder = arrow.cone.renderOrder = 12;
         arrow.traverse((o) => o.layers.set(1));
@@ -2355,14 +2363,31 @@ export class Viewer {
       const m = pushMatrix(box, toThree(point), toThree(normal), byM);
       if (m) this.moved.set(globalId, m);
     }
-    f.el.mesh.setMatrixAt(f.el.instanceId, this.matrixOf(f.el));
+    this.syncDrawings(globalId);
     if (this.editArrow) {
       const n = toThree(normal).normalize();
       this.editArrow.position.copy(toThree(point)).addScaledVector(n, byM ?? 0);
     }
-    this.drawSelection();
+    this.editLabel.textContent = byM ? signedMm(byM) : "";
     this.version++;
   }
+
+  /** An element's every drawing takes its matrix again after a preview moved or stretched it: its batch instance,
+   * its focus mesh and edges (a clash pair is drawn by the focus layer, its instance hidden), the selection and the
+   * Edit tool's lit face. Cheap: no pass over the model. */
+  private syncDrawings(globalId: string) {
+    const f = this.find(globalId);
+    if (!f) return;
+    const m = this.matrixOf(f.el);
+    f.el.mesh.setMatrixAt(f.el.instanceId, m);
+    this.focusMeshes.get(globalId)?.matrix.copy(m);
+    this.edges.get(globalId)?.matrix.copy(m);
+    for (const c of this.editLayer.children) if (c.userData.globalId === globalId) c.matrix.copy(m);
+    this.drawSelection();
+  }
+
+  /** The push's readout off (the server's check takes over on release). */
+  clearEditLabel() { this.editLabel.textContent = ""; this.version++; }
 
   /** Drag the chosen face: a press on it (or on its arrow) pushes or pulls it along its normal; null stops. */
   setEditDrag(d: EditDrag | null) { this.editDrag = d; if (!d) this.editDragging = null; }
@@ -2389,6 +2414,7 @@ export class Viewer {
     this.pane3d.setPointerCapture(e.pointerId);
     this.controls.enabled = false;
     this.editDragging = { id: e.pointerId, x: e.clientX, y: e.clientY, dir: q.normalize(), ppm, last: 0 };
+    d.onStart?.();
     return true;
   }
 
@@ -2684,6 +2710,8 @@ export class Viewer {
     if (this.projection === "orthographic") this.syncOrtho(r3.w / Math.max(r3.h, 1));
     const cam = this.activeCamera();
     this.place(this.markerLabel, this.marker.visible ? this.marker.position : null);
+    this.place(this.editLabel, this.editArrow?.visible && !this.lifted
+      ? this.editArrow.position.clone().addScaledVector(this.editArrowDir, this.editArrow.scale.x * 1.1) : null);
     // Constant sizes on screen, at any scale: a floor in metres made the marker swallow a 100 mm part.
     const perPx = (p: THREE.Vector3) => this.projection === "orthographic" ? (this.ortho.top - this.ortho.bottom) / r3.h
       : 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * Math.max(this.camera.position.distanceTo(p), 1e-4) / r3.h;
@@ -2836,6 +2864,7 @@ export class Viewer {
     this.renderer.dispose();
     this.renderer.domElement.remove();
     this.markerLabel.remove();
+    this.editLabel.remove();
     this.measureCanvas.remove();
   }
 

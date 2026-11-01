@@ -758,6 +758,8 @@ def build_edit_fixture(path: Path) -> Path:
     - S1, a slab drawn as its plan outline (x 0-3, y 4-7) and extruded 0.2 m up from z = 3.
     - B1, an I-section beam along x at y = 2.5 (z 2.5-2.9), with C2, a column standing on it (a transfer element).
     - P1, a round pipe (radius 50 mm) along x at y = -1, z = 1.5, from x = 0 to 4.
+    - T1, a 0.4 x 0.2 m post turned 30° in its plan (its rectangle's RefDirection), 1 m tall, centred on (10, 0).
+    - D1 and D2, two 0.3 x 0.3 x 2 m columns sharing one body (one IfcShapeRepresentation), at x = 12 and x = 13.
     """
     model = ifcopenshell.api.run("project.create_file", version="IFC4")
     project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA edit fixture")
@@ -809,6 +811,15 @@ def build_edit_fixture(path: Path) -> Path:
     _box(model, body, on, (0.2, 0.2, 1.0), (1.9, 2.4, 2.9))
     element("IfcPipeSegment", "P1", model.createIfcCircleProfileDef("AREA", None, None, 0.05), 4.0, (0.0, -1.0, 1.5),
             axis=(1.0, 0.0, 0.0), ref=(0.0, 1.0, 0.0))
+    c30, s30 = float(np.cos(np.radians(30))), float(np.sin(np.radians(30)))
+    turned = model.createIfcRectangleProfileDef("AREA", None, model.createIfcAxis2Placement2D(
+        model.createIfcCartesianPoint((0.0, 0.0)), model.createIfcDirection((c30, s30))), 0.4, 0.2)
+    element("IfcMember", "T1", turned, 1.0, (10.0, 0.0, 0.0))
+    d1 = element("IfcColumn", "D1", model.createIfcRectangleProfileDef("AREA", None, None, 0.3, 0.3), 2.0, (12.0, 0.0, 0.0))
+    d2 = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcColumn", name="D2")
+    ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[d2])
+    d2.Representation = model.createIfcProductDefinitionShape(None, None, d1.Representation.Representations)
+    place(d2, (13.0, 0.0, 0.0))
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path
