@@ -1,7 +1,7 @@
 # 13 · 3D viewer
 
-> **Covers:** `web/src/viewer/` (`Viewer.ts`, `ifcLoader.ts`, `normals.ts`, `patch.ts`, `views.ts`, `cube.ts`,
-> `drawing.ts`, `annotate.ts`), and the viewer's controls in `web/src/ViewerToolbar.tsx`, `web/src/ViewPanes.tsx`, `web/src/App.tsx`,
+> **Covers:** `web/src/viewer/` (`Viewer.ts`, `ifcLoader.ts`, `normals.ts`, `origin.ts`, `patch.ts`, `views.ts`,
+> `cube.ts`, `drawing.ts`, `annotate.ts`), and the viewer's controls in `web/src/ViewerToolbar.tsx`, `web/src/ViewPanes.tsx`, `web/src/App.tsx`,
 > `web/src/pilot.ts` · **Checked against code:** 2026-10-30 (`feature/drawing-views`) · **Deeper design:**
 > [docs/views.md](../views.md) (navigation, styles, visibility, drawing views), [docs/edits.md](../edits.md) ("Keeping
 > a fix"), [docs/show-it-built.md](../show-it-built.md) ("Capture"), [docs/mobile.md](../mobile.md) ("Touch")
@@ -22,6 +22,7 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 | File | What it is | Main exports | Used by |
 |---|---|---|---|
 | `viewer/ifcLoader.ts` | Parses one IFC with web-ifc into a solid batch and an optional see-through batch | `loadIfc`, `CIRCLE_SEGMENTS`, `LoadedModel`, `LoadedElement` | `viewer/Viewer.ts`, `viewer/patch.ts` (types) |
+| `viewer/origin.ts` | The point the models are drawn from (IFC plan metres) and every IFC point's way into and out of the viewer | `origin`, `setOrigin`, `pickOrigin`, `shiftFor`, `pointToThree`, `pointToIfc`, `serverVerts`, `NEAR_M` | `viewer/ifcLoader.ts`, `viewer/Viewer.ts`, `viewer/drawing.ts`, `viewer/annotate.ts`, `viewer/measure.ts`, `viewer/patch.ts` |
 | `viewer/normals.ts` | Creased normals: smooth across facets within the crease angle, sharp beyond, a vertex split only where its triangles need different normals | `creaseNormals`, `creased`, `CREASE`, `CREASE_DEGREES`, type `Creased` | `viewer/ifcLoader.ts`, `viewer/patch.ts`, `viewer/Viewer.ts` |
 | `viewer/Viewer.ts` | The `Viewer` class: scene, camera, modes, focus, previews, picking, measuring, section box, captures | `Viewer`, `serverDeltaToViewer`, `serverPointToViewer`, `meetingZone`, types `Mesh`, `BuiltPiece`, `BuiltPasses`, `OptionShape`, `ViewMode`, `Preset`, `Side`, `Focus`, `Pick` | `App.tsx`, `pilot.ts`, `ViewerToolbar.tsx` (types), `web/spikes/built.ts` |
 | `viewer/views.ts` | The views' pure rules: layouts, plan view ranges and presets, clash defaults, section frames, compass, scales, view cube regions, camera history, visibility filters, the Esc steps | `paneRects`, `planRange`, `planPreset`, `planThrough`, `sectionFrame`, `sectionThrough`, `nearestScale`, `scaleBar`, `cubeRegion`, `CameraHistory`, `shownBy`, `escStep`, types `ViewSpec`, `Datums`, `Filters`, `Temporary`, `Pose` | `viewer/Viewer.ts`, `viewer/cube.ts`, `App.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
@@ -35,12 +36,26 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 ## Coordinates and units
 
 - The server works in IFC axes: metres, **Z up**. web-ifc's placements (`flatTransformation`) and three.js are **Y
-  up**. Everything the server sends is converted on the way in: `serverDeltaToViewer([dx, dy, dz])` returns
-  `(dx, dz, −dy)` (`serverPointToViewer` is the same function, for the report's clash points), and server triangles
-  are flipped the same way by `addMeshes`, `meshBox` and `patch.toGeometry`, which then make their own creased normals
-  (`normals.creased`; the server's normals are not used).
+  up**. A delta is only turned: `serverDeltaToViewer([dx, dy, dz])` returns `(dx, dz, −dy)`.
+- **The viewer draws from an origin** (`viewer/origin.ts`): vertices on the GPU are float32, which 418 km from zero
+  (Snowdon Towers, a Revit export in survey coordinates) steps 31 mm, so a 200 mm duct's vertices snapped to that grid
+  and its round ends came out square. Viewer coordinates are IFC plan x and y less the origin; heights are never
+  shifted, so levels, plan cuts and elevations need nothing. Every IFC point crosses through it:
+  `pointToThree` and `pointToIfc` (drawing specs, grids, the Edit tool's faces and picks, snap points, measure's
+  copied ends, `drawing.toIfc`), `serverPointToViewer` (the report's clash points) and `serverVerts` (server triangles
+  in `addMeshes`, `meshBox`, `captureBuilt`'s pieces and `patch.toGeometry`, which then make their own creased normals,
+  `normals.creased`; the server's normals are not used). Directions keep the plain swaps (`views.toThree`,
+  `edit.toThree`, `edit.toIfcAxes`).
+- **Choosing it** (`loadIfc(bytes, origin)`): the first file of a load places its elements first, then takes the
+  median of their placements (`pickOrigin`: one stray element at the internal origin does not pull it away), to the
+  metre, or zero within `NEAR_M` (1 km) of zero, so Northbank and the cell draw exactly as before (their recaptured
+  demo pictures are byte-identical). Every other file of the load, `Viewer.replace` and a kept fix's patch use the same
+  origin, so federated files stay aligned; `Viewer.load` adopts it (`setOrigin`) only with the models, so a failed or
+  superseded load leaves the scene and its origin as they were. Each placement is taken relative to the origin in
+  double precision (`shiftFor(origin) × flatTransformation`) before its vertices are written. The same files give
+  the same origin, so saved views and Home (camera poses in viewer coordinates) stay valid.
 - `COORDINATE_TO_ORIGIN` is off in `loadIfc`: federated discipline files share coordinates, and shifting each by its
-  own offset would pull them apart.
+  own offset would pull them apart (the viewer's own origin is shared by every file of a load instead).
 - The measure label reports in IFC axes: Δx from three's x, Δy from three's z, Δz from three's y, in mm.
 - Fix colours follow the clash convention: side A red `#d0342c`, side B green `#1f9d3a`, one element on both sides
   purple `#8e44ad`.
@@ -56,7 +71,8 @@ flowchart TD
   om --> stream["StreamAllMeshes: one callback per element"]
   stream --> geo["each placed geometry: positions and index, creased normals (once per geometry), placement baked in"]
   geo --> merge["merge the element's pieces, colour and alpha from its first piece"]
-  merge --> split{"alpha below 0.99?"}
+  merge --> origin["after the stream: the origin (given, else the median placement), each placement baked from it"]
+  origin --> split{"alpha below 0.99?"}
   split -->|"no"| solid["solid BatchedMesh, sized for all parts plus ROOM"]
   split -->|"yes"| glass["glass BatchedMesh, only when the file has such parts"]
   solid --> maps["byGlobalId, byInstance, glassByInstance, stats"]
@@ -648,7 +664,8 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 - A new public `Viewer` method, a renamed one, or a change to what a capture returns or how it frames.
 - A new view mode, preset, layer, material or render order, or a change to the A/B/purple colours.
 - A change to how `loadIfc` splits solid and see-through elements, reads colours, or to `COORDINATE_TO_ORIGIN`.
-- A change to the axis conversion (`serverDeltaToViewer`, `toGeometry`, `addMeshes`, `meshBox`).
+- A change to the axis conversion (`serverDeltaToViewer`, `toGeometry`, `addMeshes`, `meshBox`) or to the origin
+  (`viewer/origin.ts`: how it is chosen, `NEAR_M`, which conversions go through it).
 - A change to how curves are drawn or shaded: `CIRCLE_SEGMENTS`, the crease angle (`normals.CREASE`, shared with the
   outlines and measuring's snap edges), or where normals are made.
 - A change to `patch.ts` (`ROOM`, `makeRoom`, colour rules) or to `App.applyToViewer`'s revision check.

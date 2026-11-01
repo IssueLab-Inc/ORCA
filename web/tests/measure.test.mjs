@@ -3,7 +3,8 @@ import test from "node:test";
 import * as THREE from "three";
 import { compiled } from "./app-host.mjs";
 
-const m = await import(await compiled("../src/viewer/measure.ts", { three: import.meta.resolve("three") }));
+const m = await import(await compiled("../src/viewer/measure.ts", { three: import.meta.resolve("three"),
+  "./origin": await compiled("../src/viewer/origin.ts", { three: import.meta.resolve("three") }) }));
 const v = (x, y, z) => new THREE.Vector3(x, y, z);
 const close = (a, b, e = 1e-6) => Math.abs(a - b) < e;
 

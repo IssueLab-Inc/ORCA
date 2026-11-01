@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { IfcAPI } from "web-ifc";
 import { creaseNormals, type Creased } from "./normals";
+import { pickOrigin, shiftFor } from "./origin";
 import { ROOM } from "./patch";
 
 export interface LoadedElement {
@@ -28,6 +29,8 @@ export interface LoadedModel {
   byInstance: Map<number, LoadedElement>;
   glassByInstance: Map<number, LoadedElement>;
   stats: { elements: number; triangles: number; parseMs: number };
+  /** The IFC plan point [x, y] (metres) its elements were placed from (viewer/origin.ts). */
+  origin: [number, number];
 }
 
 let api: IfcAPI | null = null;
@@ -46,20 +49,24 @@ async function ifcApi(): Promise<IfcAPI> {
  * slower; Snowdon's structure parses about 2 s slower, nearly all of it 14 rebar sweeps. */
 export const CIRCLE_SEGMENTS = 24;
 
-export async function loadIfc(bytes: Uint8Array): Promise<LoadedModel> {
+/** Parse one IFC. `origin` (IFC plan metres): the point to place its elements from, so a federation shares one; null
+ * picks it from this file's elements (`origin.pickOrigin`: zero near zero). */
+export async function loadIfc(bytes: Uint8Array, origin: [number, number] | null = null): Promise<LoadedModel> {
   const t0 = performance.now();
   const ifc = await ifcApi();
   // No COORDINATE_TO_ORIGIN: federated discipline files share coordinates, and shifting each by its own
-  // offset would pull them apart.
+  // offset would pull them apart. The viewer's own origin (below) is shared by every file of a load instead.
   const modelId = ifc.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false, CIRCLE_SEGMENTS });
 
   type Part = { expressId: number; geometry: THREE.BufferGeometry; color: THREE.Color; alpha: number };
-  const parts: Part[] = [];
+  type Placed = { shape: Creased; matrix: THREE.Matrix4 };
+  // Placed first and baked once the origin is known: their placements decide it.
+  const found: { expressId: number; placed: Placed[]; color: THREE.Color; alpha: number }[] = [];
   // Each geometry's triangles with creased normals, in its own coordinates: a type placed many times (a fitting, a
   // window) is smoothed once. Kept for the parse only.
   const smoothed = new Map<number, Creased>();
   ifc.StreamAllMeshes(modelId, (flat) => {
-    const pieces: THREE.BufferGeometry[] = [];
+    const placedHere: Placed[] = [];
     let color: THREE.Color | null = null;
     let alpha = 1;
     for (let i = 0; i < flat.geometries.size(); i++) {
@@ -78,24 +85,35 @@ export async function loadIfc(bytes: Uint8Array): Promise<LoadedModel> {
         shape = creaseNormals(position, index);
         smoothed.set(placed.geometryExpressID, shape);
       }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(shape.position.slice(), 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(shape.normal.slice(), 3));
-      geo.setIndex(new THREE.BufferAttribute(shape.index, 1));   // never changed: shared by every placement
-      // Bake the placement so each element's instance matrix starts as identity; previews are then deltas.
-      geo.applyMatrix4(new THREE.Matrix4().fromArray(placed.flatTransformation));
-      pieces.push(geo);
+      placedHere.push({ shape, matrix: new THREE.Matrix4().fromArray(placed.flatTransformation) });
       if (!color) {
         color = new THREE.Color(placed.color.x, placed.color.y, placed.color.z);
         alpha = placed.color.w;
       }
     }
-    if (pieces.length) {
-      const merged = pieces.length === 1 ? pieces[0] : mergeGeometries(pieces, false);
-      if (merged) parts.push({ expressId: flat.expressID, geometry: merged, color: color ?? new THREE.Color(0.8, 0.8, 0.8), alpha });
-    }
+    if (placedHere.length) found.push({ expressId: flat.expressID, placed: placedHere, color: color ?? new THREE.Color(0.8, 0.8, 0.8), alpha });
   });
   smoothed.clear();
+
+  // Where to draw from: float32 vertices 418 km out step 31 mm, so each placement is taken relative to the origin in
+  // double precision before its vertices are written (web-ifc's placements are Y up: IFC x is [12], IFC y is −[14]).
+  const at = origin ?? pickOrigin(found.map((f) => f.placed[0].matrix.elements[12]), found.map((f) => -f.placed[0].matrix.elements[14]));
+  const shift = shiftFor(at);
+  const parts: Part[] = [];
+  for (const f of found) {
+    const pieces = f.placed.map(({ shape, matrix }) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(shape.position.slice(), 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(shape.normal.slice(), 3));
+      geo.setIndex(new THREE.BufferAttribute(shape.index, 1));   // never changed: shared by every placement
+      // Bake the placement so each element's instance matrix starts as identity; previews are then deltas.
+      geo.applyMatrix4(shift.clone().multiply(matrix));
+      return geo;
+    });
+    const merged = pieces.length === 1 ? pieces[0] : mergeGeometries(pieces, false);
+    if (merged) parts.push({ expressId: f.expressId, geometry: merged, color: f.color, alpha: f.alpha });
+  }
+  found.length = 0;
 
   const byGlobalId = new Map<string, LoadedElement>();
   const batch = (list: Part[], byInstance: Map<number, LoadedElement>) => {
@@ -132,5 +150,6 @@ export async function loadIfc(bytes: Uint8Array): Promise<LoadedModel> {
     mesh: solid.mesh, glass: glass?.mesh ?? null, byGlobalId, byInstance, glassByInstance,
     stats: { elements: parts.length, triangles: solid.triangles + (glass?.triangles ?? 0),
       parseMs: Math.round(performance.now() - t0) },
+    origin: at,
   };
 }
