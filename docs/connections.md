@@ -8,7 +8,9 @@ design for knowing those joints, keeping them when a fix moves something, and sh
 Owner decisions (Oct 30, after a fix moved the cell's PL-302 segment 3 off column C3 and left it apart from its bend):
 
 - A move that cannot keep every joint is **refused with an explanation**. A verified fix always leaves the system
-  connected.
+  connected. For the pieces an offset, route or resize builds, that is checked in space as well as in the ports:
+  each piece's box must meet the next one's (`edits._check_meets`, Nov 1), since joined ports and a passing clash
+  check both hold for a fitting left far away.
 - Hovering shows **direct links**, coloured by kind; Shift widens the view to the whole connected run.
 - The slices land in this order:
   1. joints, with moves that break one refused;

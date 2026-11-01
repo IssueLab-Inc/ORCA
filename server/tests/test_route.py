@@ -319,3 +319,22 @@ def test_every_fitting_lands_on_the_run_whatever_the_units(tmp_path, millimetres
         lo, hi = v.min(0), v.max(0)
         assert -0.1 <= lo[0] and hi[0] <= 6.1, (scene.entity(gid).Name, lo, hi)
         assert 2.5 <= lo[2] and hi[2] <= 3.1, (scene.entity(gid).Name, lo, hi)   # the duct's 300 mm at z 2.8
+
+
+def test_a_chain_whose_pieces_would_not_meet_is_refused(tmp_path, monkeypatch):
+    """However a piece comes to land apart (a unit fault like the one above), a chain whose pieces do not meet is
+    never tried, so it cannot be verified: the clash check alone passes a bend left 50 m away, since it hits nothing."""
+    scene = IfcScene(build_run_fixture(tmp_path / "run.ifc"))
+    main = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag == "SA-1").GlobalId
+    real = edits._bend_mesh
+
+    def astray(p0, *rest):
+        verts, faces = real(p0, *rest)
+        return np.asarray(verts, float) + np.array([50.0, 0.0, 0.0]), faces
+
+    monkeypatch.setattr(edits, "_bend_mesh", astray)
+    before = len(scene.model.by_type("IfcProduct"))
+    with pytest.raises(edits.Unsupported, match="would not meet"):
+        with edits.trial(scene, main):
+            edits.apply_route(scene, main, [{"from_m": 2.6, "to_m": 3.4, "up_m": 0.4}])
+    assert len(scene.model.by_type("IfcProduct")) == before   # nothing of it is left
