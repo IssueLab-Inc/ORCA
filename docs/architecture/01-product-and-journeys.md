@@ -225,6 +225,18 @@ from there. The visitor's own models go back to the file picker (**Pick your fil
 stops showing kept fixes, Export is hidden, and a failed Show it built offers the same reopen instead of Try again.
 How: [03](03-end-to-end-flows.md), "When the server lets go of the models".
 
+### Adding a model, or taking one out
+
+With models open, **Menu › Models** offers **Add to the open models** first: the samples of their kind not open yet,
+and **Upload models to add…** (the same caps as an upload). The new model draws beside the others and every kept check
+runs again, so the list gains its clashes and #N numbering carries on; fixes, hand edits, checks and triage readings
+stay. **Open instead** below it replaces the models, as before. Each model in the viewer's **Visibility** menu has a
+remove button, which asks first: "Remove Northbank-Structure? Its 2 kept edits and the 118 clashes with it go too.
+Export first to keep the edits." Its clashes leave the list (nothing is checked again); the edits in the other models
+stay. STEP never joins building models or the reverse, said in words; both wait while ORCA works ("Wait for the
+proposal to finish."). Design: [docs/add-and-remove-models.md](../add-and-remove-models.md); how: [03](03-end-to-end-flows.md),
+"Add a model to the open ones, or take one out".
+
 ### By hand
 
 Double-click element A, then B (on touch: tap, then **Set as A** / **Set as B** on its card, or a long press) to work

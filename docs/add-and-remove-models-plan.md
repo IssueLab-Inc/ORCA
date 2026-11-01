@@ -202,4 +202,7 @@ Work test-first: write the failing test, run it red, implement, run it green.
 | Nov 1 | 1.2–1.3 `Workspace.add_models` / `add_samples`, `remove_model`, `Register.drop_file`, journal marking | done | `1d20c77` | +15 tests, Northbank add and remove |
 | Nov 1 | 1.4 routes, `layout` on every way in and the patch, doc 10 | done | `1314f57` | +5 route tests, docs map |
 | Nov 1 | 1.5 docs (04, 05, 10, 14, 15, 16, 18, 20, 22; uploads, detection, manual edits; spec status) | done | `6d27534` | docs map |
-| Nov 1 | 1.6 finish | PR #104 open, awaiting the owner | `6d27534` | 895 server tests (4 known failures), 240 web tests, build, runtime on port 8023 (build log) |
+| Nov 1 | 1.6 finish | PR #104 merged on the owner's word | `75dddf8` | 895 server tests (4 known failures), 240 web tests, build, runtime on port 8023 (build log) |
+| Nov 1 | 2.1 `api.ts`, 2.2 `Viewer.add` / `remove`, `sceneModels.ts` | done | `3d8c201` | `scene-models.test.mjs` (8), `viewer-load.test.mjs` (+3) |
+| Nov 1 | 2.3 App: the Open menu, remove with its question, waiting, another layout reloads | done | `5542aa1` | 251 web tests, build |
+| Nov 1 | 2.4 docs (01, 03, 12, 13, 18, 20, 22; spec; CLAUDE.md status) and 2.5 runtime checks | done | (the docs commit) | Chromium on port 8023: every check in the list above (build log) |

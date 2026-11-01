@@ -72,6 +72,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
 | `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (a `note` of what is set now goes on the trigger's name and tip and marks it `set`; kept inside its window, or the dock panel that clips it (`roomFor`): it moves left or up, and scrolls inside when taller, so it never makes the page scroll or gets cut off; Esc closes only the menu; it listens on its own document, so it works in a pop-out window; on a phone its sheet renders into the body, above the bottom sheet), and the tooltip layer (`Tooltips`, one per document: the page and each pop-out window) | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
 | `uploads.ts` | The size check before an upload and the words for each upload stage | `uploadRefusal`, `uploadStatus`, `localFile` | `App` |
+| `sceneModels.ts` | Adding models to the open scene and taking one out ([docs/add-and-remove-models.md](../add-and-remove-models.md)): what may be added, the refusals in words, what to wait for, the warning before a model goes, the toolbar's hidden models moved down | `addableSamples`, `addRefusal`, `isMachine`, `waitFor`, `removalWarning`, `clashesWith`, `editsIn`, `shiftHidden` | `App` |
 | `voice.ts` | Live voice over a socket, and the record-then-upload fallback | `LiveVoice`, `VoiceRecorder`, `LiveVoiceError`, `MAX_SECONDS`, `VoiceMode` | `Chat.tsx` |
 | `viewer/Viewer.ts`, `viewer/ifcLoader.ts`, `viewer/patch.ts`, `viewer/views.ts`, `viewer/cube.ts`, `viewer/drawing.ts`, `viewer/annotate.ts` | The viewer: 3D, the view cube and the drawing views | see [13](13-3d-viewer.md) | `App`, `pilot.ts`, `ViewPanes.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
 
@@ -160,7 +161,7 @@ is `useState`; refs hold what callbacks must read without re-rendering (counters
 
 | Concern | State | Refs | Derived |
 |---|---|---|---|
-| Scene and files | `sceneId`, `stats`, `modelNames`, `sceneFiles`, `stepFiles`, `samples`, `demos`, `picked`, `uploadMax`, `blank`, `labels`, `triageWorkers` | `viewer`, `host`, `sceneRevision`, `modelInput` | `landing`, `starting`, `startLabel`, `cellSample`, `cellOpen` |
+| Scene and files | `sceneId`, `stats`, `modelNames`, `sceneFiles`, `stepFiles`, `samples`, `demos`, `picked`, `uploadMax`, `blank`, `labels`, `triageWorkers`; adding and removing: `adding` (samples ticked to add), `removing` (the model asked about), `layoutRev` (re-reads what depends on the file list) | `viewer`, `host`, `sceneRevision`, `sceneLayout` (the server's layout this page drew), `modelInput`, `pickFor` (open or add: what the file input's files are for) | `landing`, `starting`, `startLabel`, `cellSample`, `cellOpen`, `addable`, `addWait`, `modelsWait()` |
 | Edits by hand and the log ([docs/manual-edits.md](../manual-edits.md)) | `tool.edit` (the Edit tool, P), `journal` (the scene's edit log, read after every keep, undo or redo: `refreshJournal`), `incomingEdit` (a check Muse or an agent made, for the Edit tool to preview) | `editTool` (`EditToolHandle`: clicks, hovers, keys, Esc), `editPick` (the element and face chosen, for chat's context), `journalAsk` | `keptEdit` (patch, picture, fixed when resolved, the kept checks run again after a keep with clashes, uncharged once: `after_edit`), `stepEdit` / `afterStep` (undo, redo; a fix undone opens its clash again), `undoTo` |
 | Report | `report`, `reportSamples`, `matches`, `clash`, `measure`, `remeasure`, `titles`, `naming`, `views`, `capturing`, `lightbox` | `reportRef`, `captures`, `folderInput`, `filesInput` | `shown()`, `shownReport`, `shownClash` |
 | Detection | `detectSetup`, `detecting`, `checks` (the scene's kept checks), `viewCheck` (the one the list shows, null for all), `ranCheck` (the last run) | `lastTests`, `pendingDetect`, `unionSerial` (the list on screen: a later one is higher), `reportNow`, `clashRef` | `listReport` (`checks.narrow` of the list by `viewCheck`), `shownCheck` (whose run the summary shows), `listTriage`, `unread` |
@@ -235,6 +236,9 @@ All are functions inside `App`. Names confirmed at HEAD.
 |---|---|
 | `open(source, existing?)` | Opens samples (`api.open`), uploads (`uploadRefusal`, `api.uploadModelsStream`) or a held scene (`existing`, for resume). Bumps the epochs, retires running work, reads each file's bytes (`localFile` for an uploaded IFC, else `api.file`), `viewer.load`s them, sets `sceneRevision` and resets per-scene state. Returns the scene id. |
 | `openDemo(source?)` | `open`, then `runDetect(null, id)`: the golden path's first half. |
+| `addModels(source)` | Adds samples or the visitor's files to the open scene ([docs/add-and-remove-models.md](../add-and-remove-models.md)): `modelsWait` and `addRefusal` first, then `api.addModels` / `api.addModelsStream`; on the next layout fetches only the new files (`localFile` for an uploaded IFC), `viewer.add`s them and `adoptFiles`; on any other, `reloadModels`. Then `runDetect(null, sid, { all: true })`. Never through `open()`: nothing is dropped. |
+| `askRemove(i)`, `removeModel()` | The Visibility menu's remove button: the question (`removalWarning` with `clashesWith` the list and `editsIn` the log), then `api.removeModel`, `viewer.remove`, `shiftHidden` on the toolbar's hidden models, `adoptFiles`, `adoptRun` with the answer's list (an imported report stays and is matched again), and A, B, the selection and stand-ins dropped when they were in the model. A 409 (the list changed) reloads the files. |
+| `adoptFiles(scene, drawn)`, `reloadModels(sid, live)` | The file list as the server has it after an add or remove (names, STEP files, revision, `sceneLayout`, stats; `infoRev` and `layoutRev` bumped; the filters on screen carried to the new set). `reloadModels` draws every file again from `api.sceneInfo`, as after a restart: a layout this page doesn't know. `applyToViewer` calls it for a patch on another layout. |
 | `startGolden()` | Sets `golden`, then `openDemo`; an effect then selects `clashOfPair(TOUR.duct)` (else the deepest clash) and calls `propose`. |
 | `loadReport(get, what)` | Replaces the report (refused while `busy`), resets report state, sets `chatReport`. |
 | `upload(list)` | Navisworks XML and images → `loadReport(api.uploadReport)`. |
@@ -423,7 +427,7 @@ built-picture events into `builtRuns[key].step`. Event types are listed in [10](
 
 | Group | Functions | Notes |
 |---|---|---|
-| Models and scenes | `samples`, `open`, `uploadModelsStream`, `uploadModels`, `file`, `sceneInfo`, `element`, `exportUrl`, `classes` | `uploadModels` (no progress) is not called by the app at HEAD |
+| Models and scenes | `samples`, `open`, `uploadModelsStream`, `uploadModels`, `addModels`, `addModelsStream`, `removeModel`, `file`, `sceneInfo`, `element`, `exportUrl`, `classes` | `uploadModels` (no progress) is not called by the app at HEAD; both upload streams go through `streamUpload` (packing, XHR progress, the requirements retry). `OpenedScene`, `Patch` and `SceneInfo` carry `layout` |
 | Fixes | `proposeStream`, `propose`, `verify`, `accept` | `accept(id, o, pair)` sends every kind to `/fix/apply` with `preview`/`before` dropped and the option's `pair` (else the clash on screen: recorded tour runs carry none); a 409 is the server's re-check refusing it, shown with its reason. `propose` (not streamed) is unused at HEAD |
 | Plans | `planStream`, `applyPlan` | resolves with the `plan` event |
 | Wider fix | `contextStream`, `applyContext` | throws if the stream ends without `context_result` or `error` |
@@ -572,6 +576,10 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
   pre-Oct 30 `sightline.signoffs.<report title>` entries over for the clashes this report has, never over newer ones,
   and leaves the rest for their own reports. Every detection run was titled "Coordination · N models", so those were
   shared between projects and runs, and the PDF's DRAFT depends on them.
+- **`sceneModels.ts`:** adding and removing models (pure, no React): `addableSamples` (not open, of the open models'
+  kind), `addRefusal` (the server's words for mixing and "already open", checked first so nothing is uploaded or
+  charged), `waitFor` (a proposal, plan, triage, check or busy line, in words), `removalWarning`, `clashesWith`,
+  `editsIn`, `shiftHidden`.
 - **`uploads.ts`:** `uploadRefusal` (at most 8 files, `.ifc`/`.step`/`.stp`, the server's cap from `api.models`
   counted before packing), `uploadStatus` (the busy line per upload event), `localFile` (an uploaded IFC is drawn from
   the visitor's own file, a STEP comes back converted). Design: [docs/uploads.md](../uploads.md).

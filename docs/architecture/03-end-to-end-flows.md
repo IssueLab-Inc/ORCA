@@ -662,6 +662,54 @@ sequenceDiagram
 Owned by: [docs/uploads.md](../uploads.md) (design and measurements), [14](14-files-in-and-out.md) (uploads, STEP),
 [06](06-geometry-and-detection.md) (boxes), [16](16-security-caps-and-cost.md) (size and upload caps).
 
+## Add a model to the open ones, or take one out
+
+**Add** (Menu › Models › Add to the open models, `App.addModels`): `sceneModels.addRefusal` refuses mixing STEP and
+IFC or a name already open before anything is sent, then `api.addModels` (samples) or `api.addModelsStream` (uploads,
+the same packing and events as an upload) reaches `Workspace.add_models`, which appends the files and measures only
+their boxes. If the reply's `layout` is the next one, the page fetches only the new files (an uploaded IFC from the
+visitor's own file), `Viewer.add`s them at the models' origin, adopts the new file list (`adoptFiles`: names, STEP
+files, revision, layout, and `infoRev`/`layoutRev` so classes, levels, the filters' index, matches and the check's tests
+are read again), then runs every kept check again (`runDetect(null, sid, { all: true })`): new clashes take the next
+numbers, readings follow unchanged clashes.
+
+**Remove** (the remove button in Visibility, `App.askRemove` then `removeModel`): the question names what goes (the
+list's clashes with that file, `clashesWith`; the log's kept edits in it, `editsIn`). `api.removeModel(sid, index,
+name)` reaches `Workspace.remove_model`, which answers the list of what is left; the page `Viewer.remove`s the file,
+moves the toolbar's hidden models down (`shiftHidden`), adopts the file list and the list (`adoptRun`), and drops the
+pair, selection and stand-ins that pointed into the model.
+
+```mermaid
+sequenceDiagram
+  participant App as App.tsx and sceneModels.ts
+  participant API as app.py
+  participant WS as Workspace and IfcScene
+  participant V as Viewer
+  App->>App: waitFor, addRefusal
+  App->>API: POST /api/scenes/{id}/models (or .../models/upload/stream)
+  API->>WS: add_models, add_files (new boxes only)
+  API-->>App: files, step, revision, layout, added
+  App->>API: GET /api/scenes/{id}/files/{i} for each new sample or STEP
+  App->>V: add(bytes, names) at origin()
+  App->>API: POST /api/scenes/{id}/detect/stream {all: true}
+  App->>App: the list, numbers carried on
+  App->>App: askRemove: removalWarning(name, clashes, edits)
+  App->>API: DELETE /api/scenes/{id}/models/{index}?name=
+  API->>WS: remove_model, Register.drop_file, Journal.drop_file
+  API-->>App: files, layout, removed, report, checks
+  App->>V: remove(index)
+  App->>App: adoptRun(report, checks)
+```
+
+**Another tab or an agent** changed the list: a reply whose `layout` is not the one after this page's (adding,
+removing, or any patch through `applyToViewer`) makes the page load every file again from the server
+(`reloadModels`: `api.sceneInfo`, `Viewer.load`), as after a restart, and read ORCA's list again. A remove by a
+position that no longer holds the file answers 409; the page reloads and says so.
+
+Owned by: [docs/add-and-remove-models.md](../add-and-remove-models.md), [12](12-web-app.md) (App),
+[13](13-3d-viewer.md) (`Viewer.add`, `remove`), [14](14-files-in-and-out.md) (files in), [05](05-domain-model-and-state.md)
+(`layout`).
+
 ## Use coordination requirements
 
 **Use them and check again** in the Requirements dialog calls `applyRequirements(doc, true, true)`. An effect registers

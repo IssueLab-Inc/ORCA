@@ -208,7 +208,9 @@ and `deploy` finds none: open work is tracked in the feature docs and here, not 
 - **Adding and removing models** ([docs/add-and-remove-models.md](../add-and-remove-models.md)): STEP and IFC never in
   one scene; no chat or MCP tool adds or removes one yet (`open_models` is unchanged); a model is not replaced by a new
   revision of itself in place, nor moved to line up with the others. An edit kept in a model that is then removed
-  stays in the log but can never be undone. Slice 1 (the server) is built; the page's Add and Remove are slice 2.
+  stays in the log but can never be undone. A page that sees another layout (another tab, an agent) loads every
+  file again rather than patch. Saved views and Home are kept per project name (the files' shared prefix): adding a
+  file with another prefix changes the name, and the set starts with none (the filters on screen carry over).
 - **Requirements:** no rules per element (by GlobalId), no import of Navisworks clash-test definitions, no STEP part
   groups as selectors, no requirements from the chat's own words ([docs/requirements.md](../requirements.md)).
 - **iOS cannot pick a folder**, so "Upload an export folder" is left out there; XML files still upload

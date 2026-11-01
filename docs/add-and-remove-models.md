@@ -1,8 +1,8 @@
 # Adding and removing models in an open scene
 
 **Status:** approved by the owner (Nov 1), to go in before the Nov 3 freeze. The plan is
-[add-and-remove-models-plan.md](add-and-remove-models-plan.md). Slice 1 (the server) is built (Nov 1); slice 2 (the
-page and viewer) is next.
+[add-and-remove-models-plan.md](add-and-remove-models-plan.md). Built (Nov 1): slice 1, the server (PR #104), and
+slice 2, the page and viewer.
 
 Owner decisions (Nov 1, after "we are unable to add/append a new model once we have opened one"):
 
