@@ -320,9 +320,9 @@ everyone per rolling day; 0 means no limit, and unset or empty is the default co
 | `SIGHTLINE_STEP_MAX_PARTS` | 20000 | not set | `step.MAX_PARTS` (import) | Parts in one STEP file |
 | `SIGHTLINE_STEP_MAX_TRIANGLES` | 5000000 | not set | `step.MAX_TRIANGLES` (import) | Triangles in one STEP conversion |
 | `SIGHTLINE_VOICE_LIVE_MAX_S` | 120 | not set | `app.VOICE_HANDS_FREE_MAX_S` | How long a hands-free voice session may run (hold to talk is 60 s) |
-| `SIGHTLINE_TRIAGE_WORKERS` | 8 | not set | `app._start_triage`, `GET /api/models` (`triage_workers`, the card's "n at a time") | Triage model calls at a time |
+| `SIGHTLINE_TRIAGE_WORKERS` | 24 (`triage.WORKERS`) | not set | `app._start_triage`, `GET /api/models` (`triage_workers`, the card's "n at a time") | Triage model calls at a time |
 | `SIGHTLINE_TITLE_BATCH` | 40 | not set | `titles.BATCH` (import) | Clashes per titling call |
-| `SIGHTLINE_TITLE_WORKERS` | `SIGHTLINE_TRIAGE_WORKERS` | not set | `titles.WORKERS` (import) | Titling calls at a time (the same host as triage) |
+| `SIGHTLINE_TITLE_WORKERS` | `SIGHTLINE_TRIAGE_WORKERS`, else 8 | not set | `titles.WORKERS` (import) | Titling calls at a time (the same host as triage) |
 | `SIGHTLINE_AGENT_ROUNDS` / `SIGHTLINE_AGENT_OPTIONS` | 3 / 3 | not set | `agent.ROUNDS`, `agent.OPTIONS` (import) | A proposal's model rounds, and the verified options it stops at |
 | `SIGHTLINE_PLAN_MAX_ITEMS` | 8 | not set | `plans.MAX_ITEMS` (import) | Clashes one Fix together or root-cause plan takes on |
 | `SIGHTLINE_PLAN_WORKERS` / `SIGHTLINE_PLAN_ROUNDS` | 4 / 2 | not set | `plans.PLAN_WORKERS`, `plans.PLAN_ROUNDS` (import) | A plan's items proposed at a time, and model rounds per item |

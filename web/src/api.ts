@@ -348,16 +348,18 @@ export type TriageEvent =
   | ({ type: "start"; total: number; asking?: number; scope?: string | null;
        queued?: boolean;          // waits for the run under way, then reads what it leaves
        following?: string | null  // the run under way is over an earlier list of the same checks: only unchanged clashes
+       can_stop?: boolean         // this visitor may stop it: whoever started it, or the owner (the run is shared)
      } & TriageModel)
   | { type: "asking"; asking: number | null }   // a queued run starts: how many it asks about
   | ({ type: "clash"; id: string } & TriageVerdict)
   | { type: "reasoning"; id: string; text: string }
   | { type: "audit"; rules: Record<string, RuleAudit> }
-  | { type: "done"; summary: Record<string, number>; seconds: number; error?: string }
+  | { type: "done"; summary: Record<string, number>; seconds: number; error?: string;
+      stopped?: boolean }   // stopped part way: what landed stays, triaging again reads only the rest
   | { type: "ping" };
 export interface TriageState extends Partial<TriageModel> {
   results: Record<string, TriageVerdict>; done: boolean; started?: boolean; total?: number; seconds?: number | null;
-  error?: string | null;
+  error?: string | null; stopped?: boolean; can_stop?: boolean;
   audit?: Record<string, RuleAudit>;
   /** The last run was under other requirements (another level, strictness or guidance): run again to apply these. */
   stale?: boolean;
@@ -745,6 +747,8 @@ export const api = {
       ...(scope ? { scope } : {}) }).toString();
     return ndjson<TriageEvent>(`/reports/${reportId}/triage/stream${q ? `?${q}` : ""}`, {}, (e) => { onEvent(e); return e.type === "done"; });
   },
+  /** Stop the triage under way (shared: for everyone following it). Its stream ends with a "done" that says stopped. */
+  triageStop: (reportId: string) => call<{ stopped: boolean }>(`/reports/${reportId}/triage/stop`, { method: "POST" }),
   patterns: (reportId: string, sceneId: string, fixed: string[]) =>
     call<Pattern[]>(`/reports/${reportId}/patterns/${sceneId}?fixed=${encodeURIComponent(fixed.join(","))}`),
   triagePatterns: (reportId: string, sceneId: string, fixed: string[]) =>

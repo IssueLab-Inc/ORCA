@@ -176,16 +176,18 @@ Owned by: [07](07-fixes-and-edits.md) (keeping, `plans.KEEP`, patches), [13](13-
 sample report's run serves every visitor; under requirements it is also keyed by prompt and rules) or starts one,
 charging one proposal to whoever starts it (free when only the rules changed: it starts from the last run's readings).
 The `triage.Job` worker settles sure cases by rule first (`by_rule`, the requirements' by-design rules, and one-element
-pairs from `_triage_facts`), then reads each group of alike clashes with one strict-JSON call on the triage model, 8 at
-a time, streaming its reasoning. `Job.follow()` replays everything so far to each subscriber, then each new event; the
-page overlays what it already knows (`shownTriage`).
+pairs from `_triage_facts`), then reads each group of alike clashes with one strict-JSON call on the triage model, 24 at
+a time (biggest groups first), streaming its reasoning. `Job.follow()` replays everything so far to each subscriber,
+then each new event; the page overlays what it already knows (`shownTriage`). **Stop** (`stopTriage`) posts
+`triage/stop`: the run drops its calls under way and ends with `done` and `stopped`; **Continue · N left** streams
+`triage/stream` again, and the new run keeps every reading and asks only the rest (one proposal).
 
 ```mermaid
 sequenceDiagram
   participant App as App.tsx
   participant API as app.py
   participant J as triage.Job
-  participant P as pool of 8
+  participant P as pool of 24
   participant M as Triage model
   App->>API: POST reports/:rid/triage/stream
   API->>API: _start_triage: the shared run by _triage_key
@@ -201,6 +203,11 @@ sequenceDiagram
   P-->>J: reasoning and clash events
   J-->>App: replayed and live events
   J-->>App: audit when requirements set aside clashes, then done
+  opt Stop
+    App->>API: POST reports/:rid/triage/stop
+    API->>J: stop(): no new call, calls under way dropped
+    J-->>App: done with stopped (no audit)
+  end
 ```
 
 Owned by: [09](09-agent-workflows.md) (triage), [08](08-ai-models-prompts-and-spend.md) (the triage model and its host),

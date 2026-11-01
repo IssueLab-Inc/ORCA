@@ -16,13 +16,14 @@ from __future__ import annotations
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Callable
 
 from . import domains, owner, requirements as reqs
 from .meta_client import ChatModel
 from .reports import Report, ReportClash
 
+WORKERS = 24  # model calls at a time (SIGHTLINE_TRIAGE_WORKERS): Northbank's 39 calls took 58 s at 8, 23 s at 24
 NON_PHYSICAL = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
 TOUCH_M = 0.001  # |distance| at or under this is a touch
 
@@ -142,13 +143,14 @@ ALIKE_MIN = 3
 _GRID = re.compile(r"\b(grid|gridline|level|lvl|axis)\s*[-:]?\s*[A-Za-z]{0,2}\d*[A-Za-z]?\b", re.I)
 _SIZE = re.compile(r"^\d+(x\d+){1,2}$", re.I)            # a section size: 457x191x67 stays
 _TAG = re.compile(r"^[A-Za-z]{0,3}\d+[A-Za-z]{0,3}$|^[A-Z]$")  # a tag or number: A4, C3, L02, 12, B
+_ELEMENT_ID = re.compile(r":\d+\s*$")  # Revit's IFC export names an element "Family:Type:ElementId"
 DEPTH_BANDS_MM = (5, 20, 60, 150, 400)
 
 
 def _stem(name: str | None) -> str:
-    """A name without its grid, level or tag: "UB 457x191x67 - grid C" and "... - grid 4" are the same member type,
-    "UB 356x171x45" is not."""
-    words = _GRID.sub(r"\1 #", name or "").split()
+    """A name without its grid, level, tag or element id: "UB 457x191x67 - grid C" and "... - grid 4" are the same
+    member type, "UB 356x171x45" is not; so are Revit's "Pipe Types:Standard:301234" and "...:301299"."""
+    words = _GRID.sub(r"\1 #", _ELEMENT_ID.sub("", name or "")).split()
     return " ".join("#" if _TAG.match(w) and not _SIZE.match(w) else w for w in words)
 
 
@@ -180,7 +182,11 @@ def _alike_note(group: list[ReportClash]) -> str:
             "them, so write the understanding and the fix hint so they are true of every one.")
 
 
-REASONING_KEPT = 6000      # characters of a clash's reasoning kept with its verdict
+class Stopped(Exception):
+    """Raised inside a model call when its run is stopped: the stream is closed and the answer never used."""
+
+
+REASONING_KEPT = 6000     # characters of a clash's reasoning kept with its verdict
 REASONING_EVERY_S = 0.6    # how often a clash's new reasoning goes to the browser
 
 
@@ -194,10 +200,11 @@ def settled_by(c: ReportClash, doc: "reqs.Doc | None" = None, facts: dict | None
 
 
 def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None] = lambda e: None,
-                  workers: int = 8, images: bool = True, rules: bool = True, done: dict | None = None,
+                  workers: int = WORKERS, images: bool = True, rules: bool = True, done: dict | None = None,
                   settled: dict | None = None, reasoning: bool = False, alike: bool = True,
                   requirements: "reqs.Doc | None" = None, domain: str = domains.CONSTRUCTION,
-                  teams: list[str] | tuple[str, ...] = (), only: set[str] | None = None) -> dict[str, dict]:
+                  teams: list[str] | tuple[str, ...] = (), only: set[str] | None = None,
+                  stop: threading.Event | None = None) -> dict[str, dict]:
     """A verdict for every clash in `report`. `done` holds results already known (resumed or cached); they are kept.
     `settled` holds verdicts the open model already decides (`same_element`): no model call for those. `only`: the
     clashes the model may be asked about (the rest get what the rules settle, or nothing).
@@ -207,7 +214,11 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
     clash, for a model that streams its reasoning), and the verdict keeps the whole reasoning (cut to REASONING_KEPT).
 
     With `alike`, each group of alike clashes (`alike_groups`) is read once, through its deepest member; the others
-    get the same verdict with "alike_of" (that member's id) and "alike" (the group's size).
+    get the same verdict with "alike_of" (that member's id) and "alike" (the group's size). The biggest groups are read
+    first, so the most clashes are settled soonest.
+
+    `stop`, once set, ends the run within half a second: no new model call starts, a call under way is dropped (a
+    streamed one is closed) and what landed is returned. A dropped clash has no verdict: unread, not "unknown".
 
     Under coordination `requirements`: a clash a by-design rule covers is settled without a model call (over a known
     result, whose reading is kept), the model is told the requirements, and its answers pass the strictness overlay."""
@@ -229,15 +240,22 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
             todo.append(c)
     lock = threading.Lock()
 
-    def one(group: list[ReportClash]) -> tuple[list[ReportClash], dict]:
+    stopped = stop.is_set if stop is not None else (lambda: False)
+
+    def one(group: list[ReportClash]) -> tuple[list[ReportClash], dict | None]:
         c = group[0]
+        err = ""
         for attempt in range(3):
+            if stopped():
+                return group, None
             started = time.perf_counter()
             thought: list[str] = []
             pending: list[str] = []
             sent = [time.perf_counter()]
 
             def heard(piece: str) -> None:
+                if stopped():
+                    raise Stopped()
                 thought.append(piece)
                 pending.append(piece)
                 if time.perf_counter() - sent[0] >= REASONING_EVERY_S:
@@ -255,21 +273,37 @@ def triage_report(report: Report, model: ChatModel, emit: Callable[[dict], None]
                     out["reasoning"] = whole if len(whole) <= REASONING_KEPT else whole[:REASONING_KEPT] + " …"
                 return group, out
             except Exception as e:  # rate limits, timeouts, malformed JSON: back off and retry, then give up
+                if stopped():
+                    return group, None
                 err = f"{type(e).__name__}: {e}"[:200]
-                time.sleep(2 ** attempt)
+                if stop is not None:
+                    stop.wait(2 ** attempt)   # a stop cuts the back-off short
+                else:
+                    time.sleep(2 ** attempt)
         return group, {"verdict": "unknown", "error": err, "source": "model"}
 
     units = alike_groups(todo) if alike else [[c] for c in todo]
-    with ThreadPoolExecutor(max(1, workers)) as pool:
-        for fut in as_completed(owner.submit(pool, one, g) for g in units):
-            group, v = fut.result()
-            for k, c in enumerate(group):
-                mine = v if k == 0 else {**{x: y for x, y in v.items() if x != "reasoning"}, "alike_of": group[0].id}
-                if len(group) > 1:
-                    mine = {**mine, "alike": len(group)}
-                with lock:
-                    results[c.id] = mine
-                emit({"type": "clash", "id": c.id, **mine})
+    units.sort(key=len, reverse=True)   # the biggest groups first (stable: the rest keep the report's order)
+    pool = ThreadPoolExecutor(max(1, workers))
+    try:
+        pending = {owner.submit(pool, one, g) for g in units}
+        while pending:
+            finished, pending = wait(pending, timeout=0.5 if stop is not None else None, return_when=FIRST_COMPLETED)
+            for fut in finished:
+                group, v = fut.result()
+                if v is None:   # dropped by a stop
+                    continue
+                for k, c in enumerate(group):
+                    mine = v if k == 0 else {**{x: y for x, y in v.items() if x != "reasoning"}, "alike_of": group[0].id}
+                    if len(group) > 1:
+                        mine = {**mine, "alike": len(group)}
+                    with lock:
+                        results[c.id] = mine
+                    emit({"type": "clash", "id": c.id, **mine})
+            if stopped():
+                break
+    finally:   # stopped: the calls under way end on their own; nobody waits for them
+        pool.shutdown(wait=not stopped(), cancel_futures=True)
     return results
 
 
@@ -329,13 +363,13 @@ def summary(results: dict[str, dict]) -> dict:
 class Job:
     """One triage run over a report, shared by everyone who opens it: late subscribers replay what has landed."""
 
-    def __init__(self, report: Report, model: ChatModel, info: dict, workers: int = 8,
+    def __init__(self, report: Report, model: ChatModel, info: dict, workers: int = WORKERS,
                  requirements: "reqs.Doc | None" = None, seed: dict[str, dict] | None = None,
                  domain: str = domains.CONSTRUCTION, teams: list[str] | tuple[str, ...] = (),
                  only: set[str] | None = None, scope: str | None = None,
                  on_reading: Callable[[ReportClash, dict], None] | None = None,
                  prior_audit: dict | None = None, after: "Job | None" = None,
-                 prepare: Callable[[], tuple[dict, set[str] | None]] | None = None):
+                 prepare: Callable[[], tuple[dict, set[str] | None]] | None = None, starter: str | None = None):
         """`requirements`: the coordination requirements this run reads under. `seed`: model readings from an earlier
         run under the same prompt (only the rules changed, or ORCA's checks carrying readings to a new list of their
         clashes): kept, so only what they no longer settle is asked. `domain`: the scene's (`domains.of`), whose voice
@@ -344,7 +378,10 @@ class Job:
         (shown, not used). `on_reading`: told every reading the model makes, as it lands (the checks keep them).
         `prior_audit`: the by-design rules' audit of the run before under the same rules, kept by a run that asks the
         model nothing (it makes no audit call of its own). `after`: a run under way this one waits for, then
-        `prepare` gives the seed and `only` as they stand then, so nothing the first run read is asked again."""
+        `prepare` gives the seed and `only` as they stand then, so nothing the first run read is asked again.
+        `starter`: the visitor who started the run (`limits.client_id`, the one its proposal was charged to), who alone
+        may stop it besides the site's owner (`may_stop`)."""
+        self.starter = starter
         self.report, self.model, self.info, self.workers = report, model, info, workers
         self.requirements = requirements
         self.domain = domain
@@ -358,6 +395,8 @@ class Job:
         self.results: dict[str, dict] = {}
         self.events: list[dict] = []
         self.done = False
+        self.stopped = False   # ended by `stop`: what landed stays, and the next run asks only about the rest
+        self._stop = threading.Event()
         self.error: str | None = None
         self.started = time.time()
         self.seconds: float | None = None
@@ -422,8 +461,10 @@ class Job:
             try:
                 if self.after is not None:   # queued behind the run under way: read what it leaves, as it stands then
                     with self.after._cond:
-                        while not self.after.done:
-                            self.after._cond.wait(timeout=15)
+                        while not self.after.done and not self._stop.is_set():
+                            self.after._cond.wait(timeout=0.5)
+                    if self._stop.is_set():
+                        raise Stopped()
                     if self.prepare is not None:
                         seed, only = self.prepare()
                         self.seed, self.only = self._seeded(seed), only
@@ -432,7 +473,10 @@ class Job:
                         self._emit({"type": "clash", "id": cid, **v})
                 triage_report(self.report, self.model, self._emit, self.workers, self.info.get("images", True),
                               done=dict(self.seed), settled=dict(self.facts), reasoning=True,
-                              requirements=self.requirements, domain=self.domain, teams=self.teams, only=self.only)
+                              requirements=self.requirements, domain=self.domain, teams=self.teams, only=self.only,
+                              stop=self._stop)
+                if self._stop.is_set():
+                    raise Stopped()   # a part read: no audit until the rest is
                 if self.requirements is not None and self.requirements.by_design:
                     if self.only is None or self.only:   # a run that asks the model also checks the rules
                         self._audit()
@@ -441,17 +485,33 @@ class Job:
                             self.after.audit if self.after is not None else None)
                         if prior:
                             self._apply_audit(prior)
+            except Stopped:
+                self.stopped = True
             except Exception as e:
                 self.error = f"{type(e).__name__}: {e}"
             self.seconds = round(time.time() - self.started, 1)
             self._emit({"type": "done", "summary": summary(self.results), "seconds": self.seconds,
-                        **({"error": self.error} if self.error else {})})
+                        **({"error": self.error} if self.error else {}), **({"stopped": True} if self.stopped else {})})
             with self._cond:
                 self.done = True
                 self._cond.notify_all()
 
         owner.spawn(work)  # with the starter's settings (the owner's triage effort)
         return self
+
+    def may_stop(self, who: str | None, owner: bool = False) -> bool:
+        """Whoever started the run, or the site's owner: the run is shared, so nobody else following it may end it
+        for everyone (a stopped run can be gone on with by anyone, for a proposal of their own)."""
+        return owner or (who is not None and who == self.starter)
+
+    def stop(self) -> bool:
+        """End the run for everyone following it: no new model call, calls under way dropped, what landed kept. A run
+        started after it asks only about the rest. False when it had already finished. Callers check `may_stop`."""
+        with self._cond:
+            if self.done:
+                return False
+            self._stop.set()
+        return True
 
     def _audit(self) -> None:
         """Muse checks the by-design rules on the clashes they set aside; a rule it disputes marks them."""
@@ -498,6 +558,7 @@ class Job:
                 return
 
     def state(self) -> dict:
-        return {**self.info, "total": len(self.report.clashes), "done": self.done, "seconds": self.seconds,
+        return {**self.info, "total": len(self.report.clashes), "done": self.done, "stopped": self.stopped,
+                "seconds": self.seconds,
                 "results": self.results, "summary": summary(self.results), "error": self.error,
                 "audit": {str(k): v for k, v in self.audit.items()}}

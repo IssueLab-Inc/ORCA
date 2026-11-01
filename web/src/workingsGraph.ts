@@ -459,7 +459,7 @@ const BASIS: Record<string, string> = { touch: "a touch within 1 mm", non_physic
 function triage(run: Run, at: number): Graph {
   const events = upTo(run, at), done = finished(run, at), cols = new Columns();
   const names = (run.meta.names ?? {}) as Record<string, string>;
-  let start: { t: number; total: number; model: string; open: boolean } | null = null, end: { t: number; seconds: number; error?: string } | null = null;
+  let start: { t: number; total: number; model: string; open: boolean } | null = null, end: { t: number; seconds: number; error?: string; stopped?: boolean } | null = null;
   let audit: { t: number; rules: Record<string, { answer: string }> } | null = null, failure: string | null = null;
   const verdict = new Map<string, { t: number; v: Record<string, unknown> }>(), thought = new Map<string, { first: number; last: string }>();
   let ruleFirst: number | null = null, ruleLast = 0, modelFirst: number | null = null;
@@ -472,7 +472,7 @@ function triage(run: Run, at: number): Graph {
       const id = String(e.id), was = thought.get(id);
       thought.set(id, { first: was?.first ?? t, last: ((was?.last ?? "") + String(e.text ?? "")).slice(-160) });
     } else if (e.type === "audit") audit = { t, rules: (e.rules ?? {}) as Record<string, { answer: string }> };
-    else if (e.type === "done") end = { t, seconds: Number(e.seconds ?? t), error: e.error ? String(e.error) : undefined };
+    else if (e.type === "done") end = { t, seconds: Number(e.seconds ?? t), error: e.error ? String(e.error) : undefined, stopped: !!e.stopped };
     else if (e.type === "error") failure = String(e.detail ?? "Triage failed");
   }
   const muse = aiName("triage");
@@ -527,7 +527,7 @@ function triage(run: Run, at: number): Graph {
   if (end) {
     const real = all.filter((v) => v.verdict === "real_clash").length;
     add({ id: "done", lane: "you", col: cols.next(262), actor: "you", t0: end.t, status: end.error ? "fail" : "ok", time: sec(end.seconds), ev: "done",
-      title: `Triage done · ${sec(end.seconds)}`, body: [text(`${real} real clash${real === 1 ? "" : "es"} of ${verdict.size}`, { strong: true })],
+      title: `Triage ${end.stopped ? "stopped" : "done"} · ${sec(end.seconds)}`, body: [text(`${real} real clash${real === 1 ? "" : "es"} of ${verdict.size}`, { strong: true })],
       detail: end.error ? [text(end.error, { tone: "bad" })] : [text(`${calls.length} model call${calls.length === 1 ? "" : "s"}`, { tone: "muted" })] });
     edges.push({ from: last, to: "done", win: true });
   } else {

@@ -91,7 +91,7 @@ secret. `load_env()` finds no `/app/.env` and does nothing.
 
 Not set, so the code's defaults apply on Modal: no cap on detection runs (page, chat or MCP) or titling runs
 (`SIGHTLINE_DETECT_PER_HOUR`, `SIGHTLINE_TITLES_PER_HOUR` default 0), 120 requirements files and 60 previews per visitor per hour,
-`SIGHTLINE_ESCALATION` `button`, `SIGHTLINE_TRIAGE_WORKERS` 8, the default models and efforts. A changed value takes
+`SIGHTLINE_ESCALATION` `button`, `SIGHTLINE_TRIAGE_WORKERS` 24, the default models and efforts. A changed value takes
 effect only in a new container, so it means a redeploy; the settings for everyone ([15](15-requirements-settings-and-config.md))
 change live from the owner menu instead.
 
