@@ -38,3 +38,30 @@ export function noClash(c: ReportClash, match?: Matches[string], measure?: Measu
       why: triage.understanding || "Triage read this as intended, not a problem." };
   return null;
 }
+
+/** Triage as shown: a model verdict of "real" or "model error" gives way to what is already settled in this browser
+ * (marked not a clash, or ORCA's own geometry: one element, not physical, a touch, no overlap here), and the model's
+ * reading is kept beside it. Only the `selected` clash has the live `measure`. A clash with a kept fix (`fixes`) keeps
+ * its verdict: the fix is why the overlap went (as the clash panel reads it), so selecting it never turns it, nor drops
+ * it from a list filtered by verdict. */
+export function shownVerdicts(clashes: ReportClash[], triage: Record<string, TriageVerdict>,
+                              reviewed: Record<string, { kind: string; note: string }>, matches: Matches | null,
+                              selected: string | null, measure: Measure | null | "busy",
+                              fixes: Record<string, string>): Record<string, TriageVerdict> {
+  const out: Record<string, TriageVerdict> = { ...triage };
+  for (const c of clashes) {
+    const t = triage[c.id];
+    if (!t || t.verdict === "by_design" || t.verdict === "non_physical") continue;
+    const rv = reviewed[c.id];
+    const nc = fixes[c.id] ? null : noClash(c, matches?.[c.id], c.id === selected ? measure : null);
+    if (rv?.kind === "by_design" || nc) {
+      const basis: TriageVerdict["basis"] = rv?.kind === "by_design" ? "reviewed"
+        : nc!.label === "same element" ? "same_element" : nc!.label === "not physical" ? "non_physical" : nc!.label === "touch" ? "touch" : "no_overlap";
+      out[c.id] = { verdict: basis === "non_physical" ? "non_physical" : "by_design", severity: "none", responsible: "none",
+        action: "exclude_with_rule", source: "rule", basis,
+        understanding: rv?.kind === "by_design" ? `Marked not a clash: ${rv.note}` : `Not a clash: ${nc!.why}`,
+        model_reading: t.understanding ? `${t.verdict.replace("_", " ")}: ${t.understanding}` : undefined };
+    }
+  }
+  return out;
+}
