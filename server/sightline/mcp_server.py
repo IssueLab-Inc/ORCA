@@ -614,8 +614,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         """Change what the model says about an element, not its shape, and keep it in the edit log as the agent's:
         `change` is {kind: attribute, name: Name|Description|ObjectType|Tag|PredefinedType, value} | {kind: property,
         pset, name, value} (one of its own sets; base quantities follow its body and are refused) | {kind: type, type:
-        GlobalId} | {kind: material, material: id} | {kind: classification, reference: id, remove?} | {kind:
-        container, container: GlobalId}. Refused in words when it would leave the model saying two things (a value its
+        GlobalId} | {kind: material, material: id} | {kind: classification, reference: id, remove? | replace?: the id
+        of one it has, swapped in one change} | {kind: container, container: GlobalId}. Refused in words when it would leave the model saying two things (a value its
         type gives every element of the type, a layered element's material). undo_edit takes it back."""
         link = call(ctx, "edit_property", {"kind": change.get("kind") if isinstance(change, dict) else None})
         sid = link.ctx.scene_id

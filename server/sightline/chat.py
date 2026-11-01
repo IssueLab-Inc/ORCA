@@ -216,8 +216,8 @@ TOOLS = [
         "message asks for it and says the new value (or names the type, material, storey or classification): `change` is "
         "{kind: attribute, name: Name|Description|ObjectType|Tag|PredefinedType, value} | {kind: property, pset, name, "
         "value} (a property in one of its own sets; base quantities follow its body and are refused) | {kind: type, type: "
-        "GlobalId} | {kind: material, material: id} | {kind: classification, reference: id, remove?} | {kind: container, "
-        "container: GlobalId}. Kept in the edit log at once; undo_edit takes it back.",
+        "GlobalId} | {kind: material, material: id} | {kind: classification, reference: id, remove? | replace?: the "
+        "id of one it has, swapped in one change} | {kind: container, container: GlobalId}. Kept in the edit log at once; undo_edit takes it back.",
         {"element": {"type": "string"}, "change": {"type": "object"}}, ["change"]),
     _fn("list_edits", "Every edit kept to the model, newest last: who kept it, what it did, the clash it is for and the "
         "fix it follows.", {"limit": {"type": "integer"}}),

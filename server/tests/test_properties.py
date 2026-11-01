@@ -206,8 +206,9 @@ def test_materials_classifications_groups_and_documents(tmp_path):
     beam, duct, _ = _complete(tmp_path / "all.ifc")
     scene = IfcScene(tmp_path / "all.ifc")
     p = properties.properties(scene, beam)
-    assert p["classifications"] == [{"system": "Uniclass 2015", "identification": "Ss_20_10_75_35",
-                                     "name": "Steel beams", "location": None}]
+    (ref,) = scene.models[0].by_type("IfcClassificationReference")
+    assert p["classifications"] == [{"id": ref.id(), "system": "Uniclass 2015", "identification": "Ss_20_10_75_35",
+                                     "name": "Steel beams", "location": None}]   # its id: the panel swaps or removes it
     assert [(g["ifc_class"], g["name"]) for g in p["groups"]] == [("IfcBuildingSystem", "Frame")]
     assert p["documents"] == [{"identification": "S-201", "name": "Beam schedule", "location": "https://example.com/s201.pdf"}]
     wall = properties.properties(scene, duct)["materials"][0]
