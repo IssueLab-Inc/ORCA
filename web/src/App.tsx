@@ -6,7 +6,7 @@ import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, 
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, BuiltResult, EditKept, EscalationInfo, Journal, JournalEntry, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, BuiltResult, EditCheck, EditKept, EscalationInfo, Journal, JournalEntry, Stepped, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -133,6 +133,10 @@ export function App() {
   const [b, setB] = useState<string | null>(null);
   const [tool, setTool] = useState<ToolbarState>({ mode: "xray", style: "shaded", ortho: false, grey: true, edges: true, section: false, measure: false, edit: false, links: false, hiddenModels: [] });
   const editTool = useRef<EditToolHandle | null>(null);
+  // A hand edit Muse or an agent checked, for the Edit tool to preview; and the element and face the tool has chosen
+  // (chat's context: "this face").
+  const [incomingEdit, setIncomingEdit] = useState<{ check: EditCheck; n: number } | null>(null);
+  const editPick = useRef<{ element: string; face: string | null } | null>(null);
   // Free navigation (docs/views.md): every clash picked takes the views to it unless turned off; visibility filters and
   // what is hidden for now (viewing only); saved views and Home per project, in this browser.
   const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
@@ -1370,7 +1374,7 @@ export function App() {
 
   /** Find the clashes in the open models and open them as the report. `tests` null: the server's defaults. Marks on
    * clashes that are still there (by design, for the author) survive a rerun: their ids stay the same. */
-  async function runDetect(tests: DetectTest[] | null, sid: string | null = sceneId, again: { check?: string; all?: boolean } = {}) {
+  async function runDetect(tests: DetectTest[] | null, sid: string | null = sceneId, again: { check?: string; all?: boolean; after_edit?: string } = {}) {
     if (!sid || busy || detecting) return;
     const epoch = sceneEpoch.current;
     const keep = report?.origin === "sightline" ? reviewed : {};
@@ -2250,20 +2254,29 @@ export function App() {
     try {
       const r = dir === "undo" ? await api.undo(sid, entry) : await api.redo(sid, entry);
       if (!live()) return false;
-      viewer.current?.preview([]);
-      if (selected && (r.removed ?? []).includes(selected.globalId)) setSelected(null);
-      await applyToViewer(sid, r, [], live);
-      if (!live()) return false;
-      const pairs = r.entry.clashes.map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
-      const fixLike = r.entry.source !== "you" && r.entry.source !== "muse";
-      if (fixLike && dir === "undo") {
-        const ids = new Set(clashIdsOf(pairs).flat());
-        setFixes((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !ids.has(id))));
-        setEvidence((ev) => Object.fromEntries(Object.entries(ev).map(([id, x]) => [id, ids.has(id) && x.status === "accepted" ? { ...x, status: "proposed" } : x])));
-      } else if (fixLike) markFixed(pairs, pairs.map(() => r.entry.title));
-      staleContext(); setRemeasure((n) => n + 1);
-      return true;
+      return await afterStep(r, dir);
     } catch (e) { if (live()) setError((e as Error).message); return false; } finally { if (live()) setBusy(null); }
+  }
+
+  /** What follows an undo or redo, from this page, chat or an agent: the model patched, a fix's clash open again (or
+   * fixed again), the log read again. */
+  async function afterStep(r: Stepped, dir: "undo" | "redo"): Promise<boolean> {
+    if (!sceneId) return false;
+    const sid = sceneId, epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
+    viewer.current?.preview([]);
+    if (selected && (r.removed ?? []).includes(selected.globalId)) setSelected(null);
+    await applyToViewer(sid, r, [], live);
+    if (!live()) return false;
+    const pairs = r.entry.clashes.filter((c) => c.pair?.length === 2).map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
+    const fixLike = r.entry.source !== "you" && r.entry.source !== "muse";
+    if (fixLike && dir === "undo") {
+      const ids = new Set(clashIdsOf(pairs).flat());
+      setFixes((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !ids.has(id))));
+      setEvidence((ev) => Object.fromEntries(Object.entries(ev).map(([id, x]) => [id, ids.has(id) && x.status === "accepted" ? { ...x, status: "proposed" } : x])));
+    } else if (fixLike) markFixed(pairs, pairs.map(() => r.entry.title));
+    staleContext(); setRemeasure((n) => n + 1);
+    return true;
   }
 
   /** A hand edit kept (the Edit tool): the model patched, the log read again, a clash it resolved marked fixed, and
@@ -2275,6 +2288,10 @@ export function App() {
     if (selected && (k.removed ?? []).includes(selected.globalId)) setSelected(null);
     await applyToViewer(sid, k, k.pieces?.length ? [k.pieces] : [], live);
     if (!live()) return;
+    if (k.entry) {   // the edit as it now looks, for the report ("After the edits")
+      const pic = viewer.current?.capture(560);
+      if (pic) void api.editPicture(sid, k.entry.id, pic).catch(() => undefined);
+    }
     staleContext(); setRemeasure((n) => n + 1);
     const st = k.entry?.status as (JournalEntry["status"] & { pair?: string[] }) | null | undefined;
     if (st?.resolved && st.pair?.length === 2) markFixed([[st.pair[0], st.pair[1]]], [k.entry?.summary ?? "Edited by hand"]);
@@ -2282,7 +2299,7 @@ export function App() {
     window.clearTimeout(keptTimer.current);
     keptTimer.current = window.setTimeout(() => setKept(null), 3200);
     if ((k.check?.clashes ?? 0) > 0) {
-      if (report?.origin === "sightline") void runDetect(null, sid, { all: true });
+      if (report?.origin === "sightline") void runDetect(null, sid, { all: true, ...(k.entry ? { after_edit: k.entry.id } : {}) });
       else flash("Kept with its clashes. Run ORCA's check to list them.");
     }
   }
@@ -2471,6 +2488,9 @@ export function App() {
       const tracker = chatContext.current ?? trackContext(null);
       chatContext.current = tracker; tracker.onEvent(e.event); planThisTurn.current = true;
     }
+    if (e.type === "ui" && e.action === "edit_preview") { setTool((t) => ({ ...t, edit: true, measure: false })); setIncomingEdit({ check: e.check, n: Date.now() }); }
+    if (e.type === "ui" && e.action === "edit_kept") { setIncomingEdit(null); void keptEdit(e.kept); }
+    if (e.type === "ui" && e.action === "edit_stepped") void afterStep(e.step, e.step.entry.state === "undone" ? "undo" : "redo");
     if (e.type === "ui" && e.action === "select_clash") {
       const c = report?.clashes.find((x) => x.id === e.clash_id);
       // Pointing at a clash after building a plan in the same reply: select it, but the plan keeps the view.
@@ -3467,7 +3487,8 @@ export function App() {
           journal={journal} csvUrl={api.journalCsvUrl(sceneId)} clashLabel={clashTag} showLog={!docked}
           onKept={keptEdit} onUndo={() => void stepEdit("undo")} onRedo={() => void stepEdit("redo")} onUndoTo={(e) => void undoTo(e)}
           onShow={(e) => { const v = viewer.current; v?.frameEverywhere([...e.elements, ...e.created].filter((g) => v.isShown(g))); }}
-          onError={(m) => setError(m)} onClose={() => toggle("edit")} />}
+          incoming={incomingEdit} onFace={(f) => { editPick.current = f; }}
+          onError={(m) => setError(m)} onClose={() => { editPick.current = null; toggle("edit"); }} />}
         {!docked && selected && !tool.measure && (
           <div className="props" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
             {elementCard(true, true)}
@@ -3549,7 +3570,8 @@ export function App() {
             <Network size={14} aria-hidden /> {contextWorking ? "Wider fix: inspecting and checking…" : context.accepted ? "Wider fix accepted" : `Review wider fix · ${context.result?.proposals.length ?? 0} alternatives`}</button>}
           <ChatPanel key={`${sceneId}:${chatReport}`} voiceModel={labels.voice} owner={chatOwner.current} ready={!!(sceneId || report) && !busy}
             onEvent={(e) => { if (sceneEpoch.current === renderedSceneEpoch && workspaceEpoch.current === renderedWorkspaceEpoch) onChatEvent(e); }} ask={chatAsk}
-            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView, check: viewCheck })} />
+            context={() => ({ scene_id: sceneId, report_id: report?.id ?? null, clash_id: clash?.id ?? null, fixed: resolved, filters: sharedFilters, filter_view: filterView, check: viewCheck,
+              selected: editPick.current ?? (selected ? { element: selected.globalId, face: null } : null) })} />
         </div>)}
       {inSlot(slots.plan, <div className="plan-slot" hidden={!docked && tab !== "plan"}>
         {(docked || tab === "plan") && <>

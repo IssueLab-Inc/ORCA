@@ -193,3 +193,26 @@ def test_parts_from_older_conversions_still_read_their_group():
     pset = ifcopenshell.api.run("pset.add_pset", model, product=part, name="Sightline_STEP")
     ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={"Group": "Frame", "Label": "0:1:1:2"})
     assert step_source(part) == {"Group": "Frame", "Label": "0:1:1:2", "id": pset.id()}
+
+
+def test_a_part_deleted_by_hand_leaves_the_step_and_a_pushed_box_changes_shape(tmp_path):
+    from sightline import manual
+    write_step(tmp_path / "Test-cell.step")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["Test-cell.step"])
+    scene = ws.scene(sid)
+    ids = {scene.entity(g).Name: g for g in scene.bounds()}
+    kept = manual.apply(ws, sid, {"op": "delete", "element": ids["Block K1"]})
+    assert kept["removed"][0] == ids["Block K1"]
+    post = next(f for f in manual.faces.faces(scene, ids["Post P1"]) if f.kind == "cap" and f.name == "top")
+    manual.apply(ws, sid, {"op": "push_pull", "element": ids["Post P1"], "face": post.id, "by_m": 0.2}, accept_clashes=9)
+    out = ws.export(sid, tmp_path / "export")
+    after = {p.name: p for p in step.parts(next(p for p in out if p.suffix == ".step"))[0]}
+    assert "Block K1" not in after and "Post P1" in after
+
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    box = Bnd_Box(); BRepBndLib.Add_s(after["Post P1"].shape, box)
+    before = {p.name: p for p in step.parts(tmp_path / "Test-cell.step")[0]}
+    box0 = Bnd_Box(); BRepBndLib.Add_s(before["Post P1"].shape, box0)
+    assert box.CornerMax().Z() - box0.CornerMax().Z() == pytest.approx(200, abs=0.5)

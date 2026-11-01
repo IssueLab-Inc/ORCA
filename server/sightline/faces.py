@@ -57,8 +57,9 @@ class Face:
 
 
 def _world(scene: IfcScene, element):
-    """The extrusion's frame: file index, unit scale, item, its world matrix (file units)."""
-    i, place, item, *_ = edits._frames(scene, element)
+    """The extrusion's frame: file index, unit scale, item, its world matrix (file units). Under a hand edit's clip,
+    the extrusion it clips."""
+    i, place, item, *_ = edits._frames(scene, element, clipped=True)
     world = place @ ifcopenshell.util.placement.get_axis2placement(item.Position)
     return i, scene.unit_scales[i], item, world
 
@@ -180,6 +181,12 @@ def faces(scene: IfcScene, gid: str) -> list[Face]:
                             float(np.linalg.norm(b - a) * s), list(ALLOWS["edge"])))
     else:
         out.append(Face(gid, "flank", "flank", "", wn(pf[:2, 1]), w(pf[:2, 2], depth / 2), None, list(ALLOWS["flank"])))
+    if edits._is_clipped(element):   # the end a clip cut is the clip's plane now: aligned, not pushed
+        v = edits._mesh_verts(element)
+        along = ((v / s) - T) @ d
+        for f in out:
+            if (f.id == "cap:end" and along.max() < depth - NEAR_M / s) or (f.id == "cap:start" and along.min() > NEAR_M / s):
+                f.kind, f.allows, f.why_not = "clip", ["align"], "it is clipped to a plane there"
     names: dict[str, int] = {}
     for f in out:
         base = {"flank": "sides", "radial": "round side"}.get(f.kind) or _name(scene, gid, np.asarray(f.normal))

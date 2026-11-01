@@ -457,7 +457,7 @@ option card (`hostRows` in `fixKinds.ts`) and in `edit.numbers`.
 | `edits.trial(scene, gid)` | The one file holding `gid` | `begin_transaction`, yield, `end_transaction` and `undo`; the box cache put back | `_try_offset`, `_try_trim`, `_try_route`, `_try_resize` |
 | `edits.trial_files(scene, indexes)` | Several files | The same over each file; never nested inside `trial` (a file holds one transaction at a time) | `_try_penetration`, `_try_combined`, `plans.verify_together` |
 | `edits.kept_files(scene, indexes)` | Several files, for good | All or nothing: an error part way undoes every file's edits, the boxes, the files marked edited and the scene's revision and history, then re-raises. Nested in another `kept_files`, a file the outer one holds is left to it (IfcOpenShell keeps one transaction per file) | `plans.apply` (every keep), `Workspace.apply_combined` (inside it) |
-| `IfcScene.translate` there and back | Moves | No transaction; the `finally` moves the run back | `_try_move`, `Workspace.verify_move` |
+| `edits.scratch(scene, indexes)` | Edits that never stay | A transaction always undone (files already in one are left to it), boxes put back. A move there and back outside one left the history pointing at replaced placements and broke the next undo (`UndoSystemError`) | `_try_move` and `Workspace.verify_move` (around `IfcScene.translate` there and back), `Workspace.export` (`ORCA_Edit`) |
 
 A trial edits the shared scene, so every `TRIES` call runs under `Workspace.lock` (`agent.resolve(lock=)`); plans
 running agents in parallel threads overlap their model calls and take turns at the geometry ([02](02-system-architecture.md)).
@@ -569,6 +569,25 @@ Edits accumulate in the scene's in-memory models; nothing is written until expor
 files marked edited (`IfcScene.write_edited`, `<name>.orca.ifc`) and, for a model converted from STEP, writes it back
 as `<stem>.orca.step` (`service.step_changes`, `step.export`). A restart or reopening the models starts clean. Full
 detail, zips and the 409 when nothing changed: [14](14-files-in-and-out.md).
+
+### The edit log
+
+Every keep goes through `journal.Journal.record` ([docs/manual-edits.md](../manual-edits.md)): `plans.apply` (source
+`fix`, `plan` or, from MCP, `agent`, with the clash ids the page or agent sends), `context_planner.accept` (`wider`,
+its state before and after) and `manual.apply` (hand edits: `you`, `muse`, `agent`). The entry holds the new
+transactions on each file, so `Workspace.undo_edit` and `redo_edit` take the newest entry back or forward (routes
+`/edits/undo`, `/edits/redo`). `plans.apply` returns the `entry`.
+
+### Hand edits: `manual.py` and `faces.py`
+
+The Edit tool, chat, voice and MCP edit elements directly through ops (push_pull, align, move, void, cut_by, split,
+remove_section, delete, clip), each resolved, gated by the requirements, checked in a trial and kept only when checked
+again ([docs/manual-edits.md](../manual-edits.md)). They share the fix kinds' primitives (`edits.stretch`,
+`apply_trim`, `_build_chain`, `_void_rep`/`_void_place`, `_grown`, the ray casts) and add `stretch_radius`,
+`offset_edge`, `face_axes`, `through_depth`, `misses`, `cut_void`, `cut_by_shape`, `split_axis`, `split`,
+`remove_product_with`, `clip_to_plane`. `edits._body(clipped=True)` and `_frames(clipped=True)` look through a hand
+edit's clip; the default stays strict, so the fix kinds and STEP export see a clipped element as before. `stretch`
+takes a rectangle drawn off its axis (a box drawn from its corner) as long as it is not turned.
 
 ### Trying by hand
 

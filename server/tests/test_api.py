@@ -59,6 +59,7 @@ def test_federated_set_exports_only_the_edited_file(tmp_path, monkeypatch):
 def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypatch):
     """Offsets, moves and trials in one session: the exported files hold all the kept edits, and only those."""
     import io
+    import json
     import zipfile
 
     import ifcopenshell
@@ -98,7 +99,9 @@ def test_export_carries_every_accepted_fix_and_no_tried_ones(tmp_path, monkeypat
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
     assert r.headers["content-disposition"].endswith('filename="orca-export.zip"')  # the files share no project name
     files = zipfile.ZipFile(io.BytesIO(r.content))
-    assert sorted(files.namelist()) == ["services.orca.ifc", "structure.orca.ifc"]
+    # The models, and the edit log beside them (every kept fix, docs/manual-edits.md)
+    assert sorted(files.namelist()) == ["orca-edits.csv", "orca-edits.json", "services.orca.ifc", "structure.orca.ifc"]
+    assert len(json.loads(files.read("orca-edits.json"))) == 3
     out = ifcopenshell.file.from_string(files.read("services.orca.ifc").decode())
     assert all(out.by_guid(g) for g in pieces)                                   # the offset's five pieces
     z = lambda m, g: ifcopenshell.util.placement.get_local_placement(m.by_guid(g).ObjectPlacement)[2, 3]

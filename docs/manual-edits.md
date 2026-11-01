@@ -92,6 +92,11 @@ caps and its length and height are outline edges; 24% are fittings, terminals, d
 | `void` | A rectangular or round opening on a cap, side or flank, centred where it was clicked (on the face's plane), across the face and up it (`edits.face_axes`). Through: rays from just inside each point of its outline find where it comes out (the deepest, refused past 1 m), plus 10 mm proud of each face; or a recess to a given depth. An `IfcOpeningElement` (OPENING or RECESS) voiding the element (`edits.cut_void`, reusing the penetration's void builders) | a cut: only where the group may be edited in any way (`requirements.can_cut`) | ORCA's hard rules for hosts (`hosts.hard_rule`: a transfer element, a column, glazing…) and structure; an outline within 50 mm of the face's edge is "a notch more than a hole" |
 | `cut_by` | Cut an element where another one is, with a gap all round: an opening shaped as the cutter grown by the gap (`edits.cut_by_shape`). Exact for extrusions (a rectangle +2 gaps, a circle +1, an outline offset by `edits._grown`, an I, U or L section as its bounding rectangle, the depth +2 gaps), in the cut element's file and units; any other cutter (a fitting's mesh) is welded and pushed out along its vertex normals, and the warning says the gap is approximate. Refused when the cutter does not reach it | a cut | as a void |
 
+| `split` | One element becomes two where the plane square to its long axis passes through the point clicked (snapped like a measure). Along a run with ports (a duct, a pipe): `edits._build_chain` with two straights, the ports chained across the cut. Along a member without ports (a beam, a transom long along its profile): a copy, then each trimmed to its side (`edits.apply_trim`). Across an outline (a wall drawn as its elevation, a slab): the outline clipped to each side of the line (Sutherland–Hodgman). The element keeps the first piece and its GlobalId; the second is a copy named "… (part 2)" (`root.copy_class`: type, properties, container, systems; the openings it duplicated are dropped). Each opening goes to the piece that holds it; a cut through an opening is refused, as is a piece under 50 mm | any edit: "may only be moved whole" refuses it | structure |
+| `remove_section` | Split at the first point and at the second, then remove the middle with what it held (`edits.remove_product_with`); the rest keeps its place and is named "… (part 2)". A run's two new ends are left open, said so for the services designer | any edit | structure; open ends → services |
+| `delete` | The element, with its openings and what fills them, the parts it aggregates and its ports (`edits.remove_product_with`); its boxes forgotten (`IfcScene.forget`). The log keeps the names of everything removed, so undo and the report can say what came back | any edit | structure; what fills its openings; peers left with an open end; elements standing on it |
+| `clip` | Cut the element's material beyond another element's face (any angle, with a gap): an `IfcBooleanClippingResult` with a half-space (`geometry.clip_solid`), the Body's type "Clipping". Refused when the plane misses it or leaves less than 50 mm. A clipped element still has faces: `edits._body(clipped=True)` looks through the clip, its clipped end reads as kind "clip" (aligned, not pushed), and its other end pushes and pulls as before | as a trim (`trims`) | structure |
+
 Measured on the fixture: a 400 x 300 mm opening through the wall lands at x 2.8–3.2, z 1.35–1.65 and comes 10 mm out of
 both faces; the wall pushed into the column and then cut round it with a 20 mm gap clears the clash at exactly 20 mm.
 
@@ -112,6 +117,43 @@ on screen marks it fixed. Kept with clashes, the page runs the kept checks again
 Measured on Northbank: a check takes about 1.1 s (a wall end pushed 200 mm into the curtain wall: four transoms and
 panels hit); clash #1's duct made 50 mm deeper reads "Makes 1 clash: girder −350 mm" and keeps only as "Keep with 1
 clash". The answer key still passes 3/3 first try at Rev04's heights after the trial moves moved into `edits.scratch`.
+
+## Muse, voice and agents
+
+- **Chat** (`chat.py`): `list_faces` (an element's faces by name, or "selected"), `edit_check` (any op; the page previews
+  it in the Edit tool with its own Keep: ui `edit_preview`), `edit_keep`, `undo_edit` and `list_edits`. The chat's
+  [context] line now says what the user has selected (and the Edit tool's chosen face) and the last three edits kept.
+- **Only the person keeps** (`chat.consents`): `edit_keep` keeps the edit Muse checked last for this conversation, only
+  when the person's own message in this turn says so ("keep it", "apply it", "do it", "yes", "go ahead"; refused when it
+  also says don't, cancel, stop, wait, or starts with no). An edit that makes clashes needs `accept_clashes` and the
+  word "clash" in their message ("keep it with the clash"). `undo_edit` needs "undo", "revert" or "take it back". The
+  prompt (`domain_packs/chat.md`) says the same: never on Muse's own initiative. A kept edit is logged as `muse`.
+- **Voice** is chat with the words spoken (`voice_live.py` only transcribes), so "make this beam 200 mm longer at the
+  east end" and then "keep it" work by voice.
+- **The fix agent** hears about edits already made to a clash's elements (`Workspace._with_edits`, in the clash's notes
+  that `_describe` reads): kept ones to build on, undone ones not to propose again. Nothing is added when there are none.
+- **MCP** (`mcp_server.py`): `list_faces`, `check_edit`, `apply_edit` (`accept_clashes` only when the person asked),
+  `list_edits`, `undo_edit`, `redo_edit`. Keeps are logged as `agent` with the link; the page follows (`edit_kept`,
+  `edit_stepped` with the patch).
+
+## Reports, BCF and export
+
+- **The report** (`document.py`; the page's PDF and MCP's `generate_report` both read the log, through
+  `app._build_document`): each clash's page gets **What was done**, its entries in order (who, when, what, the check
+  in words, warnings with who reviews, "after E1" for a follow-up), its state ("Fix applied", "Edited by hand", "Fix
+  applied, then edited by hand", then "still resolved" or "clash back (−12 mm)", from the entry's re-measure) and the
+  picture the page took after the last edit ("After the edits"). A clash with entries and no evidence from the page
+  still gets its page, so a fix an agent kept is reported. Muse's explanation reads the same timeline (`_facts`). The
+  actions table says the state. **Changes to the model**, after the summary, lists every kept entry with its clash
+  numbers, its check and its reviews (a per-team or per-model report lists the entries for its clashes).
+- **BCF**: each clash topic gets a comment per entry ("ORCA edit log"); a hand edit no clash page holds that someone
+  must review (warnings, or kept with clashes) gets a Request topic of its own, its elements selected.
+- **Export** (`Workspace.export`): every element a kept entry changed or made carries `ORCA_Edit` (EntryIds, Ops,
+  Summary, Source, When, Clashes) in the written IFC. It is written inside `edits.scratch` around the write, so the
+  live models, and the log's undo, never hold it. A zip (several files, or STEP and IFC) also holds `orca-edits.json`
+  and `orca-edits.csv`; a single file stays a bare IFC. STEP: a part a hand edit deleted is taken out of its assembly,
+  its own shape with it once nothing uses it (`step.export(remove=)`, `service.step_removed`), and a box whose side
+  or a cylinder whose radius was pushed is written with its new profile. IfcOwnerHistory is left as it was.
 
 ## On the page
 

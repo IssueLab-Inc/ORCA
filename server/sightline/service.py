@@ -10,6 +10,7 @@ import threading
 import uuid
 from collections import Counter
 
+import ifcopenshell.api
 import ifcopenshell.geom
 import ifcopenshell.util.element
 import ifcopenshell.util.system
@@ -478,8 +479,22 @@ class Workspace:
             seen = " Images are views of this clash." if pics else ""
             notes = "\n".join(filter(None, [notes, source + seen]))
             nearby = self._nearby(scene_id, self.report(report_id), element_a, element_b) if scene_id in self.scenes else {}
-            return agent.Clash(element_a, element_b, distance_m, pics, notes, nearby=nearby)
-        return agent.Clash(element_a, element_b, distance_m, pics, notes)
+            return agent.Clash(element_a, element_b, distance_m, pics, self._with_edits(notes, scene_id, element_a, element_b),
+                               nearby=nearby)
+        return agent.Clash(element_a, element_b, distance_m, pics, self._with_edits(notes, scene_id, element_a, element_b))
+
+    def _with_edits(self, notes: str, scene_id: str | None, element_a: str, element_b: str) -> str:
+        """The clash's notes, plus the edits already kept or undone on its elements (the edit log), so Muse builds on
+        them and does not propose an edit the person took back. Nothing when there are none."""
+        j = self.journals.get(scene_id or "")
+        if j is None:
+            return notes
+        touching = j.for_elements([element_a, element_b], kept_only=False)
+        if not touching:
+            return notes
+        lines = journal.entry_lines(touching, 4)
+        return "\n".join(filter(None, [notes, "Edits already made to these elements (newest last; [undone] were taken back): "
+                                        + " | ".join(lines)]))
 
     NEARBY_M = 3.0   # how close another clash of the same element must be to be worth telling Muse about
     NOT_PHYSICAL_CLASSES = {"IfcSpace", "IfcDistributionPort", "IfcOpeningElement", "IfcVirtualElement", "IfcZone"}
@@ -591,7 +606,8 @@ class Workspace:
                # which files each revision changed: a page behind `revision_before` reloads what it missed
                "history": [[rev, files] for rev, files in s.history], "removed": gone}
         with self.lock:
-            here = [g for g in dict.fromkeys(changed) if g not in gone and _exists(s, g)]
+            # Openings and provisions are not drawn as elements: the host's new shape is what changes.
+            here = [g for g in dict.fromkeys(changed) if g not in gone and _exists(s, g) and not _void(s, g)]
             try:
                 meshes = edits.meshes(s, here, render=True)
             except (RuntimeError, KeyError):
@@ -775,7 +791,13 @@ class Workspace:
         also written back as STEP, each moved part translated in the original file (`step.export`)."""
         with self.lock:
             s = self.scene(scene_id)
-            out = s.write_edited(out_dir)
+            j = self.journals.get(scene_id)
+            # Each edited element names the log's entries that made it so (ORCA_Edit), written with the files only:
+            # inside a transaction undone after, so the log's own undo stays as it was.
+            with edits.scratch(s, set(s._edited)):
+                if j is not None:
+                    _stamp_edits(s, j)
+                out = s.write_edited(out_dir)
             for i in sorted(s._edited):
                 src = self.sources.get(scene_id, {}).get(i)
                 if not src:
@@ -783,7 +805,12 @@ class Workspace:
                 parts = json.loads(Path(src["manifest"]).read_text())["parts"]
                 moves, replace, add = step_changes(s, i, parts)
                 stem = Path(src["step"]).stem
-                out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.orca.step", moves, replace, add))
+                out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.orca.step", moves, replace, add,
+                                       step_removed(s, i, parts)))
+            if j is not None and j.kept() and len(out) > 1:   # a zip: the log beside the models
+                (out_dir / "orca-edits.json").write_text(json.dumps([e.to_dict() for e in j.entries], indent=1, default=str))
+                (out_dir / "orca-edits.csv").write_text(self.edits_csv(scene_id))
+                out += [out_dir / "orca-edits.json", out_dir / "orca-edits.csv"]
             return out
 
     # Clash reports (Navisworks XML).
@@ -1128,6 +1155,41 @@ def project_name(files: list[str]) -> str | None:
     return cut if len(cut) >= 3 else None
 
 
+EDIT_PSET = "ORCA_Edit"
+
+
+def _stamp_edits(scene: IfcScene, log) -> None:
+    """An ORCA_Edit property set on every element the kept edits changed or made: which entries (E1, E2), what they
+    did, who kept them, when, and the clashes they were for. Read by anyone who opens the exported IFC."""
+    by_element: dict[str, list] = {}
+    for e in log.kept():
+        for gid in [*e.elements, *e.created]:
+            by_element.setdefault(gid, []).append(e)
+    for gid, entries in by_element.items():
+        try:
+            element = scene.entity(gid)
+        except KeyError:
+            continue
+        i = scene.index_of(gid)
+        if i not in scene._edited:
+            continue
+        model = scene.models[i]
+        ids = [c.get("id") for x in entries for c in x.clashes if c.get("id")]
+        pset = ifcopenshell.api.run("pset.add_pset", model, product=element, name=EDIT_PSET)
+        ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={
+            "EntryIds": ", ".join(x.id for x in entries),
+            "Ops": ", ".join(dict.fromkeys(x.kind for x in entries)),
+            "Summary": " | ".join(x.summary or x.title for x in entries)[:2000],
+            "Source": ", ".join(dict.fromkeys(x.source for x in entries)),
+            "When": ", ".join(x.to_dict()["when"] for x in entries),
+            "Clashes": ", ".join(dict.fromkeys(str(c) for c in ids)) or "",
+        })
+
+
+def _void(scene: IfcScene, gid: str) -> bool:
+    return scene.entity(gid).is_a("IfcFeatureElement")
+
+
 def _exists(scene: IfcScene, gid: str) -> bool:
     try:
         scene.index_of(gid)
@@ -1158,6 +1220,17 @@ def _spec(scene: IfcScene, element) -> dict:
                 "faces": np.asarray(geom.faces, int).reshape(-1, 3).tolist()}
 
 
+def step_removed(scene: IfcScene, index: int, parts: dict) -> list[str]:
+    """The STEP parts no longer in the model (a hand edit deleted them): `step.export` takes them out."""
+    model, gone = scene.models[index], []
+    for gid in parts:
+        try:
+            model.by_guid(gid)
+        except RuntimeError:
+            gone.append(gid)
+    return gone
+
+
 def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, list]:
     """What changed in a model converted from STEP, for `step.export`: moved parts (placement against the manifest's
     origin), parts whose extrusion changed (an offset's first piece, a trimmed member) or that were cut for a service,
@@ -1180,7 +1253,9 @@ def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, 
             now = _spec(scene, element)
             moved_start = np.asarray(prism["start"]) + delta
             if now["kind"] != "prism" or abs(now["depth"] - prism["depth"]) > 1e-6 \
-                    or np.linalg.norm(np.asarray(now["start"]) - moved_start) > 1e-6:
+                    or np.linalg.norm(np.asarray(now["start"]) - moved_start) > 1e-6 \
+                    or now["profile"][0] != prism["profile"][0] \
+                    or not np.allclose(now["profile"][1:], list(prism["profile"])[1:], atol=1e-6):   # a side pushed, a radius
                 replace[gid] = now
                 continue
         if np.any(np.abs(delta) > 1e-6):

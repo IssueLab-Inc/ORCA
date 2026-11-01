@@ -152,3 +152,13 @@ def test_a_wider_fix_swap_is_undone_by_putting_the_state_back(client):
     assert scene.placement(main)[2, 3] == pytest.approx(z + 0.2) and scene.revision == rev + 2
     with pytest.raises(Fenced):
         j.redo(scene)
+
+
+def test_one_detection_run_after_an_edit_kept_with_clashes_is_free(client):
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    j = ws.journal(sid)
+    with j.record(scene, "you", "push_pull") as rec, edits.kept_files(scene, {0}):
+        edits.stretch(scene, main, "end", 0.05)
+        rec.check = {"accepted_clashes": 1}
+    assert not j.free_rerun("E9") and j.free_rerun("E1") and not j.free_rerun("E1")

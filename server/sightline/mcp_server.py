@@ -26,7 +26,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.types import Image
 from mcp_types import ToolAnnotations
 
-from . import agents, chat, checks, edits, escalation, plans, requirements, settings, spend
+from . import agents, chat, checks, edits, escalation, journal, manual, plans, requirements, settings, spend
 from .service import Workspace
 
 
@@ -551,6 +551,85 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
             result["requested_only"] = [{"fix": items[n["index"]]["option"]["title"], "why": n["blocked_by"]}
                                         for n in out["not_cut"]]
         return result
+
+    # ------------------------------------------------------------------ hand edits (docs/manual-edits.md)
+
+    @tool(read_only=True)
+    def list_faces(element: str, ctx: Context) -> dict:
+        """The faces of an element there are to edit by hand, named as people say them (east end, north face, top),
+        with what each allows (push_pull, align, clip, void) and its size in metres."""
+        return run(ctx, "list_faces", {"element": element})
+
+    @tool(read_only=True)
+    def check_edit(op: dict, ctx: Context) -> dict:
+        """Check a hand edit without keeping it; the person's page previews it. `op`: {op: push_pull, element, face,
+        by_m} | {op: align, element, face, to: {element, face}, gap_m, how: stretch|move} | {op: move, element,
+        delta_m} | {op: void, element, face, at, shape: rect|round, width_m, height_m | diameter_m, depth_m?} |
+        {op: cut_by, element, cutter, gap_m} | {op: split, element, at} | {op: remove_section, element, from, to} |
+        {op: delete, element} | {op: clip, element, to: {element, face}, gap_m}. Returns what it clears, the clashes it
+        would make, its warnings (who must review), or why it cannot be made (`blocked`)."""
+        link = call(ctx, "check_edit", {"op": op.get("op") if isinstance(op, dict) else None})
+        r = manual.check(W(), link.ctx.scene_id, op)
+        link.publish({"type": "ui", "action": "edit_preview", "check": r})
+        done(link, "check_edit", ("cannot: " + r["blocked"]) if r.get("blocked") else f"{r['clashes']} clash(es)")
+        return {k: v for k, v in r.items() if k not in ("preview", "before", "targets")}
+
+    @tool()
+    def apply_edit(op: dict, ctx: Context, accept_clashes: int = 0) -> dict:
+        """Keep a hand edit in the model: checked again first, refused when the requirements forbid it or it would make
+        more clashes than `accept_clashes` (keep it with them only when the person asked). It goes in the edit log as
+        the agent's, and the person's page redraws it. Export with export_models."""
+        link = call(ctx, "apply_edit", {"op": op.get("op") if isinstance(op, dict) else None, "accept_clashes": accept_clashes})
+        sid = link.ctx.scene_id
+        if not sid:
+            raise LookupError("no models are open on this link")
+        with W().lock:
+            before = W().scene(sid).revision
+            try:
+                kept = manual.apply(W(), sid, op, accept_clashes=accept_clashes, source="agent", actor=f"agent link {link.id}",
+                                    clash_id=link.ctx.clash_id)
+            except manual.NotKept as e:
+                raise ValueError(str(e)) from e
+            patch = W().patch(sid, kept["changed"], before, removed=kept["removed"])
+        link.publish({"type": "ui", "action": "edit_kept", "kept": {**kept, **patch}})
+        done(link, "apply_edit", f"kept {kept['entry']['id'] if kept['entry'] else 'the edit'}")
+        e = kept["entry"] or {}
+        return {"kept": e.get("id"), "summary": e.get("summary"), "warnings": e.get("warnings"),
+                "accepted_clashes": (e.get("check") or {}).get("accepted_clashes", 0), "files_changed": len(kept["files"])}
+
+    @tool(read_only=True)
+    def list_edits(ctx: Context, limit: int = 20) -> dict:
+        """Every edit kept to the model, oldest first: who kept it (you, muse, agent, fix, plan, wider), what it did,
+        the clash it is for, the fix it follows, its check and warnings, kept or undone."""
+        link = call(ctx, "list_edits", {"limit": limit})
+        j = W().journal(link.ctx.scene_id).summary()
+        done(link, "list_edits", f"{len(j['entries'])} edits")
+        return {**j, "entries": j["entries"][-max(1, min(limit, 100)):]}
+
+    def _step(ctx: Context, name: str) -> dict:
+        link = call(ctx, name, {})
+        sid = link.ctx.scene_id
+        with W().lock:
+            before = W().scene(sid).revision
+            try:
+                r = W().undo_edit(sid) if name == "undo_edit" else W().redo_edit(sid)
+            except journal.Fenced as e:
+                raise ValueError(str(e)) from e
+            patch = W().patch(sid, r["changed"], before, removed=r["removed"])
+        link.publish({"type": "ui", "action": "edit_stepped", "step": {**r, **patch}})
+        done(link, name, f"{r['entry']['id']} {r['entry']['state']}")
+        return {"entry": r["entry"]["id"], "summary": r["entry"]["summary"], "state": r["entry"]["state"],
+                "can_undo": r["can_undo"], "can_redo": r["can_redo"]}
+
+    @tool()
+    def undo_edit(ctx: Context) -> dict:
+        """Undo the newest kept edit (a hand edit or a fix): the model as it was before it, the page redrawn."""
+        return _step(ctx, "undo_edit")
+
+    @tool()
+    def redo_edit(ctx: Context) -> dict:
+        """Redo the edit undone last."""
+        return _step(ctx, "redo_edit")
 
     def _applied(link: agents.Link, out: dict, pairs: list, titles: list, clash_ids: list,
                  fixed: dict[str, str]) -> None:

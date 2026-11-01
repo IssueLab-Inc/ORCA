@@ -144,6 +144,7 @@ class Row:
     reviews: list[dict] = field(default_factory=list)
     mark: str | None = None       # the session marked it "by_design" or "author"
     ai: dict | None = None        # Muse Spark's explanation for its page
+    edits: list[dict] = field(default_factory=list)   # the edit log's entries for this clash, oldest first (journal.py)
 
 
 def teams_for(team_a: str, team_b: str, moved_side: str | None, responsible: str | None,
@@ -163,7 +164,8 @@ def teams_for(team_a: str, team_b: str, moved_side: str | None, responsible: str
 
 
 def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str, str], matches: dict | None,
-               scene, evidence: dict, reviews: dict, marks: dict, guesses: dict[str, str] | None = None) -> list[Row]:
+               scene, evidence: dict, reviews: dict, marks: dict, guesses: dict[str, str] | None = None,
+               journal=None) -> list[Row]:
     """`model_teams`: the team the user typed for each model file; `guesses`: ORCA's guess per file (`guess_teams`),
     the names triage's "responsible" uses, which are translated to the typed ones."""
     guesses = guesses or {}
@@ -189,6 +191,8 @@ def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str,
         ta = model_teams.get(ma) or typed.get(ma) or guess_team(Counter(), ma)
         tb = model_teams.get(mb) or typed.get(mb) or guess_team(Counter(), mb)
         ev = evidence.get(c.id)
+        pair = [m["a"], m["b"]] if m.get("a") and m.get("b") else None
+        logged = [e.to_dict(picture=True) for e in journal.for_clash(c.id, pair)] if journal is not None else []
         moved_side = None
         if ev and ev.get("moved"):
             moved = set(ev["moved"])
@@ -199,7 +203,7 @@ def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str,
         acting, reviewers = teams_for(ta, tb, moved_side, as_typed.get(responsible, responsible), discipline)
         mark = marks.get(c.id)
         verdict = reading.get("verdict")
-        if ev:
+        if ev or logged:
             section = "page"
         elif mark == "by_design":
             section = "noise"
@@ -210,8 +214,84 @@ def build_rows(report: Report, verdicts: dict[str, dict], model_teams: dict[str,
         else:
             section = "noise"
         rows.append(Row(c, ma, mb, ta, tb, acting, reviewers, verdict, reading, section, ev,
-                        list(reviews.get(c.id, [])), mark))
+                        list(reviews.get(c.id, [])), mark, edits=logged))
     return rows
+
+
+# ------------------------------------------------------------------------------------------------- the edit log
+
+SOURCE_WORDS = {"you": "by hand", "muse": "by hand, through Muse", "agent": "by an agent", "fix": "accepted fix",
+                "plan": "accepted plan", "wider": "accepted wider fix"}
+
+
+def is_hand(e: dict) -> bool:
+    """A hand edit (manual.py) rather than a kept fix: its parameters are one op."""
+    return "op" in (e.get("params") or {})
+
+
+def _hhmm(e: dict) -> str:
+    return (e.get("when") or "")[11:16] + " UTC" if e.get("when") else ""
+
+
+def check_words(e: dict) -> str:
+    c = e.get("check") or {}
+    if c.get("verified"):
+        return "verified by geometry" + (f", nearest {_mm(c['min_clearance_m'])}" if c.get("min_clearance_m") is not None else "")
+    n = c.get("accepted_clashes") or 0
+    words = f"checked, kept with {n} clash{'es' if n > 1 else ''}" if n else "checked, clear"
+    if not n and c.get("min_clearance_m") is not None:
+        words += f", nearest {_mm(c['min_clearance_m'])}"
+    return words
+
+
+def edit_state(r: Row) -> str | None:
+    """Where a clash stands after the edits logged for it: "Fix applied, then edited by hand", "…, clash back"."""
+    if not r.edits:
+        return None
+    hand = [e for e in r.edits if is_hand(e)]
+    fixes = [e for e in r.edits if not is_hand(e)]
+    state = ("Fix applied, then edited by hand" if fixes and hand else "Edited by hand" if hand else "Fix applied")
+    last = next((e["status"] for e in reversed(r.edits) if e.get("status")), None)
+    if last is not None:
+        state += ", still resolved" if last.get("resolved") else (f", clash back ({_mm(last.get('depth_m'))})")
+    return state
+
+
+def timeline_html(r: Row) -> str:
+    if not r.edits:
+        return ""
+    items = []
+    for e in r.edits:
+        who = SOURCE_WORDS.get(e.get("source"), e.get("source"))
+        warn = "".join(f"<br><span class='warn'>{_e(w.get('text'))}{' · review: ' + _e(w['review']) if w.get('review') else ''}</span>"
+                       for w in e.get("warnings") or [])
+        follows = f" · after {', '.join(e['follows'])}" if e.get("follows") else ""
+        items.append(f"<li><b>{_e(e.get('id'))}</b> <span class='when'>{_e(_hhmm(e))} · {_e(who)}{follows}</span><br>"
+                     f"{_e(e.get('summary') or e.get('title'))} <span class='tag'>{_e(check_words(e))}</span>{warn}</li>")
+    pic = next((e.get("picture") for e in reversed(r.edits) if _data_url_ok(e.get("picture"))), None)
+    fig = f"<figure><img src='{_e(pic)}'/><figcaption>After the edits</figcaption></figure>" if pic else ""
+    return (f"<div class='timeline'><h4>What was done <span class='tag'>{_e(edit_state(r))}</span></h4>"
+            f"<ol>{''.join(items)}</ol>{fig}</div>")
+
+
+def changes_html(changes: list[dict], numbers: dict[str, int]) -> str:
+    """Every kept edit, in order: the edit log as a table (journal.py)."""
+    if not changes:
+        return ""
+    rows = []
+    for e in changes:
+        clashes = ", ".join(f"#{numbers[c['id']]}" for c in e.get("clashes") or [] if c.get("id") in numbers) or "—"
+        review = "; ".join(f"{w.get('review')}: {w.get('text')}" for w in e.get("warnings") or [] if w.get("review")) or "—"
+        rows.append(f"<tr><td>{_e(e.get('id'))}</td><td>{_e(_hhmm(e))}</td><td>{_e(SOURCE_WORDS.get(e.get('source'), e.get('source')))}"
+                    f"{(' · after ' + _e(', '.join(e['follows']))) if e.get('follows') else ''}</td>"
+                    f"<td>{_e(e.get('summary') or e.get('title'))}</td><td>{_e(clashes)}</td><td>{_e(check_words(e))}</td>"
+                    f"<td>{_e(review)}</td></tr>")
+    return ("<section class='section-break'><h2>Changes to the model</h2>"
+            "<p>Every edit kept to the models in this session, in order: fixes accepted, edits made by hand (and through "
+            "Muse or an agent), each checked by geometry before it was kept. An edit undone is not listed. The exported "
+            "IFC names each one on the elements it changed (ORCA_Edit).</p>"
+            "<table class='list'><tr><th>Edit</th><th>When</th><th>Who</th><th>What</th><th>Clash</th><th>Check</th>"
+            f"<th>Review</th></tr>{''.join(rows)}</table></section>")
 
 
 # ------------------------------------------------------------------------------------------------- Muse Spark
@@ -230,6 +310,10 @@ def _facts(r: Row) -> str:
                      f"Rationale: {ev.get('rationale') or '-'}. Also needs: {ev.get('also_needs') or '-'}.")
     elif r.reading.get("fix_hint"):
         lines.append(f"Triage's hint: {r.reading['fix_hint']}")
+    if r.edits:
+        lines.append(f"What was done ({edit_state(r)}): " + " | ".join(
+            f"{e.get('id')} ({SOURCE_WORDS.get(e.get('source'), e.get('source'))}): {e.get('summary') or e.get('title')}, "
+            f"{check_words(e)}" for e in r.edits))
     return "\n".join(lines)
 
 
@@ -412,6 +496,7 @@ def _page(r: Row, n: int) -> str:
     {f"<ul>{points}</ul>" if points else ""}
   </div>
   {fix}
+  {timeline_html(r)}
   <h4>Review</h4>
   {_review_table(r)}
 </section>"""
@@ -463,6 +548,10 @@ table { border-collapse: collapse; width: 100%; } .facts th { text-align: left; 
 .pics.four figure { width: 23.5%; } .pics .note { font-size: 8pt; color: #5d6a7a; margin: 2pt 0 0; }
 .pics img { width: 100%; max-height: 54mm; object-fit: cover; border-radius: 3pt; border: .5pt solid #d7dde5; } .pics figcaption { font-size: 7.5pt; color: #5d6a7a; }
 .fix { border: 1pt solid #b9e2c8; background: #f1faf4; padding: 6pt 10pt; border-radius: 3pt; }
+.timeline { border: 1pt solid #f2d49a; background: #fffaf0; padding: 6pt 10pt; border-radius: 3pt; margin-top: 6pt; }
+.timeline ol { margin: 4pt 0 0 14pt; padding: 0; } .timeline li { margin: 0 0 4pt; }
+.timeline .when { color: #5d6a7a; font-size: 8pt; } .timeline .warn { color: #9a6100; font-size: 8pt; }
+.timeline figure { margin: 6pt 0 0; } .timeline img { max-width: 60%; border: .5pt solid #ccd5df; }
 .fix h4 { margin: 0 0 4pt; } .fix dl { margin: 0; display: grid; grid-template-columns: 22% 78%; }
 .fix dt { color: #5d6a7a; } .fix dd { margin: 0 0 2pt; }
 .tag { font-size: 7pt; border: .5pt solid #8aa0b8; border-radius: 6pt; padding: 0 5pt; font-weight: normal; color: #2f5d8a; }
@@ -517,7 +606,7 @@ def triage_by(info: dict | None) -> str:
 
 
 def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, context: dict, requirements_doc=None,
-                triage_info: dict | None = None) -> str:
+                triage_info: dict | None = None, changes: list[dict] | None = None) -> str:
     """`triage_info`: the model the triage ran on (`meta_client.triage_model_info`'s shape), named in "How this report
     was made"; by default the one triage would run on now."""
     pages = [r for r in rows if r.section == "page"]
@@ -534,7 +623,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
         lines = "".join(
             f"<tr><td>#{r.clash.number}</td><td>{_e(r.clash.title or r.clash.name)}<br><span style='color:#5d6a7a'>{_e(r.clash.test)}</span></td>"
             f"<td>{'Acts' if r.acting == team else 'Reviews'}</td>"
-            f"<td>{_e({'accepted': 'Fix applied', 'proposed': 'Fix proposed'}.get((r.evidence or {}).get('status'), 'No fix yet'))}</td>"
+            f"<td>{_e(edit_state(r) or {'accepted': 'Fix applied', 'proposed': 'Fix proposed'}.get((r.evidence or {}).get('status'), 'No fix yet'))}</td>"
             f"<td>{'Reviewed' if any(v.get('team') == team for v in r.reviews) else 'Waiting'}</td></tr>"
             for i, r in ((pages.index(r) + 1, r) for r in mine))
         todo = "".join(f"<li>{_e(a)}</li>" for a in actions.get(team, []))
@@ -600,6 +689,7 @@ def render_html(title: str, subtitle: str, rows: list[Row], summary: dict, conte
   <h2>Actions by team</h2>
   {action_html or '<p>Nothing needs action.</p>'}
 </section>
+{changes_html(changes or [], {r.clash.id: r.clash.number for r in rows})}
 {''.join(_page(r, i + 1) for i, r in enumerate(pages))}
 <section class='section-break'>
   <h2>For the models' authors</h2>
@@ -649,7 +739,8 @@ def _xyz(tag: str, v) -> str:
     return f"<{tag}><X>{v[0]:.4f}</X><Y>{v[1]:.4f}</Y><Z>{v[2]:.4f}</Z></{tag}>"
 
 
-def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", checked_against: str = "") -> bytes:
+def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", checked_against: str = "",
+            changes: list[dict] | None = None) -> bytes:
     """BCF 2.1: one topic per clash that needs action, assigned to its acting team, with the AI explanation and the
     recorded reviews as comments, the pair selected and coloured in a viewpoint, and a snapshot."""
     from PIL import Image
@@ -671,6 +762,10 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", 
                 comments.append((author, f"Checked against coordination requirements {checked_against}."))
             comments += [(f"{v.get('name')} ({v.get('team')})", f"{v.get('decision')}: {v.get('note') or ''}".strip(": "))
                          for v in r.reviews]
+            comments += [(f"{author} edit log", f"{e.get('id')} ({SOURCE_WORDS.get(e.get('source'), e.get('source'))}, "
+                          f"{_hhmm(e)}): {e.get('summary') or e.get('title')}; {check_words(e)}"
+                          + "".join(f"; review ({w.get('review')}): {w.get('text')}" for w in e.get("warnings") or [] if w.get("review")))
+                         for e in r.edits]
             priority = {"high": "Critical", "medium": "Major", "low": "Minor"}.get(r.reading.get("severity"), "Normal")
             markup = ['<?xml version="1.0" encoding="UTF-8"?>\n<Markup xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
                       f'<Topic Guid="{topic}" TopicType="Clash" TopicStatus="Open">',
@@ -704,6 +799,27 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", 
                 png = io.BytesIO()
                 Image.open(io.BytesIO(base64.b64decode(snap.split(",", 1)[1]))).convert("RGB").save(png, "PNG")
                 z.writestr(f"{topic}/snapshot.png", png.getvalue())
+        held = {e.get("id") for r in rows if r.section == "page" for e in r.edits}
+        for e in changes or []:   # a hand edit no clash page holds, that someone must review: a topic of its own
+            if e.get("id") in held or not is_hand(e):
+                continue
+            if not (e.get("warnings") or (e.get("check") or {}).get("accepted_clashes")):
+                continue
+            topic, view = str(uuid.uuid4()), str(uuid.uuid4())
+            reviewers = sorted({w["review"] for w in e.get("warnings") or [] if w.get("review")})
+            desc = f"{e.get('summary')}; {check_words(e)}." + "".join(f" {w.get('text')}." for w in e.get("warnings") or [])
+            markup = ['<?xml version="1.0" encoding="UTF-8"?>\n<Markup xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
+                      f'<Topic Guid="{topic}" TopicType="Request" TopicStatus="Open">',
+                      f"<Title>{_e(e.get('id'))}: {_e(e.get('summary'))}</Title><Priority>Normal</Priority>",
+                      "".join(f"<Labels>{_e(t)}</Labels>" for t in reviewers),
+                      f"<CreationDate>{now}</CreationDate><CreationAuthor>{_e(author)}</CreationAuthor>",
+                      f"<Description>{_e(desc)}</Description></Topic>",
+                      f'<Viewpoints Guid="{view}"><Viewpoint>viewpoint.bcfv</Viewpoint></Viewpoints></Markup>']
+            z.writestr(f"{topic}/markup.bcf", "".join(markup))
+            comps = "".join(f'<Component IfcGuid="{g}"/>' for g in [*e.get("elements", []), *e.get("created", [])][:20])
+            z.writestr(f"{topic}/viewpoint.bcfv", f'<?xml version="1.0" encoding="UTF-8"?>\n<VisualizationInfo Guid="{view}" '
+                       'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Components>'
+                       f"<Selection>{comps}</Selection><Visibility DefaultVisibility=\"true\"/></Components></VisualizationInfo>")
     return buf.getvalue()
 
 
@@ -712,14 +828,15 @@ def bcf_zip(rows: list[Row], matches: dict | None, scene, author: str = "ORCA", 
 def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, scope: str, model_teams: dict[str, str],
              matches: dict | None, scene, evidence: dict, reviews: dict, marks: dict, include_bcf: bool,
              emit: Callable[[dict], None] = lambda e: None, triage_info: dict | None = None,
-             domain: str = domains.CONSTRUCTION) -> tuple[bytes, str, str]:
+             domain: str = domains.CONSTRUCTION, journal=None) -> tuple[bytes, str, str]:
     """Build the report(s). Returns (bytes, file name, media type): one PDF for a combined report without BCF, else a zip
     of the PDFs (one per team or per model) and the BCF. `triage_info`: the model the verdicts came from (a triage
     run's `info`), else the one triage would run on now. `domain`: the scene's (`domains.of`), whose voice the
     explanations and the summary take."""
     triage_info = triage_info or triage_model_info()
     guesses = {g["file"]: g["guess"] for g in guess_teams(report, scene, domain)}
-    rows = build_rows(report, verdicts, model_teams, matches, scene, evidence, reviews, marks, guesses)
+    rows = build_rows(report, verdicts, model_teams, matches, scene, evidence, reviews, marks, guesses, journal)
+    changes = [e.to_dict() for e in journal.kept()] if journal is not None else []
     emit({"type": "progress", "step": "explaining", "done": 0, "total": sum(r.section == "page" for r in rows)})
     explain(model, rows, emit, domain=domain)
     emit({"type": "progress", "step": "summarising"})
@@ -750,12 +867,12 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
         title = "Design coordination report" + (f": {key}" if key else "")
         sub = f"{report.title} · {len(items)} results" + (f" involving {label.lower()} {key}" if key else "")
         html_text = render_html(title, sub, items, summary, {**base_ctx, **({label: key} if key else {})}, req_doc,
-                                triage_info)
+                                triage_info, changes if not key else [e for e in changes if _concerns(e, items)])
         files.append((f"orca-report{('-' + _slug(key)) if key else ''}.pdf", to_pdf(html_text)))
         emit({"type": "progress", "step": "rendering", "done": i + 1, "total": len(groups)})
     if include_bcf:
         emit({"type": "progress", "step": "bcf"})
-        files.append(("orca-issues.bcfzip", bcf_zip(rows, matches, scene, checked_against=checked)))
+        files.append(("orca-issues.bcfzip", bcf_zip(rows, matches, scene, checked_against=checked, changes=changes)))
     if len(files) == 1:
         return files[0][1], files[0][0], "application/pdf"
     out = io.BytesIO()
@@ -763,6 +880,12 @@ def generate(report: Report, verdicts: dict[str, dict], model: ChatModel, *, sco
         for name, data in files:
             z.writestr(name, data)
     return out.getvalue(), "orca-report.zip", "application/zip"
+
+
+def _concerns(e: dict, rows: list[Row]) -> bool:
+    """Whether an edit belongs in a per-team or per-model report: it is for one of its clashes."""
+    ids = {r.clash.id for r in rows}
+    return any(c.get("id") in ids for c in e.get("clashes") or []) or any(e.get("id") == x.get("id") for r in rows for x in r.edits)
 
 
 def _slug(s: str) -> str:

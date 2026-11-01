@@ -132,6 +132,8 @@ not a thing that stands or can be cut.
 | `placement(gid)` / `translate(gids, delta_m)` | World matrix in metres; move by a metre delta, returning the new 4x4 matrices the page applies to its preview |
 | `snapshot()` | A full copy of the in-memory models (through `to_string`), boxes, edited set and revision. The wider-fix planner searches on copies ([07](07-fixes-and-edits.md)) |
 | `mark_edited(gid)` | Records that the file holding `gid` changed, so export writes it. `translate` does not call it: trials move and move back |
+| `forget(gids)` | Drops the cached boxes of elements an edit removed (a hand edit's delete, a removed section) |
+| `HISTORY_SIZE` | Each model keeps 1,024 IfcOpenShell transactions (`set_history_size` at open and in `snapshot`): kept edits stay undoable while trials come and go ([docs/manual-edits.md](../manual-edits.md)) |
 | `bump(files)` | A kept edit: `revision += 1` and `(revision, files)` appended to `history`, so a page that missed an edit knows which files to reload |
 | `write_edited(out_dir, ".orca")` | Writes each edited file as `<name>.orca.ifc`; untouched files are not rewritten ([14](14-files-in-and-out.md)) |
 

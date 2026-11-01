@@ -1880,3 +1880,33 @@ runs on in the background for its own clash, one at a time, and a finished one i
 - **Checked:** `web/tests/proposal-status.test.mjs` (2), 208 web tests, build clean. In Chromium on Northbank against
   a local server with Muse Spark: #1 proposed from its row showed Proposing…, kept it with #2 open (whose panel stayed
   empty), then "1 fix ready · View"; View brought up #1's Verified options.
+
+Edit by hand, and one edit log for everything (Nov 1; owner: "basic manual (possibly via ai as well) editing on
+objects ... select a face and increase / decrease length, align a face to another face, create a void, cut an object
+... the key thing too is that all edits are tracked and can be fed to muse, for our reports", "say muse proposes a fix
+and i accept it, and then i manually make some changes ... i want that to be known, not just in the geometry";
+owner decisions: the full toolset before the freeze; Keep with N clashes, never verified, the clash listed; the
+requirements bind, ORCA's hard rules warn; cut means split and remove a section; the person's own "keep it" in chat
+or voice keeps; [docs/manual-edits.md](../manual-edits.md)):
+- **The edit log** (`journal.py`): one entry per keep (fixes, plans, wider fixes, MCP keeps, hand edits), with who,
+  what, the clash, the fix a hand edit follows (lineage), its check and warnings; undo and redo over each file's
+  transactions (a wider fix by its state). **Found on the way:** a trial move outside a transaction broke the next
+  undo (`UndoSystemError`), so trial moves run in `edits.scratch`; `file.redo()` would replay trials, so the log
+  holds its transactions; files keep 1,024 transactions.
+- **Hand edits** (`faces.py`, `manual.py`): faces named as people say them; push/pull (depth, a rectangle's side, a
+  radius, an outline's edge), align, move, void, cut by shape, split, remove a section, delete, clip; each gated by the
+  requirements, checked in a trial (cleared, new, worse) and checked again on keep. Routes `/edit/face`,
+  `/elements/{id}/faces`, `/edit/check`, `/edit/apply`, `/edits`, `/edits/undo`, `/edits/redo`, `/edits/{id}/picture`.
+- **The page:** the Edit tool (P) with animated icons (`editIcons.tsx`), lit faces, a draggable arrow with a live
+  stretch preview, Keep / Keep with N clashes; the Edits panel; Ctrl+Z and Ctrl+Shift+Z; patches that remove elements.
+- **Muse and agents:** chat `list_faces`, `edit_check`, `edit_keep`, `undo_edit`, `list_edits` behind a consent gate
+  on the person's own words; the selection and recent edits in chat's context; proposals told of earlier edits; MCP
+  `list_faces`, `check_edit`, `apply_edit`, `list_edits`, `undo_edit`, `redo_edit`.
+- **Out:** the report's "What was done" per clash ("Fix applied, then edited by hand, still resolved") and "Changes to
+  the model", BCF comments and Request topics, `ORCA_Edit` on edited elements in the exported IFC, `orca-edits.json`
+  and `.csv` in zips, deleted STEP parts removed from the STEP.
+- **Checked:** `tests/test_journal.py` (9), `test_manual.py` (23), `test_chat_edits.py` (4), `test_edit_log_out.py`
+  (5), an MCP and a STEP test, 750+ server tests; `web/tests/edit-helpers.test.mjs` (4) and a patch test, 213 web
+  tests, build clean; answer key 3/3 first try at Rev04 heights after the trial-move change. In Chromium on Northbank:
+  P, a click on clash #1's duct top (0.300 m), 50 mm typed, "Makes 1 clash: girder −350 mm", Keep with 1 clash, the
+  model patched and the kept checks run again.

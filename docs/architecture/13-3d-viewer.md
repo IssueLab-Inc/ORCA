@@ -436,6 +436,19 @@ drawing's ticks at the ends), labels moved up off each other, the measurement un
 its length, and the snap glyph (square end, triangle midpoint, cross edge, dot surface). It shows only while measuring,
 is never in a capture, and is in the Screenshot. Opening other models clears the measurements.
 
+### The Edit tool ([docs/manual-edits.md](../manual-edits.md))
+
+- `pickAt` returns the hit's world `normal` too; `pickFace(ev)` gives `{globalId, point, normal}` in IFC axes, through
+  see-through context to the clash pair first, as a click selects.
+- `showEditFaces(list)` lights faces on `editLayer` (layer 1, over everything): each face's coplanar triangles
+  (`viewer/edit.ts`, `coplanar`, from the element's own range of the batch), orange for the face to edit (with an
+  `ArrowHelper` to drag, scaled per frame like the grips), green for a target, faint blue under the pointer.
+- `pushPreview(gid, point, normal, by)` is the live push/pull: a stretch along the face's normal holding the element's
+  far side (`pushMatrix`), one instance matrix through `moved`; the server's check meshes replace it (`showOption`).
+- `setEditDrag(d)`: a press on the chosen face or its arrow (in `press`, before the section grips) drags it along its
+  normal (the grips' screen projection), 5 mm steps, 1 mm with Shift, `onMove` then `onEnd` on release.
+- `snapPoint(ev)`: what measuring snaps to under the pointer, for a move's two points, a split and a section's ends.
+
 ### Captures
 
 | Method | What it returns | Used for |
@@ -475,7 +488,9 @@ When a fix is kept (single accept, plan, wider fix, or an agent's `applied` even
 `Workspace.patch` ([07](07-fixes-and-edits.md)): `scene_id`, `revision_before`, `revision`, `meshes` (the changed and
 new elements' triangles, world metres, Z up, unwelded, with normals, style colour and file index) and `history`.
 `App.applyToViewer` patches only when the page's model is at the revision the fix started from; otherwise it reloads
-the files the fix changed plus every file changed by an edit the page missed.
+the files the fix changed plus every file changed by an edit the page missed. A patch may also carry `removed`
+(elements an edit or an undo took out): `patch.removeElements` deletes their instances and geometry and forgets them;
+openings are never sent as meshes (the host's new shape is the change).
 
 ```mermaid
 sequenceDiagram
@@ -546,7 +561,8 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 | E | Outlines | M | Measure (N: snap on or off while measuring) |
 | G | Next visual style | L | Connections |
 | O | Perspective / orthographic | Q | Layout: Single, Two, Quad (Two at most on a tablet; none on a phone) |
-| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight. With a menu open it closes only the menu |
+| [ / ] | Back / forward through camera jumps | Esc | One thing at a time (`views.escStep`): the Edit tool's preview, target and face, then the tool; the measure, the image dialog, the selected element, then the clash; not while ORCA works on it. It also clears the connection highlight. With a menu open it closes only the menu |
+| P | The Edit tool (inside it: P push/pull, A align, T move, O void, K cut by shape, B split, R remove a section, J clip, D or Delete delete) | Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y | Undo / redo the newest kept edit (not while typing or in a dialog) |
 
 - **Mouse:** a single click selects the element and shows its properties card (with Set as A / Set as B and its view
   actions) or, in measure mode, adds a point; a double click picks A, then B (a third pick starts over at A); a drag of

@@ -28,6 +28,12 @@ How to work:
   where the requirements allow the host's model to be edited), so prefer a route when one is cheap. For a member that
   comes down into what carries it and stands above its top, check_seat: it is cut where it is inside, so it bears on
   the top.
+- When the user asks you to change an element by hand ("make this beam 200 mm longer at the east end", "align the
+  duct's bottom 50 mm under the slab", "cut a 300 mm hole here", "split it at the grid", "delete it"), find its faces
+  with list_faces (or use the selected element), then edit_check: the page shows the edit and what it would hit. Say
+  what it found. Keep an edit (edit_keep) only when the user's own latest message says to keep it, for an edit you
+  checked; never on your own initiative. An edit that makes clashes is kept only when they say to keep it with them.
+  undo_edit takes the newest kept edit back, only when they ask. list_edits says what was changed and by whom.
 - When you talk about a clash, show it (show_clash) so the user sees what you mean. set_view switches to x-ray,
   context or isolate, and the section box.
 - To show the user kinds of element (by class, level, model or any property), use set_filters: colour, colour by

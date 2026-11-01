@@ -97,6 +97,7 @@ carries the decision today.
 | Oct 30 | The demo video goes after both hackathon themes as one story: it opens in our world (Theme 1, a building problem IssueLab knows firsthand) and turns to the frontier (Theme 2, the same loop on a robot cell); a narrator with captions; plain words, no BIM or IFC unless explained; Meta's models named with what each does; numbers only from measured runs | [docs/demo-video.md](../demo-video.md) |
 | Oct 30 | The desktop has no header bar: the ORCA wordmark hangs from the model's top edge in a notch (20 px high, smaller than the brand guide's minimum, to stay out of the model) that grows to show live progress; Export and one menu sit in the model's top right corner; the brand's navy and ink across the app; the favicon and icons from the kit; not a redesign of the landing | `web/src/Brand.tsx`, `App.tsx` (`notchStatus`, `corner`), `AppMenu.tsx`; [docs/brand-assets.md](../brand-assets.md), [12](12-web-app.md) |
 | Oct 30 | Nothing about one project, domain, demo or vendor is fixed in code. The requirements file decides whether a project is a building or a machine (`domain`) and what is fixed in place (`stays`, and groups allowed no edits), fully; the demos get default requirements of their own, checked in and evaluated off and on; team names are typed; the clearance follows the requirements on every check; model names, prices and limits are settings; the MCP website address is the deploy's setting | `requirements.Doc.domain` / `stays`, `IfcScene.stays`, `Workspace.requirements_for`, `demos.py`, `Workspace.clearance`, `meta_client.labels`, doc [15](15-requirements-settings-and-config.md) |
+| Nov 1 | Edit by hand, with one log of every edit: the full toolset (push/pull, align, move, void, cut by shape, split, remove a section, delete, clip), the edit log and Muse on both before the freeze; an edit that makes clashes keeps only as "Keep with N clashes", never verified, and the clash is listed; the requirements bind hand edits, ORCA's hard rules only warn (logged with who reviews); "cut" means split and remove a section; the person's own "keep it" in chat or voice keeps, Muse never on its own; a hand edit after an accepted fix is tied to that clash and fix in the report | `journal.py`, `manual.py`, `faces.py`, `EditTool.tsx`, `EditPanel.tsx`, `chat.consents`; [docs/manual-edits.md](../manual-edits.md) |
 | Oct 31 | More model formats wait until after the freeze, and come in only as models ORCA checks (converted to IFC on the server, like STEP), never as a view-only viewer; glTF/GLB first | Nothing in code yet; "Later", below |
 | Oct 31 | Later work to explore, beyond the hackathon: connectors into design tools (Inventor, Revit and others) so a kept fix lands in the designer's own model, and site data (photos, video, scans) aligned to the coordination model with SAM 3.1 | Nothing in code yet; "Later: connectors into design tools" and "Later: site data aligned to the model", below |
 
@@ -252,6 +253,19 @@ and `deploy` finds none: open work is tracked in the feature docs and here, not 
 - Show it built's S0 did not try radii of 2 and 5 m or Muse Wonder judges at high effort.
 
 ### Known, not fixed
+
+Hand edits (Nov 1, [docs/manual-edits.md](../manual-edits.md)):
+- **Faces are only those of one straight extrusion.** Fittings, terminals, doors, furniture and meshed STEP parts move
+  (and align by moving) but have no faces to push; an I-section's flanges are its type, not a size.
+- **A cap joined by a port is refused**, not carried: move the run, or split it first. A removed section leaves two open
+  ends for the services designer (said so, not capped).
+- **Splitting** refuses a cut through an opening or across an outline with holes; a wall's Axis representation, where a
+  model has one, is not rewritten (Northbank's walls have none).
+- **Cut by shape** grows an I, U or L cutter as its bounding rectangle, and a mesh cutter along its vertex normals
+  (approximate, said so in its warning).
+- **Undo** takes the newest entry only, and refuses when an edit was kept outside the log since (a direct
+  `Workspace.apply_*` call, as `evals/step_cell.py` makes). Edits, the log and its pictures live in memory: a restart
+  or reopening the models starts clean.
 
 Recorded after the final review of Show it built (Oct 30) and still true in the code:
 

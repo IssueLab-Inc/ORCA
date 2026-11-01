@@ -28,6 +28,7 @@ It is new work, written for ORCA during the event. No code from other products.
 | Clash | The Clash tab's body | right side bar |
 | Plan | `PlanPanel` or `ContextPlan` | right side bar (tab) |
 | Chat | `ChatPanel` | right side bar (tab) |
+| Edits | The edit log (`EditPanel`): every kept edit, who kept it, its clash, the fix it follows; Undo, Redo, Undo to here, CSV ([manual-edits.md](manual-edits.md)) | right side bar (tab), put there behind the tab in front the first time something is kept (`DockHandle.place`) |
 | Activity | The agent's activity: Workings, the run drawn as it happens ([workings.md](workings.md)), or Steps, the table | bottom side bar; it grows to 380 px for a run while Workings shows (`DockHandle.fitBar`) |
 | Properties | The selected element's card and everything its model says about it (below) | floating at the model's top right, opened by the first selection; or the right side bar, once docked there |
 

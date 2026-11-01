@@ -204,6 +204,7 @@ classes in `app.py`.
 | `GET` | `/api/scenes/{scene_id}/edits` | The scene's edit log (`journal.Journal.summary`): every kept edit, oldest first, with `can_undo`, `can_redo` and which entry each would take; `?format=csv` as a spreadsheet (`Workspace.edits_csv`) | `format=json\|csv` | `{entries, can_undo, can_redo, undo, redo}` | free |
 | `POST` | `/api/scenes/{scene_id}/edits/undo` | Undoes the newest kept edit (`Workspace.undo_edit`): its transactions rolled back on each file, boxes and edited files put back, the revision moved forward; returns the patch (what it made in `removed`) | `EditStep {entry?}` | `{entry, files, changed, removed, can_undo, can_redo, undo, redo}` plus the patch | free; 409 when another edit came after it outside the log, a wider fix replaced the models, or `entry` is not the newest |
 | `POST` | `/api/scenes/{scene_id}/edits/redo` | Redoes the last undone edit (`Workspace.redo_edit`) | `EditStep {entry?}` | as undo | free; 409 when the model changed since it was undone |
+| `POST` | `/api/scenes/{scene_id}/edits/{entry_id}/picture` | A picture of a kept edit, taken by the page right after it (`Journal.attach_picture`): the report's "After the edits" | `EditPicture {png}` (a `data:image/` URL, at most 400 kB) | `{ok}` | free; 404 unknown entry, 400 not a picture or too big |
 
 "The patch" is `Workspace.patch`: `{scene_id, revision_before, revision, meshes, history}`, which lets the page
 update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13-3d-viewer.md)). `_with_patch` holds
@@ -462,7 +463,7 @@ model_calls, blockers}`, or `error {detail}`.
 | `thinking` | a model call starts |
 | `tool` | `name`, `args` |
 | `tool_result` | `name`, `summary` |
-| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `filters {mode: replace\|clear, filters?: [Rule], grey_rest?, hide_rest?}` ([docs/filters.md](../filters.md)), `open_report {report_id, detection}`, `show_it_built {clash_id}` |
+| `ui` | `action`: `select_clash {clash_id}`, `set_view {mode?, section_box?}`, `filters {mode: replace\|clear, filters?: [Rule], grey_rest?, hide_rest?}` ([docs/filters.md](../filters.md)), `open_report {report_id, detection}`, `show_it_built {clash_id}`, `edit_preview {check}` (a hand edit Muse or an agent checked: the Edit tool previews it with Keep), `edit_kept {kept}` (a hand edit kept on the person's word or by an agent, with the patch), `edit_stepped {step}` (an undo or redo, with the patch) ([docs/manual-edits.md](../manual-edits.md)) |
 | `detect_event` | `event` (a detection event, above) |
 | `agent` | `event` (a proposal event, above, `escalating` included) |
 | `proposal` | `clash_id`, `element_a`, `element_b`, the whole proposal |

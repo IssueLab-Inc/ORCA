@@ -551,6 +551,11 @@ export type ChatEvent =
   | { type: "tool"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; summary: string }
   | { type: "ui"; action: "select_clash"; clash_id: string }
+  /** A hand edit Muse (or an agent) checked: the page previews it in the Edit tool, with its own Keep. */
+  | { type: "ui"; action: "edit_preview"; check: EditCheck }
+  /** A hand edit kept on the person's word (chat, voice) or by an agent: patch the model, read the log again. */
+  | { type: "ui"; action: "edit_kept"; kept: EditKept }
+  | { type: "ui"; action: "edit_stepped"; step: Stepped }
   | { type: "ui"; action: "show_it_built"; clash_id: string }   // draw the chosen or kept fix (docs/show-it-built.md)
   | { type: "ui"; action: "set_view"; mode?: string; section_box?: boolean }
   /** Chat's or an agent's filters (docs/filters.md): replace its own (the user's paused), or clear them. */
@@ -732,7 +737,8 @@ export const api = {
   applyPlan: (sceneId: string, options: Option[], clashIds: (string | null)[] = []) =>
     call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options, clash_ids: clashIds }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
-                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView; check?: string | null },
+                 clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView; check?: string | null;
+                 selected?: { element: string; face: string | null } | null },
          onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
     ndjson<ChatEvent>("/chat", body, (e) => { onEvent(e); return e.type === "done"; }, signal),
   /** The sample models, and the demos among them (server: demos.py). */
@@ -867,6 +873,9 @@ export const api = {
   /** The scene's edit log: every kept edit, oldest first, and whether undo and redo can go now. */
   journal: (id: string) => call<Journal>(`/scenes/${id}/edits`),
   journalCsvUrl: (id: string) => `/api/scenes/${id}/edits?format=csv`,
+  /** A picture of a kept edit, for the report's "After the edits". */
+  editPicture: (id: string, entry: string, png: string) =>
+    call<{ ok: boolean }>(`/scenes/${id}/edits/${encodeURIComponent(entry)}/picture`, { method: "POST", body: JSON.stringify({ png }) }),
   /** Undo (or redo) the newest edit; `entry` names the one meant (409 when it is not next in line). */
   undo: (id: string, entry?: string) => call<Stepped>(`/scenes/${id}/edits/undo`, { method: "POST", body: JSON.stringify({ entry: entry ?? null }) }),
   redo: (id: string, entry?: string) => call<Stepped>(`/scenes/${id}/edits/redo`, { method: "POST", body: JSON.stringify({ entry: entry ?? null }) }),
@@ -875,7 +884,7 @@ export const api = {
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). `again`: run a kept check
    * again by its key, or every kept check (`all`). */
   detect: async (sceneId: string, tests: DetectTest[] | null, onEvent: (e: DetectEvent) => void,
-                 again: { check?: string; all?: boolean } = {}) => {
+                 again: { check?: string; all?: boolean; after_edit?: string } = {}) => {
     let done: Extract<DetectEvent, { type: "done" }> | null = null;
     await ndjson<DetectEvent>(`/scenes/${sceneId}/detect/stream`, { tests, ...again }, (e) => {
       onEvent(e);

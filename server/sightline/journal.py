@@ -100,6 +100,7 @@ class Journal:
         self._seq = 0
         self.lineage: dict[str, list[str]] = {}   # GlobalId -> the entries that changed or made it
         self.lock = threading.RLock()
+        self._reran: set[str] = set()                # entries kept with clashes whose free detection rerun was used
 
     # ------------------------------------------------------------------------------------------------- recording
 
@@ -296,6 +297,18 @@ class Journal:
         revision, history = scene.revision, scene.history
         scene.__dict__ = dict(state)
         scene.revision, scene.history = revision, history
+
+    def free_rerun(self, entry_id: str | None) -> bool:
+        """Whether a detection run to list what this entry was kept with goes uncharged: the newest kept entry, kept
+        with clashes, and only once."""
+        with self.lock:
+            top = self._top()
+            if not entry_id or top is None or top.id != entry_id or entry_id in self._reran:
+                return False
+            if not (top.check or {}).get("accepted_clashes"):
+                return False
+            self._reran.add(entry_id)
+            return True
 
     # ------------------------------------------------------------------------------------------------- pictures
 

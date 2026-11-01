@@ -99,22 +99,26 @@ def _profile_size(profile) -> tuple[float, float]:
     raise Unsupported(f"{profile.is_a()} profiles are not supported yet")
 
 
-def _body(element):
+def _body(element, clipped: bool = False):
+    """The element's Body representation and its one straight extrusion. With `clipped`, an extrusion cut by
+    half-space clips (a hand edit's clip) counts too: the extrusion under the clips is returned."""
     rep = element.Representation
     bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
-    if len(bodies) != 1 or len(bodies[0].Items) != 1 or not bodies[0].Items[0].is_a("IfcExtrudedAreaSolid"):
+    item = bodies[0].Items[0] if len(bodies) == 1 and len(bodies[0].Items) == 1 else None
+    while clipped and item is not None and item.is_a("IfcBooleanClippingResult"):
+        item = item.FirstOperand
+    if item is None or not item.is_a("IfcExtrudedAreaSolid"):
         raise Unsupported("only a body made of one straight extrusion can be split")
-    item = bodies[0].Items[0]
     if np.linalg.norm(np.asarray(item.ExtrudedDirection.DirectionRatios) - (0, 0, 1)) > 1e-9:
         raise Unsupported("the extrusion is not along its own axis")
     return bodies[0], item
 
 
-def _frames(scene: IfcScene, element):
+def _frames(scene: IfcScene, element, clipped: bool = False):
     """Element placement (file units) and the extrusion's world frame: origin, run direction, profile X, profile Y."""
     i = scene.index_of(element.GlobalId)
     place = ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
-    _, item = _body(element)
+    _, item = _body(element, clipped)
     world = place @ ifcopenshell.util.placement.get_axis2placement(item.Position)
     return i, place, item, world[:3, 3], world[:3, 2], world[:3, 0], world[:3, 1]
 
@@ -1538,18 +1542,18 @@ class Stretched:
     size_m: float         # its length (a cap) or its size across that side, after
 
 
-def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None) -> Stretched:
+def stretch(scene: IfcScene, global_id: str, face: str, by_m: float, normal=None, clipped: bool = False) -> Stretched:
     """Make a straight segment longer (+) or shorter (-) by moving one face outward by `by_m` metres: its "start" or
     "end" cap (the extrusion's depth, and its start when the start moves), or, for a rectangular one, a "side" whose
     outward world `normal` is given (the profile grows to that side: a ladder riser a bend sits on). Ports at that face
     move with it without turning. Edits the model in place; wrap in a trial to undo."""
     element = scene.entity(global_id)
-    i, place, item, origin, d, px, py = _frames(scene, element)
+    i, place, item, origin, d, px, py = _frames(scene, element, clipped)
     model, s = scene.models[i], scene.unit_scales[i]
     by_m = float(by_m)
     if not np.isfinite(by_m):
         raise Unsupported("a stretch must be a finite length")
-    body, _ = _body(element)
+    body, _ = _body(element, clipped)
     users = (len([x for x in model.get_inverse(item) if x.is_a("IfcShapeRepresentation")]),
              len([x for x in model.get_inverse(body) if x.is_a("IfcProductRepresentation") or x.is_a("IfcRepresentationMap")]),
              len([x for x in model.get_inverse(element.Representation) if x.is_a("IfcProduct")]))
@@ -2154,3 +2158,215 @@ def cut_by_shape(scene: IfcScene, element: str, cutter: str, gap_m: float) -> tu
     ifcopenshell.api.run("feature.add_feature", m, feature=opening, element=host)
     scene.refresh_bounds([element])
     return opening.GlobalId, exact
+
+
+def _assign_solid(model, source, part, solid) -> None:
+    """Give `part` a Body of its own holding `solid`, in `source`'s context and styles."""
+    body, item = _body(source, clipped=True)
+    styles = [x for x in model.get_inverse(item) if x.is_a("IfcStyledItem")]
+    rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "SweptSolid", [solid])
+    part.Representation = model.createIfcProductDefinitionShape(None, None, [rep])
+    for st in styles:
+        model.createIfcStyledItem(solid, st.Styles, st.Name)
+
+
+def _copy_part(model, element, solid, n: int):
+    """A copy of `element` (class, type, properties, container, systems, placement) with `solid` as its body; the
+    openings `copy_class` duplicated are dropped (the split sends each opening to the piece that holds it)."""
+    part = ifcopenshell.api.run("root.copy_class", model, product=element)
+    for rel in list(getattr(part, "HasOpenings", None) or []):
+        ifcopenshell.api.run("root.remove_product", model, product=rel.RelatedOpeningElement)
+    if element.Name:
+        part.Name = f"{element.Name} (part {n})"
+    if getattr(element, "Tag", None):
+        part.Tag = f"{element.Tag}-P{n}"
+    _assign_solid(model, element, part, solid)
+    return part
+
+
+def _clip_polygon(pts: list[np.ndarray], axis: int, c: float, keep_low: bool) -> list[np.ndarray]:
+    """The part of a closed outline on one side of the line where coordinate `axis` is `c` (Sutherland–Hodgman)."""
+    inside = (lambda p: p[axis] <= c + 1e-12) if keep_low else (lambda p: p[axis] >= c - 1e-12)
+    out = []
+    for k in range(len(pts)):
+        a, b = pts[k - 1], pts[k]
+        if inside(b):
+            if not inside(a):
+                out.append(a + (b - a) * ((c - a[axis]) / (b[axis] - a[axis])))
+            out.append(b)
+        elif inside(a):
+            out.append(a + (b - a) * ((c - a[axis]) / (b[axis] - a[axis])))
+    dedup = []
+    for p in out:
+        if not dedup or np.linalg.norm(p - dedup[-1]) > 1e-9:
+            dedup.append(p)
+    if len(dedup) > 1 and np.linalg.norm(dedup[0] - dedup[-1]) < 1e-9:
+        dedup.pop()
+    return dedup
+
+
+def _opening_centres(scene: IfcScene, element) -> list[tuple]:
+    out = []
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    for rel in getattr(element, "HasOpenings", None) or []:
+        o = rel.RelatedOpeningElement
+        try:
+            v = np.asarray(ifcopenshell.geom.create_shape(settings, o).geometry.verts, float).reshape(-1, 3)
+        except RuntimeError:
+            continue
+        out.append((rel, v.min(axis=0), v.max(axis=0)))
+    return out
+
+
+def split_axis(scene: IfcScene, global_id: str):
+    """How an element splits: ("run", start, direction, length) along its long axis (an extrusion or a long profile),
+    or ("outline", axis 0/1 in the outline's plane, world matrix) for an outline profile (a wall drawn as its
+    elevation, a slab): cut square to its longer side."""
+    from .faces import outline
+    element = scene.entity(global_id)
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    s = scene.unit_scales[i]
+    pts = outline(item.SweptArea)
+    if pts is not None:
+        ext = np.ptp(np.asarray(pts), axis=0)
+        world = place @ ifcopenshell.util.placement.get_axis2placement(item.Position)
+        return ("outline", int(np.argmax(ext)), world)
+    axis, start, direction, length = member_axis(scene, element)
+    return ("run", start, direction, length)
+
+
+def split(scene: IfcScene, global_id: str, at) -> list[str]:
+    """Split the element in two where the plane square to its long axis passes through `at` (world metres). The
+    element keeps the first piece (and its GlobalId); the second is a copy. A run's ports are chained across the cut
+    (`_build_chain`); its openings go to the piece that holds them; one the cut would pass through is refused."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    at = np.asarray(at, float)
+    how = split_axis(scene, global_id)
+    holes = _opening_centres(scene, element)
+    if how[0] == "outline":
+        from .faces import outline
+        _, ax, world = how
+        _, item = _sole_body(model, element)
+        pts = outline(item.SweptArea)
+        inv = np.linalg.inv(world)
+        q = (inv @ np.append(at / s, 1.0))[:2]
+        c = float(q[ax])
+        lo, hi = min(p[ax] for p in pts), max(p[ax] for p in pts)
+        if c - lo < MIN_PIECE_M / s or hi - c < MIN_PIECE_M / s:
+            raise Unsupported(f"a piece would be under {MIN_PIECE_M * 1000:.0f} mm")
+        sides = []
+        for rel, a, b in holes:
+            corners = [(inv @ np.append(np.array([x, y, z]) / s, 1.0))[ax] for x in (a[0], b[0]) for y in (a[1], b[1]) for z in (a[2], b[2])]
+            if min(corners) < c < max(corners):
+                raise Unsupported("the cut would pass through an opening: split it either side")
+            sides.append((rel, min(corners) >= c))
+        if getattr(item.SweptArea, "InnerCurves", None):
+            raise Unsupported("its outline has holes: split it where there are none")
+        left, right = _clip_polygon(pts, ax, c, True), _clip_polygon(pts, ax, c, False)
+        if len(left) < 3 or len(right) < 3:
+            raise Unsupported("the cut misses it")
+        repeat = item.SweptArea.OuterCurve.is_a("IfcPolyline")
+        right_prof = _write_outline(model, item.SweptArea, right, repeat)
+        solid = model.createIfcExtrudedAreaSolid(right_prof, item.Position, item.ExtrudedDirection, item.Depth)
+        part = _copy_part(model, element, solid, 2)
+        item.SweptArea = _write_outline(model, item.SweptArea, left, repeat)
+    else:
+        _, start, d, length = how
+        a = float((at - start) @ d)
+        if a < MIN_PIECE_M or length - a < MIN_PIECE_M:
+            raise Unsupported(f"a piece would be under {MIN_PIECE_M * 1000:.0f} mm")
+        sides = []
+        for rel, lo_, hi_ in holes:
+            ends = [float((np.array([x, y, z]) - start) @ d) for x in (lo_[0], hi_[0]) for y in (lo_[1], hi_[1]) for z in (lo_[2], hi_[2])]
+            if min(ends) < a < max(ends):
+                raise Unsupported("the cut would pass through an opening: split it either side")
+            sides.append((rel, min(ends) >= a))
+        axis = member_axis(scene, element)[0]
+        if axis == "depth" and _ports(element):
+            _, place, item, origin, dd, px, _ = _frames(scene, element)
+            gids = _build_chain(scene, element, place, item, dd, px, px,
+                                [("straight", origin, dd, a / s), ("straight", origin + dd * (a / s), dd, (length - a) / s)])
+            part = scene.entity(gids[1])
+            for rel in list(getattr(part, "HasOpenings", None) or []):
+                ifcopenshell.api.run("root.remove_product", model, product=rel.RelatedOpeningElement)
+            if element.Name:
+                part.Name = f"{element.Name} (part 2)"
+        else:
+            _, item = _sole_body(model, element)
+            twin = model.createIfcExtrudedAreaSolid(item.SweptArea, item.Position, item.ExtrudedDirection, item.Depth)
+            part = _copy_part(model, element, twin, 2)
+            scene.refresh_bounds([part.GlobalId])
+            apply_trim(scene, global_id, "end", length - a)
+            apply_trim(scene, part.GlobalId, "start", a)
+    for rel, beyond in sides:   # each opening to the piece that holds it
+        if beyond:
+            rel.RelatingBuildingElement = part
+    scene.refresh_bounds([global_id, part.GlobalId])
+    return [global_id, part.GlobalId]
+
+
+def remove_product_with(scene: IfcScene, global_id: str) -> list[str]:
+    """Remove an element and what cannot stand without it: its openings and what fills them, the parts it aggregates,
+    its ports. Returns every physical element removed (the element first). Peers its ports joined are left open."""
+    i = scene.index_of(global_id)
+    model = scene.models[i]
+    element = scene.entity(global_id)
+    gone = [global_id]
+    for rel in list(getattr(element, "HasOpenings", None) or []):
+        o = rel.RelatedOpeningElement
+        for f in list(getattr(o, "HasFillings", None) or []):
+            gone.append(f.RelatedBuildingElement.GlobalId)
+            ifcopenshell.api.run("root.remove_product", model, product=f.RelatedBuildingElement)
+        ifcopenshell.api.run("root.remove_product", model, product=o)
+    for rel in list(getattr(element, "IsDecomposedBy", None) or []):
+        for part in list(rel.RelatedObjects):
+            if part.is_a("IfcElement"):
+                gone.append(part.GlobalId)
+                ifcopenshell.api.run("root.remove_product", model, product=part)
+    for port in list(ifcopenshell.util.system.get_ports(element)):
+        ifcopenshell.api.run("root.remove_product", model, product=port)
+    ifcopenshell.api.run("root.remove_product", model, product=element)
+    scene.forget(gone)
+    return gone
+
+
+def clip_to_plane(scene: IfcScene, global_id: str, point, normal) -> None:
+    """Cut away the element's material on the side of the plane (world metres) its `normal` points to: an
+    IfcBooleanClippingResult with a half-space, as authoring tools clip a beam's end to a sloping face. Refused when the
+    plane misses it, or leaves less than 50 mm of its run."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    body, item = _sole_body(model, element) if not _is_clipped(element) else _body(element, clipped=True)
+    top = body.Items[0]
+    P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    v = _mesh_verts(element)
+    side = (v - P) @ N
+    if side.max() <= 1e-4 or side.min() >= -1e-4:
+        raise Unsupported("the plane does not cross it")
+    if (-side.min()) < MIN_PIECE_M:
+        raise Unsupported(f"less than {MIN_PIECE_M * 1000:.0f} mm of it would be left")
+    place = ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+    inv = np.linalg.inv(place)
+    loc = (inv @ np.append(P / s, 1.0))[:3] * s          # the representation's frame, SI metres
+    nl = inv[:3, :3] @ N
+    nl = nl / np.linalg.norm(nl)
+    result = ifcopenshell.api.run("geometry.clip_solid", model, item=top, location=loc.tolist(), normal=nl.tolist())
+    body.Items = (result,)
+    body.RepresentationType = "Clipping"
+    scene.refresh_bounds([global_id])
+
+
+def _is_clipped(element) -> bool:
+    rep = element.Representation
+    bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
+    return bool(bodies) and len(bodies[0].Items) == 1 and bodies[0].Items[0].is_a("IfcBooleanClippingResult")
+
+
+def _mesh_verts(element) -> np.ndarray:
+    settings = ifcopenshell.geom.settings()
+    settings.set("use-world-coords", True)
+    return np.asarray(ifcopenshell.geom.create_shape(settings, element).geometry.verts, float).reshape(-1, 3)

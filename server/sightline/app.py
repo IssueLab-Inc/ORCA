@@ -293,6 +293,7 @@ class ChatTurn(BaseModel):
     filters: list[PageFilter] = Field(default_factory=list, max_length=100)
     filter_view: FilterView = Field(default_factory=FilterView)
     check: str | None = None   # the kept check the page's list shows (None: all of them)
+    selected: dict | None = None   # what the user has selected: {element, face?} (the Edit tool's face)
 
 
 class PlanRequest(BaseModel):
@@ -315,6 +316,7 @@ class DetectRequest(BaseModel):
     tests: list[dict] | None = None  # None: the default tests (GET /detect/tests); see detect.Test.from_dict
     check: str | None = None         # a kept check, by key: run it again with the tests it ran with
     all: bool = False                # run every kept check again, one after another (one detection run)
+    after_edit: str | None = None    # the hand edit kept with clashes this run lists (its entry): that one run is free
 
 
 # Uploaded clash reports: XML plus the images it links to, kept in a temp folder while the report is open.
@@ -1024,6 +1026,24 @@ def _step(scene_id: str, go) -> dict:
         raise HTTPException(409, f"Cannot do that: {e}.")
 
 
+class EditPicture(BaseModel):
+    png: str   # a data:image/ URL the page took of the edit, kept (at most journal.PICTURE_MAX_BYTES)
+
+
+@app.post("/api/scenes/{scene_id}/edits/{entry_id}/picture")
+def edits_picture(scene_id: str, entry_id: str, body: EditPicture):
+    """A picture of a kept edit, taken by the page right after it (the server draws nothing): the report shows it
+    as "After the edits" on its clash's page."""
+    _scene(scene_id)
+    try:
+        ws.journal(scene_id).attach_picture(entry_id, body.png)
+    except KeyError:
+        raise HTTPException(404, f"No edit {entry_id} in this scene's log.")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
 @app.post("/api/scenes/{scene_id}/edits/undo")
 def edits_undo(scene_id: str, body: EditStep):
     """Undo the newest kept edit: an agent fix, a plan, a wider fix or a hand edit. 409 when another edit came after
@@ -1172,7 +1192,9 @@ def detect_stream(scene_id: str, body: DetectRequest, request: Request):
         register = ws.checks.get(scene_id)
         if register is None or body.check not in register.checks:
             raise HTTPException(404, "That check is no longer kept: run it from the Filters panel again.")
-    refused = _take(detect_limit, request)   # Run all again is one detection run too
+    # Run all again is one detection run too. Once, after a hand edit kept with clashes, it is free: the person
+    # accepted those clashes, and the list must show them (docs/manual-edits.md).
+    refused = None if ws.journal(scene_id).free_rerun(body.after_edit) else _take(detect_limit, request)
     if refused:
         raise HTTPException(429, refused)
     events: queue.Queue = queue.Queue()
@@ -1774,7 +1796,7 @@ def chat_turn(body: ChatTurn, request: Request):
     detect_allowed = lambda: None if no_caps else detect_limit.take(who)
     session = c.session(body.session_id)
     ctx = chat.Context(body.scene_id, body.report_id, body.clash_id, body.fixed, [f.model_dump() for f in body.filters],
-                       body.filter_view.model_dump(), body.check)
+                       body.filter_view.model_dump(), body.check, body.selected)
     events = _RequestEvents(request)
     events.put({"type": "session", "id": session.id})
 
@@ -1886,7 +1908,8 @@ def _build_document(report, verdicts: dict, scene_id: str | None, scope: str, *,
     data, name, media = document.generate(
         report, verdicts, ws.model, scope=scope, model_teams=teams or {}, matches=matches, scene=scene,
         evidence=evidence or {}, reviews=reviews or {}, marks=marks or {}, include_bcf=bcf, emit=emit or (lambda e: None),
-        triage_info=triage_info, domain=domains.of(ws, scene_id if scene is not None else None))
+        triage_info=triage_info, domain=domains.of(ws, scene_id if scene is not None else None),
+        journal=ws.journals.get(scene_id) if scene is not None else None)
     doc_id = uuid.uuid4().hex
     _documents[doc_id] = (data, name, media)
     while len(_documents) > 24:

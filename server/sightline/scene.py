@@ -265,6 +265,12 @@ class IfcScene:
         self.history.append((self.revision, sorted(set(files))))
         return self.revision
 
+    def forget(self, global_ids) -> None:
+        """Drop the cached boxes of elements an edit removed."""
+        if self._bounds is not None:
+            for gid in global_ids:
+                self._bounds.pop(gid, None)
+
     def mark_edited(self, global_id: str) -> None:
         """Record that the file holding this element changed, so export writes it."""
         self._edited.add(self.index_of(global_id))

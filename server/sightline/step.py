@@ -532,13 +532,14 @@ def _placed(shape, loc):
 
 
 def export(step_path: Path, manifest: dict, out: Path, moves: dict[str, list[float]] | None = None,
-           replace: dict[str, dict] | None = None, add: list[dict] | None = None) -> Path:
+           replace: dict[str, dict] | None = None, add: list[dict] | None = None, remove: list[str] | None = None) -> Path:
     """Write the STEP again with ORCA's edits, keeping every name and colour. `manifest` is the converter's
     `parts`; all geometry is in metres, world axes.
     - `moves` {gid: delta}: the part's component location becomes parent⁻¹ · T · parent · old, so nested assemblies
       keep their own placements;
     - `replace` {gid: spec}: the part's shape changed (an offset's first piece, a trimmed member, a wall cut for a
       service); its prototype gets the new shape, brought into the component's frame;
+    - `remove` [gid]: parts removed from the model (a hand edit's delete): taken out of their assembly;
     - `add` [{name, label (the original part's component entry), spec, colour, alpha}]: new parts (an offset's middle,
       risers and bends, a provision for void), placed in the original part's group."""
     from OCP.gp import gp_Trsf, gp_Vec
@@ -549,6 +550,7 @@ def export(step_path: Path, manifest: dict, out: Path, moves: dict[str, list[flo
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDataStd import TDataStd_Name
     from OCP.TDF import TDF_Label, TDF_Tool
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
     from OCP.TopLoc import TopLoc_Location
     from OCP.XCAFDoc import XCAFDoc_ColorSurf, XCAFDoc_Location
 
@@ -604,6 +606,15 @@ def export(step_path: Path, manifest: dict, out: Path, moves: dict[str, list[flo
             colours.SetColor(part, Quantity_ColorRGBA(*rgb, alpha) if alpha < 1 else
                              Quantity_Color(*rgb, Quantity_TOC_RGB), XCAFDoc_ColorSurf)
         shapes.AddComponent(group, part, TopLoc_Location())
+    for gid in remove or []:   # parts a hand edit deleted (or the middle of a removed section): out of their assembly
+        info = manifest.get(gid)
+        if info and info.get("path"):
+            comp, proto = label(info["path"][-1]), TDF_Label()
+            shapes.GetReferredShape_s(comp, proto)
+            shapes.RemoveComponent(comp)
+            # Its own shape too, once nothing else uses it: a shape no assembly holds is written as a product of its own.
+            if not proto.IsNull() and XCAFDoc_ShapeTool.IsFree_s(proto):
+                shapes.RemoveShape(proto, True)
     shapes.UpdateAssemblies()
 
     writer = STEPCAFControl_Writer()

@@ -251,3 +251,70 @@ def test_a_cut_needs_the_requirements_to_allow_any_edit(scene, using):
     using(doc)
     r = manual.check(ws, sid, {"op": "void", "element": g["S1"], "face": "top", "at": [1.5, 5.5, 3.2], "diameter_m": 0.15})
     assert r["blocked"] and "may not be cut" in r["blocked"]
+
+
+def length_x(s, gid):
+    b = s.bounds()[gid]
+    return b[1][0] - b[0][0]
+
+
+def test_a_wall_splits_in_two_and_its_window_stays_with_the_piece_that_holds_it(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "split", "element": g["W1"], "at": [3.0, -0.1, 1.0]})
+    assert r["passed"] and "split in two, 3.00 m from its west end" in r["summary"]
+    kept = manual.apply(ws, sid, r["op"])
+    first, second = kept["pieces"]
+    assert first == g["W1"] and kept["created"] == [second] and s.entity(second).Name == "W1 (part 2)"
+    assert length_x(s, first) == pytest.approx(3.0) and length_x(s, second) == pytest.approx(1.0)
+    assert len(s.entity(first).HasOpenings) == 1 and not s.entity(second).HasOpenings
+    through = manual.check(ws, sid, {"op": "split", "element": first, "at": [1.5, -0.1, 1.0]})
+    assert "through an opening" in through["blocked"]
+    ws.undo_edit(sid)
+    assert length_x(s, g["W1"]) == pytest.approx(4.0) and second not in s.bounds()
+
+
+def test_a_beam_and_a_pipe_split_along_their_runs(scene):
+    ws, sid, s, g = scene
+    kept = manual.apply(ws, sid, {"op": "split", "element": g["B1"], "at": [1.5, 2.5, 2.7]})
+    a, b = kept["pieces"]
+    assert length_x(s, a) == pytest.approx(1.5) and length_x(s, b) == pytest.approx(2.5)
+    assert s.entity(b).is_a("IfcBeam") and not getattr(s.entity(b), "HasOpenings", None)
+    assert "under 50 mm" in manual.check(ws, sid, {"op": "split", "element": g["P1"], "at": [0.01, -1, 1.5]})["blocked"]
+
+
+def test_a_section_is_taken_out_and_the_rest_stays_where_it_was(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "remove_section", "element": g["P1"], "from": [2.5, -1, 1.5], "to": [1.0, -1, 1.5]})
+    assert r["passed"] and "1,500 mm section taken out of pipe segment 'P1'" in r["summary"]
+    kept = manual.apply(ws, sid, r["op"])
+    rest = kept["created"][0]
+    assert s.bounds()[g["P1"]][1][0] == pytest.approx(1.0) and s.bounds()[rest][0][0] == pytest.approx(2.5)
+    assert s.bounds()[rest][1][0] == pytest.approx(4.0) and s.entity(rest).Name == "P1 (part 2)"
+    assert len([e for e in s.models[0].by_type("IfcPipeSegment")]) == 2
+
+
+def test_a_delete_warns_for_what_it_held_and_undo_brings_it_back(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "delete", "element": g["B1"]})
+    assert r["passed"] and any(w["rule"] == "support" and "C2" in w["text"] for w in r["warnings"])
+    kept = manual.apply(ws, sid, {"op": "delete", "element": g["W1"]})
+    assert kept["removed"] == [g["W1"]] and g["W1"] not in s.bounds()
+    assert not s.models[0].by_type("IfcOpeningElement") and kept["entry"]["names"][g["W1"]] == "IfcWall 'W1'"
+    undone = ws.undo_edit(sid)
+    assert g["W1"] in undone["changed"] and s.entity(g["W1"]).HasOpenings and g["W1"] in s.bounds()
+    patch = ws.patch(sid, undone["changed"], 0, removed=undone["removed"])
+    assert [m["global_id"] for m in patch["meshes"]] == [g["W1"]]   # its opening is not drawn as an element
+
+
+def test_a_beam_end_is_clipped_to_a_sloping_face_and_its_other_end_still_pushes(scene):
+    ws, sid, s, g = scene
+    slope = {"point": [3.5, 2.5, 2.7], "normal": [-0.7071, 0, 0.7071]}
+    r = manual.check(ws, sid, {"op": "clip", "element": g["B1"], "to": slope})
+    assert r["passed"] and "clipped flush with the plane picked, 45° off square" in r["summary"]
+    manual.apply(ws, sid, r["op"])
+    assert s.bounds()[g["B1"]][1][0] < 4.0 - 0.1
+    ends = {f.id: f for f in faces.faces(s, g["B1"])}
+    assert ends["cap:end"].kind == "clip" and ends["cap:start"].allows[0] == "push_pull"
+    manual.apply(ws, sid, {"op": "push_pull", "element": g["B1"], "face": "west end", "by_m": 0.2})
+    assert s.bounds()[g["B1"]][0][0] == pytest.approx(-0.2)
+    assert "nothing to clip" in manual.check(ws, sid, {"op": "clip", "element": g["P1"], "to": {"point": [10, 0, 0], "normal": [-1, 0, 0]}})["blocked"]

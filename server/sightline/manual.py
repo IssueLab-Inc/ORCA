@@ -252,7 +252,7 @@ def _stretch_openings(scene: IfcScene, gid: str, face: faces.Face, by: float) ->
 def _make_push(scene: IfcScene, plan: Plan) -> Made:
     gid, face, by = plan.element, plan.face, plan.params["by_m"]
     if face.kind == "cap":
-        edits.stretch(scene, gid, face.id.split(":")[1], by)
+        edits.stretch(scene, gid, face.id.split(":")[1], by, clipped=edits._is_clipped(scene.entity(gid)))
         _stretch_openings(scene, gid, face, by)
     elif face.kind == "side":
         edits.stretch(scene, gid, "side", by, normal=face.normal)
@@ -313,7 +313,7 @@ def _target_plane(scene: IfcScene, to: dict) -> tuple[np.ndarray, np.ndarray, st
         return point, np.asarray(f.normal, float), f"{f.name} of {label(scene, gid)}", gid
     if to.get("point") is not None and to.get("normal") is not None:
         n = _vec(to["normal"], "normal")
-        return _vec(to["point"], "point"), n / np.linalg.norm(n), "the plane picked", gid
+        return _vec(to["point"], "point"), n / np.linalg.norm(n), "plane picked", gid
     raise ValueError("say what to align to: an element and its face, or a point and a normal")
 
 
@@ -451,12 +451,186 @@ def _make_cut_by(scene: IfcScene, plan: Plan) -> Made:
     return Made(changed=[plan.element], created=[opening])
 
 
+# ----------------------------------------------------------------------------------------------------- split, remove
+
+
+def _along(scene: IfcScene, gid: str, at: np.ndarray) -> tuple[float, str]:
+    """How far `at` is along the element's long axis, and from which end, in words."""
+    how = edits.split_axis(scene, gid)
+    if how[0] == "run":
+        _, start, d, length = how
+        a = float((at - start) @ d)
+        return a, f"{a:.2f} m from its {faces._name(scene, gid, -np.asarray(d)).split()[0]} end"
+    _, ax, world = how
+    i = scene.index_of(gid)
+    s = scene.unit_scales[i]
+    q = (np.linalg.inv(world) @ np.append(at / s, 1.0))[:2]
+    d = world[:3, ax] / np.linalg.norm(world[:3, ax])
+    item = edits._body(scene.entity(gid))[1]
+    pts = faces.outline(item.SweptArea) or [np.zeros(2)]
+    a = (float(q[ax]) - min(p[ax] for p in pts)) * s
+    return a, f"{a:.2f} m from its {faces._name(scene, gid, -d).split()[0]} end"
+
+
+def _resolve_split(scene: IfcScene, op: dict) -> Plan:
+    gid = op["element"]
+    at = _vec(op.get("at"), "at")
+    try:
+        edits.split_axis(scene, gid)
+    except edits.Unsupported:
+        raise edits.Unsupported("its body is not one straight extrusion: it cannot be split")
+    a, where = _along(scene, gid, at)
+    return Plan("split", gid, {"op": "split", "element": gid, "at": [round(float(c), 4) for c in at]}, {scene.index_of(gid)},
+                [gid], f"{label(scene, gid)} split in two, {where}", "any", warnings=structure_warnings(scene, gid, "the split"))
+
+
+def _make_split(scene: IfcScene, plan: Plan) -> Made:
+    gids = edits.split(scene, plan.element, plan.params["at"])
+    return Made(changed=[gids[0]], created=gids[1:], pieces=gids)
+
+
+def _joined(scene: IfcScene, gid: str) -> list[str]:
+    return [g for g in scene.element(gid).connected]
+
+
+def _resolve_remove(scene: IfcScene, op: dict) -> Plan:
+    gid = op["element"]
+    p, q = _vec(op.get("from"), "from"), _vec(op.get("to"), "to")
+    try:
+        edits.split_axis(scene, gid)
+    except edits.Unsupported:
+        raise edits.Unsupported("its body is not one straight extrusion: a section cannot be taken out of it")
+    (a, wa), (b, wb) = _along(scene, gid, p), _along(scene, gid, q)
+    if a > b:
+        (a, wa, p), (b, wb, q) = (b, wb, q), (a, wa, p)
+    if b - a < 0.001:
+        raise edits.Unsupported("the section is under 1 mm: pick two points along it")
+    warn = structure_warnings(scene, gid, "taking out a section")
+    if ifcopenshell.util.system.get_ports(scene.entity(gid)):
+        warn.append({"rule": "open_ends", "review": "services",
+                     "text": f"{label(scene, gid)} is left with two open ends: its designer must cap or join them"})
+    return Plan("remove_section", gid, {"op": "remove_section", "element": gid, "from": [round(float(c), 4) for c in p],
+                                        "to": [round(float(c), 4) for c in q]},
+                {scene.index_of(gid)}, [gid], f"{(b - a) * 1000:,.0f} mm section taken out of {label(scene, gid)} "
+                                              f"({wa.split(' from ')[0]} to {wb})", "any", warnings=warn)
+
+
+def _make_remove(scene: IfcScene, plan: Plan) -> Made:
+    gid = plan.element
+    first = edits.split(scene, gid, plan.params["from"])
+    if (np.asarray(plan.params["to"]) - np.asarray(plan.params["from"])) @ _axis_of(scene, gid) < 0:
+        raise edits.Unsupported("pick the section's points along the element")
+    middle = edits.split(scene, first[1], plan.params["to"])
+    name = scene.entity(gid).Name
+    edits.remove_product_with(scene, middle[0])
+    rest = scene.entity(middle[1])
+    if name:
+        rest.Name = f"{name} (part 2)"
+    open_ends = [gid, middle[1]] if ifcopenshell.util.system.get_ports(scene.entity(gid)) else []
+    return Made(changed=[gid], created=[middle[1]], pieces=[gid, middle[1]], open_ends=open_ends)
+
+
+def _axis_of(scene: IfcScene, gid: str) -> np.ndarray:
+    how = edits.split_axis(scene, gid)
+    if how[0] == "run":
+        return np.asarray(how[2])
+    world = how[2]
+    return world[:3, how[1]] / np.linalg.norm(world[:3, how[1]])
+
+
+def _standing_on(scene: IfcScene, gid: str) -> list[str]:
+    """Elements standing on this one (their base at its top, over it): what a delete leaves in the air."""
+    boxes = scene.bounds()
+    hb = boxes.get(gid)
+    if hb is None:
+        return []
+    out = []
+    for g, b in boxes.items():
+        if g == gid or abs(b[0][2] - hb[1][2]) > 0.005:
+            continue
+        if (b[0][:2] < hb[1][:2] - 1e-3).all() and (b[1][:2] > hb[0][:2] + 1e-3).all():
+            out.append(g)
+    return out
+
+
+def _resolve_delete(scene: IfcScene, op: dict) -> Plan:
+    gid = op["element"]
+    e = scene.entity(gid)
+    warn = structure_warnings(scene, gid, "removing it")
+    held = [f.RelatedBuildingElement for rel in getattr(e, "HasOpenings", None) or []
+            for f in getattr(rel.RelatedOpeningElement, "HasFillings", None) or []]
+    if held:
+        warn.append({"rule": "fillings", "review": "design", "text": f"{', '.join(label(scene, x.GlobalId) for x in held[:3])} "
+                                                                     f"in its openings go{'es' if len(held) == 1 else ''} with it"})
+    joined = _joined(scene, gid)
+    if joined:
+        warn.append({"rule": "open_ends", "review": "services",
+                     "text": f"{', '.join(label(scene, g) for g in joined[:3])} would be left with an open end"})
+    on = _standing_on(scene, gid)
+    if on:
+        warn.append({"rule": "support", "review": "structure",
+                     "text": f"{', '.join(label(scene, g) for g in on[:3])} stand{'s' if len(on) == 1 else ''} on it"})
+    return Plan("delete", gid, {"op": "delete", "element": gid}, {scene.index_of(gid)}, [gid], f"{label(scene, gid)} deleted",
+                "any", warnings=warn)
+
+
+def _make_delete(scene: IfcScene, plan: Plan) -> Made:
+    joined = _joined(scene, plan.element)
+    gone = edits.remove_product_with(scene, plan.element)
+    return Made(removed=gone, open_ends=joined)
+
+
+# ----------------------------------------------------------------------------------------------------- clip
+
+
+def _resolve_clip(scene: IfcScene, op: dict) -> Plan:
+    gid = op["element"]
+    pb, nb, target, other = _target_plane(scene, op.get("to") or {})
+    if other == gid:
+        raise edits.Unsupported("clip it to another element's face")
+    gap = _num(op, "gap_m", 0.0)
+    if gap < 0:
+        raise edits.Unsupported("the gap is not negative")
+    nb = nb / np.linalg.norm(nb)
+    plane = pb + nb * gap
+    v = edits._mesh_verts(scene.entity(gid))
+    side = (v - plane) @ (-nb)
+    if side.max() <= 1e-4:
+        raise edits.Unsupported(f"it does not reach the {target}: nothing to clip")
+    if side.min() >= -1e-4:
+        raise edits.Unsupported(f"all of it is past the {target}")
+    axis = _axis_of(scene, gid) if _clip_ok(scene, gid) else None
+    angle = f", {np.degrees(np.arccos(min(abs(float(axis @ nb)), 1.0))):.0f}° off square" if axis is not None else ""
+    where = "flush with" if gap == 0 else f"{_mm(gap)} off"
+    return Plan("clip", gid, {"op": "clip", "element": gid, "to": op.get("to"), "gap_m": gap,
+                              "plane": {"point": [round(float(c), 5) for c in plane], "normal": [round(float(c), 6) for c in -nb]}},
+                {scene.index_of(gid)}, [gid], f"{label(scene, gid)} clipped {where} the {target}{angle}", "trim",
+                touching={other} if other and gap == 0 else set(), warnings=structure_warnings(scene, gid, "the clip"))
+
+
+def _clip_ok(scene: IfcScene, gid: str) -> bool:
+    try:
+        edits.split_axis(scene, gid)
+        return True
+    except edits.Unsupported:
+        return False
+
+
+def _make_clip(scene: IfcScene, plan: Plan) -> Made:
+    edits.clip_to_plane(scene, plan.element, plan.params["plane"]["point"], plan.params["plane"]["normal"])
+    return Made(changed=[plan.element])
+
+
 OPS: dict[str, Op] = {
     "push_pull": Op(_resolve_push, _make_push, "push or pull one face: a length, a width, a radius, a wall's end"),
     "align": Op(_resolve_align, _make_align, "make one face flush with another face (or a gap off it), by stretching or moving"),
     "move": Op(_resolve_move, _make_move, "move an element (and the straight run it is in) by a vector"),
     "void": Op(_resolve_void, _make_void, "cut a rectangular or round opening through a face (or a recess to a depth)"),
     "cut_by": Op(_resolve_cut_by, _make_cut_by, "cut an element where another element is, with a gap all round"),
+    "split": Op(_resolve_split, _make_split, "split an element in two at a point along it"),
+    "remove_section": Op(_resolve_remove, _make_remove, "take a section out of an element between two points along it"),
+    "delete": Op(_resolve_delete, _make_delete, "delete an element (with what fills its openings and what it aggregates)"),
+    "clip": Op(_resolve_clip, _make_clip, "clip an element's end to another element's face (any angle), with a gap"),
 }
 
 
