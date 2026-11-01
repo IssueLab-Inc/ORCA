@@ -52,6 +52,10 @@ analyzers", dashboards-as-main-feature and Streamlit apps are on the hackathon's
   `*_many` queries. Use **intersection** (not collision) for hard clashes: collision misses one element wholly
   inside another. Clearance query gives true gaps.
 - Never call the clash queries with an empty set: IfcOpenShell segfaults (guarded in `verify.check`).
+- `geometry.edit_object_placement(..., is_si=False)` scales the matrix you pass to SI **in place**: pass a copy when
+  the matrix is used again. A frame shared by a route's fittings put every fitting after the first a thousandth of
+  the way to the origin on millimetre models (0.3048 on feet), and the check passed them in empty space. Metre test
+  fixtures can't show it; test placements on mm or feet with a non-zero placement translation (Revit's way).
 - Speed: element boxes are cached once at open (`IfcScene.bounds()`, ~3 s on Northbank), each check triangulates
   only the neighbourhood: 0.4–0.6 s per check on Northbank.
 - Port-connected neighbours are ignored in checks (they touch by design); `IfcFeatureElement` (openings) and
