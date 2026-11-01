@@ -2174,6 +2174,11 @@ a.pop-item { color: inherit; }
 .ei-blade, .ei-blades { --a: ei-blade; } .ei-left { --a: ei-left; } .ei-right { --a: ei-right; } .ei-drop { --a: ei-drop; }
 .ei-plane { --a: ei-plane; } .ei-corner { --a: ei-corner; } .ei-fade { --a: ei-fade; } .ei-dust { --a: ei-dust; opacity: 0; }
 .eicon-undo .ei-curl { --a: ei-undo; } .eicon-redo .ei-curl { --a: ei-redo; }
+.ei-raise { --a: ei-raise; } .ei-up { --a: ei-up; } .ei-part-l { --a: ei-part-l; } .ei-part-r { --a: ei-part-r; }
+@keyframes ei-raise { 0%, 100% { transform: none; } 45%, 65% { transform: translateY(-2.6px); } }
+@keyframes ei-up { 0%, 35% { transform: none; } 60%, 85% { transform: translateY(1.6px); } 100% { transform: none; } }
+@keyframes ei-part-l { 0%, 100% { transform: none; } 45%, 65% { transform: translateX(-1.8px); } }
+@keyframes ei-part-r { 0%, 100% { transform: none; } 45%, 65% { transform: translateX(1.8px); } }
 .eicon-checking [class^="ei-"] { animation: 2.4s ease-in-out infinite both; animation-name: var(--a); }
 .ei-in-l { --a: ei-in-l; } .ei-in-r { --a: ei-in-r; }
 .eicon .ei-tick { stroke-dasharray: 1; stroke-dashoffset: 0; --a: none; }

@@ -35,7 +35,7 @@ Northbank has none of what real exports carry, so these paths were never exercis
 | 0a | This face or element only by default; `carry` to take joined parts along | done (Nov 1) |
 | 0b | A parametric fixture with every construct above, a model-consistency check in every edit's check, and a test matrix of every op on every construct | done (Nov 1) |
 | 1 | Keep the model consistent: own copies (types, sets, mapped bodies), layer and profile sets, `Axis`, quantities, path joins | done (Nov 1), but for a type edited for all its elements and a joined wall's neighbour re-trimmed |
-| 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | planned |
+| 2 | MEP: offsets by hand (up or sideways), bends at any angle, transitions on a carried resize, disconnect, join | offset, join and disconnect done (Nov 1); bends at other angles, transitions on a carried resize and re-fitting a carried move later |
 | 3 | Editable properties: attributes, psets, type, material, classification, container | planned |
 
 ## The consistency check (Tier 0b)
@@ -86,6 +86,27 @@ mapped, FT-BOX's map 300 mm deep.
 Not yet (later): "apply to the type" (an edit to a type for all its elements); a joined wall's neighbour re-trimmed when
 its join is carried; a profile's cardinal point re-centred when a section grows on one side (the body grows to the side
 pushed, as people expect); quantities ORCA does not work out (weights, surface areas, perimeters) are left and named.
+
+## MEP by hand (Tier 2)
+
+Three ops, on the fix kinds' own geometry, so ports chain and joints are handed on as they are for a fix
+([manual-edits.md](manual-edits.md), the op table):
+
+- **`offset`**: a section of a level duct, pipe or tray between two points, up, down or sideways square to its run, with
+  90° bends (`edits.apply_offset`, `lateral_m` for sideways). In the Edit tool (F): click where it starts and ends on the
+  run, then Up, Down or a compass side and how far.
+- **`join`**: two segments' nearest free ends, in line (the first stretched) or square in one plane (a 90° bend fitting
+  of a section depth's radius between, its ports placed and joined) (`edits.join_plan`, `join_segments`). Tool N.
+- **`disconnect`**: one joint left open, kept as an open joint: a run split at a fitting. Tool X.
+
+Measured on Northbank: clash #1 (supply air main through the transfer girder) offset by hand 400 mm up over 2.48 m
+reads "Clear · nearest 50 mm · clears 1 clash" (Rev04's own fix leaves 50 mm), keeps as E1 and marks the clash fixed;
+Ctrl+Z puts it back. On `fixtures.build_mep_fixture`: DA and DB square to each other join with a bend from (3.6, −0.2)
+to (4.2, 0.4), both 3.6 m; DA and DC join in line, DA 4.5 m; every edit leaves the file schema-valid and comes back on
+undo.
+
+Later: bends at other angles (45° offsets), transitions when a carried resize meets a neighbour of the old size, a carried
+move that re-fits its neighbours instead of carrying them.
 
 ## Test matrix
 

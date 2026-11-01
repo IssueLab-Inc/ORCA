@@ -47,7 +47,16 @@ test("the palette says what each tool can act on", () => {
   assert.deepEqual(edit.toolState("align", flank, ready), { ok: true, why: null });
   assert.deepEqual(edit.toolState("split", null, ready), { ok: false, why: "Not in this build yet" });
   assert.equal(edit.toolForKey("A"), "align"); assert.equal(edit.toolForKey("z"), null);
-  assert.deepEqual(edit.EDIT_TOOLS.map((t) => t.id), ["push_pull", "align", "move", "void", "cut_by", "split", "remove_section", "clip", "delete"]);
+  assert.deepEqual(edit.EDIT_TOOLS.map((t) => t.id), ["push_pull", "align", "move", "void", "cut_by", "split", "remove_section", "clip",
+    "offset", "join", "disconnect", "delete"]);
+  assert.equal(edit.toolForKey("F"), "offset"); assert.equal(edit.toolForKey("n"), "join"); assert.equal(edit.toolForKey("x"), "disconnect");
+});
+
+test("an offset goes up, down, or to either side of its run, named by compass", () => {
+  const along = edit.offsetWays([2, 0, 2.8], [4, 0, 2.8]);   // a run east-west: its sides are north and south
+  assert.deepEqual(along.map((w) => w.label), ["Up", "Down", "North", "South"]);
+  assert.deepEqual(along[2].toward, [0, 1, 0]); assert.deepEqual(along[3].toward, [0, -1, 0]);
+  assert.deepEqual(edit.offsetWays([0, 5, 0], [0, 1, 0]).map((w) => w.label).slice(2), ["East", "West"]);   // run south: east is its left
 });
 
 test("align previews from the two picks: how far the face moves to sit a gap off the other, parallel faces only", () => {

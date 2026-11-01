@@ -747,6 +747,131 @@ def _make_remove(scene: IfcScene, plan: Plan) -> Made:
     return Made(changed=[gid], created=[middle[1]], pieces=[gid, middle[1]], open_ends=open_ends)
 
 
+# ----------------------------------------------------------------------------------------------------- offset
+
+TOWARD = {"up": (0.0, 0.0, 1.0), "down": (0.0, 0.0, -1.0), "north": (0.0, 1.0, 0.0), "south": (0.0, -1.0, 0.0),
+          "east": (1.0, 0.0, 0.0), "west": (-1.0, 0.0, 0.0)}
+
+
+def _resolve_offset(scene: IfcScene, op: dict) -> Plan:
+    """A section of a straight duct, pipe or tray taken up, down or sideways (square to its run) between two points
+    along it, with bends either side (edits.apply_offset, the fix kind's own geometry): its joints stay as they are."""
+    gid = op["element"]
+    e = scene.entity(gid)
+    if not e.is_a("IfcFlowSegment"):
+        raise edits.Unsupported("only a duct, pipe or cable tray segment can be offset: move or split the rest")
+    _, _, _, origin, d, _, _ = edits._frames(scene, e)
+    s = scene.unit_scales[scene.index_of(gid)]
+    if abs(d @ edits.UP) > 1e-3:
+        raise edits.Unsupported("only a level run can be offset by hand yet")
+    t = op.get("toward")
+    if isinstance(t, str):
+        if t.lower() not in TOWARD:
+            raise ValueError(f"toward is one of {', '.join(TOWARD)} or a direction")
+        toward = np.asarray(TOWARD[t.lower()])
+    else:
+        toward = _vec(t, "toward")
+        toward = toward / (np.linalg.norm(toward) or 1.0)
+    by = _num(op, "by_m")
+    if by < LEAST_M:
+        raise edits.Unsupported("offset it at least 0.5 mm (say which way with toward)")
+    side = np.cross(edits.UP, d)
+    side /= np.linalg.norm(side)
+    if abs(toward @ edits.UP) > PARALLEL_COS:
+        up_m, side_m, vec = by * float(np.sign(toward @ edits.UP)), 0.0, edits.UP * float(np.sign(toward @ edits.UP))
+    elif abs(toward @ side) > PARALLEL_COS:
+        up_m, side_m, vec = 0.0, by * float(np.sign(toward @ side)), side * float(np.sign(toward @ side))
+    else:
+        raise edits.Unsupported("offset it up, down or sideways square to its run")
+    p, q = _vec(op.get("from"), "from"), _vec(op.get("to"), "to")
+    a, b = sorted((float((p - origin * s) @ d), float((q - origin * s) @ d)))
+    length = float(edits._body(e)[1].Depth) * s
+    if a < -LEAST_M or b > length + LEAST_M or b - a < 0.01:
+        raise edits.Unsupported("pick where the offset starts and ends along it")
+    words = connections.move_words((vec * by).tolist())
+    params = {"op": "offset", "element": gid, "from": [round(float(c), 4) for c in p], "to": [round(float(c), 4) for c in q],
+              "toward": [round(float(c), 6) for c in vec], "by_m": by}
+    plan = Plan("offset", gid, params, {scene.index_of(gid)}, [gid],
+                f"{label(scene, gid)} offset {words} for {b - a:.2f} m, {a:.2f} m along it, with bends", "offset", by,
+                warnings=structure_warnings(scene, gid, "the offset"))
+    plan.extra.update(start_m=a, end_m=b, up_m=up_m, side_m=side_m)
+    return plan
+
+
+def _resolve_join(scene: IfcScene, op: dict) -> Plan:
+    """Two straight segments' nearest free ends joined: in line, the first stretched to the second; square to each
+    other, both brought to the corner and a 90° bend between (edits.join_plan). Their ports are connected."""
+    a = op["element"]
+    to = op.get("to")
+    b = to.get("element") if isinstance(to, dict) else to
+    if not b:
+        raise ValueError("say which segment to join it to (to)")
+    if scene.index_of(a) != scene.index_of(b):
+        raise edits.Unsupported("join segments of one model")
+    for g in (a, b):
+        if not scene.entity(g).is_a("IfcFlowSegment"):
+            raise edits.Unsupported(f"{label(scene, g)} is not a duct, pipe or tray segment")
+    jp = edits.join_plan(scene, a, b)
+    how = (f"in line ({_mm(jp.stretch_a)} {'longer' if jp.stretch_a >= 0 else 'shorter'})" if jp.kind == "line" else
+           f"with a 90° bend ({jp.radius * 1000:.0f} mm radius)")
+    plan = Plan("join", a, {"op": "join", "element": a, "to": {"element": b}}, {scene.index_of(a)}, [a, b],
+                f"{label(scene, a)} joined to {label(scene, b)} {how}", "resize",
+                max(abs(jp.stretch_a), abs(jp.stretch_b)), gated=[a, b],
+                warnings=structure_warnings(scene, a, "the join"))
+    plan.touching.add(b)
+    plan.extra["join"] = jp
+    return plan
+
+
+def _make_join(scene: IfcScene, plan: Plan) -> Made:
+    jp = edits.join_plan(scene, plan.element, plan.extra["join"].b)   # read again: the trial's model, not the check's
+    made = edits.join_segments(scene, jp)
+    return Made(changed=[jp.a, jp.b], created=made, pieces=[jp.a, *made, jp.b])
+
+
+def _resolve_disconnect(scene: IfcScene, op: dict) -> Plan:
+    """One of the element's port joints left open: the one to `from` (an element), else the one nearest `at`, else its
+    only one. Listed with the joints the person keeps it with."""
+    gid = op["element"]
+    joints = []
+    for port in ifcopenshell.util.system.get_ports(scene.entity(gid)):
+        other = ifcopenshell.util.system.get_connected_port(port)
+        owner = ifcopenshell.util.system.get_port_element(other) if other is not None else None
+        if owner is not None:
+            joints.append((port, owner.GlobalId))
+    if not joints:
+        raise edits.Unsupported("it is not joined to anything")
+    if op.get("from"):
+        joints = [j for j in joints if j[1] == op["from"]]
+        if not joints:
+            raise edits.Unsupported(f"it is not joined to {label(scene, op['from'])}")
+    elif op.get("at") is not None:
+        at = _vec(op["at"], "at")
+        joints = [min(joints, key=lambda j: float(np.linalg.norm(scene.placement(j[0].GlobalId)[:3, 3] - at)))]
+    elif len(joints) > 1:
+        raise edits.Unsupported("it has several joints: say which (from an element, or at a point)")
+    port, other = joints[0]
+    opened = [{"element": other, "name": label(scene, other), "port": port.GlobalId}]
+    plan = Plan("disconnect", gid, {"op": "disconnect", "element": gid, "from": other}, {scene.index_of(gid)}, [gid],
+                f"{label(scene, gid)} disconnected from {label(scene, other)}", "any",
+                warnings=[_open_joint_words(scene, gid, opened)])
+    plan.extra["open_joints"] = opened
+    return plan
+
+
+def _make_disconnect(scene: IfcScene, plan: Plan) -> Made:
+    model = scene.models[scene.index_of(plan.element)]
+    (j,) = plan.extra["open_joints"]
+    ifcopenshell.api.run("system.disconnect_port", model, port=model.by_guid(j["port"]))
+    return Made(changed=[plan.element, j["element"]], open_ends=[plan.element, j["element"]])
+
+
+def _make_offset(scene: IfcScene, plan: Plan) -> Made:
+    x = plan.extra
+    off = edits.apply_offset(scene, plan.element, x["start_m"], x["end_m"], x["up_m"], lateral_m=x["side_m"])
+    return Made(changed=[plan.element], created=[g for g in off.pieces if g != plan.element], pieces=list(off.pieces))
+
+
 def _axis_of(scene: IfcScene, gid: str) -> np.ndarray:
     return edits.long_axis(scene, gid)[1]
 
@@ -830,7 +955,10 @@ def _make_clip(scene: IfcScene, plan: Plan) -> Made:
 OPS: dict[str, Op] = {
     "push_pull": Op(_resolve_push, _make_push, "push or pull one face: a length, a width, a radius, a wall's end"),
     "align": Op(_resolve_align, _make_align, "make one face flush with another face (or a gap off it), by stretching or moving"),
-    "move": Op(_resolve_move, _make_move, "move an element (and the straight run it is in) by a vector"),
+    "move": Op(_resolve_move, _make_move, "move an element by a vector (with carry, the straight run it is in)"),
+    "offset": Op(_resolve_offset, _make_offset, "take a section of a duct, pipe or tray up, down or sideways, with bends"),
+    "join": Op(_resolve_join, _make_join, "join two segments' free ends: in line, or square with a 90° bend"),
+    "disconnect": Op(_resolve_disconnect, _make_disconnect, "leave one of an element's joints open (split a run at a fitting)"),
     "void": Op(_resolve_void, _make_void, "cut a rectangular or round opening through a face (or a recess to a depth)"),
     "cut_by": Op(_resolve_cut_by, _make_cut_by, "cut an element where another element is, with a gap all round"),
     "split": Op(_resolve_split, _make_split, "split an element in two at a point along it"),

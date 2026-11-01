@@ -110,14 +110,27 @@ export function keepLabel(c: { clashes: number; joints?: unknown[] | null }, del
   return `Keep with ${parts.join(" · ")}`;
 }
 
+/** The ways an offset can take a section between two points along a run (IFC axes, Z up): up, down, and the two sides
+ * square to the run in plan, named by compass. The run must be level (the server refuses the rest). */
+export function offsetWays(from: number[], to: number[]): { label: string; toward: [number, number, number] }[] {
+  const dx = to[0] - from[0], dy = to[1] - from[1], l = Math.hypot(dx, dy) || 1;
+  const side: [number, number, number] = [-dy / l, dx / l, 0];   // cross(Z, run)
+  const compass = (v: number[]) => (Math.abs(v[0]) >= Math.abs(v[1]) ? (v[0] > 0 ? "East" : "West") : (v[1] > 0 ? "North" : "South"));
+  const r = (v: number) => Math.round(v * 1e6) / 1e6 || 0;
+  return [{ label: "Up", toward: [0, 0, 1] }, { label: "Down", toward: [0, 0, -1] },
+    { label: compass(side), toward: [r(side[0]), r(side[1]), 0] }, { label: compass(side.map((c) => -c)), toward: [r(-side[0]), r(-side[1]), 0] }];
+}
+
 /** A snapped point as an align target, in words. */
 export const SNAP_WORDS: Record<string, string> = { end: "corner", mid: "midpoint of an edge", edge: "edge" };
 
 /** Short words for a tool offered on a face the current tool cannot take ("Align it"). */
 export const OFFER: Record<EditToolId, string> = { push_pull: "Push/pull it", align: "Align it", move: "Move it", void: "Cut a void",
-  cut_by: "Cut it by a shape", split: "Split it", remove_section: "Remove a section", clip: "Clip it", delete: "Delete it" };
+  cut_by: "Cut it by a shape", split: "Split it", remove_section: "Remove a section", clip: "Clip it", delete: "Delete it",
+  offset: "Offset a section", join: "Join it", disconnect: "Disconnect it" };
 
-export type EditToolId = "push_pull" | "align" | "move" | "void" | "cut_by" | "split" | "remove_section" | "clip" | "delete";
+export type EditToolId = "push_pull" | "align" | "move" | "void" | "cut_by" | "split" | "remove_section" | "clip" | "delete"
+  | "offset" | "join" | "disconnect";
 
 /** The edit tools in the palette's order: what each does, the key inside the tool, and what it needs picked. */
 export const EDIT_TOOLS: { id: EditToolId; label: string; key: string; needs: "face" | "element"; hint: string }[] = [
@@ -129,6 +142,9 @@ export const EDIT_TOOLS: { id: EditToolId; label: string; key: string; needs: "f
   { id: "split", label: "Split in two", key: "b", needs: "element", hint: "Click the element where it splits" },
   { id: "remove_section", label: "Remove a section", key: "r", needs: "element", hint: "Click where the section starts, then where it ends" },
   { id: "clip", label: "Clip an end to a face", key: "j", needs: "face", hint: "Click the end to clip, then the face to clip it to" },
+  { id: "offset", label: "Offset a section (duct, pipe, tray)", key: "f", needs: "element", hint: "Click where the offset starts, then where it ends" },
+  { id: "join", label: "Join two ends (in line, or with a bend)", key: "n", needs: "element", hint: "Click a segment, then the one to join it to" },
+  { id: "disconnect", label: "Disconnect a joint", key: "x", needs: "element", hint: "Click an element near the joint to open" },
   { id: "delete", label: "Delete", key: "d", needs: "element", hint: "Click the element to delete" },
 ];
 

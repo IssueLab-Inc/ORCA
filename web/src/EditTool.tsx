@@ -6,17 +6,21 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api, type EditCheck, type EditFace, type EditKept, type EditOp, type Journal, type JournalEntry } from "./api";
-import { AlignIcon, CheckingIcon, ClipIcon, CutByIcon, DeleteIcon, EditIcon, KeepIcon, LogIcon, MoveIcon, PushPullIcon,
-  RemoveSectionIcon, SplitIcon, VoidIcon } from "./editIcons";
+import { AlignIcon, CheckingIcon, ClipIcon, CutByIcon, DeleteIcon, DisconnectIcon, EditIcon, JoinIcon, KeepIcon, LogIcon, MoveIcon,
+  OffsetIcon, PushPullIcon, RemoveSectionIcon, SplitIcon, VoidIcon } from "./editIcons";
 import { EditPanel } from "./EditPanel";
-import { alignDistance, EDIT_TOOLS, faceRef, keepLabel, OFFER, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState, type EditToolId } from "./viewer/edit";
+import { alignDistance, EDIT_TOOLS, faceRef, keepLabel, OFFER, offsetWays, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState,
+  type EditToolId } from "./viewer/edit";
 import type { FacePick, Viewer } from "./viewer/Viewer";
 
 const CARRY_KEY = "orca.edit.carry";
+const SNAP_ON_PICK_M = 0.3;   // a snapped point further than this from the face picked is on something else
 const ICON: Record<EditToolId, LucideIcon> = { push_pull: PushPullIcon, align: AlignIcon, move: MoveIcon, void: VoidIcon,
-  cut_by: CutByIcon, split: SplitIcon, remove_section: RemoveSectionIcon, clip: ClipIcon, delete: DeleteIcon };
+  cut_by: CutByIcon, split: SplitIcon, remove_section: RemoveSectionIcon, clip: ClipIcon, delete: DeleteIcon,
+  offset: OffsetIcon, join: JoinIcon, disconnect: DisconnectIcon };
 /** The tools this build makes; the rest say so in the palette. */
-export const READY: ReadonlySet<EditToolId> = new Set<EditToolId>(["push_pull", "align", "move", "void", "cut_by", "split", "remove_section", "clip", "delete"]);
+export const READY: ReadonlySet<EditToolId> = new Set<EditToolId>(["push_pull", "align", "move", "void", "cut_by", "split",
+  "remove_section", "clip", "offset", "join", "disconnect", "delete"]);
 
 export interface EditToolHandle {
   /** A click on the stage while the tool is on. */ click(ev: MouseEvent): void;
@@ -70,6 +74,8 @@ export const EditTool = forwardRef<EditToolHandle, {
   const [voidSize, setVoidSize] = useState<[number, number]>([0.3, 0.3]);   // width and height, or the diameter first
   const [recess, setRecess] = useState<number | null>(null);                 // null: through; else the recess's depth
   const [cutter, setCutter] = useState<{ globalId: string; label: string } | null>(null);
+  const [span, setSpan] = useState<[number[], number[]] | null>(null);       // an offset's two points along the run
+  const [way, setWay] = useState(0);                                           // which of offsetWays(span)
   const [check, setCheck] = useState<EditCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [keeping, setKeeping] = useState(false);
@@ -93,7 +99,7 @@ export const EditTool = forwardRef<EditToolHandle, {
     if (v && face && pick) v.pushPreview(face.element, pick.point, face.normal, null);
     v?.preview([]);
     setFace(null); setPick(null); setTarget(null); setTargetPick(null); setBy(0); setGap(tool === "cut_by" ? 0.02 : 0); setDelta([0, 0, 0]); setFrom(null);
-    setCutter(null);
+    setCutter(null); setSpan(null);
     setCheck(null); setChecking(false);
     if (!keepTool) setTool("push_pull");
   }
@@ -170,6 +176,8 @@ export const EditTool = forwardRef<EditToolHandle, {
     ...(recess != null ? { depth_m: recess } : {}) });
   const cutOp = (c = cutter, g = gap): EditOp => ({ op: "cut_by", element: element!, cutter: c!.globalId, gap_m: g });
   const clipOp = (t = target!, tp = targetPick!, g = gap): EditOp => ({ op: "clip", element: face!.element, gap_m: g, to: toFace(t, tp) });
+  const offsetOp = (s = span!, w = way, m = by): EditOp => ({ op: "offset", element: element!, from: s[0], to: s[1],
+    toward: offsetWays(s[0], s[1])[w].toward, by_m: m });
 
   async function run(op: EditOp) {
     if (!sceneId) return;
@@ -273,12 +281,26 @@ export const EditTool = forwardRef<EditToolHandle, {
       }
       const p = v.pickFace(ev);
       if (!p) return;
-      const at = v.snapPoint(ev)?.point ?? p.point;   // a split or a section's end: snapped like a measure
+      // A split, a section's or an offset's end: snapped like a measure, but only to the element picked (the snap does
+      // not see through the see-through context the pick does, and would land on the slab above a clash pair)
+      const sn = v.snapPoint(ev)?.point;
+      const at = sn && Math.hypot(sn[0] - p.point[0], sn[1] - p.point[1], sn[2] - p.point[2]) <= SNAP_ON_PICK_M ? sn : p.point;
       if (tool === "delete") { void choose(p, "face", (f) => void run({ op: "delete", element: f.element })); return; }
       if (tool === "split") { void choose(p, "face", (f) => void run({ op: "split", element: f.element, at })); return; }
       if (tool === "remove_section") {
         if (from && face && p.globalId === face.element) { const a = from; setFrom(null); void run({ op: "remove_section", element: face.element, from: a, to: at }); }
         else void choose(p, "face", () => { setFrom(at); });
+        return;
+      }
+      if (tool === "offset") {   // where it starts, then where it ends; then which way and how far
+        if (from && face && p.globalId === face.element) { setSpan([from, at]); setFrom(null); setCheck(null); if (!by) setBy(0.3); }
+        else { setSpan(null); void choose(p, "face", () => { setFrom(at); }); }
+        return;
+      }
+      if (tool === "disconnect") { void choose(p, "face", (f) => void run({ op: "disconnect", element: f.element, at })); return; }
+      if (tool === "join") {     // the first segment, then the one to join it to
+        if (face && p.globalId !== face.element) void run({ op: "join", element: face.element, to: { element: p.globalId } });
+        else void choose(p, "face");
         return;
       }
       if ((tool === "align" || tool === "cut_by" || tool === "clip") && face && toolState(tool, face, READY).ok && p.globalId !== face.element) {
@@ -318,7 +340,7 @@ export const EditTool = forwardRef<EditToolHandle, {
       if (face || pick) { setFace(null); setPick(null); return true; }
       return false;
     },
-  }), [tool, face, pick, target, element, from, check, checking, by, delta, sceneId, busy, keeping, gap, how, voidShape, voidSize, recess, cutter]);
+  }), [tool, face, pick, target, element, from, check, checking, by, delta, sceneId, busy, keeping, gap, how, voidShape, voidSize, recess, cutter, span]);
 
   const hint = (() => {
     if (face && !toolState(tool, face, READY).ok) return `${act} another face, or use one of these`;
@@ -330,6 +352,9 @@ export const EditTool = forwardRef<EditToolHandle, {
     if (tool === "split") return check ? `${act} elsewhere on it to split it there instead` : `${act} the element where it splits`;
     if (tool === "remove_section") return !face || (!from && !check) ? `${act} where the section starts` : from ? `${act} where it ends` : null;
     if (tool === "clip") return !face ? `${act} the end to clip` : !target ? `${act} the face to clip it to (any angle)` : null;
+    if (tool === "offset") return !face || (!from && !span) ? `${act} the duct, pipe or tray where the offset starts` : from ? `${act} where it ends` : null;
+    if (tool === "join") return !face ? `${act} the segment to join` : !check && !checking ? `${act} the segment to join it to` : null;
+    if (tool === "disconnect") return !face ? `${act} the element near the joint to open` : null;
     if (tool === "delete") return !face ? `${act} the element to delete` : null;
     return EDIT_TOOLS.find((t) => t.id === tool)!.hint;
   })();
@@ -380,7 +405,7 @@ export const EditTool = forwardRef<EditToolHandle, {
             })}</div>}
           </div>)}
         {tool === "push_pull" && face && !refused && (
-          <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); if (by) void run(pushOp(by)); }}>
+          <form className="edit-row-in" noValidate onSubmit={(e) => { e.preventDefault(); if (by) void run(pushOp(by)); }}>
             <label>{by >= 0 ? "Out" : "In"} <input type="number" step={5} value={mmIn(by)} aria-label="How far, mm (out is +)"
               onChange={(e) => { const m = Number(e.target.value) / 1000; setBy(m); setCheck(null); viewer()?.preview([]);
                 if (pick) viewer()?.pushPreview(face.element, pick.point, face.normal, m); }} /> mm</label>
@@ -399,7 +424,7 @@ export const EditTool = forwardRef<EditToolHandle, {
             </div>
           </div>)}
         {tool === "move" && element && (
-          <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); if (delta.some((x) => x)) void run(moveOp(delta)); }}>
+          <form className="edit-row-in" noValidate onSubmit={(e) => { e.preventDefault(); if (delta.some((x) => x)) void run(moveOp(delta)); }}>
             {(["x", "y", "z"] as const).map((axis, i) => (
               <label key={axis}>{axis === "x" ? "East" : axis === "y" ? "North" : "Up"} <input type="number" step={10} value={mmIn(delta[i])} aria-label={`Move ${axis}, mm`}
                 onChange={(e) => { const d = [...delta] as [number, number, number]; d[i] = Number(e.target.value) / 1000; setDelta(d); setCheck(null);
@@ -407,7 +432,7 @@ export const EditTool = forwardRef<EditToolHandle, {
             <button type="submit" className="btn small" disabled={!delta.some((x) => x) || checking}>Check</button>
           </form>)}
         {tool === "void" && face && pick && !refused && (
-          <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); void run(voidOp()); }}>
+          <form className="edit-row-in" noValidate onSubmit={(e) => { e.preventDefault(); void run(voidOp()); }}>
             <div className="seg" role="group" aria-label="Shape">
               {(["rect", "round"] as const).map((sh) => <button key={sh} type="button" className={voidShape === sh ? "on" : ""}
                 onClick={() => { setVoidShape(sh); setCheck(null); }}>{sh === "rect" ? "Rectangle" : "Round"}</button>)}
@@ -422,18 +447,30 @@ export const EditTool = forwardRef<EditToolHandle, {
             <button type="submit" className="btn small" disabled={checking}>Check</button>
           </form>)}
         {tool === "cut_by" && face && (
-          <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); if (cutter) void run(cutOp()); }}>
+          <form className="edit-row-in" noValidate onSubmit={(e) => { e.preventDefault(); if (cutter) void run(cutOp()); }}>
             {cutter && <span className="edit-target">cut round <b>{cutter.label}</b></span>}
             <label>Gap <input type="number" step={5} min={0} value={mmIn(gap)} aria-label="Gap all round, mm"
               onChange={(e) => { setGap(Number(e.target.value) / 1000); setCheck(null); }} /> mm</label>
             <button type="submit" className="btn small" disabled={!cutter || checking}>Check</button>
           </form>)}
         {tool === "clip" && face && target && !refused && (
-          <form className="edit-row-in" onSubmit={(e) => { e.preventDefault(); void run(clipOp()); }}>
+          <form className="edit-row-in" noValidate onSubmit={(e) => { e.preventDefault(); void run(clipOp()); }}>
             <span className="edit-target">to the <b>{target.name}</b>{target.label ? <> of {target.label}</> : null}</span>
             <label>Gap <input type="number" step={5} min={0} value={mmIn(gap)} aria-label="Gap, mm"
               onChange={(e) => { setGap(Number(e.target.value) / 1000); setCheck(null); }} /> mm</label>
             <button type="submit" className="btn small" disabled={checking}>Check</button>
+          </form>)}
+        {tool === "offset" && span && element && (
+          <form className="edit-row-in" noValidate onSubmit={(e) => { e.preventDefault(); if (by > 0) void run(offsetOp()); }}>
+            <span className="edit-target">{Math.hypot(span[1][0] - span[0][0], span[1][1] - span[0][1], span[1][2] - span[0][2]).toFixed(2)} m of it</span>
+            <div className="seg" role="group" aria-label="Which way">
+              {offsetWays(span[0], span[1]).map((w, i) => (
+                <button key={w.label} type="button" className={way === i ? "on" : ""}
+                  onClick={() => { setWay(i); if (by > 0) void run(offsetOp(span, i, by)); }}>{w.label}</button>))}
+            </div>
+            <label>By <input type="number" step={10} min={1} value={mmIn(by)} aria-label="How far, mm"
+              onChange={(e) => { setBy(Math.abs(Number(e.target.value)) / 1000); setCheck(null); }} /> mm</label>
+            <button type="submit" className="btn small" disabled={!(by > 0) || checking}>Check</button>
           </form>)}
         {(checking || check) && (
           <div className={`edit-status ${status?.tone ?? ""}`} role="status">

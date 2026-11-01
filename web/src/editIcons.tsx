@@ -83,6 +83,25 @@ export const ClipIcon = make("clip", <>
   <path className="ei-plane" d="M12.5 3 19.5 21" />
 </>);
 
+/** Offset: the middle of a run lifts over something, its ends staying where they are. */
+export const OffsetIcon = make("offset", <>
+  <path d="M2 16h5.5M16.5 16H22" strokeWidth={2.4} />
+  <g className="ei-raise"><path d="M7.5 16 9.5 10h5l2 6" {...lit} /></g>
+</>);
+
+/** Join: two free ends close in and meet round a bend. */
+export const JoinIcon = make("join", <>
+  <path d="M3 18h4a6 6 0 0 0 6-6V8" style={thin} strokeDasharray="1.6 1.8" />
+  <g className="ei-right"><path d="M3 18h4" strokeWidth={3} /></g>
+  <g className="ei-up"><path d="M13 3v5" strokeWidth={3} /></g>
+</>);
+
+/** Disconnect: a joint opens, the two ends parting. */
+export const DisconnectIcon = make("disconnect", <>
+  <g className="ei-part-l"><path d="M2 12h8" strokeWidth={3} /><path d="M10 8.5v7" /></g>
+  <g className="ei-part-r"><path d="M14 12h8" strokeWidth={3} /><path d="M14 8.5v7" /></g>
+</>);
+
 /** Delete: the element breaks into dots and is gone. */
 export const DeleteIcon = make("delete", <>
   <g className="ei-fade"><rect x="5" y="6" width="14" height="12" rx="1" {...lit} /></g>

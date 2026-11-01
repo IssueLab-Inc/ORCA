@@ -988,3 +988,52 @@ def build_parametric_fixture(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     model.write(str(path))
     return path
+
+
+def build_mep_fixture(path: Path) -> Path:
+    """Free duct ends for MEP hand edits (docs/editing-parity.md, Tier 2), 400 wide x 300 deep, centreline z = 2.8,
+    each straight with a port at both ends, none joined:
+
+    - DA along x from 0 to 3 (y = 0); DC along x from 4.5 to 6 on the same line: a gap of 1.5 m to join in line.
+    - DB along y from 1 to 4 (x = 4): square to DA in plan, the axes meeting at (4, 0): a corner to join with a bend.
+    - PA, a 100 mm round pipe along x from 0 to 3 at y = -2, z = 2.8.
+    """
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA MEP fixture")
+    ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model", context_identifier="Body",
+                                target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 02")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+
+    def segment(cls, name, start, direction, run, profile):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
+        d = np.asarray(direction, float)
+        ref = np.cross((0.0, 0.0, 1.0), d)      # profile X across the run, level; profile Y up
+        position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint(tuple(float(c) for c in start)),
+                                                   model.createIfcDirection(tuple(float(c) for c in d)),
+                                                   model.createIfcDirection(tuple(float(c) for c in ref)))
+        solid = model.createIfcExtrudedAreaSolid(profile, position, model.createIfcDirection((0.0, 0.0, 1.0)), float(run))
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+        for n, at in enumerate((np.asarray(start, float), np.asarray(start, float) + d * run)):
+            port = ifcopenshell.api.run("system.add_port", model, element=e)
+            port.Name, port.FlowDirection = f"Port {n}", ("SINK" if n == 0 else "SOURCE")
+            m = np.eye(4)
+            z = d if n else -d
+            m[:3, :3] = np.column_stack([ref, np.cross(z, ref), z])
+            m[:3, 3] = at
+            ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+        return e
+
+    rect = lambda: model.createIfcRectangleProfileDef("AREA", None, None, 0.4, 0.3)
+    segment("IfcDuctSegment", "DA", (0.0, 0.0, 2.8), (1.0, 0.0, 0.0), 3.0, rect())
+    segment("IfcDuctSegment", "DC", (4.5, 0.0, 2.8), (1.0, 0.0, 0.0), 1.5, rect())
+    segment("IfcDuctSegment", "DB", (4.0, 1.0, 2.8), (0.0, 1.0, 0.0), 3.0, rect())
+    segment("IfcPipeSegment", "PA", (0.0, -2.0, 2.8), (1.0, 0.0, 0.0), 3.0, model.createIfcCircleProfileDef("AREA", None, None, 0.05))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path

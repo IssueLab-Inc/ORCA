@@ -132,6 +132,9 @@ section warning) all check in 0.1–0.7 s.
 | `remove_section` | Split at the first point and at the second, then remove the middle with what it held (`edits.remove_product_with`); the rest keeps its place and is named "… (part 2)". By clips, both cuts are square to the whole's axis. A run's two new ends are left open, said so for the services designer | any edit | structure; open ends → services |
 | `delete` | The element, with its openings and what fills them, the parts it aggregates and its ports (`edits.remove_product_with`); its boxes forgotten (`IfcScene.forget`). The log keeps the names of everything removed, so undo and the report can say what came back | any edit | structure; what fills its openings; peers left with an open end; elements standing on it |
 | `clip` | Cut the element's material beyond another element's face (any angle, with a gap): an `IfcBooleanClippingResult` with a half-space (`geometry.clip_solid`) round every solid of its Body that the plane crosses, meshes too (a solid wholly beyond is dropped), the Body's type "Clipping" (`edits._clip_items`). Any face picks the element. Refused when the plane misses it or leaves less than 5 mm. A clipped element still has faces: each clip's plane is a face (`clip:j`) that pushes and pulls, the end it cut away is gone, and its other end pushes and pulls as before | as a trim (`trims`) | structure |
+| `offset` | A section of a level duct, pipe or tray between two points along it (`from`, `to`) taken up, down or sideways square to its run (`toward`: up, down, a compass word, or a direction; `by_m`), with 90° bend fittings either side: the fix kind's own geometry (`edits.apply_offset`, its `lateral_m` for sideways), so its ports chain through the pieces and the far joint is handed on. Refused along the run, off a level run, or for anything but a flow segment ([editing-parity.md](editing-parity.md), Tier 2) | as an offset | structure |
+| `join` | Two straight segments' nearest free ends (`edits.join_plan`, `join_segments`): on one line, the first stretched to the second; square to each other in one plane, both brought to the corner less a bend radius (one section depth) and a 90° bend fitting between, its ports placed and joined to both. Refused for other angles, different kinds or sizes (a transition is needed), an end already joined, or an end within a bend's radius of the corner | as a resize | structure |
+| `disconnect` | One of the element's port joints left open (`system.disconnect_port`): the one to `from`, else nearest `at`, else its only one. Listed under `joints`, kept only as **Keep with 1 open joint**: how a run is split at a fitting | any edit | open joint → services |
 
 Measured on the fixture: a 400 x 300 mm opening through the wall lands at x 2.8–3.2, z 1.35–1.65 and comes 10 mm out of
 both faces; the wall pushed into the column and then cut round it with a 20 mm gap clears the clash at exactly 20 mm.
@@ -218,8 +221,13 @@ back.
 ## On the page
 
 - **The Edit tool** (`web/src/EditTool.tsx`, **P** or the rail's Edit button; measuring and editing take turns): a panel
-  beside the rail with the palette (push/pull, align, move, void, cut by shape, split, remove a section, clip, delete;
-  inside the tool their keys are P, A, T, O, K, B, R, J and D). The face under the pointer is lit faintly; a click chooses
+  beside the rail with the palette (push/pull, align, move, void, cut by shape, split, remove a section, clip, offset,
+  join, disconnect, delete; inside the tool their keys are P, A, T, O, K, B, R, J, F, N, X and D). An offset takes where
+  it starts and where it ends on the run, then Up, Down or a compass side (`offsetWays`) and how far; a join takes one
+  segment, then the other; a disconnect, the element near the joint. A point clicked for a split, a section or an
+  offset snaps as a measure does, but only to the element picked (a snap further than 0.3 m from the pick, on the
+  context drawn see-through around a clash, is ignored); the forms leave numbers to the server (`noValidate`: a 400 mm
+  offset is not "invalid" for a 10 mm step). The face under the pointer is lit faintly; a click chooses
   it (the server names it: "top of duct segment 'Supply air main L02 600x300' · 0.300 m") and lights it orange with an
   arrow. Drag the face (5 mm steps, Shift for 1 mm) or type how far: the element stretches live, as one instance matrix
   (`viewer/edit.ts`, `pushMatrix`), every drawing of it with it (a clash pair is drawn by the focus layer: its focus mesh,
@@ -246,6 +254,7 @@ back.
 
 ## Icons
 
-The edit tools' icons (`web/src/editIcons.tsx`) act out what each tool does: they play once on hover or focus and loop
-gently while their tool is on. Motion follows the brand's rules (`docs/brand-assets.md`): checking plays only while a
+The edit tools' icons (`web/src/editIcons.tsx`) act out what each tool does (an offset's middle lifts over, a join's ends
+close in round a bend, a disconnected joint parts): they play once on hover or focus and loop gently while their tool is
+on. Motion follows the brand's rules (`docs/brand-assets.md`): checking plays only while a
 check really runs, Keep settles once only after the server kept the edit. Under reduced motion they hold still.

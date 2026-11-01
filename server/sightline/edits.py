@@ -2005,6 +2005,147 @@ def _move_item(model, item, m: np.ndarray) -> None:
         raise Unsupported(f"its type's shape is drawn as {item.is_a()}: ORCA cannot copy it for this element alone")
 
 
+# ----------------------------------------------------------------------------------------------------- join
+
+
+@dataclass
+class JoinPlan:
+    """How two straight segments' nearest ends meet (metres, world): `line` (A's end stretched `stretch_a` to B's) or
+    `bend` (both brought to where their axes meet, less `radius`, and a 90° bend fitting between)."""
+    kind: str
+    a: str
+    b: str
+    end_a: str              # "start" or "end": the cap of A that moves
+    end_b: str
+    stretch_a: float
+    stretch_b: float
+    radius: float = 0.0
+    corner: list[float] | None = None
+
+
+def _free_end_port(scene: IfcScene, element, point):
+    """The port at a segment's end (within 5 mm of `point`, world metres): refused when it is already joined."""
+    near = [p for p in ifcopenshell.util.system.get_ports(element) if p.ObjectPlacement is not None
+            and np.linalg.norm(scene.placement(p.GlobalId)[:3, 3] - point) <= 0.005]
+    if any(ifcopenshell.util.system.get_connected_port(p) is not None for p in near):
+        raise Unsupported(f"its end at {', '.join(f'{c:.2f}' for c in point)} is already joined: disconnect it first")
+    return near[0] if near else None
+
+
+def _section_across(scene: IfcScene, gid: str, side) -> tuple[float, float, bool]:
+    """A segment's section as (across the plane `side` is square to, in it, round), metres."""
+    e = scene.entity(gid)
+    _, _, item, _, _, px, py = _frames(scene, e)
+    s = scene.unit_scales[scene.index_of(gid)]
+    sx, sy = _profile_size(item.SweptArea)
+    round_ = item.SweptArea.is_a("IfcCircleProfileDef")
+    if round_ or abs(px @ side) > 0.999:
+        return sx * s, sy * s, round_
+    if abs(py @ side) > 0.999:
+        return sy * s, sx * s, round_
+    raise Unsupported("its section is turned to the bend: join it in line, or turn it first")
+
+
+def join_plan(scene: IfcScene, a_gid: str, b_gid: str) -> JoinPlan:
+    """How the nearest free ends of two straight segments meet, without editing anything (see `JoinPlan`)."""
+    if a_gid == b_gid:
+        raise Unsupported("join it to another segment")
+    if FITTING_CLASS.get(scene.entity(a_gid).is_a()) != FITTING_CLASS.get(scene.entity(b_gid).is_a()):
+        raise Unsupported("join segments of one kind (a duct to a duct, a pipe to a pipe)")
+    ra, rb = run_of(scene, a_gid), run_of(scene, b_gid)
+    da, db = np.asarray(ra.direction, float), np.asarray(rb.direction, float)
+    ends_a = {"start": (np.asarray(ra.start, float), -da), "end": (np.asarray(ra.end, float), da)}
+    ends_b = {"start": (np.asarray(rb.start, float), -db), "end": (np.asarray(rb.end, float), db)}
+    ea, eb = min(((x, y) for x in ends_a for y in ends_b),
+                 key=lambda k: float(np.linalg.norm(ends_a[k[0]][0] - ends_b[k[1]][0])))
+    (pa, ta), (pb, tb) = ends_a[ea], ends_b[eb]
+    _free_end_port(scene, scene.entity(a_gid), pa)
+    _free_end_port(scene, scene.entity(b_gid), pb)
+    cos = float(ta @ tb)
+    if cos < -np.cos(np.radians(1)):     # facing each other: one line?
+        gap = float((pb - pa) @ ta)
+        if np.linalg.norm((pb - pa) - ta * gap) > 0.005:
+            raise Unsupported("they are not on one line: offset one first, or join them square with a bend")
+        if gap < -0.001:
+            raise Unsupported("their ends overlap: shorten one first")
+        sa, sb = run_of(scene, a_gid), run_of(scene, b_gid)
+        if abs(sa.width_m - sb.width_m) > 0.001 or abs(sa.depth_m - sb.depth_m) > 0.001:
+            raise Unsupported("they are not the same size: a transition is needed between them")
+        return JoinPlan("line", a_gid, b_gid, ea, eb, gap, 0.0)
+    if cos > np.cos(np.radians(1)):
+        raise Unsupported("their ends point the same way: they run side by side, so offset one onto the other's line")
+    if abs(cos) > np.sin(np.radians(1)):
+        raise Unsupported("join ends in line or square to each other: other angles are not in this build")
+    # Square: where the two axes meet (closest points), within 5 mm of each other to be one plane.
+    w = pa - pb
+    m = np.array([[ta @ ta, -(ta @ tb)], [ta @ tb, -(tb @ tb)]])
+    s_, t_ = np.linalg.solve(m, [-(w @ ta), -(w @ tb)])
+    xa, xb = pa + ta * s_, pb + tb * t_
+    if np.linalg.norm(xa - xb) > 0.005:
+        raise Unsupported("their axes do not meet: they are not in one plane")
+    side = np.cross(ta, -tb)
+    side /= np.linalg.norm(side)
+    wa, ha, round_a = _section_across(scene, a_gid, side)
+    wb, hb, _ = _section_across(scene, b_gid, side)
+    if abs(wa - wb) > 0.001 or abs(ha - hb) > 0.001:
+        raise Unsupported("they are not the same size: a transition is needed between them")
+    radius = ha
+    if s_ - radius < -0.001 or t_ - radius < -0.001:
+        raise Unsupported(f"an end runs past the corner or within a bend's radius ({radius * 1000:.0f} mm) of it: "
+                          "pull it back first")
+    for gid, by in ((a_gid, s_ - radius), (b_gid, t_ - radius)):
+        if run_of(scene, gid).length_m + by < MIN_PIECE_M:
+            raise Unsupported(f"a piece would be under {MIN_PIECE_M * 1000:.0f} mm")
+    return JoinPlan("bend", a_gid, b_gid, ea, eb, float(s_ - radius), float(t_ - radius), float(radius),
+                    ((xa + xb) / 2).tolist())
+
+
+def join_segments(scene: IfcScene, plan: JoinPlan) -> list[str]:
+    """Make a `join_plan`: stretch the ends, add the bend, connect the ports. Returns the bend's GlobalId, if any."""
+    a, b = scene.entity(plan.a), scene.entity(plan.b)
+    model = scene.models[scene.index_of(plan.a)]
+    s = scene.unit_scales[scene.index_of(plan.a)]
+    if abs(plan.stretch_a) > 1e-6:
+        stretch(scene, plan.a, plan.end_a, plan.stretch_a, unique=True)
+    if abs(plan.stretch_b) > 1e-6:
+        stretch(scene, plan.b, plan.end_b, plan.stretch_b, unique=True)
+    ra, rb = run_of(scene, plan.a), run_of(scene, plan.b)
+    pa = np.asarray(ra.end if plan.end_a == "end" else ra.start, float)
+    pb = np.asarray(rb.end if plan.end_b == "end" else rb.start, float)
+    port_a, port_b = _free_end_port(scene, a, pa), _free_end_port(scene, b, pb)
+    made = []
+    if plan.kind == "bend":
+        ta = np.asarray(ra.direction, float) * (1 if plan.end_a == "end" else -1)
+        tb = np.asarray(rb.direction, float) * (1 if plan.end_b == "end" else -1)
+        side = np.cross(ta, -tb)
+        side /= np.linalg.norm(side)
+        width, depth, round_ = _section_across(scene, plan.a, side)
+        i, place, item, _, _, px, _ = _frames(scene, a)
+        part = _new_fitting(model, a, place, f"{a.Name or 'Segment'} bend", f"{a.Tag}-BJ" if a.Tag else None)
+        verts, tris = _bend_mesh(pa / s, ta, -tb, plan.radius / s, width / s, depth / s, round_)
+        local = (np.linalg.inv(place) @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
+        solid = model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]),
+                                                   None, True, [[int(x) + 1 for x in f] for f in tris], None)
+        body = next(r for r in a.Representation.Representations if r.RepresentationIdentifier == "Body")
+        part.Representation = model.createIfcProductDefinitionShape(None, None, [model.createIfcShapeRepresentation(
+            body.ContextOfItems, "Body", "Tessellation", [solid])])
+        for st in [x for it in body.Items for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
+            model.createIfcStyledItem(solid, st.Styles, st.Name)
+        p0, p1 = _ports(part)
+        px_b = _frames(scene, b)[5]
+        _place_port(model, p0, pa / s, s, -ta, px)     # as a chain's pieces: back out of its start, on out of its end
+        _place_port(model, p1, pb / s, s, -tb, px_b)   # (the bend leaves along -tb, into B's end: B's section axes)
+        if port_a is not None:
+            ifcopenshell.api.run("system.connect_port", model, port1=port_a, port2=p0, direction=port_a.FlowDirection or "NOTDEFINED")
+        if port_b is not None:
+            ifcopenshell.api.run("system.connect_port", model, port1=p1, port2=port_b, direction=p1.FlowDirection or "NOTDEFINED")
+        made.append(part.GlobalId)
+        scene.refresh_bounds([part.GlobalId])
+    elif port_a is not None and port_b is not None:
+        ifcopenshell.api.run("system.connect_port", model, port1=port_a, port2=port_b, direction=port_a.FlowDirection or "NOTDEFINED")
+    return made
+
+
 SECTION_DIMS = {   # an I, U, C, L or T section's overall width (profile x) and depth (profile y)
     "IfcIShapeProfileDef": ("OverallWidth", "OverallDepth"), "IfcUShapeProfileDef": ("FlangeWidth", "Depth"),
     "IfcCShapeProfileDef": ("Width", "Depth"), "IfcLShapeProfileDef": ("Width", "Depth"),

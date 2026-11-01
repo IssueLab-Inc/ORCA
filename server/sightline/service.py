@@ -1235,7 +1235,7 @@ def step_removed(scene: IfcScene, index: int, parts: dict) -> list[str]:
     return gone
 
 
-RESHAPES = {"push_pull", "clip", "void", "cut_by", "split", "remove_section"}   # hand edits that change a body's shape
+RESHAPES = {"push_pull", "clip", "void", "cut_by", "split", "remove_section", "offset", "join"}   # hand edits that change a body's shape
 
 
 def reshaped(journal) -> set[str]:

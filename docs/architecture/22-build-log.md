@@ -2003,3 +2003,15 @@ the file schema-valid; the first run found the old shape `unmap` left behind, no
 fixture uploaded, four edits kept (a wall thickened, a beam lengthened, a mapped fitting pushed, a wall split) and
 exported: W1 "WT-250 (ORCA)" 300 mm, W2 still 250 mm, the join on "W1 (part 2)", F1 its own extrusion and F2 still
 mapped, `ORCA_Edit` stamped, no schema issues; six edits undone leave the file valid with F1 mapped again.
+
+**Nov 1, MEP by hand: offset, join, disconnect** ([docs/editing-parity.md](../editing-parity.md), Tier 2). Three hand
+edits on the fix kinds' geometry: `offset` (a section of a level duct, pipe or tray up, down or sideways square to its
+run, with bends: `edits.apply_offset`), `join` (two free ends in line, or square with a 90° bend fitting:
+`edits.join_plan`, `join_segments`) and `disconnect` (a joint left open, kept as one). Edit tool keys F, N and X, with
+animated icons; Muse and MCP read the ops. Two fixes found on the way, both older than these tools: a point clicked for a
+split, a section or an offset snapped through the see-through context to the slab above a clash pair (now it snaps
+only to the element picked), and the tool's number fields refused values off their step (400 mm on a 10 mm step from
+1, a void's 300 mm on 10 from 5), so their Check did nothing (the forms are now `noValidate`; the server checks every
+op). Checked: 812 server tests pass (the four environment failures), 223 web tests, build clean; in Chromium on
+Northbank, clash #1 offset by hand 400 mm up over 2.48 m: "Clear · nearest 50 mm · clears 1 clash", kept as E1, the
+clash marked fixed ("no overlap here"), Ctrl+Z undid it.
