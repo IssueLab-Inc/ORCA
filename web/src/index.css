@@ -509,6 +509,16 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .clash-row { display: flex; align-items: center; gap: 6px; padding-left: 6px; border-radius: 6px; }
 .clash-row:hover { background: var(--bg); }
 .clash-row.pick { background: var(--accent-soft); }
+/* A row's quick actions (ReportList RowActions): on hover, keyboard focus, and the selected row (touch screens) */
+.clash-row { position: relative; }
+.row-actions { display: none; position: absolute; right: 0; top: 0; bottom: 0; align-items: center; gap: 2px; padding: 0 4px 0 18px;
+  border-radius: 0 6px 6px 0; background: linear-gradient(to right, transparent, var(--bg) 16px); }
+.clash-row.pick .row-actions { background: linear-gradient(to right, transparent, var(--accent-soft) 16px); }
+.clash-row:hover .row-actions, .clash-row:focus-within .row-actions, .clash-row.pick .row-actions { display: flex; }
+.row-actions .ibtn { width: 26px; height: 26px; color: var(--muted); }
+.row-actions .ibtn:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
+.row-actions .same { width: auto; padding: 0 5px; display: inline-flex; gap: 3px; }
+.row-actions .same .n { font-size: 11px; font-variant-numeric: tabular-nums; }
 .clash-main { all: unset; cursor: pointer; flex: 1; min-width: 0; display: grid; grid-template-columns: 12px auto 1fr auto auto; gap: 6px; align-items: baseline; padding: 6px 6px 6px 0; font-size: 12.5px; }
 .clash-name { font-weight: 600; }
 .clash-pair { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

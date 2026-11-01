@@ -1281,6 +1281,17 @@ export function App() {
     if (a && b && !proposal && !proposing) { golden.current = false; void propose(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, sceneId, matches, clash, a, b]);
+
+  // A row's Propose fixes (the list's quick actions): select it, then propose once its pair is picked, as the panel's
+  // button would. On the clash already proposed for, it only shows that proposal.
+  const [proposeNext, setProposeNext] = useState<string | null>(null);
+  function proposeFromList(c: ReportClash) {
+    if (busy || planning) return;
+    setTab("clash");
+    if (c.id === clash?.id && (proposal || proposing)) return;
+    setProposeNext(c.id);
+    selectClash(c);
+  }
   async function loadReport(get: () => Promise<Report>, what: string) {
     // Report replacement changes callback ownership; defer it until committed model reloads finish.
     if (busy) return;
@@ -2705,6 +2716,15 @@ export function App() {
   }
 
   const proposing = !!progress && progress.phase !== "done";
+  // A row's Propose fixes (proposeFromList): once the clash is selected and its own pair picked, propose.
+  useEffect(() => {
+    if (!proposeNext || clash?.id !== proposeNext || !matches) return;
+    const m = matches[clash.id];
+    if (!a || !b || a !== m?.a || b !== m?.b || proposal || proposing) return;   // its own pair, picked
+    setProposeNext(null);
+    void propose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposeNext, clash, matches, a, b, proposal, proposing]);
   // A proposal landed: bring its options into view in the Clash panel (once per result; the panel scrolls, not the page).
   const optionsHead = useRef<HTMLHeadingElement | null>(null);
   const landed = useRef<Proposal | null>(null);
@@ -3218,6 +3238,8 @@ export function App() {
               reviewed={reviewed} checked={checked} busy={planning || proposing} triage={listTriage} triageFilter={triageFilter}
               onCheck={(ids, on) => setChecked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; })}
               onFixChecked={() => runPlan({ clash_ids: [...checked] })}
+              onPropose={sceneId ? proposeFromList : undefined} onSetAside={(c, note) => review([c.id], "by_design", note)}
+              onFocus={(f) => setListFocus(f)}
               view={leftView} onView={setLeftView} insightsCount={insightsOpen}
               status={detecting && <p className="live-line"><i className="spinner" aria-hidden /> {detecting.phase}</p>}
               picker={report.origin === "sightline" && checks.length > 1 && <CheckPicker checks={checks} total={report.clashes.length}

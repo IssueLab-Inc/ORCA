@@ -1839,3 +1839,16 @@ page under SwiftShader and the proposal never finished) and `web/scripts/timelap
 the speed on each frame. Checked: the four runs made by the committed script against a local server with Muse Spark,
 each with one verified option (duct +400, tray +250, cold water +280: Rev04's heights; air line −150 under both
 rails); frames inspected; `tests/test_docs_map.py` passes.
+
+Quick actions on a clash row (Nov 1; owner: "when we hover on a clash in the list of clashes, i want to see control
+icons button to quickly propose fixes", "also when we hover, additional capability to see clashes with the same
+elements"; owner choices: Propose fixes, Mark as not a clash and Same elements, the last narrowing the list to clashes
+sharing either element; code `ReportList` `RowActions` / `sameElements`, App's `proposeFromList`):
+- **What:** hovering a row (or focusing it, or the selected row on a touch screen) shows icons over its right end:
+  Propose fixes (selects it and proposes once its own pair is picked; only when both elements are in the model and it
+  may need a fix), Mark as not a clash (as the panel's button), and the count of other clashes sharing an element with
+  it, which narrows the list to them with the list's focus chip ("Clashes with Supply air main L02 600x300 or Transfer
+  plate girder 1000 deep · 15").
+- **Checked:** `web/tests/row-actions.test.mjs` (3), 204 web tests, build clean; in Chromium on Northbank against a
+  local server, hovering #1 shows the three actions over the depth with the title still readable, and Same elements
+  shows the 15 clashes on the supply air main or the transfer girder.
