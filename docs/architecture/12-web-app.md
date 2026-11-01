@@ -63,7 +63,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `fixKinds.ts` | Every fix kind in words: label, edit text, clearance, framing, reviewer, host rows; rejected options as the next proposal's notes | `KIND_LABEL`, `kindLabel`, `editText`, `changeText`, `clearanceText`, `needsText`, `framePieces`, `hostRows`, `moveWords`, `reviewText`, `recEditText`, `optionKey`, `rejectionNotes`, `Rejection` | `App`, `Activity.tsx`, `PlanPanel.tsx` |
 | `links.ts` | The connection highlight's logic: index the graph, an element's direct links by kind, its run (Shift), the groups and colours to light, the hover label's counts | `indexGraph`, `linksOf`, `runOf`, `highlightGroups`, `countsText`, `LINK_COLOURS`, `LINK_WORDS`, `LINK_ORDER`, `Graph`, `LinkIndex`, `LinkKind` | `App`, `api.ts` (the `Graph` type) |
 | `layout.ts` | Desktop / tablet / phone by width, touch detection, sheet snapping, `follow()` | `useLayout`, `layoutFor`, `useCoarse`, `isCoarse`, `follow`, `nearestSnap`, `nextSnap`, `SNAPS`, `PHONE_MAX`, `TABLET_MAX` | `App`, `Sheet.tsx`, `About.tsx` |
-| `noClash.ts` | Why a reported clash needs no fix (same element, not physical, a touch, no overlap, by design) | `noClash`, `oneElement`, `sameWhy`, `NoClash` | `App`, `ReportList.tsx`, `ClashPanel.tsx` |
+| `noClash.ts` | Why a reported clash needs no fix (same element, not physical, a touch, no overlap, by design), and triage as shown (`shownVerdicts`: what is settled in this browser over the model's verdict; a fixed clash keeps its own) | `noClash`, `shownVerdicts`, `oneElement`, `sameWhy`, `NoClash` | `App`, `ReportList.tsx`, `ClashPanel.tsx` |
 | `pilot.ts` | Lets the fix agent drive the viewer while it works; its status names the idea on screen (`step`), for Workings | `Pilot`, `PilotStatus` | `App` |
 | `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules, the domain and the classes fixed in place (`setDomain`, `setStays`) | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
 | `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
@@ -540,6 +540,10 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
   both sides (`oneElement`), a non-physical side (`IfcSpace`, ports, openings, virtual elements, zones) or ORCA
   measuring it non-physical, a touch (Navisworks at most 1 mm and no ORCA overlap), no overlap in the open model, or
   triage `by_design` / `non_physical`. Used for the clash panel's "Mark as not a clash", list tags and `shownTriage`.
+  `shownVerdicts(clashes, triage, reviewed, matches, selected, measure, fixes)` is `shownTriage`: a mark or that
+  reading over a model verdict of real or model error, the live measure only for the selected clash, and a clash with
+  a kept fix keeping its verdict (so selecting it never drops it from a list filtered by verdict). The list keeps the
+  selected row under a verdict filter for the same reason.
 - **`clashImage.ts`:** `readClashImage(url)` reads a Navisworks picture on a 512 grid by colour (red A, green B, their
   blend or seam where they meet), cached per URL; `focusSquare` crops thumbnails to the meeting zone, `drawOverlay`
   draws outlines in the image dialog.

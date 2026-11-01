@@ -103,7 +103,7 @@ export async function appHost({ initial = {}, api: overrides = {}, effects = tru
   // The page's layout is none (not desktop, phone or tablet) unless a test asks for one: appHost({ layout }).
   const mocks = url(`${names.filter((name) => name !== "useLayout").map((name) => `export function ${name}(){return null;}`).join("\n")}
     export function useLayout(){return globalThis.__hostLayout ?? null;}
-    export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null;
+    export const TOUR={duct:[],joint:[],girder:""},TOUR_QUESTION="",CELL={ladder:[],post:[],pipe:[],rails:[]}; export const mm=(v)=>String(v); export const noClash=()=>null; export const shownVerdicts=(clashes,triage)=>triage;
     export const clashLabel=(c)=>"#"+c.number; export const inSlot=(s,n)=>n; export const usePanelSlots=()=>({}); export const STYLES=[{id:"shaded"},{id:"consistent"},{id:"edges"},{id:"hidden"},{id:"xray"}];
     export class Viewer {constructor(){return globalThis.${key}.viewer;}} export const serverPointToViewer=(v)=>v;
     export class Pilot { start(){} event(){} cancel(){globalThis.${key}.viewer.preview([]);} finish(fn){fn();} takeOver(){} }`);

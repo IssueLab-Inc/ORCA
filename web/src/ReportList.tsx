@@ -78,13 +78,16 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
       if (by === "open" && (fixes[c.id] || reviewed[c.id])) continue;
       if (by === "fixed" && !fixes[c.id]) continue;
       if (by === "reviewed" && (fixes[c.id] || !reviewed[c.id])) continue;
-      if (triageFilter && triage[c.id]?.verdict !== triageFilter) continue;
+      // The clash on screen stays while a verdict filter is on: selecting it can change its shown verdict (the live
+      // measure, a mark made from its panel), and a row never leaves the list from under the click. It goes with the
+      // next selection, as the other rows the filter leaves out.
+      if (triageFilter && c.id !== selected && triage[c.id]?.verdict !== triageFilter) continue;
       const text = [`#${c.number}`, c.title, c.name, c.ref, c.test, c.a.name, c.b.name, c.a.ifc_class, c.b.ifc_class, c.a.level, c.b.level, c.grid].join(" ").toLowerCase();
       if (q && !q.split(/\s+/).every((w) => text.includes(w))) continue;
       out.set(c.test, [...(out.get(c.test) ?? []), c]);
     }
     return [...out.entries()];
-  }, [report, matches, query, onlyLinked, by, fixes, reviewed, triage, triageFilter, focus]);
+  }, [report, matches, query, onlyLinked, by, fixes, reviewed, triage, triageFilter, focus, selected]);
 
   const root = useRef<HTMLDivElement>(null);
   // Bring the selected clash into view, also when something else (the chat) selected it.

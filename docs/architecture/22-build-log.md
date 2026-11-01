@@ -1839,3 +1839,15 @@ page under SwiftShader and the proposal never finished) and `web/scripts/timelap
 the speed on each frame. Checked: the four runs made by the committed script against a local server with Muse Spark,
 each with one verified option (duct +400, tray +250, cold water +280: Rev04's heights; air line −150 under both
 rails); frames inspected; `tests/test_docs_map.py` passes.
+
+A fixed clash left the clash list when selected (Nov 1; owner: "when i click on a fixed clash, the item disappears from
+the list of clashes. however, when i click on another item that isn't fixed, it shows up again"; code
+`noClash.shownVerdicts`, `ReportList`'s triage filter):
+- **Cause:** with the list filtered by a verdict ("real"), the selected clash alone gets ORCA's live measure, and for a
+  clash fixed in this session that measure finds no overlap; the list's verdict overlay then read it as "not a clash:
+  no overlap here" (by design), so the "real" filter dropped it until another clash took the measure. The clash panel
+  already left fixed clashes out of that reading; the list did not.
+- **Fix:** a clash with a kept fix keeps its triage verdict in the overlay (moved from App into
+  `noClash.shownVerdicts`, so it is tested with the real `noClash`), and the selected row stays while a verdict filter
+  is on, as selecting a clash can change its shown verdict.
+- **Checked:** `web/tests/clash-list.test.mjs` (2; the old reading fails the first), 203 web tests, build clean.

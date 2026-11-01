@@ -29,7 +29,7 @@ import { TriageCard, type TriageRun } from "./Triage";
 import { CheckPicker, DetectSetupCard, DetectSummary, type DetectProgress } from "./Detect";
 import { narrow, pruneFixes, sameClash } from "./checks";
 import { ReportList, clashLabel, mm, type Review } from "./ReportList";
-import { noClash } from "./noClash";
+import { noClash, shownVerdicts } from "./noClash";
 import { Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
 import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode, type VisualStyle } from "./viewer/Viewer";
@@ -993,28 +993,11 @@ export function App() {
     finally { v.showOptions(contextShapes(p), compare); }
   }
 
-  // Triage as shown: a model verdict of "real" or "model error" gives way to what is already settled in this browser
-  // (marked not a clash, or ORCA's own geometry: one element, not physical, a touch, no overlap here), and the
-  // model's reading is kept beside it.
-  const shownTriage = useMemo(() => {
-    if (!report) return triage;
-    const out: Record<string, TriageVerdict> = { ...triage };
-    for (const c of report.clashes) {
-      const t = triage[c.id];
-      if (!t || t.verdict === "by_design" || t.verdict === "non_physical") continue;
-      const rv = reviewed[c.id];
-      const nc = noClash(c, matches?.[c.id], c.id === clash?.id ? measure : null);
-      if (rv?.kind === "by_design" || nc) {
-        const basis: TriageVerdict["basis"] = rv?.kind === "by_design" ? "reviewed"
-          : nc!.label === "same element" ? "same_element" : nc!.label === "not physical" ? "non_physical" : nc!.label === "touch" ? "touch" : "no_overlap";
-        out[c.id] = { verdict: basis === "non_physical" ? "non_physical" : "by_design", severity: "none", responsible: "none",
-          action: "exclude_with_rule", source: "rule", basis,
-          understanding: rv?.kind === "by_design" ? `Marked not a clash: ${rv.note}` : `Not a clash: ${nc!.why}`,
-          model_reading: t.understanding ? `${t.verdict.replace("_", " ")}: ${t.understanding}` : undefined };
-      }
-    }
-    return out;
-  }, [report, triage, reviewed, matches, clash, measure]);
+  // Triage as shown (noClash.shownVerdicts): what is settled in this browser over the model's verdict; a fixed clash
+  // keeps its own.
+  const shownTriage = useMemo(() => (report
+    ? shownVerdicts(report.clashes, triage, reviewed, matches, clash?.id ?? null, measure, fixes) : triage),
+  [report, triage, reviewed, matches, clash, measure, fixes]);
 
   // A selected report clash that needs no fix (one element, not physical, a touch, no overlap, by design per triage):
   // the panel says why instead of offering a fix, unless someone asks for one anyway.
