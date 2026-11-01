@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
 import { patchModel, removeElements, ROOM, type ElementMesh } from "./patch";
+import { creased, CREASE_DEGREES } from "./normals";
 import { coplanar, pushMatrix, signedMm, toIfcAxes, toThree } from "./edit";
 import { ViewCube } from "./cube";
 import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
@@ -684,7 +685,7 @@ export class Viewer {
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(tri, 3));
-      edges = new THREE.EdgesGeometry(g, 25);
+      edges = new THREE.EdgesGeometry(g, CREASE_DEGREES);   // a line where the shading creases, not round a curve's facets
       g.dispose();
       this.edgeGeometry.set(gid, edges);
     }
@@ -891,10 +892,8 @@ export class Viewer {
       for (let i = 0; i < p.verts.length; i += 3) {
         pos[i] = p.verts[i]; pos[i + 1] = p.verts[i + 2]; pos[i + 2] = -p.verts[i + 1]; // IFC Z up → three.js Y up
       }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      g.setIndex(p.faces);
-      g.computeVertexNormals();
+      // The server welds a preview's corners: creased normals keep a box's faces flat and a round duct smooth.
+      const g = creased(pos, p.faces);
       const mesh = new THREE.Mesh(g, material);
       if (capped) mesh.layers.enable(CAP_LAYER.preview);
       this.overlay.add(mesh);
@@ -2606,7 +2605,8 @@ export class Viewer {
     return c;
   }
 
-  /** An element's feature edges (the outlines' 25° edges) in world space: its corners, midpoints and edges. */
+  /** An element's feature edges (the outlines' edges, sharper than the crease) in world space: its corners, midpoints
+   * and edges. */
   private edgesFor(gid: string): Candidates {
     const f = this.find(gid);
     if (!f) return { ends: [], mids: [], segs: [] };

@@ -3,7 +3,9 @@ import test from "node:test";
 import * as THREE from "three";
 import { appHost, compiled, option } from "./app-host.mjs";
 
-const { patchModel, makeRoom, toGeometry, removeElements } = await import(await compiled("../src/viewer/patch.ts", { three: import.meta.resolve("three") }));
+const three = import.meta.resolve("three");
+const { patchModel, makeRoom, toGeometry, removeElements } = await import(await compiled("../src/viewer/patch.ts",
+  { three, "./normals": await compiled("../src/viewer/normals.ts", { three }) }));
 
 /** A box as the server sends it: world metres, IFC Z up, unwelded (one quad of two triangles per face). */
 function box(gid, [x, y, z], [sx, sy, sz] = [1, 1, 1], extra = {}) {
@@ -61,6 +63,33 @@ test("a kept fix swaps an element's geometry on its own instance and adds new pi
   assert.equal(m.stats.elements, 5);
   assert.equal(m.mesh.instanceCount, 4);  // A, B, P1, P2: nothing lost growing the batch
   assert.equal(m.mesh.boundingSphere, null);  // recomputed on the next frame, so new pieces are not culled
+});
+
+test("a kept element shades like the model round it: a box stays flat, a round duct smooth", () => {
+  // A box with its corners shared by every face (no normals sent): each face keeps its own normal, not one averaged
+  // across the edge, which shades a flat face in streaks.
+  const welded = { global_id: "W", verts: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1],
+    faces: [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5] };
+  const g = toGeometry(welded), n = g.getAttribute("normal"), index = g.getIndex();
+  for (let i = 0; i < index.count; i++) {
+    const v = index.getX(i);
+    const axis = [n.getX(v), n.getY(v), n.getZ(v)].map(Math.abs).sort((a, b) => b - a);
+    assert.ok(axis[0] > 0.9999, `corner ${i} faces along an axis`);
+  }
+  // A 24-sided round along x, each facet its own (as the server sends a kept duct): normals point out from its axis.
+  const verts = [], faces = [];
+  const at = (k, x) => [x, Math.cos((2 * Math.PI * k) / 24), Math.sin((2 * Math.PI * k) / 24)];
+  for (let k = 0; k < 24; k++) {
+    const v = verts.length / 3;
+    verts.push(...at(k, 0), ...at(k, 2), ...at(k + 1, 2), ...at(k + 1, 0));
+    faces.push(v, v + 2, v + 1, v, v + 3, v + 2);   // wound outward
+  }
+  const round = toGeometry({ global_id: "R", verts, faces, normals: verts.map(() => 0) });
+  const p = round.getAttribute("position"), rn = round.getAttribute("normal");
+  for (let v = 0; v < p.count; v++) {
+    const out = [0, p.getY(v), p.getZ(v)], l = Math.hypot(...out);
+    assert.ok((rn.getY(v) * out[1] + rn.getZ(v) * out[2]) / l > 0.9999, `vertex ${v} points out from the axis`);
+  }
 });
 
 test("room is made by packing out what earlier patches freed before growing the batch", () => {

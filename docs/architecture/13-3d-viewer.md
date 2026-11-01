@@ -1,7 +1,7 @@
 # 13 · 3D viewer
 
-> **Covers:** `web/src/viewer/` (`Viewer.ts`, `ifcLoader.ts`, `patch.ts`, `views.ts`, `cube.ts`, `drawing.ts`,
-> `annotate.ts`), and the viewer's controls in `web/src/ViewerToolbar.tsx`, `web/src/ViewPanes.tsx`, `web/src/App.tsx`,
+> **Covers:** `web/src/viewer/` (`Viewer.ts`, `ifcLoader.ts`, `normals.ts`, `patch.ts`, `views.ts`, `cube.ts`,
+> `drawing.ts`, `annotate.ts`), and the viewer's controls in `web/src/ViewerToolbar.tsx`, `web/src/ViewPanes.tsx`, `web/src/App.tsx`,
 > `web/src/pilot.ts` · **Checked against code:** 2026-10-30 (`feature/drawing-views`) · **Deeper design:**
 > [docs/views.md](../views.md) (navigation, styles, visibility, drawing views), [docs/edits.md](../edits.md) ("Keeping
 > a fix"), [docs/show-it-built.md](../show-it-built.md) ("Capture"), [docs/mobile.md](../mobile.md) ("Touch")
@@ -21,7 +21,8 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 
 | File | What it is | Main exports | Used by |
 |---|---|---|---|
-| `viewer/ifcLoader.ts` | Parses one IFC with web-ifc into a solid batch and an optional see-through batch | `loadIfc`, `LoadedModel`, `LoadedElement` | `viewer/Viewer.ts`, `viewer/patch.ts` (types) |
+| `viewer/ifcLoader.ts` | Parses one IFC with web-ifc into a solid batch and an optional see-through batch | `loadIfc`, `CIRCLE_SEGMENTS`, `LoadedModel`, `LoadedElement` | `viewer/Viewer.ts`, `viewer/patch.ts` (types) |
+| `viewer/normals.ts` | Creased normals: smooth across facets within the crease angle, sharp beyond, a vertex split only where its triangles need different normals | `creaseNormals`, `creased`, `CREASE`, `CREASE_DEGREES`, type `Creased` | `viewer/ifcLoader.ts`, `viewer/patch.ts`, `viewer/Viewer.ts` |
 | `viewer/Viewer.ts` | The `Viewer` class: scene, camera, modes, focus, previews, picking, measuring, section box, captures | `Viewer`, `serverDeltaToViewer`, `serverPointToViewer`, `meetingZone`, types `Mesh`, `BuiltPiece`, `BuiltPasses`, `OptionShape`, `ViewMode`, `Preset`, `Side`, `Focus`, `Pick` | `App.tsx`, `pilot.ts`, `ViewerToolbar.tsx` (types), `web/spikes/built.ts` |
 | `viewer/views.ts` | The views' pure rules: layouts, plan view ranges and presets, clash defaults, section frames, compass, scales, view cube regions, camera history, visibility filters, the Esc steps | `paneRects`, `planRange`, `planPreset`, `planThrough`, `sectionFrame`, `sectionThrough`, `nearestScale`, `scaleBar`, `cubeRegion`, `CameraHistory`, `shownBy`, `escStep`, types `ViewSpec`, `Datums`, `Filters`, `Temporary`, `Pose` | `viewer/Viewer.ts`, `viewer/cube.ts`, `App.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
 | `viewer/cube.ts` | The view cube: a labelled cube in the 3D view's corner, click a face, edge or corner (26 views), drag to orbit, Home | `ViewCube`, `CUBE_PX` | `viewer/Viewer.ts` |
@@ -36,7 +37,8 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 - The server works in IFC axes: metres, **Z up**. web-ifc's placements (`flatTransformation`) and three.js are **Y
   up**. Everything the server sends is converted on the way in: `serverDeltaToViewer([dx, dy, dz])` returns
   `(dx, dz, −dy)` (`serverPointToViewer` is the same function, for the report's clash points), and server triangles
-  are flipped the same way by `addMeshes`, `meshBox` and `patch.toGeometry` (normals too).
+  are flipped the same way by `addMeshes`, `meshBox` and `patch.toGeometry`, which then make their own creased normals
+  (`normals.creased`; the server's normals are not used).
 - `COORDINATE_TO_ORIGIN` is off in `loadIfc`: federated discipline files share coordinates, and shifting each by its
   own offset would pull them apart.
 - The measure label reports in IFC axes: Δx from three's x, Δy from three's z, Δz from three's y, in mm.
@@ -52,7 +54,7 @@ flowchart TD
   each --> init["IfcAPI once, SetWasmPath /wasm/, Init"]
   init --> om["OpenModel with COORDINATE_TO_ORIGIN false"]
   om --> stream["StreamAllMeshes: one callback per element"]
-  stream --> geo["each placed geometry: vertex and index arrays, placement baked in, deinterleaved"]
+  stream --> geo["each placed geometry: positions and index, creased normals (once per geometry), placement baked in"]
   geo --> merge["merge the element's pieces, colour and alpha from its first piece"]
   merge --> split{"alpha below 0.99?"}
   split -->|"no"| solid["solid BatchedMesh, sized for all parts plus ROOM"]
@@ -69,6 +71,18 @@ flowchart TD
 - **One batch per file:** `BatchedMesh(parts + ROOM.instances, vertices + ROOM.vertices, indices + ROOM.indices)`.
   Each element is one instance (`addGeometry` then `addInstance`) whose matrix starts as identity, because the
   placement is baked into its geometry: a preview is then just a delta matrix.
+- **Curves and shading:** web-ifc draws a circle with `CIRCLE_SEGMENTS` (24; its default of 12 drew a round duct as a
+  dodecagon) and gives every facet a flat normal of its own, so a curve shaded as stripes and a see-through view
+  showed every facet. The loader keeps only web-ifc's positions and index and makes creased normals
+  (`normals.creaseNormals`): each vertex takes the corner-angle-weighted average of the facets meeting at its point
+  within `CREASE` (40°) of its own, so a round duct, a Revit fitting's facets (5–30°) and a STEP part shade as one
+  surface while a hexagon (60°) and a building's 85–90° edges stay sharp. A vertex is split only where its triangles
+  need different normals: +0.1–3% vertices on Snowdon Towers, none on Northbank. Each geometry is smoothed once per
+  parse in its own coordinates (a type placed many times, a fitting or a window, is done once) and placed per instance.
+  Measured Nov 1 at 24 segments (Node, web-ifc 0.0.77): Snowdon Towers' architecture 3.13M → 3.22M triangles with no
+  slower parse, HVAC and plumbing +16–19% triangles with no slower parse, structure 1.0M → 1.6M and about 2 s slower,
+  nearly all of it 14 rebar sweeps; smoothing costs about 0.35 µs a triangle (1.1 s on 3.2M, before the per-geometry
+  reuse).
 - **Colour and opacity** come from web-ifc's style colour on the element's first placed geometry (grey 0.8 when none)
   and are set per instance with a `Vector4` (`setColorAt`). Elements with alpha below `SEE_THROUGH` (0.99) go into
   the model's `glass` batch, drawn without depth writes so what is inside a zone, a mesh guard or glazing still shows.
@@ -127,7 +141,8 @@ flowchart TD
   `clipping` planes, so the section box cuts everything.
 - **Focus meshes share the batches' buffers:** `geometryOf` makes a `BufferGeometry` that points at the batch's
   position, normal and index attributes with a draw range for that element: no copy, already on the GPU. Only an
-  outline copies the element's triangles (`edgeGeometryOf`, an `EdgesGeometry` at 25°, cached). Because they share
+  outline copies the element's triangles (`edgeGeometryOf`, an `EdgesGeometry` at the crease angle,
+  `normals.CREASE_DEGREES` (40°), cached), so a line is drawn where the shading creases and never round a curve's facets. Because they share
   buffers, the focus cache is dropped (not disposed) whenever a batch is replaced, patched or grown
   (`clearFocusCache`).
 
@@ -221,6 +236,8 @@ every style.
   `App` colours an option red when it moves A, else green; a plan's fixes green; the pilot uses amber while checking
   and teal when clear ([12](12-web-app.md), `pilot.ts`), and so does a check pointed at in Workings, with its hits lit
   when it failed ([docs/workings.md](../workings.md)).
+- A preview's meshes (`addMeshes`) come welded from the server; they get creased normals (`normals.creased`), so a box
+  piece's faces stay flat (normals averaged across its corners shaded them in streaks) and a round piece shades smooth.
 
 ### Camera
 
@@ -420,7 +437,7 @@ second, which keeps a `Measurement` (two points in the model and the view it was
 from `App`) finds what the pointer snaps to; `measureCancel` drops a first point. `snapAt` routes by pane:
 
 - **3D** (`snap3d`): a pick (ghosts included); with snapping on, the element's feature edges (the outlines' `EdgesGeometry`
-  at 25°, in world space: `edgesFor`) give ends, midpoints and edges, and `measure.pickSnap` takes the nearest end within
+  at the crease angle, in world space: `edgesFor`) give ends, midpoints and edges, and `measure.pickSnap` takes the nearest end within
   12 px, else a midpoint, else an edge within 8 px, the edge point where the pointer's ray passes closest (exact in
   perspective); else the surface point. Nothing under the pointer: no point.
 - **A drawing** (`snapDrawing`): every point is laid on the drawing's plane (a plan's cut, a section's line, an
@@ -542,6 +559,8 @@ sequenceDiagram
   at it, then the old geometry deleted (deleting first would delete the instance). An element whose opacity moved it
   across the 0.99 line leaves its old batch and gets a new instance in the other.
 - **A new piece** (a split run's pieces, bends, a provision for void) gets its own instance with an identity matrix.
+- **Normals:** `toGeometry` makes creased normals from the triangles, as the loader does, so a kept element shades like
+  the model round it (a box flat, a round duct smooth), whatever the server welded.
 - **Colours:** a mesh's own style colour wins; an element already drawn otherwise keeps the colour it had; a new
   piece otherwise takes the colour of the element it was split from (`colourOf`, from the `origin` map: each GlobalId
   after the first in a `pieces` group maps to the first, the original); else grey 0.75.
@@ -630,6 +649,8 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 - A new view mode, preset, layer, material or render order, or a change to the A/B/purple colours.
 - A change to how `loadIfc` splits solid and see-through elements, reads colours, or to `COORDINATE_TO_ORIGIN`.
 - A change to the axis conversion (`serverDeltaToViewer`, `toGeometry`, `addMeshes`, `meshBox`).
+- A change to how curves are drawn or shaded: `CIRCLE_SEGMENTS`, the crease angle (`normals.CREASE`, shared with the
+  outlines and measuring's snap edges), or where normals are made.
 - A change to `patch.ts` (`ROOM`, `makeRoom`, colour rules) or to `App.applyToViewer`'s revision check.
 - A new `reach` use, or a change to the building values or shares.
 - A new keyboard shortcut, mouse or touch gesture, or toolbar control.

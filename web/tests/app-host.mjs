@@ -27,6 +27,7 @@ export async function compiled(path, dependencies = {}, labels = false) {
 export async function viewerModule(loader = "export const loadIfc=()=>null;") {
   const three = import.meta.resolve("three");
   const views = await compiled("../src/viewer/views.ts", { three });
+  const normals = await compiled("../src/viewer/normals.ts", { three });
   return import(await compiled("../src/viewer/Viewer.ts", {
     three, "three/examples/jsm/controls/OrbitControls.js": import.meta.resolve("three/examples/jsm/controls/OrbitControls.js"),
     "three/examples/jsm/utils/BufferGeometryUtils.js": import.meta.resolve("three/examples/jsm/utils/BufferGeometryUtils.js"),
@@ -34,7 +35,7 @@ export async function viewerModule(loader = "export const loadIfc=()=>null;") {
     "./drawing": await compiled("../src/viewer/drawing.ts", { three, "./views": views }),
     "./annotate": await compiled("../src/viewer/annotate.ts", { three, "./views": views }),
     "./measure": await compiled("../src/viewer/measure.ts", { three }),
-    "./patch": await compiled("../src/viewer/patch.ts", { three }),
+    "./normals": normals, "./patch": await compiled("../src/viewer/patch.ts", { three, "./normals": normals }),
     "./edit": await compiled("../src/viewer/edit.ts", { three }) }));
 }
 export function find(node, predicate) {
