@@ -973,7 +973,8 @@ def fix_apply(scene_id: str, body: FixApply):
     that trial makes is kept; one that no longer passes is a 409. A kind whose keeping depends on the requirements
     decides that in its `plans.KEEP` entry, never from what the page sends."""
     o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
-    if not isinstance(o.get("moved"), list) or not o["moved"]:
+    # A drain tilted about its fixture with its other end free translates nothing: it names the drain it tilts.
+    if not isinstance(o.get("moved"), list) or not (o["moved"] or (o.get("edit") or {}).get("tilts")):
         raise HTTPException(400, "The fix names no element.")
     return _one(_keep(scene_id, [o], "this fix", [body.clash_id]))
 

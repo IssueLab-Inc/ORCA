@@ -138,3 +138,20 @@ def test_a_tail_open_at_its_far_end_tilts_and_is_kept(drain):
     kept = plans.apply(ws, sid, [{**agent.asdict(option), "pair": [g["DT"], g["Basin WB"]]}])
     assert edits.run_of(scene, g["DT"]).end == pytest.approx([12.9, 9.0, 0.87], abs=1e-6)
     assert g["DT"] in kept["changed"]
+
+
+def test_the_page_keeps_a_tilt_that_translates_nothing(tmp_path, monkeypatch):
+    # The page's Accept goes through /fix/apply, which refused an option whose `moved` is empty ("names no element").
+    from fastapi.testclient import TestClient
+    from sightline import app as app_module
+    ws, sid, scene, g = _open(tmp_path)
+    monkeypatch.setattr(app_module, "ws", ws)
+    _, option = agent._try_move(scene, {"title": "drop the tail's end", "delta_m": [0.0, 0.0, -0.03]}, g["DT"], 0.025)
+    o = {**agent.asdict(option), "preview": None, "before": None, "pair": [g["DT"], g["Basin WB"]]}
+    assert o["moved"] == []
+    r = TestClient(app_module.app).post(f"/api/scenes/{sid}/fix/apply", json={"option": o})
+    assert r.status_code == 200, r.text
+    assert g["DT"] in r.json()["changed"]
+    assert edits.run_of(scene, g["DT"]).end == pytest.approx([12.9, 9.0, 0.87], abs=1e-6)
+    nothing = TestClient(app_module.app).post(f"/api/scenes/{sid}/fix/apply", json={"option": {**o, "edit": {}}})
+    assert nothing.status_code == 400 and "names no element" in nothing.json()["detail"]
