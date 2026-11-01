@@ -22,8 +22,14 @@ There are two slices, each its own branch and PR:
     `git -c user.name="Dodzi Agbenorku" -c user.email="50728220+dodzikojo@users.noreply.github.com" commit …`.
   - No co-author or session trailers.
   - PR bodies end with the "Generated with Claude Code" line, as earlier PRs do.
-- **The checkout is shared:** other sessions work in this checkout and in the `ORCA-viewer-quality` worktree. Run
-  `git status` and stage only your files. `voicebench/` is not ours.
+- **The checkout is shared, so work in a worktree.** Other sessions work in `C:\Users\dodzi\source\repos\ORCA` at the
+  same time. Never switch branches there.
+  - Make a sibling worktree for each slice: `git worktree add ../ORCA-add-models feature/add-remove-models-server`.
+  - Link `web/node_modules` with a junction (`cmd /c mklink /J web\node_modules
+    ..\ORCA\web\node_modules`) and copy `web/public/wasm`.
+  - When the worktree is done, unlink the junction (`cmd /c rmdir web\node_modules`) before
+    `git worktree remove`.
+  - Stage only your files. `voicebench/` is not ours.
 - **Freeze, Nov 3:** keep to the spec. Anything else goes in its "Not in this slice" list.
 - **Known failures on `main`:**
   - `test_detect.py`: two clash-point tests;
