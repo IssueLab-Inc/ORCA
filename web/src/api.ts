@@ -186,8 +186,11 @@ export interface EditCheck {
   new?: EditHit[]; worse?: EditHit[]; cleared?: { other: string; name: string; was_m: number }[];
   min_clearance_m?: number | null; checked_against?: number; changed?: string[]; created?: string[]; removed?: string[];
   open_ends?: string[]; preview?: Piece[] | null; before?: Piece[] | null;
-  /** A follow-up the check suggests: an align that meets the other face at one edge offers to clip it flush. */
-  offer?: EditOp | null;
+  /** A follow-up the check suggests, in a few words: an align that meets the other face at one edge offers to clip it
+   * flush; a move that cannot keep its joints offers to move it alone. */
+  offer?: EditOp | null; offer_words?: string;
+  /** The joints it leaves open (a pushed end whose neighbour cannot follow, a move alone): kept only when said. */
+  joints?: { element: string; name: string }[];
 }
 export type EditKept = { entry: JournalEntry | null; files: number[]; changed: string[]; created: string[]; removed: string[];
   pieces: string[]; check: EditCheck } & Patch;
@@ -869,9 +872,10 @@ export const api = {
   /** Try a hand edit without keeping it: what it clears and hits, its warnings, its preview; `blocked` says why not. */
   editCheck: (id: string, op: EditOp) => call<EditCheck>(`/scenes/${id}/edit/check`, { method: "POST", body: JSON.stringify({ op }) }),
   /** Keep a hand edit: checked again on the server (409 when it would make more clashes than accepted, or changed). */
-  editApply: (id: string, op: EditOp, key: string | undefined, acceptClashes: number, clash: { id: string | null; pair: string[] | null } | null) =>
+  editApply: (id: string, op: EditOp, key: string | undefined, acceptClashes: number, clash: { id: string | null; pair: string[] | null } | null,
+    acceptJoints = 0) =>
     call<EditKept>(`/scenes/${id}/edit/apply`, { method: "POST", body: JSON.stringify({ op, key: key ?? null, accept_clashes: acceptClashes,
-      clash_id: clash?.id ?? null, pair: clash?.pair ?? null }) }),
+      accept_joints: acceptJoints, clash_id: clash?.id ?? null, pair: clash?.pair ?? null }) }),
   /** The scene's edit log: every kept edit, oldest first, and whether undo and redo can go now. */
   journal: (id: string) => call<Journal>(`/scenes/${id}/edits`),
   journalCsvUrl: (id: string) => `/api/scenes/${id}/edits?format=csv`,

@@ -9,7 +9,7 @@ import { api, type EditCheck, type EditFace, type EditKept, type EditOp, type Jo
 import { AlignIcon, CheckingIcon, ClipIcon, CutByIcon, DeleteIcon, EditIcon, KeepIcon, LogIcon, MoveIcon, PushPullIcon,
   RemoveSectionIcon, SplitIcon, VoidIcon } from "./editIcons";
 import { EditPanel } from "./EditPanel";
-import { alignDistance, EDIT_TOOLS, faceRef, OFFER, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState, type EditToolId } from "./viewer/edit";
+import { alignDistance, EDIT_TOOLS, faceRef, keepLabel, OFFER, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState, type EditToolId } from "./viewer/edit";
 import type { FacePick, Viewer } from "./viewer/Viewer";
 
 const ICON: Record<EditToolId, LucideIcon> = { push_pull: PushPullIcon, align: AlignIcon, move: MoveIcon, void: VoidIcon,
@@ -186,7 +186,7 @@ export const EditTool = forwardRef<EditToolHandle, {
     if (!check || !sceneId || check.blocked || keeping) return;
     setKeeping(true);
     try {
-      const kept = await api.editApply(sceneId, check.op, check.key, check.clashes, clash);
+      const kept = await api.editApply(sceneId, check.op, check.key, check.clashes, clash, check.joints?.length ?? 0);
       viewer()?.preview([]);
       await onKept(kept);
       setSettled(Date.now());
@@ -430,15 +430,23 @@ export const EditTool = forwardRef<EditToolHandle, {
           </div>)}
         {check && !check.blocked && check.summary && <p className="edit-summary">{check.summary}</p>}
         {check?.warnings.map((w, i) => <p key={i} className="edit-warn">{w.text}{w.review ? <span className="chip">review: {w.review}</span> : null}</p>)}
-        {check?.offer?.op === "clip" && !check.blocked && READY.has("clip") && (
-          <div className="edit-offer-tools"><button type="button" className="ebtn btn small" onClick={() => offer("clip", check.offer!)}
-            data-tip="Clip its end to that face, so it is flush all along"><ClipIcon size={14} aria-hidden /> Clip it flush</button></div>)}
+        {check?.offer && (() => {   // another way: Clip it flush (another tool), Move it alone (this one, alone)
+          const o = check.offer, other = o.op !== tool && READY.has(o.op as EditToolId);
+          const Icon = o.op === "clip" ? ClipIcon : MoveIcon;
+          return (o.op === tool || other) && <div className="edit-offer-tools"><button type="button" className="ebtn btn small"
+            onClick={() => other ? offer(o.op as EditToolId, o) : void run(o)}
+            data-tip={o.op === "clip" ? "Clip its end to that face, so it is flush all along" : "Move this element only: its joints are left open, for you to keep"}>
+            <Icon size={14} aria-hidden /> {check.offer_words ?? OFFER[o.op as EditToolId] ?? "Try it"}</button></div>;
+        })()}
+        {check && !check.blocked && (check.joints?.length ?? 0) > 0 && (
+          <p className="edit-warn">Leaves {check.joints!.length === 1 ? "its joint" : `${check.joints!.length} joints`} open: {check.joints!.map((j) => j.name).join(", ")}</p>)}
         {check && !check.blocked && (
           <div className="edit-actions">
-            <button type="button" className={`ebtn btn ${check.clashes ? "danger" : "primary"}`} disabled={keeping || checking} onClick={() => void keep()}
-              data-tip={check.clashes ? "Keep it anyway: it is not verified, and its clashes join the list" : "Keep it in the model (checked again first)"}>
+            <button type="button" className={`ebtn btn ${check.clashes || check.joints?.length ? "danger" : "primary"}`} disabled={keeping || checking} onClick={() => void keep()}
+              data-tip={check.clashes || check.joints?.length ? "Keep it anyway: it is not verified; its clashes join the list and its open joints are logged for review"
+                : "Keep it in the model (checked again first)"}>
               {tool === "delete" ? <DeleteIcon size={15} aria-hidden /> : <KeepIcon size={15} aria-hidden />}
-              {" "}{keeping ? "Keeping…" : check.clashes ? `Keep with ${check.clashes} clash${check.clashes === 1 ? "" : "es"}` : tool === "delete" ? "Delete it" : "Keep"}</button>
+              {" "}{keeping ? "Keeping…" : keepLabel(check, tool === "delete")}</button>
             <button type="button" className="btn small ghost" onClick={() => { const v = viewer(); v?.preview([]); setCheck(null); }}>Cancel</button>
           </div>)}
         {showLog && (journal?.entries.length ?? 0) > 0 && (

@@ -102,6 +102,14 @@ export function pointDistance(pa: ArrayLike<number>, na: ArrayLike<number>, p: A
   return t - gap * (t >= 0 ? 1 : -1);
 }
 
+/** The keep button's words for a check: "Keep", or what it is kept with ("Keep with 1 clash · 1 open joint"). */
+export function keepLabel(c: { clashes: number; joints?: unknown[] | null }, deleting = false): string {
+  const n = c.clashes, j = c.joints?.length ?? 0;
+  if (!n && !j) return deleting ? "Delete it" : "Keep";
+  const parts = [n ? `${n} clash${n === 1 ? "" : "es"}` : "", j ? `${j} open joint${j === 1 ? "" : "s"}` : ""].filter(Boolean);
+  return `Keep with ${parts.join(" · ")}`;
+}
+
 /** A snapped point as an align target, in words. */
 export const SNAP_WORDS: Record<string, string> = { end: "corner", mid: "midpoint of an edge", edge: "edge" };
 

@@ -74,3 +74,11 @@ test("a face aligns to a point through its plane, the gap short of it", () => {
   assert.ok(Math.abs(edit.pointDistance([1, 5, 3.2], [0, 0, 1], [0, 0, 3.0], 0.05) + 0.15) < 1e-12);
   assert.equal(edit.SNAP_WORDS.end, "corner");
 });
+
+test("the keep button says what an edit is kept with: clashes and open joints", () => {
+  assert.equal(edit.keepLabel({ clashes: 0 }), "Keep");
+  assert.equal(edit.keepLabel({ clashes: 0 }, true), "Delete it");
+  assert.equal(edit.keepLabel({ clashes: 2, joints: [] }), "Keep with 2 clashes");
+  assert.equal(edit.keepLabel({ clashes: 1, joints: [{}] }), "Keep with 1 clash · 1 open joint");
+  assert.equal(edit.keepLabel({ clashes: 0, joints: [{}, {}] }), "Keep with 2 open joints");
+});

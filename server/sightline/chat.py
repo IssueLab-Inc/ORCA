@@ -200,7 +200,8 @@ TOOLS = [
         {"op": {"type": "object"}}, ["op"]),
     _fn("edit_keep", "Keep the hand edit you checked last, only when the user's own latest message says to keep it "
         "(keep it, apply it, do it, yes). When it makes clashes, only when they said to keep it with the clashes; pass "
-        "accept_clashes = that number. Never on your own initiative.", {"accept_clashes": {"type": "integer"}}),
+        "accept_clashes = that number. When its check lists joints it leaves open, only when they said to keep it with "
+        "the open joint. Never on your own initiative.", {"accept_clashes": {"type": "integer"}}),
     _fn("undo_edit", "Undo the newest kept edit (a hand edit or a fix), only when the user's own latest message asks to "
         "undo it."),
     _fn("list_edits", "Every edit kept to the model, newest last: who kept it, what it did, the clash it is for and the "
@@ -541,10 +542,14 @@ class Chat:
             if r["clashes"] and (n < r["clashes"] or not re.search(r"clash", text, re.I)):
                 return {"error": f"it makes {r['clashes']} clash(es): keep it only if the user says to keep it with the clashes"}, \
                     "waiting for the user", []
+            joints = len(r.get("joints") or [])
+            if joints and not re.search(r"joint", text, re.I):
+                return {"error": f"it leaves {joints} joint(s) open: keep it only if the user says to keep it with the open "
+                                 "joint"}, "waiting for the user", []
             scene = ws.scene(sid)
             with ws.lock:
                 before = scene.revision
-                kept = manual.apply(ws, sid, r["op"], key=r.get("key"), accept_clashes=n, source="muse",
+                kept = manual.apply(ws, sid, r["op"], key=r.get("key"), accept_clashes=n, accept_joints=joints, source="muse",
                                     clash_id=ctx.clash_id, pair=self._pair(ctx))
                 patch = ws.patch(sid, kept["changed"], before, removed=kept["removed"])
             self.pending.pop(session, None)

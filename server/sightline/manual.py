@@ -43,6 +43,14 @@ class NotKept(ValueError):
     """The edit was not kept: refused, changed since its check, or it would make clashes nobody accepted."""
 
 
+class Offered(edits.Unsupported):
+    """Refused as asked, with another way the page can offer (an op): "Move it alone"."""
+
+    def __init__(self, message: str, offer: dict, words: str):
+        super().__init__(message)
+        self.offer, self.words = offer, words
+
+
 @dataclass
 class Plan:
     op: str
@@ -151,6 +159,11 @@ def plane_point(scene: IfcScene, gid: str, face: faces.Face) -> np.ndarray:
 
 def _ports_at(scene: IfcScene, gid: str, point, normal) -> list[str]:
     """Elements joined to `gid` through a port on the plane of this face."""
+    return [peer for _, _, peer in _joints_at(scene, gid, point, normal)]
+
+
+def _joints_at(scene: IfcScene, gid: str, point, normal) -> list[tuple[object, object, str]]:
+    """The joints on the plane of this face: (its port, the port it joins, the element that port is on)."""
     out = []
     P, N = np.asarray(point, float), np.asarray(normal, float)
     for port in ifcopenshell.util.system.get_ports(scene.entity(gid)):
@@ -161,8 +174,37 @@ def _ports_at(scene: IfcScene, gid: str, point, normal) -> list[str]:
         if abs((at - P) @ N) <= 0.005:
             owner = ifcopenshell.util.system.get_port_element(other)
             if owner is not None:
-                out.append(owner.GlobalId)
+                out.append((port, other, owner.GlobalId))
     return out
+
+
+def _follows(scene: IfcScene, gid: str, face: faces.Face, peer: str, other) -> str | None:
+    """Which cap of `peer` stretches with this face so their joint moves and holds: a straight segment of one
+    extrusion on the face's axis, joined at its start or end cap. None: it cannot follow (a fitting, a branch)."""
+    if face.kind != "cap" or faces.split_id(face.id)[0] is not None:
+        return None
+    sol = edits.solids(scene, scene.entity(peer))
+    if len(sol) != 1 or sol[0].kind != "extrusion" or not scene.entity(peer).is_a("IfcFlowSegment"):
+        return None
+    try:
+        run = edits.run_of(scene, peer)
+    except (edits.Unsupported, AttributeError):
+        return None
+    if abs(np.asarray(run.direction) @ np.asarray(face.normal)) < 0.999:
+        return None
+    at = scene.placement(other.GlobalId)[:3, 3]
+    if np.linalg.norm(at - np.asarray(run.start)) <= 0.005:
+        return "start"
+    if np.linalg.norm(at - np.asarray(run.end)) <= 0.005:
+        return "end"
+    return None
+
+
+def _open_joint_words(scene: IfcScene, gid: str, peers: list[dict]) -> dict:
+    names = ", ".join(p["name"] for p in peers[:3])
+    return {"rule": "open_joint", "review": "services",
+            "text": f"{label(scene, gid)} is no longer joined to {names}: its designer must join or cap "
+                    f"{'it' if len(peers) == 1 else 'them'}"}
 
 
 def _openings(element) -> list:
@@ -215,11 +257,18 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     by = _num(op, "by_m")
     if abs(by) < LEAST_M:
         raise edits.Unsupported("push or pull a face at least 0.5 mm")
-    if face.kind in ("cap", "plane"):
-        joined = _ports_at(scene, gid, plane_point(scene, gid, face), face.normal)
-        if joined:
-            raise edits.Unsupported(f"its {face.name} is joined to {label(scene, joined[0])}: move the run instead, "
-                                    "or split it first")
+    follow, opened = [], []
+    if face.kind in ("cap", "plane", "side"):
+        for port, other, peer in _joints_at(scene, gid, plane_point(scene, gid, face), face.normal):
+            cap = None if op.get("alone") else _follows(scene, gid, face, peer, other)
+            if cap is not None:   # a straight segment on its axis: it stretches too, and the joint moves and holds
+                length = edits.run_of(scene, peer).length_m
+                if length - by < MIN_HAND_M - 1e-9:
+                    raise edits.Unsupported(f"{label(scene, peer)} it is joined to would be under "
+                                            f"{MIN_HAND_M * 1000:.0f} mm: move the run instead")
+                follow.append((peer, cap))
+            else:                 # anything else: the joint is left open, kept only when the person says so
+                opened.append({"element": peer, "name": label(scene, peer), "port": port.GlobalId})
     size = face.size_m
     after = None if size is None else size + (2 * by if face.kind == "radial" else by)
     what = {"cap": "long" if face.name.endswith("end") else "thick" if face.name.endswith("face") else "deep",
@@ -239,8 +288,16 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     if face.kind == "radial" and scene.entity(gid).is_a("IfcFlowSegment"):
         warn.append({"rule": "size", "review": "services",
                      "text": f"{label(scene, gid)} changes size: its designer must confirm what it carries"})
-    return Plan("push_pull", gid, params, {scene.index_of(gid)}, [gid],
-                f"{face.name} of {label(scene, gid)} pushed {change}{sizes}", "resize", abs(by), face=face, warnings=warn)
+    if op.get("alone"):
+        params["alone"] = True
+    if opened:
+        warn.append(_open_joint_words(scene, gid, opened))
+    kept = f"; {', '.join(label(scene, p) for p, _ in follow)} {'shorter' if by > 0 else 'longer'} so the joint holds" if follow else ""
+    plan = Plan("push_pull", gid, params, {scene.index_of(gid), *(scene.index_of(p) for p, _ in follow)},
+                [gid, *(p for p, _ in follow)], f"{face.name} of {label(scene, gid)} pushed {change}{sizes}{kept}", "resize",
+                abs(by), gated=[gid, *(p for p, _ in follow)], face=face, warnings=warn)
+    plan.extra.update(follow=follow, open_joints=opened)
+    return plan
 
 
 def _opening_corners(scene: IfcScene, gid: str) -> list[np.ndarray]:
@@ -305,7 +362,15 @@ def _make_push(scene: IfcScene, plan: Plan) -> Made:
         edits.move_clip(scene, gid, int(own.split(":")[1]), by, item=k, least_m=MIN_HAND_M)
     else:
         raise edits.Unsupported(f"its {face.name} cannot be pushed or pulled")
-    return Made(changed=[gid])
+    for peer, cap in plan.extra.get("follow", []):   # its joined segment's end goes the same way: the joint holds
+        edits.stretch(scene, peer, cap, -by, **hand)
+    model = scene.models[scene.index_of(gid)]
+    for j in plan.extra.get("open_joints", []):
+        port = model.by_guid(j["port"])
+        if ifcopenshell.util.system.get_connected_port(port) is not None:
+            ifcopenshell.api.run("system.disconnect_port", model, port=port)
+    return Made(changed=[gid, *(p for p, _ in plan.extra.get("follow", []))],
+                open_ends=[gid, *(j["element"] for j in plan.extra.get("open_joints", []))] if plan.extra.get("open_joints") else [])
 
 
 # ----------------------------------------------------------------------------------------------------- move
@@ -319,20 +384,39 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
         delta = _vec(op.get("to"), "to") - _vec(op.get("from"), "from")
     if np.linalg.norm(delta) < LEAST_M:
         raise edits.Unsupported("move it at least 0.5 mm")
-    run = connections.run(scene, gid) if not op.get("alone") else [gid]
+    params = {"op": "move", "element": gid, "delta_m": [round(float(x), 6) for x in delta]}
+    words = connections.move_words(delta.tolist())
+    if op.get("alone"):   # the element only: every joint it has is left open, kept only when the person says so
+        opened = []
+        for port in ifcopenshell.util.system.get_ports(scene.entity(gid)):
+            other = ifcopenshell.util.system.get_connected_port(port)
+            owner = ifcopenshell.util.system.get_port_element(other) if other is not None else None
+            if owner is not None:
+                opened.append({"element": owner.GlobalId, "name": label(scene, owner.GlobalId), "port": port.GlobalId})
+        warn = structure_warnings(scene, gid, "the move") + ([_open_joint_words(scene, gid, opened)] if opened else [])
+        return Plan("move", gid, {**params, "alone": True}, {scene.index_of(gid)}, [gid],
+                    f"{label(scene, gid)} moved {words} on its own", "move", float(np.linalg.norm(delta)), gated=[gid],
+                    warnings=warn, extra={"plan": connections.MovePlan([gid], [float(x) for x in delta]), "open_joints": opened})
+    run = connections.run(scene, gid)
     plan = connections.plan_move(scene, run, delta.tolist())
     if not plan.ok:
-        raise edits.Unsupported(f"it cannot keep its joints: {plan.refused}")
+        raise Offered(f"it cannot keep its joints: {plan.refused}", {**params, "alone": True}, "Move it alone")
     changed = plan.changed()
     with_run = f" with its run ({len(run)} pieces)" if len(run) > 1 else ""
-    return Plan("move", gid, {"op": "move", "element": gid, "delta_m": [round(float(x), 6) for x in delta]},
-                {scene.index_of(g) for g in changed}, changed,
-                f"{label(scene, gid)} moved {connections.move_words(delta.tolist())}{with_run}", "move",
+    return Plan("move", gid, params, {scene.index_of(g) for g in changed}, changed,
+                f"{label(scene, gid)} moved {words}{with_run}", "move",
                 float(np.linalg.norm(delta)), gated=list(run), warnings=structure_warnings(scene, gid, "the move"),
                 extra={"plan": plan})
 
 
 def _make_move(scene: IfcScene, plan: Plan) -> Made:
+    if plan.params.get("alone"):
+        model = scene.models[scene.index_of(plan.element)]
+        for j in plan.extra.get("open_joints", []):
+            ifcopenshell.api.run("system.disconnect_port", model, port=model.by_guid(j["port"]))
+        scene.translate([plan.element], tuple(plan.params["delta_m"]))
+        opened = plan.extra.get("open_joints", [])
+        return Made(changed=[plan.element], open_ends=[plan.element, *(j["element"] for j in opened)] if opened else [])
     mp = connections.plan_move(scene, plan.extra["plan"].moved, plan.params["delta_m"])
     if not mp.ok:
         raise edits.Unsupported(f"it cannot keep its joints: {mp.refused}")
@@ -391,16 +475,20 @@ def _resolve_align(scene: IfcScene, op: dict) -> Plan:
     if how == "stretch":
         if "push_pull" not in face.allows:
             raise edits.Unsupported(f"its {face.name} cannot be stretched: move it instead")
-        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t})
+        plan = _resolve_push(scene, {"op": "push_pull", "element": gid, "face": spec(face), "by_m": t, "alone": op.get("alone")})
         plan.summary = f"{face.name} of {label(scene, gid)} stretched {_mm(t)} {'out' if t > 0 else 'in'}, {where} the {target}{meets}"
     elif how == "move":
-        plan = _resolve_move(scene, {"op": "move", "element": gid, "delta_m": (na * t).tolist()})
+        try:
+            plan = _resolve_move(scene, {"op": "move", "element": gid, "delta_m": (na * t).tolist(), "alone": op.get("alone")})
+        except Offered as e:   # the align itself, alone
+            raise Offered(str(e), {**op, "alone": True}, e.words) from None
         plan.summary = f"{label(scene, gid)} moved {_mm(t)} so its {face.name} is {where} the {target}{meets}"
     else:
         raise ValueError("how is stretch or move")
     plan.op = "align"
     plan.params = {"op": "align", "element": gid, "face": spec(face), "to": op.get("to"), "gap_m": gap, "how": how,
-                   "by_m": t, **({"delta_m": plan.params["delta_m"]} if how == "move" else {})}
+                   "by_m": t, **({"delta_m": plan.params["delta_m"]} if how == "move" else {}),
+                   **({"alone": True} if op.get("alone") else {})}
     if other:
         plan.touching.add(other)
     plan.extra["how"] = how
@@ -774,13 +862,17 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
     with ws.lock:
         try:
             plan = resolve(scene, op)
+        except Offered as e:
+            return {"op": op, "passed": False, "blocked": str(e), "warnings": [], "clashes": 0, "offer": e.offer,
+                    "offer_words": e.words}
         except (edits.Unsupported, KeyError, ValueError, TypeError) as e:
             return {"op": op, "passed": False, "blocked": str(e).strip("'\""), "warnings": [], "clashes": 0}
         refused = gate(scene, plan)
         base = {"op": plan.params, "summary": plan.summary,
                 "face": {**plan.face.to_dict(), "label": label(scene, plan.element)} if plan.face else None,
                 "warnings": plan.warnings, "revision": scene.revision, "key": key_of(plan.params, scene.revision),
-                "targets": plan.targets, **({"offer": plan.extra["offer"]} if plan.extra.get("offer") else {})}
+                "targets": plan.targets, "joints": [{k: j[k] for k in ("element", "name")} for j in plan.extra.get("open_joints", [])],
+                **({"offer": plan.extra["offer"], "offer_words": "Clip it flush"} if plan.extra.get("offer") else {})}
         if refused:
             return {**base, "passed": False, "blocked": refused, "clashes": 0}
         clearance = ws.clearance(scene_id)
@@ -806,7 +898,7 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
         cleared = [{"other": g, "name": label(scene, g) if _exists(scene, g) else g, "was_m": before[g].distance_m}
                    for g in before if g not in still and before[g].kind == "collision"]
         clashes = [h for h in new + worse if h.kind == "collision"]
-        return {**base, "passed": not clashes, "blocked": None, "clashes": len(clashes),
+        return {**base, "passed": not clashes and not base["joints"], "blocked": None, "clashes": len(clashes),
                 "close": len([h for h in new + worse if h.kind != "collision"]),
                 "new": [_hit(scene, h) for h in new], "worse": [_hit(scene, h) for h in worse], "cleared": cleared,
                 "min_clearance_m": v.min_clearance_m, "checked_against": v.checked_against,
@@ -815,10 +907,12 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
 
 
 def apply(ws, scene_id: str, op: dict, *, key: str | None = None, accept_clashes: int = 0, source: str = "you",
-          actor: str | None = None, clash_id: str | None = None, pair: list[str] | None = None) -> dict:
+          actor: str | None = None, clash_id: str | None = None, pair: list[str] | None = None,
+          accept_joints: int = 0) -> dict:
     """Keep a hand edit: checked again first, here and now; refused (NotKept) when the requirements forbid it, the
-    model changed since its check (`key`), or it would make more clashes than `accept_clashes`. Kept through the edit
-    log, tied to the clash (`clash_id`, `pair`) and to any fix it follows; the clash is measured again after."""
+    model changed since its check (`key`), or it would make more clashes than `accept_clashes` or leave more joints
+    open than `accept_joints`. Kept through the edit log, tied to the clash (`clash_id`, `pair`) and to any fix it
+    follows; the clash is measured again after."""
     scene = ws.scene(scene_id)
     log = ws.journal(scene_id)
     with ws.lock:
@@ -831,6 +925,10 @@ def apply(ws, scene_id: str, op: dict, *, key: str | None = None, accept_clashes
             n = r["clashes"]
             raise NotKept(f"it would make {n} clash{'es' if n > 1 else ''} ({', '.join(h['name'] for h in r['new'][:3])}): "
                           f"keep it with {n} clash{'es' if n > 1 else ''} to go ahead")
+        if len(r["joints"]) > max(int(accept_joints or 0), 0):
+            n = len(r["joints"])
+            raise NotKept(f"it would leave {n} joint{'s' if n > 1 else ''} open ({', '.join(j['name'] for j in r['joints'][:3])}): "
+                          f"keep it with {n} open joint{'s' if n > 1 else ''} to go ahead")
         plan = resolve(scene, op)
         clashes = [{"id": clash_id, "pair": list(pair)}] if pair and len(pair) == 2 else (
             [{"id": clash_id, "pair": None}] if clash_id else [])
@@ -842,7 +940,8 @@ def apply(ws, scene_id: str, op: dict, *, key: str | None = None, accept_clashes
             rec.changed, rec.summary, rec.title = list(made.changed), plan.summary, plan.summary
             rec.params, rec.clashes, rec.warnings = plan.params, clashes, list(r["warnings"])
             rec.check = {"verified": False, "cleared": r["cleared"], "new": r["new"], "worse": r["worse"],
-                         "accepted_clashes": r["clashes"], "min_clearance_m": r["min_clearance_m"]}
+                         "accepted_clashes": r["clashes"], "min_clearance_m": r["min_clearance_m"],
+                         **({"open_joints": r["joints"]} if r["joints"] else {})}
         entry = rec.entry
         if entry is not None:
             entry.status = _status(scene, log, entry)

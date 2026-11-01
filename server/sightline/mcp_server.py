@@ -575,19 +575,21 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         return {k: v for k, v in r.items() if k not in ("preview", "before", "targets")}
 
     @tool()
-    def apply_edit(op: dict, ctx: Context, accept_clashes: int = 0) -> dict:
-        """Keep a hand edit in the model: checked again first, refused when the requirements forbid it or it would make
-        more clashes than `accept_clashes` (keep it with them only when the person asked). It goes in the edit log as
-        the agent's, and the person's page redraws it. Export with export_models."""
-        link = call(ctx, "apply_edit", {"op": op.get("op") if isinstance(op, dict) else None, "accept_clashes": accept_clashes})
+    def apply_edit(op: dict, ctx: Context, accept_clashes: int = 0, accept_joints: int = 0) -> dict:
+        """Keep a hand edit in the model: checked again first, refused when the requirements forbid it, it would make
+        more clashes than `accept_clashes`, or leave more joints open than `accept_joints` (its check lists them under
+        `joints`; keep it with them only when the person asked). It goes in the edit log as the agent's, and the
+        person's page redraws it. Export with export_models."""
+        link = call(ctx, "apply_edit", {"op": op.get("op") if isinstance(op, dict) else None, "accept_clashes": accept_clashes,
+                                        "accept_joints": accept_joints})
         sid = link.ctx.scene_id
         if not sid:
             raise LookupError("no models are open on this link")
         with W().lock:
             before = W().scene(sid).revision
             try:
-                kept = manual.apply(W(), sid, op, accept_clashes=accept_clashes, source="agent", actor=f"agent link {link.id}",
-                                    clash_id=link.ctx.clash_id)
+                kept = manual.apply(W(), sid, op, accept_clashes=accept_clashes, accept_joints=accept_joints, source="agent",
+                                    actor=f"agent link {link.id}", clash_id=link.ctx.clash_id)
             except manual.NotKept as e:
                 raise ValueError(str(e)) from e
             patch = W().patch(sid, kept["changed"], before, removed=kept["removed"])

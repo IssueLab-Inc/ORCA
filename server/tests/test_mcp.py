@@ -313,3 +313,5 @@ def test_an_agent_edits_by_hand_through_the_log_and_the_page_follows(server):
     tools = asyncio.run(mcp_server.build(Workspace()).list_tools())
     read_only = {t.name for t in tools if t.annotations and t.annotations.read_only_hint}
     assert {"list_faces", "check_edit", "list_edits"} <= read_only and not read_only & {"apply_edit", "undo_edit", "redo_edit"}
+    apply_tool = next(t for t in tools if t.name == "apply_edit")
+    assert {"accept_clashes", "accept_joints"} <= set(apply_tool.input_schema["properties"])

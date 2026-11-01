@@ -955,6 +955,7 @@ class EditBody(BaseModel):
     op: dict
     key: str | None = None             # the check's: refused (409) when the model changed since
     accept_clashes: int = 0            # how many new clashes the person accepted ("Keep with N clashes")
+    accept_joints: int = 0             # how many joints it may leave open ("Keep with N open joints")
     clash_id: str | None = None        # the clash on screen when it was made: the log ties the edit to it
     pair: list[str] | None = None      # that clash's two elements
 
@@ -991,10 +992,12 @@ def edit_check(scene_id: str, body: EditBody):
 @app.post("/api/scenes/{scene_id}/edit/apply")
 def edit_apply(scene_id: str, body: EditBody):
     """Keep a hand edit (manual.apply): checked again here first; 409 when the requirements refuse it, the model
-    changed since its check, or it would make more clashes than `accept_clashes`. Logged, then the patch."""
+    changed since its check, or it would make more clashes than `accept_clashes` or leave more joints open than
+    `accept_joints`. Logged, then the patch."""
     try:
         return _with_patch(_scene(scene_id), lambda: manual.apply(ws, scene_id, body.op, key=body.key,
                                                                   accept_clashes=body.accept_clashes,
+                                                                  accept_joints=body.accept_joints,
                                                                   clash_id=body.clash_id, pair=body.pair))
     except manual.NotKept as e:
         raise HTTPException(409, str(e))

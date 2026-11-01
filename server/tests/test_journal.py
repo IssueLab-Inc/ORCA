@@ -162,3 +162,51 @@ def test_one_detection_run_after_an_edit_kept_with_clashes_is_free(client):
         edits.stretch(scene, main, "end", 0.05)
         rec.check = {"accepted_clashes": 1}
     assert not j.free_rerun("E9") and j.free_rerun("E1") and not j.free_rerun("E1")
+
+
+def test_a_joined_end_pushed_moves_the_joint_with_it_when_its_peer_runs_on(client):
+    from sightline import manual
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    r = manual.check(ws, sid, {"op": "push_pull", "element": main, "face": "east end", "by_m": 0.3})
+    assert r["blocked"] is None and r["joints"] == [] and "shorter so the joint holds" in r["summary"]
+    manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"])
+    assert edits.run_of(scene, main).length_m == pytest.approx(6.3) and edits.run_of(scene, tail).length_m == pytest.approx(0.7)
+    assert scene.element(main).connected == [tail]
+    ports = [scene.placement(p.GlobalId)[:3, 3] for p in edits._ports(scene.entity(main))]
+    assert any(np.allclose(p, [6.3, 0, 2.8]) for p in ports)
+
+
+def test_a_joint_left_open_is_kept_only_when_said_and_undone_with_the_edit(client):
+    from sightline import manual
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    op = {"op": "push_pull", "element": main, "face": "east end", "by_m": -0.2, "alone": True}
+    r = manual.check(ws, sid, op)
+    assert r["blocked"] is None and [j["element"] for j in r["joints"]] == [tail] and not r["passed"]
+    assert any(w["rule"] == "open_joint" and w["review"] == "services" for w in r["warnings"])
+    with pytest.raises(manual.NotKept, match="keep it with 1 open joint"):
+        manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"])
+    kept = manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"], accept_joints=1)
+    assert kept["entry"]["check"]["open_joints"][0]["element"] == tail and scene.element(main).connected == []
+    assert scene.element(tail).connected == []
+    c.post(f"/api/scenes/{sid}/edits/undo", json={})
+    assert scene.element(main).connected == [tail] and edits.run_of(scene, main).length_m == pytest.approx(6.0)
+
+
+def test_a_move_that_cannot_keep_its_joints_offers_to_move_it_alone(client, monkeypatch):
+    from sightline import manual
+    c, ws = client
+    sid, scene, main, beam = open_run(c)
+    tail = next(e for e in scene.model.by_type("IfcDuctSegment") if e.Tag != "SA-1").GlobalId
+    refused = connections.MovePlan([tail], [0, 0.3, 0], refused="the main it runs from cannot follow", code="joined")
+    monkeypatch.setattr(connections, "plan_move", lambda *a, **k: refused)
+    r = manual.check(ws, sid, {"op": "move", "element": tail, "delta_m": [0, 0.3, 0]})
+    assert "cannot keep its joints" in r["blocked"] and r["offer"]["alone"] is True and r["offer_words"] == "Move it alone"
+    alone = manual.check(ws, sid, r["offer"])
+    assert alone["blocked"] is None and [j["element"] for j in alone["joints"]] == [main] and "on its own" in alone["summary"]
+    y = scene.placement(tail)[1, 3]
+    manual.apply(ws, sid, alone["op"], accept_clashes=alone["clashes"], accept_joints=1)
+    assert scene.placement(tail)[1, 3] == pytest.approx(y + 0.3) and scene.element(tail).connected == []

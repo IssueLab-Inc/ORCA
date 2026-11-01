@@ -110,3 +110,24 @@ def test_the_face_chosen_in_the_edit_tool_reaches_muse_as_its_pick(setup):
     check = next(e for e in events if e.get("action") == "edit_preview")["check"]
     assert check["blocked"] is None and check["op"]["face"] == pick
     assert Chat._chosen_face(ctx, g["B1"], "south side 2") == pick and Chat._chosen_face(ctx, g["P1"], "selected") == "selected"
+
+
+def test_an_open_joint_is_kept_from_chat_only_when_the_person_says_joint(tmp_path):
+    from sightline.fixtures import build_run_fixture
+    build_run_fixture(tmp_path / "run.ifc")
+    ws = Workspace(samples=tmp_path)
+    sid = ws.open(["run.ifc"])
+    main = next(e for e in ws.scene(sid).model.by_type("IfcDuctSegment") if e.Tag == "SA-1").GlobalId
+    op = {"op": "push_pull", "element": main, "face": "east end", "by_m": -0.2, "alone": True}
+    model = Scripted([[("edit_check", {"op": op})], "It leaves the joint open.", [("edit_keep", {})], "Say so.",
+                      [("edit_keep", {})], "Kept."])
+    c = Chat(ws, model)
+    s = c.session(None)
+    ctx = Context(sid)
+    c.turn(s, "shorten the main's east end by 200 mm on its own", ctx, lambda e: None)
+    c.turn(s, "keep it", ctx, lambda e: None)
+    assert not ws.journal(sid).entries
+    assert any("joint(s) open" in m["content"] for m in s.messages if m["role"] == "tool")
+    c.turn(s, "yes keep it with the open joint", ctx, lambda e: None)
+    (e,) = ws.journal(sid).entries
+    assert e.source == "muse" and e.check["open_joints"]
