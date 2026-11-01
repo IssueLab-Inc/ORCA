@@ -163,7 +163,8 @@ def test_single_middle_port_rejects_without_changing_model(tmp_path):
     frame = scene.placement(port.GlobalId); frame[0, 3] = 3
     ifcopenshell.api.run('geometry.edit_object_placement', scene.model, product=port, matrix=frame)
     original = scene.model.to_string()
-    with pytest.raises(edits.Unsupported, match='endpoint'):
+    # A port in the middle is a branch off the side: an offset over it would move it, so it is refused, untouched
+    with pytest.raises(edits.Unsupported, match='branches off it 3.00 m along, where it would move'):
         edits.apply_offset(scene, main.GlobalId, 2, 4, .4)
     assert scene.model.to_string() == original
 

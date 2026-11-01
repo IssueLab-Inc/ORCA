@@ -107,7 +107,7 @@ def _validate(scene, objective, operations, discovered):
             if dz and lateral:
                 raise ValueError('compound offsets are unsupported')
             size = run.depth_m if dz else run.width_m
-            if scene.entity(gid).is_a() not in edits.FITTING_CLASS or edits.bend_radius(size, abs(dz or lateral)) is None:
+            if edits.fitting_class(scene.entity(gid)) is None or edits.bend_radius(size, abs(dz or lateral)) is None:
                 raise ValueError('offset requires supported radiused fittings; square fallback is not verified')
         if kind == 'trim':
             by = _number(op.get('by_m'), 'by_m')
@@ -427,7 +427,7 @@ def _bend_clearances(scene, offset_chains, contacts):
     allowed = set()
     for chain in offset_chains:
         for a, bend, b in zip(chain, chain[1:], chain[2:]):
-            if (scene.entity(bend).is_a() in edits.FITTING_CLASS.values()
+            if ((scene.entity(bend).is_a() in edits.FITTING_CLASS.values() or scene.entity(bend).is_a("IfcFlowFitting"))
                     and frozenset((a,bend)) in contacts and frozenset((bend,b)) in contacts):
                 allowed.add(frozenset((a,b)))
     return allowed

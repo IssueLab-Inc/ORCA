@@ -999,7 +999,9 @@ def edit_face(scene_id: str, body: FacePick):
     s = ws.scene(_scene(scene_id))
     try:
         with ws.lock:
-            return {**faces.resolve(s, body.element, body.point, body.normal).to_dict(), "label": manual.label(s, body.element)}
+            face = faces.resolve(s, body.element, body.point, body.normal)
+            return {**face.to_dict(), "label": manual.label(s, body.element),
+                    "choices": manual.choices_for(s, body.element, face)}
     except KeyError as e:
         raise HTTPException(404, str(e).strip("'\""))
 

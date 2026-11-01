@@ -290,10 +290,11 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     size = face.size_m
     after = None if size is None else size + (2 * by if face.kind == "radial" else by)
     what = {"cap": "long" if face.name.endswith("end") else "thick" if face.name.endswith("face") else "deep",
-            "side": "deep" if abs(face.normal[2]) > 0.9 else "wide", "radial": "across", "edge": "long",
+            "side": ("deep" if abs(face.normal[2]) > 0.9 else "long" if face.name.endswith("end")
+                     else "thick" if scene.entity(gid).is_a("IfcWall") else "wide"), "radial": "across", "edge": "long",
             "plane": "thick behind it", "clip": "long behind it"}.get(face.kind, "")
     change = f"{_mm(by)} {'out' if by > 0 else 'in'}"
-    sizes = f" ({size:.3f} → {after:.3f} m {what})" if size is not None and after is not None and face.kind != "edge" else ""
+    sizes = f" ({abs(size) if abs(size) < 5e-4 else size:.3f} → {after:.3f} m {what})" if size is not None and after is not None and face.kind != "edge" else ""
     params = {"op": "push_pull", "element": gid, "face": spec(face), "by_m": by}
     warn = structure_warnings(scene, gid, "the new size")
     if face.kind == "side":
@@ -309,7 +310,8 @@ def _resolve_push(scene: IfcScene, op: dict) -> Plan:
     # A duct's or pipe's section changed where it is joined: carried, a transition back to the old size at each joined
     # end keeps the joints meeting what they join; on its own, the ends no longer match (said so)
     resized_ends = (edits.joined_caps(scene, gid) if face.kind in ("side", "radial") and faces.split_id(face.id)[0] is None
-                    and scene.entity(gid).is_a("IfcFlowSegment") and scene.entity(gid).is_a() in edits.TRANSITION_TYPE else [])
+                    and scene.entity(gid).is_a("IfcFlowSegment") and edits.segment_kind(scene.entity(gid)) in edits.TRANSITION_TYPE
+                    and edits.fitting_class(scene.entity(gid)) else [])
     transitions = resized_ends if carries(op) else []
     if resized_ends and not transitions:
         warn.append({"rule": "size", "review": "services",
@@ -1150,6 +1152,55 @@ def _sync(scene: IfcScene, plan: Plan, made: Made, was: dict) -> parametric.Sync
     return parametric.sync(scene, was, made.changed, made.created, made_from=plan.element, label=label)
 
 
+def also(scene: IfcScene, plan: Plan, made: Made) -> list[dict]:
+    """Every element besides the one picked that the edit changes or makes, and why, in words: the page lists them
+    before the edit is kept (its type's other elements, joined parts taken along, walls whose ends follow, what a
+    re-fit or a split makes). Read inside the trial, while what it made is still there."""
+    why: dict[str, str] = {}
+    share = plan.extra.get("type_share")
+    for g in (share.others if share else []):
+        why[g] = f"same type ({share.type_name})"
+    for peer, _ in plan.extra.get("follow", []):
+        why[peer] = "joined: follows the pushed end"
+    for r in plan.extra.get("retrim", []):
+        why[r.element] = "joined wall: its end follows"
+    mp = plan.extra.get("plan")
+    if isinstance(mp, connections.MovePlan) and plan.params.get("carry"):
+        for g in mp.moved:
+            why.setdefault(g, "in its run")
+        for g in mp.carried:
+            why[g] = "joined: taken along"
+        for st in mp.stretched:
+            why[st.global_id] = "joined: made longer or shorter"
+        for j in mp.jogs:
+            why[j.global_id] = "joined: re-fitted with a pair of bends"
+    out = []
+    for g in dict.fromkeys([*made.changed, *made.created]):
+        if g == plan.element or not scene.has(g) or not_physical(scene.entity(g)):
+            continue
+        out.append({"element": g, "name": label(scene, g),
+                    "why": why.get(g, "new part" if g in made.created else "changed with it")})
+    return out
+
+
+def choices_for(scene: IfcScene, gid: str, face: faces.Face | None) -> dict:
+    """What the Edit tool's two choices would do for this element and face, so it offers only those that do
+    something: `type` (the type an edit to this face would change for every element of it, with how many others;
+    None when it changes nothing a type gives) and `joined` (how many parts are joined to it)."""
+    t = None
+    if face is not None:
+        try:
+            share = parametric.type_share(scene, gid, face, label)
+            t = {"name": share.type_name, "others": len(share.others), "kind": share.kind}
+        except (edits.Unsupported, ValueError, KeyError, AttributeError):
+            t = None
+    e = scene.entity(gid)
+    ports = sum(1 for p in ifcopenshell.util.system.get_ports(e) if ifcopenshell.util.system.get_connected_port(p))
+    paths = sum(1 for r in [*getattr(e, "ConnectedTo", []), *getattr(e, "ConnectedFrom", [])]
+                if r.is_a("IfcRelConnectsPathElements"))
+    return {"type": t, "joined": ports + paths}
+
+
 def _left_words(scene: IfcScene, synced: parametric.Synced) -> list[dict]:
     if not synced.left:
         return []
@@ -1181,7 +1232,8 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
         clearance = ws.clearance(scene_id)
         boxes = scene.bounds()
         targets = [g for g in plan.targets if g in boxes]
-        before = {h.other: h for h in verify.check(scene, targets, clearance_m=clearance).hits} if targets else {}
+        near: dict = {}   # what the edit leaves alone is triangulated once, for the check before it and after it
+        before = {h.other: h for h in verify.check(scene, targets, clearance_m=clearance, neighbours=near).hits} if targets else {}
         shapes_before = edits.meshes(scene, [g for g in plan.targets if scene.has(g)]) if preview else None
         readings = consistency.measure(scene, plan.targets, label)   # what the model says besides the shape, before
         was = parametric.snapshot(scene, plan.targets)
@@ -1194,10 +1246,11 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
                 issues = consistency.compare(scene, readings, consistency.measure(scene, [
                     g for g in dict.fromkeys([*plan.targets, *made.changed, *made.created]) if scene.has(g)], label),
                     made_from=plan.element, allow=frozenset(plan.extra.get("consistent", ())))
-                v = (verify.check(scene, mine, clearance_m=clearance, ignore=set(mine), touching=plan.touching)
+                v = (verify.check(scene, mine, clearance_m=clearance, ignore=set(mine), touching=plan.touching, neighbours=near)
                      if mine else verify.Verdict(True, [], None, 0))
                 shapes = edits.meshes(scene, [g for g in dict.fromkeys([*made.changed, *made.created])
                                               if scene.has(g) and not not_physical(scene.entity(g))]) if preview else None
+                others = also(scene, plan, made)
         except edits.Unsupported as e:
             return {**base, "passed": False, "blocked": str(e), "clashes": 0}
         blocks = [i for i in issues if i.severity == "block"]
@@ -1224,6 +1277,7 @@ def check(ws, scene_id: str, op: dict, preview: bool = True) -> dict:
                 "new": [_hit(scene, h) for h in new], "worse": [_hit(scene, h) for h in worse], "cleared": cleared,
                 "min_clearance_m": v.min_clearance_m, "checked_against": v.checked_against,
                 "changed": made.changed, "created": made.created, "removed": made.removed, "open_ends": made.open_ends,
+                "also": others,
                 "preview": shapes, "before": shapes_before}
 
 

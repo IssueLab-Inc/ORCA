@@ -171,6 +171,34 @@ def _ports(element):
 # Fittings for a segment's bends, by segment class (IFC4). Anything else gets square corners.
 FITTING_CLASS = {"IfcDuctSegment": "IfcDuctFitting", "IfcPipeSegment": "IfcPipeFitting",
                  "IfcCableCarrierSegment": "IfcCableCarrierFitting", "IfcCableSegment": "IfcCableFitting"}
+# IFC2X3 (Revit's 2x3 exports) draws every segment as IfcFlowSegment and every fitting as IfcFlowFitting: what it is,
+# and a fitting's bend or transition, are its type's.
+SEGMENT_TYPE_2X3 = {"IfcDuctSegmentType": "IfcDuctSegment", "IfcPipeSegmentType": "IfcPipeSegment",
+                    "IfcCableCarrierSegmentType": "IfcCableCarrierSegment", "IfcCableSegmentType": "IfcCableSegment"}
+FITTING_TYPE_2X3 = {"IfcDuctSegment": "IfcDuctFittingType", "IfcPipeSegment": "IfcPipeFittingType",
+                    "IfcCableCarrierSegment": "IfcCableCarrierFittingType"}
+
+
+def segment_kind(element) -> str | None:
+    """What a flow segment is, as IFC4 names it (IfcDuctSegment, IfcPipeSegment…): its class, or in IFC2X3 its
+    type's; None for anything else."""
+    if element.is_a() in FITTING_CLASS:
+        return element.is_a()
+    if element.is_a() == "IfcFlowSegment":
+        t = ifcopenshell.util.element.get_type(element)
+        return SEGMENT_TYPE_2X3.get(t.is_a()) if t is not None else None
+    return None
+
+
+def fitting_class(element) -> str | None:
+    """The class of the fittings (bends, transitions) a segment gets, or None when it has none: IFC2X3's
+    IfcFlowFitting for a typed duct, pipe or tray (cables have no fitting type in IFC2X3)."""
+    kind = segment_kind(element)
+    if kind is None:
+        return None
+    if element.is_a() == "IfcFlowSegment":
+        return "IfcFlowFitting" if kind in FITTING_TYPE_2X3 else None
+    return FITTING_CLASS[kind]
 RISER_MIN_M = 0.04       # straight riser left between two bends when the rise allows (Rev04: 40-172 mm)
 BEND_STEPS = 8           # facets per 90° bend
 OFFSET_AXIS_TOL = 1e-9   # numerical residue, metres; shared by validation and generation
@@ -248,7 +276,7 @@ def apply_offset(scene: IfcScene, global_id: str, start_m: float, end_m: float, 
     angled = abs(bend_deg - 90.0) > 1e-6
     if angled and not 15.0 <= bend_deg < 90.0:
         raise Unsupported("bends turn between 15° and 90°")
-    r_m = (bend_radius(t * s, amount, bend_deg) if (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS
+    r_m = (bend_radius(t * s, amount, bend_deg) if (corners or default_corners()) == "bends" and fitting_class(element)
            else None)
     if angled and r_m is None:
         raise Unsupported(f"the offset is too small for {bend_deg:.0f}° bends of this section")
@@ -320,12 +348,6 @@ def apply_jog(scene: IfcScene, global_id: str, end: str, delta_m) -> Offset:
     carried move re-fits"). Edits the model in place; wrap in a trial to undo."""
     element = scene.entity(global_id)
     place, item, d, px, profile_x, pieces, shift, at, dz_m, lateral_m = _jog(scene, global_id, end, delta_m)
-    model = scene.models[scene.index_of(global_id)]
-    if end == "start":   # the segment keeps the first piece: it starts where the joint went
-        local = ifcopenshell.util.placement.get_axis2placement(item.Position)
-        local[:3, 3] = (np.linalg.inv(place) @ np.append(pieces[0][1], 1.0))[:3]
-        item.Position = model.createIfcAxis2Placement3D(
-            _point(model, local[:3, 3]), _dir(model, local[:3, 2]), _dir(model, local[:3, 0]))
     gids = _build_chain(scene, element, place, item, d, px, profile_x, pieces, shift_ends=shift)
     return Offset(global_id, at, at, dz_m, gids, "bends", lateral_m)
 
@@ -342,10 +364,8 @@ def jog_fits(scene: IfcScene, global_id: str, end: str, delta_m) -> str | None:
 def _jog(scene: IfcScene, global_id: str, end: str, delta_m):
     """A re-fit's pieces, read from the model without editing it (see `apply_jog`)."""
     element = scene.entity(global_id)
-    if element.is_a() not in FITTING_CLASS:
+    if fitting_class(element) is None:
         raise Unsupported(f"a {element.is_a()} has no bend fittings to re-fit it with")
-    if len(_ports(element)) > 2:
-        raise Unsupported("a branched segment cannot be re-fitted")
     i, place, item, origin, d, px, py = _frames(scene, element)
     model, s = scene.models[i], scene.unit_scales[i]
     delta = np.asarray(delta_m, float)
@@ -384,6 +404,10 @@ def _jog(scene: IfcScene, global_id: str, end: str, delta_m):
     if L - m - 2 * R < MIN_PIECE_M / s:
         raise Unsupported(f"it is too short to re-fit ({L * s:.2f} m; the bends and the piece moved take "
                           f"{(m + 2 * R) * s:.2f} m)")
+    moving = (0.0, m + 2 * R) if end == "start" else (L - m - 2 * R, L)
+    for b, t in side_ports(scene, element, origin, d, L):   # a branch on the end that goes with the move
+        if moving[0] - 0.005 / s <= t <= moving[1] + 0.005 / s:
+            raise Unsupported(f"a branch {t * s:.2f} m along it is on the end that would move")
     u = offset_axis * (1.0 if dz > 0 else -1.0)
     rise = abs(dz) - 2 * R
     riser = rise > 1e-3 / s
@@ -556,7 +580,7 @@ def apply_route(scene: IfcScene, global_id: str, steps: list[dict], corners: str
             moves.append((at, up * np.sign(du), abs(du), (across, vertical)))
         else:
             moves.append((at, side * np.sign(dv), abs(dv), (vertical, across)))
-    use_bends = (corners or default_corners()) == "bends" and element.is_a() in FITTING_CLASS
+    use_bends = (corners or default_corners()) == "bends" and fitting_class(element) is not None
     radii = [bend_radius(wt[1] * s, jump) for _, _, jump, wt in moves] if use_bends else []
     use_bends = use_bends and all(r is not None for r in radii)
     # Room along the run: each transition takes its bend radius (or half the section, square) before and after it.
@@ -621,8 +645,9 @@ def equivalent_diameter(width: float, depth: float) -> float:
 def _resizable(scene: IfcScene, element):
     """(file index, placement, item, origin, run direction, profile X, profile Y, width m, depth m, up, side) of a
     level, straight, rectangular duct or tray; else Unsupported with why."""
-    if not any(element.is_a(c) for c in RESIZABLE):
-        what = "a pipe's size is set by its flow" if element.is_a("IfcPipeSegment") else f"{element.is_a()} is not a duct or tray"
+    if segment_kind(element) not in RESIZABLE:
+        what = ("a pipe's size is set by its flow" if segment_kind(element) == "IfcPipeSegment"
+                else f"{element.is_a()} is not a duct or tray")
         raise Unsupported(f"only rectangular ducts and cable trays are resized here ({what})")
     if step_source(element):
         raise Unsupported("a part from STEP keeps its section (its file has no profile to change)")
@@ -840,13 +865,13 @@ def add_transitions(scene: IfcScene, global_id: str, before: Section, ends: list
                                 (cur.w / s, cur.h / s, float(shift @ cur.py) / s, float(shift @ cur.px) / s),
                                 (before.w / s, before.h / s, 0.0, 0.0), cur.round_)
         part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} transition",
-                            f"{element.Tag}-TR{end[0].upper()}" if element.Tag else None, TRANSITION_TYPE[element.is_a()])
+                            f"{element.Tag}-TR{end[0].upper()}" if element.Tag else None,
+                            TRANSITION_TYPE[segment_kind(element)])
         local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
-        solid = model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]),
-                                                   None, True, [[int(x) + 1 for x in f] for f in tris], None)
+        solid, kind = mesh_item(model, local, tris)
         body = next(r for r in element.Representation.Representations if r.RepresentationIdentifier == "Body")
         part.Representation = model.createIfcProductDefinitionShape(None, None, [model.createIfcShapeRepresentation(
-            body.ContextOfItems, "Body", "Tessellation", [solid])])
+            body.ContextOfItems, "Body", kind, [solid])])
         for st in [x for it in body.Items for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
             model.createIfcStyledItem(solid, st.Styles, st.Name)
         near, far = _ports(part)
@@ -967,9 +992,15 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
     styles = [x for x in model.get_inverse(item) if x.is_a("IfcStyledItem")]
     round_ = item.SweptArea.is_a("IfcCircleProfileDef")
 
-    first_ports = _ports(element)
+    # A branch off its side (a Revit tap, a grille on a duct) is not an end: it stays with the piece that keeps its
+    # place where it is, and an edit that would move it is refused. Out of the element while its copies are made.
+    branches = side_ports(scene, element, origin, d, L)
+    homes = [_branch_home(scene, b, t, pieces, origin, d, s) for b, t in branches]   # before anything is edited
+    first_ports = [p for p in _ports(element) if p not in {b for b, _ in branches}]
     if len(first_ports) > 2:
-        raise Unsupported('a branched segment with more than two ports cannot be offset')
+        raise Unsupported('a segment with more than two end ports cannot be split into pieces')
+    for b, _ in branches:
+        ifcopenshell.api.run('system.unassign_port', model, element=element, port=b)
     first_ports.sort(key=lambda p: float(scene.placement(p.GlobalId)[:3, 3] @ d) if p.ObjectPlacement else 0.)
     original_flows = [p.FlowDirection for p in first_ports] if len(first_ports) == 2 else ['NOTDEFINED','NOTDEFINED']
     external_frames = [scene.placement(p.GlobalId) if p.ObjectPlacement else None
@@ -1000,6 +1031,12 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
     if far is not None:
         ifcopenshell.api.run("system.disconnect_port", model, port=first_ports[-1])
 
+    first_start = np.asarray(pieces[0][1], float)
+    if np.linalg.norm(first_start - origin) > 1e-9:   # the first piece starts elsewhere: a re-fit's end, moved
+        local = ifcopenshell.util.placement.get_axis2placement(item.Position)
+        local[:3, 3] = (inv @ np.append(first_start, 1.0))[:3]
+        item.Position = model.createIfcAxis2Placement3D(
+            _point(model, local[:3, 3]), _dir(model, local[:3, 2]), _dir(model, local[:3, 0]))
     item.Depth = pieces[0][3]
     chain, ends = [element], [(pieces[0][1], pieces[0][1] + pieces[0][2] * pieces[0][3])]
     straights = bends = transitions = 0
@@ -1024,12 +1061,10 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
             transitions += 1
             part = _new_fitting(model, element, place, f"{element.Name or 'Segment'} transition",
                                 f"{element.Tag}-TR{transitions}" if element.Tag else None,
-                                TRANSITION_TYPE[element.is_a()])
+                                TRANSITION_TYPE[segment_kind(element)])
             local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
-            solid = model.createIfcTriangulatedFaceSet(
-                model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]), None, True,
-                [[int(x) + 1 for x in f] for f in faces], None)
-            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "Tessellation", [solid])
+            solid, kind = mesh_item(model, local, faces)
+            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", kind, [solid])
             ends.append((start + shift[0], start + axis * length + shift[1]))
         else:
             _, start, t0, t1, R, w, t = piece
@@ -1038,10 +1073,8 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
                                 f"{element.Tag}-BR{bends}" if element.Tag else None)
             verts, faces = _bend_mesh(start, t0, t1, R, w, t, round_)
             local = (inv @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
-            solid = model.createIfcTriangulatedFaceSet(
-                model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]), None, True,
-                [[int(x) + 1 for x in f] for f in faces], None)
-            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", "Tessellation", [solid])
+            solid, kind = mesh_item(model, local, faces)
+            rep = model.createIfcShapeRepresentation(body.ContextOfItems, "Body", kind, [solid])
             ends.append((start, bend_end(start, t0, t1, R)))   # start + (t0 + t1) R at 90°
         part.Representation = model.createIfcProductDefinitionShape(None, None, [rep])
         for st in styles:
@@ -1096,16 +1129,73 @@ def _build_chain(scene: IfcScene, element, place, item, d, px, profile_x, pieces
                     frame[:3, 3] += np.asarray(shift, float)
                 ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=frame, is_si=True)
 
+    for (b, _), k in zip(branches, homes):   # each branch to the straight that holds where it was
+        ifcopenshell.api.run('system.assign_port', model, element=chain[k], port=b)
+
     gids = [p.GlobalId for p in chain]
     scene.refresh_bounds(gids)
     return gids
 
 
+def _branch_home(scene: IfcScene, port, t: float, pieces: list[tuple], origin, d, s: float) -> int:
+    """Which of a chain's pieces holds a branch `t` along the run (file units): a straight on the run's own line that
+    spans it. Unsupported, naming what it feeds, when the edit would move it (an offset's middle, a re-fit's end)."""
+    tol = 0.005 / s
+    for k, shape in enumerate(pieces):
+        if shape[0] != "straight" or abs(float(np.asarray(shape[2], float) @ d)) < 0.999:
+            continue
+        rel = np.asarray(shape[1], float) - origin
+        if np.linalg.norm(rel - d * float(rel @ d)) > tol:
+            continue   # moved off the line
+        a0 = float(rel @ d)
+        a1 = a0 + float(shape[3]) * float(np.asarray(shape[2], float) @ d)
+        if min(a0, a1) - tol <= t <= max(a0, a1) + tol:
+            return k
+    peer = ifcopenshell.util.system.get_connected_port(port)
+    owner = ifcopenshell.util.system.get_port_element(peer) if peer is not None else None
+    what = f"'{owner.Name}'" if owner is not None and owner.Name else "a branch"
+    raise Unsupported(f"{what} branches off it {t * s:.2f} m along, where it would move: keep the edit clear of the branch")
+
+
+def side_ports(scene: IfcScene, element, origin, d, length) -> list[tuple]:
+    """The ports along a straight segment's side, not at its ends (a branch: a Revit tap, a grille fed from the duct),
+    with how far along the run each is (file units), in the segment's frame of `origin`, `d` and `length`."""
+    s = scene.unit_scales[scene.index_of(element.GlobalId)]
+    tol = 0.005 / s
+    out = []
+    for p in _ports(element):
+        if p.ObjectPlacement is None:
+            continue
+        t = float((scene.placement(p.GlobalId)[:3, 3] / s - np.asarray(origin, float)) @ np.asarray(d, float))
+        if tol < t < length - tol:
+            out.append((p, t))
+    return out
+
+
+def mesh_item(model, verts, faces):
+    """A closed triangle mesh (file units, the element's frame) as the file's schema writes one: an
+    IfcTriangulatedFaceSet (IFC4), or an IfcFacetedBrep of triangles (IFC2X3 has no face sets: Revit's 2x3 exports).
+    Returns (item, the representation type: "Tessellation" or "Brep")."""
+    if model.schema == "IFC2X3":
+        pts = [model.createIfcCartesianPoint(tuple(float(c) for c in v)) for v in verts]
+        shell = model.createIfcClosedShell([
+            model.createIfcFace([model.createIfcFaceOuterBound(model.createIfcPolyLoop([pts[int(i)] for i in f]), True)])
+            for f in faces])
+        return model.createIfcFacetedBrep(shell), "Brep"
+    return (model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D([[float(c) for c in v] for v in verts]),
+                                               None, True, [[int(x) + 1 for x in f] for f in faces], None), "Tessellation")
+
+
 def _new_fitting(model, segment, place, name: str, tag: str | None, predefined: str = "BEND"):
     """A fitting for `segment` (a bend, or a transition): its fitting class, in the same storey and systems, with two
     ports and its own placement (the segment's frame, so the fitting's vertices share the segment's local coordinates)."""
-    fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=FITTING_CLASS[segment.is_a()],
-                                   predefined_type=predefined, name=name)
+    cls = fitting_class(segment)
+    if cls == "IfcFlowFitting":   # IFC2X3: what it is (a duct bend…) is its type's
+        fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        ifcopenshell.api.run("type.assign_type", model, related_objects=[fitting], should_map_representations=False,
+                             relating_type=_fitting_type(model, FITTING_TYPE_2X3[segment_kind(segment)], predefined))
+    else:
+        fitting = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, predefined_type=predefined, name=name)
     if tag:
         fitting.Tag = tag
     container = ifcopenshell.util.element.get_container(segment)
@@ -1126,9 +1216,21 @@ def _new_fitting(model, segment, place, name: str, tag: str | None, predefined: 
         port.Name = f"Port {n}"
         if len(old) >= 2:
             port.FlowDirection = old[n].FlowDirection
-            port.PredefinedType = old[n].PredefinedType
-            port.SystemType = old[n].SystemType
+            for attr in ("PredefinedType", "SystemType"):   # IFC4 only
+                if hasattr(port, attr):
+                    setattr(port, attr, getattr(old[n], attr))
     return fitting
+
+
+def _fitting_type(model, cls: str, predefined: str):
+    """ORCA's own fitting type of this class and kind (an IFC2X3 "ORCA bend" duct fitting type…), made once."""
+    name = f"ORCA {predefined.lower()}"
+    for t in model.by_type(cls):
+        if t.Name == name and t.PredefinedType == predefined:
+            return t
+    t = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+    t.PredefinedType = predefined
+    return t
 
 
 def bend_turn(t0, t1) -> tuple[np.ndarray, float]:
@@ -2273,7 +2375,7 @@ def _move_item(model, item, m: np.ndarray) -> None:
         item.Coordinates.CoordList = [tuple(float(x) for x in p) for p in (pts @ m[:3, :3].T + m[:3, 3])]
         if getattr(item, "Normals", None) is not None:
             item.Normals = None
-    elif item.is_a("IfcFacetedBrep") or item.is_a("IfcShellBasedSurfaceModel"):
+    elif item.is_a("IfcFacetedBrep") or item.is_a("IfcShellBasedSurfaceModel") or item.is_a("IfcFaceBasedSurfaceModel"):
         for p in {e for e in model.traverse(item) if e.is_a("IfcCartesianPoint")}:
             p.Coordinates = tuple(float(x) for x in m[:3, :3] @ np.asarray(p.Coordinates, float) + m[:3, 3])
     else:
@@ -2325,7 +2427,7 @@ def join_plan(scene: IfcScene, a_gid: str, b_gid: str) -> JoinPlan:
     """How the nearest free ends of two straight segments meet, without editing anything (see `JoinPlan`)."""
     if a_gid == b_gid:
         raise Unsupported("join it to another segment")
-    if FITTING_CLASS.get(scene.entity(a_gid).is_a()) != FITTING_CLASS.get(scene.entity(b_gid).is_a()):
+    if segment_kind(scene.entity(a_gid)) != segment_kind(scene.entity(b_gid)):
         raise Unsupported("join segments of one kind (a duct to a duct, a pipe to a pipe)")
     ra, rb = run_of(scene, a_gid), run_of(scene, b_gid)
     da, db = np.asarray(ra.direction, float), np.asarray(rb.direction, float)
@@ -2399,11 +2501,10 @@ def join_segments(scene: IfcScene, plan: JoinPlan) -> list[str]:
         part = _new_fitting(model, a, place, f"{a.Name or 'Segment'} bend", f"{a.Tag}-BJ" if a.Tag else None)
         verts, tris = _bend_mesh(pa / s, ta, -tb, plan.radius / s, width / s, depth / s, round_)
         local = (np.linalg.inv(place) @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
-        solid = model.createIfcTriangulatedFaceSet(model.createIfcCartesianPointList3D([[float(c) for c in v] for v in local]),
-                                                   None, True, [[int(x) + 1 for x in f] for f in tris], None)
+        solid, kind = mesh_item(model, local, tris)
         body = next(r for r in a.Representation.Representations if r.RepresentationIdentifier == "Body")
         part.Representation = model.createIfcProductDefinitionShape(None, None, [model.createIfcShapeRepresentation(
-            body.ContextOfItems, "Body", "Tessellation", [solid])])
+            body.ContextOfItems, "Body", kind, [solid])])
         for st in [x for it in body.Items for x in model.get_inverse(it) if x.is_a("IfcStyledItem")]:
             model.createIfcStyledItem(solid, st.Styles, st.Name)
         p0, p1 = _ports(part)
@@ -3030,9 +3131,8 @@ def cut_by_shape(scene: IfcScene, element: str, cutter: str, gap_m: float) -> tu
         keys, inverse = np.unique(np.round(verts, 6), axis=0, return_inverse=True)
         faces = inverse.reshape(-1)[faces]
         grown = (keys + _vertex_normals(keys, faces) * gap_m) / sx
-        pts = m.createIfcCartesianPointList3D([tuple(float(c) for c in p) for p in grown])
-        mesh = m.createIfcTriangulatedFaceSet(pts, None, True, [tuple(int(x) + 1 for x in f) for f in faces], None)
-        rep = m.createIfcShapeRepresentation(_body_context(host), "Body", "Tessellation", [mesh])
+        mesh, kind = mesh_item(m, grown, faces)
+        rep = m.createIfcShapeRepresentation(_body_context(host), "Body", kind, [mesh])
     opening = ifcopenshell.api.run("root.create_entity", m, ifc_class="IfcOpeningElement",
                                    name=f"Cut for {tool.Name or tool.is_a()[3:]}")
     if m.schema != "IFC2X3":

@@ -349,3 +349,27 @@ def test_a_wall_moved_along_its_own_line_leaves_its_join_open_even_with_joined_p
     ws, sid, scene, g = param
     r = manual.check(ws, sid, {"op": "move", "element": g["W1"], "delta_m": [-0.2, 0, 0], "carry": True})
     assert [j["name"] for j in r["joints"]] == ["wall 'W2'"] and "follows" not in r["summary"]
+
+
+
+# ----------------------------------------------------------------------------------------------------- what the page is told
+
+
+def test_a_check_lists_every_other_element_it_changes_and_why(param):
+    ws, sid, scene, g = param
+    r = manual.check(ws, sid, {"op": "push_pull", "element": g["F1"], "face": "top", "by_m": 0.1, "scope": "type"})
+    assert r["also"] == [{"element": g["F2"], "name": "duct fitting 'F2'", "why": "same type (FT-BOX)"}]
+    r = manual.check(ws, sid, {"op": "move", "element": g["W2"], "delta_m": [0.5, 0, 0], "carry": True})
+    assert r["also"] == [{"element": g["W1"], "name": "wall 'W1'", "why": "joined wall: its end follows"}]
+    r = manual.check(ws, sid, {"op": "split", "element": g["BM1"], "at": [2.5, 12.0, 3.0]})
+    assert [a["why"] for a in r["also"]] == ["new part"]
+    assert manual.check(ws, sid, {"op": "move", "element": g["BM1"], "delta_m": [0, 0, 0.1]})["also"] == []
+
+
+def test_a_face_says_what_the_edit_tool_s_choices_would_do(param):
+    ws, sid, scene, g = param
+    face = lambda name, f: manual.choices_for(scene, g[name], manual.face_of(scene, g[name], f))
+    assert face("F1", "top") == {"type": {"name": "FT-BOX", "others": 1, "kind": "map"}, "joined": 0}
+    assert face("W1", "north face") == {"type": {"name": "WT-250", "others": 1, "kind": "layers"}, "joined": 1}
+    assert face("W1", "top") == {"type": None, "joined": 1}, "a wall's height is its own"
+    assert face("SL1", "top") == {"type": None, "joined": 0}

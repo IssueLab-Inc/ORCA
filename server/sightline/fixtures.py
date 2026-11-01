@@ -991,15 +991,25 @@ def build_parametric_fixture(path: Path) -> Path:
     return path
 
 
-def build_mep_fixture(path: Path) -> Path:
+def build_mep_fixture(path: Path, schema: str = "IFC4") -> Path:
     """Free duct ends for MEP hand edits (docs/editing-parity.md, Tier 2), 400 wide x 300 deep, centreline z = 2.8,
     each straight with a port at both ends, none joined:
 
     - DA along x from 0 to 3 (y = 0); DC along x from 4.5 to 6 on the same line: a gap of 1.5 m to join in line.
     - DB along y from 1 to 4 (x = 4): square to DA in plan, the axes meeting at (4, 0): a corner to join with a bend.
     - PA, a 100 mm round pipe along x from 0 to 3 at y = -2, z = 2.8, joined at its end to PB (3 to 4.5).
+
+    `schema` "IFC2X3" draws them as Revit's 2x3 exports do: IfcFlowSegment, what each is given by its type
+    (IfcDuctSegmentType, IfcPipeSegmentType).
     """
-    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    model = ifcopenshell.api.run("project.create_file", version=schema)
+    if schema == "IFC2X3":   # every 2x3 root has an owner history: who made it, with what (as Revit's exports do)
+        person = ifcopenshell.api.run("owner.add_person", model, identification="ORCA", family_name="Fixture", given_name="ORCA")
+        org = ifcopenshell.api.run("owner.add_organisation", model, identification="ORCA", name="ORCA")
+        ifcopenshell.api.run("owner.add_person_and_organisation", model, person=person, organisation=org)
+        ifcopenshell.api.run("owner.add_application", model, application_developer=org, version="1",
+                             application_full_name="ORCA fixtures", application_identifier="ORCA")
+    kinds = {}
     project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA MEP fixture")
     ifcopenshell.api.run("unit.assign_unit", model, units=[ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT")])
     ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
@@ -1009,7 +1019,15 @@ def build_mep_fixture(path: Path) -> Path:
     ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
 
     def segment(cls, name, start, direction, run, profile):
-        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
+        if schema == "IFC2X3":   # the class is generic; the type says duct or pipe
+            if cls not in kinds:
+                kinds[cls] = ifcopenshell.api.run("root.create_entity", model, ifc_class=f"{cls}Type", name=cls[3:])
+                kinds[cls].PredefinedType = "RIGIDSEGMENT"
+            e = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcFlowSegment", name=name)
+            ifcopenshell.api.run("type.assign_type", model, related_objects=[e], relating_type=kinds[cls],
+                                 should_map_representations=False)
+        else:
+            e = ifcopenshell.api.run("root.create_entity", model, ifc_class=cls, name=name)
         ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
         ifcopenshell.api.run("geometry.edit_object_placement", model, product=e)
         d = np.asarray(direction, float)
@@ -1030,12 +1048,14 @@ def build_mep_fixture(path: Path) -> Path:
             ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
         return e
 
-    rect = lambda: model.createIfcRectangleProfileDef("AREA", None, None, 0.4, 0.3)
+    # IFC2X3 asks every profile for its position (IFC4 may leave it out)
+    at = lambda: model.createIfcAxis2Placement2D(model.createIfcCartesianPoint((0.0, 0.0))) if schema == "IFC2X3" else None
+    rect = lambda: model.createIfcRectangleProfileDef("AREA", None, at(), 0.4, 0.3)
     segment("IfcDuctSegment", "DA", (0.0, 0.0, 2.8), (1.0, 0.0, 0.0), 3.0, rect())
     segment("IfcDuctSegment", "DC", (4.5, 0.0, 2.8), (1.0, 0.0, 0.0), 1.5, rect())
     segment("IfcDuctSegment", "DB", (4.0, 1.0, 2.8), (0.0, 1.0, 0.0), 3.0, rect())
-    pa = segment("IfcPipeSegment", "PA", (0.0, -2.0, 2.8), (1.0, 0.0, 0.0), 3.0, model.createIfcCircleProfileDef("AREA", None, None, 0.05))
-    pb = segment("IfcPipeSegment", "PB", (3.0, -2.0, 2.8), (1.0, 0.0, 0.0), 1.5, model.createIfcCircleProfileDef("AREA", None, None, 0.05))
+    pa = segment("IfcPipeSegment", "PA", (0.0, -2.0, 2.8), (1.0, 0.0, 0.0), 3.0, model.createIfcCircleProfileDef("AREA", None, at(), 0.05))
+    pb = segment("IfcPipeSegment", "PB", (3.0, -2.0, 2.8), (1.0, 0.0, 0.0), 1.5, model.createIfcCircleProfileDef("AREA", None, at(), 0.05))
     out = next(p for p in ifcopenshell.util.system.get_ports(pa) if p.Name == "Port 1")
     into = next(p for p in ifcopenshell.util.system.get_ports(pb) if p.Name == "Port 0")
     ifcopenshell.api.run("system.connect_port", model, port1=out, port2=into, direction="SOURCE")

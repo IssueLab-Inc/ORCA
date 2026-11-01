@@ -356,6 +356,7 @@ its default, so a bad value fails the wider-fix run with a `ValueError` rather t
 | `SIGHTLINE_OFFSET_CORNERS` | `bends` | not set | `edits.default_corners` | A value starting `sq` makes offsets turn with square corners instead of bend fittings |
 | `SIGHTLINE_CONNECTED_MOVES` | `carry` | not set | `connections.mode` (each call) | How a move treats joints: `carry` the fittings beyond the run and stretch the segments it runs along, `refuse` one that would pull a joint apart, or `off` (moves as before joints were known) ([docs/connections.md](../connections.md)) |
 | `SIGHTLINE_CARRY_MAX` | 12 | not set | `connections.CARRY_MAX` (import) | Most parts a move may take along before it is refused |
+| `SIGHTLINE_GEOM_THREADS` | up to 8 | not set | `verify.geometry_threads` (each check) | Threads that triangulate a clash check's neighbourhood when it has more than 50 elements ([06](06-geometry-and-detection.md)) |
 | `SIGHTLINE_MOVE_REFIT` | on | not set | `connections.refit_moves` (each call) | Whether Muse's moves re-fit a straight segment square to them (a pair of bends at its joined end) instead of taking it along; `off` plans them as before. Hand moves with joined parts always re-fit ([docs/editing-parity.md](../editing-parity.md)) |
 | `SIGHTLINE_SAMPLE_EXCLUDE` | `IfcGeographicElement,IfcSpace,IfcBuildingElementProxy` | not set | `service.SAMPLE_EXCLUDE` (import) | Classes whose clash tests sample reports leave out; empty keeps everything |
 

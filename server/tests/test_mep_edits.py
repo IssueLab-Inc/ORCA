@@ -259,3 +259,95 @@ def test_muse_s_move_re_fits_too_and_keeps_it_as_tried(mep, monkeypatch):
     assert len(entry.created) == 4
     ws.journal(sid).undo(scene)
     assert us.get_port_element(us.get_connected_port(port)).GlobalId == g["DB"] and not valid(scene)
+
+
+
+# ----------------------------------------------------------------------------------------------------- IFC2X3 (Revit's 2x3)
+
+
+@pytest.fixture
+def mep2x3(tmp_path):
+    from sightline.fixtures import build_mep_fixture as build
+    return _open(tmp_path, lambda p: build(p, schema="IFC2X3"), "mep2x3.ifc")
+
+
+def test_ifc2x3_segments_get_bends_their_type_says_are_bends_drawn_as_breps(mep2x3):
+    import ifcopenshell.util.element as ue
+    ws, sid, scene, g = mep2x3
+    assert scene.models[0].schema == "IFC2X3" and scene.entity(g["DA"]).is_a() == "IfcFlowSegment"
+    assert edits.segment_kind(scene.entity(g["DA"])) == "IfcDuctSegment" and edits.fitting_class(scene.entity(g["PA"])) == "IfcFlowFitting"
+    kept = manual.apply(ws, sid, {"op": "join", "element": g["DA"], "to": {"element": g["DB"]}})
+    (bend,) = kept["created"]
+    b = scene.entity(bend)
+    assert b.is_a() == "IfcFlowFitting" and ue.get_type(b).is_a() == "IfcDuctFittingType" and ue.get_type(b).PredefinedType == "BEND"
+    assert [i.is_a() for i in b.Representation.Representations[0].Items] == ["IfcFacetedBrep"]
+    assert sorted(scene.element(bend).connected) == sorted([g["DA"], g["DB"]]) and not valid(scene)
+    ws.journal(sid).undo(scene)
+    assert not scene.has(bend) and not valid(scene)
+
+
+def test_ifc2x3_offset_and_a_carried_move_s_re_fit_work_and_stay_valid(mep2x3):
+    ws, sid, scene, g = mep2x3
+    r = manual.apply(ws, sid, {"op": "offset", "element": g["DA"], "from": [0.8, 0, 2.8], "to": [2.2, 0, 2.8],
+                               "toward": "up", "by_m": 0.4})
+    assert len(r["created"]) >= 4 and all(scene.entity(x).is_a() in ("IfcFlowSegment", "IfcFlowFitting") for x in r["created"])
+    assert not valid(scene)
+    ws.journal(sid).undo(scene)
+    manual.apply(ws, sid, {"op": "join", "element": g["DA"], "to": {"element": g["DB"]}})
+    # DB's far end on something that stays: the lift re-fits DB instead of pulling it
+    import ifcopenshell.api
+    import ifcopenshell.util.system as us
+    model = scene.models[0]
+    t = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcFlowTerminal", name="AT1")
+    port = ifcopenshell.api.run("system.add_port", model, element=t)
+    m = np.eye(4)
+    m[:3, 3] = (4.0, 4.0, 2.8)
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+    far = max(us.get_ports(scene.entity(g["DB"])), key=lambda p: scene.placement(p.GlobalId)[1, 3])
+    ifcopenshell.api.run("system.connect_port", model, port1=far, port2=port, direction="NOTDEFINED")
+    kept = manual.apply(ws, sid, {"op": "move", "element": g["DA"], "delta_m": [0, 0, 0.4], "carry": True})
+    assert "re-fitted" in kept["entry"]["summary"] and len(kept["created"]) == 4 and not valid(scene)
+
+
+
+# ----------------------------------------------------------------------------------------------------- branches off a side
+
+
+def _tap(scene, gid, at):
+    """A grille fed from the side of a duct (a Revit tap): a port on its side at `at`, joined to a terminal's."""
+    import ifcopenshell.api
+    model = scene.models[0]
+    t = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcAirTerminal", name="Grille G1")
+    tp = ifcopenshell.api.run("system.add_port", model, element=t)
+    sp = ifcopenshell.api.run("system.add_port", model, element=scene.entity(gid))
+    m = np.eye(4)
+    m[:3, 3] = at
+    for p in (tp, sp):
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=p, matrix=m, is_si=True)
+    ifcopenshell.api.run("system.connect_port", model, port1=sp, port2=tp, direction="NOTDEFINED")
+    return t.GlobalId, sp
+
+
+def test_an_offset_clear_of_a_side_branch_keeps_it_on_the_piece_that_stays(mep):
+    import ifcopenshell.util.system as us
+    ws, sid, scene, g = mep
+    grille, tap = _tap(scene, g["DA"], (2.4, -0.2, 2.8))
+    kept = manual.apply(ws, sid, {"op": "offset", "element": g["DA"], "from": [0.6, 0, 2.8], "to": [1.4, 0, 2.8],
+                                  "toward": "up", "by_m": 0.4})
+    home = us.get_port_element(tap).GlobalId
+    assert home != g["DA"] and home in kept["created"], "the tap went to the piece past the offset"
+    assert us.get_port_element(us.get_connected_port(tap)).GlobalId == grille, "still feeding the grille"
+    assert scene.bounds()[home][1][0] == pytest.approx(3.0) and not valid(scene)
+    ws.journal(sid).undo(scene)
+    assert us.get_port_element(tap).GlobalId == g["DA"] and not valid(scene)
+
+
+def test_an_offset_across_a_side_branch_is_refused_naming_it(mep):
+    ws, sid, scene, g = mep
+    _tap(scene, g["DA"], (1.5, -0.2, 2.8))
+    r = manual.check(ws, sid, {"op": "offset", "element": g["DA"], "from": [1.0, 0, 2.8], "to": [2.0, 0, 2.8],
+                               "toward": "up", "by_m": 0.4})
+    assert r["blocked"] and "'Grille G1' branches off it 1.50 m along, where it would move" in r["blocked"], r["blocked"]
+    assert edits.jog_fits(scene, g["DA"], "start", [0, 0, 0.4]) is None, "a re-fit at the far end leaves it be"
+    _tap(scene, g["DA"], (0.1, -0.2, 2.8))
+    assert "a branch 0.10 m along it is on the end that would move" in edits.jog_fits(scene, g["DA"], "start", [0, 0, 0.4])
