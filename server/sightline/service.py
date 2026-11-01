@@ -194,12 +194,12 @@ class Workspace:
         clashes. Refused (ValueError, in words): STEP into building models or the reverse, a name already open, the
         scene past the byte budget. The folder is deleted when it fails."""
         try:
-            self._refuse_adding(scene_id, paths)
+            self.check_adding(scene_id, paths)
             start = len(self.names[scene_id])
             ifc_paths, sources, root = self._as_ifc(paths, start, root, classify_with, on_event)
             incoming = sum(p.stat().st_size for p in ifc_paths)
             with self.lock:
-                self._refuse_adding(scene_id, paths, incoming)   # again: another request may have added meanwhile
+                self.check_adding(scene_id, paths, incoming)   # again: another request may have added meanwhile
                 if len(self.names[scene_id]) != start:
                     raise StaleLayout("The models changed: reload them.")
                 on_event({"type": "opening", "files": len(ifc_paths)})
@@ -219,8 +219,9 @@ class Workspace:
             raise
         return added
 
-    def _refuse_adding(self, scene_id: str, paths: list[Path], incoming: int | None = None) -> None:
-        """Why these models may not join the scene (ValueError, in words); `incoming`: their IFC bytes, once known."""
+    def check_adding(self, scene_id: str, paths: list[Path], incoming: int | None = None) -> None:
+        """Why these models may not join the scene (ValueError, in words; KeyError for a scene not open); `incoming`:
+        their IFC bytes, once known (the budget)."""
         self.scene(scene_id)
         names, open_ = [p.name for p in paths], self.names[scene_id]
         if not names:

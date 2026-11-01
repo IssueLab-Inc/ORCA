@@ -309,6 +309,103 @@ def test_a_wider_fix_is_not_undone_once_the_models_changed(ws):
     assert len(ws.scene(sid).models) == 3
 
 
+# ------------------------------------------------------------------------------------------------- routes
+
+
+@pytest.fixture
+def client(ws, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sightline import app as app_module
+    monkeypatch.setattr(app_module, "ws", ws)
+    monkeypatch.setattr(app_module, "_classifier", lambda: None)
+    return TestClient(app_module.app), app_module
+
+
+def events(response) -> list[dict]:
+    import json
+    return [json.loads(line) for line in response.text.splitlines() if line.strip()]
+
+
+def upload(c, sid, *files):
+    return c.post(f"/api/scenes/{sid}/models/upload/stream", files=[("files", (n, data)) for n, data in files])
+
+
+def test_the_routes_add_samples_and_then_the_check_finds_the_new_pair(client, ws):
+    c, _ = client
+    opened = c.post("/api/scenes", json={"samples": ["beam.ifc"]}).json()
+    sid = opened["id"]
+    assert opened["layout"] == 0 and opened["files"] == ["beam.ifc"]
+    first = events(c.post(f"/api/scenes/{sid}/detect/stream", json={"all": True}))[-1]
+    assert first["type"] == "done" and first["report"]["clashes"] == []
+    r = c.post(f"/api/scenes/{sid}/models", json={"samples": ["duct.ifc"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["files"], body["added"], body["layout"], body["step"]) == (["beam.ifc", "duct.ifc"], [1], 1, {})
+    assert body["revision"] == ws.scene(sid).revision
+    assert c.get(f"/api/scenes/{sid}").json()["layout"] == 1
+    done = events(c.post(f"/api/scenes/{sid}/detect/stream", json={"all": True}))[-1]
+    (clash,) = done["report"]["clashes"]
+    assert files_of(clash) == {"beam.ifc", "duct.ifc"} and clash["number"] == 1
+    assert c.get(f"/api/scenes/{sid}/files/1").content == (ws.samples / "duct.ifc").read_bytes()
+
+
+def test_the_routes_refuse_in_words(client, ws, tmp_path):
+    c, _ = client
+    sid = c.post("/api/scenes", json={"samples": ["beam.ifc", "duct.ifc"]}).json()["id"]
+    r = c.post(f"/api/scenes/{sid}/models", json={"samples": ["duct.ifc"]})
+    assert (r.status_code, r.json()["detail"]) == (400, "duct.ifc is already open.")
+    assert c.post(f"/api/scenes/{sid}/models", json={"samples": ["nothing.ifc"]}).status_code == 404
+    assert c.post(f"/api/scenes/{sid}/models", json={"samples": []}).status_code == 400
+    assert c.post("/api/scenes/nope/models", json={"samples": ["pipe.ifc"]}).status_code == 404
+    from test_step import write_step
+    step_file = write_step(tmp_path / "Cell.step")
+    r = upload(c, sid, ("Cell.step", step_file.read_bytes()))
+    assert (r.status_code, r.json()["detail"]) == \
+        (400, "A STEP machine can't join building models yet: open it on its own.")
+
+
+def test_adding_an_upload_is_one_model_upload_and_a_refusal_is_not(client, ws, monkeypatch):
+    c, app_module = client
+    monkeypatch.setattr(app_module, "model_upload_limit", app_module.ProposeLimit(1, 0, noun="model uploads"))
+    sid = c.post("/api/scenes", json={"samples": ["beam.ifc"]}).json()["id"]   # samples are free
+    assert upload(c, sid, ("beam.ifc", b"x")).status_code == 400, "refused before it is charged"
+    r = upload(c, sid, ("Mine.ifc", (ws.samples / "duct.ifc").read_bytes()))
+    assert r.status_code == 200
+    seen = events(r)
+    assert seen[0]["type"] == "received" and {"opening", "boxes"} <= {e["type"] for e in seen}
+    done = seen[-1]
+    assert done["type"] == "done" and done["files"] == ["beam.ifc", "Mine.ifc"] and done["added"] == [1]
+    assert done["layout"] == 1
+    assert upload(c, sid, ("Other.ifc", (ws.samples / "pipe.ifc").read_bytes())).status_code == 429
+
+
+def test_a_broken_upload_added_says_why_and_changes_nothing(client, ws):
+    c, _ = client
+    sid = c.post("/api/scenes", json={"samples": ["beam.ifc"]}).json()["id"]
+    done = events(upload(c, sid, ("Broken.ifc", b"not an IFC file")))[-1]
+    assert done["type"] == "error" and done["status"] == 400 and "Could not add the models" in done["detail"]
+    assert ws.names[sid] == ["beam.ifc"] and ws.scene(sid).layout == 0 and not ws._roots.get(sid)
+
+
+def test_the_delete_route_guards_the_position_and_answers_what_is_left(client, ws):
+    c, _ = client
+    sid = c.post("/api/scenes", json={"samples": ["beam.ifc", "duct.ifc", "pipe.ifc"]}).json()["id"]
+    events(c.post(f"/api/scenes/{sid}/detect/stream", json={"all": True}))
+    stale = c.delete(f"/api/scenes/{sid}/models/0", params={"name": "duct.ifc"})
+    assert (stale.status_code, stale.json()["detail"]) == (409, "The models changed: reload them.")
+    r = c.delete(f"/api/scenes/{sid}/models/0", params={"name": "beam.ifc"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["files"] == ["duct.ifc", "pipe.ifc"] and body["layout"] == 1 and body["removed"]["name"] == "beam.ifc"
+    assert body["removed"]["clashes"] >= 1 and body["removed"]["edits"] == 0
+    assert all("beam.ifc" not in files_of(x) for x in body["report"]["clashes"])
+    assert body["report"]["id"] == c.get(f"/api/scenes/{sid}/checks").json()["report_id"]
+    c.delete(f"/api/scenes/{sid}/models/1", params={"name": "pipe.ifc"})
+    only = c.delete(f"/api/scenes/{sid}/models/0", params={"name": "duct.ifc"})
+    assert (only.status_code, only.json()["detail"]) == (400, "This is the only model: open others instead.")
+    assert c.delete(f"/api/scenes/{sid}/models/0").status_code == 422, "the name is required"
+
+
 # ------------------------------------------------------------------------------------------------- Northbank
 
 STRUCTURE, MEP, ARCHITECTURE = "Northbank-Structure.ifc", "Northbank-MEP.ifc", "Northbank-Architecture.ifc"

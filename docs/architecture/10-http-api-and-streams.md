@@ -6,7 +6,7 @@
 > **Deeper design:** [docs/voice.md](../voice.md), [docs/uploads.md](../uploads.md), [docs/mcp.md](../mcp.md)
 
 ORCA's server is one FastAPI app, `app` in `server/sightline/app.py`, that the page, the MCP server and anything
-else talk to. It serves 64 decorated routes under `/api/`, one WebSocket (live voice), the MCP endpoint at `/mcp`,
+else talk to. It serves 83 decorated routes under `/api/`, one WebSocket (live voice), the MCP endpoint at `/mcp`,
 and the built web app from the same origin. Long work answers as newline-delimited JSON (NDJSON) so the page can
 show the agent working. This doc is the inventory of every route, stream event, header and error, and how
 `web/src/api.ts` reads them. Other docs link here rather than list routes again. What each route's work does
@@ -171,10 +171,13 @@ classes in `app.py`.
 | Method | Path | What it does | Body / params | Reply | Caps / auth |
 |---|---|---|---|---|---|
 | `GET` | `/api/samples` | Model files in `samples/` (`Workspace.list_samples`) and the demos among them (`demos.listing`) | none | `{files: [name], demos: [{id, name, label, kind, files, context, tour}]}` | free |
-| `POST` | `/api/scenes` | Opens sample models; a STEP sample is converted first (cached by hash) with the triage model naming parts | `Open {samples}` | `{id, files, step, revision}` | free; 404 unknown name, 400 STEP error |
-| `POST` | `/api/models/upload` | Opens the visitor's own IFC/STEP files (`_receive_models`, then `Workspace.open_paths`) | multipart `files` (each may be `<name>.gz`); `Content-Length` required | `{id, files, step, revision}` | `model_upload_limit` (`SIGHTLINE_MODEL_UPLOADS_PER_HOUR`/`_DAY`); 411, 413, 400, 429 |
+| `POST` | `/api/scenes` | Opens sample models; a STEP sample is converted first (cached by hash) with the triage model naming parts | `Open {samples}` | `{id, files, step, revision, layout}` (`app._files_of`, as every route that opens or changes the file list) | free; 404 unknown name, 400 STEP error |
+| `POST` | `/api/models/upload` | Opens the visitor's own IFC/STEP files (`_receive_models`, then `Workspace.open_paths`) | multipart `files` (each may be `<name>.gz`); `Content-Length` required | `{id, files, step, revision, layout}` | `model_upload_limit` (`SIGHTLINE_MODEL_UPLOADS_PER_HOUR`/`_DAY`); 411, 413, 400, 429 |
 | `POST` | `/api/models/upload/stream` | The same, with the opening streamed (below) | as above | NDJSON | as above; refusals before the files are in are plain HTTP errors |
-| `GET` | `/api/scenes/{scene_id}` | A scene the page had open, to resume it (`Workspace.scene_info`) | none | `{id, files, step, revision, report_id, checks}` (the kept checks and the report listing their clashes, as `GET .../checks`) | free; 404 once evicted |
+| `POST` | `/api/scenes/{scene_id}/models` | Adds sample models to an open scene (`Workspace.add_samples`, [docs/add-and-remove-models.md](../add-and-remove-models.md)): appended after its files, everything kept stays; the page then runs every kept check again | `Open {samples}` | `{id, files, step, revision, layout, added: [index]}` | free; 400 "A STEP machine can't join building models yet: open it on its own." (or the reverse), "`<name>` is already open.", past the byte budget, none given; 404 unknown name or scene; 409 the list changed meanwhile |
+| `POST` | `/api/scenes/{scene_id}/models/upload/stream` | Adds the visitor's own files to an open scene (`_receive_models`, then `Workspace.add_models`), streamed as the upload stream is (below) | as `/api/models/upload` | NDJSON; `done` adds `added` | one model upload, as `/api/models/upload`; the mixing and "already open" refusals are plain 400s before it is charged (`_receive_models`' `check`); past the byte budget, an `error` event |
+| `DELETE` | `/api/scenes/{scene_id}/models/{index}` | Takes one model out (`Workspace.remove_model`): its clashes leave every kept check and the list (nothing is detected again, the checks stay current), edits kept in it stay in the log marked `model_removed`, an uploaded file is deleted | `?name=` (required): the file the page means at `index` | `{id, files, step, revision, layout, removed: {name, clashes, edits}, report (the union's summary, null when no check is kept), checks}` | free; 409 "The models changed: reload them." (`StaleLayout`: `index` no longer holds `name`), 400 "This is the only model: open others instead." |
+| `GET` | `/api/scenes/{scene_id}` | A scene the page had open, to resume it (`Workspace.scene_info`) | none | `{id, files, step, revision, layout, report_id, checks}` (the kept checks and the report listing their clashes, as `GET .../checks`) | free; 404 once evicted |
 | `GET` | `/api/scenes/{scene_id}/files/{index}` | One model file as it is now: the original, or the edited model written out (`Workspace.file`); tidies exports older than an hour | none | IFC bytes, `no-store` | free; 404 |
 | `GET` | `/api/scenes/{scene_id}/elements/{global_id}` | One element's class, name, level, file, and its links by kind with names, systems and assembly (`Workspace.describe`) | none | element dict | free |
 | `GET` | `/api/scenes/{scene_id}/elements/{global_id}/properties` | Everything the model says about one object (an element, or a storey, building, site or project from a breadcrumb), for the Properties panel: every attribute, its type, every set (the type's marked), units, materials, classifications, groups, documents, storey, container and path (`Workspace.properties`, `properties.properties`); 404 for an object the scene doesn't have or a file it hasn't | `?file=` (optional): the model's index, when federated files repeat a GlobalId | `{global_id, ifc_class, name, source, file, size_m, attributes: [Prop], type: {global_id, ifc_class, name, attributes} \| null, storey, container: Ref \| null, path: [Ref], materials: [{usage, name, from_type, items, total_m?, sets}], classifications, groups, documents, sets: [{name, kind: pset\|qto, props: [Prop], from_type?}]}`; `Prop = {name, value, unit?, from_type?, kind?, rows?, table?, of?}`, `Ref = {global_id, ifc_class, name, file}` | free |
@@ -204,12 +207,14 @@ classes in `app.py`.
 | `POST` | `/api/scenes/{scene_id}/edit/check` | Tries a hand edit in a trial (`manual.check`): what it clears, what it would hit new or worse, the nearest gap, its warnings and preview meshes; a refusal (the requirements, the geometry) comes back as `blocked` | `EditBody {op}` | `{op, key, summary, face, passed, blocked, clashes, close, new, worse, cleared, min_clearance_m, warnings, preview, before, targets, revision, also}`; `also`: every other element it changes or makes, `{element, name, why}` (`manual.also`) | free |
 | `POST` | `/api/scenes/{scene_id}/edit/apply` | Keeps a hand edit (`manual.apply`): checked again first, then kept through the edit log, tied to the clash and any fix it follows, the clash measured again; returns the patch | `EditBody {op, key?, accept_clashes=0, accept_joints=0, clash_id?, pair?}` | `{entry, files, changed, created, removed, pieces, check}` plus the patch | free; 409 refused by the requirements, changed since its check (`key`), more clashes than accepted, or more joints left open than accepted; 422 cannot be made; 400 not an edit |
 | `GET` | `/api/scenes/{scene_id}/edits` | The scene's edit log (`journal.Journal.summary`): every kept edit, oldest first, with `can_undo`, `can_redo` and which entry each would take; `?format=csv` as a spreadsheet (`Workspace.edits_csv`) | `format=json\|csv` | `{entries, can_undo, can_redo, undo, redo}` | free |
-| `POST` | `/api/scenes/{scene_id}/edits/undo` | Undoes the newest kept edit (`Workspace.undo_edit`): its transactions rolled back on each file, boxes and edited files put back, the revision moved forward; returns the patch (what it made in `removed`) and each of the entry's clashes measured again (`clash_states`: the page opens or marks fixed from that, whoever kept the entry) | `EditStep {entry?}` | `{entry, files, changed, removed, clash_states, can_undo, can_redo, undo, redo}` plus the patch | free; 409 when another edit came after it outside the log, a wider fix replaced the models, or `entry` is not the newest |
-| `POST` | `/api/scenes/{scene_id}/edits/redo` | Redoes the last undone edit (`Workspace.redo_edit`) | `EditStep {entry?}` | as undo | free; 409 when the model changed since it was undone |
+| `POST` | `/api/scenes/{scene_id}/edits/undo` | Undoes the newest kept edit (`Workspace.undo_edit`): its transactions rolled back on each file, boxes and edited files put back, the revision moved forward; returns the patch (what it made in `removed`) and each of the entry's clashes measured again (`clash_states`: the page opens or marks fixed from that, whoever kept the entry) | `EditStep {entry?}` | `{entry, files, changed, removed, clash_states, can_undo, can_redo, undo, redo}` plus the patch | free; 409 when another edit came after it outside the log, a wider fix replaced the models (or models were added or removed since a wider fix), `entry` changed a model since removed (`model_removed`: undo passes over it), or `entry` is not the newest |
+| `POST` | `/api/scenes/{scene_id}/edits/redo` | Redoes the last undone edit (`Workspace.redo_edit`) | `EditStep {entry?}` | as undo | free; 409 when the model changed since it was undone, or `entry` changed a model since removed |
 | `POST` | `/api/scenes/{scene_id}/edits/{entry_id}/picture` | A picture of a kept edit, taken by the page right after it (`Journal.attach_picture`): the report's "After the edits" | `EditPicture {png}` (a `data:image/` URL, at most 400 kB) | `{ok}` | free; 404 unknown entry, 400 not a picture or too big |
 
-"The patch" is `Workspace.patch`: `{scene_id, revision_before, revision, meshes, history}`, which lets the page
-update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13-3d-viewer.md)). `_with_patch` holds
+"The patch" is `Workspace.patch`: `{scene_id, revision_before, revision, layout, meshes, history}`, which lets the
+page update its model in place (`applyToViewer`, [07](07-fixes-and-edits.md), [13](13-3d-viewer.md)). `history`'s file
+indexes hold only within one `layout`: a page whose layout differs (a model was added or removed elsewhere) reloads
+the files instead of patching by index. `_with_patch` holds
 `Workspace.lock` from reading `revision_before` to building the patch, so another tab's edit cannot fall between.
 
 ### Export
@@ -338,7 +343,7 @@ the stream through. `_McpGate` adds the same header to `/mcp` replies. Test a st
 
 | Pattern | Routes | How it works | When the reader goes away |
 |---|---|---|---|
-| Queue and worker thread | `propose/stream`, `detect/stream`, `plan/stream`, `document/stream`, `models/upload/stream` | The route charges, makes a `queue.Queue`, starts `work` with `owner.spawn` and returns a sync generator that yields `json.dumps(event) + "\n"` until the `None` sentinel (Starlette iterates it in its thread pool). The upload stream yields `{"type": "tick"}` after 5 s with no event. | The work runs to the end; the queue is unbounded. |
+| Queue and worker thread | `propose/stream`, `detect/stream`, `plan/stream`, `document/stream`, both `models/upload/stream` routes | The route charges, makes a `queue.Queue`, starts `work` with `owner.spawn` and returns a sync generator that yields `json.dumps(event) + "\n"` until the `None` sentinel (Starlette iterates it in its thread pool). The upload stream yields `{"type": "tick"}` after 5 s with no event. | The work runs to the end; the queue is unbounded. |
 | `_RequestEvents` | `chat`, `context/stream`, `built/stream` | A bounded queue (64) that never blocks a worker, even under `Workspace.lock`. When full it drops or evicts progress events (`thinking`, `tool`, `tool_result`, `trial`, `reasoning`, `ideas`, `checking`, `attempt`, `context_progress`, `item`, `checking_plan`, and wrapped ones) to keep results, errors and the end; if results alone fill it, the request ends with `error` "Request cancelled: too many unread result events. Please retry." The async reader polls every 50 ms and checks `request.is_disconnected()`. | Sets `cancel`: the chat turn and the wider search stop at their next check; a built view's work carries on. |
 | Shared job, replayed | `triage/stream`, `titles/stream` | One `triage.Job` / `titles.Job` per report key (triage over ORCA's checks: one per scene, `scene:<id>`); `Job.follow()` yields every event so far, then new ones, and `{"type": "ping"}` after 15 s of quiet. A late follower of triage skips reasoning sent before it joined. | Other followers and the job carry on. |
 | Link channel | `links/{token}/events` | An async generator polling the subscriber's queue every 0.1 s; `heartbeat` after 15 s idle; ends after about 240 s (under Modal's request limit), when the page leaves, or when the link is gone. | The subscriber is removed. |
@@ -478,17 +483,19 @@ model_calls, blockers}`, or `error {detail}`.
 | `error` | `detail` |
 | `done` | last |
 
-**`POST /api/models/upload/stream`** (`app.upload_models_stream`, `Workspace.open_paths`, `step.convert`):
+**`POST /api/models/upload/stream`** (`app.upload_models_stream`, `Workspace.open_paths`, `step.convert`) and
+**`POST /api/scenes/{scene_id}/models/upload/stream`** (`app.add_uploaded_models_stream`, `Workspace.add_models`), both
+through `app._ticking`:
 
 | Type | Fields |
 |---|---|
 | `received` | `bytes` (unpacked, all files) |
 | `reading`, `classifying`, `classify_failed`, `meshing`, `converted` | the STEP conversion: `file`, `parts`, `seconds`, `cached`, `detail` |
-| `opening` | `files` |
-| `boxes` | `done`, `total` (elements measured, `IfcScene.bounds`) |
+| `opening` | `files` (the files coming in) |
+| `boxes` | `done`, `total` (elements measured: `IfcScene.bounds` on opening, only the new files' on adding) |
 | `tick` | every 5 s with nothing else |
-| `done` | `id`, `files`, `step`, `revision` |
-| `error` | `status`, `detail` |
+| `done` | `id`, `files`, `step`, `revision`, `layout`; adding: `added` (the new files' indexes) |
+| `error` | `status` (400; adding: 409 the list changed meanwhile, 404 the scene is gone), `detail` |
 
 `packing` and `upload` are made in the browser by `api.uploadModelsStream`, not sent by the server.
 
@@ -578,7 +585,7 @@ sequenceDiagram
 - A new body field, reply field, status code or refusal message on a route; a new cap charged by a route.
 - A new NDJSON stream, a new event `type` or field from `agent.resolve`, `detect.run`, `triage.Job`, `titles.Job`,
   `plans`, `document.generate`, `built.make`, `context_planner.build`, `chat.Chat`, `step.convert`,
-  `Workspace.open_paths`, or `Link.publish`.
+  `Workspace.open_paths`, `Workspace.add_models`, or `Link.publish`.
 - A change to `_ndjson`, `NDJSON_HEADERS`, `_RequestEvents` (size, what counts as progress), keep-alives, or how
   long the link events stream lives.
 - A new header or cookie, or a change to `_OwnerContext`, `_McpGate`, the lifespan or the static mount.
