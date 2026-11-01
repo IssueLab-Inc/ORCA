@@ -517,6 +517,7 @@ h3 { font-size: 12.5px; margin: 0; display: flex; align-items: center; gap: 6px;
 .clash-row:hover .row-actions, .clash-row:focus-within .row-actions, .clash-row.pick .row-actions { display: flex; }
 .row-actions .ibtn { width: 26px; height: 26px; color: var(--muted); }
 .row-actions .ibtn:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
+.row-actions .ibtn.on { color: var(--accent-ink); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 .row-actions .same { width: auto; padding: 0 5px; display: inline-flex; gap: 3px; }
 .row-actions .same .n { font-size: 11px; font-variant-numeric: tabular-nums; }
 /* A row's proposal (ReportList): Proposing… while it runs, then how many fixes are ready, and View to bring it up */
