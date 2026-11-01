@@ -92,6 +92,10 @@ place, before its check) and `attempt`. `trackAgent` fills the activity table, l
 [docs/workings.md](../workings.md)) and feeds `Pilot`, which plays the trials at a readable pace; the `result` (ranked
 verified options with `before` meshes) shows once the pilot has caught up, and the Clash panel scrolls to it. Options
 rejected for the pair go with the next request as `notes` ([docs/edits.md](../edits.md), "Rejecting a fix").
+A proposal belongs to its clash and runs on while others are opened (one at a time): its row says Proposing…, then how
+many fixes are ready with View; `trackAgent` keeps the run's own state (`runState`) and writes the panel only while
+its clash is on screen; the result is kept per clash (`doneProposals`), so opening it again shows it without a new
+request.
 
 ```mermaid
 sequenceDiagram
