@@ -586,8 +586,24 @@ again ([docs/manual-edits.md](../manual-edits.md)). They share the fix kinds' pr
 `apply_trim`, `_build_chain`, `_void_rep`/`_void_place`, `_grown`, the ray casts) and add `stretch_radius`,
 `offset_edge`, `face_axes`, `through_depth`, `misses`, `cut_void`, `cut_by_shape`, `split_axis`, `split`,
 `remove_product_with`, `clip_to_plane`. `edits._body(clipped=True)` and `_frames(clipped=True)` look through a hand
-edit's clip; the default stays strict, so the fix kinds and STEP export see a clipped element as before. `stretch`
-takes a rectangle drawn off its axis (a box drawn from its corner) as long as it is not turned.
+edit's clip; the default stays strict, so the fix kinds and STEP export see a clipped element as before.
+
+Hand edits reach every body through parameters the fix kinds leave at their defaults (Nov 1, second round):
+- **Per solid:** `edits.solids` lists each item of the Body (an extrusion along its own axis, a mesh, or other, under
+  any clips); `_body`, `_frames`, `stretch`, `stretch_radius`, `offset_edge` and `_sole_body` take `item` (its place in
+  the Body).
+- **Meshes:** `mesh_data`, `mesh_patches` (flat faces through shared corners, within 1° and 1 mm), `patch_at` and
+  `push_mesh_face` (a flat face's corners moved along its normal; ports on it go along).
+- **Sections and clips:** `stretch(sections=True)` changes an I, U, C, L or T section's overall width or depth
+  (`SECTION_DIMS`), the opposite side held; `clip_planes` and `move_clip` push and pull a clip's plane;
+  `_clip_items` clips every solid of a Body (meshes too).
+- **Any body split:** `long_axis` and `split_by_clip` split any body with half-space clips.
+- **Leniency for people:** `least_m` (people leave 5 mm, `manual.MIN_HAND_M`; fixes keep `MIN_PIECE_M`, 50 mm) on
+  `stretch`, `split`, `apply_trim` and `clip_to_plane`, and `unique` (`make_unique`: a shared body copied for this
+  element, styles kept; a type's mapped shape refused). `stretch` also takes a rectangle turned in its plane (its own
+  axes).
+
+With their defaults, the fix kinds' calls are unchanged.
 
 ### Trying by hand
 

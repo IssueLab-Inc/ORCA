@@ -1915,3 +1915,17 @@ or voice keeps; [docs/manual-edits.md](../manual-edits.md)):
   Against the live server: Muse's fix for the duct and girder (offset +400 mm, 50 mm clear) kept as E1, then the middle
   piece it made pulled 20 mm in by hand: E2 follows E1, carries the clash, and the clash is still resolved. Answer key
   3/3 again at the end. `evals/step_cell.py` was not run: the demo-models checkout is not in this session.
+
+**Nov 1, fewer restrictions on editing by hand** (owner testing of the Edit tool: "too many restrictions"). Faces for
+every body (`edits.solids`: each solid of a Body, ids prefixed `i1:` only when there are several; mesh faces that push
+by moving their corners; an I, U, C, L or T section's outer sides; a clip's plane), align at first contact up to 80°
+apart with Clip it flush offered, and to a corner or an edge point, joints that follow (a collinear segment stretches)
+or are left open behind "Keep with 1 open joint" (`accept_joints` on the route, MCP and chat's "joint"), Move it alone,
+void, split, remove a section and clip on any body by half-space clips (`edits.split_by_clip`, `_clip_items`), people's
+5 mm minimum, shared bodies copied, turned rectangles. On the page: the drag stretches every drawing of the element
+live with its distance at the arrow, align previews from the two picks, a face the tool cannot take offers the tools it
+does, and Undone sits in an Edits row's header. Measured: all 1,732 of Northbank's physical elements now have a face to
+push (was 1,324), listed in 1.6 s; a diffuser's side, a door's bottom and a UB 457's flange check in 0.1–0.7 s; 312 of
+the MEP model's mesh faces push cleanly, the rest are joined ends. Checked: 761 server tests, 218 web tests,
+`test_docs_map`, the answer key 3/3 first try at Rev04's heights (+0.40, +0.25, +0.28), and in Chromium the duct's top
+dragged up live ("+440 mm" at the arrow) then checked on release. Design: [docs/manual-edits.md](../manual-edits.md).

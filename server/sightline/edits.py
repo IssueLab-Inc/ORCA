@@ -2718,6 +2718,98 @@ def remove_product_with(scene: IfcScene, global_id: str) -> list[str]:
     return gone
 
 
+def long_axis(scene: IfcScene, global_id: str) -> tuple[np.ndarray, np.ndarray, float]:
+    """The element's long axis, world metres: a start, a unit direction and a length. Its extrusion's (`split_axis`)
+    when it has one; else the axis of its placement it is longest along (a fitting, a door, a mesh)."""
+    try:
+        how = split_axis(scene, global_id)
+    except Unsupported:
+        how = None
+    if how is not None and how[0] == "run":
+        return np.asarray(how[1], float), np.asarray(how[2], float), float(how[3])
+    v = _mesh_verts(scene.entity(global_id))
+    c = v.mean(axis=0)
+    if how is not None:
+        d = how[2][:3, how[1]] / np.linalg.norm(how[2][:3, how[1]])
+    else:
+        element = scene.entity(global_id)
+        place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+                 if element.ObjectPlacement is not None else np.eye(4))
+        axes = [place[:3, k] / np.linalg.norm(place[:3, k]) for k in range(3)]
+        d = max(axes, key=lambda a: float(np.ptp(v @ a)))
+    proj = (v - c) @ d
+    return c + d * proj.min(), d, float(proj.max() - proj.min())
+
+
+def _clip_items(scene: IfcScene, element, point, normal) -> None:
+    """Clip every solid of the element's Body with the half-space on the side `normal` points to (world metres):
+    meshes and extrusions alike. A solid wholly kept is left as it is; one wholly taken away is dropped."""
+    i = scene.index_of(element.GlobalId)
+    model, s = scene.models[i], scene.unit_scales[i]
+    body = _body_rep(element)
+    if any(it.is_a("IfcMappedItem") for it in body.Items):
+        raise Unsupported("its shape comes from its type: editing it would change every element of that type")
+    P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
+    place = (ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
+             if element.ObjectPlacement is not None else np.eye(4))
+    inv = np.linalg.inv(place)
+    loc = (inv @ np.append(P / s, 1.0))[:3] * s          # the representation's frame, SI metres
+    nl = inv[:3, :3] @ N
+    nl = nl / np.linalg.norm(nl)
+    new = []
+    for top in body.Items:
+        side = (item_verts(scene, element, top) - P) @ N
+        if side.max() <= 1e-6:
+            new.append(top)
+        elif side.min() < -1e-6:
+            new.append(ifcopenshell.api.run("geometry.clip_solid", model, item=top, location=loc.tolist(), normal=nl.tolist()))
+    if not new:
+        raise Unsupported("the plane takes all of it away")
+    body.Items = tuple(new)
+    body.RepresentationType = "Clipping"
+
+
+def split_by_clip(scene: IfcScene, global_id: str, at, least_m: float = MIN_PIECE_M, unique: bool = False,
+                  axis: tuple | None = None) -> list[str]:
+    """Split any body in two square to its long axis (`long_axis`) at `at`, by half-space clips: the element keeps the
+    first piece, clipped beyond the plane; a copy (its class, properties, openings, its own body) is clipped before it.
+    The copy's ports are dropped: its joints stay with the first piece. `axis` (a start and a direction) cuts square
+    to another axis than its own (a section taken out of a fitting: both cuts square to the whole's axis). Returns both
+    GlobalIds."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    if unique:
+        make_unique(model, element)
+    if axis is None:
+        start, d, length = long_axis(scene, global_id)
+    else:
+        d = np.asarray(axis[1], float) / np.linalg.norm(axis[1])
+        proj = _mesh_verts(element) @ d
+        start, length = np.asarray(axis[0], float) + d * (proj.min() - np.asarray(axis[0], float) @ d), float(np.ptp(proj))
+    a = float((np.asarray(at, float) - start) @ d)
+    if a < least_m or length - a < least_m:
+        raise Unsupported(f"a piece would be under {least_m * 1000:.0f} mm")
+    P = start + d * a
+    part = ifcopenshell.api.run("root.copy_class", model, product=element)
+    import ifcopenshell.util.element as ue
+    part.Representation = ue.copy_deep(model, element.Representation, exclude=["IfcGeometricRepresentationContext"])
+    for old_r, new_r in zip(element.Representation.Representations, part.Representation.Representations):
+        for old_i, new_i in zip(old_r.Items, new_r.Items):
+            for st in [x for x in model.get_inverse(old_i) if x.is_a("IfcStyledItem")]:
+                model.createIfcStyledItem(new_i, st.Styles, st.Name)
+    for port in list(ifcopenshell.util.system.get_ports(part)):
+        ifcopenshell.api.run("root.remove_product", model, product=port)
+    if element.Name:
+        part.Name = f"{element.Name} (part 2)"
+    if getattr(element, "Tag", None):
+        part.Tag = f"{element.Tag}-P2"
+    _clip_items(scene, element, P, d)
+    _clip_items(scene, part, P, -d)
+    scene.refresh_bounds([global_id, part.GlobalId])
+    return [global_id, part.GlobalId]
+
+
 def clip_to_plane(scene: IfcScene, global_id: str, point, normal, least_m: float = MIN_PIECE_M, unique: bool = False) -> None:
     """Cut away the element's material on the side of the plane (world metres) its `normal` points to: an
     IfcBooleanClippingResult with a half-space, as authoring tools clip a beam's end to a sloping face. Refused when the
@@ -2727,8 +2819,6 @@ def clip_to_plane(scene: IfcScene, global_id: str, point, normal, least_m: float
     model, s = scene.models[i], scene.unit_scales[i]
     if unique:
         make_unique(model, element)
-    body, item = _sole_body(model, element) if not _is_clipped(element) else _body(element, clipped=True)
-    top = body.Items[0]
     P, N = np.asarray(point, float), np.asarray(normal, float) / np.linalg.norm(normal)
     v = _mesh_verts(element)
     side = (v - P) @ N
@@ -2736,14 +2826,9 @@ def clip_to_plane(scene: IfcScene, global_id: str, point, normal, least_m: float
         raise Unsupported("the plane does not cross it")
     if (-side.min()) < least_m:
         raise Unsupported(f"less than {least_m * 1000:.0f} mm of it would be left")
-    place = ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)
-    inv = np.linalg.inv(place)
-    loc = (inv @ np.append(P / s, 1.0))[:3] * s          # the representation's frame, SI metres
-    nl = inv[:3, :3] @ N
-    nl = nl / np.linalg.norm(nl)
-    result = ifcopenshell.api.run("geometry.clip_solid", model, item=top, location=loc.tolist(), normal=nl.tolist())
-    body.Items = (result,)
-    body.RepresentationType = "Clipping"
+    if shared(model, element, _body_rep(element), _body_rep(element).Items[0]):
+        raise Unsupported("its body is shared with other elements")
+    _clip_items(scene, element, P, N)   # every solid of its body, meshes too
     scene.refresh_bounds([global_id])
 
 

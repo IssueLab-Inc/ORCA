@@ -553,8 +553,12 @@ def _resolve_void(scene: IfcScene, op: dict) -> Plan:
             raise edits.Unsupported("a recess is at least 1 mm deep")
     else:
         depth = edits.through_depth(scene, gid, at, n, offsets)
-        if depth is None:
-            raise edits.Unsupported("it does not come out the other side here: give it a depth (a recess)")
+        if depth is None:   # no way through found: as deep as the element is behind the face, when that is a wall's worth
+            v = edits._mesh_verts(scene.entity(gid))
+            behind = float(((at - v) @ n).max()) + 0.001
+            if not 0.001 < behind <= edits.MAX_THROUGH_M:
+                raise edits.Unsupported("it does not come out the other side here: give it a depth (a recess)")
+            depth = behind
     warn = cut_warnings(scene, gid)
     if edits.misses(scene, gid, at, n, edits._outline(shape, w + 2 * edits.OPENING_EDGE_M, h + 2 * edits.OPENING_EDGE_M, u, v)):
         warn.append({"rule": "edge", "review": None,
@@ -617,36 +621,58 @@ def _make_cut_by(scene: IfcScene, plan: Plan) -> Made:
 
 def _along(scene: IfcScene, gid: str, at: np.ndarray) -> tuple[float, str]:
     """How far `at` is along the element's long axis, and from which end, in words."""
-    how = edits.split_axis(scene, gid)
-    if how[0] == "run":
-        _, start, d, length = how
-        a = float((at - start) @ d)
-        return a, f"{a:.2f} m from its {faces._name(scene, gid, -np.asarray(d)).split()[0]} end"
-    _, ax, world = how
-    i = scene.index_of(gid)
-    s = scene.unit_scales[i]
-    q = (np.linalg.inv(world) @ np.append(at / s, 1.0))[:2]
-    d = world[:3, ax] / np.linalg.norm(world[:3, ax])
-    item = edits._body(scene.entity(gid))[1]
-    pts = faces.outline(item.SweptArea) or [np.zeros(2)]
-    a = (float(q[ax]) - min(p[ax] for p in pts)) * s
-    return a, f"{a:.2f} m from its {faces._name(scene, gid, -d).split()[0]} end"
+    start, d, _ = edits.long_axis(scene, gid)
+    a = float((at - start) @ d)
+    return a, f"{a:.2f} m from its {faces._name(scene, gid, -np.asarray(d)).split()[0]} end"
+
+
+def _has_body(scene: IfcScene, gid: str) -> bool:
+    try:
+        return len(edits._mesh_verts(scene.entity(gid))) > 0
+    except RuntimeError:
+        return False
+
+
+def _split(scene: IfcScene, plan: Plan, gid: str, at, axis=None) -> list[str]:
+    """Split exactly where the body is one extrusion (its profile cut, its ports chained); else, or where that path
+    refuses (a cut through an opening, an outline with holes), by half-space clips, saying what that leaves."""
+    if axis is None:
+        try:
+            return edits.split(scene, gid, at, least_m=MIN_HAND_M, unique=True)
+        except edits.Unsupported as e:
+            if "under" in str(e):
+                raise
+    element = scene.entity(gid)
+    joints = bool(ifcopenshell.util.system.get_ports(element))
+    held = [f.RelatedBuildingElement for rel in getattr(element, "HasOpenings", None) or []
+            for f in getattr(rel.RelatedOpeningElement, "HasFillings", None) or []]
+    out = edits.split_by_clip(scene, gid, at, least_m=MIN_HAND_M, unique=True, axis=axis)
+    rules = {w["rule"] for w in plan.warnings}
+    if "clipped" not in rules:
+        plan.warnings.append({"rule": "clipped", "review": None,
+                              "text": "split by clips: each piece keeps the whole body, clipped where it was cut"})
+    if joints and "joints_first" not in rules:
+        plan.warnings.append({"rule": "joints_first", "review": "services",
+                              "text": f"{label(scene, gid)}'s joints stay with its first piece: its designer must join the other"})
+    if held and "fillings" not in rules:
+        plan.warnings.append({"rule": "fillings", "review": "design",
+                              "text": f"{', '.join(label(scene, x.GlobalId) for x in held[:3])} stay{'s' if len(held) == 1 else ''} "
+                                      "with its first piece"})
+    return out
 
 
 def _resolve_split(scene: IfcScene, op: dict) -> Plan:
     gid = op["element"]
     at = _vec(op.get("at"), "at")
-    try:
-        edits.split_axis(scene, gid)
-    except edits.Unsupported:
-        raise edits.Unsupported("its body is not one straight extrusion: it cannot be split")
+    if not _has_body(scene, gid):
+        raise edits.Unsupported("it has no body to split")
     a, where = _along(scene, gid, at)
     return Plan("split", gid, {"op": "split", "element": gid, "at": [round(float(c), 4) for c in at]}, {scene.index_of(gid)},
                 [gid], f"{label(scene, gid)} split in two, {where}", "any", warnings=structure_warnings(scene, gid, "the split"))
 
 
 def _make_split(scene: IfcScene, plan: Plan) -> Made:
-    gids = edits.split(scene, plan.element, plan.params["at"], least_m=MIN_HAND_M, unique=True)
+    gids = _split(scene, plan, plan.element, plan.params["at"])
     return Made(changed=[gids[0]], created=gids[1:], pieces=gids)
 
 
@@ -657,10 +683,8 @@ def _joined(scene: IfcScene, gid: str) -> list[str]:
 def _resolve_remove(scene: IfcScene, op: dict) -> Plan:
     gid = op["element"]
     p, q = _vec(op.get("from"), "from"), _vec(op.get("to"), "to")
-    try:
-        edits.split_axis(scene, gid)
-    except edits.Unsupported:
-        raise edits.Unsupported("its body is not one straight extrusion: a section cannot be taken out of it")
+    if not _has_body(scene, gid):
+        raise edits.Unsupported("it has no body to take a section out of")
     (a, wa), (b, wb) = _along(scene, gid, p), _along(scene, gid, q)
     if a > b:
         (a, wa, p), (b, wb, q) = (b, wb, q), (a, wa, p)
@@ -678,10 +702,12 @@ def _resolve_remove(scene: IfcScene, op: dict) -> Plan:
 
 def _make_remove(scene: IfcScene, plan: Plan) -> Made:
     gid = plan.element
-    first = edits.split(scene, gid, plan.params["from"], least_m=MIN_HAND_M, unique=True)
-    if (np.asarray(plan.params["to"]) - np.asarray(plan.params["from"])) @ _axis_of(scene, gid) < 0:
+    start, d, _ = edits.long_axis(scene, gid)
+    if (np.asarray(plan.params["to"]) - np.asarray(plan.params["from"])) @ d < 0:
         raise edits.Unsupported("pick the section's points along the element")
-    middle = edits.split(scene, first[1], plan.params["to"], least_m=MIN_HAND_M)
+    first = _split(scene, plan, gid, plan.params["from"])
+    clipped = any(w["rule"] == "clipped" for w in plan.warnings)   # both cuts square to the whole's axis
+    middle = _split(scene, plan, first[1], plan.params["to"], axis=(start, d) if clipped else None)
     name = scene.entity(gid).Name
     edits.remove_product_with(scene, middle[0])
     rest = scene.entity(middle[1])
@@ -692,11 +718,7 @@ def _make_remove(scene: IfcScene, plan: Plan) -> Made:
 
 
 def _axis_of(scene: IfcScene, gid: str) -> np.ndarray:
-    how = edits.split_axis(scene, gid)
-    if how[0] == "run":
-        return np.asarray(how[2])
-    world = how[2]
-    return world[:3, how[1]] / np.linalg.norm(world[:3, how[1]])
+    return edits.long_axis(scene, gid)[1]
 
 
 def _standing_on(scene: IfcScene, gid: str) -> list[str]:
@@ -760,21 +782,13 @@ def _resolve_clip(scene: IfcScene, op: dict) -> Plan:
         raise edits.Unsupported(f"it does not reach the {target}: nothing to clip")
     if side.min() >= -1e-4:
         raise edits.Unsupported(f"all of it is past the {target}")
-    axis = _axis_of(scene, gid) if _clip_ok(scene, gid) else None
+    axis = _axis_of(scene, gid)
     angle = f", {np.degrees(np.arccos(min(abs(float(axis @ nb)), 1.0))):.0f}° off square" if axis is not None else ""
     where = "flush with" if gap == 0 else f"{_mm(gap)} off"
     return Plan("clip", gid, {"op": "clip", "element": gid, "to": op.get("to"), "gap_m": gap,
                               "plane": {"point": [round(float(c), 5) for c in plane], "normal": [round(float(c), 6) for c in -nb]}},
                 {scene.index_of(gid)}, [gid], f"{label(scene, gid)} clipped {where} the {target}{angle}", "trim",
                 touching={other} if other and gap == 0 else set(), warnings=structure_warnings(scene, gid, "the clip"))
-
-
-def _clip_ok(scene: IfcScene, gid: str) -> bool:
-    try:
-        edits.split_axis(scene, gid)
-        return True
-    except edits.Unsupported:
-        return False
 
 
 def _make_clip(scene: IfcScene, plan: Plan) -> Made:

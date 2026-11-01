@@ -46,7 +46,7 @@ def test_faces_are_named_as_people_say_them_and_say_what_they_allow(scene):
     assert names(s, g["P1"])["radial"] == "round side"
     wall = {f.id: f for f in faces.faces(s, g["W1"])}
     assert wall["cap:start"].size_m == pytest.approx(0.2) and "void" in wall["cap:start"].allows
-    assert wall["edge:1"].allows == ["push_pull", "align"]
+    assert wall["edge:1"].allows == ["push_pull", "align", "clip", "void"]
     beam = {f.id: f for f in faces.faces(s, g["B1"])}
     assert "push_pull" not in beam["flank"].allows and "push_pull" in beam["side:+y"].allows
     assert beam["side:+y"].size_m == pytest.approx(0.4) and beam["side:+x"].size_m == pytest.approx(0.2)
@@ -241,7 +241,10 @@ def test_a_round_void_in_a_slab_a_recess_and_the_rules_that_warn(scene):
     assert web["passed"] and "hard_rule" in rules   # a transfer beam: ORCA would never cut it, a person may, for review
     edge = manual.check(ws, sid, {"op": "void", "element": g["W1"], "face": "north face", "at": [3.95, 0.0, 1.5], "diameter_m": 0.06})
     assert any(w["rule"] == "edge" for w in edge["warnings"])
-    assert "does not take an opening" in manual.check(ws, sid, {"op": "void", "element": g["W1"], "face": "east end", "diameter_m": 0.1})["blocked"]
+    # The wall's end takes one too: not through its 4 m length, as a recess
+    assert "give it a depth" in manual.check(ws, sid, {"op": "void", "element": g["W1"], "face": "east end", "diameter_m": 0.1})["blocked"]
+    end = manual.check(ws, sid, {"op": "void", "element": g["W1"], "face": "east end", "diameter_m": 0.1, "depth_m": 0.05})
+    assert end["blocked"] is None and "50 mm recess cut in the east end" in end["summary"]
 
 
 def test_cut_by_shape_leaves_the_gap_round_the_cutter(scene):
@@ -279,8 +282,9 @@ def test_a_wall_splits_in_two_and_its_window_stays_with_the_piece_that_holds_it(
     assert first == g["W1"] and kept["created"] == [second] and s.entity(second).Name == "W1 (part 2)"
     assert length_x(s, first) == pytest.approx(3.0) and length_x(s, second) == pytest.approx(1.0)
     assert len(s.entity(first).HasOpenings) == 1 and not s.entity(second).HasOpenings
+    # Through its window: split by clips instead, each piece keeping the opening where it is
     through = manual.check(ws, sid, {"op": "split", "element": first, "at": [1.5, -0.1, 1.0]})
-    assert "through an opening" in through["blocked"]
+    assert through["blocked"] is None and any(w["rule"] == "clipped" for w in through["warnings"])
     ws.undo_edit(sid)
     assert length_x(s, g["W1"]) == pytest.approx(4.0) and second not in s.bounds()
 
@@ -452,3 +456,40 @@ def test_a_face_turned_the_same_way_aligns_level_and_keeps_its_side(scene):
     # The wall's top (z = 3) level with the slab's top (z = 3.2), 20 mm short: it stays below
     r = manual.check(ws, sid, {"op": "align", "element": g["W1"], "face": "top", "gap_m": 0.02, "to": {"element": g["S1"], "face": "top"}})
     assert r["op"]["by_m"] == pytest.approx(0.18)
+
+
+def test_a_mesh_and_a_body_of_two_solids_split_by_clips(scene):
+    ws, sid, s, g = scene
+    r = manual.check(ws, sid, {"op": "split", "element": g["M1"], "at": [24.3, 0.2, 1.15]})
+    assert r["blocked"] is None and "0.30 m from its west end" in r["summary"] and any(w["rule"] == "clipped" for w in r["warnings"])
+    kept = manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"])
+    a, b = kept["pieces"]
+    assert np.allclose(s.bounds()[a], [[24, 0, 1], [24.3, 0.4, 1.3]], atol=1e-6)
+    assert np.allclose(s.bounds()[b], [[24.3, 0, 1], [24.6, 0.4, 1.3]], atol=1e-6) and s.entity(b).Name == "M1 (part 2)"
+    ws.undo_edit(sid)
+    assert b not in s.bounds() and np.allclose(s.bounds()[g["M1"]], [[24, 0, 1], [24.6, 0.4, 1.3]])
+    # The fitting along its longest side (x): its standing piece goes with the second part
+    kept = manual.apply(ws, sid, {"op": "split", "element": g["K1"], "at": [20.5, 0.15, 1.15]})
+    a, b = kept["pieces"]
+    assert np.allclose(s.bounds()[a], [[20, 0, 1], [20.5, 0.3, 1.3]], atol=1e-6)
+    assert np.allclose(s.bounds()[b], [[20.5, 0, 1], [21, 0.3, 1.9]], atol=1e-6)
+
+
+def test_a_section_comes_out_of_a_mesh_and_a_mesh_is_clipped_and_cut(scene):
+    ws, sid, s, g = scene
+    kept = manual.apply(ws, sid, {"op": "remove_section", "element": g["M1"], "from": [24.2, 0.2, 1.15], "to": [24.4, 0.2, 1.15]})
+    a, b = kept["pieces"]
+    assert np.allclose(s.bounds()[a][1], [24.2, 0.4, 1.3], atol=1e-6) and np.allclose(s.bounds()[b][0], [24.4, 0, 1], atol=1e-6)
+    ws.undo_edit(sid)
+    r = manual.check(ws, sid, {"op": "clip", "element": g["M1"], "to": {"point": [24.5, 0, 1.3], "normal": [-0.7071, 0, 0.7071]}})
+    assert r["blocked"] is None
+    manual.apply(ws, sid, r["op"], accept_clashes=r["clashes"])
+    # What lay past the slope (x - z > 23.2) is gone: its top ends at x = 24.5, its bottom at 24.2
+    assert s.bounds()[g["M1"]][1][0] == pytest.approx(24.5, abs=1e-4)
+    from sightline import edits
+    v = edits._mesh_verts(s.entity(g["M1"]))
+    assert ((v - [24.5, 0, 1.3]) @ np.array([-0.7071, 0, 0.7071]) >= -1e-4).all()
+    assert v[np.isclose(v[:, 2], 1.0)][:, 0].max() == pytest.approx(24.2, abs=1e-4)
+    hole = manual.check(ws, sid, {"op": "void", "element": g["K1"], "face": {"point": [20.3, 0.15, 1.3], "normal": [0, 0, 1]},
+                                  "diameter_m": 0.1})
+    assert hole["blocked"] is None and "opening cut in the top of duct fitting 'K1'" in hole["summary"]

@@ -35,15 +35,15 @@ CAP_COS = np.cos(np.radians(5))      # a normal within 5° of the extrusion is o
 SIDE_COS = 0.99                      # a normal within ~8° of a profile axis (or an edge's normal) is on that side
 NEAR_M = 0.005                       # a pick this close to a face's plane is on it
 
-ALLOWS = {
+ALLOWS = {   # clip takes any face: the element is clipped where the other face is, whichever of its faces was picked
     "cap": ["push_pull", "align", "clip", "void"],
-    "side": ["push_pull", "align", "void"],
-    "radial": ["push_pull", "align"],
-    "flank": ["align", "void"],
-    "edge": ["push_pull", "align"],
-    "plane": ["push_pull", "align"],
-    "clip": ["push_pull", "align"],
-    "other": ["align"],
+    "side": ["push_pull", "align", "clip", "void"],
+    "radial": ["push_pull", "align", "clip"],
+    "flank": ["align", "clip", "void"],
+    "edge": ["push_pull", "align", "clip", "void"],
+    "plane": ["push_pull", "align", "clip", "void"],
+    "clip": ["push_pull", "align", "clip", "void"],
+    "other": ["align", "clip"],
 }
 
 
@@ -348,7 +348,7 @@ def _resolve_extrusion(scene: IfcScene, gid: str, so: edits.Solid, listed: list[
             f = pick("flank")
             f.normal, f.name = N.tolist(), _name(scene, gid, N)
             return f
-        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, ["align"],
+        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, list(ALLOWS["other"]),
                     "a face ORCA does not edit")
     if prof.is_a("IfcCircleProfileDef"):
         return pick("radial")
@@ -367,10 +367,10 @@ def _resolve_extrusion(scene: IfcScene, gid: str, so: edits.Solid, listed: list[
             return pick(f"edge:{best[1]}")
         inner = getattr(prof, "InnerCurves", None)
         why = "a face of a hole in its outline" if inner else "a face ORCA does not edit"
-        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, ["align"], why)
+        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, list(ALLOWS["other"]), why)
     f = pick("flank")
     if f is None:
-        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, ["align"],
+        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, list(ALLOWS["other"]),
                     "a face ORCA does not edit")
     f.normal, f.name = N.tolist(), _name(scene, gid, N)
     return f
@@ -383,7 +383,7 @@ def _resolve_mesh(scene: IfcScene, gid: str, so: edits.Solid, listed: list[Face]
     except edits.Unsupported as e:
         if "curved" not in str(e):
             return None
-        return 0.0, Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, ["align"], str(e))
+        return 0.0, Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, list(ALLOWS["other"]), str(e))
     pre = f"i{so.k}:" if so.k is not None else ""
     n = N   # outward: the side it was picked from
     thick = float(((P - world) @ n).max())
@@ -420,7 +420,7 @@ def resolve(scene: IfcScene, gid: str, point, normal) -> Face:
         except (RuntimeError, edits.Unsupported, AttributeError, TypeError):
             continue
     if not found:
-        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, ["align"],
+        return Face(gid, "other", "other", _name(scene, gid, N), N.tolist(), P.tolist(), None, list(ALLOWS["other"]),
                     "a face ORCA does not edit")
     # The nearest solid; among equals, a face to edit before one only aligned by moving
     found.sort(key=lambda x: (round(x[0], 4), x[1].kind == "other"))

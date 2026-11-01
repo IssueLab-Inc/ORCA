@@ -238,7 +238,7 @@ call goes through `chat.Chat._run` under the same name.
 | `check_seat` | yes | An element seated on what it comes down into, checked without keeping it | chat → `Workspace.check_seat` | none |
 | `list_faces` | yes | An element's faces to edit by hand, named (east end, north face, top), with what each allows | chat → `faces.faces` | none |
 | `check_edit` | yes | A hand edit checked without keeping it (`manual.check`); the page previews it (`edit_preview`) | `manual.check` | none |
-| `apply_edit` | no | A hand edit kept (`manual.apply`, checked again first; `accept_clashes` for one kept with its clashes), logged as the agent's; the page redraws it (`edit_kept` with the patch) | `manual.apply`, `Workspace.patch` | none |
+| `apply_edit` | no | A hand edit kept (`manual.apply`, checked again first; `accept_clashes` for one kept with its clashes, `accept_joints` for one that leaves the joints its check lists open), logged as the agent's; the page redraws it (`edit_kept` with the patch) | `manual.apply`, `Workspace.patch` | none |
 | `list_edits` | yes | The edit log: every kept edit, who kept it, its clash and the fix it follows, kept or undone | `Journal.summary` | none |
 | `undo_edit` | no | The newest kept edit undone (a hand edit or a fix); the page redraws (`edit_stepped`) | `Workspace.undo_edit` | none |
 | `redo_edit` | no | The edit undone last made again | `Workspace.redo_edit` | none |

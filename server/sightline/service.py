@@ -803,7 +803,7 @@ class Workspace:
                 if not src:
                     continue
                 parts = json.loads(Path(src["manifest"]).read_text())["parts"]
-                moves, replace, add = step_changes(s, i, parts)
+                moves, replace, add = step_changes(s, i, parts, reshaped(j))
                 stem = Path(src["step"]).stem
                 out.append(step.export(Path(src["step"]), parts, out_dir / f"{stem}.orca.step", moves, replace, add,
                                        step_removed(s, i, parts)))
@@ -1231,11 +1231,24 @@ def step_removed(scene: IfcScene, index: int, parts: dict) -> list[str]:
     return gone
 
 
-def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, list]:
+RESHAPES = {"push_pull", "clip", "void", "cut_by", "split", "remove_section"}   # hand edits that change a body's shape
+
+
+def reshaped(journal) -> set[str]:
+    """Elements a kept hand edit gave a new shape (not only a new place): a pushed face, a clip, a cut, a split."""
+    out: set[str] = set()
+    for e in (journal.kept() if journal is not None else []):
+        if e.kind in RESHAPES or (e.kind == "align" and (e.params or {}).get("how") != "move"):
+            out |= set(e.elements)
+    return out
+
+
+def step_changes(scene: IfcScene, index: int, parts: dict, reshaped: set[str] = frozenset()) -> tuple[dict, dict, list]:
     """What changed in a model converted from STEP, for `step.export`: moved parts (placement against the manifest's
-    origin), parts whose extrusion changed (an offset's first piece, a trimmed member) or that were cut for a service,
-    and new parts (the rest of an offset, a provision for void), each new part tied to the STEP part it came from
-    through its `ORCA_STEP` label."""
+    origin), parts whose extrusion changed (an offset's first piece, a trimmed member), that were cut for a service or
+    that a hand edit reshaped (`reshaped`: a mesh's face pushed, a clip), and new parts (the rest of an offset, a
+    provision for void, a split's second piece), each new part tied to the STEP part it came from through its
+    `ORCA_STEP` label."""
     model = scene.models[index]
     moves, replace, add = {}, {}, []
     for gid, info in parts.items():
@@ -1258,6 +1271,9 @@ def step_changes(scene: IfcScene, index: int, parts: dict) -> tuple[dict, dict, 
                     or not np.allclose(now["profile"][1:], list(prism["profile"])[1:], atol=1e-6):   # a side pushed, a radius
                 replace[gid] = now
                 continue
+        if gid in reshaped:   # its shape as it is now (a mesh), in place of the STEP part's
+            replace[gid] = _spec(scene, element)
+            continue
         if np.any(np.abs(delta) > 1e-6):
             moves[gid] = delta.tolist()
     known = set(parts)

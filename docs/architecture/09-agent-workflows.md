@@ -549,7 +549,7 @@ take proposals as their routes do, `find_patterns` the pattern route's one propo
 | `check_move`, `check_offset`, `check_route`, `check_resize`, `check_penetration`, `check_seat` | A specific idea checked against the whole model, not kept | none | none |
 | `list_faces` | An element's faces to edit by hand, named (east end, north face, top), with what each allows; "selected" for the user's selection | none | none |
 | `edit_check` | A hand edit checked (`manual.check`), not kept; remembered as the conversation's pending edit | none | ui `edit_preview` (the Edit tool shows it with Keep) |
-| `edit_keep` | Keeps the pending edit (`manual.apply`, source `muse`) only when the user's own message this turn says so (`chat.consents`); one with clashes also needs `accept_clashes` and the word "clash" | none | ui `edit_kept` (with the patch) |
+| `edit_keep` | Keeps the pending edit (`manual.apply`, source `muse`) only when the user's own message this turn says so (`chat.consents`); one with clashes also needs `accept_clashes` and the word "clash", one that leaves a joint open the word "joint" | none | ui `edit_kept` (with the patch) |
 | `undo_edit`, `list_edits` | The newest kept edit undone, only when the user's message asks ("undo", "revert", "take it back"); the log | none | ui `edit_stepped` (undo) |
 | `propose_fixes` (`escalate`) | `Workspace.propose`, or `Workspace.escalate` with `escalate: true`; the reply lists verified options and failed ideas, and suggests a second try when nothing (or only a resize or an opening) passed | one proposal; a second try's caps and budget | `ui` `select_clash`, `agent` (each agent event), `proposal` |
 | `find_root_causes` | `plans.root_causes` | none | none |
