@@ -32,7 +32,7 @@ from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
 from . import (agents, built, chat, checks, context_planner, demos, detect, document, domains, edits, escalation,
-               mcp_server, meta_client, owner, plans, requirements, settings, spend, step, titles, triage, voice_live)
+               journal, mcp_server, meta_client, owner, plans, requirements, settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
@@ -303,6 +303,7 @@ class PlanRequest(BaseModel):
 
 class PlanApply(BaseModel):
     options: list[dict]
+    clash_ids: list[str | None] | None = None   # per option, the clash it was accepted for (the edit log ties them)
 
 
 class OpenReport(BaseModel):
@@ -803,15 +804,15 @@ def _with_patch(scene_id: str, kept) -> dict:
     with ws.lock:   # one request's edits between `before` and the patch, never another tab's
         before = ws.scene(scene_id).revision
         r = kept()
-        return {**r, **ws.patch(scene_id, r.get("changed", []), before)}
+        return {**r, **ws.patch(scene_id, r.get("changed", []), before, removed=r.get("removed", []))}
 
 
-def _keep(scene_id: str, options: list[dict], what: str) -> dict:
+def _keep(scene_id: str, options: list[dict], what: str, clash_ids: list[str | None] | None = None) -> dict:
     """Keep fixes through `plans.apply`, which tries each again first (as its proposal did, with the clearance and
     requirements of its clash) and keeps all or none, plus what the page needs to patch its model. A fix that no longer
     passes is a 409 with why; one that cannot be made a 422; one that is not a fix ORCA knows a 400."""
     try:
-        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, options))
+        return _with_patch(_scene(scene_id), lambda: plans.apply(ws, scene_id, options, clash_ids=clash_ids))
     except plans.NotVerified as e:
         raise HTTPException(409, str(e))
     except edits.Unsupported as e:
@@ -925,6 +926,7 @@ def apply_offset(scene_id: str, body: Offset):
 
 class FixApply(BaseModel):
     option: dict
+    clash_id: str | None = None   # the clash it was accepted for (the edit log ties them)
 
 
 @app.post("/api/scenes/{scene_id}/fix/apply")
@@ -937,7 +939,41 @@ def fix_apply(scene_id: str, body: FixApply):
     o = {k: v for k, v in body.option.items() if k not in ("preview", "before")}
     if not isinstance(o.get("moved"), list) or not o["moved"]:
         raise HTTPException(400, "The fix names no element.")
-    return _one(_keep(scene_id, [o], "this fix"))
+    return _one(_keep(scene_id, [o], "this fix", [body.clash_id]))
+
+
+class EditStep(BaseModel):
+    entry: str | None = None   # the entry the page means: refused (409) when it is not the one next in line
+
+
+@app.get("/api/scenes/{scene_id}/edits")
+def edits_log(scene_id: str, format: str = "json"):
+    """The scene's edit log (journal.py): every kept edit, by whom, for which clash, oldest first, with whether undo
+    and redo can go now. `?format=csv` gives it as a spreadsheet."""
+    _scene(scene_id)
+    if format == "csv":
+        return Response(ws.edits_csv(scene_id), media_type="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="orca-edits.csv"'})
+    return ws.journal(scene_id).summary()
+
+
+def _step(scene_id: str, go) -> dict:
+    try:
+        return _with_patch(_scene(scene_id), go)
+    except journal.Fenced as e:
+        raise HTTPException(409, f"Cannot do that: {e}.")
+
+
+@app.post("/api/scenes/{scene_id}/edits/undo")
+def edits_undo(scene_id: str, body: EditStep):
+    """Undo the newest kept edit: an agent fix, a plan, a wider fix or a hand edit. 409 when another edit came after
+    it outside the log, or `entry` is not the newest."""
+    return _step(scene_id, lambda: ws.undo_edit(scene_id, body.entry))
+
+
+@app.post("/api/scenes/{scene_id}/edits/redo")
+def edits_redo(scene_id: str, body: EditStep):
+    return _step(scene_id, lambda: ws.redo_edit(scene_id, body.entry))
 
 
 @app.get("/api/scenes/{scene_id}/export")
@@ -1646,7 +1682,7 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
 @app.post("/api/scenes/{scene_id}/plan/apply")
 def plan_apply(scene_id: str, body: PlanApply):
     """Keep a plan's fixes, all or none: each tried again alone and all together first (plans.apply)."""
-    return _keep(scene_id, body.options, "the plan")
+    return _keep(scene_id, body.options, "the plan", body.clash_ids)
 
 
 _chat: chat.Chat | None = None

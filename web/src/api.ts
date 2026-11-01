@@ -155,7 +155,25 @@ export interface ContextApplied extends Patch {
 export interface Patch {
   scene_id?: string; revision_before?: number; revision?: number; meshes?: ElementMesh[] | null;
   history?: [number, number[]][];   // (revision, files it changed): a page that missed an edit reloads those
+  removed?: string[];               // elements the request took out (a delete, undo of what a fix made)
 }
+
+/** Who kept an edit: by hand on the page, Muse in chat or voice, an MCP agent, an accepted fix, a plan, a wider fix. */
+export type EditSource = "you" | "muse" | "agent" | "fix" | "plan" | "wider";
+/** One kept edit in the scene's edit log (server: journal.py, docs/manual-edits.md). */
+export interface JournalEntry {
+  id: string; seq: number; when: string; source: EditSource; kind: string; title: string; summary: string;
+  actor: string | null; elements: string[]; created: string[]; removed: string[]; names: Record<string, string>;
+  files: number[]; revision: number; clashes: { id: string | null; pair: string[] }[]; follows: string[];
+  check: { verified?: boolean; cleared?: unknown[]; new?: unknown[]; worse?: unknown[]; accepted_clashes?: number;
+    min_clearance_m?: number | null } | null;
+  warnings: { rule: string; text: string; review: string | null }[]; status: { clash: string | null; resolved: boolean;
+    depth_m: number | null } | null; state: "kept" | "undone"; has_picture: boolean; params: Record<string, unknown>;
+}
+export interface Journal { entries: JournalEntry[]; can_undo: boolean; can_redo: boolean; undo: string | null; redo: string | null }
+/** Undo or redo: the entry, and how to patch the page (what came back in `changed`, what went in `removed`). */
+export type Stepped = { entry: JournalEntry; files: number[]; can_undo: boolean; can_redo: boolean;
+  undo: string | null; redo: string | null } & Patch;
 /** Progress from the agent while it works (server: agent.resolve), then the result. */
 export type AgentEvent = (
   | { type: "thinking"; round: number }
@@ -693,8 +711,8 @@ export const api = {
     if (!plan) throw new Error("The server stopped before the plan was ready. Try again.");
     return plan;
   },
-  applyPlan: (sceneId: string, options: Option[]) =>
-    call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options }) }),
+  applyPlan: (sceneId: string, options: Option[], clashIds: (string | null)[] = []) =>
+    call<{ files: number[]; pieces: string[][]; groups?: string[][][]; not_cut?: { index: number; blocked_by: string }[] } & Patch>(`/scenes/${sceneId}/plan/apply`, { method: "POST", body: JSON.stringify({ options, clash_ids: clashIds }) }),
   chat: (body: { message: string; session_id: string | null; scene_id: string | null; report_id: string | null;
                  clash_id: string | null; fixed: string[]; filters?: SharedFilter[]; filter_view?: FilterView; check?: string | null },
          onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
@@ -815,9 +833,15 @@ export const api = {
    *  from the option itself (its meshes are not needed there): the server tries it again against the clash it names
    *  (`pair`: the option's own, else the clash on screen) and answers 409 with why when it no longer passes. A
    *  penetration whose host the requirements lock comes back `cut: false`: only its provision for void was written. */
-  accept: (id: string, o: Option, pair: string[] | null) =>
+  accept: (id: string, o: Option, pair: string[] | null, clashId: string | null = null) =>
     call<Kept>(`/scenes/${id}/fix/apply`, { method: "POST",
-      body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null } }) }),
+      body: JSON.stringify({ option: { ...o, pair: o.pair ?? pair, preview: null, before: null }, clash_id: clashId }) }),
+  /** The scene's edit log: every kept edit, oldest first, and whether undo and redo can go now. */
+  journal: (id: string) => call<Journal>(`/scenes/${id}/edits`),
+  journalCsvUrl: (id: string) => `/api/scenes/${id}/edits?format=csv`,
+  /** Undo (or redo) the newest edit; `entry` names the one meant (409 when it is not next in line). */
+  undo: (id: string, entry?: string) => call<Stepped>(`/scenes/${id}/edits/undo`, { method: "POST", body: JSON.stringify({ entry: entry ?? null }) }),
+  redo: (id: string, entry?: string) => call<Stepped>(`/scenes/${id}/edits/redo`, { method: "POST", body: JSON.stringify({ entry: entry ?? null }) }),
 
   detectTests: (sceneId: string) => call<DetectSetup>(`/scenes/${sceneId}/detect/tests`),
   /** ORCA's own detection; resolves with the "done" event (the report and its coverage). `again`: run a kept check

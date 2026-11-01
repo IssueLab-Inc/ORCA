@@ -2,7 +2,7 @@ import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.j
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { loadIfc, type LoadedElement, type LoadedModel } from "./ifcLoader";
-import { patchModel, ROOM, type ElementMesh } from "./patch";
+import { patchModel, removeElements, ROOM, type ElementMesh } from "./patch";
 import { ViewCube } from "./cube";
 import { CAP_LAYER, CUT, DrawingStyle, DrawingView, farBehind, PAPER, targets, toIfc } from "./drawing";
 import { annotate, type Handle } from "./annotate";
@@ -311,13 +311,17 @@ export class Viewer {
   /** Swap a kept fix's changed and new elements into the models in place (viewer/patch.ts), instead of reloading the
    * files it changed. `origin` maps a new piece to the element it was split from, for its colour when it has none.
    * False when it cannot (a mesh for a file that is not loaded, or a batch refused it): reload the files then. */
-  patch(meshes: ElementMesh[], origin: Map<string, string> = new Map()): boolean {
+  patch(meshes: ElementMesh[], origin: Map<string, string> = new Map(), removed: string[] = []): boolean {
     const byFile = new Map<number, ElementMesh[]>();
     for (const m of meshes) {
       if (m.file == null || !this.models[m.file]) return false;
       byFile.set(m.file, [...(byFile.get(m.file) ?? []), m]);
     }
     try {
+      if (removed.length) {   // an edit took these out (a delete, a removed section, undo of what a fix made)
+        for (const model of this.models) if (model) removeElements(model, removed);
+        for (const gid of removed) { this.moved.delete(gid); this.hidden.delete(gid); this.info.delete(gid); }
+      }
       for (const [index, list] of byFile) {
         const model = this.models[index];
         patchModel(model, list, () => {

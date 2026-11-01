@@ -6,7 +6,7 @@ import { changeText, clearanceText, editText, framePieces, hostRows, kindLabel, 
 import { ChatPanel } from "./Chat";
 import { ChatRequestOwner } from "./chatRequest";
 import { ReportDialog, ReviewBlock } from "./ReportDoc";
-import type { AgentLink, BuiltResult, EscalationInfo, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
+import type { AgentLink, BuiltResult, EscalationInfo, Journal, JournalEntry, LinkEvent, OpenedScene, OwnerSettings, Patch, Piece, SavedSession, SceneInfo, TriageModel } from "./api";
 import { OwnerSettingsMenu } from "./Owner";
 import { CELL, Tour, TOUR, TOUR_QUESTION, type TourActions, type TourState } from "./Tour";
 import { RequirementsDialog } from "./Requirements";
@@ -37,6 +37,7 @@ import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./
 import { escStep, type DrawingsShow, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
 import { ViewPanes } from "./ViewPanes";
 import { MeasurePanel } from "./MeasurePanel";
+import { EditPanel } from "./EditPanel";
 import { follow, useCoarse, useLayout, type Happening, type Snap } from "./layout";
 import { SheetBar } from "./Sheet";
 import { MenuSheet } from "./AppMenu";
@@ -246,6 +247,9 @@ export function App() {
   // `fixes`: report clash id → the fix accepted for it.
   const [edits, setEdits] = useState<Record<string, string[]>>({});
   const [fixes, setFixes] = useState<Record<string, string>>({});
+  // The scene's edit log (journal.py): every kept edit, by whom and for which clash; undo and redo walk it.
+  const [journal, setJournal] = useState<Journal | null>(null);
+  const journalAsk = useRef(0);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [now, setNow] = useState(Date.now());
   const [compare, setCompare] = useState<"before" | "after" | "both">("after");
@@ -559,6 +563,7 @@ export function App() {
   // What the filters read: each element's class (the server's) and storey (datums). Read again after a kept fix (same
   // scene, new elements: `infoRev`); filters and hides start clean only with a new scene.
   useEffect(() => { setFilters({ classes: [], levels: [] }); setTemporary({ hidden: [], isolated: null }); setFacetIndex(null); }, [sceneId]);
+  useEffect(() => { setJournal(null); if (sceneId) void refreshJournal(sceneId); }, [sceneId]);
   useEffect(() => {
     if (!sceneId) return;
     let live = true;
@@ -1794,7 +1799,13 @@ export function App() {
   // forward, S section, E edges, M measure, L links, Esc one thing at a time.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
+      const typing = (e.target as HTMLElement).closest("input, textarea, select, [contenteditable]");
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && !document.querySelector('[aria-modal="true"]')) {
+        const key = e.key.toLowerCase();   // Ctrl+Z undoes the newest kept edit; Ctrl+Shift+Z or Ctrl+Y redoes it
+        if (key === "z" || key === "y") { e.preventDefault(); void stepEdit(key === "z" && !e.shiftKey ? "undo" : "redo"); }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey || typing) return;
       // A modal over the page (About ORCA, the report, the agent link, requirements) has its own keys: Esc closes it,
       // and must not also leave the clash underneath.
       if (document.querySelector('[aria-modal="true"]')) return;
@@ -2150,7 +2161,8 @@ export function App() {
     });
     try {
       // Each fix names its clash: the server tries them again, alone and together, before keeping any.
-      const kept = await api.applyPlan(sceneId, items.map((i) => ({ ...i.option!, pair: [i.element_a, i.element_b], others: i.others ?? [] })));
+      const kept = await api.applyPlan(sceneId, items.map((i) => ({ ...i.option!, pair: [i.element_a, i.element_b], others: i.others ?? [] })),
+        items.map((i) => i.clash_ids?.[0] ?? null));
       const pieces = kept.pieces;
       if (!live()) return;
       staleContext();
@@ -2190,9 +2202,10 @@ export function App() {
   async function applyToViewer(sid: string, kept: { files: number[] } & Patch, pieces: string[][] | undefined, live: () => boolean) {
     const origin = new Map((pieces ?? []).flatMap((ps) => ps.slice(1).map((g) => [g, ps[0]] as const)));
     if (kept.meshes && kept.scene_id === sid && kept.revision_before != null && kept.revision_before === sceneRevision.current
-        && viewer.current?.patch(kept.meshes, origin)) {
+        && viewer.current?.patch(kept.meshes, origin, kept.removed ?? [])) {
       sceneRevision.current = kept.revision ?? null;
       setInfoRev((n) => n + 1);   // the fix's new pieces: their classes and storeys for the filters
+      void refreshJournal(sid);
       return;
     }
     // Reload this fix's files, and any file changed by an edit this page missed (after the revision it last drew; all of
@@ -2204,7 +2217,57 @@ export function App() {
       if (!live()) return;
       await viewer.current!.replace(i, bytes, live);
     }
-    if (live()) { sceneRevision.current = kept.revision ?? null; setInfoRev((n) => n + 1); }
+    if (live()) { sceneRevision.current = kept.revision ?? null; setInfoRev((n) => n + 1); void refreshJournal(sid); }
+  }
+
+  /** Read the scene's edit log again (after any keep, undo or redo). The Edits panel comes into its side bar, behind
+   * the tab in front, the first time there is something in it. */
+  async function refreshJournal(sid: string) {
+    const ask = ++journalAsk.current;
+    try {
+      const j = await api.journal(sid);
+      if (ask !== journalAsk.current) return;
+      setJournal(j);
+      if (j.entries.length) dock.current?.place("edits");
+    } catch { /* the scene went: the next one starts its own log */ }
+  }
+
+  /** Undo or redo the newest edit in the log (Ctrl+Z, Ctrl+Shift+Z, the Edits panel). A fix undone leaves its clash
+   * open again; redone, fixed again. */
+  async function stepEdit(dir: "undo" | "redo", entry?: string): Promise<boolean> {
+    if (!sceneId || busy) return false;
+    const sid = sceneId, epoch = sceneEpoch.current;
+    const live = () => sceneEpoch.current === epoch;
+    setBusy(dir === "undo" ? "Undoing…" : "Redoing…"); setError(null);
+    try {
+      const r = dir === "undo" ? await api.undo(sid, entry) : await api.redo(sid, entry);
+      if (!live()) return false;
+      viewer.current?.preview([]);
+      if (selected && (r.removed ?? []).includes(selected.globalId)) setSelected(null);
+      await applyToViewer(sid, r, [], live);
+      if (!live()) return false;
+      const pairs = r.entry.clashes.map((c) => [c.pair[0] ?? null, c.pair[1] ?? null] as const);
+      const fixLike = r.entry.source !== "you" && r.entry.source !== "muse";
+      if (fixLike && dir === "undo") {
+        const ids = new Set(clashIdsOf(pairs).flat());
+        setFixes((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !ids.has(id))));
+        setEvidence((ev) => Object.fromEntries(Object.entries(ev).map(([id, x]) => [id, ids.has(id) && x.status === "accepted" ? { ...x, status: "proposed" } : x])));
+      } else if (fixLike) markFixed(pairs, pairs.map(() => r.entry.title));
+      staleContext(); setRemeasure((n) => n + 1);
+      return true;
+    } catch (e) { if (live()) setError((e as Error).message); return false; } finally { if (live()) setBusy(null); }
+  }
+
+  /** Undo every edit newer than `e`, then `e` itself, newest first. */
+  async function undoTo(e: JournalEntry) {
+    const newer = (journal?.entries ?? []).filter((x) => x.state === "kept" && x.seq >= e.seq).sort((x, y) => y.seq - x.seq);
+    for (const x of newer) if (!(await stepEdit("undo", x.id))) return;
+  }
+
+  /** The label the clash list shows for a clash id ("#042"), for the log's rows. */
+  function clashTag(id: string): string | null {
+    const c = report?.clashes.find((x) => x.id === id);
+    return c ? clashLabel(c) : null;
   }
 
   /** Mark every report clash of these element pairs as fixed (one pair can be reported by several tests). */
@@ -2706,7 +2769,7 @@ export function App() {
     const built = pair && canBuild(o) && builtDone.current[builtKey(pair, o)]?.status !== "done"
       && !builtPending.current.has(builtKey(pair, o)) ? builtPasses(builtFix(o, false), pair) : null;
     try {
-      const kept = await api.accept(sceneId, o, pair);
+      const kept = await api.accept(sceneId, o, pair, ids[0] ?? null);
       // Each split run's pieces, the original first (a combined fix can split several runs).
       const groups = kept.groups ?? (kept.pieces?.length ? [kept.pieces] : []);
       if (!live()) return;
@@ -3646,6 +3709,9 @@ export function App() {
           draft={filterDraft} onDraft={setFilterDraft} onZoom={(ids) => { const v = viewer.current; v?.frameEverywhere(ids.filter((g) => v.isShown(g))); }} check={filterCheck}
           drawingsWhole={drawingsShow === "whole"} onDrawingsWhole={shownLayout === "single" ? undefined : (whole) => setDrawingsShow(whole ? "whole" : "filtered")} />
       </div>)}
+      {docked && inSlot(slots.edits, <EditPanel journal={journal} busy={!!busy} csvUrl={sceneId ? api.journalCsvUrl(sceneId) : null}
+        clashLabel={clashTag} onUndo={() => void stepEdit("undo")} onRedo={() => void stepEdit("redo")} onUndoTo={(e) => void undoTo(e)}
+        onShow={(e) => { const v = viewer.current; v?.frameEverywhere([...e.elements, ...e.created].filter((g) => v.isShown(g))); }} />)}
       {docked && inSlot(slots.properties, <div className="props in-panel">
         {selected ? elementCard(false, false) : <p className="hint">Click any element in the model to see its properties.</p>}
       </div>)}

@@ -1496,6 +1496,24 @@ def kept_files(scene: IfcScene, indexes: set[int]):
 
 
 @contextmanager
+def scratch(scene: IfcScene, indexes: set[int]):
+    """Edits that never stay (a move there and back): inside a transaction that is always undone, so they do not
+    break the undo of kept edits (an untracked placement change leaves the history pointing at entities that are
+    gone). A file already holding a transaction is left to it. Boxes are put back."""
+    before = dict(scene.bounds())
+    models = [scene.models[i] for i in sorted(indexes) if scene.models[i].transaction is None]
+    for m in models:
+        m.begin_transaction()
+    try:
+        yield
+    finally:
+        for m in models:
+            m.end_transaction()
+            m.undo()
+        scene._bounds = before
+
+
+@contextmanager
 def trial_files(scene: IfcScene, indexes: set[int]):
     """Edit several files of a scene (a plan, or one fix that changes two models), then undo every edit, cached boxes
     included. Never nest it inside `trial`: a file holds one transaction at a time."""
@@ -1844,3 +1862,151 @@ def passages(scene: IfcScene, run_gid: str, obstacle_gid: str, clearance_m: floa
         else:
             i += 1
     return out
+
+
+# ----------------------------------------------------------------------------------------- hand edits (manual.py)
+
+MIN_EDGE_M = 0.01   # an outline edge left shorter than this by moving its neighbour is refused
+
+
+def _sole_body(model, element):
+    """The element's one extrusion, refusing a body other elements share (editing it would change them too)."""
+    body, item = _body(element)
+    users = (len([x for x in model.get_inverse(item) if x.is_a("IfcShapeRepresentation")]),
+             len([x for x in model.get_inverse(body) if x.is_a("IfcProductRepresentation") or x.is_a("IfcRepresentationMap")]),
+             len([x for x in model.get_inverse(element.Representation) if x.is_a("IfcProduct")]))
+    if max(users) > 1:
+        raise Unsupported("its body is shared with other elements")
+    return body, item
+
+
+def stretch_radius(scene: IfcScene, global_id: str, by_m: float) -> float:
+    """A round element's radius `by_m` larger (or smaller): a new circle profile (profiles can be shared), the axis
+    and ports where they were. Returns the new diameter in metres."""
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    _, item = _sole_body(model, element)
+    prof = item.SweptArea
+    if not prof.is_a("IfcCircleProfileDef"):
+        raise Unsupported("only a round section changes its radius")
+    r = prof.Radius + float(by_m) / s
+    if not np.isfinite(r) or r * s < 0.005:
+        raise Unsupported(f"it would be {max(r * s * 2000, 0):.0f} mm across (at least 10 mm stays)")
+    if prof.is_a("IfcCircleHollowProfileDef"):
+        if r <= prof.WallThickness:
+            raise Unsupported("its wall would be thicker than its radius")
+        item.SweptArea = model.createIfcCircleHollowProfileDef(prof.ProfileType, prof.ProfileName, prof.Position,
+                                                               float(r), prof.WallThickness)
+    else:
+        item.SweptArea = model.createIfcCircleProfileDef(prof.ProfileType, prof.ProfileName, prof.Position, float(r))
+    scene.refresh_bounds([global_id])
+    return float(2 * r * s)
+
+
+def _line_cross(p, d, q, e):
+    """Where the lines p + t·d and q + u·e meet, or None when they are parallel."""
+    den = d[0] * e[1] - d[1] * e[0]
+    if abs(den) < 1e-12:
+        return None
+    t = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / den
+    return p + d * t
+
+
+def _simple(pts: list[np.ndarray]) -> bool:
+    """No two edges of the closed outline cross (neighbours share their corner)."""
+    n = len(pts)
+    segs = [(pts[k], pts[(k + 1) % n]) for k in range(n)]
+
+    def cross(a, b, c, d):
+        def o(p, q, r):
+            return np.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]))
+        return o(a, b, c) != o(a, b, d) and o(c, d, a) != o(c, d, b)
+
+    for x in range(n):
+        for y in range(x + 1, n):
+            if y == x + 1 or (x == 0 and y == n - 1):
+                continue
+            if cross(*segs[x], *segs[y]):
+                return False
+    return True
+
+
+def inside(pts: list[np.ndarray], q) -> bool:
+    """Whether 2D point `q` lies in the closed outline (on its edge counts as inside)."""
+    x, y = q
+    hit = False
+    n = len(pts)
+    for k in range(n):
+        (x0, y0), (x1, y1) = pts[k], pts[(k + 1) % n]
+        if abs((x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)) < 1e-9 and min(x0, x1) - 1e-9 <= x <= max(x0, x1) + 1e-9 \
+                and min(y0, y1) - 1e-9 <= y <= max(y0, y1) + 1e-9:
+            return True
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+            hit = not hit
+    return hit
+
+
+def _write_outline(model, prof, pts: list[np.ndarray], closed_repeat: bool):
+    """A new outline profile with these points, keeping its kind, name and holes (profiles and curves can be shared)."""
+    curve = prof.OuterCurve
+    if curve.is_a("IfcIndexedPolyCurve"):
+        coords = [tuple(float(c) for c in p) for p in pts]
+        new = model.createIfcIndexedPolyCurve(model.createIfcCartesianPointList2D(coords + [coords[0]]), None, False)
+    else:
+        cps = [_point(model, p) for p in pts]
+        new = model.createIfcPolyline(cps + [cps[0]] if closed_repeat else cps)
+    if prof.is_a("IfcArbitraryProfileDefWithVoids"):
+        return model.createIfcArbitraryProfileDefWithVoids(prof.ProfileType, prof.ProfileName, new, prof.InnerCurves)
+    return model.createIfcArbitraryClosedProfileDef(prof.ProfileType, prof.ProfileName, new)
+
+
+def offset_edge(scene: IfcScene, global_id: str, k: int, by_m: float, keep_inside: list[np.ndarray] = ()) -> float:
+    """Move straight edge `k` of the element's outline profile out (+) or in (−) by `by_m`, square to itself; the
+    edges either side run on to meet it (a wall's end moves, its top and bottom get longer or shorter). Refused when
+    a neighbour is parallel to it, would turn back or fall under 10 mm, the outline would cross itself, or a hole in
+    it or any of `keep_inside` (2D points in the profile's plane, file units: an opening's corners) would be left
+    outside. Returns the edge's distance moved, metres."""
+    from .faces import ccw, edge_normal, outline
+    element = scene.entity(global_id)
+    i = scene.index_of(global_id)
+    model, s = scene.models[i], scene.unit_scales[i]
+    _, item = _sole_body(model, element)
+    prof = item.SweptArea
+    pts = outline(prof)
+    if pts is None:
+        raise Unsupported("its outline is not straight edges")
+    n = len(pts)
+    if not 0 <= k < n:
+        raise Unsupported(f"its outline has no edge {k}")
+    by = float(by_m) / s
+    if not np.isfinite(by) or abs(by_m) < 1e-4:
+        raise Unsupported("an edge moves at least 0.1 mm")
+    a, b = pts[k], pts[(k + 1) % n]
+    d = b - a
+    nrm = edge_normal(a, b, ccw(pts))
+    prev_a, next_b = pts[k - 1], pts[(k + 2) % n]
+    na = _line_cross(a + nrm * by, d, prev_a, a - prev_a)
+    nb = _line_cross(a + nrm * by, d, b, next_b - b)
+    if na is None or nb is None:
+        raise Unsupported("an edge beside it runs the same way, so it cannot follow")
+    for old_far, old, new in ((prev_a, a, na), (next_b, b, nb)):
+        before, after = old - old_far, new - old_far
+        if np.linalg.norm(after) * s < MIN_EDGE_M or before @ after <= 0:
+            raise Unsupported(f"an edge beside it would be shorter than {MIN_EDGE_M * 1000:.0f} mm or turn back")
+    new_pts = list(pts)
+    new_pts[k], new_pts[(k + 1) % n] = na, nb
+    if not _simple(new_pts):
+        raise Unsupported("its outline would cross itself")
+    holes = []
+    for c in getattr(prof, "InnerCurves", None) or ():
+        holes += [np.asarray(p.Coordinates[:2], float) for p in getattr(c, "Points", [])]
+    for q in [*holes, *keep_inside]:
+        if not inside(new_pts, q):
+            raise Unsupported("it would cut through an opening in it" if any(q is x for x in keep_inside)
+                              else "it would cut through a hole in its outline")
+    curve = prof.OuterCurve
+    repeat = curve.is_a("IfcPolyline") and len(curve.Points) > n
+    item.SweptArea = _write_outline(model, prof, new_pts, repeat)
+    scene.refresh_bounds([global_id])
+    return float(by * s)

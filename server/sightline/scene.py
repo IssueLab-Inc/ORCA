@@ -66,6 +66,7 @@ NOT_PHYSICAL = ("IfcFeatureElement", "IfcVirtualElement")
 THREADS = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
 MESH_KERNEL = "hybrid-cgal-simple-opencascade"
 BOUNDS_BATCH = 2000   # elements per geometry iterator while measuring boxes
+HISTORY_SIZE = 1024   # transactions each file keeps: kept edits must outlast the trials between them (journal.py)
 # From this size (all files together) every element goes through CGAL, extrusions too: about twice as fast, with boxes
 # within 1 mm of OpenCASCADE's on curved sections (it facets them a little differently). Smaller models keep the
 # default kernel for everything but meshes, so their boxes and checks are exactly as before.
@@ -113,6 +114,8 @@ class IfcScene:
     def __init__(self, paths: str | Path | list[str | Path]):
         self.paths = [Path(p) for p in (paths if isinstance(paths, list) else [paths])]
         self.models = [ifcopenshell.open(str(p)) for p in self.paths]
+        for m in self.models:   # kept edits stay undoable (journal.py) while trials come and go
+            m.set_history_size(HISTORY_SIZE)
         # Project length unit → metres, per file. Authoring-tool exports are often in millimetres.
         self.unit_scales = [ifcopenshell.util.unit.calculate_unit_scale(m) for m in self.models]
         self._edited: set[int] = set()
@@ -138,6 +141,8 @@ class IfcScene:
         clone = object.__new__(IfcScene)
         clone.paths = list(self.paths)
         clone.models = [ifcopenshell.file.from_string(m.to_string()) for m in self.models]
+        for m in clone.models:
+            m.set_history_size(HISTORY_SIZE)
         clone.unit_scales = list(self.unit_scales)
         clone._edited = set(self._edited)
         clone._bounds = None if self._bounds is None else {g: b.copy() for g, b in self._bounds.items()}

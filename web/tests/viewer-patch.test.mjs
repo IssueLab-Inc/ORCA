@@ -3,7 +3,7 @@ import test from "node:test";
 import * as THREE from "three";
 import { appHost, compiled, option } from "./app-host.mjs";
 
-const { patchModel, makeRoom, toGeometry } = await import(await compiled("../src/viewer/patch.ts", { three: import.meta.resolve("three") }));
+const { patchModel, makeRoom, toGeometry, removeElements } = await import(await compiled("../src/viewer/patch.ts", { three: import.meta.resolve("three") }));
 
 /** A box as the server sends it: world metres, IFC Z up, unwelded (one quad of two triangles per face). */
 function box(gid, [x, y, z], [sx, sy, sz] = [1, 1, 1], extra = {}) {
@@ -115,4 +115,16 @@ test("an opening the host's team must cut is recorded as requested, and the clas
     if (!cut) assert.match(ev.blocked_by, /its team cuts the opening/);
     host.unmount();
   }
+});
+
+test("an edit that removes elements takes their instances out and the maps forget them (undo of what a fix made, a delete)", () => {
+  const m = model();
+  const b = m.byGlobalId.get("B");
+  assert.deepEqual(removeElements(m, ["B", "nope"]), ["B"]);
+  assert.equal(m.byGlobalId.has("B"), false); assert.equal(m.byInstance.has(b.instanceId), false);
+  assert.equal(m.stats.elements, 1);
+  assert.throws(() => m.mesh.getGeometryIdAt(b.instanceId));   // its instance went with its geometry
+  const r = patchModel(m, [box("B", [3, 0, 0])], () => { throw new Error("no glass needed"); });
+  assert.deepEqual(r.added, ["B"]);   // redo brings it back as a new instance
+  assert.equal(m.stats.elements, 2);
 });

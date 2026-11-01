@@ -507,7 +507,8 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         o = {**options[option - 1], "pair": [proposal["element_a"], proposal["element_b"]]}
         with W().lock:   # one request's edits between `before` and the patch
             before = W().scene(link.ctx.scene_id).revision
-            out = plans.apply(W(), link.ctx.scene_id, [o])
+            out = plans.apply(W(), link.ctx.scene_id, [o], source="agent", actor=f"agent link {link.id}",
+                              clash_ids=[c.id])
             out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
         if out["not_cut"]:   # a penetration requested, not cut: the clash stays open until the host's team cuts it
             _applied(link, out, [], [], [], {})
@@ -534,7 +535,9 @@ def build(ws: Workspace | Callable[[], Workspace], hooks: Hooks | None = None,
         with W().lock:   # one request's edits between `before` and the patch
             before = W().scene(link.ctx.scene_id).revision
             out = plans.apply(W(), link.ctx.scene_id, [{**it["option"], "pair": [it["element_a"], it["element_b"]],
-                                                        "others": it.get("others") or []} for it in items])
+                                                        "others": it.get("others") or []} for it in items],
+                              source="agent", actor=f"agent link {link.id}",
+                              clash_ids=[(it.get("clash_ids") or [None])[0] for it in items])
             out = {**out, **W().patch(link.ctx.scene_id, out["changed"], before)}
         requested = {n["index"] for n in out["not_cut"]}   # penetrations only requested: their clashes stay open
         cut = [it for k, it in enumerate(items) if k not in requested]

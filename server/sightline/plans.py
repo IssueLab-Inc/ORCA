@@ -729,7 +729,18 @@ def _check_together(ws: Workspace, scene_id: str, checked: list[dict]) -> None:
                               "the requirements may have changed since the plan was checked: plan again.", k)
 
 
-def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
+def _words(o: dict) -> str:
+    """A kept fix in words, for the edit log: its title and what the edit does."""
+    edit = o.get("edit") or {}
+    what = edit.get("summary")
+    if not what and (o.get("kind") or "move") == "move" and o.get("delta_m"):
+        what = "move " + agent.move_words(o["delta_m"])
+    title = o.get("title") or o.get("kind") or "fix"
+    return f"{title}: {what}" if what and what not in title else title
+
+
+def apply(ws: Workspace, scene_id: str, options: list[dict], *, source: str | None = None, actor: str | None = None,
+          clash_ids: list[str | None] | None = None) -> dict:
     """Keep every fix of an accepted plan (or one accepted option), all or nothing. Each is tried again first, as its
     proposal tried it (`recheck`), and several are checked together (`verify_together`): a fix that no longer passes
     (the model changed since, or it was never verified) raises NotVerified and nothing is kept; what the trials make,
@@ -749,8 +760,19 @@ def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
         if len(checked) > 1:
             _check_together(ws, scene_id, checked)
         scene = ws.scene(scene_id)
+        ids = list(clash_ids or []) + [None] * len(checked)
+        kind = (checked[0].get("kind") or "move") if len(checked) == 1 else "plan"
+        log = ws.journal(scene_id).record(scene, source or ("fix" if len(checked) == 1 else "plan"), kind, actor=actor,
+                                          requirements=requirements.current_id())
         # All or nothing: a fix refused part way (a penetration whose host may no longer take it) undoes the others.
-        with edits.kept_files(scene, set().union(*(option_files(scene, o) for o in checked))):
+        with log as rec, edits.kept_files(scene, set().union(*(option_files(scene, o) for o in checked))):
+            rec.title = checked[0].get("title") or kind if len(checked) == 1 else f"Plan of {len(checked)} fixes"
+            rec.summary = "; ".join(_words(o) for o in checked)
+            rec.params = {"options": [{k: v for k, v in o.items() if k not in ("preview", "before", "placements")}
+                                      for o in checked]}
+            rec.clashes = [{"id": ids[k], "pair": list(option_pair(o)[:2])} for k, o in enumerate(checked)]
+            rec.check = {"verified": True, "min_clearance_m": min((o["min_clearance_m"] for o in checked
+                                                                   if o.get("min_clearance_m") is not None), default=None)}
             for k, o in enumerate(checked):
                 r, made = KEEP[o["kind"]](ws, scene_id, o)
                 runs = made if made and isinstance(made[0], list) else [made] if made else []
@@ -760,7 +782,8 @@ def apply(ws: Workspace, scene_id: str, options: list[dict]) -> dict:
                 changed += r.get("changed", [g for run in runs for g in run] or o["moved"])
                 if r.get("cut") is False:   # a penetration its host's team must cut: the clash stays open
                     not_cut.append({"index": k, "blocked_by": r["blocked_by"]})
-    return {"files": sorted(files), "pieces": pieces, "groups": groups, "changed": list(dict.fromkeys(changed)),
+            rec.changed = list(dict.fromkeys(changed))
+    return {"entry": rec.entry.to_dict() if rec.entry else None, "files": sorted(files), "pieces": pieces, "groups": groups, "changed": list(dict.fromkeys(changed)),
             "not_cut": not_cut, "verified": [{"min_clearance_m": o["min_clearance_m"],
                                               "checked_against": o["checked_against"]} for o in checked]}
 

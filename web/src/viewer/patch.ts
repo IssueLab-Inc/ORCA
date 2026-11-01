@@ -110,3 +110,21 @@ export function patchModel(model: LoadedModel, meshes: ElementMesh[], glassFor: 
   for (const b of need.keys()) { b.boundingBox = null; b.boundingSphere = null; }
   return { added, changed };
 }
+
+/** Take elements out of `model` (an edit removed them, or undo took back what it made): their instance and geometry
+ * go, and the maps forget them. Returns the GlobalIds it held. */
+export function removeElements(model: LoadedModel, globalIds: Iterable<string>): string[] {
+  const gone: string[] = [];
+  for (const gid of globalIds) {
+    const el = model.byGlobalId.get(gid);
+    if (!el) continue;
+    // Deleting the geometry deletes the instances drawing it (one per element here).
+    el.mesh.deleteGeometry(el.mesh.getGeometryIdAt(el.instanceId));
+    (el.mesh === model.mesh ? model.byInstance : model.glassByInstance).delete(el.instanceId);
+    model.byGlobalId.delete(gid);
+    model.stats.elements -= 1;
+    el.mesh.boundingBox = null; el.mesh.boundingSphere = null;
+    gone.push(gid);
+  }
+  return gone;
+}

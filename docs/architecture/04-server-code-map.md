@@ -114,6 +114,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `escalation.py` | Fix agent | The brief a second try on Muse Wonder reads (first try, neighbourhood, blockers) |
 | `fixtures.py` | Test support | Synthetic IFC models: clash, run, joint, context, detection, route, penetration, resize fixtures |
 | `hosts.py` | Fix agent | Which hosts may take an opening: hard rules, requirements, Muse's reading by kind, hole limits |
+| `journal.py` | State | The edit log: one `Entry` per kept edit (agent fixes, plans, wider fixes, hand edits), who and which clash, the fix a hand edit follows, undo and redo over each file's transactions ([docs/manual-edits.md](../manual-edits.md)) |
 | `limits.py` | Policy | `ProposeLimit`: rolling per-visitor and per-day caps; `client_id` |
 | `mcp_server.py` | Entry points | ORCA as an MCP server: remote at `/mcp` by link token, or local over stdio |
 | `meta_client.py` | Model client | `MetaChatModel` and the model factories: Muse Spark, Muse Spark Open, Muse Wonder; transcription; prices |

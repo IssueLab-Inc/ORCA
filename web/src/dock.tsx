@@ -6,6 +6,7 @@ import { DockviewReact, type DockviewApi, type DockviewGroupPanelApi, type Dockv
 import "dockview-react/dist/styles/dockview.css";
 import { Activity as Pulse, AppWindow, Box, Info, List, ListFilter, LocateFixed, MessageSquare, Network, PanelBottomClose, PanelBottomOpen,
   PanelLeftClose, PanelRight, PanelRightClose, PictureInPicture2, Undo2, X, type LucideIcon } from "lucide-react";
+import { LogIcon } from "./editIcons";
 import { EDGE_GROUP, EDGE_SIZE, PANELS, PANEL_IDS, PROPS_KEY, homeOf as defaultHome, readPropsHome, isPanel, readLayout, showSteps, titleOf, writeLayout,
   type Edge, type PanelId, type PropsHome, type SavedLayout, type Where } from "./dockLayout";
 
@@ -78,6 +79,8 @@ export interface DockHandle {
   /** Show a panel: reopen it if closed, open its collapsed side bar, bring its window forward; with `dock`, bring it
    *  back from a pop-out window (the tour reads the main page). */
   show(id: PanelId, opts?: { dock?: boolean }): void;
+  /** Put a closed panel in its side bar without bringing it to the front (the Edits log, on the first kept edit). */
+  place(id: PanelId): void;
   /** Back to the default layout. */
   reset(): void;
   /** Every panel back in this window, every side bar open (the tour, which reads the main page). */
@@ -95,7 +98,7 @@ interface Context { slots: Slots; tabs: Tabs; onTab: (id: PanelId) => void }
 const DockContext = createContext<Context | null>(null);
 
 const ICONS: Record<PanelId, LucideIcon> = { model: Box, clashes: List, filters: ListFilter, clash: LocateFixed, plan: Network, chat: MessageSquare,
-  activity: Pulse, properties: Info };
+  edits: LogIcon, activity: Pulse, properties: Info };
 const TOUR_TAG: Partial<Record<PanelId, string>> = { plan: "tab-plan", chat: "tab-chat" };
 const THEME: DockviewTheme = { name: "orca", className: "dockview-theme-orca", colorScheme: "light" };
 const SAVE_MS = 400;
@@ -263,7 +266,7 @@ function edgeGroup(api: DockviewApi, edge: Edge, size?: number) {
   return api.getGroup(EDGE_GROUP[edge]);
 }
 
-function addHome(api: DockviewApi, id: PanelId) {
+function addHome(api: DockviewApi, id: PanelId, inactive = false) {
   const home = homeOf(id);
   if (home === "centre") return;
   if (home === "float") {
@@ -271,7 +274,7 @@ function addHome(api: DockviewApi, id: PanelId) {
     return;
   }
   edgeGroup(api, home);
-  api.addPanel({ id, component: "panel", title: titleOf(id), position: { referenceGroup: EDGE_GROUP[home] }, renderer: "always" });
+  api.addPanel({ id, component: "panel", title: titleOf(id), position: { referenceGroup: EDGE_GROUP[home] }, renderer: "always", inactive });
 }
 
 function moveHome(api: DockviewApi, panel: IDockviewPanel) {
@@ -318,7 +321,7 @@ function build(api: DockviewApi, sizes: { left: number; right: number }) {
     if (p.home === "centre" || p.home === "float") continue;  // a floating panel appears when it is needed
     // "always": a panel behind another tab stays in the page, hidden, so the tour finds what it points at and shows it.
     api.addPanel({ id: p.id, component: "panel", title: p.title, position: { referenceGroup: EDGE_GROUP[p.home] },
-      inactive: p.id === "plan" || p.id === "chat" || p.id === "filters", renderer: "always" });
+      inactive: p.id === "plan" || p.id === "chat" || p.id === "edits" || p.id === "filters", renderer: "always" });
   }
   api.getPanel("clash")?.api.setActive();
   model.api.setActive();
@@ -446,6 +449,7 @@ export function DockHost({ slots, sizes, tabs, onReady, onGone, onTab, onShown, 
           else if (step === "activate" && panel && !panel.api.isActive) panel.api.setActive();
         }
       },
+      place(id) { if (!api.getPanel(id)) addHome(api, id, true); },
       reset() {
         building = true;   // the bars are empty for a moment while they fill: they stay as they are made
         try { clearAll(api); build(api, live.current.sizes); } finally { building = false; }

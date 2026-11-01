@@ -17,7 +17,7 @@ import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
-from . import agent, checks, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, properties, reports, requirements, settings, spend, step, verify
+from . import agent, checks, connections, datums, demos, detect, domains, edits, escalation, facets, hosts, journal, properties, reports, requirements, settings, spend, step, verify
 from .limits import env_int
 from .meta_client import ChatModel, MetaChatModel, escalation_model, model_label
 from .scene import IfcScene, is_provision, step_source
@@ -64,6 +64,8 @@ class Workspace:
         # and the scene's own temporary folder (uploads, conversions), deleted when the scene is dropped.
         self.sources: dict[str, dict[int, dict]] = {}
         self._roots: dict[str, Path] = {}
+        # Scene id → its edit log: every kept edit, by whom, for which clash (journal.py, docs/manual-edits.md).
+        self.journals: dict[str, journal.Journal] = {}
         # Geometry trials edit the model and undo; anything touching a scene's geometry holds this.
         self.lock = threading.RLock()
         self._model = model
@@ -175,6 +177,7 @@ class Workspace:
             register = self.checks.pop(old, None)
             if register is not None:
                 register.drop()
+            self.journals.pop(old, None)
             self._stays.pop(old, None)
             with self._last_lock:
                 for key in [k for k in self._last if k[0] == old]:
@@ -213,6 +216,12 @@ class Workspace:
 
     def scene(self, scene_id: str) -> IfcScene:
         return self.scenes[scene_id]
+
+    def journal(self, scene_id: str) -> journal.Journal:
+        """The scene's edit log (journal.py), made on first use."""
+        self.scene(scene_id)
+        with self.lock:
+            return self.journals.setdefault(scene_id, journal.Journal())
 
     def classes(self, scene_id: str) -> dict[str, list[str]]:
         """GlobalId → [IFC class, name] of every physical element (what has a box)."""
@@ -309,15 +318,16 @@ class Workspace:
                         "checked_against": t.checked, "placements": t.placements, "preview": t.preview,
                         "reason": None, "joints": plan.edit(s, moved)}
             sup = verify.supports(s, moved, set(obstacles), clearance_m) if obstacles else None
-            placements = s.translate(moved, tuple(delta_m))
-            try:
-                v = verify.check(s, moved, clearance_m=clearance_m)
-                hits, held, why = verify.keep_supports(s, sup, v.hits) if sup else (v.hits, set(), None)
-                if held and not hits and not why:
-                    v = verify.check(s, moved, clearance_m=clearance_m, ignore=held)
-                    hits = v.hits
-            finally:
-                s.translate(moved, tuple(-d for d in delta_m))
+            with edits.scratch(s, {s.index_of(g) for g in moved}):   # undone: kept edits stay undoable
+                placements = s.translate(moved, tuple(delta_m))
+                try:
+                    v = verify.check(s, moved, clearance_m=clearance_m)
+                    hits, held, why = verify.keep_supports(s, sup, v.hits) if sup else (v.hits, set(), None)
+                    if held and not hits and not why:
+                        v = verify.check(s, moved, clearance_m=clearance_m, ignore=held)
+                        hits = v.hits
+                finally:
+                    s.translate(moved, tuple(-d for d in delta_m))
         return {**asdict(v), "passed": not hits and not why, "hits": [asdict(h) for h in hits], "reason": why,
                 "placements": placements}
 
@@ -533,18 +543,57 @@ class Workspace:
 
     PATCH_MAX_VERTS = 500_000   # past this, the page reloads the files instead
 
-    def patch(self, scene_id: str, changed: list[str], revision_before: int) -> dict:
+    def undo_edit(self, scene_id: str, entry_id: str | None = None) -> dict:
+        """Undo the newest kept edit in the log (journal.Fenced when it cannot be undone). What it made is gone again
+        (`removed`), what it changed or removed is back (`changed`)."""
+        s = self.scene(scene_id)
+        with self.lock:
+            e = self.journal(scene_id).undo(s, entry_id)
+        return {"entry": e.to_dict(), "files": e.files, "changed": [*e.elements, *e.removed], "removed": e.created,
+                **self._journal_flags(scene_id)}
+
+    def redo_edit(self, scene_id: str, entry_id: str | None = None) -> dict:
+        s = self.scene(scene_id)
+        with self.lock:
+            e = self.journal(scene_id).redo(s, entry_id)
+        return {"entry": e.to_dict(), "files": e.files, "changed": [*e.elements, *e.created], "removed": e.removed,
+                **self._journal_flags(scene_id)}
+
+    def _journal_flags(self, scene_id: str) -> dict:
+        j = self.journal(scene_id).summary()
+        return {k: j[k] for k in ("can_undo", "can_redo", "undo", "redo")}
+
+    def edits_csv(self, scene_id: str) -> str:
+        """The edit log as CSV, one row per entry (kept and undone), for a spreadsheet or an issue tracker."""
+        import csv
+        import io
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["id", "when", "source", "kind", "title", "summary", "clashes", "follows", "changed", "created",
+                    "removed", "warnings", "state"])
+        for e in self.journal(scene_id).entries:
+            d = e.to_dict()
+            w.writerow([e.id, d["when"], e.source, e.kind, e.title, e.summary,
+                        " ".join(str(c.get("id") or "/".join(c.get("pair") or [])) for c in e.clashes),
+                        " ".join(e.follows), " ".join(e.names.get(g, g) for g in e.elements),
+                        " ".join(e.names.get(g, g) for g in e.created), " ".join(e.names.get(g, g) for g in e.removed),
+                        "; ".join(w_["text"] for w_ in e.warnings), e.state])
+        return out.getvalue()
+
+    def patch(self, scene_id: str, changed: list[str], revision_before: int, removed: list[str] = ()) -> dict:
         """What a page needs to update its model in place after a kept fix, instead of reloading whole files: the
         scene's revision before and after the request, and the changed or new elements' triangles (`edits.meshes`,
         render), taken after every edit of it. A page whose model is not at `revision_before` (it missed an edit), or
         that gets no meshes (an element that would not triangulate, or too much to send), reloads the files."""
         s = self.scene(scene_id)
+        gone = list(dict.fromkeys(removed))
         out = {"scene_id": scene_id, "revision_before": revision_before, "revision": s.revision, "meshes": None,
                # which files each revision changed: a page behind `revision_before` reloads what it missed
-               "history": [[rev, files] for rev, files in s.history]}
+               "history": [[rev, files] for rev, files in s.history], "removed": gone}
         with self.lock:
+            here = [g for g in dict.fromkeys(changed) if g not in gone and _exists(s, g)]
             try:
-                meshes = edits.meshes(s, list(dict.fromkeys(changed)), render=True)
+                meshes = edits.meshes(s, here, render=True)
             except (RuntimeError, KeyError):
                 return out
         if sum(len(m["verts"]) for m in meshes) // 3 <= self.PATCH_MAX_VERTS:
@@ -1077,6 +1126,14 @@ def project_name(files: list[str]) -> str | None:
     m = re.match(r"^(.*[A-Za-z0-9])[\s_.-]", prefix)
     cut = m.group(1) if m else prefix if all(n == prefix for n in names) else ""
     return cut if len(cut) >= 3 else None
+
+
+def _exists(scene: IfcScene, gid: str) -> bool:
+    try:
+        scene.index_of(gid)
+        return True
+    except KeyError:
+        return False
 
 
 def _spec(scene: IfcScene, element) -> dict:

@@ -681,15 +681,16 @@ def _try_move(scene: IfcScene, cand: dict, target: str, clearance_m: float,
     sup = verify.supports(scene, run, set(partners), clearance_m, ignore=neighbours) if partners else None
     if on_trial:
         on_trial({"kind": "move", "moved": run, "delta_m": delta, "pieces": None})
-    placements = scene.translate(run, tuple(delta))
-    try:
-        v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
-        hits, held, why = verify.keep_supports(scene, sup, v.hits) if sup else (v.hits, set(), None)
-        if held and not why and not hits:   # its clearance is to what is near it, not to what it stands on
-            v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours | held)
-            hits = v.hits
-    finally:
-        scene.translate(run, tuple(-d for d in delta))
+    with edits.scratch(scene, {scene.index_of(g) for g in run}):   # undone: kept edits stay undoable
+        placements = scene.translate(run, tuple(delta))
+        try:
+            v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours)
+            hits, held, why = verify.keep_supports(scene, sup, v.hits) if sup else (v.hits, set(), None)
+            if held and not why and not hits:   # its clearance is to what is near it, not to what it stands on
+                v = verify.check(scene, run, clearance_m=clearance_m, ignore=neighbours | held)
+                hits = v.hits
+        finally:   # also when the file already holds a transaction (scratch then leaves it alone)
+            scene.translate(run, tuple(-d for d in delta))
     passed = not hits and not why
     attempt = Attempt(cand.get("title", "move"), delta, passed, why or _reason(hits), hit_ids=_hit_ids(hits),
                       where=_where(hits))
