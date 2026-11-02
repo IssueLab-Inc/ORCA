@@ -184,6 +184,8 @@ diagrams, checked against the code. Feature designs (the "why") stay in `docs/*.
 - **Numbers people see are measured:** the landing's numbers, the README's "Two demos" table and the demo cards share
   pictures and numbers; change them together and only from measured runs, and recapture `web/public/demos/*.webp`
   (`web/scripts/capture-demos.cjs`) after visual changes.
+- **The dev server watches `sightline/` only** (`--reload-dir sightline`, README). Plain `--reload` watches
+  `server/.venv` too: a `uv sync` or install from another session restarted it and dropped every open model (Nov 2).
 - **Modal CLI behind the cloud session's proxy** needs `uv tool install 'modal[api-proxy-support]'`. **On Windows** it
   stops mid-deploy printing ✓ ("'charmap' codec can't encode"): set `PYTHONIOENCODING=utf-8` first. Not installed?
   `uvx --from modal modal deploy deploy/modal_app.py`.

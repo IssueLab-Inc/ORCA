@@ -21,7 +21,8 @@ inside is in [09](09-agent-workflows.md) and [07](07-fixes-and-edits.md); the ca
   any module it imports reads a setting: the caps, the owner token and the settings modules read at import time
   (`SIGHTLINE_MAX_SCENES`, `SIGHTLINE_SCENE_BUDGET_MB` and the others marked "import" in
   [15](15-requirements-settings-and-config.md)) all come from `.env` when the real environment does not set them
-  (real environment variables win). Locally: `uv run uvicorn sightline.app:app --reload`. On
+  (real environment variables win). Locally: `uv run uvicorn sightline.app:app --reload --reload-dir sightline` (only the
+  package is watched: a package install in `server/.venv` would otherwise restart it and drop every scene). On
   Modal, `deploy/modal_app.py` imports the same `app` under `@modal.asgi_app()`, one container, up to 64 requests at
   once (`@modal.concurrent(max_inputs=64)`: linked pages each hold an events stream), 10-minute request timeout
   ([17](17-deployment-and-operations.md)).
