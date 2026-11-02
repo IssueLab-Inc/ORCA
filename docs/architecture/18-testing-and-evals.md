@@ -448,7 +448,7 @@ flowchart TD
 | App's imports | Both stub lists (`app-host.mjs`, `app-replacement.test.mjs`) |
 | The viewer's look, the demo models | `capture-demos.cjs` and `capture-proposals.cjs --landing`; then the landing, the README's "Two demos" table and the demo cards together |
 | The proposal flow's look, the Workings graph | `capture-proposals.cjs`, and with `--landing`; then the README's "See it work" captions and the landing clips' alt text from that run |
-| Numbers people see (landing, README, tour) | Only from a measured run, and say where it was measured |
+| Numbers people see (landing, README, tour) | ORCA's own: only from a measured run, and say where it was measured. An industry figure (rework's cost on the landing and About ORCA): only from its primary source, linked beside it, worded as the source states it |
 | Any core part | The matching doc in `docs/architecture/` in the same PR, and a dated entry at the end of [22](22-build-log.md) |
 
 Always: the product check in the browser for anything a person sees, and the work on its own branch (`feature/…`,

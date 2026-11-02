@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ABOUT_TABS, nextTab, type AboutTab } from "./aboutRoute";
+import { GIRI_STRATEGY } from "./About";
 
 /**
  * About ORCA: a full page, in tabs, for anyone who wants more than the landing: what ORCA does, how the loop works,
@@ -131,8 +132,10 @@ function Overview({ reduced, onTab }: { reduced: boolean; onTab: (t: AboutTab) =
           </p>
           <p>
             A check finds them by the hundred. Most are harmless, parts that meet on purpose. A few are real, and each
-            real one costs a meeting and a redesign; missed, it costs rework on site. Today a coordinator finds them,
-            explains them and waits for someone to redraw.
+            real one costs a meeting and a redesign; missed, it costs rework on site. Avoidable errors like these cost
+            about 5% of a project's value directly, and an estimated 10 to 25% once indirect costs are counted (<a
+            className="src" href={GIRI_STRATEGY} target="_blank" rel="noopener noreferrer">Get It Right
+            Initiative</a>). Today a coordinator finds them, explains them and waits for someone to redraw.
           </p>
           <p className="oa-pull">ORCA does the redrawing too, and proves it worked.</p>
         </div>
