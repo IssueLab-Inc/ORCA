@@ -548,9 +548,11 @@ def _resolve_move(scene: IfcScene, op: dict) -> Plan:
                       f"({_mm(r.params['by_m'])} {'longer' if r.params['by_m'] > 0 else 'shorter'})" for r in retrim)
     follows += "".join(f"; {label(scene, j.global_id)} re-fitted at its {j.end} with a pair of bends, the rest where it is"
                        for j in plan.jogs)
+    follows += "".join(f"; {connections.tilt_words(scene, t, past=True)}" for t in plan.tilts)
     return Plan("move", gid, params, {scene.index_of(g) for g in [*changed, *(r.element for r in retrim)]},
                 [*changed, *(r.element for r in retrim)], f"{label(scene, gid)} moved {words}{with_run}{follows}", "move",
-                float(np.linalg.norm(delta)), gated=[*run, *(j.global_id for j in plan.jogs), *(r.element for r in retrim)],
+                float(np.linalg.norm(delta)), gated=[*run, *(j.global_id for j in plan.jogs),
+                                                     *(t.global_id for t in plan.tilts), *(r.element for r in retrim)],
                 warnings=[*structure_warnings(scene, gid, "the move"), *(w for r in retrim for w in r.warnings)],
                 extra={"plan": plan, "retrim": retrim})
 
@@ -1184,6 +1186,8 @@ def also(scene: IfcScene, plan: Plan, made: Made) -> list[dict]:
             why[st.global_id] = "joined: made longer or shorter"
         for j in mp.jogs:
             why[j.global_id] = "joined: re-fitted with a pair of bends"
+        for t in mp.tilts:
+            why[t.global_id] = "a drain: tilted about the end that stays"
     out = []
     for g in dict.fromkeys([*made.changed, *made.created]):
         if g == plan.element or not scene.has(g) or not_physical(scene.entity(g)):

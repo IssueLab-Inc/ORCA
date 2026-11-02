@@ -552,11 +552,13 @@ def resolve(scene: IfcScene | Path, clash: Clash, model: ChatModel, pack: str = 
         try:
             with lock:   # a move's stretched segments change too
                 o.before = edits.meshes(base, o.moved + [st["global_id"] for st in (o.edit or {}).get("stretched", [])]
-                                        + [j["global_id"] for j in (o.edit or {}).get("jogs", [])])
+                                        + [j["global_id"] for j in (o.edit or {}).get("jogs", [])]
+                                        + [t["global_id"] for t in (o.edit or {}).get("tilts", [])])
         except RuntimeError:
             o.before = None
         if policy and doc is not None:
-            mine = clash.element_a if clash.element_a in o.moved else clash.element_b
+            changes = o.moved + [t["global_id"] for t in (o.edit or {}).get("tilts", [])]   # a tilted drain turns in place
+            mine = clash.element_a if clash.element_a in changes else clash.element_b
             if o.kind == "penetration":   # its team asks; the host is the other side
                 mine = o.edit["service"]
             theirs = clash.element_b if mine == clash.element_a else clash.element_a

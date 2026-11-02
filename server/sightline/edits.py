@@ -431,7 +431,171 @@ def _jog(scene: IfcScene, global_id: str, end: str, delta_m):
     return place, item, d, px, profile_x, pieces, shift, at, dz_m, lateral_m
 
 
-ROUTE_STEPS = 3                      # most steps one route may take
+TILT_TURN_MAX_DEG = 5.0   # a tilted drain turns this much at most: each joint turns with it, and a socket or coupling
+                          # takes a few degrees, no more
+
+
+@dataclass
+class Tilted:
+    """A drain turned about one cap (`tilt`): how far it turned and how much it falls to its outlet after."""
+    global_id: str
+    held: str            # "start" / "end": the cap it turned about, which stays where it is
+    turn_deg: float      # how far it turned: each joint turns this much
+    fall: float          # rise over run, from its inlet down to its outlet, after
+    length_m: float      # its length after
+
+
+def drain_outlet(scene: IfcScene, element) -> str | None:
+    """The cap a straight drain empties from, "start" or "end": its ports' flow says (a SOURCE cap is where it leaves,
+    a SINK cap where it comes in), else a fixture joined at one cap drains into it there; None when nothing says."""
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    s = scene.unit_scales[i]
+    caps = {"start": origin * s, "end": (origin + d * item.Depth) * s}
+    other = {"start": "end", "end": "start"}
+    out, inn, fixture = set(), set(), set()
+    for port in ifcopenshell.util.system.get_ports(element):
+        if port.ObjectPlacement is None:
+            continue
+        p = scene.placement(port.GlobalId)[:3, 3]
+        cap = next((c for c, at in caps.items() if np.linalg.norm(p - at) <= 0.002), None)
+        if cap is None:
+            continue
+        if port.FlowDirection == "SOURCE":
+            out.add(cap)
+        elif port.FlowDirection == "SINK":
+            inn.add(cap)
+        peer = ifcopenshell.util.system.get_connected_port(port)
+        joined = ifcopenshell.util.system.get_port_element(peer) if peer is not None else None
+        if joined is not None and joined.is_a("IfcFlowTerminal"):
+            fixture.add(cap)
+    for told in (out, {other[c] for c in inn}, {other[c] for c in fixture}):
+        if len(told) == 1:
+            return next(iter(told))
+    return None
+
+
+def _rotation(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """The rotation taking unit vector `a` to unit vector `b` (Rodrigues; they are never opposed here)."""
+    v = np.cross(a, b)
+    sine, cosine = float(np.linalg.norm(v)), float(a @ b)
+    if sine < 1e-12:
+        return np.eye(3)
+    k = v / sine
+    K = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
+    return np.eye(3) + sine * K + (1.0 - cosine) * K @ K
+
+
+def _tilt(scene: IfcScene, global_id: str, held: str, delta_m):
+    """A tilt read from the model without editing it (see `tilt`)."""
+    element = scene.entity(global_id)
+    if not is_gravity(element):
+        raise Unsupported("it is not a drain: only a drain tilts to keep its joints (a pressure pipe is re-fitted "
+                          "with a pair of bends)")
+    i, place, item, origin, d, px, py = _frames(scene, element)
+    model, s = scene.models[i], scene.unit_scales[i]
+    delta = np.asarray([float(v) for v in delta_m], float)
+    if not np.all(np.isfinite(delta)):
+        raise Unsupported("a tilt must be a finite move")
+    if float(np.linalg.norm(delta[:2])) > 0.0005:
+        raise Unsupported("a drain tilts only up or down")
+    if abs(float(delta[2])) < 0.0005:
+        raise Unsupported("nothing to tilt")
+    if held not in ("start", "end"):
+        raise Unsupported(f"no end called {held!r}")
+    if abs(float(d @ UP)) > ROUTE_SLOPE:
+        raise Unsupported("only a level or gently falling drain tilts (up to 15°)")
+    body, _ = _body(element)
+    if shared(model, element, body, item):
+        raise Unsupported("its body is shared with other elements")
+    L = item.Depth
+    if side_ports(scene, element, origin, d, L):
+        raise Unsupported("a branch off its side would move with it")
+    outlet = drain_outlet(scene, element)
+    if outlet is None:
+        raise Unsupported("which way it drains is not known (its ports carry no flow and no fixture is joined to it)")
+    a, b = origin, origin + d * L                                  # its caps, file units
+    held_pt, free_pt = (a, b) if held == "start" else (b, a)
+    free_new = free_pt + UP * (float(delta[2]) / s)
+    start, end = (held_pt, free_new) if held == "start" else (free_new, held_pt)
+    length = float(np.linalg.norm(end - start))
+    nd = (end - start) / length
+
+    def fall(p0, p1):   # rise over run from the inlet cap down to the outlet cap
+        inlet, out = (p0, p1) if outlet == "end" else (p1, p0)
+        return float(inlet[2] - out[2]) / max(float(np.linalg.norm((p1 - p0)[:2])), 1e-9)
+    before, after = fall(a, b), fall(start, end)
+    turn = float(np.degrees(np.arccos(np.clip(d @ nd, -1.0, 1.0))))
+    if after <= 1e-6:
+        raise Unsupported("it would fall toward its inlet: a drain must keep falling to its outlet")
+    if after < before - 1e-6:
+        raise Unsupported(f"it would fall less than it does ({before * 100:.1f}% now): a tilt only adds fall")
+    if turn > TILT_TURN_MAX_DEG + 1e-9:
+        raise Unsupported(f"it would turn {turn:.1f}°, more than {TILT_TURN_MAX_DEG:.0f}°, at each joint (a "
+                          f"fitting takes a few degrees)")
+    return element, i, place, item, d, px, held_pt, free_pt, free_new, start, nd, length, turn, after
+
+
+def tilt(scene: IfcScene, global_id: str, held: str, delta_m) -> Tilted:
+    """Turn a straight drain about its `held` cap ("start" or "end") so its other cap moves `delta_m` (straight up or
+    down, metres): the held cap stays, the other goes exactly where what is joined there goes, and the length changes
+    to suit. Both caps' ports go with it, turned by the tilt. Refused (`Unsupported`) for a pipe that is not a drain,
+    a move that is not straight up or down, a drain left falling toward its inlet or less than it does, a turn of more
+    than `TILT_TURN_MAX_DEG`, a branch off its side or a shared body. Edits the model in place; wrap in a trial to
+    undo."""
+    (element, i, place, item, d, px, held_pt, free_pt, free_new, start, nd, length, turn,
+     fall) = _tilt(scene, global_id, held, delta_m)
+    model, s = scene.models[i], scene.unit_scales[i]
+    R = _rotation(d, nd)
+    inv = np.linalg.inv(place)
+    item.Position = model.createIfcAxis2Placement3D(   # a new placement: placements can be shared
+        _point(model, (inv @ np.append(start, 1.0))[:3]), _dir(model, inv[:3, :3] @ nd), _dir(model, inv[:3, :3] @ (R @ px)))
+    item.Depth = float(length)
+    for port in ifcopenshell.util.system.get_ports(element):
+        if port.ObjectPlacement is None:
+            continue
+        m = scene.placement(port.GlobalId)
+        if np.linalg.norm(m[:3, 3] - free_pt * s) <= 0.002:
+            m[:3, 3] = free_new * s
+        elif np.linalg.norm(m[:3, 3] - held_pt * s) > 0.002:
+            continue
+        m[:3, :3] = R @ m[:3, :3]
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=port, matrix=m, is_si=True)
+    scene.refresh_bounds([global_id])
+    return Tilted(global_id, held, turn, fall, length * s)
+
+
+def tilt_fits(scene: IfcScene, global_id: str, held: str, delta_m) -> str | None:
+    """Why `tilt` cannot turn this drain so, in words, or None when it can. Edits nothing."""
+    try:
+        _tilt(scene, global_id, held, delta_m)
+    except Unsupported as e:
+        return str(e)
+    return None
+
+
+def tilt_info(scene: IfcScene, global_id: str, held: str, delta_m) -> Tilted | None:
+    """What `tilt` would do, without doing it; None when it cannot."""
+    try:
+        *_, length, turn, fall = _tilt(scene, global_id, held, delta_m)
+    except Unsupported:
+        return None
+    return Tilted(global_id, held, turn, fall, length * scene.unit_scales[scene.index_of(global_id)])
+
+
+def tilt_room(scene: IfcScene, global_id: str, held: str, sign: float) -> float:
+    """How far (metres, to the millimetre below) the free cap of a drain held at `held` may go down (`sign` < 0) or up
+    and still tilt; 0 when it cannot go that way at all."""
+    step = lambda m: [0.0, 0.0, float(np.sign(sign)) * m]
+    if tilt_info(scene, global_id, held, step(0.001)) is None:
+        return 0.0
+    lo, hi = 0.001, max(run_of(scene, global_id).length_m, 0.002)
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if tilt_info(scene, global_id, held, step(mid)) is not None else (lo, mid)
+    return float(np.floor(lo * 1000 + 1e-6) / 1000)
+
+
+ROUTE_STEPS = 3                     # most steps one route may take
 ROUTE_SLOPE = np.sin(np.radians(15))  # steepest run a route may take, as |sin| of its slope
 GRAVITY_SYSTEMS = {"DRAINAGE", "RAINWATER", "SEWAGE", "STORMWATER", "WASTEWATER"}
 # Revit names: "Sanitary" is its system classification, "DWV" (drain-waste-vent) its plastic drain pipe type.

@@ -112,11 +112,12 @@ every joint must move alike. It goes out from what was asked to move, one joint 
 | a rectangular segment joined end-on by its side (80% of the face covered: a ladder bend sitting on its riser), when the move runs along the side's normal | grows to that side |
 | anything joined to a segment's side that does not cover it | a branch, refused ("it branches off") |
 | a level straight segment joined by a cap, the move square to it, and joined at its far end too (`refit`: hand moves, and Muse's unless `SIGHTLINE_MOVE_REFIT=off`) | re-fitted: its joined end goes with the move, a pair of bends and a riser take it back to the rest, which stays (`edits.apply_jog`); too short, a move too small for the bends, or up and across at once: taken along |
+| the same, when it is a drain and the move is straight up or down (`refit`) | tilted about its far cap (`edits.tilt`; "A drain tilts", below), never re-fitted with bends up or down; one that cannot tilt is taken along |
 | any other straight segment | taken along |
 | a segment reached at a second face | moves whole |
 | more than `SIGHTLINE_CARRY_MAX` (12) parts taken along | refused |
 
-No extra slope, gravity or cycle rules are needed: taking along only translates, and stretching moves a face along the
+No extra slope, gravity or cycle rules were needed (until drains tilted, below): taking along only translates, and stretching moves a face along the
 segment's own axis.
 
 **`edits.stretch(scene, gid, face, by_m, normal)`:**
@@ -188,6 +189,53 @@ segment's own axis.
 - A STEP prototype used by several components would change for all of them when one is stretched. The same is already
   true of offsets and trims; the cell's STEP has none.
 - Joints across files (a service on structure) are not modelled.
+
+## A drain tilts (Nov 1)
+
+**Why:** on Autodesk's Snowdon Towers sample (#20, #21), a washer's waste arm runs dead level at the same height as a
+cold-water stub to a closet connection, through it, 24 mm from the arm's bend over its stack. Neither pipe could move:
+each is held at one end by a fixture, the stub has no room for bends, and a drain must not step up or down. A plumber
+lowers the stack end and gives the arm the fall it lacked; every kind ORCA had either refused or would trap the drain.
+
+**What** (`plan_move`, under `refit`): a drain (`edits.is_gravity`) is turned about one cap instead of being translated
+or re-fitted with bends, when the move is straight up or down:
+
+| Case | What tilts |
+|---|---|
+| a drain asked to move on its own (its run is just itself), held at exactly one cap by something that stays (a fixture, equipment, anything kept fixed: `_held_cap`) | it turns about that cap; its other cap moves with the move, and the walk goes on from there (the bend carried, the stack below stretched) |
+| a drain reached at a cap by what moves, joined at its far cap too | it turns about the far cap, never a pair of bends up or down (a sideways move still re-fits it with bends: it keeps its fall) |
+
+**`edits.tilt(scene, gid, held, delta_m)`:** the held cap stays; the other goes exactly by the move (it stays joined to
+what moves there), and the length changes to suit. The extrusion gets a new placement and depth, and both caps' ports
+turn with it. Refused in words (`tilt_fits`, `_tilt`): not a drain; a move with any sideways part; a run steeper than
+15°; a branch off its side; a shared body; no way to tell its outlet (`drain_outlet`: a SOURCE port's cap, else the
+cap away from a SINK port, else the cap away from a fixture); left falling toward its inlet, or less than it did
+before (a tilt only adds fall); a turn of more than `TILT_TURN_MAX_DEG` (5°), since each joint turns by as much and a
+socket or coupling takes only a few degrees.
+
+**Checking:** the tilted drain is checked as what moves (it turns along its whole length), its joints by
+`check_joints`. `Tilt` rides in `MovePlan.tilts` like a jog: in `changed`, the preview (`trial_move`), `before`, the
+key (only when there is a tilt, so other keys read as before) and `edit.tilts` (`held`, `turn_deg`, `fall`). The
+summary says it: "'Waste arm DA' tilts about its end at 'Washer box WT': falls 3.3° (5.8%) toward 'Bend DB'". The
+tilted drain is not in `moved` (the page would translate it); `plans._candidate_move` and the requirements' side
+(`agent.resolve`) count it as what the fix changes. Kept from the option's `moved` (the bend), the move plans the same
+tilt, so the keys match; a drain with nothing at its free end translates nothing and is kept from itself
+(`plans._move_asks`).
+
+**Muse reads** how far a held drain may go (`_tilt_lines`, `tilt_room`): "Moving B down tilts it about its end at
+terminal '…' instead … down up to 73 mm (each joint turns at most 5°)".
+
+**Measured** (Snowdon plumbing, Revit 2027 sample, feet, local only): the arm `1544925` dropped 65 mm at its bend
+falls 4.4° (7.7%) about the washer connection, its stack `1508981` 65 mm shorter, the bend carried: verified, 25.1 mm
+from everything; 50 mm leaves 21 mm and fails. The tests (`test_drain_tilt.py`) build the same knot in metres and
+millimetres with Revit's placements.
+
+**Known limits:**
+
+- The fall is checked only to be more than before and the turn at most 5°; a plumbing code's limit on a trap arm's fall
+  (often one pipe diameter) is not known to ORCA, so Snowdon's 65 mm drop on a 2-inch arm is one a plumber may question.
+- Only a drain on its own, or one reached at a cap, tilts: a run of several straights does not, and combined fixes'
+  move steps do not re-fit or tilt.
 
 ## Slice 3: see connections (Oct 30)
 

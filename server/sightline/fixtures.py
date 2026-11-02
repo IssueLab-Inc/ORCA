@@ -697,6 +697,105 @@ def build_joints_fixture(path: Path) -> Path:
     return path
 
 
+def build_drain_fixture(path: Path, millimetres: bool = False) -> Path:
+    """A washer's waste arm crossed by a cold-water pipe at its own height, as on Autodesk's Snowdon Towers sample
+    (#20): the case for a drain that tilts about its fixture (edits.tilt). Metres or millimetres; every element is
+    placed as Revit places it (its placement at its start, `SITE` from the origin, its body local), one storey.
+
+    - Washer box WT (an IfcSanitaryTerminal, x -0.1 to 0.1), its outlet at (0.1, 0, 0.9).
+    - Waste arm DA (DN50, r 30 mm), level from WT's outlet (0.1, 0, 0.9) to (1.3, 0, 0.9): 1.2 m, SINK at the washer,
+      SOURCE at the bend.
+    - Bend DB (a box, x 1.3-1.36, z 0.84-0.93), turning the arm down into stack DV at (1.33, 0, 0.84).
+    - Stack DV (DN50), from (1.33, 0, 0.84) down to (1.33, 0, 0.24): 0.6 m, joined to nothing below.
+    - Cold water CW (DN15, r 8 mm) along Y at x 1.2 (y -0.4 to 0.4), z 0.9: it runs through the arm 0.1 m from the
+      bend, 38 mm deep; joined at both ends to closet connections WC1 and WC2, so it cannot move.
+    - A basin's tail DT (DN40, r 20 mm) at y 2: level from basin WB's outlet (0.1, 2, 0.9) to (0.9, 2, 0.9), its far
+      end joined to nothing.
+
+    Dropping the bend end 70 mm tilts DA 3.3° about the washer end and clears CW by about 26 mm.
+    """
+    k = 1000.0 if millimetres else 1.0
+    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="ORCA drain fixture")
+    length = ifcopenshell.api.run("unit.add_si_unit", model, unit_type="LENGTHUNIT",
+                                  prefix="MILLI" if millimetres else None)
+    ifcopenshell.api.run("unit.assign_unit", model, units=[length])
+    ctx = ifcopenshell.api.run("context.add_context", model, context_type="Model")
+    body = ifcopenshell.api.run("context.add_context", model, context_type="Model",
+                                context_identifier="Body", target_view="MODEL_VIEW", parent=ctx)
+    storey = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Level 04")
+    ifcopenshell.api.run("aggregate.assign_object", model, relating_object=project, products=[storey])
+    site = np.array([12.0, 7.0, 0.0])
+    z = 0.9
+
+    def at(p):
+        return np.asarray(p, float) + site   # metres, world
+
+    def element(ifc_class, name, tag=None):
+        e = ifcopenshell.api.run("root.create_entity", model, ifc_class=ifc_class, name=name)
+        e.Tag = tag
+        ifcopenshell.api.run("spatial.assign_container", model, relating_structure=storey, products=[e])
+        return e
+
+    def port(e, point, direction, flow):
+        p = ifcopenshell.api.run("system.add_port", model, element=e)
+        p.FlowDirection = flow
+        d = np.asarray(direction, float)
+        x = np.cross(UP_, d) if abs(d @ UP_) < 0.9 else np.array([1.0, 0.0, 0.0])
+        x /= np.linalg.norm(x)
+        m = np.eye(4)
+        m[:3, :3] = np.column_stack([x, np.cross(d, x), d])
+        m[:3, 3] = at(point)
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=p, matrix=m, is_si=True)
+        return p
+
+    def pipe(name, tag, start, end, radius):
+        e = element("IfcPipeSegment", name, tag)
+        start, end = np.asarray(start, float), np.asarray(end, float)
+        d = (end - start) / np.linalg.norm(end - start)
+        x = np.cross(UP_, d) if abs(d @ UP_) < 0.9 else np.array([1.0, 0.0, 0.0])
+        x /= np.linalg.norm(x)
+        place = np.eye(4)
+        place[:3, :3] = np.column_stack([x, np.cross(d, x), d])   # Revit: the element's own frame, its body along Z
+        place[:3, 3] = at(start)
+        ifcopenshell.api.run("geometry.edit_object_placement", model, product=e, matrix=place, is_si=True)
+        position = model.createIfcAxis2Placement3D(model.createIfcCartesianPoint((0.0, 0.0, 0.0)))
+        solid = model.createIfcExtrudedAreaSolid(model.createIfcCircleProfileDef("AREA", None, None, radius * k),
+                                                 position, model.createIfcDirection((0.0, 0.0, 1.0)),
+                                                 float(np.linalg.norm(end - start) * k))
+        e.Representation = model.createIfcProductDefinitionShape(
+            None, None, [model.createIfcShapeRepresentation(body, "Body", "SweptSolid", [solid])])
+        return e, port(e, start, -d, "SINK"), port(e, end, d, "SOURCE")
+
+    def part(ifc_class, name, lo, hi, *ports):
+        e = element(ifc_class, name)
+        _box(model, body, e, tuple(np.subtract(hi, lo) * k), tuple(at(lo) * k))
+        return (e, *[port(e, p, d, f) for p, d, f in ports])
+
+    def join(p, q):
+        ifcopenshell.api.run("system.connect_port", model, port1=p, port2=q, direction="SOURCE")
+
+    _, wt_out = part("IfcSanitaryTerminal", "Washer box WT", (-0.1, -0.1, z - 0.15), (0.1, 0.1, z + 0.15),
+                     ((0.1, 0, z), (1, 0, 0), "SOURCE"))
+    _, da_in, da_out = pipe("Waste arm DA", "DA", (0.1, 0, z), (1.3, 0, z), 0.03)
+    _, db_in, db_out = part("IfcPipeFitting", "Bend DB", (1.3, -0.03, z - 0.06), (1.36, 0.03, z + 0.03),
+                            ((1.3, 0, z), (-1, 0, 0), "SINK"), ((1.33, 0, z - 0.06), (0, 0, -1), "SOURCE"))
+    _, dv_in, _ = pipe("Waste stack DV", "DV", (1.33, 0, z - 0.06), (1.33, 0, z - 0.66), 0.03)
+    _, wc1 = part("IfcSanitaryTerminal", "Closet connection WC1", (1.15, -0.5, z - 0.05), (1.25, -0.4, z + 0.05),
+                  ((1.2, -0.4, z), (0, 1, 0), "SOURCE"))
+    _, cw_in, cw_out = pipe("Cold water CW", "CW", (1.2, -0.4, z), (1.2, 0.4, z), 0.008)
+    _, wc2 = part("IfcSanitaryTerminal", "Closet connection WC2", (1.15, 0.4, z - 0.05), (1.25, 0.5, z + 0.05),
+                  ((1.2, 0.4, z), (0, -1, 0), "SINK"))
+    _, wb_out = part("IfcSanitaryTerminal", "Basin WB", (-0.1, 1.9, z - 0.1), (0.1, 2.1, z + 0.1),
+                     ((0.1, 2.0, z), (1, 0, 0), "SOURCE"))
+    _, dt_in, _ = pipe("Waste tail DT", "DT", (0.1, 2.0, z), (0.9, 2.0, z), 0.02)
+    for p, q in ((wt_out, da_in), (da_out, db_in), (db_out, dv_in), (wc1, cw_in), (cw_out, wc2), (wb_out, dt_in)):
+        join(p, q)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(path))
+    return path
+
+
 def build_seat_fixture(path: Path, millimetres: bool = False) -> Path:
     """Elements that come down into what carries them, for seats (edits.seat), metres (or millimetres), one storey.
 

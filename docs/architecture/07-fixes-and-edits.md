@@ -133,6 +133,12 @@ which the page no longer uses. Routes in full: [10](10-http-api-and-streams.md).
   (`edits.stretch`), a rectangular segment covered end-on at its side (a ladder riser under its bend) grows that way.
   Equipment, terminals, structure, a branch, a piece left under 50 mm or more than 12 parts along refuse it before it
   is tried, naming why ("cannot keep its joints: …"); the joints are the attempt's hits, so the pilot shows them.
+- **A drain tilts** (with re-fits, `SIGHTLINE_MOVE_REFIT`): moved straight up or down, a drain held at one cap by a
+  fixture (or reached at a cap and joined at its far one) turns about that cap instead (`edits.tilt`, `Tilt` in
+  `MovePlan.tilts`), never a pair of bends up or down; it must end falling more toward its outlet, each joint turning
+  at most 5°. The tilted drain is checked as what moves, is drawn in `preview`, and is not in `moved`;
+  `plans._candidate_move` and the requirements' side count it. Snowdon's #20 is fixed this way
+  ([docs/connections.md](../connections.md), "A drain tilts").
 - **A move that carries** is tried in a trial (`connections.trial_move`): what moves is checked against everything
   but what it changes and what that is joined to; a stretched segment counts only contacts new or worse than before;
   `check_joints` proves every joint still meets. It stays kind `"move"`, with `edit` {summary, key, run, carried,
