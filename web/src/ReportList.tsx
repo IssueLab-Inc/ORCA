@@ -60,9 +60,26 @@ export function sameElements(clashes: ReportClash[], matches: Matches | null): M
   return out;
 }
 
+/** Rows a group draws before the list has been measured (and in tests, which never measure). */
+export const FIRST_ROWS = 60;
+/** Rows drawn above and below the visible ones, so a quick scroll never shows a gap. */
+export const OVERSCAN = 12;
+
+/** Which rows of a group are drawn (docs/architecture/12-web-app.md, "The clash list draws what is on screen"): those
+ * between `top` and `bottom` (pixels from the group's first row: the part of it on screen), and `OVERSCAN` either side.
+ * [start, end): end is not drawn. A group wholly off screen draws nothing. */
+export function rowWindow(top: number, bottom: number, count: number, rowH: number, overscan = OVERSCAN): [number, number] {
+  if (!(rowH > 0) || count <= 0 || bottom <= top) return [0, 0];
+  const start = Math.max(0, Math.floor(top / rowH) - overscan);
+  const end = Math.min(count, Math.ceil(bottom / rowH) + overscan);
+  return start < end ? [start, end] : [0, 0];
+}
+
+interface RowWindows { rowH: number; ranges: Record<string, [number, number]> }
+
 export function ReportList({ report, matches, selected, onSelect, onImage, fixes, reviewed, checked, onCheck, onFixChecked, triageCard, insights,
   insightsCount = null, view = "clashes", onView, status, picker, busy, triage, triageFilter, naming = 0, thumbs, onThumb, focus = null, onClearFocus,
-  onPropose, onSetAside, onFocus, proposing = null, ready = {}, panel = false, onViewProposal, isolating = false, onIsolate }: {
+  onPropose, onSetAside, onFocus, proposing = null, ready = {}, panel = false, onViewProposal, isolating = false, onIsolate, reveal = null }: {
   report: Report; matches: Matches | null; selected: string | null; onSelect: (c: ReportClash) => void;
   onImage: (c: ReportClash, index: number) => void;
   fixes: Record<string, string>; reviewed: Record<string, Review>;
@@ -89,6 +106,8 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   proposing?: string | null; ready?: Record<string, number>; panel?: boolean; onViewProposal?: (c: ReportClash) => void;
   /** Isolate the clashing elements: on, each clash opened after is isolated in turn (`isolating`), until turned off. */
   isolating?: boolean; onIsolate?: (c: ReportClash) => void;
+  /** A clash to scroll to without selecting it (the tour pointing at a row that is not drawn yet). */
+  reveal?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [onlyLinked, setOnlyLinked] = useState(false);
@@ -121,15 +140,100 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
   }, [report, matches, query, onlyLinked, by, fixes, reviewed, triage, triageFilter, focus, selected]);
 
   const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  // Only the rows on screen are drawn (thousands on a big model made every title, thumbnail and click re-render them
+  // all): each group keeps its full height with padding, and the rows in view (and OVERSCAN more) are measured from
+  // where the group sits in the visible part of the list, after every scroll, resize, group opened or list change.
+  const [win, setWin] = useState<RowWindows | null>(null);
+  const winNow = useRef<RowWindows | null>(null);
+  winNow.current = win;
+  const groupsNow = useRef(groups);
+  groupsNow.current = groups;
+  const measureAt = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    const el = list.current;
+    // In the list's own document and window: in a pop-out window (docs/panels.md) the main one has no rows.
+    const doc = el?.ownerDocument, w = doc?.defaultView;
+    if (!el || !doc || !w) return;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const view = el.getBoundingClientRect();
+      const top = Math.max(view.top, 0), bottom = Math.min(view.bottom, w.innerHeight);
+      const row = [...el.querySelectorAll<HTMLElement>(".clash-row")].find((r) => r.offsetHeight > 0);
+      const rowH = row?.getBoundingClientRect().height || winNow.current?.rowH || 40;
+      const ranges: Record<string, [number, number]> = {};
+      for (const body of el.querySelectorAll<HTMLElement>("[data-rows]")) {
+        const key = body.dataset.rows ?? "", n = Number(body.dataset.count) || 0;
+        const r = body.getBoundingClientRect();
+        // A closed group, or the list hidden (another tab, a collapsed panel): the first rows, as before measuring.
+        ranges[key] = !r.height ? [0, Math.min(n, FIRST_ROWS)] : rowWindow(top - r.top, bottom - r.top, n, rowH);
+      }
+      const prev = winNow.current;
+      const same = prev && prev.rowH === rowH && Object.keys(ranges).length === Object.keys(prev.ranges).length
+        && Object.entries(ranges).every(([k, [a, b]]) => prev.ranges[k]?.[0] === a && prev.ranges[k]?.[1] === b);
+      if (!same) setWin({ rowH, ranges });
+    };
+    const later = () => { if (!frame) frame = w.requestAnimationFrame(measure); };
+    measureAt.current = later;
+    // Scrolls do not bubble: caught on the way down, from the list or whatever holds it (a phone's sheet).
+    doc.addEventListener("scroll", later, { capture: true, passive: true });
+    el.addEventListener("toggle", later, true);   // a group opened or closed
+    w.addEventListener("resize", later);
+    const ro = new w.ResizeObserver(later);
+    ro.observe(el);
+    later();
+    return () => {
+      doc.removeEventListener("scroll", later, { capture: true });
+      el.removeEventListener("toggle", later, true);
+      w.removeEventListener("resize", later);
+      ro.disconnect();
+      if (frame) w.cancelAnimationFrame(frame);
+      measureAt.current = () => undefined;
+    };
+  }, []);
+  // What is drawn changes with the list (a filter, titles, a fixed clash): measured again once it is on screen.
+  useEffect(() => { measureAt.current(); }, [groups]);
+
+  /** Scroll the list to a clash, drawn or not: a row on screen scrolls into view as it always did; one that is not
+   * drawn yet is scrolled to where it sits in its group (opened if closed), and is drawn once there. */
+  const bringIntoView = (id: string) => {
+    const el = list.current;
+    const row = root.current?.querySelector(`[data-clash="${id}"]`);
+    if (row && (row as HTMLElement).offsetHeight) { row.scrollIntoView({ block: "nearest" }); return; }
+    const group = groupsNow.current.find(([, cs]) => cs.some((c) => c.id === id));
+    const body = group && el ? [...el.querySelectorAll<HTMLElement>("[data-rows]")].find((b) => b.dataset.rows === group[0]) : undefined;
+    if (!group || !body || !el) return;
+    const details = body.closest("details");
+    if (details && !details.open) details.open = true;
+    const i = group[1].findIndex((c) => c.id === id);
+    const rowH = winNow.current?.rowH ?? 40;
+    // What scrolls: the list itself, or (a phone's sheet) something holding it.
+    const w = el.ownerDocument.defaultView ?? window;
+    let s: HTMLElement = el;
+    for (let n: HTMLElement | null = el; n; n = n.parentElement) {
+      const o = w.getComputedStyle(n).overflowY;
+      if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight) { s = n; break; }
+    }
+    const at = body.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop + i * rowH;
+    if (at < s.scrollTop) s.scrollTop = at;
+    else if (at + rowH > s.scrollTop + s.clientHeight) s.scrollTop = at + rowH - s.clientHeight;
+    measureAt.current();
+  };
   // Bring the selected clash into view, also when something else (the chat) selected it.
   useEffect(() => {
     if (!selected) return;
-    // In the list's own document: in a pop-out window (docs/panels.md) the main document has no rows.
-    const t = setTimeout(() => { root.current?.querySelector(`[data-clash="${selected}"]`)?.scrollIntoView({ block: "nearest" }); }, 50);
+    const t = setTimeout(() => bringIntoView(selected), 50);
     return () => clearTimeout(t);
-  }, [selected]);
+  }, [selected]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!reveal) return;
+    const t = setTimeout(() => bringIntoView(reveal), 50);
+    return () => clearTimeout(t);
+  }, [reveal]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const related = useMemo(() => sameElements(report.clashes, matches), [report, matches]);
+  const anyImages = useMemo(() => report.clashes.some((x) => x.images.length), [report]);
 
   const shown = groups.reduce((n, [, cs]) => n + cs.length, 0);
   const linked = matches ? report.clashes.filter((c) => linkState(matches, c.id) === "both").length : null;
@@ -199,10 +303,13 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
         </div>}
       </div>
 
-      <div className="groups">
+      <div className="groups" ref={list}>
         {groups.map(([test, cs]) => {
           const pick = cs.filter(fixable).map((c) => c.id);
           const all = pick.length > 0 && pick.every((id) => checked.has(id));
+          const rowH = win?.rowH ?? 40;
+          const range = win?.ranges[test] ?? [0, FIRST_ROWS];
+          const start = Math.min(range[0], cs.length), end = Math.min(range[1], cs.length);
           return (
             <details key={test} open={!!query.trim() || !!focus || by !== "all" || groups.length <= 3 || cs.some((c) => c.id === selected)}>
               <summary>
@@ -212,7 +319,9 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                 {cs.some((c) => fixes[c.id] || reviewed[c.id]) && <span className="ok count">✓ {cs.filter((c) => fixes[c.id] || reviewed[c.id]).length}</span>}
                 <span className="count mono">{cs.length}</span>
               </summary>
-              {cs.map((c) => {
+              <div className="rows" data-rows={test} data-count={cs.length}
+                style={{ paddingTop: start * rowH, paddingBottom: Math.max(0, cs.length - Math.max(end, start)) * rowH }}>
+              {cs.slice(start, end).map((c) => {
                 const link = linkState(matches, c.id);
                 const rv = !fixes[c.id] ? reviewed[c.id] : undefined;
                 const tv = triage[c.id];
@@ -228,7 +337,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                         </button>
                       : thumbs && onThumb
                         ? <LazyThumb clash={c} url={thumbs[c.id]} onNeed={onThumb} onOpen={() => onSelect(c)} />
-                        : report.clashes.some((x) => x.images.length) && <span className="row-thumb none" aria-hidden />}
+                        : anyImages && <span className="row-thumb none" aria-hidden />}
                     <button className="clash-main" onClick={() => onSelect(c)} title={fixes[c.id] ? `Fixed: ${fixes[c.id]}` : rv ? rv.note : link ? LINK_TITLE[link] : undefined}>
                       {fixes[c.id] ? <i className="tick" aria-label="Fixed">✓</i> : rv ? <i className="tick muted" aria-label="Reviewed">✓</i> : link ? <i className={`dot ${link}`} /> : <i />}
                       <span className="clash-name">#{c.number}</span>
@@ -258,6 +367,7 @@ export function ReportList({ report, matches, selected, onSelect, onImage, fixes
                   </div>
                 );
               })}
+              </div>
             </details>
           );
         })}
