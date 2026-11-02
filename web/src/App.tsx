@@ -33,7 +33,7 @@ import { ReportList, clashLabel, mm, type Review } from "./ReportList";
 import { noClash, shownVerdicts } from "./noClash";
 import { Tooltips } from "./ui";
 import { Pilot, type PilotStatus } from "./pilot";
-import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type ViewMode, type VisualStyle } from "./viewer/Viewer";
+import { Viewer, serverPointToViewer, type BuiltPasses, type Mesh, type Preset, type Side, type Staged, type ViewMode, type VisualStyle } from "./viewer/Viewer";
 import { ViewerToolbar, STYLES, type ToolbarState, type ViewsControls } from "./ViewerToolbar";
 import { escStep, type DrawingsShow, type Filters, type Layout, type Pose, type Temporary } from "./viewer/views";
 import { ViewPanes } from "./ViewPanes";
@@ -1281,10 +1281,19 @@ export function App() {
     const step = (next: Partial<LoadProgress>) => { load = { ...load, ...next }; if (sceneEpoch.current === epoch) setLoading(load); };
     step({}); setNow(Date.now());
     setError(null); resetWork(false, true);
+    // An upload of IFC files is parsed while it goes up and the server opens it (in the viewer's worker: the page goes
+    // on), so the models are ready when the server is, not six seconds after on a big model.
+    let early: Promise<Staged | null> | null = null, handed = false;
     try {
       if (upload && !existing) {
         const refusal = uploadRefusal(source as File[], uploadMax);
         if (refusal) throw new Error(refusal);
+        if (names.every((n) => /\.ifc$/i.test(n)) && viewer.current) {
+          const v = viewer.current;
+          early = Promise.all((source as File[]).map(async (f) => new Uint8Array(await f.arrayBuffer())))
+            .then((bytes) => v.stage(bytes, () => sceneEpoch.current === epoch, (drawn, elements) => step({ drawn, elements })));
+          early.catch(() => undefined);   // a file that will not parse: parsed again below, which says why
+        }
       }
       const { id, files, step: stepMap, revision, layout: opened } = existing ?? (upload
         ? await api.uploadModelsStream(source as File[], (e) => {
@@ -1295,8 +1304,13 @@ export function App() {
       if (sceneEpoch.current !== epoch) return;
       if (upload) setBusy("Drawing the models…");
       step({ step: "download", files: shortNames(files), ends: { server: Date.now() - load.started } });
+      // The early parse, if the server kept the files as sent (same names, same order); else (or it failed) as below.
+      const same = files.length === (source as File[]).length
+        && files.every((_, i) => localFile(source as File[], files, stepMap, i) === (source as File[])[i]);
+      const staged = early && same ? await early.catch(() => null) : null;
+      if (sceneEpoch.current !== epoch) return;
       // An uploaded IFC is parsed from the visitor's own file; a STEP comes back converted, samples come from the server.
-      const bytes = await Promise.all(files.map(async (_, i) => {
+      const bytes = staged ? [] : await Promise.all(files.map(async (_, i) => {
         const local = upload ? localFile(source as File[], files, stepMap, i) : null;
         const got = local ? new Uint8Array(await local.arrayBuffer()) : await api.file(id, i);
         step({ fetched: load.fetched + 1, bytes: load.bytes + got.byteLength });
@@ -1304,8 +1318,9 @@ export function App() {
       }));
       if (sceneEpoch.current !== epoch) return;
       step({ step: "draw", ends: { ...load.ends, download: Date.now() - load.started } });
+      handed = !!staged;   // the viewer shows it, or disposes it if this open is superseded
       const stats = await viewer.current!.load(bytes, files, () => sceneEpoch.current === epoch,
-        (drawn, elements) => step({ drawn, elements }));
+        (drawn, elements) => step({ drawn, elements }), staged ? Promise.resolve(staged) : undefined);
       if (sceneEpoch.current !== epoch || !stats) return;
       sceneRevision.current = revision ?? null;
       sceneLayout.current = opened ?? null;
@@ -1319,7 +1334,11 @@ export function App() {
       setStats(stats); setSceneId(id); setA(null); setB(null); setStandIns({}); setSelected(null);
       setStepFiles(Object.values(stepMap ?? {})); setSceneFiles(files); setResumable(null); sceneUploaded.current = upload;
       return id;
-    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally { if (sceneEpoch.current === epoch) { setBusy(null); setLoading(null); } }
+    } catch (e) { if (sceneEpoch.current === epoch) setError((e as Error).message); } finally {
+      if (sceneEpoch.current === epoch) { setBusy(null); setLoading(null); }
+      // Parsed early and never shown (the upload failed, the server renamed or reordered the files): let it go.
+      if (early && !handed) { const v = viewer.current; early.then((s) => v?.drop(s), () => undefined); }
+    }
   }
 
   /** The start page's buttons: open the demo models and let ORCA check them (the golden path also picks the duct

@@ -165,3 +165,25 @@ test("a model removed is disposed, the later ones move down, and what pointed in
   assert.equal(s.v.remove(5), null, "a position it does not have changes nothing");
   assert.deepEqual(s.v.models, [mep, arch]);
 });
+
+test("an upload parsed while it went up is shown as staged, without parsing again; one never shown is disposed", async () => {
+  const o = await originModule(); o.setOrigin(null);
+  const s = await stage(), calls = [];
+  globalThis.__sightlineLoadIfc = (...a) => new Promise((resolve, reject) => { calls.push(a); s.pending.push({ resolve, reject }); });
+  const early = s.v.stage([new Uint8Array([1])]);
+  s.pending[0].resolve({ ...s.model("early"), origin: [417609, 78711] });
+  const staged = await early;
+  const stats = await s.v.load([], ["early.ifc"], () => true, undefined, Promise.resolve(staged));
+  assert.equal(calls.length, 1, "parsed once, while it uploaded");
+  assert.deepEqual(s.v.models.map((m) => m.id), ["early"]); assert.deepEqual(s.v.names, ["early.ifc"]);
+  assert.deepEqual(o.origin(), [417609, 78711]);
+  assert.deepEqual(stats, { elements: 1, triangles: 2, parseMs: 3 });
+  // Superseded before it is shown: the viewer disposes it and keeps what it has.
+  const late = s.model("late");
+  await s.v.load([], ["late.ifc"], () => false, undefined, Promise.resolve({ models: [late], origin: null }));
+  assert.equal(late.mesh.disposed, true); assert.deepEqual(s.v.models.map((m) => m.id), ["early"]);
+  // An open that failed after staging: dropped.
+  const unused = s.model("unused"); s.v.drop({ models: [unused], origin: null });
+  assert.equal(unused.mesh.disposed, true);
+  o.setOrigin(null);
+});
