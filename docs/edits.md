@@ -119,7 +119,8 @@ Services cross walls and floors all the time; what they need is an opening, and 
 penetration asks for one instead of moving the service.
 
 **When** (`edits.penetration`, `not_penetrable`): a straight service (an extruded segment, any direction, so a riser
-through a slab too) crosses a host whose body is extrusions. Which hosts may take one is `hosts.decide`'s call (next
+through a slab too) crosses a host with a body the kernel can triangulate (extrusions, booleans, or Revit's faceted B-reps; until Nov 2
+extrusions only, which refused Snowdon Towers' faceted concrete walls). Which hosts may take one is `hosts.decide`'s call (next
 section; on Oct 29 at first walls and slabs only). Refused by geometry: a crossing that runs more than 1 m inside the
 host (along it, not through it), one the service doesn't reach or pass through, a service that stops inside the host (it runs into the wall:
 move or shorten it), and an opening the host would not

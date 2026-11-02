@@ -228,6 +228,53 @@ def test_a_service_that_stops_inside_the_host_is_refused(scene):
         edits.penetration(scene, pipe.GlobalId, gid(scene, "Wall W1 partition"))
 
 
+def _as_faceted_brep(path: Path, name: str) -> None:
+    """Rewrite the body of the element called `name` as one IfcFacetedBrep of its own triangles, in its own frame: how
+    Revit writes a wall it cannot export as an extrusion (12 of Snowdon Towers' 58 structural walls)."""
+    import ifcopenshell, ifcopenshell.geom
+    model = ifcopenshell.open(str(path))
+    wall = next(e for e in model.by_type("IfcElement") if e.Name == name)
+    shape = ifcopenshell.geom.create_shape(ifcopenshell.geom.settings(), wall)
+    verts = np.asarray(shape.geometry.verts, float).reshape(-1, 3)
+    faces = []
+    for tri in np.asarray(shape.geometry.faces, int).reshape(-1, 3):
+        loop = model.createIfcPolyLoop([model.createIfcCartesianPoint([float(c) for c in verts[i]]) for i in tri])
+        faces.append(model.createIfcFace([model.createIfcFaceOuterBound(loop, True)]))
+    body = next(r for r in wall.Representation.Representations if r.RepresentationIdentifier == "Body")
+    body.RepresentationType, body.Items = "Brep", [model.createIfcFacetedBrep(model.createIfcClosedShell(faces))]
+    model.write(str(path))
+
+
+def test_a_wall_drawn_as_a_faceted_brep_takes_the_same_opening_as_an_extruded_one(tmp_path):
+    # Snowdon Towers #1: a copper cold-water pipe through Revit's "Basic Wall:Concrete 24\"", written as a faceted
+    # B-rep, was refused at once ("only a host whose body is extrusions can be cut here"), so no opening was offered.
+    extruded = IfcScene(build_penetration_fixture(tmp_path / "extruded"))
+    paths = build_penetration_fixture(tmp_path / "faceted")
+    _as_faceted_brep(paths[0], "Wall W1 partition")
+    scene = IfcScene(paths)
+    pipe, wall = gid(scene, "PN-1"), gid(scene, "Wall W1 partition")
+    assert scene.entity(wall).Representation.Representations[0].Items[0].is_a("IfcFacetedBrep")
+    pen = edits.penetration(scene, pipe, wall)
+    same = edits.penetration(extruded, gid(extruded, "PN-1"), gid(extruded, "Wall W1 partition"))   # its own ids
+    assert (pen.shape, pen.width_m, pen.depth_m) == (same.shape, same.width_m, same.depth_m)
+    assert pen.start == pytest.approx(same.start)
+    assert 'A "penetration"' in agent._describe(scene, Clash(pipe, wall))   # Muse is told the opening's size
+    attempt, option = agent._try_penetration(scene, {}, pipe, wall, 0.025)
+    assert attempt.passed and option is not None and option.edit["summary"].startswith("Ø170 mm opening")
+    with edits.trial_files(scene, {0, 1}):
+        edits.apply_penetration(scene, pen, cut=True)
+        assert not hits_on(scene, pipe, wall)   # the opening really is cut from the faceted body
+    assert hits_on(scene, pipe, wall)
+
+
+def test_a_host_the_kernel_cannot_triangulate_is_refused_in_words(scene, monkeypatch):
+    def fails(scene, host_gid):
+        raise RuntimeError("Failed to process shape")
+    monkeypatch.setattr(edits, "_host_tris", fails)
+    attempt, option = agent._try_penetration(scene, {}, gid(scene, "PN-1"), gid(scene, "Wall W1 partition"), 0.025)
+    assert not attempt.passed and option is None and "could not be triangulated" in attempt.reason
+
+
 def test_an_opening_asked_for_twice_is_one_request(tmp_path):
     ws, sid, scene = workspace(tmp_path)
     duct, wall = gid(scene, "PN-2"), gid(scene, "Wall W1 partition")

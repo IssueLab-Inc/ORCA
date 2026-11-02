@@ -1595,8 +1595,10 @@ def apply_trim(scene: IfcScene, global_id: str, end: str, by_m: float, least_m: 
 # ------------------------------------------------------------------------------------------------- penetrations
 
 # Walls and slabs take openings for services as a matter of course; whether anything else may (a beam's web, a
-# machine panel's gland plate) is `hosts.decide`'s call. This module only needs the host's body to be extrusions, so
-# the opening can be cut reliably.
+# machine panel's gland plate) is `hosts.decide`'s call. This module needs only a body the kernel can triangulate:
+# extrusions, booleans, or Revit's faceted B-reps (12 of Snowdon Towers' 58 structural walls). The opening is sized by
+# rays against the host's triangles, and the check after the cut proves it was cut: a boolean the kernel cannot do
+# leaves the host whole, and the service still hits it.
 PENETRABLE = ("IfcWall", "IfcSlab")
 OPENING_MARGIN_M = 0.005  # beyond the clearance, all round: tessellated circles and site tolerance
 OPENING_ROUND_M = 0.01    # opening sizes are rounded up to this
@@ -1630,9 +1632,8 @@ class Penetration:
 def not_penetrable(host) -> str | None:
     """Why the geometry of `host` cannot take an opening here, or None (whether it may is `hosts.decide`'s call)."""
     rep = host.Representation
-    bodies = [r for r in (rep.Representations if rep else []) if r.RepresentationIdentifier == "Body"]
-    if not bodies or not all(i.is_a("IfcExtrudedAreaSolid") for b in bodies for i in b.Items):
-        return "only a host whose body is extrusions can be cut here"
+    if not any(r.RepresentationIdentifier == "Body" and r.Items for r in (rep.Representations if rep else [])):
+        return "it has no body to cut"
     return None
 
 
@@ -1694,7 +1695,10 @@ def penetration(scene: IfcScene, service_gid: str, host_gid: str, clearance_m: f
     lo, hi = float(along.min()), float(along.max())
     if hi < 0 or lo > length:
         raise Unsupported("the service does not reach it")
-    tris = _host_tris(scene, host_gid)
+    try:
+        tris = _host_tris(scene, host_gid)
+    except RuntimeError as e:   # a body the kernel cannot read: refused in words, never a crash in the agent's loop
+        raise Unsupported("its body could not be triangulated, so no opening can be sized through it") from e
     ring = np.array(_outline(shape, w, h, px, py))
     front, back = start + d * (lo - 0.5), start + d * (hi + 0.5)
     t_in = _first_hit(front + ring, d, tris)
