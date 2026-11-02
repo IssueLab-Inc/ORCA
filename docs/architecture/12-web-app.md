@@ -694,6 +694,18 @@ No `sessionStorage` or IndexedDB is used.
   card's width (about 500 px); frames are the whole window, and each clip crops its part, so Northbank's run gives
   the card and steps 2-4. `--keep` keeps the frames and times, `--from <folder>` encodes them again without a
   new proposal, and `--gpu` draws with the graphics card instead of SwiftShader.
+- **`web/scripts/record-demo.cjs`:** records the demo video's shots ([docs/demo-video.md](../demo-video.md),
+  "Recording the takes"), each as its own take in Recordly, a desktop screen recorder outside this repository (AGPL-3.0)
+  that draws the cursor from the script's clicks and zooms on each. It loads Recordly's Playwright helper and Playwright
+  from a Recordly checkout (`--recordly`, `RECORDLY_DIR`, else `../Recordly`) and copies nothing from it. One function
+  per shot: an unrecorded setup (models opened afresh when needed, Filters cleared, the viewer on 3D only, Activity
+  docked in its bottom bar showing Workings at `WORKINGS_HEIGHT`, by ORCA's own fit or a drag of the bar's edge) and a
+  take in Chrome's app mode in a maximized window (Recordly's `maximizeWindow`), with a profile outside git (`--login`
+  signs the owner in once); `duct` and `cell-22` switch to Four views on camera, and `cell-22` asks Chat for #22's fix.
+  A failed take, or one stopped by Ctrl+C, is still stopped in Recordly with its footage kept, and a take that shows
+  the wrong thing (no verified fix from the chat's run on #22) is reported as a RETAKE. `--dry-run --headless` runs the
+  steps with no Recordly and saves where each take ended. Not served by the app; `web/tests/record-demo.test.mjs`
+  covers its arguments, takes, Ctrl+C, summary, the opening's tidy check, the chat's fix and the maximized window.
 - **`web/public/`:** `favicon.svg`, `brand/` (above), `popout.html` (the page a panel's own window opens: dockview moves the panel in
   and copies the styles), `demos/*.webp` (the stills, and the landing's clips with their stills), `tour/*.json` (the five recordings), and the generated `wasm/`.
 - **`web/index.html`:** the shell (`#root`, `viewport-fit=cover`, the IBM Plex fonts from Google Fonts, title "ORCA ·
@@ -724,5 +736,5 @@ No `sessionStorage` or IndexedDB is used.
 - A new or renamed panel, a change to the default layout, the side bars' buttons, what is saved, or how `setTab` and
   the dock follow each other (also [docs/panels.md](../panels.md)).
 - A new tour, act, `TourState` field, `TourActions` action or recording in `web/public/tour/`.
-- A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `capture-proposals.cjs`, `web/public/`.
+- A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `capture-proposals.cjs`, `record-demo.cjs`, `web/public/`.
 - The identity or motion library in `assets/brand/orca/`, or its adoption by the app.

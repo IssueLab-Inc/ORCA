@@ -22,6 +22,7 @@ disclosed below; those are not claimed as code or assets created during the chal
   manually authored vector masters, static and animated exports, native elements, React wrappers and build/check scripts.
 - The PC-03 palletising cell demo models (generated during the event by IssueLab's own scripts): Rev A and Rev B
   STEP files are bundled in `samples/` under this repository's MIT licence. Their generator source is not included.
+- The demo video's take script (`web/scripts/record-demo.cjs`) and its test.
 
 ## Pre-existing, not built during the event
 
@@ -30,6 +31,8 @@ disclosed below; those are not claimed as code or assets created during the chal
   so judges can reproduce the demo. They are synthetic, contain no customer data, and are not claimed as work
   created during the challenge. Their generator source is not included. See [samples/README.md](samples/README.md).
 - Open-source libraries listed in the README.
+- **Recordly**, an open-source screen recorder (AGPL-3.0), records the demo video. It is a tool, not part of ORCA:
+  the take script loads it from its own checkout, and nothing from it is in this repository.
 
 No earlier IssueLab product code is included. If any module is ever adapted from earlier work, it is listed here with
 its source before it is committed.
