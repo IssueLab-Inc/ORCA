@@ -180,7 +180,9 @@ diagrams, checked against the code. Feature designs (the "why") stay in `docs/*.
 - **Numbers people see are measured:** the landing's numbers, the README's "Two demos" table and the demo cards share
   pictures and numbers; change them together and only from measured runs, and recapture `web/public/demos/*.webp`
   (`web/scripts/capture-demos.cjs`) after visual changes.
-- **Modal CLI behind the cloud session's proxy** needs `uv tool install 'modal[api-proxy-support]'`.
+- **Modal CLI behind the cloud session's proxy** needs `uv tool install 'modal[api-proxy-support]'`. **On Windows** it
+  stops mid-deploy printing ✓ ("'charmap' codec can't encode"): set `PYTHONIOENCODING=utf-8` first. Not installed?
+  `uvx --from modal modal deploy deploy/modal_app.py`.
 - **Muse Code has no `muse mcp add`:** it takes the settings JSON (`docs/mcp.md`).
 - **Nothing names a demo, a domain or a vendor outside its home:** demos in `server/sightline/demos.py` (and the tour,
   landing, evals), building or machine and what stays in place in the requirements (`IfcScene.stays`, never a class
@@ -209,7 +211,9 @@ Workings (the Activity panel draws each run as it happens: `docs/workings.md`), 
 log: the Edit tool (P: push/pull a face, align, move, void, cut by shape, split, remove a section, delete, clip; each
 checked before Keep, "Keep with N clashes" never verified), Muse and agents doing the same on the person's own word,
 every kept edit (fixes too) logged with its clash and the fix it follows, undo/redo (Ctrl+Z), and the log in the
-report, BCF and exported IFC (`docs/manual-edits.md`; Nov 1: 744 server tests, 213 web tests, answer key 3/3). Latest
+report, BCF and exported IFC (`docs/manual-edits.md`; Nov 1: 744 server tests, 213 web tests, answer key 3/3), and
+(Nov 1) models added to the open ones or taken out without opening again, everything kept staying
+(`docs/add-and-remove-models.md`). Latest
 validation (Oct 31): 674 server tests, 187 web tests (with the filters and checks on them); answer key 3/3 first try at Rev04 heights and
 `evals/step_cell.py` passing (C1, C2, C3, C6, C7, C8, Rev B 0) with requirements off (with Northbank's own on: Oct
 30), both last run before the filters, which changed nothing in the fix path. How each part works now: `docs/architecture/`. What was built when, with the numbers measured at the time:

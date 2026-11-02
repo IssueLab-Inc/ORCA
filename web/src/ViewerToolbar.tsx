@@ -67,8 +67,13 @@ type Toggle = "edges" | "section" | "measure" | "edit" | "links" | "ortho" | "gr
  * or nowhere while a drawing is maximised. Null: one rail for everything, at the stage's left. */
 export interface Rail3d { shown: boolean; x: number; y: number; h: number }
 
-export function ViewerToolbar({ compact = false, state, models, hasFocus, views, split = null, onMode, onStyle, onToggle, onView, onFit, onFocus, onModel, onShot }: {
+/** Taking a model out of the open scene (docs/add-and-remove-models.md): what does it, and why it can't now (ORCA is
+ * working: "Wait for the proposal to finish."), or null. */
+export interface RemoveModel { onRemove: (i: number) => void; blocked: string | null }
+
+export function ViewerToolbar({ compact = false, state, models, hasFocus, views, split = null, remove, onMode, onStyle, onToggle, onView, onFit, onFocus, onModel, onShot }: {
   compact?: boolean; state: ToolbarState; models: string[]; hasFocus: boolean; views: ViewsControls; split?: Rail3d | null;
+  remove?: RemoveModel;
   onMode: (m: ViewMode) => void; onStyle: (s: VisualStyle) => void; onToggle: (k: Toggle) => void; onView: (p: Preset) => void;
   onFit: () => void; onFocus: () => void; onModel: (i: number, visible: boolean) => void; onShot: () => void;
 }) {
@@ -105,7 +110,7 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, views,
             {VIEWS.map((v) => <button key={v.id} type="button" className="btn small" onClick={() => { onView(v.id); close(); }}>{v.label}</button>)}
           </div>
           <CameraItems state={state} views={views} onToggle={onToggle} close={close} fly />
-          <VisibilityItems models={models} state={state} views={views} onModel={onModel} close={close} />
+          <VisibilityItems models={models} state={state} views={views} onModel={onModel} remove={remove} close={close} />
         </>)}
       </Popover>
       <button type="button" className="btn rail-btn" disabled={!hasFocus} onClick={onFocus}><LocateFixed size={16} aria-hidden /> Go to clash</button>
@@ -178,7 +183,7 @@ export function ViewerToolbar({ compact = false, state, models, hasFocus, views,
         </Popover>)}
       {models.length > 0 && (
         <Popover icon={Layers} label="Visibility: models, levels, classes">
-          {(close) => <VisibilityItems models={models} state={state} views={views} onModel={onModel} close={close} />}
+          {(close) => <VisibilityItems models={models} state={state} views={views} onModel={onModel} remove={remove} close={close} />}
         </Popover>
       )}
       <IconButton icon={Camera} label="Save a screenshot" onClick={onShot} />
@@ -258,8 +263,8 @@ function SavedViews({ views }: { views: ViewsControls }) {
 
 /** Models, levels and classes to show (viewing only: the check, triage and fixes never see these), and what is hidden
  * for now. */
-function VisibilityItems({ models, state, views, onModel, close }: { models: string[]; state: ToolbarState; views: ViewsControls;
-  onModel: (i: number, visible: boolean) => void; close?: () => void }) {
+function VisibilityItems({ models, state, views, onModel, remove, close }: { models: string[]; state: ToolbarState; views: ViewsControls;
+  onModel: (i: number, visible: boolean) => void; remove?: RemoveModel; close?: () => void }) {
   const { filters, onFilters } = views;
   const flip = (key: keyof Filters, v: string, show: boolean) =>
     onFilters({ ...filters, [key]: show ? filters[key].filter((x) => x !== v) : [...filters[key], v] });
@@ -269,9 +274,15 @@ function VisibilityItems({ models, state, views, onModel, close }: { models: str
       <button className="btn small" onClick={views.onResetTemporary}>Reset</button></div>}
     <p className="pop-title">Models</p>
     {models.map((name, i) => (
-      <label key={name} className="pop-item check">
-        <input type="checkbox" checked={!state.hiddenModels.includes(i)} onChange={(e) => onModel(i, e.target.checked)} /> {name}
-      </label>))}
+      <div key={name} className="pop-item model-row">
+        <label className="check">
+          <input type="checkbox" checked={!state.hiddenModels.includes(i)} onChange={(e) => onModel(i, e.target.checked)} /> {name}
+        </label>
+        {remove && models.length > 1 && (
+          <button type="button" className="ibtn" aria-label={`Remove ${name} from the open models`} disabled={!!remove.blocked}
+            data-tip={remove.blocked ?? "Remove from the open models"} data-tip-side="left"
+            onClick={() => { remove.onRemove(i); close?.(); }}><Trash2 size={13} aria-hidden /></button>)}
+      </div>))}
     {views.levels.length > 0 && <>
       <p className="pop-title">Levels</p>
       {views.levels.map(([lv, n]) => (

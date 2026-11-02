@@ -107,3 +107,61 @@ test("every file of a load is placed from the first file's origin, and the viewe
   assert.deepEqual(o.origin(), [417609, 78711]);
   o.setOrigin(null);
 });
+
+// Adding and removing models in an open scene (docs/add-and-remove-models.md).
+async function opened(...ids) {
+  const s = await stage({ realAdopt: true });
+  const els = (id) => new Map([[`${id}-1`, {}], [`${id}-2`, {}]]);
+  const make = (id) => ({ ...s.model(id), byGlobalId: els(id) });
+  const models = ids.map(make);
+  Object.assign(s.v, { models, names: ids.map((id) => `${id}.ifc`), moved: new Map(), hidden: new Set(), info: new Map(),
+    paints: new Map(), focus: { a: null, b: null }, selection: null, measures: [{ id: 1 }], measureStamp: 0, draft: null, hover: { point: null } });
+  return { ...s, make, models };
+}
+
+test("files added are parsed from the models' own origin, all before any is shown, then appended", async () => {
+  const o = await originModule(); o.setOrigin([417609, 78711]);
+  const s = await opened("S", "M"), calls = [];
+  globalThis.__sightlineLoadIfc = (...a) => new Promise((resolve, reject) => { calls.push(a); s.pending.push({ resolve, reject }); });
+  let fitted = 0; s.v.fitAll = () => { fitted++; };
+  const work = s.v.add([new Uint8Array([1]), new Uint8Array([2])], ["A.ifc", "B.ifc"]);
+  const a = s.make("A"); s.pending[0].resolve(a); await flush();
+  assert.deepEqual(s.v.models, s.models, "nothing shows until every new file is parsed");
+  const b = s.make("B"); s.pending[1].resolve(b); const stats = await work;
+  assert.deepEqual(calls.map((c) => c[1]), [[417609, 78711], [417609, 78711]]);
+  assert.deepEqual(s.v.models, [...s.models, a, b]); assert.deepEqual(s.v.names, ["S.ifc", "M.ifc", "A.ifc", "B.ifc"]);
+  assert.deepEqual(s.added, [a.mesh, b.mesh]); assert.equal(a.mesh.material, s.v.solid);
+  assert.deepEqual(stats, { elements: 4, triangles: 8, parseMs: 12 }); assert.equal(fitted, 1, "framed so the new model shows");
+  assert.deepEqual(s.v.measures, [{ id: 1 }], "measurements on the other models stay");
+  o.setOrigin(null);
+});
+
+test("an add that fails or is superseded leaves the open models as they were and disposes what it parsed", async () => {
+  const s = await opened("S");
+  const failing = s.v.add([new Uint8Array([1]), new Uint8Array([2])], ["A.ifc", "B.ifc"]);
+  const a = s.make("A"); s.pending[0].resolve(a); await flush();
+  s.pending[1].reject(new Error("Invalid IFC")); await assert.rejects(failing, /Invalid IFC/);
+  assert.equal(a.mesh.disposed, true); assert.deepEqual(s.v.models, s.models);
+  let current = true; const stale = s.v.add([new Uint8Array([3])], ["C.ifc"], () => current); current = false;
+  const c = s.make("C"); s.pending[2].resolve(c);
+  assert.equal(await stale, null); assert.equal(c.mesh.disposed, true); assert.deepEqual(s.v.names, ["S.ifc"]);
+});
+
+test("a model removed is disposed, the later ones move down, and what pointed into it goes", async () => {
+  const s = await opened("S", "M", "A");
+  const [structure, mep, arch] = s.models;
+  s.v.hiddenModels = new Set([1, 2]);
+  s.v.moved.set("S-1", {}); s.v.hidden.add("S-2"); s.v.info.set("S-1", {}); s.v.info.set("M-1", {});
+  s.v.focus = { a: "S-1", b: "M-1", group: { "S-2": "a", "M-2": "b" } }; s.v.selection = "S-2";
+  const stats = s.v.remove(0);
+  assert.deepEqual(s.v.models, [mep, arch]); assert.deepEqual(s.v.names, ["M.ifc", "A.ifc"]);
+  assert.deepEqual(s.removed, [structure.mesh]); assert.equal(structure.mesh.disposed, true); assert.equal(mep.mesh.disposed, undefined);
+  assert.deepEqual([...s.v.hiddenModels].sort(), [0, 1], "the hidden marks follow their models down");
+  assert.equal(s.v.moved.has("S-1") || s.v.hidden.has("S-2") || s.v.info.has("S-1"), false);
+  assert.equal(s.v.info.has("M-1"), true);
+  assert.deepEqual(s.v.focus, { a: null, b: "M-1", group: { "M-2": "b" } }); assert.equal(s.v.selection, null);
+  assert.deepEqual(s.v.measures, [], "measurements may have been on it"); assert.equal(s.v.hover, null);
+  assert.deepEqual(stats, { elements: 2, triangles: 4, parseMs: 6 });
+  assert.equal(s.v.remove(5), null, "a position it does not have changes nothing");
+  assert.deepEqual(s.v.models, [mep, arch]);
+});

@@ -169,6 +169,9 @@ export interface ContextApplied extends Patch {
  * (server: Workspace.patch). A page whose model is not at `revision_before`, or that gets no meshes, reloads. */
 export interface Patch {
   scene_id?: string; revision_before?: number; revision?: number; meshes?: ElementMesh[] | null;
+  /** Bumped when a model is added or removed: `history`'s file indexes hold only within one layout, so a page on
+   *  another layout reloads every file (docs/add-and-remove-models.md). */
+  layout?: number;
   history?: [number, number[]][];   // (revision, files it changed): a page that missed an edit reloads those
   removed?: string[];               // elements the request took out (a delete, undo of what a fix made)
 }
@@ -184,6 +187,8 @@ export interface JournalEntry {
     min_clearance_m?: number | null; open_joints?: { element: string; name: string }[] } | null;
   warnings: { rule: string; text: string; review: string | null }[]; status: { clash: string | null; resolved: boolean;
     depth_m: number | null } | null; state: "kept" | "undone"; has_picture: boolean; params: Record<string, unknown>;
+  /** The model it changed was taken out of the scene (its name): it stays in the log and is never undone or redone. */
+  model_removed?: string | null;
 }
 export interface Journal { entries: JournalEntry[]; can_undo: boolean; can_redo: boolean; undo: string | null; redo: string | null }
 /** A face of an element as the server reads a pick (faces.py): its kind, its name in words, what it allows. */
@@ -425,8 +430,16 @@ export interface ReqPreview { clashes: number; baseline: number; seconds: number
 /** The owner's settings (server: owner.py), sent with every call; the server ignores them for anyone but the owner. */
 export type Effort = "minimal" | "low" | "medium" | "high";
 /** The owner's own settings (this browser): absent fields follow the settings for everyone. */
-/** An opened set of models: the scene id, the file names, and which came from STEP (index → STEP name). */
-export interface OpenedScene { id: string; files: string[]; step?: Record<string, string>; revision?: number }
+/** An opened set of models: the scene id, the file names, and which came from STEP (index → STEP name). `layout` is
+ * bumped each time a model is added or removed (docs/add-and-remove-models.md). */
+export interface OpenedScene { id: string; files: string[]; step?: Record<string, string>; revision?: number; layout?: number }
+/** Models added to an open scene: the scene as it is now, and the new files' indexes. */
+export interface AddedModels extends OpenedScene { added: number[] }
+/** A model taken out of an open scene: the scene as it is now, what went with it, and the list of what is left. */
+export interface RemovedModel extends OpenedScene {
+  removed: { name: string; clashes: number; edits: number };
+  report: Report | null; checks: CheckSummary[];
+}
 /** How an upload is going (server: app.upload_models_stream): packing here, sending, then the server opening it. */
 export type UploadEvent =
   | { type: "packing"; done: number; total: number; name: string }
@@ -624,6 +637,61 @@ export type DocEvent =
   | { type: "ready"; url: string; name: string; bytes: number }
   | { type: "error"; message: string };
 
+/** Upload model files with progress: each gzipped here first when the browser can, sent with XMLHttpRequest for upload
+ * progress, then the server's stream read to its `done` (resolved with it, less its type) or `error`. Sent again once,
+ * as `send` does, when the server has forgotten the requirements' id (a restart). */
+async function streamUpload<T extends OpenedScene>(url: string, files: File[], onEvent: (e: UploadEvent) => void): Promise<T> {
+  const form = new FormData();
+  for (const [i, f] of files.entries()) {
+    onEvent({ type: "packing", done: i, total: files.length, name: f.name });
+    const packed = await pack(f);
+    form.append("files", packed, packed === f ? f.name : `${f.name}.gz`);
+  }
+  const post = (retry: boolean) => new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    for (const [k, v] of Object.entries(settingsHeader())) xhr.setRequestHeader(k, v);
+    let seen = 0, opened: T | null = null, failed: Error | null = null;
+    const read = () => {
+      const text = xhr.responseText;
+      for (let nl = text.indexOf("\n", seen); nl >= 0; nl = text.indexOf("\n", seen)) {
+        const line = text.slice(seen, nl);
+        seen = nl + 1;
+        if (!line.trim()) continue;
+        const e = JSON.parse(line) as UploadEvent;
+        if (e.type === "done") {
+          const { type: _done, ...rest } = e as unknown as T & { type: string };
+          opened = rest as unknown as T;
+        } else if (e.type === "error") {
+          const x = e as unknown as { status: number; detail: string };
+          failed = new ApiError(x.detail, x.status);
+        } else onEvent(e);
+      }
+    };
+    xhr.upload.onprogress = (e) => onEvent({ type: "upload", loaded: e.loaded, total: e.total });
+    xhr.onprogress = () => { if (xhr.status === 200) read(); };
+    xhr.onload = () => {
+      if (xhr.status !== 200) {
+        let detail = `Upload failed (${xhr.status})`;
+        try { detail = JSON.parse(xhr.responseText).detail ?? detail; } catch { /* not JSON */ }
+        if (retry && xhr.status === 409 && detail === "requirements_unknown") {
+          reRegister().then((ok) => (ok ? post(false) : Promise.reject(new ApiError(detail, 409)))).then(resolve, reject);
+          return;
+        }
+        reject(new ApiError(detail, xhr.status));
+        return;
+      }
+      read();
+      if (failed) reject(failed);
+      else if (opened) resolve(opened);
+      else reject(new Error("The server stopped before the models opened. Try again."));
+    };
+    xhr.onerror = () => reject(new Error("The upload stopped: the connection dropped."));
+    xhr.send(form);
+  });
+  return post(true);
+}
+
 /** POST and read newline-delimited JSON events until the stream ends. */
 async function ndjson<T>(path: string, body: unknown, onEvent: (e: T) => boolean | void, signal?: AbortSignal, method = "POST") {
   const r = await send(`/api${path}`, method === "GET" ? { headers: jsonHeaders(), signal }
@@ -788,58 +856,19 @@ export const api = {
   },
   /** Upload your own models with progress (UploadEvent): each file gzipped here first when the browser can (IFC text
    * packs 5-10x), sent with XMLHttpRequest for upload progress, then the server's opening streamed back. */
-  uploadModelsStream: async (files: File[], onEvent: (e: UploadEvent) => void): Promise<OpenedScene> => {
-    const form = new FormData();
-    for (const [i, f] of files.entries()) {
-      onEvent({ type: "packing", done: i, total: files.length, name: f.name });
-      const packed = await pack(f);
-      form.append("files", packed, packed === f ? f.name : `${f.name}.gz`);
-    }
-    // Sent again once, as `send` does, when the server has forgotten the requirements' id (a restart).
-    const post = (retry: boolean) => new Promise<OpenedScene>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/models/upload/stream");
-      for (const [k, v] of Object.entries(settingsHeader())) xhr.setRequestHeader(k, v);
-      let seen = 0, opened: OpenedScene | null = null, failed: Error | null = null;
-      const read = () => {
-        const text = xhr.responseText;
-        for (let nl = text.indexOf("\n", seen); nl >= 0; nl = text.indexOf("\n", seen)) {
-          const line = text.slice(seen, nl);
-          seen = nl + 1;
-          if (!line.trim()) continue;
-          const e = JSON.parse(line) as UploadEvent;
-          if (e.type === "done") {
-            const d = e as unknown as OpenedScene;
-            opened = { id: d.id, files: d.files, step: d.step, revision: d.revision };
-          } else if (e.type === "error") {
-            const x = e as unknown as { status: number; detail: string };
-            failed = new ApiError(x.detail, x.status);
-          } else onEvent(e);
-        }
-      };
-      xhr.upload.onprogress = (e) => onEvent({ type: "upload", loaded: e.loaded, total: e.total });
-      xhr.onprogress = () => { if (xhr.status === 200) read(); };
-      xhr.onload = () => {
-        if (xhr.status !== 200) {
-          let detail = `Upload failed (${xhr.status})`;
-          try { detail = JSON.parse(xhr.responseText).detail ?? detail; } catch { /* not JSON */ }
-          if (retry && xhr.status === 409 && detail === "requirements_unknown") {
-            reRegister().then((ok) => (ok ? post(false) : Promise.reject(new ApiError(detail, 409)))).then(resolve, reject);
-            return;
-          }
-          reject(new ApiError(detail, xhr.status));
-          return;
-        }
-        read();
-        if (failed) reject(failed);
-        else if (opened) resolve(opened);
-        else reject(new Error("The server stopped before the models opened. Try again."));
-      };
-      xhr.onerror = () => reject(new Error("The upload stopped: the connection dropped."));
-      xhr.send(form);
-    });
-    return post(true);
-  },
+  uploadModelsStream: (files: File[], onEvent: (e: UploadEvent) => void): Promise<OpenedScene> =>
+    streamUpload<OpenedScene>("/api/models/upload/stream", files, onEvent),
+  /** Add sample models to the open scene (free); then run the kept checks again. 400 with why for STEP among building
+   * models (or the reverse) or a name already open. */
+  addModels: (sceneId: string, samples: string[]) =>
+    call<AddedModels>(`/scenes/${sceneId}/models`, { method: "POST", body: JSON.stringify({ samples }) }),
+  /** Add your own files to the open scene, as an upload (one model upload, the same caps), with the same progress. */
+  addModelsStream: (sceneId: string, files: File[], onEvent: (e: UploadEvent) => void): Promise<AddedModels> =>
+    streamUpload<AddedModels>(`/api/scenes/${sceneId}/models/upload/stream`, files, onEvent),
+  /** Take the model at `index` out of the open scene; `name` is the file this page means there (409: the list changed,
+   * reload the files). */
+  removeModel: (sceneId: string, index: number, name: string) =>
+    call<RemovedModel>(`/scenes/${sceneId}/models/${index}?name=${encodeURIComponent(name)}`, { method: "DELETE" }),
   file: async (id: string, index: number) => {
     const r = await fetch(`/api/scenes/${id}/files/${index}`, { cache: "no-store" });
     if (!r.ok) throw new ApiError(`Model download failed (${r.status})`, r.status);

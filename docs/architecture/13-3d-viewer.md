@@ -111,6 +111,12 @@ flowchart TD
   callback is `App`'s `sceneEpoch` check) disposes what it staged and leaves the usable scene as it was.
   **`Viewer.replace(index, bytes, isCurrent)`** swaps one file the same way (used when a kept fix cannot be patched).
   Both assign the viewer's own materials to the batches (`adopt`), reset the cached scene size and redraw.
+- **`Viewer.add(files, names, isCurrent)`** ([docs/add-and-remove-models.md](../add-and-remove-models.md)) parses each
+  new file at the models' own `origin()` (as `replace` does), all before any is shown (a failure or a superseded add
+  disposes what it staged), appends them, sets the views up again and frames everything. **`Viewer.remove(index)`**
+  disposes one file's batches, splices `models` and `names`, moves the hidden models after it down, and drops what
+  pointed into it: previewed moves and hides, its elements' facts and paints, the focus and selection on them, the
+  last clash, every measurement and the hover snap; then `onChange`. Both return the stats `load` returns.
 
 ## The scene and its layers
 
@@ -169,7 +175,7 @@ Public methods unless marked private. `App` calls nearly all of them; `pilot.ts`
 
 | Concern | Members |
 |---|---|
-| Loading | `load(files, names, isCurrent)`, `replace(index, bytes, isCurrent)`, `patch(meshes, origin)`, `dispose()`; fields `models`, `names` |
+| Loading | `load(files, names, isCurrent)`, `replace(index, bytes, isCurrent)`, `add(files, names, isCurrent)`, `remove(index)`, `patch(meshes, origin)`, `dispose()`; fields `models`, `names` |
 | Visibility per model | `setModelVisible(index, visible)` (the toolbar's Models list; `App` keeps `tool.hiddenModels`) |
 | Modes and focus | `setMode(mode)`, `setFocus({ a, b, group })`, `setEdges(on)`, `setHits(ids)`, `setLinks(groups)`; private `applyMode`, `aroundIds`, `drawFocus`, `nearFocus`, `focusSide` |
 | Style, selection and visibility | `setStyle(style)`, `setGreyContext(on)`, `setSelection(gid)`, `setInfo(classes, storeys)` (either may be null to keep what it had), `setFilters(filters)`, `setTemporary(t)`, getter `temporary`, `setRules(view)` and `isShown(gid)` (the filters' rules, [docs/filters.md](../filters.md); its test is built once and kept until the next `applyMode`), `ofLevel(name)` (a storey's elements from the datums, for the Properties card's level actions), `infoCounts()` (cached until the models or the info change), `ofClass(cls)`; private `filterTest`, `drawSelection` |
@@ -228,7 +234,10 @@ every style.
   through the same call: `App.isolateClash`), then the filters (`setFilters({ classes, levels })`: classes and storeys
   left out, `views.shownBy`), then the filters' rules (`setRules`: what hide rules find is hidden; while an isolate
   rule is on, only what isolate rules find shows), then the mode round the focus. `isShown(gid)` answers for the card
-  and App (a filter that hides the selection clears it); the selection and lit links leave out what is hidden.
+  and App (a filter that hides the selection clears it); the selection and lit links leave out what is hidden. What a
+  preview moves (`moved`: the fittings a fix carries, a hand move, a trial) skips everything after the hidden model,
+  its lit link too, as a preview's own meshes do: hidden, the bend a tilted drain carries left the drain ending in
+  mid-air on an isolated clash (Nov 1).
 - **Colour:** `applyMode` sets each element's colour: a filter's colour (`setRules`' `paint`, the top rule winning),
   else the ghost, else grey (the grey context round a focus, or Grey the rest), else its own. One scratch `Vector4`
   for every element. The pair, selection, hits, links, previews and measure are their own layers over the batches,
