@@ -6,7 +6,9 @@ Frames are named `f<n>_<seconds>.jpg` (seconds on the recording's clock). Each s
 a frame that does not change between ticks is held rather than repeated. Run by `capture-proposals.cjs` with the
 server's Python (Pillow). Settings from the environment:
 
-- BADGE="x,y" places the speed label (fractions of the frame; y is its bottom edge); BADGE_PX sets its text size.
+- BADGE="x,y" places the speed label (fractions of the frame; y is its bottom edge), or "none" for no label (the
+  page around it then says the clip is sped up); BADGE_PX sets its text size.
+- CROP="x0,y0,x1,y1" keeps that part of each frame (fractions of it) before scaling to `width`.
 - STILL=<path> also writes the last frame as a still WebP (the picture for people who ask for less motion).
 - Q is the WebP quality (65).
 """
@@ -34,7 +36,9 @@ def main(src: str, out: str, width: int, fps: float, segments: list[tuple[float,
     files = sorted(f for f in os.listdir(src) if f.endswith(".jpg"))
     stamps = [float(f.rsplit("_", 1)[1][:-4]) for f in files]
     font = load_font(int(os.environ.get("BADGE_PX") or max(13, round(22 * width / 1440))))
-    bx, by = map(float, os.environ.get("BADGE", "0.02,0.97").split(","))
+    badge = os.environ.get("BADGE", "0.02,0.97")
+    bx, by = map(float, badge.split(",")) if badge != "none" else (0.0, 0.0)
+    crop = tuple(map(float, os.environ["CROP"].split(","))) if os.environ.get("CROP") else None
     frames: list[Image.Image] = []
     durations: list[float] = []
     cached: tuple[int, Image.Image] | None = None
@@ -45,12 +49,15 @@ def main(src: str, out: str, width: int, fps: float, segments: list[tuple[float,
             i = max(0, bisect.bisect_right(stamps, t) - 1)
             if cached is None or cached[0] != i:
                 im = Image.open(os.path.join(src, files[i])).convert("RGB")
+                if crop:
+                    im = im.crop((round(crop[0] * im.width), round(crop[1] * im.height),
+                                  round(crop[2] * im.width), round(crop[3] * im.height)))
                 cached = (i, im.resize((width, round(im.height * width / im.width)), Image.LANCZOS))
             if (i, speed) == last:
                 durations[-1] += 1000 / fps
             else:
                 frame = cached[1].copy()
-                if speed != 1:
+                if speed != 1 and badge != "none":
                     draw = ImageDraw.Draw(frame)
                     text = f"{speed:g}× speed"
                     x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=font)
