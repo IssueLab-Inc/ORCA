@@ -300,7 +300,7 @@ async function clearFilters(page) {
     console.warn("  Filters didn't read the models within 60 s: not cleared");
   }
   await tab(page, "clashes").click();
-  const search = page.getByLabel("Filter clashes").first();   // the list's own filter too (#29 is found through it)
+  const search = page.getByLabel("Filter clashes").first();   // the list's own filter too (a setup may filter it to a #N)
   await search.waitFor({ state: "visible", timeout: 10000 });
   if (await search.inputValue()) await search.fill("");
 }
@@ -403,7 +403,12 @@ async function setLayout(page, name, click) {
   await click(menu);
   const item = page.locator(".pop.open").getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).first();
   await item.waitFor({ state: "visible", timeout: 5000 });
-  if ((await item.getAttribute("aria-checked")) === "true") { await page.keyboard.press("Escape"); return; }
+  if ((await item.getAttribute("aria-checked")) === "true") {
+    await page.keyboard.press("Escape");
+    // Routine in a setup; in a take the beat is lost (the viewer was already there before it started).
+    if (click !== plainClick) console.warn(`  The viewer was already on ${name}: the take has no switch to it`);
+    return;
+  }
   await click(item);
   await sleep(1000);
 }
@@ -575,17 +580,27 @@ async function xray(page, click) {
   await click(page.locator(".pop.open").getByRole("menuitemradio", { name: /^X-ray/ }));
 }
 
-/** Type `line` into Chat at a readable pace and send it: the cursor glides to the message box, then to Send. Resolves
- * the answers on the page and how many there were before, for `chatAnswer`. */
-async function askChat(page, ctx, line, delay = TYPING) {
+/** Type `line` into Chat at a readable pace and send it: the cursor glides to the message box, then to Send. The box is
+ * also focused directly (nothing drawn): a key typed anywhere else is one of ORCA's single-key shortcuts (App.tsx), so
+ * the words must land in the box, and are checked there before Send. Resolves the answers on the page and how many
+ * there were before, for `chatAnswer`; fails within 5 s when Chat doesn't take the message. */
+async function askChat(page, ctx, line, { delay = TYPING, takenMs = 5000 } = {}) {
   const message = page.getByRole("textbox", { name: "Message" }).first();
   await until(() => message.isEnabled(), 30000, "Chat");
   await ctx.click(message);
+  await message.focus();
+  if (await message.inputValue()) await message.fill("");   // a draft left by an earlier take
+  if (!(await message.evaluate((box) => box === box.ownerDocument.activeElement))) {
+    throw new Error("Chat's message box didn't take the focus: nothing typed (keys elsewhere are ORCA's shortcuts)");
+  }
   await page.keyboard.type(line, { delay });
   await sleep(800);
+  const typed = await message.inputValue();
+  if (typed !== line) throw new Error(`Chat's message box holds "${typed}", not "${line}": not sent`);
   const replies = page.locator(".chat-log .msg.assistant");
   const before = await replies.count();
   await ctx.click(page.locator('button[data-tour="chat-send"]:visible'));
+  await until(async () => (await replies.count()) > before, takenMs, "Chat to take the message after Send");
   return { replies, before };
 }
 
@@ -595,6 +610,29 @@ async function chatAnswer(page, { replies, before }, timeout, what) {
   await until(async () => (await replies.count()) > before && (await send.innerText()).trim() === "Send"
     && !(await replies.last().locator(".spinner").count()), timeout, what);
   return replies.last();
+}
+
+/**
+ * The verified options of a run Chat started, once the page has landed it. Chat's turn ends one Muse Spark reply after
+ * the fix agent's result, but the page shows that result only when ORCA has finished playing the ideas it tried in the
+ * viewer (`pilot.finish`, App.tsx): until then the run is still working (Propose fixes says "Working…", also behind
+ * Chat) and no option is drawn. So: wait for "Working…" to go, give it `settleMs` as `settle` does, then count; while
+ * Chat said it verified `verified` fixes and none is drawn yet, keep waiting, up to `timeout`. Resolves the count.
+ */
+async function landedOptions(page, verified, { timeout = 60000, settleMs = 1500 } = {}) {
+  const working = page.locator('button[data-tour="propose"]', { hasText: "Working" });
+  const options = page.locator(".card-body.option");   // the Clash panel's, drawn behind Chat too
+  const end = Date.now() + timeout;
+  let count = 0;
+  for (;;) {
+    if (!(await working.count())) {
+      await sleep(settleMs);
+      count = await options.count();
+      if (count || !verified) return count;
+    }
+    if (Date.now() > end) return count;
+    await sleep(250);
+  }
 }
 
 /** What Chat's fix agent did, from the steps under an answer (Chat.tsx: "Ran the fix agent (#22) → 2 verified of 6
@@ -835,7 +873,7 @@ const SHOTS = [
       await check.first().click();
       await listReady(page);
       state.scene = "revision";
-      await prepareShot(page);   // laid out as every take is: the panels match the duct take's
+      await prepareShot(page);   // laid out as every take is (3D only: the duct take's 3D view, not its four)
       await rest(page);
     },
     async take(page, ctx) {
@@ -872,11 +910,13 @@ const SHOTS = [
       state.proposal = 22;
       const fix = chatFix(await answer.locator("details.tools li").allTextContents());
       const error = (await answer.locator(".bad").allTextContents())[0]?.trim();
-      const options = await page.locator(".card-body.option").count();   // the Clash panel's, behind Chat
-      const picked = (await page.locator(".clash-row.pick .clash-name").first().textContent().catch(() => ""))?.trim();
+      const options = await landedOptions(page, fix.verified);   // the page shows the run once ORCA has played it
+      const pick = page.locator(".clash-row.pick .clash-name");
+      const picked = (await pick.count()) ? (await pick.first().textContent({ timeout: 2000 }).catch(() => ""))?.trim() : "";
       ctx.log(`  Chat: ${fix.ran ? `ran the fix agent (${fix.said || "no summary"})` : "didn't run the fix agent"}; ${options} verified option(s) on ${picked || "no clash"}`);
       if (!fix.ran) return ctx.retake(`the chat didn't run the fix agent on #22${error ? ` (${error})` : ""}`);
       if (picked !== "#22") return ctx.retake(`the chat's fix agent ran on ${picked || "no clash"}, not #22`);
+      if (!options && fix.verified) return ctx.retake(`Chat said ${fix.said}, but the page drew no option within 60 s`);
       if (!options) return ctx.retake(`the chat's run verified no fix for #22 (${fix.said || error || "no summary"})`);
       await sleep(GAP);
       await ctx.click(tab(page, "clash"));   // the verified fix in the Clash panel
@@ -928,7 +968,7 @@ const SHOTS = [
       await sleep(1000);
       await ctx.click(tab(page, "chat"));
       await sleep(GAP);
-      const asked = await askChat(page, ctx, VOICE_LINE, 45);   // as tested
+      const asked = await askChat(page, ctx, VOICE_LINE, { delay: 45 });   // as tested
       await chatAnswer(page, asked, LONG, "Muse Spark's reply");
       await sleep(5000);
     },
@@ -1101,8 +1141,8 @@ async function main() {
 }
 
 module.exports = { SHOT_NAMES, SHOTS, USAGE, defaultProfile, parseArgs, selectShots, loadRecordly, startTake, runTake,
-  interruptTake, takeState, summaryLine, exitCodeOf, SIGN_IN, NO_BUILT, listReady, untidy, chatFix, maximize, CHAT_LINE,
-  WORKINGS_HEIGHT };
+  interruptTake, takeState, summaryLine, exitCodeOf, SIGN_IN, NO_BUILT, listReady, untidy, chatFix, landedOptions, askChat, maximize,
+  CHAT_LINE, WORKINGS_HEIGHT };
 
 if (require.main === module) {
   main().catch((error) => {

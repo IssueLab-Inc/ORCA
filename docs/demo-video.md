@@ -146,7 +146,7 @@ from it.
 | `revision` | 1:12–1:22 | Northbank with `Northbank-MEP-Rev04.ifc` in place of MEP, from the camera the duct take ended on with a section box round #1, in X-ray: to set beside the duct take's After | 180 s to open |
 | `built` | 1:22–1:42 | Show it built on #1's first option, the picture; Fit; the wipe slider dragged across | 180 s |
 | `accept` | 1:42–1:54 | Accept this fix; Export (the IFC saved); Menu › Report, then (3 s on, its own zoom) Build the report, Download (the PDF saved) | 300 s |
-| `cell-22` | 1:54–2:34 | Starts with #22's row on screen (the list filtered to it before the take when it isn't); Views › Four views; #22; Chat: types "Find a fix for clash #22.", Send; Muse Spark runs ORCA's fix agent (its `propose_fixes` tool) while Workings draws the run; then the Clash panel with the verified fix. RETAKE when the chat doesn't run the fix agent on #22 or it verifies nothing | 300 s |
+| `cell-22` | 1:54–2:34 | Starts with #22's row on screen (the list filtered to it before the take when it isn't); Views › Four views; #22; Chat: types "Find a fix for clash #22.", Send; Muse Spark runs ORCA's fix agent (its `propose_fixes` tool) while Workings draws the run; then the Clash panel with the verified fix (counted once ORCA has played the run's ideas, after the chat's answer). RETAKE when the chat doesn't run the fix agent on #22 or it verifies nothing | 300 s |
 | `cell-13` | 2:34–2:42 | #13, Propose fixes, then Ask Muse Wonder (as tested; kept, owner Nov 2). RETAKE when an option verifies or Wonder isn't offered | 300 s each |
 | `voice` | 2:42–2:50 | Chat: types "Isolate the services and colour them by system.", Send, Muse Spark's reply | 180 s |
 

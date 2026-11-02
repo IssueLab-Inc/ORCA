@@ -246,3 +246,66 @@ test("listReady: no raw click inside a take (nudge: false), nor when the clashes
   await demo.listReady(infront.page, { after: 100 });
   assert.deepEqual(infront.clicks, []);
 });
+
+/** A page landing a run Chat started: Propose fixes says "Working…" until `workingUntil` ms (ORCA still playing the
+ * ideas), and `options` verified options are drawn from `optionsAt` ms (never when null). */
+function runPage({ workingUntil = 0, optionsAt = null, options = 1 }) {
+  const t0 = Date.now(), at = () => Date.now() - t0;
+  const locator = (selector, opts = {}) => ({
+    count: async () => selector === 'button[data-tour="propose"]' && opts.hasText === "Working" ? (at() < workingUntil ? 1 : 0)
+      : selector === ".card-body.option" ? (optionsAt != null && at() >= optionsAt ? options : 0) : 0,
+  });
+  return { page: { locator }, at };
+}
+
+test("cell-22 counts the chat's verified options only once the page has landed the run, not when the chat's turn ends", async () => {
+  const late = runPage({ workingUntil: 400, optionsAt: 400, options: 2 });
+  assert.equal(await demo.landedOptions(late.page, 2, { timeout: 5000, settleMs: 50 }), 2, "drawn once Working… went: counted");
+  assert.ok(late.at() >= 400);
+  const lagging = runPage({ workingUntil: 0, optionsAt: 600 });
+  assert.equal(await demo.landedOptions(lagging.page, 1, { timeout: 5000, settleMs: 50 }), 1, "Chat said 1 verified: waited until drawn");
+  assert.ok(lagging.at() >= 600);
+  const none = runPage({ workingUntil: 200 });
+  assert.equal(await demo.landedOptions(none.page, 0, { timeout: 5000, settleMs: 50 }), 0, "nothing verified: done once it landed");
+  assert.ok(none.at() < 2000, `no wait past the landing (${none.at()} ms)`);
+  const never = runPage({ workingUntil: 0 });
+  assert.equal(await demo.landedOptions(never.page, 1, { timeout: 500, settleMs: 50 }), 0, "said verified, never drawn: gives up at the timeout");
+  assert.ok(never.at() >= 500);
+});
+
+/** Chat's message box and Send: `lands` false sends the keys elsewhere (focus lost), `focused` false refuses the focus,
+ * `answers` false never adds a turn. Records every glided click by what it was on. */
+function chatPage({ lands = true, focused = true, answers = true, draft = "" } = {}) {
+  let value = draft, turns = 0;
+  const clicks = [];
+  const box = {
+    first: () => box, isEnabled: async () => true, focus: async () => undefined, inputValue: async () => value,
+    fill: async (v) => { value = v; }, evaluate: async () => focused,
+  };
+  const page = {
+    getByRole: () => box,
+    keyboard: { type: async (text) => { if (lands) value += text; } },
+    locator: (selector) => ({ count: async () => (selector === ".chat-log .msg.assistant" ? turns : 0), selector }),
+  };
+  const ctx = { click: async (l) => { clicks.push(l === box ? "message" : l.selector); if (l.selector?.includes("chat-send") && answers) turns += 1; } };
+  return { page, ctx, clicks, typed: () => value };
+}
+
+test("Chat's line is typed only into its focused box and sent only when it is there; no new turn within the wait fails", async () => {
+  const ok = chatPage({ draft: "left over" });
+  const asked = await demo.askChat(ok.page, ok.ctx, demo.CHAT_LINE, { delay: 0 });
+  assert.equal(asked.before, 0);
+  assert.equal(ok.typed(), demo.CHAT_LINE, "an earlier draft cleared first");
+  assert.deepEqual(ok.clicks, ["message", 'button[data-tour="chat-send"]:visible']);
+
+  const elsewhere = chatPage({ lands: false });
+  await assert.rejects(demo.askChat(elsewhere.page, elsewhere.ctx, demo.CHAT_LINE, { delay: 0 }), /holds "", not "Find a fix for clash #22\.": not sent/);
+  assert.deepEqual(elsewhere.clicks, ["message"], "never sent");
+
+  const unfocused = chatPage({ focused: false });
+  await assert.rejects(demo.askChat(unfocused.page, unfocused.ctx, demo.CHAT_LINE, { delay: 0 }), /didn't take the focus/);
+  assert.equal(unfocused.typed(), "", "nothing typed");
+
+  const silent = chatPage({ answers: false });
+  await assert.rejects(demo.askChat(silent.page, silent.ctx, demo.CHAT_LINE, { delay: 0, takenMs: 300 }), /Chat to take the message after Send/);
+});
