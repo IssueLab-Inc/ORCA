@@ -596,7 +596,8 @@ how long), [11](11-mcp-and-agent-links.md) (`Link.applied`).
 
 ## When the server lets go of the models
 
-A redeploy, a restart, a scale-down after 20 idle minutes ([17](17-deployment-and-operations.md)) or eviction drops
+A redeploy, a restart, a scale-down after 20 idle minutes (none while the deploy keeps its container warm:
+[17](17-deployment-and-operations.md)) or eviction drops
 the open scene, its kept edits and the report, while the page still shows them. The page's next call about either
 (Show it built, Accept, an element's card, triage…) answers 404 "Model not loaded. Open it again." with
 `X-Sightline-Gone: scene:<id>`. `api.ts` `send` hands that to App's handler (`setGoneHandler`), which acts only for

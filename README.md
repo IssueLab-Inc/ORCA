@@ -1,11 +1,12 @@
 # ORCA
 
-An AI design coordinator for 3D models, proven on buildings.
+**For the design coordinator who runs a project's clash meetings.** ORCA proposes fixes to the clashes between the
+teams' 3D models as real edits to those models, and proves each one with geometry before anyone sees it. Proven on a
+building and on a robot cell.
 
 ORCA checks the models every team makes against each other, finds where they clash, sorts what matters from what
-doesn't, and proposes one to three fixes by editing real model elements. Every fix
-is checked with geometry before you see it: the clash is gone, there is clearance, and nothing new clashes.
-You review the options in 3D and export the edited IFC.
+doesn't, and proposes one to three fixes. The check behind every fix: the clash is gone, there is clearance, and
+nothing new clashes. You review the options in 3D, accept one, and export the edited IFC.
 
 ORCA stands for its loop: **Observe** the clash, **Resolve** it with a proposed fix, **Check** the fix with geometry,
 **Apply** it to the model.
@@ -554,6 +555,17 @@ Locally, with its own session and no browser:
 cd server && uv run python -m sightline.mcp_server
 ```
 
+## What's next
+
+Today a kept fix ends in an exported IFC or STEP, with a PDF report and BCF issues. Next, none of it built yet (the
+detail is in [the roadmap](docs/architecture/20-decisions-limits-and-roadmap.md#later-not-in-the-hackathon-build)):
+
+- **Fixes into the designers' own tools.** Connectors, so a kept fix lands in the model it came from: open and cloud
+  tools first (Speckle, the BCF API, Onshape, Bonsai), then Revit and Inventor.
+- **Checks against the real site.** Photos, video and laser scans aligned to the model and segmented with SAM 3.1, so
+  ORCA compares what was installed with what was designed, and checks a fix against what is really there.
+- **Projects that last.** Sign-in and saved projects, so models, kept fixes and agent links survive a restart.
+
 ## Deploy (public demo on Modal)
 
 One container serves the built web app and the API from the same origin
@@ -568,7 +580,9 @@ modal secret create sightline-meta META_API_KEY="$META_API_KEY" TRIAGE_API_KEY="
 modal deploy deploy/modal_app.py
 ```
 
-It runs one container on purpose: open models and edits live in server memory. Proposals are capped per visitor
+It runs one container on purpose: open models and edits live in server memory. The container is kept warm
+(`min_containers=1`, about $3 a day at Modal's list prices), so the first visitor after a quiet spell doesn't wait for
+a cold start; set it to 0 to let it stop after 20 idle minutes. Proposals are capped per visitor
 and per day (`SIGHTLINE_PROPOSE_PER_HOUR`, `SIGHTLINE_PROPOSE_PER_DAY`, in `server/sightline/limits.py`), because
 each one is a paid Muse Spark call; **Check this move** is not limited.
 

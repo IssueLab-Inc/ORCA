@@ -8,7 +8,8 @@ The demo models are the *.ifc files in samples/ at deploy time, and the sample c
 (not in git; see samples/README.md).
 
 One container, always: open scenes (and their edits) live in that process's memory, and so do the proposal
-limits. A second container would answer "Model not loaded" to half the requests.
+limits. A second container would answer "Model not loaded" to half the requests. It is kept warm, so a visitor
+after a quiet spell never waits for a fresh one.
 """
 from pathlib import Path
 
@@ -68,6 +69,8 @@ app = modal.App("orca")
     cpu=2,
     memory=4096,
     max_containers=1,
+    min_containers=1,  # kept warm through judging: no cold start, and open models outlive a quiet spell (about $3 a
+                       # day, docs/architecture/17); 0 lets it stop after the idle window below
     scaledown_window=20 * 60,
     timeout=10 * 60,  # a proposal with retries can take a few minutes
 )

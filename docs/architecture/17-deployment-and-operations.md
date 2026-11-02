@@ -3,7 +3,8 @@
 > **Covers:** `deploy/modal_app.py`, `server/sightline/app.py` (static files, streams, exports), `server/sightline/meta_client.py`
 > (`load_env`), `server/sightline/settings.py` (the Modal Dict), `server/sightline/service.py` (eviction),
 > `.env.example`, `README.md` ("Run locally", "Deploy"), `samples/README.md`, `web/vite.config.ts`,
-> `web/scripts/copy-wasm.mjs` · **Checked against code:** 2026-10-31 (local setup and samples; deploy code at `104fda9`) ·
+> `web/scripts/copy-wasm.mjs` · **Checked against code:** 2026-11-02 (the container, at `c157ad7` plus `min_containers`);
+2026-10-31 (local setup and samples; deploy code at `104fda9`) ·
 > **Deeper design:** [docs/uploads.md](../uploads.md) (memory on Modal), [docs/mcp.md](../mcp.md) ("On Modal"),
 > [docs/voice.md](../voice.md) (the socket on Modal)
 
@@ -25,7 +26,7 @@ flowchart LR
   end
   subgraph cloud["Modal"]
     image["Image: debian_slim Python 3.13, apt packages, uv_sync, env caps"]
-    fn["Function web: asgi_app, max_containers 1, 64 inputs, 2 CPU, 4 GB"]
+    fn["Function web: asgi_app, one warm container, 64 inputs, 2 CPU, 4 GB"]
     secret["Secret sightline-meta"]
     store["Dict sightline-settings"]
     edge["Edge: dodzikojo--orca-web.us-east.modal.run"]
@@ -125,15 +126,21 @@ Dict survives restarts and redeploys; nothing else the server holds does.
 | `@modal.concurrent(max_inputs=64)` | up to 64 requests at once | every page following an agent link holds an events stream, besides the NDJSON streams of proposals, triage and the rest |
 | `cpu=2`, `memory=4096` | 2 CPUs, 4 GB | the scene budget above is sized to fit ([docs/uploads.md](../uploads.md)) |
 | `timeout=10 * 60` | 10 minutes per request | a proposal with retries can take a few minutes; it is also why the link events stream ends after 240 s and `/mcp` answers one JSON reply per call |
-| `scaledown_window=20 * 60` | 20 minutes | how long the container waits idle before Modal stops it; then everything in memory is gone (below) |
+| `min_containers=1` | one container kept warm | Nov 2, owner decision, for judging: the container is not stopped when nobody uses it, so the first visitor after a quiet spell is answered at once, not by a cold start with no models open, and open models, edits and caps outlive a quiet spell |
+| `scaledown_window=20 * 60` | 20 minutes | how long a container above `min_containers` waits idle before Modal stops it; with `min_containers=1` the one container is never stopped for idling. At 0, a scale-down loses everything in memory (below) |
 
-There is no `min_containers`: the first request after a scale-down starts a fresh container, with no models open.
+**What warm costs.** Modal bills the larger of a container's request and its use, so the warm container is billed for
+2 cores and 4 GiB all day: at Modal's list prices on Nov 2 ($0.0000131 a physical core and $0.00000222 a GiB per
+second, [modal.com/pricing](https://modal.com/pricing)), about $2.26 + $0.77 = **about $3 a day**, before the Muse
+calls. After judging, set `min_containers` to 0 and redeploy: the container stops again after 20 idle minutes, and the
+first request after that starts a fresh one with no models open.
 
 ### The entry point
 
 ```python
 # abridged from deploy/modal_app.py
-@app.function(image=image, secrets=[...], cpu=2, memory=4096, max_containers=1, scaledown_window=20 * 60, timeout=10 * 60)
+@app.function(image=image, secrets=[...], cpu=2, memory=4096, max_containers=1, min_containers=1,
+              scaledown_window=20 * 60, timeout=10 * 60)
 @modal.concurrent(max_inputs=64)
 @modal.asgi_app()
 def web():
@@ -283,7 +290,8 @@ Long work stays inside Modal's 10-minute request limit and its idle timeouts:
 
 ### What a restart loses
 
-A redeploy, a crash, or a scale-down after 20 idle minutes all start a fresh process. What lived in memory or in the
+A redeploy or a crash starts a fresh process, and so does a scale-down after 20 idle minutes when `min_containers` is
+0 (it is 1 through judging). What lived in memory or in the
 container's temp folders is gone; the page and agents recover as follows:
 
 | Lost | What people see | Recovery |
@@ -318,7 +326,8 @@ stays valid while the token is unchanged), and everything in the image (`samples
     `EXPORTS_KEEP_S` (3,600 s) on every file download and export;
   - `sightline-models` (uploads, conversions) and `sightline-reports` (uploaded reports) are deleted with their scene or
     report;
-  - `sightline-built` is never pruned by the code: it grows until the container goes.
+  - `sightline-built` is never pruned by the code: it grows until the container goes (kept warm, until the next
+    redeploy).
 
 ### Logs and troubleshooting
 
@@ -330,7 +339,7 @@ the browser's view of the stream is often the quickest place to look.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | A stream's events arrive all at once at the end, in the browser only | the stream does not go through `app._ndjson` (no `Content-Encoding: identity`) | send it through `_ndjson`; test with `Accept-Encoding: gzip, deflate, br, zstd` |
-| "The server no longer holds your models" (or "Model not loaded. Open it again.") during a session | a restart: every `modal deploy` replaces the container (Oct 30: the page's next call, a Show it built, answered 404 seconds after v16 went live), a scale-down after 20 idle minutes; or eviction under the scene budget | **Open them again** on the notice; don't redeploy while someone is working or recording; for many visitors, check `SIGHTLINE_MAX_SCENES` and `SIGHTLINE_SCENE_BUDGET_MB` |
+| "The server no longer holds your models" (or "Model not loaded. Open it again.") during a session | a restart: every `modal deploy` replaces the container (Oct 30: the page's next call, a Show it built, answered 404 seconds after v16 went live), a scale-down after 20 idle minutes (only when `min_containers` is 0); or eviction under the scene budget | **Open them again** on the notice; don't redeploy while someone is working or recording; for many visitors, check `SIGHTLINE_MAX_SCENES` and `SIGHTLINE_SCENE_BUDGET_MB` |
 | "Triage the report first" from Report | no verdicts on the page and no finished run on the server | Triage all, then build again |
 | 401 from `/mcp` | the link expired (12 h after its last use, 24 h at most), was revoked, or the server restarted | make a new link in **Connect an agent** |
 | The voice socket closes at once | another origin (1008 from `voice_live.same_origin`), the voice cap, or Meta refused the session (its close codes become sentences, `voice_live.CLOSED`) | open the page from the same host; read the `error` frame |
