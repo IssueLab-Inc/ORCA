@@ -19,6 +19,7 @@ is [22 · Build log](22-build-log.md); this doc is the current state.
   and only work built during the event.
 - **Plan to the end:** freeze Nov 3, record the video, submit Nov 4 before noon ET (CLAUDE.md, "Next, in order", item
   7; not done at `104fda9`). The video's script, plain words and tested shots: [docs/demo-video.md](../demo-video.md).
+  The submission's one-liner and what's next, drafted: [docs/submission.md](../submission.md).
 
 ```mermaid
 flowchart LR
@@ -104,6 +105,7 @@ carries the decision today.
 | Nov 2 (request) | The landing's demo cards play a recorded fix, not a still ("show some gifs of some clashes with a proposal implemented to convey the app capabilities"), cut to the 3D view because the whole app is too small at a card's width; the Workings clip sits beside "What ORCA does"; less motion gets each clip's last frame | `Clip` and `DemoCard` in `About.tsx`, `capture-proposals.cjs --landing`, `web/public/demos/fix-*.webp`, `workings.webp`; [19](19-demo-data.md) |
 | Nov 2 (request) | Each step of "What ORCA does" gets a recorded run of its own, beside it (the one Workings clip left the space beside steps 3 and 4 empty): the check, Muse Spark reading the clash, Workings, the fix kept | `Step` in `About.tsx`, `capture-proposals.cjs --landing` (`check`, `understand`, `keep`); [19](19-demo-data.md) |
 | Nov 2 (feedback) | "What ORCA does" as tabs beside one player, not a clip beside each step ("good content, but the layout is poor": small cards in white space beside clips of four shapes, four screens long): one frame, one screen high, moving on as each clip ends until the visitor picks a step | `StepsPlayer` in `About.tsx`, `stepClips.ts`; [19](19-demo-data.md) |
+| Nov 2 | The live demo is kept warm through judging, so a judge never meets a cold start with no models open (about $3 a day); `min_containers` back to 0 after judging | `deploy/modal_app.py` (`min_containers=1`); [17](17-deployment-and-operations.md), "The container" |
 | Oct 31 | More model formats wait until after the freeze, and come in only as models ORCA checks (converted to IFC on the server, like STEP), never as a view-only viewer; glTF/GLB first | Nothing in code yet; "Later", below |
 | Oct 31 | Later work to explore, beyond the hackathon: connectors into design tools (Inventor, Revit and others) so a kept fix lands in the designer's own model, and site data (photos, video, scans) aligned to the coordination model with SAM 3.1 | Nothing in code yet; "Later: connectors into design tools" and "Later: site data aligned to the model", below |
 

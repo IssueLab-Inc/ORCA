@@ -1,11 +1,12 @@
 # ORCA
 
-An AI design coordinator for 3D models, proven on buildings.
+**For the design coordinator, who makes every team's 3D design fit together, on a building or a machine.** Where two
+designs conflict, ORCA proposes a fix as a real edit to the model, and proves it with geometry before anyone sees it.
 
-ORCA checks the models every team makes against each other, finds where they clash, sorts what matters from what
-doesn't, and proposes one to three fixes by editing real model elements. Every fix
-is checked with geometry before you see it: the clash is gone, there is clearance, and nothing new clashes.
-You review the options in 3D and export the edited IFC.
+ORCA checks the models every team makes against each other and finds where they conflict: two parts designed into
+the same space, or too close to leave room (the industry calls these clashes). It sorts what matters from what
+doesn't, and proposes one to three fixes. The check behind every fix: the conflict is gone, there is clearance, and
+nothing new is hit. You review the options in 3D, accept one, and export the edited IFC.
 
 ORCA stands for its loop: **Observe** the clash, **Resolve** it with a proposed fix, **Check** the fix with geometry,
 **Apply** it to the model.
@@ -14,6 +15,22 @@ Built for the Meta Global AI Developer Hackathon (Oct 27 – Nov 4, 2026) by Iss
 synthetic baseline asset used to demonstrate and evaluate ORCA; it was not created during the challenge.**
 ORCA's application code was written during the event. See [BUILT_DURING_HACKATHON.md](BUILT_DURING_HACKATHON.md)
 for the full distinction between new work, baseline data and third-party dependencies.
+
+## Who it's for
+
+ORCA is built around one person: **the design coordinator** (on a building, often the BIM coordinator; on a machine,
+the engineer who owns the assembly), who runs the check, sorts what it found, asks for fixes, accepts them and hands
+back the files. Around them:
+
+- **The design teams whose models meet** (structure, building services and architecture; mechanical, electrical and
+  safety on a machine): a report and BCF issues each, a review of every fix to their model, and their model back with
+  the edit in it. A report stays DRAFT until every team involved has reviewed.
+- **Whoever sets the project's standard** (a BIM or design manager): coordination requirements, such as the room each
+  kind of part needs and who moves for whom, which every fix must meet.
+- **People who don't read technical drawings** (clients, project managers): Show it built paints a checked fix as a
+  picture of what will be built.
+- **Teams with their own AI agent:** a pairing link lets Muse Code or another MCP client check and fix through the same
+  geometry check.
 
 ## See it work
 
@@ -554,6 +571,17 @@ Locally, with its own session and no browser:
 cd server && uv run python -m sightline.mcp_server
 ```
 
+## What's next
+
+Today a kept fix ends in an exported IFC or STEP, with a PDF report and BCF issues. Next, none of it built yet (the
+detail is in [the roadmap](docs/architecture/20-decisions-limits-and-roadmap.md#later-not-in-the-hackathon-build)):
+
+- **Fixes into the designers' own tools.** Connectors, so a kept fix lands in the model it came from: open and cloud
+  tools first (Speckle, the BCF API, Onshape, Bonsai), then Revit and Inventor.
+- **Checks against the real site.** Photos, video and laser scans aligned to the model and segmented with SAM 3.1, so
+  ORCA compares what was installed with what was designed, and checks a fix against what is really there.
+- **Projects that last.** Sign-in and saved projects, so models, kept fixes and agent links survive a restart.
+
 ## Deploy (public demo on Modal)
 
 One container serves the built web app and the API from the same origin
@@ -568,7 +596,9 @@ modal secret create sightline-meta META_API_KEY="$META_API_KEY" TRIAGE_API_KEY="
 modal deploy deploy/modal_app.py
 ```
 
-It runs one container on purpose: open models and edits live in server memory. Proposals are capped per visitor
+It runs one container on purpose: open models and edits live in server memory. The container is kept warm
+(`min_containers=1`, about $3 a day at Modal's list prices), so the first visitor after a quiet spell doesn't wait for
+a cold start; set it to 0 to let it stop after 20 idle minutes. Proposals are capped per visitor
 and per day (`SIGHTLINE_PROPOSE_PER_HOUR`, `SIGHTLINE_PROPOSE_PER_DAY`, in `server/sightline/limits.py`), because
 each one is a paid Muse Spark call; **Check this move** is not limited.
 
