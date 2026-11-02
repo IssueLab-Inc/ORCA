@@ -9,6 +9,9 @@ stay on each file's history; the entry holds them, so undo rolls them back and r
 (`context_planner.accept`) replaces the scene's state wholesale; its entry keeps the state before and after instead.
 Undo takes only the newest live entry: an edit kept outside the log since then (each file's history no longer ends in
 the entry's transactions) fences it. Undo and redo always move the scene's revision forward (caches are keyed on it).
+
+A model taken out of the scene (`drop_file`) takes its transactions with it: an entry that changed it stays in the log,
+marked `model_removed`, and is never undone or redone; undo passes over it to the newest entry it can undo.
 """
 from __future__ import annotations
 
@@ -54,6 +57,7 @@ class Entry:
     status: dict | None = None   # where the clash stands after a follow-up: {"clash": id, "resolved", "depth_m"}
     state: str = "kept"        # kept | undone
     picture: str | None = None
+    model_removed: str | None = None   # the model it changed was taken out of the scene (its name): never undone again
     # Private: what undo and redo need.
     _tx: dict = field(default_factory=dict, repr=False)          # file index -> [Transaction]
     _models: dict = field(default_factory=dict, repr=False)      # file index -> the ifcopenshell.file it was kept in
@@ -61,6 +65,7 @@ class Entry:
     _edited: tuple = field(default=(set(), set()), repr=False)   # (before, after)
     _swap: tuple | None = field(default=None, repr=False)        # a wider fix: (state before, state after)
     _tail: dict = field(default_factory=dict, repr=False)        # after undo: file index -> its history's last item
+    _layout: int = field(default=0, repr=False)                  # the scene's layout when kept (a wider fix's state)
 
     def to_dict(self, picture: bool = False) -> dict:
         out = {k: v for k, v in self.__dict__.items() if not k.startswith("_") and k != "picture"}
@@ -150,7 +155,7 @@ class Journal:
                       requirements=requirements, _tx=tx, _models={i: scene.models[i] for i in tx},
                       _bounds=({g: before_bounds.get(g) for g in keys}, {g: after_bounds.get(g) for g in keys}),
                       _edited=(before_edited, set(scene._edited)),
-                      _swap=(state, dict(scene.__dict__)) if swapped else None)
+                      _swap=(state, dict(scene.__dict__)) if swapped else None, _layout=getattr(scene, "layout", 0))
             e.follows = self._follows([*changed, *removed])
             for f in e.follows:   # a follow-up carries the clashes of the fixes it amends
                 for c in self.get(f).clashes:
@@ -214,20 +219,32 @@ class Journal:
                 "undo": top.id if top else None, "redo": self._redo[-1].id if self._redo else None}
 
     def _top(self) -> Entry | None:
-        live = self.kept()
+        """The newest kept entry undo can take: one whose model was removed is passed over."""
+        live = [e for e in self.kept() if not e.model_removed]
         return live[-1] if live else None
+
+    @staticmethod
+    def _gone(e: Entry, verb: str) -> Fenced:
+        return Fenced(f"{e.id} changed {e.model_removed}, which was removed from the open models: it can't be {verb}")
+
+    def _named(self, entry_id: str | None) -> Entry | None:
+        return next((e for e in self.entries if e.id == entry_id), None) if entry_id else None
 
     # ------------------------------------------------------------------------------------------------- undo, redo
 
     def undo(self, scene, entry_id: str | None = None) -> Entry:
         """Undo the newest kept entry (named, it must be that one). Raises Fenced with why when it cannot."""
         with self.lock:
+            named = self._named(entry_id)
+            if named is not None and named.model_removed:
+                raise self._gone(named, "undone")
             e = self._top()
             if e is None:
                 raise Fenced("nothing to undo")
             if entry_id and entry_id != e.id:
                 raise Fenced(f"only the newest edit, {e.id}, can be undone next")
             if e._swap is not None:
+                self._same_layout(scene, e, "undone")
                 self._restore(scene, e._swap[0])
             else:
                 self._fence(scene, e)
@@ -246,12 +263,16 @@ class Journal:
 
     def redo(self, scene, entry_id: str | None = None) -> Entry:
         with self.lock:
+            named = self._named(entry_id)
+            if named is not None and named.model_removed:
+                raise self._gone(named, "redone")
             if not self._redo:
                 raise Fenced("nothing to redo")
             e = self._redo[-1]
             if entry_id and entry_id != e.id:
                 raise Fenced(f"only {e.id} can be redone next")
             if e._swap is not None:
+                self._same_layout(scene, e, "redone")
                 self._restore(scene, e._swap[1])
             else:
                 for i in e._tx:
@@ -270,6 +291,33 @@ class Journal:
             e.state = "kept"
             self._redo.pop()
             return e
+
+    @staticmethod
+    def _same_layout(scene, e: Entry, verb: str) -> None:
+        """A wider fix's saved state holds the files as they were: once one was added or removed, it can't come back."""
+        if e._layout != getattr(scene, "layout", 0):
+            raise Fenced(f"models were added or removed since this wider fix: it can't be {verb}")
+
+    def drop_file(self, index: int, name: str, elements) -> int:
+        """A model was taken out of the scene (`Workspace.remove_model`), after `IfcScene.remove_file`: every entry that
+        changed it is marked `model_removed` (it stays in the log, never undone or redone, and leaves the redo list),
+        every later file index moves down one, and its elements' boxes are forgotten. Returns how many kept entries
+        changed it."""
+        gone = set(elements)
+        shift = lambda i: i - (i > index)
+        remap = lambda d: {shift(i): v for i, v in d.items() if i != index}
+        kept = 0
+        with self.lock:
+            for e in self.entries:
+                if index in e.files or index in e._tx:
+                    e.model_removed = e.model_removed or name
+                    kept += e.state == "kept"
+                e.files = [shift(i) for i in e.files if i != index]
+                e._tx, e._models, e._tail = remap(e._tx), remap(e._models), remap(e._tail)
+                e._edited = tuple({shift(i) for i in marks if i != index} for marks in e._edited)
+                e._bounds = tuple({g: b for g, b in boxes.items() if g not in gone} for boxes in e._bounds)
+            self._redo = [e for e in self._redo if not e.model_removed]
+        return kept
 
     def _fence(self, scene, e: Entry) -> None:
         for i, txs in e._tx.items():

@@ -44,6 +44,11 @@ SAMPLE_EXCLUDE = tuple(c.strip() for c in os.environ.get(
     "SIGHTLINE_SAMPLE_EXCLUDE", "IfcGeographicElement,IfcSpace,IfcBuildingElementProxy").split(",") if c.strip())
 
 
+class StaleLayout(Exception):
+    """A model was named by a position the scene no longer has at that name (another tab or an agent changed the
+    list): the route answers 409, and the page reloads the files."""
+
+
 class Workspace:
     def __init__(self, samples: Path = SAMPLES, model: ChatModel | None = None, max_scenes: int = MAX_SCENES,
                  max_reports: int = MAX_REPORTS, keep=None, hosts_model: ChatModel | None = None,
@@ -62,9 +67,9 @@ class Workspace:
         # Scene id → its kept checks and what each clash keeps from check to check (checks.py, docs/detection.md).
         self.checks: dict[str, checks.Register] = {}
         # Scene id → {file index: {"step": original STEP, "manifest": converter manifest}} for models opened from STEP,
-        # and the scene's own temporary folder (uploads, conversions), deleted when the scene is dropped.
+        # and the scene's own temporary folders (uploads, conversions; one per opening or adding), deleted with it.
         self.sources: dict[str, dict[int, dict]] = {}
-        self._roots: dict[str, Path] = {}
+        self._roots: dict[str, list[Path]] = {}
         # Scene id → its edit log: every kept edit, by whom, for which clash (journal.py, docs/manual-edits.md).
         self.journals: dict[str, journal.Journal] = {}
         # Geometry trials edit the model and undo; anything touching a scene's geometry holds this.
@@ -113,32 +118,15 @@ class Workspace:
     def open(self, names: list[str], classify_with: ChatModel | None = None, on_event=lambda e: None) -> str:
         """Open one or more sample models that share coordinates (e.g. structure + MEP + architecture). IFC opens as
         is; STEP is converted first (`step.convert`, cached by its hash)."""
-        paths = []
-        for name in names:
-            path = (self.samples / name).resolve()
-            if path.parent != self.samples.resolve() or not path.exists():
-                raise FileNotFoundError(name)
-            paths.append(path)
-        return self.open_paths(paths, classify_with=classify_with, on_event=on_event)
+        return self.open_paths([self._sample(n) for n in names], classify_with=classify_with, on_event=on_event)
 
     def open_paths(self, paths: list[Path], root: Path | None = None, classify_with: ChatModel | None = None,
                    on_event=lambda e: None) -> str:
         """Open models from these paths (samples, or an upload kept in `root`, which is deleted with the scene)."""
         if not paths:
             raise FileNotFoundError("no models given")
-        ifc_paths, sources = [], {}
         try:
-            for i, path in enumerate(paths):
-                if path.suffix.lower() in step.SUFFIXES:
-                    if root is None:
-                        MODELS.mkdir(parents=True, exist_ok=True)
-                        root = Path(tempfile.mkdtemp(dir=MODELS))
-                    ifc, manifest = step.convert(path, root / f"converted-{i}", classify_with, self.step_cache,
-                                                 on_event)
-                    ifc_paths.append(ifc)
-                    sources[i] = {"step": path, "manifest": manifest}
-                else:
-                    ifc_paths.append(path)
+            ifc_paths, sources, root = self._as_ifc(paths, 0, root, classify_with, on_event)
             on_event({"type": "opening", "files": len(ifc_paths)})
             # Room first: a new scene peaks while it opens, so the held ones over the budget go before, not after.
             self._evict(sum(p.stat().st_size for p in ifc_paths))
@@ -158,9 +146,176 @@ class Workspace:
         self.names[scene_id] = [p.name for p in paths]
         self.sizes[scene_id] = sum(p.stat().st_size for p in ifc_paths)
         if root is not None:
-            self._roots[scene_id] = root
+            self._roots[scene_id] = [root]
         self._evict(0, scene_id)
         return scene_id
+
+    def _as_ifc(self, paths: list[Path], start: int, root: Path | None, classify_with, on_event):
+        """Each model as the IFC the scene opens: IFC as it is, STEP converted (`step.convert`, cached by its hash) into
+        `root` (a new folder when none is given). Returns the IFC paths, the STEP sources by file index (from
+        `start`) and the folder. A folder made here is deleted again when a conversion fails."""
+        made = root is None
+        ifc_paths, sources = [], {}
+        try:
+            for k, path in enumerate(paths):
+                if path.suffix.lower() not in step.SUFFIXES:
+                    ifc_paths.append(path)
+                    continue
+                if root is None:
+                    MODELS.mkdir(parents=True, exist_ok=True)
+                    root = Path(tempfile.mkdtemp(dir=MODELS))
+                ifc, manifest = step.convert(path, root / f"converted-{start + k}", classify_with, self.step_cache,
+                                             on_event)
+                ifc_paths.append(ifc)
+                sources[start + k] = {"step": path, "manifest": manifest}
+        except BaseException:
+            if made and root is not None:
+                shutil.rmtree(root, ignore_errors=True)
+            raise
+        return ifc_paths, sources, root
+
+    def add_samples(self, scene_id: str, names: list[str], classify_with: ChatModel | None = None,
+                    on_event=lambda e: None) -> list[int]:
+        """Add sample models to an open scene (`add_models`)."""
+        return self.add_models(scene_id, [self._sample(n) for n in names], classify_with=classify_with,
+                               on_event=on_event)
+
+    def _sample(self, name: str) -> Path:
+        path = (self.samples / name).resolve()
+        if path.parent != self.samples.resolve() or not path.exists():
+            raise FileNotFoundError(name)
+        return path
+
+    def add_models(self, scene_id: str, paths: list[Path], root: Path | None = None,
+                   classify_with: ChatModel | None = None, on_event=lambda e: None) -> list[int]:
+        """Add models to an open scene, after the files it has (docs/add-and-remove-models.md): their file indexes.
+        They share its coordinates; STEP is converted as `open_paths` does, and `root` (an upload's folder) is kept
+        with the scene. Everything kept stays (edits, fixes, checks, readings); run the checks again to see the new
+        clashes. Refused (ValueError, in words): STEP into building models or the reverse, a name already open, the
+        scene past the byte budget. The folder is deleted when it fails."""
+        try:
+            self.check_adding(scene_id, paths)
+            start = len(self.names[scene_id])
+            ifc_paths, sources, root = self._as_ifc(paths, start, root, classify_with, on_event)
+            incoming = sum(p.stat().st_size for p in ifc_paths)
+            with self.lock:
+                self.check_adding(scene_id, paths, incoming)   # again: another request may have added meanwhile
+                if len(self.names[scene_id]) != start:
+                    raise StaleLayout("The models changed: reload them.")
+                on_event({"type": "opening", "files": len(ifc_paths)})
+                self._evict(incoming, scene_id)   # room first, as opening makes it: the other scenes go, never this one
+                scene = self.scene(scene_id)
+                added = scene.add_files(ifc_paths, lambda done, total: on_event({"type": "boxes", "done": done,
+                                                                                  "total": total}))
+                self.names[scene_id] = [*self.names[scene_id], *(p.name for p in paths)]
+                self.sources.setdefault(scene_id, {}).update(sources)
+                self.sizes[scene_id] = self.sizes.get(scene_id, 0) + incoming
+                if root is not None:
+                    self._roots.setdefault(scene_id, []).append(root)
+                self._files_changed(scene_id)
+        except BaseException:
+            if root is not None:
+                shutil.rmtree(root, ignore_errors=True)
+            raise
+        return added
+
+    def check_adding(self, scene_id: str, paths: list[Path], incoming: int | None = None) -> None:
+        """Why these models may not join the scene (ValueError, in words; KeyError for a scene not open); `incoming`:
+        their IFC bytes, once known (the budget)."""
+        self.scene(scene_id)
+        names, open_ = [p.name for p in paths], self.names[scene_id]
+        if not names:
+            raise FileNotFoundError("no models given")
+        if len(set(names)) < len(names):
+            raise ValueError("A file was given twice.")
+        already = next((n for n in names if n in open_), None)
+        if already:
+            raise ValueError(f"{already} is already open.")
+        machine = bool(open_) and len(self.sources.get(scene_id, {})) == len(open_)
+        steps = [Path(n).suffix.lower() in step.SUFFIXES for n in names]
+        if any(steps) and not machine:
+            raise ValueError("A STEP machine can't join building models yet: open it on its own.")
+        if not all(steps) and self.sources.get(scene_id):
+            raise ValueError("A building model can't join a STEP machine yet: open it on its own.")
+        total = self.sizes.get(scene_id, 0) + (incoming or 0)
+        if incoming is not None and self.budget and total > self.budget:
+            raise ValueError(f"With these the open models would be {_mb(total)}, over this server's "
+                             f"{_mb(self.budget)} for one set: open fewer models together.")
+
+    def remove_model(self, scene_id: str, index: int, name: str) -> dict:
+        """Take one model out of an open scene (docs/add-and-remove-models.md). `name` is the file the page means at
+        `index`: StaleLayout when the scene's list has changed since. Its clashes leave every kept check and the list,
+        nothing is detected again; the edits kept in it stay in the log, marked, never undone; the edits in the other
+        models stay. An uploaded file is deleted. Refused (ValueError) for the only model."""
+        s = self.scene(scene_id)
+        with self.lock:
+            names = self.names[scene_id]
+            if not 0 <= index < len(names) or names[index] != name:
+                raise StaleLayout("The models changed: reload them.")
+            if len(names) == 1:
+                raise ValueError("This is the only model: open others instead.")
+            elements = {e.GlobalId for e in s.models[index].by_type("IfcElement")}
+            path, source = s.paths[index], self.sources.get(scene_id, {}).get(index)
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = 0
+            was = s.revision
+            s.remove_file(index)
+            shift = lambda i: i - (i > index)
+            self.names[scene_id] = [n for i, n in enumerate(names) if i != index]
+            self.sources[scene_id] = {shift(i): src for i, src in self.sources.get(scene_id, {}).items() if i != index}
+            self.sizes[scene_id] = max(0, self.sizes.get(scene_id, 0) - size)
+            self._delete_upload(scene_id, [path, *([source["step"], source["manifest"]] if source else [])])
+            edits_gone = self.journal(scene_id).drop_file(index, name, elements)
+            register = self.checks.get(scene_id)
+            clashes_gone, report = 0, None
+            if register is not None:
+                register.absorb(self.reports.get(register.report_id or ""))
+                clashes_gone = register.drop_file(name, elements)
+                for check in register.checks.values():   # a removal makes no clash: what was current still is
+                    if check.revision == was:
+                        check.revision = s.revision
+                if register.checks:
+                    report = self._union(scene_id)
+            self._files_changed(scene_id)
+            revision = s.revision
+            summaries = register.summaries(revision) if register is not None else []
+        return {"files": self.names[scene_id], "step": self.step_files(scene_id), "revision": revision,
+                "layout": s.layout, "removed": {"name": name, "clashes": clashes_gone, "edits": edits_gone},
+                "report": self.report_summary(report.id) if report is not None else None, "checks": summaries}
+
+    def _delete_upload(self, scene_id: str, files: list[Path]) -> None:
+        """Delete a removed model's files that live in the scene's own folders (an upload, a conversion), never a
+        sample; a folder that no longer holds any of the scene's files goes too."""
+        roots = self._roots.get(scene_id, [])
+        inside = lambda p, r: Path(p).resolve().is_relative_to(r.resolve())
+        for f in files:
+            if any(inside(f, r) for r in roots):
+                Path(f).unlink(missing_ok=True)
+        s = self.scene(scene_id)
+        held = [*s.paths, *(Path(src["step"]) for src in self.sources.get(scene_id, {}).values())]
+        for r in list(roots):
+            if not any(inside(p, r) for p in held):
+                shutil.rmtree(r, ignore_errors=True)
+                roots.remove(r)
+
+    def _files_changed(self, scene_id: str) -> None:
+        """What was worked out from a scene's set of files, worked out again on next use: what stays in place, which
+        model element each report clash is, the readings of report patterns, the last tries (their checks ran on
+        other files). The domain follows the files (all from STEP: a machine)."""
+        s = self.scenes[scene_id]
+        s.domain = domains.MACHINES if len(self.sources.get(scene_id, {})) == len(self.names[scene_id]) \
+            else domains.CONSTRUCTION
+        self._stays.pop(scene_id, None)
+        for key in [k for k in self._matches if k[1] == scene_id]:
+            self._matches.pop(key, None)
+        with self._patterns_lock:
+            for key in [k for k in self._patterns if k[1] == scene_id]:
+                self._patterns.pop(key, None)
+        with self._last_lock:
+            for key in [k for k in self._last if k[0] == scene_id]:
+                self._last.pop(key, None)
 
     def _evict(self, incoming: int, newest: str | None = None) -> None:
         """Drop the oldest scenes (those no live agent link holds last) until the count and byte budget leave room:
@@ -183,8 +338,8 @@ class Workspace:
             with self._last_lock:
                 for key in [k for k in self._last if k[0] == old]:
                     self._last.pop(key, None)
-            if old in self._roots:
-                shutil.rmtree(self._roots.pop(old), ignore_errors=True)
+            for root in self._roots.pop(old, []):
+                shutil.rmtree(root, ignore_errors=True)
 
     def requirements_for(self, scene_id: str) -> requirements.Doc | None:
         """The requirements that decide a scene's domain and what stays in place: the user's, when switched on
@@ -235,7 +390,7 @@ class Workspace:
         the samples' `<prefix>-Grids.ifc`; an upload only from its own files."""
         s = self.scene(scene_id)
         with self.lock:
-            return datums.read(s, self.names.get(scene_id, []), None if scene_id in self._roots else self.samples)
+            return datums.read(s, self.names.get(scene_id, []), None if self._roots.get(scene_id) else self.samples)
 
     def describe(self, scene_id: str, global_id: str) -> dict:
         """An element, with what it is linked to by kind (connections.links_of: joints, assembly, hosted, what it rests
@@ -606,7 +761,8 @@ class Workspace:
         that gets no meshes (an element that would not triangulate, or too much to send), reloads the files."""
         s = self.scene(scene_id)
         gone = list(dict.fromkeys(removed))
-        out = {"scene_id": scene_id, "revision_before": revision_before, "revision": s.revision, "meshes": None,
+        out = {"scene_id": scene_id, "revision_before": revision_before, "revision": s.revision, "layout": s.layout,
+               "meshes": None,
                # which files each revision changed: a page behind `revision_before` reloads what it missed
                "history": [[rev, files] for rev, files in s.history], "removed": gone}
         with self.lock:
@@ -1063,7 +1219,8 @@ class Workspace:
         which came from STEP, its kept checks and the report that lists their clashes."""
         self.scene(scene_id)
         return {"id": scene_id, "files": self.names.get(scene_id, []), "step": self.step_files(scene_id),
-                "revision": self.scene(scene_id).revision, **self.checks_info(scene_id)}
+                "revision": self.scene(scene_id).revision, "layout": self.scene(scene_id).layout,
+                **self.checks_info(scene_id)}
 
     def save_capture(self, report_id: str, clash_id: str, label: str, png: bytes) -> list[str]:
         """A view of a detected clash taken in the browser (A, B or C). It joins the clash's images, so the fix agent,
@@ -1143,6 +1300,10 @@ class Workspace:
             v = verify.check(scene, [m["a"]], clearance_m=0.0)
             hit = next((h for h in v.hits if h.other == m["b"]), None)
             return {"matched": True, "physical": True, "distance_m": hit.distance_m if hit else None}
+
+
+def _mb(size: int) -> str:
+    return f"{size / (1 << 20):.0f} MB" if size >= 10 << 20 else f"{size / (1 << 20):.1f} MB"
 
 
 def project_name(files: list[str]) -> str | None:

@@ -36,7 +36,7 @@ from . import (agents, built, chat, checks, context_planner, demos, detect, docu
                step, titles, triage, voice_live)
 from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
 from .limits import ProposeLimit, client_id, env_float, env_int
-from .service import MODEL_SUFFIXES, MODELS, Workspace, project_name
+from .service import MODEL_SUFFIXES, MODELS, StaleLayout, Workspace, project_name
 
 # The repo's .env was read on the package's first import (sightline/__init__.py), before any module read a setting.
 app = FastAPI(title="ORCA")
@@ -427,6 +427,14 @@ def _classifier():
         return None
 
 
+def _files_of(sid: str) -> dict:
+    """What every way of opening or changing a scene's models answers with: its files in order, which came from STEP
+    (by index), its revision and its layout (bumped when a model is added or removed: docs/add-and-remove-models.md)."""
+    scene = ws.scene(sid)
+    return {"id": sid, "files": list(ws.names.get(sid, [])), "step": ws.step_files(sid), "revision": scene.revision,
+            "layout": scene.layout}
+
+
 @app.post("/api/scenes")
 def open_scene(body: Open):
     """Open sample models. A STEP sample is converted to IFC first (cached by its contents, so only the first
@@ -434,10 +442,48 @@ def open_scene(body: Open):
     try:
         needs = any(Path(n).suffix.lower() in step.SUFFIXES for n in body.samples)
         sid = ws.open(body.samples, classify_with=_classifier() if needs else None)
-        return {"id": sid, "files": body.samples, "step": ws.step_files(sid), "revision": ws.scene(sid).revision}
+        return _files_of(sid)
     except FileNotFoundError as e:
         raise HTTPException(404, f"No model called {e.args[0]}.")
     except step.StepError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/scenes/{scene_id}/models")
+def add_sample_models(scene_id: str, body: Open):
+    """Add sample models to an open scene (docs/add-and-remove-models.md): free, like opening samples. Everything kept
+    stays; run the checks again to list the new clashes. 400 with why for STEP among building models or the reverse,
+    a name already open or a set past the byte budget; 404 for a sample there is not."""
+    _scene(scene_id)
+    if not body.samples:
+        raise HTTPException(400, "Choose a model to add.")
+    try:
+        needs = any(Path(n).suffix.lower() in step.SUFFIXES for n in body.samples)
+        added = ws.add_samples(scene_id, body.samples, classify_with=_classifier() if needs else None)
+        return {**_files_of(scene_id), "added": added}
+    except FileNotFoundError as e:
+        raise HTTPException(404, f"No model called {e.args[0]}.")
+    except StaleLayout as e:
+        raise HTTPException(409, str(e))
+    except (ValueError, step.StepError) as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        _scene(scene_id)   # dropped meanwhile: the usual 404
+        raise
+
+
+@app.delete("/api/scenes/{scene_id}/models/{index}")
+def remove_scene_model(scene_id: str, index: int, name: str):
+    """Take a model out of an open scene: `name` is the file the page means at `index` (409 when the list has changed
+    since: reload the files). Its clashes leave every kept check and the list, the edits kept in it stay in the log
+    but can't be undone, an uploaded file is deleted. Answers the files, `removed` ({name, clashes, edits}), the
+    report listing what is left (null when nothing is) and the checks."""
+    _scene(scene_id)
+    try:
+        return {"id": scene_id, **ws.remove_model(scene_id, index, name)}
+    except StaleLayout as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
         raise HTTPException(400, str(e))
 
 
@@ -477,12 +523,14 @@ def _unpack(src, dest: Path, gz: bool, room: int) -> int:
     return written
 
 
-async def _receive_models(request: Request) -> tuple[Path, list[Path], list[str]]:
+async def _receive_models(request: Request, check: Callable[[list[str]], None] | None = None
+                          ) -> tuple[Path, list[Path], list[str]]:
     """Check, receive and unpack an upload of model files: IFC or STEP, each as is or gzipped by the page (`.gz`, the
     name without it). Refused before the body is read when it has no length (411: a chunked body would be spooled
     whole before any check) or its length alone is over the cap; the cap (SIGHTLINE_MODEL_UPLOAD_MAX_MB, all files
-    together) counts the unpacked size, checked in bounded steps off the event loop. Returns the folder (deleted with
-    the scene, or here on failure), the paths and the names."""
+    together) counts the unpacked size, checked in bounded steps off the event loop. `check` refuses by the names
+    (an HTTPException) before the upload allowance is charged. Returns the folder (deleted with the scene, or here on
+    failure), the paths and the names."""
     cap = MODEL_UPLOAD_MAX_MB << 20
     try:
         length = int(request.headers["content-length"])
@@ -501,6 +549,8 @@ async def _receive_models(request: Request) -> tuple[Path, list[Path], list[str]
         raise HTTPException(400, f"{bad[0]} is not an IFC or STEP file (.ifc, .step, .stp).")
     if len(set(names)) < len(names):
         raise HTTPException(400, "A file was given twice.")
+    if check is not None:
+        check(names)
     refused = _take(model_upload_limit, request)
     if refused:
         raise HTTPException(429, refused)
@@ -535,7 +585,7 @@ async def upload_models(request: Request):
         needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
         classifier = _classifier() if needs else None
         sid = await run_in_threadpool(lambda: ws.open_paths(paths, root, classify_with=classifier))
-        return {"id": sid, "files": names, "step": ws.step_files(sid), "revision": ws.scene(sid).revision}
+        return _files_of(sid)
     except step.StepError as e:  # open_paths already removed the folder
         raise HTTPException(400, str(e))
     except Exception as e:  # not a model IfcOpenShell can read
@@ -559,8 +609,7 @@ async def upload_models_stream(request: Request):
             needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
             classifier = _classifier() if needs else None
             sid = ws.open_paths(paths, root, classify_with=classifier, on_event=events.put)
-            events.put({"type": "done", "id": sid, "files": names, "step": ws.step_files(sid),
-                        "revision": ws.scene(sid).revision})
+            events.put({"type": "done", **_files_of(sid)})
         except step.StepError as e:  # open_paths already removed the folder
             events.put({"type": "error", "status": 400, "detail": str(e)})
         except Exception as e:  # not a model IfcOpenShell can read
@@ -569,19 +618,63 @@ async def upload_models_stream(request: Request):
         events.put(None)
 
     owner.spawn(work)
+    return _ndjson(_ticking(events))
 
-    def stream():
-        while True:
-            try:
-                event = events.get(timeout=5)
-            except queue.Empty:   # opening a big model can take minutes: keep the connection busy
-                yield json.dumps({"type": "tick"}) + "\n"
-                continue
-            if event is None:
-                return
-            yield json.dumps(event) + "\n"
 
-    return _ndjson(stream())
+def _ticking(events: queue.Queue):
+    """A model stream's events as NDJSON until None, with a tick every 5 s: opening a big model can take minutes, and
+    an idle connection would be timed out."""
+    while True:
+        try:
+            event = events.get(timeout=5)
+        except queue.Empty:
+            yield json.dumps({"type": "tick"}) + "\n"
+            continue
+        if event is None:
+            return
+        yield json.dumps(event) + "\n"
+
+
+@app.post("/api/scenes/{scene_id}/models/upload/stream")
+async def add_uploaded_models_stream(scene_id: str, request: Request):
+    """Add your own models to an open scene (docs/add-and-remove-models.md), answered as /api/models/upload/stream is:
+    one model upload against the allowance, the same size cap and events, then {"type": "done", "id", "files", "step",
+    "revision", "layout", "added"} or {"type": "error", "status", "detail"}. STEP among building models (or the
+    reverse) and a name already open are refused (400) before anything is charged; past the byte budget, once the
+    files are in, an error event."""
+    _scene(scene_id)
+
+    def check(names: list[str]) -> None:
+        try:
+            ws.check_adding(scene_id, [Path(n) for n in names])
+        except KeyError:
+            _scene(scene_id)
+            raise
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    root, paths, names = await _receive_models(request, check)
+    events: queue.Queue = queue.Queue()
+    events.put({"type": "received", "bytes": sum(p.stat().st_size for p in paths)})
+
+    def work():
+        try:
+            needs = any(p.suffix.lower() in step.SUFFIXES for p in paths)
+            classifier = _classifier() if needs else None
+            added = ws.add_models(scene_id, paths, root, classify_with=classifier, on_event=events.put)
+            events.put({"type": "done", **_files_of(scene_id), "added": added})
+        except StaleLayout as e:   # add_models removed the folder
+            events.put({"type": "error", "status": 409, "detail": str(e)})
+        except (ValueError, step.StepError) as e:
+            events.put({"type": "error", "status": 400, "detail": str(e)})
+        except KeyError:
+            events.put({"type": "error", "status": 404, "detail": "Model not loaded. Open it again."})
+        except Exception as e:  # not a model IfcOpenShell can read
+            events.put({"type": "error", "status": 400, "detail": f"Could not add the models: {type(e).__name__}: {e}"})
+        events.put(None)   # add_models deletes the folder whenever it fails
+
+    owner.spawn(work)
+    return _ndjson(_ticking(events))
 
 
 @app.get("/api/scenes/{scene_id}")

@@ -68,6 +68,36 @@ test("lit links leave out what a filter takes off screen", () => {
   assert.equal(lit(), 1);
 });
 
+test("what a preview moves shows through an isolated clash, the Isolate and Context modes and a filter, lit as joined", () => {
+  // Snowdon #20 isolated: the drain tilts and its bend goes down with it. The bend is the model's own element, shifted;
+  // hidden, the tilted arm ended in mid-air (views.shownBy: the pair, previews and trials always show).
+  const { v, m } = viewer();
+  Object.assign(v, { linkLayer: new THREE.Group(), linkMaterials: new Map(), geometryOf: () => new THREE.BoxGeometry(),
+    edgeGeometryOf: () => new THREE.BufferGeometry(), find: (gid) => ({ model: v.models[0], el: v.models[0].byGlobalId.get(gid) }) });
+  const shown = () => ["a", "b", "c"].map((g) => visible(m, g));
+  const lit = () => v.linkLayer.children.filter((o) => o.isMesh).length;
+  v.setTemporary({ hidden: [], isolated: ["a"] });   // a clash row's Isolate: only its pair
+  v.setLinks([{ color: "#2563eb", ids: ["b"] }]);    // what the option carries, lit as joined
+  assert.deepEqual(shown(), [true, false, false]);
+  assert.equal(lit(), 0);
+  v.moved.set("b", new THREE.Matrix4().makeTranslation(0, -0.07, 0)); v.applyMode();   // the option carries b down
+  assert.deepEqual(shown(), [true, true, false], "the carried part shows where the fix puts it; nothing else comes back");
+  assert.equal(lit(), 1);
+  v.setTemporary({ hidden: [], isolated: null });
+  v.focus = { a: "a", b: null, group: {} };
+  v.setMode("isolate");
+  assert.deepEqual(shown(), [false, true, false], "Isolate: the pair is drawn by the focus layer, the carried part on its batch");
+  v.nearFocus = () => new Set();
+  v.setMode("context");
+  assert.deepEqual(shown(), [false, true, false], "Context: shown however far it is");
+  v.setMode("shaded");
+  v.setRules({ hide: new Set(["b", "c"]), only: null, paint: null, greyRest: false });
+  assert.deepEqual(shown(), [false, true, false], "a part a filter hides shows while a preview moves it");
+  v.moved.clear(); v.applyMode();   // the preview goes: the filter has it again
+  assert.deepEqual(shown(), [false, false, false]);
+  assert.equal(lit(), 0);
+});
+
 test("drawings show what the filters leave, what the 3D view shows, or the whole model", () => {
   const { v, m } = viewer();
   v.panes = [{}, {}];

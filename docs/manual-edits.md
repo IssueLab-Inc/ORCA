@@ -74,6 +74,16 @@ edited files back, and moves the revision forward (caches are keyed on it). Redo
 A wider fix is undone by putting its state back. Measured on the run fixture: an offset undone and redone in place,
 its eight new pieces gone and back, the revision 1 → 2 → 3.
 
+**Entries in a removed model** ([add-and-remove-models.md](add-and-remove-models.md), Nov 1). Taking a model out of
+the scene takes its transactions with it, so an entry that changed it can never be undone or redone: it stays in the
+log, marked `model_removed` (the file's name), still kept, and leaves the redo list (`Journal.drop_file`). Undo passes
+over it to the newest entry it can undo; named, undo or redo refuses it in words ("E2 changed
+Northbank-Structure.ifc, which was removed from the open models: it can't be undone"). Every other entry's file
+indexes move down with the files, so its undo and redo still work; the edits in the other models stay, fixes made
+for clashes with the removed model included. Adding a model leaves the log alone, except a wider fix: its saved
+state holds the files as they were, so once a model is added or removed it is refused ("models were added or
+removed since this wider fix").
+
 **Two traps found on the way.**
 - A trial move (`IfcScene.translate` there and back) outside a transaction left the file's history pointing at
   placements it had replaced: the next undo raised `UndoSystemError`. Trial moves now run inside `edits.scratch`, a

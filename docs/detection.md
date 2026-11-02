@@ -216,6 +216,13 @@ replaces "a check's clashes replace the open list" (Oct 31, [filters.md](filters
   MCP `generate_report(check=…)`), or every check's.
 - **An imported Navisworks report** never joins the list (its ids are positions in its file): opening one shows it on
   its own, and the Coordinate menu offers **Back to ORCA's checks**.
+- **Adding and removing models** ([add-and-remove-models.md](add-and-remove-models.md), Nov 1). A model added to the
+  open scene changes no check by itself: the page runs every kept check again (Run all again, one detection run). The
+  open models' check reads its tests afresh, so it checks the new model's pairs too; every clash it had keeps its id,
+  #N, title, views and reading, the new model's clashes take the next numbers, and triage reads only them. A model
+  taken out (`checks.Register.drop_file`) takes its clashes out of every kept check, and out of what each compares
+  its next run with, so they are neither listed nor said to be resolved. Nothing runs again (removing a model makes
+  no clash) and the checks stay current, not stale. Their ids and numbers stay issued: a number is never reused.
 - **Limits.** Kept checks live in memory with the scene: a restart or reopening the models starts with none, and
   opening them again after a restart runs the check on screen again, not every check. Run all again is sequential;
   its time on Northbank is not measured yet.

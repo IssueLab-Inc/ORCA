@@ -167,8 +167,13 @@ flowchart TD
   stream -->|"held back"| fix["A stream not sent through _ndjson: fix it and deploy again"]
 ```
 
-1. **Credentials.** `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` come from the environment, never chat. Behind the cloud
-   session's proxy the Modal CLI needs `uv tool install 'modal[api-proxy-support]'`.
+1. **Credentials.** `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` come from the environment, never chat, or from
+   `~/.modal.toml` (written once by `modal token set`). Behind the cloud session's proxy the Modal CLI needs
+   `uv tool install 'modal[api-proxy-support]'`. Without the CLI installed, run it through uv:
+   `uvx --from modal modal deploy deploy/modal_app.py` (only `modal` is needed locally; the image is built on Modal).
+   **On Windows**, set `PYTHONIOENCODING=utf-8` (and `PYTHONUTF8=1`) first: the CLI prints ✓, the console's cp1252
+   cannot encode it, and the deploy stops with "'charmap' codec can't encode character '✓'" after the image is
+   built (Nov 1). Deploying again with the setting is safe.
 2. **Samples** ([samples/README.md](../../samples/README.md)):
    - six Northbank IFCs and the cell's `PC-03-Palletising-Cell-RevA.step` and `-RevB.step` are bundled under MIT;
      no private-repository access is needed for the two demo cards;
@@ -330,6 +335,7 @@ the browser's view of the stream is often the quickest place to look.
 | 401 from `/mcp` | the link expired (12 h after its last use, 24 h at most), was revoked, or the server restarted | make a new link in **Connect an agent** |
 | The voice socket closes at once | another origin (1008 from `voice_live.same_origin`), the voice cap, or Meta refused the session (its close codes become sentences, `voice_live.CLOSED`) | open the page from the same host; read the `error` frame |
 | The Modal CLI cannot connect from the cloud session | the session's proxy | `uv tool install 'modal[api-proxy-support]'` |
+| `modal deploy` stops with "'charmap' codec can't encode character '✓'" on Windows | the console's cp1252 cannot print the CLI's ✓ | set `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1`, then deploy again |
 | The first cell opening after a restart takes about half a minute | `samples/step-cache` was not deployed | ship the conversion (step 2 above) |
 | Show it built answers 403 | switched off for this visitor (`SIGHTLINE_BUILT_VIEWS` 0, owner settings) | switch it on in the owner menu |
 | A second try answers 429 about the budget | the day's Muse Wonder budget (`SIGHTLINE_WONDER_MAX_USD_DAY`) is spent; it resets at midnight UTC | wait, or raise the budget and redeploy |
