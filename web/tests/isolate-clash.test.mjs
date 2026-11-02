@@ -39,6 +39,32 @@ test("isolate a clash's elements; each clash opened after goes straight to its o
   host.unmount();
 });
 
+test("what a kept fix changed stays in its clash's isolation, from the edit log, until it is undone; the camera stays", async () => {
+  // Snowdon #20 isolated and fixed: the drain tilts, its bend goes down, the stack below gets shorter. With only the
+  // pair drawn, the tilted drain ended in mid-air.
+  const host = await appHost({ initial: { report, matches, clash: null, a: null, b: null, sceneFiles: ["m.ifc"] }, api: { match: async () => matches } });
+  await host.settle();
+  const calls = [];
+  host.viewer.focusClash = (...args) => { calls.push(args); return true; };
+  host.component("ReportList").props.onIsolate(A); await host.settle();
+  const flights = calls.length;
+  assert.ok(flights > 0, "straight to it");
+  const entry = (id, state, clashes, elements, created = []) => ({ id, state, clashes, elements, created });
+  host.state.journal = { entries: [
+    entry("E1", "kept", [{ id: "ca", pair: ["duct", "girder"] }], ["duct", "bend", "stack"]),
+    entry("E2", "kept", [{ id: null, pair: ["girder", "duct"] }], ["hanger"], ["duct-piece"]),   // an agent's: its pair
+    entry("E3", "undone", [{ id: "ca", pair: ["duct", "girder"] }], ["damper"]),
+    entry("E4", "kept", [{ id: "cb", pair: ["tray", "girder"] }], ["tray", "rack"]),                // another clash's
+  ], can_undo: true, can_redo: true, undo: "E2", redo: "E3" };
+  host.render(); await host.settle();
+  assert.deepEqual(host.state.temporary.isolated, ["duct", "girder", "bend", "stack", "hanger", "duct-piece"]);
+  assert.equal(calls.length, flights, "the camera stays where the user has it");
+  host.state.journal = { ...host.state.journal, entries: host.state.journal.entries.map((e) => e.id === "E1" ? { ...e, state: "undone" } : e) };
+  host.render(); await host.settle();
+  assert.deepEqual(host.state.temporary.isolated, ["duct", "girder", "hanger", "duct-piece"], "undone: its parts go");
+  host.unmount();
+});
+
 test("the chip's Show all and the toolbar's Reset end it; another isolation of the user's replaces it", async () => {
   const host = await appHost({ initial: { report, matches, clash: null, a: null, b: null, sceneFiles: ["m.ifc"], stats: { elements: 3, triangles: 3, parseMs: 1 } },
     api: { match: async () => matches } });

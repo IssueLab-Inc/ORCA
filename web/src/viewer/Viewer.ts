@@ -524,10 +524,13 @@ export class Viewer {
       for (const el of model.byGlobalId.values()) {
         const inFocus = !!this.focusSide(el.globalId);
         const raw = !inFocus && !this.hidden.has(el.globalId);  // focus elements are drawn by the focus layer
-        const base = raw && shown ? shown(el.globalId) : raw;
+        // What a preview moves (a fix's carried fittings) always shows, as its new pieces do: a hide, an isolate, a
+        // filter or the mode would leave what it joins ending in mid-air.
+        const previewed = this.moved.has(el.globalId);
+        const base = raw && shown && !previewed ? shown(el.globalId) : raw;
         let visible = base;
-        if (visible && hasFocus && this.mode === "isolate") visible = keep.has(el.globalId);
-        if (visible && near) visible = near.has(el.globalId);
+        if (visible && hasFocus && this.mode === "isolate" && !previewed) visible = keep.has(el.globalId);
+        if (visible && near && !previewed) visible = near.has(el.globalId);
         const vDraw = this.drawings === "follow" ? visible : this.drawings === "whole" ? raw : base;
         if (visible !== vDraw && this.panes.length > 1) this.drawVis.push({ el, v3d: visible, vDraw });
         el.mesh.setVisibleAt(el.instanceId, visible);
@@ -780,7 +783,7 @@ export class Viewer {
     this.drawLinks();
   }
 
-  /** The lit links, leaving out what the filters or a temporary hide take off screen. */
+  /** The lit links, leaving out what the filters or a temporary hide take off screen (never what a preview moves). */
   private drawLinks() {
     this.version++;
     this.linkLayer.clear();
@@ -789,7 +792,8 @@ export class Viewer {
       const mats = this.linkMats(group.color);
       group.ids.slice(0, LINK_MAX).forEach((gid, k) => {
         const f = this.find(gid);
-        if (!f || this.hidden.has(gid) || this.hiddenModels.has(this.models.indexOf(f.model)) || (shown && !shown(gid))) return;
+        if (!f || this.hidden.has(gid) || this.hiddenModels.has(this.models.indexOf(f.model))
+            || (shown && !this.moved.has(gid) && !shown(gid))) return;
         const parts: THREE.Object3D[] = [new THREE.Mesh(this.geometryOf(f), mats.mesh)];
         if (k < LINK_EDGES) { const l = new THREE.LineSegments(this.edgeGeometryOf(gid, f), mats.edges); l.layers.set(1); parts.push(l); }
         for (const o of parts) {
