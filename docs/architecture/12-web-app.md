@@ -23,7 +23,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `api.ts` | Every server call, the NDJSON reader, the wire types, the two request headers | `api`, `ApiError`, `setOwnerSettings`, `setRequirements`, `requirementsInUse`, ~100 types | everything |
 | `aiNames.ts` | The name of the AI model behind each role (proposal, escalation, triage, image, voice) as the server reports it (`GET /api/models` labels), for every panel's words; App sets them, the defaults until then | `aiName`, `setAiNames`, `DEFAULT_AI_NAMES`, `AiRole`, `AiNames` | `App`, `Activity.tsx`, `pilot.ts`, `PlanPanel.tsx`, `BuiltView.tsx`, `Triage.tsx`, `Insights.tsx`, `ReportDoc.tsx`, `ClashPanel.tsx`, `ReportList.tsx`, `Requirements.tsx`, `Owner.tsx`, `Workings.tsx`, `workingsGraph.ts` |
 | `names.ts` | Model files' names as people read them: no extension, and no prefix the set shares, whatever the project is called | `shortNames`, `sharedPrefix` | `App` |
-| `About.tsx` | Landing page in the empty viewer (hero, demo cards, resume card, before/after picture, the "Go deeper" card that opens About ORCA) | `About`, `Resume`, `projectName` | `App` |
+| `About.tsx` | Landing page in the empty viewer (hero, demo cards playing a recorded fix, resume card, before/after picture, the Workings clip beside "What ORCA does", the "Go deeper" card that opens About ORCA) | `About`, `Resume`, `projectName` | `App` |
 | `AboutOrca.tsx` | About ORCA: a full page over the app in six tabs (Overview, How it works, The fixes, The AI, Under the hood, Proof and limits), with animated SVG pictures (the ORCA loop, the girder clash before and after, each fix kind, the propose-check loop), count-up numbers and sections that fade up as they scroll in; reduced motion shows it all still. Its numbers are the landing's measured ones | `AboutOrca` | `App` |
 | `aboutRoute.ts` | The About page's tabs and address: `#about` and `#about/<tab>`, pushed when it opens (Back closes it), replaced on a tab change | `ABOUT_TABS`, `AboutTab`, `aboutTabFromHash`, `aboutHash`, `nextTab`, `currentHash`, `showAboutHash` | `App`, `AboutOrca.tsx` |
 | `Activity.tsx` | The Activity panel: the one-line status, then Steps (the table of ideas tried, why each failed) or Workings, with the switch between them, Workings' off button and, when it is off, Turn it on | `Activity`, `ActivityView`, `statusLine`, `Progress` (re-exports `editText`, `KIND_LABEL`) | `App` |
@@ -679,13 +679,19 @@ No `sessionStorage` or IndexedDB is used.
 - **`web/scripts/capture-demos.cjs`:** Playwright opens each demo against a running server (default
   `http://localhost:8765`), waits for the check, picks a view, saves the viewer's screenshot and writes
   `web/public/demos/northbank.webp` and `cell.webp` (cropped to 16:10 with Pillow). Recapture after visual changes;
-  the landing's demo cards and the README use these pictures.
+  the README's "Two demos" table and About ORCA use these pictures.
 - **`web/scripts/capture-proposals.cjs`** (with **`timelapse.py`**): records live proposal runs in the app (a clash,
   Propose fixes, the verified options, Before / After, then the run's Workings replayed in Activity's own window) from
   the browser's screencast and writes animated WebP time-lapses to `docs/media/proposals/` for the README's "See it
   work". Needs `META_API_KEY` on the server: every capture is a real proposal. Not served by the app.
+  `--landing` records the landing's clips instead, into `web/public/demos/` (served): `fix-northbank.webp` and
+  `fix-cell.webp` on the demo cards (the 3D view alone: the left and bottom bars collapsed, the rail cropped off) and
+  `workings.webp` beside "What ORCA does" (the Workings graph alone), each with a `-still.webp` of its last frame. The
+  window is small (1110 × 435, Workings 720 × 480) at twice the pixels, so the words in the 3D view still read at a
+  card's width (about 500 px). `--keep` keeps the frames and times, `--from <folder>` encodes them again without a
+  new proposal, and `--gpu` draws with the graphics card instead of SwiftShader.
 - **`web/public/`:** `favicon.svg`, `brand/` (above), `popout.html` (the page a panel's own window opens: dockview moves the panel in
-  and copies the styles), `demos/*.webp`, `tour/*.json` (the five recordings), and the generated `wasm/`.
+  and copies the styles), `demos/*.webp` (the stills, and the landing's clips with their stills), `tour/*.json` (the five recordings), and the generated `wasm/`.
 - **`web/index.html`:** the shell (`#root`, `viewport-fit=cover`, the IBM Plex fonts from Google Fonts, title "ORCA ·
   AI design coordination", theme colour navy `#052640`, the icon and manifest links, the Open Graph image). `#root`
   starts with the boot splash: the wordmark's letters arrive once (inline CSS) until React mounts and replaces it.

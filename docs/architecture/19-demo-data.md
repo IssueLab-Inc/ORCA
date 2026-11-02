@@ -268,7 +268,7 @@ flowchart LR
   clone -->|"DEMO_MODELS: STEP, IFC, Code answer key"| cellEvals["Cell evals: step_cell, detection_cell, escalation"]
   samples --> nbEvals["Northbank evals: answer_key, not_a_clash, penetration_hosts, detection_navisworks"]
   app -->|"recorded runs"| tour["web/public/tour"]
-  app -->|"capture-demos.cjs"| pics["web/public/demos"]
+  app -->|"capture-demos.cjs, capture-proposals.cjs --landing"| pics["web/public/demos"]
 ```
 
 ## Tour recordings (`web/public/tour/`)
@@ -303,13 +303,23 @@ recorded. Accepting a replayed fix edits the model for real.
 
 ## Demo pictures (`web/public/demos/`)
 
-`northbank.webp` and `cell.webp` are the pictures on the landing's demo cards (`DemoCard` in `About.tsx`) and in the
-README's "Two demos" table. `web/scripts/capture-demos.cjs` makes them in ORCA's own viewer: with the server running
+`northbank.webp` and `cell.webp` are the pictures in the README's "Two demos" table and About ORCA's overview.
+The landing's demo cards play a recorded fix instead (below, "Landing clips"). `web/scripts/capture-demos.cjs` makes them in ORCA's own viewer: with the server running
 on the demo models (`uv run uvicorn sightline.app:app --port 8765`), it opens each demo the way a visitor does in
 headless Chromium (Playwright, SwiftShader WebGL), waits for the check, picks the iso view and zooms in, saves the
 canvas with the viewer's screenshot button, and crops it to 16:10 WebP with Pillow from the server's environment.
 Recapture after the viewer's look or the demo models change; the cards, the README table and the landing numbers move
 together and only from measured runs.
+
+### Landing clips
+
+`fix-northbank.webp` (#1, the duct through the girder) and `fix-cell.webp` (#66, the air pipe into the conveyor's
+side rail) play on the demo cards (`DemoCard` → `Clip` in `About.tsx`), and `workings.webp` (#1's run in the Workings
+graph) beside "What ORCA does". Each is a live proposal recorded by `capture-proposals.cjs --landing`
+([18](18-testing-and-evals.md)) as an animated WebP time-lapse of the 3D view alone, so its words read at a card's
+width (the whole app, as in the README's clips, is too small there). Each has a `-still.webp`, its last frame, shown
+instead to people who ask for less motion (`prefers-reduced-motion`). The alt text describes the run on screen:
+rewrite it from the new run after a recapture.
 
 ## Proposal clips (`docs/media/proposals/`)
 
