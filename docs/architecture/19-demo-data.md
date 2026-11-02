@@ -314,10 +314,12 @@ together and only from measured runs.
 ### Landing clips
 
 `fix-northbank.webp` (#1, the duct through the girder) and `fix-cell.webp` (#66, the air pipe into the conveyor's
-side rail) play on the demo cards (`DemoCard` → `Clip` in `About.tsx`), and `workings.webp` (#1's run in the Workings
-graph) beside "What ORCA does". Each is a live proposal recorded by `capture-proposals.cjs --landing`
-([18](18-testing-and-evals.md)) as an animated WebP time-lapse of the 3D view alone, so its words read at a card's
-width (the whole app, as in the README's clips, is too small there). Each has a `-still.webp`, its last frame, shown
+side rail) play on the demo cards (`DemoCard` → `Clip` in `About.tsx`). Each step of "What ORCA does" (`Step`) sits
+beside a clip of its own: `check.webp` (Northbank checked and its list appearing), `understand.webp` (the Clash panel
+while Muse Spark reads #1), `workings.webp` (#1's run in the Workings graph) and `keep.webp` (#1's fix kept). They are
+recorded by `capture-proposals.cjs --landing` ([18](18-testing-and-evals.md)) as animated WebP time-lapses of one part
+of the window each, so their words read at a card's width (the whole app, as in the README's clips, is too small
+there); the card and steps 2-4 come from one live proposal on #1. Each has a `-still.webp`, its last frame, shown
 instead to people who ask for less motion (`prefers-reduced-motion`). The alt text describes the run on screen:
 rewrite it from the new run after a recapture.
 

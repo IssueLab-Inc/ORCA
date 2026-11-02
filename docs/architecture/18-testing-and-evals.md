@@ -375,12 +375,16 @@ to port 8000), or build the web app and let the server serve `web/dist` on one p
   Workings there. Frames come from Chromium's screencast (Playwright's own video recording starved the page of CPU
   under SwiftShader and the proposal never finished); `web/scripts/timelapse.py` (Pillow, server env) speeds the waits
   up 2-6× and stamps the speed on each frame. Writes `docs/media/proposals/*.webp`. Each capture is a fresh proposal.
-  With `--landing` it records the landing's clips (Northbank #1 and the cell's #66, the 3D view alone, and #1's
-  Workings) in a small window at twice the pixels and writes `web/public/demos/fix-northbank.webp`, `fix-cell.webp`
-  and `workings.webp`, each with a `-still.webp` (its last frame, for reduced motion); `--keep` keeps the frames.
-  Its frames are screenshots of just the part kept, about ten a second (`Page.captureScreenshot` with a clip at
-  scale 2): the screencast sends the page at its CSS size whatever the pixel ratio, so a small window came out
-  blurred. It presses F to fly to the clash: Playwright, reaching the rail's button, scrolled the short stage.
+  With `--landing` it records the landing's clips in a small window at twice the pixels and writes them to
+  `web/public/demos/`, each with a `-still.webp` (its last frame, for reduced motion): the cards' `fix-northbank` and
+  `fix-cell` (#1 and #66, the 3D view alone) and one per step of "What ORCA does" (`check`, a run that only opens
+  and checks Northbank; `understand`, `workings` and `keep`, all from #1's run, which keeps the fix after Before /
+  After). `--keep` keeps the frames. Its frames are screenshots of the whole window, about ten a second
+  (`Page.captureScreenshot` at scale 2), each clip cropping its part afterwards: the screencast sends the page at
+  its CSS size whatever the pixel ratio, so a small window came out blurred. Step 2 watches the Clash panel, scrolled
+  to its pictures, then kept on Muse Spark's reasoning every second as it grows (scrolled once, the panel stopped at
+  its end and the reasoning arrived below the crop); being words throughout, it carries no speed badge and the page
+  says it is sped up. It presses F to fly to the clash: Playwright, reaching the rail's button, scrolled the short stage.
   Under SwiftShader Northbank's run drew about one frame a second while the server checked ideas, too few to show
   the ideas being tried; `--gpu` launches Chromium on the graphics card (Direct3D on Windows: 20 frames a second).
   `--from <kept folder>` encodes a `--keep` recording again (another pace or badge) without a new proposal; the

@@ -183,7 +183,7 @@ diagrams, checked against the code. Feature designs (the "why") stay in `docs/*.
   Muse Spark's 12 model errors into 80 on Northbank.
 - **Numbers people see are measured:** the landing's numbers, the README's "Two demos" table and the demo cards share
   pictures and numbers; change them together and only from measured runs, and recapture `web/public/demos/*.webp`
-  after visual changes: the stills with `web/scripts/capture-demos.cjs`, the cards' clips and Workings with
+  after visual changes: the stills with `web/scripts/capture-demos.cjs`, the cards' and steps' clips with
   `capture-proposals.cjs --landing` (live proposals; rewrite their alt text from the new run).
 - **The dev server watches `sightline/` only** (`--reload-dir sightline`, README). Plain `--reload` watches
   `server/.venv` too: a `uv sync` or install from another session restarted it and dropped every open model (Nov 2).
