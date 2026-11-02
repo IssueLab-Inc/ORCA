@@ -153,7 +153,7 @@ when you want ORCA to propose fixes.
 
 ```text
 cd server
-uv run --locked uvicorn sightline.app:app --reload --host 127.0.0.1 --port 8000
+uv run --locked uvicorn sightline.app:app --reload --reload-dir sightline --host 127.0.0.1 --port 8000
 ```
 
 **Terminal 2 — open a new terminal in `ORCA/`:**
@@ -254,7 +254,10 @@ Accepted model edits live in the Python process until you export them; a server 
 
 For small edits during development, [Vite hot-reloads web source changes](https://vite.dev/guide/features.html#hot-module-replacement)
 and uvicorn's `--reload` restarts on Python
-changes. A Git pull can change both source and dependencies at once, so use the stopped-server workflow above.
+changes in `server/sightline/` only (`--reload-dir sightline`). Without it uvicorn also watches `server/.venv`, so a
+package install or `uv sync` there (another terminal, a test run) restarts the server, and a restart drops every
+open model, fix and check: the page then offers to open them again. A Git pull can change both source and
+dependencies at once, so use the stopped-server workflow above.
 To check for updates while keeping the app running, `git fetch origin` updates remote references without changing
 your working files; `git log --oneline HEAD..origin/main` shows commits not in your current checkout.
 
@@ -270,6 +273,7 @@ your working files; `git log --oneline HEAD..origin/main` shows commits not in y
 | Viewer reports missing `.wasm` files | From `ORCA/`, run `npm.cmd run copy-wasm --prefix web` (macOS/Linux: `npm`), then refresh; check that WebGL is enabled |
 | AI request fails | Check the root `.env`, model access and quota, then restart the server. Empty keys allow geometry checks, not AI calls |
 | PDF reports fail with a missing-library error | Install the PDF system libraries and check DLL discovery on Windows |
+| Open models vanish ("Open them again") and the Python terminal shows `WatchFiles detected changes in '.venv\...'` | The server was started without `--reload-dir sightline`, so a package install restarted it. Restart it with the command above |
 | MCP client cannot connect through port 5173 | Use `http://127.0.0.1:8000/mcp` with the app's pairing token; Vite proxies `/api`, not `/mcp` |
 
 The owner confirmed Windows startup on Oct 31 after installing uv/Node.js and using `npm.cmd`. **Still to verify

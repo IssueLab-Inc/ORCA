@@ -347,7 +347,7 @@ supports change, which left service runs untouched.
 ## Browser and product checks
 
 Tests prove parts; the product check proves the running app. Run the server and the web app the way the README does
-(`uv run uvicorn sightline.app:app --reload --port 8000` and `npm run dev`, which proxies `/api` and the voice socket
+(`uv run uvicorn sightline.app:app --reload --reload-dir sightline --port 8000` and `npm run dev`, which proxies `/api` and the voice socket
 to port 8000), or build the web app and let the server serve `web/dist` on one port (`app.py` mounts it when
 `web/dist/index.html` exists).
 
