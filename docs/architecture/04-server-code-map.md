@@ -469,7 +469,8 @@ Elements are addressed by IFC GlobalId everywhere, never by express id. From the
 - **Main symbols:** `IfcScene` (`bounds`, `refresh_bounds`, `translate`, `placement`, `element`, `entity`,
   `index_of`, `products`, `near`, `connected_run`, `step_run`, `step_group`, `mark_edited`, `bump`, `snapshot`,
   `write_edited`, `domain`, `stays` and `stays_rule`: what stays in place, as the requirements say), `Element`
-  (`fixed` = `stays`), `NOT_PHYSICAL`, `not_physical`, `is_provision`, `meshes_only`,
+  (`fixed` = `stays`), `NOT_PHYSICAL`, `not_physical`, `is_provision`, `meshes_only`, `faceted` and `kernel` (Revit's
+  faceted meshes on the mesh kernel in every clash query), `FACETED_ITEMS`,
   `opacity`, `step_source`, `STEP_PSET` (`ORCA_STEP`; `STEP_PSETS` also reads `Sightline_STEP`), `FITTINGS`,
   `MESH_KERNEL`, `BIG_MODEL_BYTES` (`SIGHTLINE_BIG_MODEL_MB`), `BOUNDS_BATCH`, `THREADS`.
 - **Imported by:** `agent.py`, `context_eval.py`, `detect.py`, `edits.py`, `escalation.py`, `fixtures.py`,

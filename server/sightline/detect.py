@@ -36,7 +36,7 @@ import numpy as np
 from . import facets, requirements, verify
 from .limits import env_int
 from .reports import Report, ReportClash, ReportElement, plain_name
-from .scene import IfcScene
+from .scene import MESH_KERNEL, IfcScene, faceted, kernel
 
 TOLERANCE_M = 0.001        # an overlap must be deeper than this to be a hard clash; less is a touch
 DUPLICATE_M = 0.001        # two copies of one thing: boxes and vertices agree within this
@@ -468,15 +468,18 @@ def _offset(ix: _Index) -> np.ndarray:
 
 
 def _tree(ix: _Index, gids: set[str], offset: np.ndarray):
+    """The triangle tree over `gids`: one iterator per file and kernel (scene.kernel: faceted meshes on the mesh
+    kernel, as a fix's check triangulates them)."""
     tree = ifcopenshell.geom.tree(backend="opencascade.trianglebvh")
-    by_file: dict[int, list] = {}
+    groups: dict[tuple[int, bool], list] = {}
     for g in gids:
-        by_file.setdefault(ix.file[g], []).append(ix.entity[g])
-    for i, include in by_file.items():
+        groups.setdefault((ix.file[g], faceted(ix.entity[g])), []).append(ix.entity[g])
+    for (i, mesh), include in groups.items():
         s = verify._settings()
         if offset.any():
             s.set("model-offset", tuple(float(x) for x in offset))
-        tree.add_iterator(ifcopenshell.geom.iterator(s, ix.scene.models[i], os.cpu_count() or 1, include=include))
+        kw = {"geometry_library": MESH_KERNEL} if mesh else {}
+        tree.add_iterator(ifcopenshell.geom.iterator(s, ix.scene.models[i], os.cpu_count() or 1, include=include, **kw))
     return tree
 
 
@@ -548,7 +551,7 @@ class _Solids:
 
 
 def _verts(ix: _Index, gid: str) -> np.ndarray:
-    shape = ifcopenshell.geom.create_shape(verify._settings(), ix.entity[gid])
+    shape = ifcopenshell.geom.create_shape(verify._settings(), ix.entity[gid], **kernel(ix.entity[gid]))
     return np.asarray(shape.geometry.verts, dtype=float).reshape(-1, 3)
 
 

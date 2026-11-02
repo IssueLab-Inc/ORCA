@@ -85,6 +85,33 @@ def meshes_only(p) -> bool:
     return bool(items) and all(any(i.is_a(c) for c in MESH_ITEMS) for i in items) and not getattr(p, "HasOpenings", None)
 
 
+# Revit's faceted meshes (its IFC2X3 families, railings, furniture, proxies): OpenCASCADE sews each into a solid first,
+# about eight times CGAL's time for the same vertices. On Snowdon Towers' architecture they were 580 of the 613
+# CPU-seconds it took to triangulate, and a check's triangle tree took 148 s (15 s with these on CGAL).
+FACETED_ITEMS = ("IfcFacetedBrep", "IfcFaceBasedSurfaceModel")
+
+
+def faceted(p) -> bool:
+    """Whether every body item of `p` (through mapped items: Revit's types) is a faceted B-rep or a face-based surface
+    model, with no openings to cut. The clash queries triangulate these with the mesh kernel (`kernel`): detection's
+    tree, the live measure and a fix's check alike, so all three see the same solids. Triangle and polygon meshes
+    (Northbank's fittings, the cell's STEP parts) are not among them: their checks stay as they were."""
+    if p.Representation is None or getattr(p, "HasOpenings", None):
+        return False
+    items = []
+    for r in p.Representation.Representations:
+        if r.RepresentationIdentifier == "Body":
+            for i in r.Items:
+                items += list(i.MappingSource.MappedRepresentation.Items) if i.is_a("IfcMappedItem") else [i]
+    return bool(items) and all(i.is_a() in FACETED_ITEMS for i in items)
+
+
+def kernel(p) -> dict:
+    """How the clash queries triangulate `p`: keyword arguments for `ifcopenshell.geom.create_shape` and `iterator`
+    (the mesh kernel for a faceted element, else OpenCASCADE, the default)."""
+    return {"geometry_library": MESH_KERNEL} if faceted(p) else {}
+
+
 def is_provision(e) -> bool:
     """A provision for void: the space a service asks to be opened through a wall or slab, drawn in the service's own
     model (IFC4 PredefinedType PROVISIONFORVOID; IFC2X3 has only the ObjectType)."""
