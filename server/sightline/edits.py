@@ -434,7 +434,9 @@ def _jog(scene: IfcScene, global_id: str, end: str, delta_m):
 ROUTE_STEPS = 3                      # most steps one route may take
 ROUTE_SLOPE = np.sin(np.radians(15))  # steepest run a route may take, as |sin| of its slope
 GRAVITY_SYSTEMS = {"DRAINAGE", "RAINWATER", "SEWAGE", "STORMWATER", "WASTEWATER"}
-GRAVITY_WORDS = re.compile(r"drain|waste|soil|sewer|sewage|storm|rain ?water|condensate|gutter", re.I)
+# Revit names: "Sanitary" is its system classification, "DWV" (drain-waste-vent) its plastic drain pipe type.
+GRAVITY_WORDS = re.compile(r"drain|waste|soil|sewer|sewage|storm|rain ?water|condensate|gutter|sanitary|\bdwv\b",
+                           re.I)
 
 
 def run_frame(direction) -> tuple[np.ndarray, np.ndarray]:

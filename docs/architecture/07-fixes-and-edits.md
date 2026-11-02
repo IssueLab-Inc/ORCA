@@ -211,7 +211,8 @@ flowchart LR
 - **Refused:** a vertical run (`run_frame`); a slope over 15° (`ROUTE_SLOPE`); bad steps (`route_steps`: none, more
   than 3, outside the run, no offset, overlapping, not finite); a falling drainage pipe, or drainage stepping up or
   down (`is_gravity`: its systems are drainage, rainwater, sewage, storm or waste water, a gutter or culvert, or its
-  names say so); a profile tilted against the run's up; a rectangular section changing both axes at once (with the
+  names say so, `GRAVITY_WORDS`: drain, waste, soil, sewer, storm, rainwater, condensate, gutter, and Revit's
+  sanitary and DWV, since Revit's IFC2X3 systems carry no type); a profile tilted against the run's up; a rectangular section changing both axes at once (with the
   words to say it instead); a straight piece under 50 mm.
 - **Shortcut** (`_try_route`): a single step straight up or down on a level run that is not drainage is tried, and
   kept, as an offset.
