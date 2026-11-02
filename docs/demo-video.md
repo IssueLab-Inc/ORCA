@@ -3,7 +3,7 @@
 **Status (Oct 31):** script agreed, every shot tested on a local server at `main` (below: "Shots, as tested"). Two
 picture swaps for the new filters are proposed and tested, for the owner to agree (Script, "Proposed"). To record
 by the Nov 3 freeze; submit Nov 4 before noon ET ([20](architecture/20-decisions-limits-and-roadmap.md), "The hackathon
-frame").
+frame"). Nov 2: a script records each shot as its own Recordly take ("Before recording", "Recording the takes").
 
 ## What it has to do
 
@@ -112,6 +112,59 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
 - If the filters shots are agreed: **Clear all** in Filters before #1, so the clash shots look as tested. Filters are
   kept per set of models in the browser, so clear them between takes too.
 - Re-measure every number on the day. A number that comes out differently changes its line, never the other way.
+
+### Recording the takes
+
+Each shot is its own take in Recordly, a desktop screen recorder that draws the cursor where a script clicks and zooms
+in on each click. `web/scripts/record-demo.cjs` drives ORCA in Chrome and tells Recordly when to start and stop.
+Recordly is not part of ORCA (it is AGPL-3.0, ORCA is MIT): the script loads Recordly's Playwright helper from a
+Recordly checkout beside this one (`../Recordly`; elsewhere `--recordly <dir>` or `RECORDLY_DIR`) and copies nothing
+from it.
+
+1. **Start Recordly** from its checkout with the control server on, and leave it running (PowerShell):
+   `$env:RECORDLY_CONTROL = "1"; npm run dev`. The script never starts it; it stops at once if Recordly isn't running
+   or a take was left recording.
+2. **Once, sign in:** `node web/scripts/record-demo.cjs --login --url https://dodzikojo--orca-web.us-east.modal.run/#owner`.
+   Chrome opens ORCA with the takes' own profile (`%LOCALAPPDATA%\orca-demo-profile`, outside git). Sign in as owner
+   (the gear), switch on, For me, the open-weights model and Show it built, then close the window. The profile keeps
+   both for every take.
+3. **The takes**, from the repository root. Live: add `--url https://dodzikojo--orca-web.us-east.modal.run/#owner`
+   (without `--url` they go to a local server, `http://localhost:8765`).
+   - Every shot: `node web/scripts/record-demo.cjs --url https://dodzikojo--orca-web.us-east.modal.run/#owner`
+   - One shot again: add `--only duct`; several: `--only built,accept`
+   - The opening with the proposed filter beats: `--only open --filters`
+
+| Shot | Script | The take | Waits up to |
+|---|---|---|---|
+| `open` | 0:12–0:26 | Open the Northbank demo, the check, 464 listed, then Visual style: X-ray (the walls fade). With `--filters` instead: Filters, Colour by… Discipline, a Hide filter on Site and Architecture | 180 s to open |
+| `triage` | 0:26–0:40 | Triage all, until "N need a fix of 464"; Fit in Workings | 180 s |
+| `duct` | 0:40–1:12 | #1, Propose fixes, the verified options; Fit; Before, After | 300 s |
+| `revision` | 1:12–1:22 | Northbank with `Northbank-MEP-Rev04.ifc` in place of MEP, from the camera the duct take ended on with a section box round #1, in X-ray: to set beside the duct take's After | 180 s to open |
+| `built` | 1:22–1:42 | Show it built on #1's first option, the picture; Fit; the wipe slider dragged across | 180 s |
+| `accept` | 1:42–1:54 | Accept this fix; Export (the IFC saved); Menu › Report, Build the report, Download (the PDF saved) | 300 s |
+| `cell-29` | 1:54–2:34 | #29, Propose fixes; Fit; Look for a better fix (Ask Muse Wonder when Spark found none); Fit. Says when Wonder's move isn't ranked first: take it again | 300 s each |
+| `cell-13` | 2:34–2:42 | #13, Propose fixes, then Ask Muse Wonder (as tested); fails the take if an option verifies | 300 s each |
+| `voice` | 2:42–2:50 | Chat: types "Isolate the services and colour them by system.", Send, Muse Spark's reply | 180 s |
+
+- **Setups are not recorded.** Before each take the script opens the models when the shot needs them afresh, clears
+  Filters (**Clear all**) and floats Activity inside the page before the clash shots (never in its own window: a window
+  recording wouldn't see it), and puts Activity back in its bar for `open` and `voice`. The opening's filters stay for
+  `triage`.
+- **Order.** Shots run in the order `open`, `triage`, `duct`, `built`, `accept`, `revision`, `cell-29`, `cell-13`,
+  `voice`, whatever order `--only` gives: Northbank, its triage and #1's options carry from `duct` to `accept`, and
+  `revision` uses the camera `duct` ended on (kept as the saved view "Demo: ORCA's fix for #1"). A shot run alone sets up
+  what it needs, unrecorded: `accept` alone first runs triage and a proposal for #1.
+- **What it prints:** each take's `shot`, `videoPath` and `projectPath`, then a summary; it exits 1 if any shot failed.
+  A failure inside a take still stops the take (its footage is kept) and the next shot goes on. Ctrl+C stops the take
+  that is recording. The exported IFC and the PDF go to `%LOCALAPPDATA%\orca-demo-downloads` for the edit (the PDF's
+  pages are not in a take).
+- **Zooms:** clicks meant to get their own zoom are at least 3 s apart (Recordly merges clicks under 2.5 s apart into
+  one). Only the cursor is drawn: typing shows as the text appearing.
+- **The window** is Chrome in app mode with a 1440 × 900 page, as tested, titled "ORCA · AI design coordination"; a
+  Chrome or Edge window with ORCA open in a tab is told apart by its exact title. Leave it where the script puts it.
+- **Check before the day:** `node web/scripts/record-demo.cjs --dry-run --headless --only open` runs a shot's steps with
+  no Recordly and no window, and saves where each take ended as a picture (`orca-demo-dry-run` beside the profile). Use
+  it against a local server: on the live app the steps are real (models opened, Muse called).
 
 ## Production notes
 
