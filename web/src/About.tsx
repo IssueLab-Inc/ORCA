@@ -4,6 +4,13 @@ import { useLayout } from "./layout";
 import { loadClip } from "./stepClips";
 
 /**
+ * The source of the industry figure beside "rework on site" (here and in About ORCA): "the measured direct costs of
+ * avoidable errors are in the order of 5% of project value", "10% and 25% of project cost" with unmeasured and
+ * indirect costs. Not ORCA's own measurement: an industry number, quoted as the source states it.
+ */
+export const GIRI_STRATEGY = "https://getitright.uk.com/reports/strategy-for-change";
+
+/**
  * What ORCA is and does, for people who have never heard of BIM or design coordination: the start page in the
  * empty viewer (with the demo buttons). The longer story, in tabs, is About ORCA (AboutOrca.tsx).
  */
@@ -128,8 +135,10 @@ export function About({ start, onAbout, triageOpen = false }: {
         <p>
           A check finds them by the hundred. Most are harmless: parts that meet on purpose, like a bolt in its plate.
           A few are real, and each real one costs a meeting and a redesign. Missed, it costs rework on site, which is
-          where clashes get expensive. The same goes for any design made in 3D by more than one team: a machine cell, a
-          plant room, a ship.
+          where clashes get expensive: avoidable errors like these cost about 5% of a project's value directly, and an
+          estimated 10 to 25% once indirect costs are counted (<a className="src" href={GIRI_STRATEGY} target="_blank"
+          rel="noopener noreferrer">Get It Right Initiative</a>). The same goes for any design made in 3D by more than
+          one team: a machine cell, a plant room, a ship.
         </p>
       </section>
 
