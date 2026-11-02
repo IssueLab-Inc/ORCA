@@ -244,14 +244,19 @@ async function landing(page, url) {
 }
 
 /** The clash list after a check: rows drawn and the triage card in. The dock keeps its last tabs, so Filters may be in
- * front of the list (the opening ends there): the list's own tab is brought forward, now and then, until it shows. */
-async function listReady(page) {
+ * front of the list (the opening ends there): the list's own tab is brought forward, once `after` ms pass with no rows
+ * and only if it is not already the tab in front. Inside a take that click would be drawn and zoomed on, so a take
+ * passes `nudge: false` and just waits; setups, which are not recorded, keep the nudge. */
+async function listReady(page, { nudge = true, after = 2000 } = {}) {
   const rows = page.locator("button.clash-main").first();
-  let asked = 0;
+  let asked = Date.now();
   await until(async () => {
     if (await rows.count()) return true;
-    const list = tab(page, "clashes");
-    if (Date.now() - asked > 2000 && (await list.count())) { asked = Date.now(); await list.click({ timeout: 2000 }).catch(() => undefined); }
+    if (nudge && Date.now() - asked > after) {
+      const list = tab(page, "clashes");
+      const front = page.locator('.dv-tab.dv-active-tab [data-panel-tab="clashes"]');
+      if ((await list.count()) && !(await front.count())) { asked = Date.now(); await list.click({ timeout: 2000 }).catch(() => undefined); }
+    }
     return false;
   }, LONG, "the clash list");
   await page.locator('section[data-tour="triage"]').first().waitFor({ state: "visible", timeout: 60000 });
@@ -490,7 +495,7 @@ const SHOTS = [
     async take(page, ctx) {
       await sleep(1000);
       await ctx.click(page.locator(DEMO.northbank));
-      await listReady(page);   // the check, then the clashes listed
+      await listReady(page, { nudge: false });   // the check, then the clashes listed; no stray click in the take
       state.scene = "northbank";
       ctx.log(`  ${await page.locator(".report-head h2").first().innerText().catch(() => "")}`.trimEnd());
       await sleep(GAP);
@@ -939,7 +944,7 @@ async function main() {
 }
 
 module.exports = { SHOT_NAMES, SHOTS, USAGE, defaultProfile, parseArgs, selectShots, loadRecordly, startTake, runTake,
-  interruptTake, takeState, summaryLine, exitCodeOf, SIGN_IN, NO_BUILT };
+  interruptTake, takeState, summaryLine, exitCodeOf, SIGN_IN, NO_BUILT, listReady };
 
 if (require.main === module) {
   main().catch((error) => {

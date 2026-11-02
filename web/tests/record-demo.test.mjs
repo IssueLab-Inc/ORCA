@@ -166,3 +166,38 @@ test("the sign-in checklist and the built shot's refusal name Show it built (Mus
   assert.equal(demo.SIGN_IN, "Sign in as owner, switch on the open-weights model and Show it built (Muse Image), then close the window");
   assert.match(demo.NO_BUILT, /"Show it built \(Muse Image\)" for you in Owner settings \(--login\)/);
 });
+
+/** A page whose clash rows draw after `rowsAfter` ms; records every click on the clashes tab. */
+function listPage({ rowsAfter, front = false }) {
+  const t0 = Date.now(), clicks = [];
+  const drawn = () => Date.now() - t0 >= rowsAfter;
+  const locator = (selector) => {
+    const l = {
+      first: () => l,
+      count: async () => (selector === "button.clash-main" ? (drawn() ? 1 : 0)
+        : selector.startsWith(".dv-tab.dv-active-tab") ? (front ? 1 : 0) : 1),
+      click: async () => { clicks.push(Date.now() - t0); },
+      waitFor: async () => undefined,
+    };
+    return l;
+  };
+  return { clicks, page: { locator } };
+}
+
+test("listReady: the clashes tab is nudged only after the wait, never on the first poll", async () => {
+  const quick = listPage({ rowsAfter: 300 });
+  await demo.listReady(quick.page);
+  assert.deepEqual(quick.clicks, [], "rows came inside the 2 s: nothing to nudge");
+  const slow = listPage({ rowsAfter: 1000 });
+  await demo.listReady(slow.page, { after: 400 });
+  assert.ok(slow.clicks.length >= 1 && slow.clicks[0] >= 400, `first nudge at ${slow.clicks[0]} ms, not before the wait`);
+});
+
+test("listReady: no raw click inside a take (nudge: false), nor when the clashes tab is already in front", async () => {
+  const inTake = listPage({ rowsAfter: 1000 });
+  await demo.listReady(inTake.page, { nudge: false, after: 100 });
+  assert.deepEqual(inTake.clicks, []);
+  const infront = listPage({ rowsAfter: 1000, front: true });
+  await demo.listReady(infront.page, { after: 100 });
+  assert.deepEqual(infront.clicks, []);
+});
