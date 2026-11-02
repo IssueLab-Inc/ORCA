@@ -25,6 +25,9 @@ const GAP = 3000;        // Recordly merges clicks under 2.5 s apart into one zo
 const LONG = 180000;     // triage (86 s as tested) and Show it built (85 s), and opening the models
 const RUN = 300000;      // a proposal, a second look by Muse Wonder, the report
 const VOICE_LINE = "Isolate the services and colour them by system.";
+// The owner's sign-in checklist (--login), and what the built shot says when its setting is off.
+const SIGN_IN = "Sign in as owner, switch on the open-weights model and Show it built (Muse Image), then close the window";
+const NO_BUILT = 'No "Show it built" on #1\'s fix: switch on "Show it built (Muse Image)" for you in Owner settings (--login)';
 const VIEW = "Demo: ORCA's fix for #1";   // the saved view the later revision is shown from
 // The later revision (Northbank-MEP-Rev04) in place of today's MEP model.
 const REVISION = ["Northbank-Architecture.ifc", "Northbank-MEP-Rev04.ifc", "Northbank-Site.ifc", "Northbank-Structure.ifc"];
@@ -585,12 +588,14 @@ const SHOTS = [
         forget();
         await ensureProposal(page, ctx, 1);
       }
+      // The button shows only with the owner's setting on: checked here, before anything is recorded.
+      if (!(await shown(page.locator('button[data-tour="show-built"]:visible')))) throw new Error(NO_BUILT);
       await rest(page);
     },
     async take(page, ctx) {
       await sleep(1000);
       const show = page.locator('button[data-tour="show-built"]:visible');
-      if (!(await shown(show))) throw new Error('No "Show it built" on #1\'s fix: switch it on for you in the owner settings (--login)');
+      if (!(await shown(show))) throw new Error(NO_BUILT);
       await ctx.click(show);
       await page.locator("figure.built.done:visible, .built.failed:visible").first().waitFor({ state: "visible", timeout: LONG });
       const failed = page.locator(".built.failed:visible");
@@ -902,7 +907,7 @@ async function main() {
     // The --app window's page (Recordly's helper finds it); headless has none, so the first page goes there at once.
     const page = await helper.openAppPage(context, url, { timeoutMs: options.headless ? 1 : 5000 });
     if (options.login) {
-      console.log("Sign in as owner, switch on the open-weights model and Show it built, then close the window");
+      console.log(SIGN_IN);
       await new Promise((resolve) => { context.once("close", resolve); page.once("close", resolve); });
       return;
     }
@@ -934,7 +939,7 @@ async function main() {
 }
 
 module.exports = { SHOT_NAMES, SHOTS, USAGE, defaultProfile, parseArgs, selectShots, loadRecordly, startTake, runTake,
-  interruptTake, takeState, summaryLine, exitCodeOf };
+  interruptTake, takeState, summaryLine, exitCodeOf, SIGN_IN, NO_BUILT };
 
 if (require.main === module) {
   main().catch((error) => {

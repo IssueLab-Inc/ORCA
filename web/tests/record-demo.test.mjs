@@ -161,3 +161,8 @@ test("the summary says RETAKE or FAILED with why, and either makes the exit code
   assert.equal(demo.exitCodeOf([ok, again]), 1);
   assert.equal(demo.exitCodeOf([ok, broken]), 1);
 });
+
+test("the sign-in checklist and the built shot's refusal name Show it built (Muse Image), as the owner's settings do", () => {
+  assert.equal(demo.SIGN_IN, "Sign in as owner, switch on the open-weights model and Show it built (Muse Image), then close the window");
+  assert.match(demo.NO_BUILT, /"Show it built \(Muse Image\)" for you in Owner settings \(--login\)/);
+});

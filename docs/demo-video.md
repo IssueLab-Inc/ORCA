@@ -105,7 +105,7 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
 
 - The Wonder lane ([workings.md](workings.md)) is merged and deployed (Oct 31): check the video shows the Muse Wonder lane.
 - On the live app, the owner signs in (owner menu) and switches on, For me: the open-weights model (triage is on Muse
-  Spark otherwise) and Show it built (off on the deploy). The owner is exempt from the caps (Muse Wonder 3 an hour per
+  Spark otherwise) and Show it built (Muse Image; off on the deploy). The owner is exempt from the caps (Muse Wonder 3 an hour per
   visitor), so retakes don't run out.
 - Workings is cramped in the default bottom bar. Float Activity or open it in its own window, make it tall, and use Fit
   when a run ends.
@@ -126,8 +126,10 @@ from it.
    or a take was left recording.
 2. **Once, sign in:** `node web/scripts/record-demo.cjs --login --url https://dodzikojo--orca-web.us-east.modal.run/#owner`.
    Chrome opens ORCA with the takes' own profile (`%LOCALAPPDATA%\orca-demo-profile`, outside git). Sign in as owner
-   (the gear), switch on, For me, the open-weights model and Show it built, then close the window. The profile keeps
-   both for every take.
+   (the gear), switch on, For me, the open-weights model and Show it built (Muse Image), then close the window: the
+   script prints "Sign in as owner, switch on the open-weights model and Show it built (Muse Image), then close the
+   window". The profile keeps both for every take; without Show it built (Muse Image) the `built` shot stops before it
+   records, saying so.
 3. **The takes**, from the repository root. Live: add `--url https://dodzikojo--orca-web.us-east.modal.run/#owner`
    (without `--url` they go to a local server, `http://localhost:8765`).
    - Every shot: `node web/scripts/record-demo.cjs --url https://dodzikojo--orca-web.us-east.modal.run/#owner`
