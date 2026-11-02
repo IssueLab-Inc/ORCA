@@ -28,6 +28,19 @@ coordinator; on a machine, the engineer who owns the assembly. "Conflict" is the
 conflict"). Not "design coordination issues": it is vaguer, and it promises more than ORCA fixes (conflicts in space
 and room to spare, not missing information or code compliance). The README opens with the same sentence.
 
+## Who it's for
+
+> ORCA is built around the design coordinator, who makes every team's 3D design fit together (on a building, often the
+> BIM coordinator; on a machine, the engineer who owns the assembly). It also serves the teams whose designs meet, each
+> with its own report and a review of every fix to its design; whoever sets the project's standard, through
+> requirements every fix must meet; people who don't read technical drawings, through a picture of what will be built;
+> and teams with their own AI agent, through a pairing link. Later: site teams, comparing what was installed with what
+> was designed.
+
+One user leads and the others follow, each with what ORCA gives them: a list of job titles with nothing beside them
+would blur the one-liner. The table with where each lives: [01](architecture/01-product-and-journeys.md), "Who it is
+for".
+
 ## What's next
 
 > Today a kept fix ends in an exported IFC or STEP, with a PDF report and BCF issues. Next, none of it built yet:

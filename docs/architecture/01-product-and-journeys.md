@@ -31,11 +31,21 @@ inside lives in the docs it links to; the cross-layer sequence of each action is
 | **Apply** | Accept keeps the edit in the server's model and patches the viewer in place. | [07](07-fixes-and-edits.md), `Workspace.patch` |
 | **Hand off** | Export the edited IFC (and STEP), a PDF per scope with team reviews, BCF 2.1 issues. | [14](14-files-in-and-out.md), `document.py` |
 
-**Who it is for.** Design coordinators and the teams whose models meet: structure, building services (MEP) and
-architecture on a building; mechanical, electrical and safety on a machine cell. The landing page (`About`) is
-written for people who have never heard of BIM: what a clash is, the disciplines, a colour legend for the viewer and a
-short glossary ("Words you'll see"). **About ORCA** (`AboutOrca`) tells the longer story in six tabs, for anyone who
-wants more, judges included.
+**Who it is for.** One person leads, and the rest follow from what ORCA gives them (Nov 2; the README and
+[docs/submission.md](../submission.md) say the same):
+
+| Who | What ORCA gives them | Where |
+|---|---|---|
+| **The design coordinator**, who makes every team's 3D design fit together (on a building, often the BIM coordinator; on a machine, the engineer who owns the assembly). The primary user | The whole loop: the check, triage, fixes proposed and proved, accept, export, the report | This doc's golden path, below |
+| **The design teams whose models meet**: structure, building services (MEP) and architecture on a building; mechanical, electrical and safety on a machine cell | A report and BCF issues each (**One per team**), a review of every fix to their model, their model back with the edit in it. A report says DRAFT until every team involved has reviewed | "Reviews, the report and BCF", below; [14](14-files-in-and-out.md) |
+| **Whoever sets the project's standard** (a BIM or design manager) | Coordination requirements every fix must meet: the room each kind of part needs, who moves for whom, what is built that way on purpose | "Coordination requirements", below; [docs/requirements.md](../requirements.md) |
+| **People who don't read technical drawings** (clients, project managers) | Show it built: a checked fix painted as a picture of what will be built; the landing and the report in plain words | "Show it built", below; [docs/show-it-built.md](../show-it-built.md) |
+| **Teams with their own AI agent** | A pairing link: Muse Code or another MCP client checks and fixes through the same geometry check | [11](11-mcp-and-agent-links.md) |
+| Later: **site teams** | What was installed compared with what was designed, from photos and scans (SAM 3.1) | [20](20-decisions-limits-and-roadmap.md), "Later" |
+
+The landing page (`About`) is written for people who have never heard of BIM: what a clash is, the disciplines, a
+colour legend for the viewer and a short glossary ("Words you'll see"). **About ORCA** (`AboutOrca`) tells the longer
+story in six tabs, for anyone who wants more, judges included.
 
 **The hackathon framing.** ORCA was built for the Meta Global AI Developer Hackathon (Startup track, Oct 27 - Nov 4,
 2026), with only work written during the event. The headline is **verified model edits**: a fix is a real IFC edit,

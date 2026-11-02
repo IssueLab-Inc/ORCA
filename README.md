@@ -16,6 +16,22 @@ synthetic baseline asset used to demonstrate and evaluate ORCA; it was not creat
 ORCA's application code was written during the event. See [BUILT_DURING_HACKATHON.md](BUILT_DURING_HACKATHON.md)
 for the full distinction between new work, baseline data and third-party dependencies.
 
+## Who it's for
+
+ORCA is built around one person: **the design coordinator** (on a building, often the BIM coordinator; on a machine,
+the engineer who owns the assembly), who runs the check, sorts what it found, asks for fixes, accepts them and hands
+back the files. Around them:
+
+- **The design teams whose models meet** (structure, building services and architecture; mechanical, electrical and
+  safety on a machine): a report and BCF issues each, a review of every fix to their model, and their model back with
+  the edit in it. A report stays DRAFT until every team involved has reviewed.
+- **Whoever sets the project's standard** (a BIM or design manager): coordination requirements, such as the room each
+  kind of part needs and who moves for whom, which every fix must meet.
+- **People who don't read technical drawings** (clients, project managers): Show it built paints a checked fix as a
+  picture of what will be built.
+- **Teams with their own AI agent:** a pairing link lets Muse Code or another MCP client check and fix through the same
+  geometry check.
+
 ## See it work
 
 Real proposal runs, recorded in ORCA's own app with `web/scripts/capture-proposals.cjs` (Oct 31, Muse Spark live; the
