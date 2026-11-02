@@ -58,6 +58,10 @@ analyzers", dashboards-as-main-feature and Streamlit apps are on the hackathon's
   fixtures can't show it; test placements on mm or feet with a non-zero placement translation (Revit's way).
 - Speed: element boxes are cached once at open (`IfcScene.bounds()`, ~3 s on Northbank), each check triangulates
   only the neighbourhood: 0.4–0.6 s per check on Northbank.
+- Every clash query triangulates an element with the same kernel (`scene.kernel`): Revit's faceted meshes
+  (`IfcFacetedBrep`, `IfcFaceBasedSurfaceModel`, no openings) on the mesh kernel, the rest OpenCASCADE. OpenCASCADE
+  sews those meshes first (Snowdon Towers' check: 150 s, 17 s this way); the two kernels close them differently, so
+  detection, the live measure and `verify.check` must use the same rule or a clash found is not one the check sees.
 - Port-connected neighbours are ignored in checks (they touch by design); `IfcFeatureElement` (openings) and
   virtual elements are not physical.
 - three.js is Y-up, IFC Z-up: viewer delta = (dx, dz, −dy).

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import ifcopenshell.geom
 import numpy as np
 
-from .scene import IfcScene, opacity
+from .scene import MESH_KERNEL, IfcScene, faceted, kernel, opacity
 from .requirements import DEFAULT_CLEARANCE_M
 
 # How far to look for the nearest neighbour, so a passing fix can still report its real clearance.
@@ -80,7 +80,7 @@ def _cached_shape(scene: IfcScene, e):
     cache = scene.__dict__.setdefault("_heavy_shapes", {})
     if key not in cache:
         try:
-            cache[key] = ifcopenshell.geom.create_shape(_settings(), e)
+            cache[key] = ifcopenshell.geom.create_shape(_settings(), e, **kernel(e))
         except RuntimeError:
             cache[key] = None
     return cache[key]
@@ -117,20 +117,22 @@ def check(scene: IfcScene, moved: list[str], clearance_m: float = DEFAULT_CLEARA
 
     # The default "opencascade.brep" tree has no *_many clash queries; the triangle BVH tree does.
     tree = ifcopenshell.geom.tree(backend="opencascade.trianglebvh")
-    by_file: dict[int, list] = {}
+    # One iterator per federated file and kernel (scene.kernel: faceted meshes on the mesh kernel, as detection's tree).
+    by_file: dict[tuple[int, bool], list] = {}
     keep = neighbours if neighbours is not None else {}
     for e in others:   # what is slow to triangulate comes from the scene's cache (what moves never does)
         shape = keep.get(e.GlobalId) or (_cached_shape(scene, e) if _heavy(e) else None)
         if shape is not None:
             tree.add_element(shape)
         else:
-            by_file.setdefault(scene.index_of(e.GlobalId), []).append(e)
-    for e in targets:  # one iterator per federated file, over just the elements we need
-        by_file.setdefault(scene.index_of(e.GlobalId), []).append(e)
+            by_file.setdefault((scene.index_of(e.GlobalId), faceted(e)), []).append(e)
+    for e in targets:  # over just the elements we need
+        by_file.setdefault((scene.index_of(e.GlobalId), faceted(e)), []).append(e)
     mine = {e.GlobalId for e in targets}
-    for i, include in by_file.items():
+    for (i, mesh), include in by_file.items():
         threads = geometry_threads() if len(include) > 50 else 1   # threads cost more than they save on a few
-        it = ifcopenshell.geom.iterator(_settings(), scene.models[i], threads, include=include)
+        kw = {"geometry_library": MESH_KERNEL} if mesh else {}
+        it = ifcopenshell.geom.iterator(_settings(), scene.models[i], threads, include=include, **kw)
         if not it.initialize():
             continue
         while True:

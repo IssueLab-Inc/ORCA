@@ -176,7 +176,8 @@ flowchart TD
 3. **Empty-set guard.** With nothing nearby the check passes at once. This is required: IfcOpenShell's `*_many`
    clash queries crash the process on an empty set.
 4. **The tree.** `ifcopenshell.geom.tree(backend="opencascade.trianglebvh")`, filled with one iterator per federated
-   file over just the needed elements, on several threads past 50 of them (`geometry_threads`, `SIGHTLINE_GEOM_THREADS`,
+   file and kernel over just the needed elements (`scene.kernel`: Revit's faceted meshes on the mesh kernel, as
+   detection's tree, below), on several threads past 50 of them (`geometry_threads`, `SIGHTLINE_GEOM_THREADS`,
    up to 8: an edit to a type of 100 fittings across a building checks against 2,500 elements, 33 s on one thread, 10 s
    on eight). The default `opencascade.brep` tree has no `*_many` queries. Two things are triangulated once:
    - **Heavy neighbours** (`_heavy`: a faceted or surface body with openings cut through it, a Revit toposolid with a
@@ -358,8 +359,20 @@ candidate pair.
 
 ### Narrow phase and depth
 
-`_tree` builds one `opencascade.trianglebvh` tree, one iterator per file (threads: `os.cpu_count()`). `_measure` then
-runs per test:
+`_tree` builds one `opencascade.trianglebvh` tree, one iterator per file and kernel (threads: `os.cpu_count()`).
+**Revit's faceted meshes go through the mesh kernel** (Nov 2, owner decision): an element whose every body item,
+through mapped items, is an `IfcFacetedBrep` or `IfcFaceBasedSurfaceModel`, with no openings (`scene.faceted`), is
+triangulated with `MESH_KERNEL` (`scene.kernel`), here, in a fix's check (`verify.check`, step 4 above) and in the live
+measure (`measure_pair`, which uses this tree), so all three see the same solids. OpenCASCADE sews each such mesh into
+a solid first: on Snowdon Towers' architecture (204 MB, 6,604 elements) those meshes were 580 of the 613 CPU-seconds of
+triangulating and the tree took 148 s; the whole check now takes 17 s (from about 150). The two kernels give the same
+vertices but close Revit's meshes differently, so about 1% of that model's clashes differ: 2,453 clashes instead of
+2,471. Judged independently from the triangles (the overlap volume of each pair's closed pieces, manifold3d) on the 26
+of 61 disputed pairs where both sides are closed, OpenCASCADE was nearer in 18 and the mesh kernel in 8 (mostly
+depth; the mesh kernel also reports two overlaps that are not there), and the mesh kernel misses about 20 recessed
+lamps set into ceilings (open surfaces, not judged). Taken for the speed. Triangle and polygon meshes (Northbank's
+fittings, the cell's STEP parts) are not among these: Northbank and the cell triangulate exactly as before.
+`_measure` then runs per test:
 
 - **duplicate:** same IFC class, boxes equal within the tolerance (1 mm), and every vertex of each within the
   tolerance of a vertex of the other (`_same_shape`, a symmetric check over vertices; elements over 4,000 vertices are
@@ -480,6 +493,7 @@ Each is a rule the code relies on, checked at `104fda9`.
 | `edit_object_placement` takes SI with `is_si=True` | `IfcScene.translate`, `edits._place_port` and the port frames in `_build_chain`; new fittings and voids pass file-unit matrices with `is_si=False` |
 | `add_profile_representation(depth=)` takes SI | Only the test fixtures call it (`fixtures.py`, with a comment saying so) |
 | Use the `opencascade.trianglebvh` tree: the default brep tree has no `*_many` queries | `verify.check`, `detect._tree` |
+| Every clash query triangulates an element with the same kernel (`scene.kernel`): detection, the live measure and a fix's check must see the same solids | `detect._tree`, `detect._verts`, `verify.check`, `verify._cached_shape` |
 | Intersection, not collision, for hard clashes: collision misses one element wholly inside another | Both use intersection first; collision without touching only adds flush-face overlaps |
 | Intersection misses flush-faced overlaps; clearance then reads 0 mm | Collision without touching plus box overlap (`verify`), plus separating axes (`detect._Solids`, `verify._rectangular_penetration`) |
 | The clearance query gives true gaps | `min_clearance_m` and clearance hits come from `clash_clearance_many` |
