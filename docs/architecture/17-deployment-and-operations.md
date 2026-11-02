@@ -79,7 +79,7 @@ secret. `load_env()` finds no `/app/.env` and does nothing.
 | `SIGHTLINE_UPLOAD_MAX_MB` | 150 | a Navisworks report upload, all files |
 | `SIGHTLINE_ESCALATE_PER_HOUR` / `_PER_DAY` | 3 / 30 | second tries on Muse Wonder (each also one proposal) |
 | `SIGHTLINE_WONDER_MAX_USD_DAY` | 25 | what Muse Wonder may cost in a day, all visitors (`spend.py`) |
-| `SIGHTLINE_BUILT_VIEWS` | 0 | Show it built off unless the owner switches it on |
+| `SIGHTLINE_BUILT_VIEWS` | 0 | Show it built off unless the owner switches it on (on for everyone in the Dict since Nov 2, which wins over this) |
 | `SIGHTLINE_BUILT_PER_HOUR` / `_PER_DAY` | 6 / 60 | built views |
 | `SIGHTLINE_CHAT_PER_HOUR` / `_PER_DAY` | 40 / 1500 | chat messages |
 | `SIGHTLINE_VOICE_PER_HOUR` / `_PER_DAY` | 60 / 2000 | voice messages (a live session is one) |
@@ -115,7 +115,10 @@ would break the deployed configuration ([21](21-glossary-and-naming.md)).
 `settings._modal_dict()` opens `modal.Dict.from_name("sightline-settings", create_if_missing=True)` whenever
 `MODAL_TASK_ID` is set (Modal sets it in its containers), so the deploy script does not create it: first use does. The
 settings for everyone live under the key `settings`; they are read once per process (`settings.current`) and written on
-`PUT /api/settings`. A store that cannot be read or written is logged (`log.warning`) and the value in memory is used. The
+`PUT /api/settings`. So a value written to the Dict from outside the app (the Modal SDK, as on Nov 2) is read only by
+the next process: restart the container (`modal container stop --yes <id>`; the warm container comes back by itself),
+and change no setting in the owner menu before then, or the old process writes its own values back. The owner menu
+needs no restart. A store that cannot be read or written is logged (`log.warning`) and the value in memory is used. The
 Dict survives restarts and redeploys; nothing else the server holds does.
 
 ### The container

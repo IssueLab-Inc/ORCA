@@ -606,11 +606,11 @@ each one is a paid Muse Spark call; **Check this move** is not limited.
 
 Set `SIGHTLINE_OWNER_TOKEN` (24+ characters, in the `sightline-meta` Modal secret, never in git) and open the site with
 `#owner` to unlock the gear in the header. It has two scopes:
-- **For me:** Muse Spark and triage reasoning effort, the open-weights model on or off, and skipping the demo caps, for
-  the owner's own requests only (kept in that browser).
-- **For everyone:** Muse Spark and triage reasoning effort and the open-weights model, for every visitor
-  (`server/sightline/settings.py`, kept in the `sightline-settings` Modal Dict, or a JSON file locally, so they survive
-  restarts).
+- **For me:** Muse Spark and triage reasoning effort, the open-weights model on or off, second tries on Muse Wonder,
+  Show it built, and skipping the demo caps, for the owner's own requests only (kept in that browser).
+- **For everyone:** Muse Spark and triage reasoning effort, the open-weights model, second tries on Muse Wonder and
+  Show it built, for every visitor (`server/sightline/settings.py`, kept in the `sightline-settings` Modal Dict, or a
+  JSON file locally, so they survive restarts). On the live demo, Show it built is on for everyone (Nov 2).
 
 The owner's own settings win for the owner; the settings for everyone win over the environment. The open-weights model
 (Muse Spark Open, which writes clash titles and runs triage) is **off** unless switched on (`SIGHTLINE_OPEN_WEIGHTS`,

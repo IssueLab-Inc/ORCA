@@ -106,7 +106,7 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
 
 - The Wonder lane ([workings.md](workings.md)) is merged and deployed (Oct 31): check the video shows the Muse Wonder lane.
 - On the live app, the owner signs in (owner menu) and switches on, For me: the open-weights model (triage is on Muse
-  Spark otherwise) and Show it built (Muse Image; off on the deploy). The owner is exempt from the caps (Muse Wonder 3 an hour per
+  Spark otherwise) and Show it built (Muse Image; on for everyone since Nov 2, so this only keeps it on if that changes). The owner is exempt from the caps (Muse Wonder 3 an hour per
   visitor), so retakes don't run out.
 - Workings stays docked in its bar along the bottom, at the full height ORCA gives it for a run (380 px), never floated
   or in a window of its own (owner, Nov 2); use Fit when a run ends. The script's setups put it there before each take.
