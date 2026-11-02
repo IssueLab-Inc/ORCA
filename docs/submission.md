@@ -8,19 +8,25 @@ frame"). The video has its own script: [demo-video.md](demo-video.md).
 
 - **The user and the job first, the loop second, features last** (as "it also…"). Past Meta hackathon winners named a
   user and a job in one line ("A&E triage assistant for NHS staff"), and judges weighed coherence over feature count.
-- **Technical names are fine here** (IFC, STEP, BCF, MCP), unlike the video's plain words.
+- **The opening lines are plain words for any industry:** they describe the problem (two designs that conflict,
+  parts designed into the same space) before naming it. "Clash" is the building industry's word for it, and the app's:
+  use it after it has been explained, as the video does.
+- **Technical names are fine after that** (IFC, STEP, BCF, MCP), unlike the video's plain words.
 - **Every number is measured** and measured again on the day (CLAUDE.md, "Numbers people see are measured").
 
 ## The one-liner
 
-> ORCA is for the design coordinator who runs a project's clash meetings: it proposes fixes to the clashes between the
-> teams' 3D models as real edits to those models, and proves each one with geometry before anyone sees it.
+> ORCA is for the design coordinator, who makes every team's 3D design fit together: where two designs conflict, it
+> proposes a fix as a real edit to the model, and proves the fix with geometry before anyone sees it.
 
-Short form, for a tagline field: **Clash fixes for design coordinators, each proven by geometry before anyone sees it.**
+Short form, for a tagline field: **When teams' 3D designs collide, ORCA proposes the fix and proves it before anyone
+sees it.**
 
-"Design coordinator" is the user [01](architecture/01-product-and-journeys.md) names and the job
-[21](architecture/21-glossary-and-naming.md) calls design coordination; on a building the same person is often called
-the BIM coordinator. The README opens with the same sentence.
+"Design coordinator" is the user [01](architecture/01-product-and-journeys.md) names, and "who makes every team's 3D
+design fit together" says the job in words any industry reads: on a building the same person is often the BIM
+coordinator; on a machine, the engineer who owns the assembly. "Conflict" is the landing's word ("finds where they
+conflict"). Not "design coordination issues": it is vaguer, and it promises more than ORCA fixes (conflicts in space
+and room to spare, not missing information or code compliance). The README opens with the same sentence.
 
 ## What's next
 

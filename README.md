@@ -1,12 +1,12 @@
 # ORCA
 
-**For the design coordinator who runs a project's clash meetings.** ORCA proposes fixes to the clashes between the
-teams' 3D models as real edits to those models, and proves each one with geometry before anyone sees it. Proven on a
-building and on a robot cell.
+**For the design coordinator, who makes every team's 3D design fit together, on a building or a machine.** Where two
+designs conflict, ORCA proposes a fix as a real edit to the model, and proves it with geometry before anyone sees it.
 
-ORCA checks the models every team makes against each other, finds where they clash, sorts what matters from what
-doesn't, and proposes one to three fixes. The check behind every fix: the clash is gone, there is clearance, and
-nothing new clashes. You review the options in 3D, accept one, and export the edited IFC.
+ORCA checks the models every team makes against each other and finds where they conflict: two parts designed into
+the same space, or too close to leave room (the industry calls these clashes). It sorts what matters from what
+doesn't, and proposes one to three fixes. The check behind every fix: the conflict is gone, there is clearance, and
+nothing new is hit. You review the options in 3D, accept one, and export the edited IFC.
 
 ORCA stands for its loop: **Observe** the clash, **Resolve** it with a proposed fix, **Check** the fix with geometry,
 **Apply** it to the model.
