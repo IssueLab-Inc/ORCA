@@ -53,7 +53,7 @@ export function About({ start, onAbout, triageOpen = false }: {
           <h2 className="about-h">Pick a demo</h2>
           <div className={`about-demos${start.onCell ? "" : " one"}`}>
             <DemoCard clip="/demos/fix-northbank" eyebrow="Building · 4 IFC models" title="Northbank, a riverside office site"
-              alt="ORCA fixing Northbank's clash #1, sped up: the camera flies from the whole site to the supply air duct running through the transfer girder while Muse Spark thinks. Its ideas are tried in the model: raising the duct 400 mm through the girder's web opening passes, dropping it under the girder hits a ceiling. The fix, clear by 50 mm, is shown before and after."
+              alt="ORCA fixing Northbank's clash #1, sped up: the camera flies from the whole site to the supply air duct running through the transfer girder while Muse Spark thinks. Its ideas are tried in the model, the duct raised 400 mm through the girder's web opening with square bends and with 45° ones, and the fix, clear by 50 mm, is shown before and after."
               blurb={<>Structure, building services, architecture and site, modelled by four teams. On Level 02 a transfer
                 girder is hit by a duct, a cable tray and a water main.</>}
               shows={[<>Every pair of models checked: <b>464 clashes in 1,732 elements, in 4 s</b></>,
@@ -134,35 +134,35 @@ export function About({ start, onAbout, triageOpen = false }: {
 
       <section>
         <h2 className="about-h">What ORCA does</h2>
-        <div className="about-does">
         <ol className="about-steps">
-          <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Checks the models and sorts what it finds">
+          <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Checks the models and sorts what it finds"
+            clip={{ src: "/demos/check", width: 1000, height: 751, caption: "Northbank's check, then its list: 464 clashes, numbered, being named.",
+              alt: "Northbank's three building models checked: ORCA lists each pair of models and each model against itself while it checks 1,961 elements, then the list appears, 464 clashes numbered and grouped by check, the supply air main through the girder first at -300 mm, and they are being named." }}>
             ORCA checks every pair of models and each model against itself, and numbers each clash.{" "}
             {triageOpen ? <><b>Muse Spark Open</b>, an open-weights model,</> : <b>Muse Spark</b>} names every one and gives
             it a verdict: a real problem, by design, or a modelling mistake. Alike clashes (forty bolts in forty plates) are
             read once.
           </Step>
-          <Step n={2} icon={<Eye size={18} aria-hidden />} title="Understands a clash">
+          <Step n={2} icon={<Eye size={18} aria-hidden />} title="Understands a clash"
+            clip={{ src: "/demos/understand", width: 760, height: 790, caption: "Muse Spark on #1, sped up: the three pictures, its reasoning as it thinks, what it understood.",
+              alt: "The Clash panel for Northbank's #1 while Muse Spark works, sped up: the three pictures of the duct through the girder, then its reasoning as it thinks, then its understanding: the duct crosses the 1000 deep girder with 300 mm overlap, cannot shift as a whole without pulling apart its tees, and the girder has an opening on this line it can use." }}>
             <b>Muse Spark</b> looks at three pictures of the clash and reads the model's own data: what each element is,
             which way it runs, where the openings are. You can follow its reasoning as it thinks.
           </Step>
-          <Step n={3} icon={<ShieldCheck size={18} aria-hidden />} title="Proposes fixes, and checks every one">
+          <Step n={3} icon={<ShieldCheck size={18} aria-hidden />} title="Proposes fixes, and checks every one"
+            clip={{ src: "/demos/workings", width: 1000, height: 504, caption: <><b>Workings</b>, the same run: your request, Muse Spark's ideas, ORCA's checks, the rank. Every run draws its own in <b>Activity</b>.</>,
+              alt: "Workings replaying Northbank's run, sped up: one lane each for you, Muse Spark and ORCA. Your request and ORCA's brief go to Muse Spark, whose round replies with two ideas; ORCA checks the first in the model's geometry and it is verified, so ORCA stops there, ranks it and leaves one verified option, then kept." }}>
             It suggests real edits: raising a duct through an opening in a beam, or trimming a member back where it runs into another. A geometry engine then tests each
             one in the actual model: the clash is gone, there is room to spare, and nothing new is hit. Ideas that fail
             go back with the reason. <b>You only see fixes that passed.</b>
           </Step>
-          <Step n={4} icon={<Download size={18} aria-hidden />} title="You review and export">
+          <Step n={4} icon={<Download size={18} aria-hidden />} title="You review and export"
+            clip={{ src: "/demos/keep", width: 1000, height: 625, caption: "Accept: the server tries the fix again, edits the model and checks it.",
+              alt: "Northbank's #1 after the fix, Before and After: overlap -300 mm, then clear by 50 mm. Accept is pressed: Applying the fix, then Fix kept in the model, checked again, and Export IFC counts one edit to download." }}>
             Watch it try ideas live in the 3D view, compare before and after, accept the fix, and download the edited
             model as an IFC file that any design tool can open.
           </Step>
         </ol>
-        <figure className="about-workings">
-          <Clip src="/demos/workings" width={1000} height={504}
-            alt="Workings replaying Northbank's run, sped up: one lane each for you, Muse Spark and ORCA. Your request and ORCA's brief go to Muse Spark, whose round replies with three ideas; ORCA checks each in the model's geometry: one passes, one hits a ceiling, and an opening cannot be asked for in a transfer girder. The rank leaves one verified option." />
-          <figcaption className="hint"><b>Workings</b>, the run on the Northbank card: you ask, Muse Spark proposes, ORCA checks
-            each idea in the geometry and ranks the ones that pass. Every run draws its own, live, in <b>Activity</b>.</figcaption>
-        </figure>
-        </div>
       </section>
 
       {onAbout && (
@@ -254,11 +254,21 @@ function Discipline({ colour, name, what }: { colour: string; name: string; what
   );
 }
 
-function Step({ n, icon, title, children }: { n: number; icon: ReactNode; title: string; children: ReactNode }) {
+/** One step of "What ORCA does": what it does, beside a recorded run of it (`Clip`) with a line on what that shows. */
+interface StepClip { src: string; alt: string; width: number; height: number; caption: ReactNode }
+const STEP_CLIP_MAX_H = 430;   // px: a squarer clip (the Clash panel) is narrowed so no row towers over the rest
+
+function Step({ n, icon, title, clip, children }: { n: number; icon: ReactNode; title: string; clip: StepClip; children: ReactNode }) {
   return (
-    <li className="step">
-      <div className="step-icon" aria-hidden>{icon}<span>{n}</span></div>
-      <div><h3>{title}</h3><p>{children}</p></div>
+    <li className="step-row">
+      <div className="step">
+        <div className="step-icon" aria-hidden>{icon}<span>{n}</span></div>
+        <div><h3>{title}</h3><p>{children}</p></div>
+      </div>
+      <figure className="step-clip" style={{ maxWidth: Math.round(STEP_CLIP_MAX_H * clip.width / clip.height) }}>
+        <Clip src={clip.src} alt={clip.alt} width={clip.width} height={clip.height} />
+        <figcaption className="hint">{clip.caption}</figcaption>
+      </figure>
     </li>
   );
 }
