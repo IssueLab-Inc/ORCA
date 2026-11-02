@@ -28,7 +28,7 @@ test("arguments: the defaults, shots by name, and refusals that say what to do",
 });
 
 test("shots run in the script's order whatever order --only gives, each with a setup and a take", () => {
-  assert.deepEqual(demo.SHOT_NAMES, ["open", "triage", "duct", "built", "accept", "revision", "cell-29", "cell-13", "voice"]);
+  assert.deepEqual(demo.SHOT_NAMES, ["open", "triage", "duct", "built", "accept", "revision", "cell-22", "cell-13", "voice"]);
   assert.deepEqual(demo.selectShots(demo.SHOTS, ["voice", "duct", "open"]).map((s) => s.name), ["open", "duct", "voice"]);
   assert.equal(demo.selectShots(demo.SHOTS, null).length, demo.SHOTS.length);
   for (const s of demo.SHOTS) assert.equal(typeof s.setup === "function" && typeof s.take === "function", true, s.name);
@@ -152,10 +152,10 @@ test("Ctrl+C while the start is in flight stops the take once it has started, be
 
 test("the summary says RETAKE or FAILED with why, and either makes the exit code non-zero", () => {
   const ok = { shot: "duct", status: "ok", videoPath: "duct.mp4" };
-  const again = { shot: "cell-29", status: "retake", why: "Muse Wonder's option isn't ranked first in this take", videoPath: "c.mp4" };
+  const again = { shot: "cell-22", status: "retake", why: "the chat's run verified no fix for #22 (0 verified of 5 tried)", videoPath: "c.mp4" };
   const broken = { shot: "built", status: "failed", why: "setup: #1 got no verified option this time: run it again" };
   assert.match(demo.summaryLine(ok), /^ {2}duct {6}ok {6}duct\.mp4$/);
-  assert.match(demo.summaryLine(again), /cell-29 +RETAKE +c\.mp4 +\(Muse Wonder's option isn't ranked first in this take\)/);
+  assert.match(demo.summaryLine(again), /cell-22 +RETAKE +c\.mp4 +\(the chat's run verified no fix for #22 \(0 verified of 5 tried\)\)/);
   assert.match(demo.summaryLine(broken), /built +FAILED +\(setup: #1 got no verified option/);
   assert.equal(demo.exitCodeOf([ok]), 0);
   assert.equal(demo.exitCodeOf([ok, again]), 1);
@@ -165,6 +165,51 @@ test("the summary says RETAKE or FAILED with why, and either makes the exit code
 test("the sign-in checklist and the built shot's refusal name Show it built (Muse Image), as the owner's settings do", () => {
   assert.equal(demo.SIGN_IN, "Sign in as owner, switch on the open-weights model and Show it built (Muse Image), then close the window");
   assert.match(demo.NO_BUILT, /"Show it built \(Muse Image\)" for you in Owner settings \(--login\)/);
+});
+
+/** What the browser keeps when the opening can start as it is: no filters, 3D only, Workings, Activity in its bar along
+ * the bottom at ORCA's Workings height (the dock's saved layout, as dockview writes it). */
+const tidyKept = (bottom = {}) => ({
+  filters: JSON.stringify({ rules: [] }), layout: "single", workings: JSON.stringify({ on: true, view: "work" }),
+  dock: JSON.stringify({ v: 1, layout: { grid: {}, panels: {}, floatingGroups: [], edgeGroups: {
+    bottom: { size: 380, visible: true, group: { id: "edge-bottom", views: ["activity"] }, ...bottom } } } }),
+});
+
+test("the opening is tidied first when the browser keeps a filter, Four views, Workings off or Activity off its bar", () => {
+  assert.equal(demo.WORKINGS_HEIGHT, 380, "ORCA's own Workings height (App.tsx WORKINGS_HEIGHT)");
+  assert.deepEqual(demo.untidy(tidyKept()), []);
+  assert.deepEqual(demo.untidy({ ...tidyKept(), filters: null, layout: null, workings: null }), [], "nothing kept yet is the default: 3D only, Workings on");
+  assert.deepEqual(demo.untidy(tidyKept({ size: 377 })), [], "a few pixels off is as ORCA sized it");
+  assert.deepEqual(demo.untidy({ ...tidyKept(), filters: JSON.stringify({ rules: [{ name: "Hide Site" }] }) }), ["Northbank has filters kept"]);
+  assert.deepEqual(demo.untidy({ ...tidyKept(), layout: "quad" }), ["the viewer is on quad"]);
+  assert.deepEqual(demo.untidy({ ...tidyKept(), workings: JSON.stringify({ on: true, view: "steps" }) }), ["Activity isn't showing Workings"]);
+  assert.deepEqual(demo.untidy({ ...tidyKept(), workings: JSON.stringify({ on: false, view: "steps" }) }), ["Activity isn't showing Workings"]);
+  assert.deepEqual(demo.untidy(tidyKept({ size: 120 })), ["Activity's bar is 120 px high, not 380"]);
+  assert.deepEqual(demo.untidy(tidyKept({ collapsed: true })), ["Activity's bar is closed"]);
+  assert.deepEqual(demo.untidy(tidyKept({ group: { views: [] } })), ["Activity isn't in its bar along the bottom"], "floated, or docked elsewhere");
+  assert.deepEqual(demo.untidy({ ...tidyKept(), dock: null }), ["no panel layout kept yet"]);
+  assert.deepEqual(demo.untidy({ ...tidyKept(), dock: "not json" }), ["no panel layout kept yet"]);
+});
+
+test("the chat's fix is read from the steps under its answer, as Chat lists them", () => {
+  assert.equal(demo.CHAT_LINE, "Find a fix for clash #22.");
+  assert.deepEqual(demo.chatFix(["Read a clash (#22) → PL-302 segment 3 × column C4", "Ran the fix agent (#22) → 2 verified of 6 tried"]),
+    { ran: true, verified: 2, said: "2 verified of 6 tried" });
+  assert.deepEqual(demo.chatFix(["Ran the fix agent (#22) → 0 verified of 7 tried"]), { ran: true, verified: 0, said: "0 verified of 7 tried" });
+  assert.deepEqual(demo.chatFix(["Ran the fix agent (#22) → refused: allowance used"]), { ran: true, verified: 0, said: "refused: allowance used" });
+  assert.deepEqual(demo.chatFix(["Ran the fix agent (#22) …"]), { ran: true, verified: 0, said: "" }, "still running: no summary yet");
+  assert.deepEqual(demo.chatFix(["Read a clash (#22) → PL-302"]), { ran: false, verified: 0, said: "" });
+  assert.deepEqual(demo.chatFix([]), { ran: false, verified: 0, said: "" });
+});
+
+test("the takes' window is maximized and its page size said; a window that won't maximize stops the run with why", async () => {
+  const lines = [], asked = [];
+  const helper = { maximizeWindow: async (page, o) => { asked.push([page, o]); return { width: 2458, height: 1291 }; } };
+  assert.deepEqual(await demo.maximize(helper, "page", { log: (l) => lines.push(l) }), { width: 2458, height: 1291 });
+  assert.deepEqual(asked, [["page", { timeoutMs: 5000 }]]);
+  assert.deepEqual(lines, ["Window maximized: the page is 2458 × 1291"]);
+  const stuck = { maximizeWindow: async () => { throw new Error("Couldn't maximize the browser window within 5000 ms"); } };
+  await assert.rejects(demo.maximize(stuck, "page", quiet), /Couldn't maximize the takes' window \(Couldn't maximize the browser window within 5000 ms\): .*maximized window on the primary display/);
 });
 
 /** A page whose clash rows draw after `rowsAfter` ms; records every click on the clashes tab. */

@@ -4,6 +4,9 @@
 picture swaps for the new filters are proposed and tested, for the owner to agree (Script, "Proposed"). To record
 by the Nov 3 freeze; submit Nov 4 before noon ET ([20](architecture/20-decisions-limits-and-roadmap.md), "The hackathon
 frame"). Nov 2: a script records each shot as its own Recordly take ("Before recording", "Recording the takes").
+Nov 2, after the owner tested the takes: the cell's beat is #22 with its fix asked for in Chat (in place of #29), `duct`
+and `cell-22` switch to four views on camera, Workings stays docked in its bar at full height, and the window is
+maximized.
 
 ## What it has to do
 
@@ -46,11 +49,11 @@ Muse Image. Each is named once, with what it does.
 | 0:00–0:12 | Three see-through drawings of one floor, one per team, slide together; where a duct passes through a beam, it glows | "Every building is designed by several teams at once: one for the structure, one for air and water, one for the walls. Each design works. Together, they don't." |
 | 0:12–0:26 | Northbank opens; the outer walls fade to show the steel and the services | "Where they collide is a clash: two things designed into the same space. We've sat in the meetings where teams spend days finding them, and longer arguing about who moves. Miss one, and the builders find it on site." |
 | 0:26–0:40 | The notch: "Checking the models"; 464 appear; Triage on Muse Spark Open, Workings drawing its calls (4×) | "ORCA checks every part against every other: 464 clashes, found in four seconds. Muse Spark Open, an open-weights model, reads them all and finds the five that need a fix." |
-| 0:40–1:12 | #1, the duct through the beam; Propose fixes; Workings: Muse Spark's round, the idea, ORCA's check turning teal; Before and After | "Take this one: an air duct running straight through the main steel beam. Muse Spark looks at it from three angles, reads the measurements, and proposes a real change to the design. Then ORCA tries it in the model. Is the clash gone? Is there room to spare? Did it hit anything else? You can watch it work. This one passes first time: lift the duct 40 centimetres, through the hole already in the beam, with 5 centimetres to spare." |
+| 0:40–1:12 | #1, the duct through the beam; four views (plan, section, elevation beside 3D); Propose fixes; Workings: Muse Spark's round, the idea, ORCA's check turning teal; Before and After in all four | "Take this one: an air duct running straight through the main steel beam. Muse Spark looks at it from three angles, reads the measurements, and proposes a real change to the design. Then ORCA tries it in the model. Is the clash gone? Is there room to spare? Did it hit anything else? You can watch it work. This one passes first time: lift the duct 40 centimetres, through the hole already in the beam, with 5 centimetres to spare." |
 | 1:12–1:22 | ORCA's fix beside Northbank's later revision. Caption: "Northbank: a demo building with a later design revision to compare against" | "The building's next design revision made the same move. On all three clashes at this beam, ORCA matched it." |
 | 1:22–1:42 | Show it built (4×); Workings: Muse Image's rounds, the pixel check, the judges; the picture with the wipe slider over ORCA's view | "Not everyone reads technical drawings. Muse Image turns ORCA's view into a picture of what will be built, and Muse Wonder judges check it against the design before you see it. We learned Image can't design a fix, because it invents shapes. So it only paints what has already been checked." |
 | 1:42–1:54 | Accept this fix; the design changes; Export; the PDF report | "Accept, and the design changes. ORCA hands back the files the designers' own software opens, with a report for each team." |
-| 1:54–2:34 | The robot cell; #29, a fence post inside the robot's safety zone; Spark's fix; Look for a better fix; the Muse Wonder lane in Workings; Wonder's move ranked first | "We built ORCA for buildings, our world. Then we gave it a robot cell from a factory floor: a different world, the same problem. Here a fence post stands inside the robot's safety zone. Muse Spark finds a fix. Then Muse Wonder, a larger model, takes a longer look at everything Spark tried, and finds a better one: one straight move, with more room to spare. ORCA checks that too, and ranks it first. In this cell, ORCA found all 17 clashes we had planted." |
+| 1:54–2:34 | The robot cell in four views; #22, a compressed-air pipe through one of the plant's columns; in Chat, "Find a fix for clash #22."; Muse Spark runs ORCA's fix agent, Workings drawing it; the verified fix in every view, then in the Clash panel (owner, Nov 2: in place of #29) | Draft, for the owner: "We built ORCA for buildings, our world. Then we gave it a robot cell from a factory floor: a different world, the same problem. Here an air pipe runs through one of the plant's columns. Just ask for a fix, in plain words. Muse Spark runs the same loop: it proposes changes, ORCA checks each against the whole cell, and only a fix that passes comes back. In this cell, ORCA found all 17 clashes we had planted." |
 | 2:34–2:42 | #13, the operator's screen: No verified fix, and what decides it | "And when nothing passes, ORCA changes nothing, and tells you what's in the way." |
 | 2:42–2:50 | A voice command; an AI agent asking ORCA for a fix | "Ask it out loud, or let your own AI agent drive it." |
 | 2:50–3:00 | The wordmark settles in the notch; Observe · Resolve · Check · Apply | "Each design worked. Now, together, they do. ORCA: AI you can trust to change real designs, because it checks every change." |
@@ -68,9 +71,6 @@ already at about 2:55, so they go into two shots that exist, as pictures only: n
 Optional, picture only: while #1 is picked (0:40–1:12), keep the Properties panel in view, so the duct's breadcrumb
 (Northbank › … › Level 02) and its icon bar are on screen. Not narrated.
 
-If a take of #29 shows a failed Spark idea (it did in one of two runs), add after "Muse Spark finds a fix": "Its first
-idea fails, and ORCA says why; the second passes."
-
 Honesty: Northbank is a demo building made by IssueLab, and its "next design revision" is a later model of it (the
 caption says so). The cell's clashes are called planted.
 
@@ -79,7 +79,7 @@ caption says so). The cell's clashes are called planted.
 | Criterion | Where |
 |---|---|
 | Impact | The firsthand problem; days of finding and arguing down to minutes; matching the later revision; the same loop in a factory |
-| Meta tooling | Four Muse models with four jobs, each visible in Workings: Spark Open sorts at scale, Spark reasons from three views and the numbers, Wonder takes a longer look and beats Spark's fix, Image paints a checked fix under Wonder's judges. The finding: Image can't design, so ORCA never lets it |
+| Meta tooling | Four Muse models with four jobs, each visible in Workings: Spark Open sorts at scale, Spark reasons from three views and the numbers (and runs the fix agent when asked in Chat), Wonder takes a longer look when Spark finds nothing, Image paints a checked fix under Wonder's judges. The finding: Image can't design, so ORCA never lets it |
 | Technical depth | The geometry check after every idea; real edits to the real files; a refusal that explains itself (#13) |
 | Demo | Recorded live; waits sped up with a visible "4×" badge, never faked |
 
@@ -107,8 +107,9 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
 - On the live app, the owner signs in (owner menu) and switches on, For me: the open-weights model (triage is on Muse
   Spark otherwise) and Show it built (Muse Image; off on the deploy). The owner is exempt from the caps (Muse Wonder 3 an hour per
   visitor), so retakes don't run out.
-- Workings is cramped in the default bottom bar. Float Activity or open it in its own window, make it tall, and use Fit
-  when a run ends.
+- Workings stays docked in its bar along the bottom, at the full height ORCA gives it for a run (380 px), never floated
+  or in a window of its own (owner, Nov 2); use Fit when a run ends. The script's setups put it there before each take.
+- The viewer starts each take on 3D only; `duct` and `cell-22` switch to four views on camera (Views, then Four views).
 - The opening's filters are agreed (Nov 2): **Clear all** in Filters before #1, so the clash shots look as tested.
   Filters are kept per set of models in the browser, so clear them between takes too.
 - Re-measure every number on the day. A number that comes out differently changes its line, never the other way.
@@ -141,19 +142,22 @@ from it.
 |---|---|---|---|
 | `open` | 0:12–0:26 | Open the Northbank demo, the check, 464 listed; Filters, Colour by… Discipline (the cursor goes to the list and the choice is set there: Chrome's own drop-down is a window of its own, which a window recording doesn't capture), a Hide filter on Site and Architecture, the views closing in; then Visual style: X-ray (the services between the floors) | 180 s to open |
 | `triage` | 0:26–0:40 | Triage all, until "N need a fix of 464"; Fit in Workings. RETAKE when the model left clashes unread | 180 s |
-| `duct` | 0:40–1:12 | #1, Propose fixes, the verified options; Fit; Before, After. RETAKE when no option verifies | 300 s |
+| `duct` | 0:40–1:12 | #1 (the camera flies to it in the one 3D view); Views › Four views, so the plan, section and elevation open on it; Propose fixes, the verified options; Fit; Before, After, in all four views. RETAKE when no option verifies | 300 s |
 | `revision` | 1:12–1:22 | Northbank with `Northbank-MEP-Rev04.ifc` in place of MEP, from the camera the duct take ended on with a section box round #1, in X-ray: to set beside the duct take's After | 180 s to open |
 | `built` | 1:22–1:42 | Show it built on #1's first option, the picture; Fit; the wipe slider dragged across | 180 s |
 | `accept` | 1:42–1:54 | Accept this fix; Export (the IFC saved); Menu › Report, then (3 s on, its own zoom) Build the report, Download (the PDF saved) | 300 s |
-| `cell-29` | 1:54–2:34 | Starts on #29's row (the list filtered to it before the take); #29, Propose fixes; Fit; Look for a better fix (Ask Muse Wonder when Spark found none); Fit. RETAKE when Wonder's move isn't ranked first | 300 s each |
+| `cell-22` | 1:54–2:34 | Starts with #22's row on screen (the list filtered to it before the take when it isn't); Views › Four views; #22; Chat: types "Find a fix for clash #22.", Send; Muse Spark runs ORCA's fix agent (its `propose_fixes` tool) while Workings draws the run; then the Clash panel with the verified fix. RETAKE when the chat doesn't run the fix agent on #22 or it verifies nothing | 300 s |
 | `cell-13` | 2:34–2:42 | #13, Propose fixes, then Ask Muse Wonder (as tested; kept, owner Nov 2). RETAKE when an option verifies or Wonder isn't offered | 300 s each |
 | `voice` | 2:42–2:50 | Chat: types "Isolate the services and colour them by system.", Send, Muse Spark's reply | 180 s |
 
 - **Setups are not recorded.** Before each take the script opens the models when the shot needs them afresh, clears
-  Filters (**Clear all**) and floats Activity inside the page before the clash shots (never in its own window: a window
-  recording wouldn't see it) with its Workings view chosen (turned on if it was off), and puts Activity back in its bar
-  for `open` and `voice`. The opening's filters stay for `triage`.
-- **Order.** Shots run in the order `open`, `triage`, `duct`, `built`, `accept`, `revision`, `cell-29`, `cell-13`,
+  Filters (**Clear all**), puts the viewer back on 3D only (the layout is kept in the browser), and docks Activity in
+  its bar along the bottom (**Put it back** when it is away, the bar opened when collapsed) with its Workings view
+  chosen (turned on if it was off) and the bar at Workings' full height: ORCA's own fit, which grows a short bar to
+  380 px when Workings is chosen, or a drag of the bar's top edge when it was sized taller by hand. The opening starts
+  from the start page, so when the browser keeps a filter, four views, Workings off or Activity off its bar, its
+  setup puts that right in Northbank first. The opening's filters stay for `triage`.
+- **Order.** Shots run in the order `open`, `triage`, `duct`, `built`, `accept`, `revision`, `cell-22`, `cell-13`,
   `voice`, whatever order `--only` gives: Northbank, its triage and #1's options carry from `duct` to `accept`, and
   `revision` uses the camera `duct` ended on (kept as the saved view "Demo: ORCA's fix for #1"). A shot run alone sets up
   what it needs, unrecorded: `accept` alone first runs triage and a proposal for #1.
@@ -166,8 +170,9 @@ from it.
 - **The live app's first answer** after a quiet spell can be a cold start: the start page is waited for up to 180 s.
 - **Zooms:** clicks meant to get their own zoom are at least 3 s apart (Recordly merges clicks under 2.5 s apart into
   one). Only the cursor is drawn: typing shows as the text appearing.
-- **The window** is Chrome in app mode with a 1440 × 900 page, as tested, titled "ORCA · AI design coordination"; a
-  Chrome or Edge window with ORCA open in a tab is told apart by its exact title. Leave it where the script puts it.
+- **The window** is Chrome in app mode, maximized on the primary display (the script prints the page size it got, and
+  stops before recording if the window won't maximize), titled "ORCA · AI design coordination"; a Chrome or Edge
+  window with ORCA open in a tab is told apart by its exact title. Leave it where the script puts it.
 - **Check before the day:** `node web/scripts/record-demo.cjs --dry-run --headless --only open` runs a shot's steps with
   no Recordly and no window, and saves where each take ended as a picture (`orca-demo-dry-run` beside the profile). Use
   it against a local server: on the live app the steps are real (models opened, Muse called).
@@ -176,4 +181,4 @@ from it.
 
 - Captions burned in (judges often watch muted); light music, none under the key lines.
 - One clean take per beat; waits at 4× with a badge (triage, Show it built, Wonder).
-- Record the cell's #29 until a take shows Wonder's move ranked first (two of two runs so far).
+- Record the cell's #22 until the chat's run shows a verified fix (the script marks a take without one RETAKE).

@@ -698,12 +698,14 @@ No `sessionStorage` or IndexedDB is used.
   "Recording the takes"), each as its own take in Recordly, a desktop screen recorder outside this repository (AGPL-3.0)
   that draws the cursor from the script's clicks and zooms on each. It loads Recordly's Playwright helper and Playwright
   from a Recordly checkout (`--recordly`, `RECORDLY_DIR`, else `../Recordly`) and copies nothing from it. One function
-  per shot: an unrecorded setup (models opened afresh when needed, Filters cleared, Activity floated in the page showing
-  Workings) and a take in Chrome's app mode at a 1440 × 900 page, with a profile outside git (`--login` signs the owner
-  in once); a failed take, or one stopped by Ctrl+C, is still stopped in Recordly with its footage kept, and a take
-  that shows the wrong thing (Muse Wonder's move not ranked first) is reported as a RETAKE. `--dry-run --headless` runs
-  the steps with no Recordly and saves where each take ended. Not served by the app; `web/tests/record-demo.test.mjs`
-  covers its arguments, takes, Ctrl+C and summary.
+  per shot: an unrecorded setup (models opened afresh when needed, Filters cleared, the viewer on 3D only, Activity
+  docked in its bottom bar showing Workings at `WORKINGS_HEIGHT`, by ORCA's own fit or a drag of the bar's edge) and a
+  take in Chrome's app mode in a maximized window (Recordly's `maximizeWindow`), with a profile outside git (`--login`
+  signs the owner in once); `duct` and `cell-22` switch to Four views on camera, and `cell-22` asks Chat for #22's fix.
+  A failed take, or one stopped by Ctrl+C, is still stopped in Recordly with its footage kept, and a take that shows
+  the wrong thing (no verified fix from the chat's run on #22) is reported as a RETAKE. `--dry-run --headless` runs the
+  steps with no Recordly and saves where each take ended. Not served by the app; `web/tests/record-demo.test.mjs`
+  covers its arguments, takes, Ctrl+C, summary, the opening's tidy check, the chat's fix and the maximized window.
 - **`web/public/`:** `favicon.svg`, `brand/` (above), `popout.html` (the page a panel's own window opens: dockview moves the panel in
   and copies the styles), `demos/*.webp` (the stills, and the landing's clips with their stills), `tour/*.json` (the five recordings), and the generated `wasm/`.
 - **`web/index.html`:** the shell (`#root`, `viewport-fit=cover`, the IBM Plex fonts from Google Fonts, title "ORCA ·

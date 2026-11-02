@@ -9,22 +9,35 @@
 //   node web/scripts/record-demo.cjs [--url <ORCA>] [--only duct,built] [--no-filters] [--no-xray]
 //   node web/scripts/record-demo.cjs --dry-run --headless --only open  no Recordly: a shot's steps, nothing recorded
 //
-// A shot is { name, setup(page), take(page) }. Its setup is not recorded: it opens the models, clears Filters and floats
-// Activity (Workings) in the page. Its take is one Recordly take with the agent cursor: every visible click glides there.
+// A shot is { name, setup(page), take(page) }. Its setup is not recorded: it opens the models, clears Filters, puts the
+// viewer back on 3D only and Activity (Workings) in its bar along the bottom at ORCA's own Workings height. Its take is
+// one Recordly take with the agent cursor: every visible click glides there. The takes' window is maximized.
 // If anything fails inside a take, the take is still stopped (its footage kept), the failure reported, and the next
-// shot goes on; a take that ran but shows the wrong thing (Muse Wonder's move not ranked first, say) is a RETAKE. Ctrl+C
-// stops the take that is recording, keeping its footage. Shots run in the order of SHOTS, whatever --only's order.
+// shot goes on; a take that ran but shows the wrong thing (no verified fix from the chat's run on #22, say) is a
+// RETAKE. Ctrl+C stops the take that is recording, keeping its footage. Shots run in the order of SHOTS, whatever
+// --only's order.
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { createRequire } = require("module");
 
 const ROOT = path.resolve(__dirname, "..", "..");
-const VIEWPORT = { width: 1440, height: 900 };   // as every shot was tested (docs/demo-video.md, "Shots, as tested")
+// The takes' window is maximized on the primary display (owner, Nov 2). A headless dry run has no window to maximize:
+// its page is about the size of a maximized window on a 1080p display.
+const DRY_RUN_VIEWPORT = { width: 1920, height: 1080 };
 const GAP = 3000;        // Recordly merges clicks under 2.5 s apart into one zoom: 3 s gives a click its own
 const LONG = 180000;     // triage (86 s as tested) and Show it built (85 s), and opening the models
-const RUN = 300000;      // a proposal, a second look by Muse Wonder, the report
+const RUN = 300000;      // a proposal, a second look by Muse Wonder, the report, a fix asked for in Chat
+// Activity's bar along the bottom, as ORCA sizes it for Workings (App.tsx, WORKINGS_HEIGHT and WORKINGS_SHORT): it
+// grows a bar shorter than WORKINGS_SHORT to WORKINGS_HEIGHT when Workings is chosen, and leaves a taller one alone.
+const WORKINGS_HEIGHT = 380, WORKINGS_SHORT = 240;
 const VOICE_LINE = "Isolate the services and colour them by system.";
+const CHAT_LINE = "Find a fix for clash #22.";   // the cell-22 take asks for its fix in Chat (owner, Nov 2)
+const TYPING = 65;       // ms a key: readable typing
+// The viewer's layouts (ViewerToolbar.tsx): kept in the browser (`sightline.views.layout`), so every setup puts back
+// "3D only"; `duct` and `cell-22` switch to "Four views" on camera.
+const VIEWS_MENU = 'button[aria-label="Views: plans, sections and elevations beside the 3D view"]:visible';
+const NORTHBANK_FILTERS = "sightline.filters.Northbank";   // filters are kept per set of models, by their common name
 // The owner's sign-in checklist (--login), and what the built shot says when its setting is off.
 const SIGN_IN = "Sign in as owner, switch on the open-weights model and Show it built (Muse Image), then close the window";
 const NO_BUILT = 'No "Show it built" on #1\'s fix: switch on "Show it built (Muse Image)" for you in Owner settings (--login)';
@@ -42,11 +55,11 @@ const USAGE = `Records the demo video's shots, each as a Recordly take of its ow
   --only <shot,...>  only these shots; they run in this order whatever order is given:
                      open      Northbank opens: Colour by Discipline, Site and Architecture hidden, then X-ray
                      triage    Triage all, Workings drawing its calls
-                     duct      #1 Propose fixes, Workings, Before / After
+                     duct      #1, Four views, Propose fixes, Workings, Before / After
                      built     Show it built on #1's fix, the wipe slider
                      accept    Accept this fix, Export, the PDF report
                      revision  the later revision (Rev04), from the camera the duct take ended on
-                     cell-29   the machine cell's #29: Propose, Look for a better fix
+                     cell-22   the machine cell in Four views, #22, then "${CHAT_LINE}" in Chat
                      cell-13   the cell's #13: no verified fix, then Muse Wonder's second look
                      voice     types "${VOICE_LINE}" in Chat
   --no-filters       the opening without its filter beats (Colour by, the Hide filter); --filters is the default
@@ -292,16 +305,21 @@ async function clearFilters(page) {
   if (await search.inputValue()) await search.fill("");
 }
 
-/** Activity (Workings) floating inside the page, or back in its bottom bar. Never in a window of its own: a window
- * recording would not see it. */
-async function placeActivity(page, where) {
+/** Activity's group in the dock, found by its tab (its own group's buttons only: a bar it left keeps none of them). */
+const activityGroup = (page) => page.locator(".dv-groupview").filter({ has: page.locator('[data-panel-tab="activity"]:visible') }).last();
+
+/** Activity at home in its bar along the bottom, the bar open (owner, Nov 2: never floated, nor in a window of its own,
+ * which a window recording wouldn't see). Whether it was floated, docked elsewhere or its bar collapsed, its own
+ * buttons put it back: "Put it back", then "Open the bottom bar". */
+async function homeActivity(page) {
   const activity = tab(page, "activity");
-  if (!(await activity.count())) { console.warn("  No Activity panel: Workings stays where it is"); return; }
+  if (!(await activity.count())) { console.warn("  No Activity panel on the page (closed?): Workings stays where it is"); return false; }
   await activity.click();
-  // Its own group's buttons only: a bar it left can still hold a hidden "Float Activity".
-  const group = page.locator(".dv-groupview").filter({ has: page.locator('[data-panel-tab="activity"]:visible') }).last();
-  const button = group.getByRole("button", { name: where === "float" ? "Float Activity" : "Put it back" });
-  if (await shown(button)) { await button.first().click({ timeout: 5000 }); await sleep(600); }
+  for (const name of ["Put it back", "Open the bottom bar"]) {
+    const button = activityGroup(page).getByRole("button", { name });
+    if (await shown(button)) { await button.first().click({ timeout: 5000 }); await sleep(600); }
+  }
+  return true;
 }
 
 /** Activity showing Workings, as the app's own controls set it (kept in the browser, `sightline.workings`): turned on
@@ -310,17 +328,121 @@ async function showWorkings(page) {
   const turnOn = page.locator(".wk-off").getByRole("button", { name: "Turn it on" });
   if (await shown(turnOn)) { await turnOn.first().click({ timeout: 5000 }); await sleep(300); }
   const work = page.getByRole("tablist", { name: "Activity view" }).getByRole("tab", { name: /Workings/ }).first();
-  if ((await work.isVisible()) && (await work.getAttribute("aria-selected")) !== "true") await work.click({ timeout: 5000 });
+  if ((await work.isVisible()) && (await work.getAttribute("aria-selected")) !== "true") { await work.click({ timeout: 5000 }); await sleep(600); }
   if (!(await work.isVisible())) console.warn("  Activity shows no Workings tab: Workings may not be drawn in this take");
 }
 
-/** Before a clash shot (docs/demo-video.md, "Before recording"): no filters, Workings floated where it can be seen,
- * the Clash panel in front. */
-async function prepareClashShot(page) {
-  await clearFilters(page);
-  await placeActivity(page, "float");
+/** The height of Activity's bar along the bottom, or null when Activity isn't docked there. */
+function barHeight(page) {
+  return page.evaluate(() => {
+    const t = [...document.querySelectorAll('[data-panel-tab="activity"]')].find((e) => e.getClientRects().length);
+    const group = t?.closest(".dv-groupview.dv-edge-group");
+    if (!group) return null;
+    const r = group.getBoundingClientRect();
+    return Math.abs(r.bottom - window.innerHeight) <= 2 ? Math.round(r.height) : null;
+  });
+}
+
+/** Drag the splitter along the top of Activity's bar until the bar is `height` px high. Setups only: never recorded. */
+async function dragBar(page, height) {
+  const sash = await page.evaluate(() => {
+    const t = [...document.querySelectorAll('[data-panel-tab="activity"]')].find((e) => e.getClientRects().length);
+    const group = t?.closest(".dv-groupview.dv-edge-group");
+    if (!group) return null;
+    const r = group.getBoundingClientRect();
+    const s = [...document.querySelectorAll(".dv-sash.dv-enabled")].map((e) => e.getBoundingClientRect())
+      .find((b) => b.width > b.height && Math.abs((b.top + b.bottom) / 2 - r.top) <= 4 && b.left < r.right && b.right > r.left);
+    return s ? { x: (Math.max(s.left, r.left) + Math.min(s.right, r.right)) / 2, y: (s.top + s.bottom) / 2, h: r.height } : null;
+  });
+  if (!sash) return;
+  const to = sash.y - (height - sash.h);
+  await page.mouse.move(sash.x, sash.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) { await page.mouse.move(sash.x, sash.y + ((to - sash.y) * i) / 10); await sleep(16); }
+  await page.mouse.up();
+  await sleep(400);
+}
+
+/** Activity's bar at ORCA's own Workings height. ORCA grows a short bar to it when Workings is chosen (App.tsx,
+ * growActivity), so Workings is chosen again (Steps, then Workings); a bar taller than WORKINGS_SHORT is one ORCA leaves
+ * as the person sized it, so its splitter is dragged instead. */
+async function fitBar(page) {
+  const right = (h) => h != null && Math.abs(h - WORKINGS_HEIGHT) <= 6;
+  const was = await barHeight(page);
+  if (was == null) { console.warn("  Activity isn't in its bar along the bottom: its height is left as it is"); return; }
+  if (right(was)) return;
+  let height = was;
+  const views = page.getByRole("tablist", { name: "Activity view" });
+  if (height < WORKINGS_SHORT && (await shown(views))) {
+    await views.getByRole("tab", { name: /Steps/ }).first().click({ timeout: 5000 });
+    await sleep(300);
+    await views.getByRole("tab", { name: /Workings/ }).first().click({ timeout: 5000 });
+    await sleep(800);
+    height = await barHeight(page);
+    if (right(height)) { console.log(`  Activity's bar ${was} → ${height} px (ORCA's own fit for Workings)`); return; }
+  }
+  await dragBar(page, WORKINGS_HEIGHT);
+  height = await barHeight(page);
+  if (right(height)) console.log(`  Activity's bar ${was} → ${height} px (its top edge dragged)`);
+  else console.warn(`  Activity's bar is ${height} px high, not ${WORKINGS_HEIGHT}: drag its top edge to fix it`);
+}
+
+/** Workings as the takes show it (docs/demo-video.md, "Before recording"): Activity docked in its bar along the bottom,
+ * showing Workings, the bar at ORCA's own Workings height. */
+async function dockWorkings(page) {
+  if (!(await homeActivity(page))) return;
   await showWorkings(page);
+  await fitBar(page);
+}
+
+/** The viewer's layout, from its Views menu ("Views: plans, sections and elevations beside the 3D view"): "3D only" or
+ * "Four views". `click` is a glided click in a take (the menu, then the layout: one zoom), a plain one in a setup. */
+async function setLayout(page, name, click) {
+  const menu = page.locator(VIEWS_MENU);
+  if (!(await shown(menu))) throw new Error(`No Views menu on screen for "${name}" (models not open, or the window too narrow for the desktop layout?)`);
+  await click(menu);
+  const item = page.locator(".pop.open").getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).first();
+  await item.waitFor({ state: "visible", timeout: 5000 });
+  if ((await item.getAttribute("aria-checked")) === "true") { await page.keyboard.press("Escape"); return; }
+  await click(item);
+  await sleep(1000);
+}
+
+/** Before a take (docs/demo-video.md, "Before recording"): no filters (unless `clear: false`), the viewer on 3D only,
+ * Workings docked at its height, the Clash panel in front. */
+async function prepareShot(page, { clear = true } = {}) {
+  if (clear) await clearFilters(page);
+  await setLayout(page, "3D only", plainClick);
+  await dockWorkings(page);
   await tab(page, "clash").click({ timeout: 5000 }).catch(() => undefined);
+}
+
+/**
+ * Why the opening can't start as the browser keeps it: the opening draws Northbank with what was kept (localStorage),
+ * so a kept filter, Four views, Workings off, or Activity away from its bar or its bar not at Workings' height would
+ * show. `kept` holds the raw values: Northbank's filters, `sightline.views.layout`, `sightline.workings` and the dock's
+ * saved layout (`sightline.dock.v1`). Empty when nothing needs putting right.
+ */
+function untidy(kept) {
+  const read = (s) => { try { return JSON.parse(s ?? "null"); } catch { return null; } };
+  const why = [];
+  if (read(kept.filters)?.rules?.length) why.push("Northbank has filters kept");
+  if (kept.layout && kept.layout !== "single") why.push(`the viewer is on ${kept.layout}`);
+  const work = read(kept.workings);
+  if (work && (work.on === false || work.view !== "work")) why.push("Activity isn't showing Workings");
+  const dock = read(kept.dock)?.layout;
+  const bar = dock?.edgeGroups?.bottom;
+  if (!dock) why.push("no panel layout kept yet");
+  else if (!bar?.group?.views?.includes("activity")) why.push("Activity isn't in its bar along the bottom");
+  else if (bar.visible === false || bar.collapsed) why.push("Activity's bar is closed");
+  else if (!(Math.abs((bar.size ?? 0) - WORKINGS_HEIGHT) <= 6)) why.push(`Activity's bar is ${bar.size} px high, not ${WORKINGS_HEIGHT}`);
+  return why;
+}
+
+/** What the opening reads from the browser (`untidy`). */
+function keptLayout(page) {
+  return page.evaluate((filters) => ({ filters: localStorage.getItem(filters), layout: localStorage.getItem("sightline.views.layout"),
+    workings: localStorage.getItem("sightline.workings"), dock: localStorage.getItem("sightline.dock.v1") }), NORTHBANK_FILTERS);
 }
 
 /** The row of clash #n. The list draws only the rows on screen, and a closed group none: open the group, else filter
@@ -371,7 +493,6 @@ async function outcome(page) {
     options: await options.count(),
     titles: await options.locator(".opt-title").allInnerTexts(),
     nofix: await shown(page.locator("div.nofix:visible")),
-    wonderFirst: (await options.first().locator(".chip.model.wonder").count()) > 0,
   };
 }
 
@@ -399,7 +520,7 @@ async function ensureProposal(page, ctx, n) {
     && (await page.locator(".card-body.option:visible").count()) > 0;
   if (!reuse) {
     await openDemo(page, ctx.url, "northbank");
-    await prepareClashShot(page);
+    await prepareShot(page);
     await pickClash(page, n, plainClick);
     const result = await propose(page, plainClick, n);
     state.proposal = n;
@@ -423,8 +544,10 @@ async function ensureTriaged(page, ctx) {
 }
 
 /** A saved view of the camera now, with a section box round the clash on screen, replacing one of the same name (kept
- * in the browser for these models). The box is switched off again after, so the next shots look as tested. */
+ * in the browser for these models). The box is switched off again after, so the next shots look as tested. The viewer
+ * goes back to 3D only first: the 3D camera stays where it was, and in Four views its tools fold into a menu. */
 async function saveView(page, name) {
+  await setLayout(page, "3D only", plainClick);
   const section = page.locator('button[aria-label^="Section box"]:visible').first();
   const boxed = (await section.count()) && (await section.getAttribute("aria-pressed")) !== "true";
   if (boxed) { await section.click(); await sleep(1500); }
@@ -452,6 +575,37 @@ async function xray(page, click) {
   await click(page.locator(".pop.open").getByRole("menuitemradio", { name: /^X-ray/ }));
 }
 
+/** Type `line` into Chat at a readable pace and send it: the cursor glides to the message box, then to Send. Resolves
+ * the answers on the page and how many there were before, for `chatAnswer`. */
+async function askChat(page, ctx, line, delay = TYPING) {
+  const message = page.getByRole("textbox", { name: "Message" }).first();
+  await until(() => message.isEnabled(), 30000, "Chat");
+  await ctx.click(message);
+  await page.keyboard.type(line, { delay });
+  await sleep(800);
+  const replies = page.locator(".chat-log .msg.assistant");
+  const before = await replies.count();
+  await ctx.click(page.locator('button[data-tour="chat-send"]:visible'));
+  return { replies, before };
+}
+
+/** Wait for Chat's answer (a new answer in, Send back, nothing spinning) and resolve it. */
+async function chatAnswer(page, { replies, before }, timeout, what) {
+  const send = page.locator('button[data-tour="chat-send"]').first();
+  await until(async () => (await replies.count()) > before && (await send.innerText()).trim() === "Send"
+    && !(await replies.last().locator(".spinner").count()), timeout, what);
+  return replies.last();
+}
+
+/** What Chat's fix agent did, from the steps under an answer (Chat.tsx: "Ran the fix agent (#22) → 2 verified of 6
+ * tried"): whether it ran, the most fixes one run verified, and what each run said. */
+function chatFix(steps) {
+  const runs = steps.map((s) => s.trim()).filter((s) => s.startsWith("Ran the fix agent"));
+  const verified = runs.map((s) => Number(s.match(/(\d+) verified of \d+/)?.[1] ?? 0));
+  return { ran: runs.length > 0, verified: Math.max(0, ...verified),
+    said: runs.map((s) => s.split("→")[1]?.trim()).filter(Boolean).join("; ") };
+}
+
 /** Drag the mouse along a line at about 60 steps a second. */
 async function drag(page, from, to, y, ms) {
   const steps = Math.max(2, Math.round(ms / 16));
@@ -473,21 +627,17 @@ const SHOTS = [
     name: "open",
     async setup(page, ctx) {
       await landing(page, ctx.url);
-      // Filters and the dock are kept in the browser: a floated Activity or a kept filter would show in the opening.
-      const tidy = await page.evaluate(() => {
-        let floating = false, filtered = false;
-        try { floating = JSON.stringify(JSON.parse(localStorage.getItem("sightline.dock.v1") ?? "null")?.floatingGroups ?? []).includes('"activity"'); } catch { /* none kept */ }
-        for (const k of Object.keys(localStorage)) {
-          if (!k.startsWith("sightline.filters.")) continue;
-          try { if (JSON.parse(localStorage.getItem(k))?.rules?.length) filtered = true; } catch { /* none kept */ }
-        }
-        return floating || filtered;
-      });
-      if (tidy) {
+      // Filters, the layout and the dock are kept in the browser and drawn as the opening's models open: put right in
+      // Northbank first when anything is off, then back to the start page.
+      const why = untidy(await keptLayout(page));
+      if (why.length) {
+        console.log(`  Tidying first, unrecorded: ${why.join("; ")}`);
         await openDemo(page, ctx.url, "northbank");
-        await clearFilters(page);
-        await placeActivity(page, "home");
+        await prepareShot(page);
+        await sleep(1500);   // the dock keeps its layout a moment after each change
         await landing(page, ctx.url);
+        const still = untidy(await keptLayout(page));
+        if (still.length) console.warn(`  Still not as the takes need it: ${still.join("; ")}`);
       }
       await page.locator(DEMO.northbank).first().scrollIntoViewIfNeeded();
       await rest(page);
@@ -538,9 +688,7 @@ const SHOTS = [
       }
       const idle = state.scene === "northbank" && !state.triaged && (await shown(page.locator('section[data-tour="triage"] .triage-go')));
       if (!idle) await openDemo(page, ctx.url, "northbank");
-      await placeActivity(page, "float");   // the opening's filters stay: the clash shots clear them
-      await showWorkings(page);
-      await tab(page, "clash").click({ timeout: 5000 }).catch(() => undefined);
+      await prepareShot(page, { clear: false });   // the opening's filters stay: the clash shots clear them
       await rest(page);
     },
     async take(page, ctx) {
@@ -562,13 +710,17 @@ const SHOTS = [
     async setup(page, ctx) {
       // A fresh #1: a proposal on screen, or the fix kept, means its models open again (and triage with them).
       if (!(state.scene === "northbank" && state.proposal === null && !state.fixed)) await openDemo(page, ctx.url, "northbank");
-      await prepareClashShot(page);
+      await prepareShot(page);
       await clashRow(page, 1, plainClick);   // on screen when the take starts
       await rest(page);
     },
     async take(page, ctx) {
       await sleep(1000);
-      await pickClash(page, 1, ctx.click);
+      await pickClash(page, 1, ctx.click);   // the camera flies to the duct through the beam, in the one 3D view
+      await sleep(GAP);
+      // Four views (owner, Nov 2), once #1 is on screen: the plan, section and elevation open on it, and the proposal,
+      // its verified option and Before / After then play in all four.
+      await setLayout(page, "Four views", ctx.click);
       await sleep(GAP);
       const result = await propose(page, ctx.click, 1);
       state.proposal = 1;
@@ -582,7 +734,8 @@ const SHOTS = [
       }
       await sleep(GAP);
     },
-    // The camera this take ended on, kept so the later revision can be recorded from the same place.
+    // The camera this take ended on (its 3D view), kept so the later revision can be recorded from the same place.
+    // Unrecorded, so the viewer going back to 3D only for it adds nothing to the take.
     after: (page) => saveView(page, VIEW),
   },
   {
@@ -593,6 +746,7 @@ const SHOTS = [
         forget();
         await ensureProposal(page, ctx, 1);
       }
+      await prepareShot(page, { clear: false });   // the duct take left Four views on
       // The button shows only with the owner's setting on: checked here, before anything is recorded.
       if (!(await shown(page.locator('button[data-tour="show-built"]:visible')))) throw new Error(NO_BUILT);
       await rest(page);
@@ -625,6 +779,7 @@ const SHOTS = [
     async setup(page, ctx) {
       await ensureProposal(page, ctx, 1);
       await ensureTriaged(page, ctx);   // the report can only be built after triage
+      await prepareShot(page, { clear: false });
       await rest(page);
     },
     async take(page, ctx) {
@@ -680,7 +835,7 @@ const SHOTS = [
       await check.first().click();
       await listReady(page);
       state.scene = "revision";
-      await prepareClashShot(page);   // laid out as the duct take was, so the two frames match
+      await prepareShot(page);   // laid out as every take is: the panels match the duct take's
       await rest(page);
     },
     async take(page, ctx) {
@@ -695,34 +850,37 @@ const SHOTS = [
     },
   },
   {
-    name: "cell-29",
+    name: "cell-22",
     async setup(page, ctx) {
-      await openDemo(page, ctx.url, "cell");   // fresh every time: #29 is retaken until Wonder's move ranks first
-      await prepareClashShot(page);
-      await clashRow(page, 29, plainClick);    // the list drawn down to #29, so the take starts on its row
+      await openDemo(page, ctx.url, "cell");   // fresh every time: no proposal or chat carried over from a take before
+      await prepareShot(page);
+      await clashRow(page, 22, plainClick);    // the list drawn down to #22, so the take starts on its row
       await rest(page);
     },
     async take(page, ctx) {
       await sleep(1000);
-      await pickClash(page, 29, ctx.click);
+      await setLayout(page, "Four views", ctx.click);   // owner, Nov 2: this one in four views too
       await sleep(GAP);
-      const first = await propose(page, ctx.click, 29);
-      state.proposal = 29;
-      ctx.log(`  Muse Spark: ${first.options ? first.titles.join(" | ") : "no verified option"}`);
+      await pickClash(page, 22, ctx.click);   // every view goes to the clash; ready once its three pictures are taken
       await sleep(GAP);
-      await fitWorkings(page, ctx.click);
+      // The fix asked for in Chat (owner, Nov 2): Muse Spark runs ORCA's fix agent on #22 (its propose_fixes tool, the
+      // agent Propose fixes runs); Workings draws the run and the page shows its verified options, the first chosen.
+      await ctx.click(tab(page, "chat"));
+      await sleep(800);
+      const asked = await askChat(page, ctx, CHAT_LINE);
+      const answer = await chatAnswer(page, asked, RUN, "Muse Spark's answer on #22");
+      state.proposal = 22;
+      const fix = chatFix(await answer.locator("details.tools li").allTextContents());
+      const error = (await answer.locator(".bad").allTextContents())[0]?.trim();
+      const options = await page.locator(".card-body.option").count();   // the Clash panel's, behind Chat
+      const picked = (await page.locator(".clash-row.pick .clash-name").first().textContent().catch(() => ""))?.trim();
+      ctx.log(`  Chat: ${fix.ran ? `ran the fix agent (${fix.said || "no summary"})` : "didn't run the fix agent"}; ${options} verified option(s) on ${picked || "no clash"}`);
+      if (!fix.ran) return ctx.retake(`the chat didn't run the fix agent on #22${error ? ` (${error})` : ""}`);
+      if (picked !== "#22") return ctx.retake(`the chat's fix agent ran on ${picked || "no clash"}, not #22`);
+      if (!options) return ctx.retake(`the chat's run verified no fix for #22 (${fix.said || error || "no summary"})`);
       await sleep(GAP);
-      // Muse Wonder's second look: "Look for a better fix" beside options, "Ask Muse Wonder" on the no-fix card.
-      const again = page.locator(first.options ? 'button[data-tour="better-fix"]:visible' : '[data-tour="escalate"]:visible');
-      if (!(await shown(again))) throw new Error("Muse Wonder isn't offered on #29 (the owner's second-try setting?)");
-      await ctx.click(again);
-      await settle(page, RUN, "Muse Wonder's second look at #29");
-      const second = await outcome(page);
-      ctx.log(`  after Muse Wonder: ${second.titles.join(" | ") || "no verified option"}`);
-      if (!second.wonderFirst) ctx.retake("Muse Wonder's option isn't ranked first in this take");
-      await sleep(GAP);
-      await fitWorkings(page, ctx.click);
-      await page.locator(".card-body.option:visible").first().scrollIntoViewIfNeeded().catch(() => undefined);
+      await ctx.click(tab(page, "clash"));   // the verified fix in the Clash panel
+      await page.locator(".card-body.option:visible").first().waitFor({ state: "visible", timeout: 10000 });
       await sleep(4000);
     },
   },
@@ -730,7 +888,7 @@ const SHOTS = [
     name: "cell-13",
     async setup(page, ctx) {
       if (!(state.scene === "cell" && state.proposal !== 13)) await openDemo(page, ctx.url, "cell");
-      await prepareClashShot(page);
+      await prepareShot(page);   // after cell-22: 3D only again
       await clashRow(page, 13, plainClick);
       await rest(page);
     },
@@ -763,25 +921,15 @@ const SHOTS = [
     name: "voice",
     async setup(page, ctx) {
       if (state.scene !== "northbank") await openDemo(page, ctx.url, "northbank");
-      await clearFilters(page);
-      await placeActivity(page, "home");
+      await prepareShot(page);
       await rest(page);
     },
     async take(page, ctx) {
       await sleep(1000);
       await ctx.click(tab(page, "chat"));
       await sleep(GAP);
-      const message = page.getByRole("textbox", { name: "Message" }).first();
-      await until(() => message.isEnabled(), 30000, "Chat");
-      await ctx.click(message);
-      await message.pressSequentially(VOICE_LINE, { delay: 45 });
-      await sleep(800);
-      const replies = page.locator(".chat-log .msg.assistant");
-      const before = await replies.count();
-      await ctx.click(page.locator('button[data-tour="chat-send"]:visible'));
-      const send = page.locator('button[data-tour="chat-send"]').first();
-      await until(async () => (await replies.count()) > before && (await send.innerText()).trim() === "Send"
-        && !(await replies.last().locator(".spinner").count()), LONG, "Muse Spark's reply");
+      const asked = await askChat(page, ctx, VOICE_LINE, 45);   // as tested
+      await chatAnswer(page, asked, LONG, "Muse Spark's reply");
       await sleep(5000);
     },
   },
@@ -797,7 +945,7 @@ async function launch(chromium, options, url) {
   const own = { channel: "chrome", chromiumSandbox: true, acceptDownloads: true, handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false };
   try {
     const context = await chromium.launchPersistentContext(options.profile, options.headless
-      ? { ...own, headless: true, viewport: VIEWPORT, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] }
+      ? { ...own, headless: true, viewport: DRY_RUN_VIEWPORT, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] }
       : { ...own, headless: false, viewport: null, args: [`--app=${url}`] });
     context.setDefaultNavigationTimeout(LONG);   // the live app's first answer can be a cold start
     return context;
@@ -807,6 +955,21 @@ async function launch(chromium, options, url) {
     }
     throw error;
   }
+}
+
+const MAXIMIZE_MS = 5000;
+
+/** The takes' window maximized on its display (Recordly's helper), and the page size it gave said; stops the run with
+ * why when the window won't maximize, before anything is recorded. */
+async function maximize(helper, page, log = console) {
+  let size;
+  try {
+    size = await helper.maximizeWindow(page, { timeoutMs: MAXIMIZE_MS });
+  } catch (error) {
+    throw new Error(`Couldn't maximize the takes' window (${error.message}): the takes are recorded in a maximized window on the primary display`);
+  }
+  log.log(`Window maximized: the page is ${size.width} × ${size.height}`);
+  return size;
 }
 
 /** An error in one line: Playwright's own first line, and what it was waiting for. */
@@ -916,13 +1079,7 @@ async function main() {
       await new Promise((resolve) => { context.once("close", resolve); page.once("close", resolve); });
       return;
     }
-    if (!options.headless) {
-      try {
-        await helper.sizeWindowForViewport(page, VIEWPORT);
-      } catch (error) {
-        throw new Error(`${error.message}: the takes need a ${VIEWPORT.width}×${VIEWPORT.height} page; use a bigger display or less scaling`);
-      }
-    }
+    if (!options.headless) await maximize(helper, page);
 
     const shots = selectShots(SHOTS, options.only);
     const downloads = path.join(path.dirname(options.profile), "orca-demo-downloads");
@@ -944,7 +1101,8 @@ async function main() {
 }
 
 module.exports = { SHOT_NAMES, SHOTS, USAGE, defaultProfile, parseArgs, selectShots, loadRecordly, startTake, runTake,
-  interruptTake, takeState, summaryLine, exitCodeOf, SIGN_IN, NO_BUILT, listReady };
+  interruptTake, takeState, summaryLine, exitCodeOf, SIGN_IN, NO_BUILT, listReady, untidy, chatFix, maximize, CHAT_LINE,
+  WORKINGS_HEIGHT };
 
 if (require.main === module) {
   main().catch((error) => {
