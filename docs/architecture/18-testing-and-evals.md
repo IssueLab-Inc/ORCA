@@ -367,13 +367,24 @@ to port 8000), or build the web app and let the server serve `web/dist` on one p
   visitor does, waits for the check, picks the iso view, saves the canvas with the viewer's Screenshot button, crops to
   16:10 and writes `web/public/demos/northbank.webp` and `cell.webp` with Pillow from the server's env. Run against a
   server with the demo models (`--url`, default `http://localhost:8765`). Recapture after the viewer's look or the demo
-  models change; the landing cards and the README's "Two demos" table share these pictures and numbers.
+  models change; the README's "Two demos" table shares these pictures and the landing cards' numbers.
 - **`web/scripts/capture-proposals.cjs`** records the README's proposal clips: for each run (Northbank #1, #2, #3 and
   the cell's #66) it opens the demo, picks the clash, chooses Propose fixes (a live Muse Spark call), waits for the
   verified options, flips Before / After, and for #1 and #66 opens Activity in its own window and replays the
   Workings there. Frames come from Chromium's screencast (Playwright's own video recording starved the page of CPU
   under SwiftShader and the proposal never finished); `web/scripts/timelapse.py` (Pillow, server env) speeds the waits
   up 2-6× and stamps the speed on each frame. Writes `docs/media/proposals/*.webp`. Each capture is a fresh proposal.
+  With `--landing` it records the landing's clips (Northbank #1 and the cell's #66, the 3D view alone, and #1's
+  Workings) in a small window at twice the pixels and writes `web/public/demos/fix-northbank.webp`, `fix-cell.webp`
+  and `workings.webp`, each with a `-still.webp` (its last frame, for reduced motion); `--keep` keeps the frames.
+  Its frames are screenshots of just the part kept, about ten a second (`Page.captureScreenshot` with a clip at
+  scale 2): the screencast sends the page at its CSS size whatever the pixel ratio, so a small window came out
+  blurred. It presses F to fly to the clash: Playwright, reaching the rail's button, scrolled the short stage.
+  Under SwiftShader Northbank's run drew about one frame a second while the server checked ideas, too few to show
+  the ideas being tried; `--gpu` launches Chromium on the graphics card (Direct3D on Windows: 20 frames a second).
+  `--from <kept folder>` encodes a `--keep` recording again (another pace or badge) without a new proposal; the
+  landing's pace runs the wait for Muse Spark at 6× but its last 5 s at 2×, and Workings' checks and rank at 0.5×
+  (on the graphics card they took 1.2 s of the replay).
 - **`evals/big_models_browser.cjs`**: the timed upload above (start the server with `SIGHTLINE_MODEL_UPLOAD_MAX_MB`
   raised).
 - **Phones and tablets** ([docs/mobile.md](../mobile.md), Oct 29): Playwright device profiles iPhone 13, iPhone SE,
@@ -430,8 +441,8 @@ flowchart TD
 | Scene loading, boxes, uploads | `big_models.py`, `big_models_browser.cjs`; Northbank's boxes and its 464 clashes unchanged |
 | A stream or a route behind Modal | The `Accept-Encoding` curl check, on the live URL after deploy |
 | App's imports | Both stub lists (`app-host.mjs`, `app-replacement.test.mjs`) |
-| The viewer's look, the demo models | `capture-demos.cjs`; then the landing, the README's "Two demos" table and the demo cards together |
-| The proposal flow's look, the Workings graph | `capture-proposals.cjs`; then the README's "See it work" captions from that run |
+| The viewer's look, the demo models | `capture-demos.cjs` and `capture-proposals.cjs --landing`; then the landing, the README's "Two demos" table and the demo cards together |
+| The proposal flow's look, the Workings graph | `capture-proposals.cjs`, and with `--landing`; then the README's "See it work" captions and the landing clips' alt text from that run |
 | Numbers people see (landing, README, tour) | Only from a measured run, and say where it was measured |
 | Any core part | The matching doc in `docs/architecture/` in the same PR, and a dated entry at the end of [22](22-build-log.md) |
 

@@ -52,8 +52,8 @@ export function About({ start, onAbout, triageOpen = false }: {
         <section className="about-demos-wrap" id="demos" aria-label="The demos">
           <h2 className="about-h">Pick a demo</h2>
           <div className={`about-demos${start.onCell ? "" : " one"}`}>
-            <DemoCard img="/demos/northbank.webp" eyebrow="Building · 4 IFC models" title="Northbank, a riverside office site"
-              alt="The Northbank demo in ORCA's viewer: an office building among its neighbours, with streets, trees and the river."
+            <DemoCard clip="/demos/fix-northbank" eyebrow="Building · 4 IFC models" title="Northbank, a riverside office site"
+              alt="ORCA fixing Northbank's clash #1, sped up: the camera flies from the whole site to the supply air duct running through the transfer girder while Muse Spark thinks. Its ideas are tried in the model: raising the duct 400 mm through the girder's web opening passes, dropping it under the girder hits a ceiling. The fix, clear by 50 mm, is shown before and after."
               blurb={<>Structure, building services, architecture and site, modelled by four teams. On Level 02 a transfer
                 girder is hit by a duct, a cable tray and a water main.</>}
               shows={[<>Every pair of models checked: <b>464 clashes in 1,732 elements, in 4 s</b></>,
@@ -68,8 +68,8 @@ export function About({ start, onAbout, triageOpen = false }: {
                 <Compass size={16} aria-hidden /> Take the guided tour</button>}
             </DemoCard>
             {start.onCell && (
-              <DemoCard img="/demos/cell.webp" eyebrow="Machine · 1 STEP file" title="PC-03, a robot palletising cell"
-                alt="The PC-03 palletising cell in ORCA's viewer: a robot inside its see-through safety zone, a conveyor, fence posts and the air line."
+              <DemoCard clip="/demos/fix-cell" eyebrow="Machine · 1 STEP file" title="PC-03, a robot palletising cell"
+                alt="ORCA fixing the cell's clash #66, sped up: the camera flies to the compressed-air pipe running into the conveyor's side rail while Muse Spark thinks. Two of its ideas pass the check in the model, and the air line lowered 150 mm under both rails, clear by 53 mm, is shown before and after."
                 blurb={<>A robot, a conveyor, safety guarding and services in a corner of the plant, from mechanical CAD.
                   Eight problems were planted in this revision.</>}
                 shows={[<>The STEP converted: <b>161 parts</b> keep their names and colours, and Muse names what each is</>,
@@ -134,6 +134,7 @@ export function About({ start, onAbout, triageOpen = false }: {
 
       <section>
         <h2 className="about-h">What ORCA does</h2>
+        <div className="about-does">
         <ol className="about-steps">
           <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Checks the models and sorts what it finds">
             ORCA checks every pair of models and each model against itself, and numbers each clash.{" "}
@@ -155,6 +156,13 @@ export function About({ start, onAbout, triageOpen = false }: {
             model as an IFC file that any design tool can open.
           </Step>
         </ol>
+        <figure className="about-workings">
+          <Clip src="/demos/workings" width={1000} height={504}
+            alt="Workings replaying Northbank's run, sped up: one lane each for you, Muse Spark and ORCA. Your request and ORCA's brief go to Muse Spark, whose round replies with three ideas; ORCA checks each in the model's geometry: one passes, one hits a ceiling, and an opening cannot be asked for in a transfer girder. The rank leaves one verified option." />
+          <figcaption className="hint"><b>Workings</b>, the run on the Northbank card: you ask, Muse Spark proposes, ORCA checks
+            each idea in the geometry and ranks the ones that pass. Every run draws its own, live, in <b>Activity</b>.</figcaption>
+        </figure>
+        </div>
       </section>
 
       {onAbout && (
@@ -300,14 +308,26 @@ function ResumeCard({ r, disabled }: { r: Resume; disabled: boolean }) {
   );
 }
 
-/** One demo on the start page: what you see when it opens, what it is, what it shows, and how to start it. */
-function DemoCard({ img, alt, eyebrow, title, blurb, shows, chips, note, children }: {
-  img: string; alt: string; eyebrow: string; title: string; blurb: ReactNode; shows: ReactNode[]; chips: string[];
+/** A recorded run of ORCA, as a picture that plays itself: `<src>.webp`, an animated WebP time-lapse (no controls, no
+ * sound, it loops), made by web/scripts/capture-proposals.cjs --landing. People who ask for less motion get
+ * `<src>-still.webp`, its last frame, instead. */
+function Clip({ src, alt, width, height }: { src: string; alt: string; width: number; height: number }) {
+  return (
+    <picture>
+      <source media="(prefers-reduced-motion: reduce)" srcSet={`${src}-still.webp`} />
+      <img src={`${src}.webp`} alt={alt} width={width} height={height} loading="lazy" decoding="async" />
+    </picture>
+  );
+}
+
+/** One demo on the start page: a fix being found in it, what it is, what it shows, and how to start it. */
+function DemoCard({ clip, alt, eyebrow, title, blurb, shows, chips, note, children }: {
+  clip: string; alt: string; eyebrow: string; title: string; blurb: ReactNode; shows: ReactNode[]; chips: string[];
   note?: ReactNode; children: ReactNode;
 }) {
   return (
     <article className="demo-card">
-      <img src={img} alt={alt} width={1200} height={750} loading="lazy" />
+      <Clip src={clip} alt={alt} width={1000} height={625} />
       <div className="demo-body">
         <p className="eyebrow">{eyebrow}</p>
         <h3>{title}</h3>
