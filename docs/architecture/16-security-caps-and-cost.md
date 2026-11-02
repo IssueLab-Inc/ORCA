@@ -245,7 +245,9 @@ per-token model only take their cap.
 
 ### Show it built's budget
 
-Off unless switched on (`SIGHTLINE_BUILT_VIEWS` 0 and the `built_views` setting; 403 when off). In `built_stream`:
+Off unless switched on (`SIGHTLINE_BUILT_VIEWS` 0 and the `built_views` setting; 403 when off). On the live demo it is
+on for everyone (owner decision, Nov 2, for judging: [20](20-decisions-limits-and-roadmap.md)), held by the caps
+below: 6 an hour per visitor, 60 a day for everyone. In `built_stream`:
 a cached picture, or one being drawn for the same view, costs nothing. Otherwise, when the day's budget can still
 cover $0.62, the request claims it and Muse Wonder judges the pictures; when it cannot, the request claims only the
 pictures' $0.04 and three Muse Spark judges check them instead (`built.SPARK_JUDGES`, named in the result's `judge`).
