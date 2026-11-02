@@ -38,7 +38,7 @@ const react = url("export const useState=(v)=>[typeof v==='function'?v():v,()=>{
   + "export const useEffect=()=>{};export const useRef=(v)=>({current:v ?? null});");
 const TRIAGE = url(`export const TRIAGE={${["real_clash", "modelling_error", "by_design", "non_physical", "unknown"]
   .map((k) => `${k}:{label:"${k}",cls:"",tip:"",colour:"",long:"${k}"}`).join(",")}};`);
-const { ReportList } = await import(await compiled("../src/ReportList.tsx", { react, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+const { ReportList, rowWindow, FIRST_ROWS, OVERSCAN } = await import(await compiled("../src/ReportList.tsx", { react, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
   "lucide-react": stub(["CircleCheck", "Eye", "Focus", "Network", "Search", "Sparkles", "Wand2", "X"]), "./api": url("export const api={imageUrl:()=>''};"),
   "./ClashPanel": stub(["ClashThumb"]), "./Triage": TRIAGE, "./noClash": await compiled("../src/noClash.ts", {}),
   "./aiNames": await compiled("../src/aiNames.ts", {}) }));
@@ -62,4 +62,36 @@ test("under a verdict filter the selected row stays, though its shown verdict ch
   assert.deepEqual(rows(null), ["c3"], "c17 reads by design now: the real filter leaves it out");
   assert.deepEqual(rows("c17"), ["c3", "c17"], "selected, it stays");
   assert.ok(find, "app-host helpers load");
+});
+
+// ---------------------------------------------------------------- only the rows on screen are drawn
+
+test("a group draws the rows in view and a few either side; one off screen draws none", () => {
+  // 2,471 rows of 40 px; 600 px of the list on screen, 4,000 px down the group.
+  assert.deepEqual(rowWindow(4000, 4600, 2471, 40), [100 - OVERSCAN, 115 + OVERSCAN]);
+  assert.deepEqual(rowWindow(-200, 400, 2471, 40), [0, 10 + OVERSCAN], "the group starts part way down the screen");
+  assert.deepEqual(rowWindow(98000, 98600, 2471, 40), [2450 - OVERSCAN, 2471], "its end");
+  assert.deepEqual(rowWindow(200000, 200600, 2471, 40), [0, 0], "scrolled past: nothing");
+  assert.deepEqual(rowWindow(-9000, -8400, 2471, 40), [0, 0], "far below the screen: nothing");
+  assert.deepEqual(rowWindow(0, 600, 0, 40), [0, 0]);
+  assert.deepEqual(rowWindow(0, 600, 10, 0), [0, 0], "not measured: no division by nothing");
+});
+
+test("a long list draws its first rows until measured, and keeps its full height with padding", () => {
+  const many = Array.from({ length: 2471 }, (_, i) => clash(`m${i}`, i + 1));
+  const tree = ReportList({ report: { ...report, clashes: many }, matches: null, selected: null, onSelect() {}, onImage() {}, fixes: {},
+    reviewed: {}, checked: new Set(), onCheck() {}, onFixChecked() {}, insights: null, busy: false, triage: {}, triageFilter: null });
+  const ids = [];
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (n.props?.["data-clash"]) ids.push(n.props["data-clash"]);
+    [n.props?.children].flat(Infinity).forEach(walk);
+  };
+  walk(tree);
+  assert.equal(ids.length, FIRST_ROWS, "not 2,471 rows: every title, thumbnail and click re-rendered them all");
+  assert.equal(ids[0], "m0");
+  const body = find(tree, (n) => n.props?.["data-rows"] === "Structure (within)");
+  assert.equal(body.props["data-count"], 2471);
+  assert.deepEqual(body.props.style, { paddingTop: 0, paddingBottom: (2471 - FIRST_ROWS) * 40 }, "the rest of the group's height");
 });
