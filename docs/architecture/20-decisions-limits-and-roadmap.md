@@ -172,7 +172,7 @@ and `deploy` finds none: open work is tracked in the feature docs and here, not 
   pipes, round ducts, hollow, rounded or channel sections, or STEP parts (Northbank's U-channel tray cannot be resized).
   Not yet: round ducts (flat oval), resizing at fittings, keeping a pressure drop rather than an equivalent diameter.
   There is no planted demo case.
-- **Penetrations** (`edits.penetration`, `hosts.py`): a straight service through a host with an extruded body; the
+- **Penetrations** (`edits.penetration`, `hosts.py`): a straight service through a host of any body the kernel can triangulate; the
   opening must be surrounded by 50 mm of host; hard rules refuse columns, doors, windows, curtain walls, piles,
   footings, stairs, railings, lifts, services and equipment, glazing, see-through zones and transfer elements (the
   Northbank girder). Not yet: sleeves and fire-stopping as elements, one opening for several services.

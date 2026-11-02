@@ -291,12 +291,14 @@ flowchart LR
 - **Shape:** `{"kind": "penetration", "move": "A"}`, where `move` names the service. When Muse names the host instead,
   `agent.penetration_sides` swaps them.
 - **Who decides** whether the host may take an opening: `hosts.py` (next section).
-- **Geometry** (`edits.penetration`, reads only): the service must be a straight extrusion; the host's body must be
-  extrusions (`not_penetrable`). The opening is the service's section plus the clearance and 5 mm all round, rounded
+- **Geometry** (`edits.penetration`, reads only): the service must be a straight extrusion; the host needs only a
+  body the kernel can triangulate (`not_penetrable`): extrusions, booleans, or Revit's faceted B-reps (12 of
+  Snowdon Towers' 58 structural walls; Nov 2). The check after the cut proves the opening was cut: a boolean the
+  kernel cannot do leaves the host whole, and the service still hits it. The opening is the service's section plus the clearance and 5 mm all round, rounded
   up to 10 mm (annular), or plus 1 mm to the mm (fitted: a gland), round or rectangular like the service and square to
   it. Its depth comes from rays along the service round the opening's outline (every 30 mm, `_outline`) from both
   faces, then 10 mm proud of each face.
-- **Refused by geometry:** a host that is not extrusions; a service that does not reach or pass through it; one that
+- **Refused by geometry:** a host with no body, or one the kernel cannot triangulate; a service that does not reach or pass through it; one that
   stops inside it (move or shorten it instead); a crossing more than 1 m deep (`MAX_THROUGH_M`: along the host, not
   through it); an opening the host would not surround by 50 mm (`OPENING_EDGE_M`: a hole at its edge is a notch).
   Also refused: a host the reading refuses, a hole over the reading's limits (`hosts.check_hole`), and a second
