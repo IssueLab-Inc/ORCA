@@ -6,13 +6,14 @@
 // on before the takes (docs/demo-video.md, "Before recording"); this script never starts it.
 //
 //   node web/scripts/record-demo.cjs --login [--url <ORCA>]           once: sign in as the owner in the takes' profile
-//   node web/scripts/record-demo.cjs [--url <ORCA>] [--only duct,built] [--filters]
+//   node web/scripts/record-demo.cjs [--url <ORCA>] [--only duct,built] [--no-filters] [--no-xray]
 //   node web/scripts/record-demo.cjs --dry-run --headless --only open  no Recordly: a shot's steps, nothing recorded
 //
 // A shot is { name, setup(page), take(page) }. Its setup is not recorded: it opens the models, clears Filters and floats
 // Activity (Workings) in the page. Its take is one Recordly take with the agent cursor: every visible click glides there.
 // If anything fails inside a take, the take is still stopped (its footage kept), the failure reported, and the next
-// shot goes on. Shots run in the order of SHOTS, whatever the order given to --only.
+// shot goes on; a take that ran but shows the wrong thing (Muse Wonder's move not ranked first, say) is a RETAKE. Ctrl+C
+// stops the take that is recording, keeping its footage. Shots run in the order of SHOTS, whatever --only's order.
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -36,7 +37,7 @@ const USAGE = `Records the demo video's shots, each as a Recordly take of its ow
 
   --url <url>        the ORCA to record (default http://localhost:8765)
   --only <shot,...>  only these shots; they run in this order whatever order is given:
-                     open      Northbank opens (with --filters: Colour by Discipline, hide Site and Architecture)
+                     open      Northbank opens: Colour by Discipline, Site and Architecture hidden, then X-ray
                      triage    Triage all, Workings drawing its calls
                      duct      #1 Propose fixes, Workings, Before / After
                      built     Show it built on #1's fix, the wipe slider
@@ -45,7 +46,8 @@ const USAGE = `Records the demo video's shots, each as a Recordly take of its ow
                      cell-29   the machine cell's #29: Propose, Look for a better fix
                      cell-13   the cell's #13: no verified fix, then Muse Wonder's second look
                      voice     types "${VOICE_LINE}" in Chat
-  --filters          the opening with the proposed filter beats
+  --no-filters       the opening without its filter beats (Colour by, the Hide filter); --filters is the default
+  --no-xray          the opening without its last beat, Visual style: X-ray
   --login            open the takes' profile and record nothing: sign in as the owner, then close the window
   --profile <dir>    the browser profile the takes use (default %LOCALAPPDATA%\\orca-demo-profile)
   --recordly <dir>   the Recordly checkout (default: RECORDLY_DIR, else ../Recordly beside this repository)
@@ -61,7 +63,7 @@ function defaultProfile(env = process.env) {
 }
 
 function parseArgs(argv, env = process.env) {
-  const o = { url: "http://localhost:8765", only: null, filters: false, login: false, profile: defaultProfile(env),
+  const o = { url: "http://localhost:8765", only: null, filters: true, xray: true, login: false, profile: defaultProfile(env),
     recordly: env.RECORDLY_DIR || path.resolve(ROOT, "..", "Recordly"), dryRun: false, headless: false, help: false };
   const value = (i) => {
     if (argv[i + 1] === undefined || argv[i + 1].startsWith("--")) throw new Error(`${argv[i]} needs a value`);
@@ -73,7 +75,9 @@ function parseArgs(argv, env = process.env) {
     else if (a === "--only") o.only = value(i++).split(",").map((s) => s.trim()).filter(Boolean);
     else if (a === "--profile") o.profile = path.resolve(value(i++));
     else if (a === "--recordly") o.recordly = path.resolve(value(i++));
-    else if (a === "--filters") o.filters = true;
+    else if (a === "--filters") o.filters = true;   // the default since Nov 2; kept so older commands still run
+    else if (a === "--no-filters") o.filters = false;
+    else if (a === "--no-xray") o.xray = false;
     else if (a === "--login") o.login = true;
     else if (a === "--dry-run") o.dryRun = true;
     else if (a === "--headless") o.headless = true;
@@ -128,26 +132,57 @@ async function startTake(recordly, title) {
   }
 }
 
-/** The take now recording, so Ctrl+C can stop it (a take left running makes the next start fail). */
-const live = { stop: null };
+/** The take now starting or recording, so Ctrl+C can stop it: a take left running makes the next start fail. */
+const takeState = () => ({ client: null, starting: null, recording: false, cursor: null, stopping: null, interrupted: false });
+const live = takeState();
+
+/** Detach the cursor, then stop the take (its footage kept), once, whoever asks first: the take or Ctrl+C. */
+function stopOnce(take) {
+  take.stopping ??= (async () => {
+    await take.cursor?.detach().catch(() => undefined);
+    return take.client.stop();
+  })();
+  return take.stopping;
+}
+
+/**
+ * Ctrl+C or the console closing: stop the take, keeping its footage. A take still starting is waited for, then stopped.
+ * Resolves to stop's answer, or null when nothing was recording.
+ */
+async function interruptTake(take = live) {
+  take.interrupted = true;
+  if (take.starting) {
+    if (!(await take.starting.then(() => true, () => false))) return null;
+  } else if (!take.recording && !take.stopping) {
+    return null;
+  }
+  return stopOnce(take).catch(() => null);
+}
 
 /**
  * One take: start, draw the cursor, run `take`, then always detach the cursor and stop, so the footage is kept even
  * when the take failed. Resolves { started, failure, result, cursor } and never throws.
  */
-async function runTake({ recordly, page, title, take, log = console }) {
-  let started = false, cursor = null, failure = null, result = null;
+async function runTake({ recordly, page, title, take, log = console, current = live }) {
+  Object.assign(current, { client: recordly, starting: null, recording: false, cursor: null, stopping: null });
+  let started = false, failure = null, result = null;
   try {
-    await startTake(recordly, title);
+    current.starting = startTake(recordly, title);
+    await current.starting;
     started = true;
-    live.stop = async () => { await cursor?.detach().catch(() => undefined); await recordly.stop().catch(() => undefined); };
-    cursor = await recordly.attachCursor(page);
+    current.recording = true;
+    current.starting = null;
+    if (current.interrupted) throw new Error("Stopped by Ctrl+C");
+    current.cursor = await recordly.attachCursor(page);
     await take();
   } catch (error) {
     failure = error;
   }
+  current.starting = null;
   let counts = null;
-  if (cursor) {
+  const cursor = current.cursor;
+  if (cursor && !current.stopping) {
+    current.cursor = null;   // detached here, so the stop below doesn't detach it again
     try { await cursor.detach(); } catch (error) { log.warn(`  The last cursor events didn't reach Recordly: ${error.message}`); }
     const { lastError, ...rest } = cursor.stats();
     counts = rest;
@@ -156,13 +191,13 @@ async function runTake({ recordly, page, title, take, log = console }) {
   }
   if (started) {
     try {
-      result = await recordly.stop();
+      result = await stopOnce(current);
     } catch (error) {
       log.error(`  Stopping the take failed: ${error.message}`);
       failure = failure ?? error;
     }
   }
-  live.stop = null;
+  current.recording = false;
   return { started, failure, result, cursor: counts };
 }
 
@@ -195,18 +230,27 @@ async function rest(page) {
   await page.mouse.move(width / 2, 4);
 }
 
-/** The start page, loaded afresh (a reload starts a new page: nothing open, every panel where it was left). */
+/** The start page, loaded afresh (a reload starts a new page: nothing open, every panel where it was left). Waits long:
+ * the live app's first answer after a quiet spell comes from a cold start. */
 async function landing(page, url) {
   forget();
   await page.goto("about:blank");
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: LONG });
   const demo = page.locator(DEMO.northbank).first();
-  await until(() => usable(demo), 60000, `"Open the Northbank demo" on ${url}`);
+  await until(() => usable(demo), LONG, `"Open the Northbank demo" on ${url}`);
 }
 
-/** The clash list after a check: rows drawn and the triage card in. */
+/** The clash list after a check: rows drawn and the triage card in. The dock keeps its last tabs, so Filters may be in
+ * front of the list (the opening ends there): the list's own tab is brought forward, now and then, until it shows. */
 async function listReady(page) {
-  await page.locator("button.clash-main").first().waitFor({ state: "attached", timeout: LONG });
+  const rows = page.locator("button.clash-main").first();
+  let asked = 0;
+  await until(async () => {
+    if (await rows.count()) return true;
+    const list = tab(page, "clashes");
+    if (Date.now() - asked > 2000 && (await list.count())) { asked = Date.now(); await list.click({ timeout: 2000 }).catch(() => undefined); }
+    return false;
+  }, LONG, "the clash list");
   await page.locator('section[data-tour="triage"]').first().waitFor({ state: "visible", timeout: 60000 });
   await sleep(2000);
 }
@@ -252,11 +296,22 @@ async function placeActivity(page, where) {
   if (await shown(button)) { await button.first().click({ timeout: 5000 }); await sleep(600); }
 }
 
+/** Activity showing Workings, as the app's own controls set it (kept in the browser, `sightline.workings`): turned on
+ * when it is off, and its Workings tab chosen over Steps. */
+async function showWorkings(page) {
+  const turnOn = page.locator(".wk-off").getByRole("button", { name: "Turn it on" });
+  if (await shown(turnOn)) { await turnOn.first().click({ timeout: 5000 }); await sleep(300); }
+  const work = page.getByRole("tablist", { name: "Activity view" }).getByRole("tab", { name: /Workings/ }).first();
+  if ((await work.isVisible()) && (await work.getAttribute("aria-selected")) !== "true") await work.click({ timeout: 5000 });
+  if (!(await work.isVisible())) console.warn("  Activity shows no Workings tab: Workings may not be drawn in this take");
+}
+
 /** Before a clash shot (docs/demo-video.md, "Before recording"): no filters, Workings floated where it can be seen,
  * the Clash panel in front. */
 async function prepareClashShot(page) {
   await clearFilters(page);
   await placeActivity(page, "float");
+  await showWorkings(page);
   await tab(page, "clash").click({ timeout: 5000 }).catch(() => undefined);
 }
 
@@ -436,39 +491,47 @@ const SHOTS = [
       state.scene = "northbank";
       ctx.log(`  ${await page.locator(".report-head h2").first().innerText().catch(() => "")}`.trimEnd());
       await sleep(GAP);
-      if (!ctx.filters) {
-        await xray(page, ctx.click);   // the outer walls fade to show the steel and the services
-        await sleep(4000);
-        return;
+      if (ctx.filters) {
+        // Agreed Nov 2 (docs/demo-video.md): Colour by Discipline, then a filter hiding Site and Architecture.
+        await ctx.click(tab(page, "filters"));
+        const colourBy = page.locator('.fpanel-head select[aria-label="Colour by"]').first();
+        await colourBy.waitFor({ state: "visible", timeout: 60000 });   // the filters' index arrives after the drawing
+        await sleep(GAP);
+        const discipline = await colourBy.evaluate((s) => [...s.options].find((o) => /^Discipline\b/.test(o.textContent.trim()))?.value);
+        if (!discipline) throw new Error('"Colour by…" offers no Discipline');
+        // The cursor goes to the list and the choice is set there: a click would open Chrome's own drop-down, a window of
+        // its own that a window recording doesn't capture.
+        await ctx.glide(colourBy);
+        await colourBy.selectOption(discipline);
+        await sleep(GAP);
+        await ctx.click(page.locator(".fpanel-head").getByRole("button", { name: "New filter" }));
+        const editor = page.locator(".feditor").first();
+        const models = editor.locator('xpath=.//span[contains(@class,"flabel") and normalize-space(.)="Models"]/following-sibling::div[1]//details/summary');
+        await ctx.click(models);
+        for (const model of [/Architecture/, /Site/]) await ctx.click(editor.locator(".pick-item", { hasText: model }));
+        await ctx.click(models);
+        await ctx.click(editor.getByRole("radio", { name: /Hide/ }));
+        await ctx.click(editor.getByRole("button", { name: /Add filter/ }));
+        await sleep(5000);   // the views close in on what is left by themselves
       }
-      // Proposed (docs/demo-video.md): Colour by Discipline, then a filter hiding Site and Architecture.
-      await ctx.click(tab(page, "filters"));
-      const colourBy = page.locator('.fpanel-head select[aria-label="Colour by"]').first();
-      await colourBy.waitFor({ state: "visible", timeout: 60000 });   // the filters' index arrives after the drawing
-      await sleep(GAP);
-      const discipline = await colourBy.evaluate((s) => [...s.options].find((o) => /^Discipline\b/.test(o.textContent.trim()))?.value);
-      if (!discipline) throw new Error('"Colour by…" offers no Discipline');
-      await ctx.click(colourBy);   // opens the browser's own list, which a window recording may not show
-      await colourBy.selectOption(discipline);
-      await page.keyboard.press("Escape");
-      await sleep(GAP);
-      await ctx.click(page.locator(".fpanel-head").getByRole("button", { name: "New filter" }));
-      const editor = page.locator(".feditor").first();
-      const models = editor.locator('xpath=.//span[contains(@class,"flabel") and normalize-space(.)="Models"]/following-sibling::div[1]//details/summary');
-      await ctx.click(models);
-      for (const model of [/Architecture/, /Site/]) await ctx.click(editor.locator(".pick-item", { hasText: model }));
-      await ctx.click(models);
-      await ctx.click(editor.getByRole("radio", { name: /Hide/ }));
-      await ctx.click(editor.getByRole("button", { name: /Add filter/ }));
-      await sleep(5000);   // the views close in on what is left by themselves
+      if (ctx.xray) {
+        await xray(page, ctx.click);   // the outer walls fade (with the filters: the services show between the floors)
+        await sleep(4000);
+      }
     },
   },
   {
     name: "triage",
     async setup(page, ctx) {
+      // The opening ends on Filters (its filters stay for this take): the list, with the triage card, comes forward.
+      if (state.scene === "northbank") {
+        await tab(page, "clashes").click({ timeout: 5000 }).catch(() => undefined);
+        await page.locator('section[data-tour="triage"]').first().waitFor({ state: "visible", timeout: 10000 }).catch(() => undefined);
+      }
       const idle = state.scene === "northbank" && !state.triaged && (await shown(page.locator('section[data-tour="triage"] .triage-go')));
       if (!idle) await openDemo(page, ctx.url, "northbank");
       await placeActivity(page, "float");   // the opening's filters stay: the clash shots clear them
+      await showWorkings(page);
       await tab(page, "clash").click({ timeout: 5000 }).catch(() => undefined);
       await rest(page);
     },
@@ -480,7 +543,7 @@ const SHOTS = [
       const said = (await page.locator('section[data-tour="triage"]').first().innerText()).match(/\d+\s+needs? a fix\s+of\s+\d+/);
       ctx.log(`  ${said ? said[0].replace(/\s+/g, " ") : "triage done"}`);
       const unread = page.locator('section[data-tour="triage"] .triage-unread:visible');
-      if (await shown(unread)) console.warn(`  Triage left clashes unread ("${(await unread.first().innerText()).trim()}"): the model didn't answer them all`);
+      if (await shown(unread)) ctx.retake(`triage left clashes unread ("${(await unread.first().innerText()).trim()}"): the model didn't answer them all`);
       await sleep(GAP);
       await fitWorkings(page, ctx.click);
       await sleep(4000);
@@ -492,6 +555,7 @@ const SHOTS = [
       // A fresh #1: a proposal on screen, or the fix kept, means its models open again (and triage with them).
       if (!(state.scene === "northbank" && state.proposal === null && !state.fixed)) await openDemo(page, ctx.url, "northbank");
       await prepareClashShot(page);
+      await clashRow(page, 1, plainClick);   // on screen when the take starts
       await rest(page);
     },
     async take(page, ctx) {
@@ -500,7 +564,7 @@ const SHOTS = [
       await sleep(GAP);
       const result = await propose(page, ctx.click, 1);
       state.proposal = 1;
-      if (!result.options) throw new Error(`#1 got no verified option${result.nofix ? " (No edit passed the geometry check)" : ""}`);
+      if (!result.options) return ctx.retake(`#1 got no verified option${result.nofix ? " (No edit passed the geometry check)" : ""}`);
       ctx.log(`  ${result.options} verified: ${result.titles.join(" | ")}`);
       await sleep(GAP);
       await fitWorkings(page, ctx.click);
@@ -570,7 +634,7 @@ const SHOTS = [
       const dialog = page.getByRole("dialog", { name: "Coordination report" });
       const build = dialog.locator('[data-tour="build"]');
       await until(() => usable(build), 60000, "Build the report (it needs triage)");
-      await sleep(1500);
+      await sleep(GAP);   // Report and Build each get their own zoom
       await ctx.click(build);
       const download = dialog.locator('[data-tour="download"]');
       await download.waitFor({ state: "visible", timeout: RUN });
@@ -625,6 +689,7 @@ const SHOTS = [
     async setup(page, ctx) {
       await openDemo(page, ctx.url, "cell");   // fresh every time: #29 is retaken until Wonder's move ranks first
       await prepareClashShot(page);
+      await clashRow(page, 29, plainClick);    // the list drawn down to #29, so the take starts on its row
       await rest(page);
     },
     async take(page, ctx) {
@@ -644,7 +709,7 @@ const SHOTS = [
       await settle(page, RUN, "Muse Wonder's second look at #29");
       const second = await outcome(page);
       ctx.log(`  after Muse Wonder: ${second.titles.join(" | ") || "no verified option"}`);
-      if (!second.wonderFirst) console.warn("  Muse Wonder's option isn't ranked first in this take: retake it");
+      if (!second.wonderFirst) ctx.retake("Muse Wonder's option isn't ranked first in this take");
       await sleep(GAP);
       await fitWorkings(page, ctx.click);
       await page.locator(".card-body.option:visible").first().scrollIntoViewIfNeeded().catch(() => undefined);
@@ -656,6 +721,7 @@ const SHOTS = [
     async setup(page, ctx) {
       if (!(state.scene === "cell" && state.proposal !== 13)) await openDemo(page, ctx.url, "cell");
       await prepareClashShot(page);
+      await clashRow(page, 13, plainClick);
       await rest(page);
     },
     async take(page, ctx) {
@@ -664,18 +730,20 @@ const SHOTS = [
       await sleep(GAP);
       const first = await propose(page, ctx.click, 13);
       state.proposal = 13;
-      if (first.options) throw new Error(`#13 got ${first.options} verified option(s) this time: not the no-fix picture`);
+      if (first.options) return ctx.retake(`#13 got ${first.options} verified option(s) this time: not the no-fix picture`);
       await sleep(GAP);
       await fitWorkings(page, ctx.click);
       await sleep(GAP);
-      const ask = page.locator('[data-tour="escalate"]:visible');   // as tested: then Ask Muse Wonder
+      const ask = page.locator('[data-tour="escalate"]:visible');   // as tested (owner, Nov 2: keep it): Ask Muse Wonder
       if (await shown(ask)) {
         await ctx.click(ask);
         await settle(page, RUN, "Muse Wonder's second look at #13");
         const second = await outcome(page);
-        if (second.options) throw new Error(`Muse Wonder found ${second.options} verified option(s) for #13: not the no-fix picture`);
+        if (second.options) return ctx.retake(`Muse Wonder found ${second.options} verified option(s) for #13: not the no-fix picture`);
         await sleep(GAP);
         await fitWorkings(page, ctx.click);
+      } else {
+        ctx.retake("Ask Muse Wonder wasn't offered on #13 (the owner's second-try setting?)");
       }
       await page.locator("div.nofix:visible").first().scrollIntoViewIfNeeded();   // and what decides it
       await sleep(4000);
@@ -712,26 +780,17 @@ const SHOT_NAMES = SHOTS.map((s) => s.name);
 
 // ------------------------------------------------------------------ running
 
-/** The page ORCA opened in: the --app window's own, else the first, sent there. */
-async function appPage(context, url, headless) {
-  const origin = new URL(url).origin;
-  const ours = (p) => { try { return new URL(p.url()).origin === origin; } catch { return false; } };
-  let page = context.pages().find(ours);
-  if (!page && !headless) page = await context.waitForEvent("page", { predicate: ours, timeout: 5000 }).catch(() => undefined);
-  if (!page) {
-    page = context.pages()[0] ?? (await context.newPage());
-    await page.goto(url, { waitUntil: "domcontentloaded" });
-  }
-  await page.bringToFront();
-  return page;
-}
+const LEFT_RUNNING = "Recordly is still recording a take (one left running?): stop or cancel it in Recordly, then run again";
 
+/** Chrome for the takes. Ctrl+C is this script's to handle (it stops the take first), not Playwright's. */
 async function launch(chromium, options, url) {
+  const own = { channel: "chrome", acceptDownloads: true, handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false };
   try {
-    return await chromium.launchPersistentContext(options.profile, options.headless
-      ? { channel: "chrome", headless: true, viewport: VIEWPORT, acceptDownloads: true,
-          args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] }
-      : { channel: "chrome", headless: false, viewport: null, acceptDownloads: true, args: [`--app=${url}`] });
+    const context = await chromium.launchPersistentContext(options.profile, options.headless
+      ? { ...own, headless: true, viewport: VIEWPORT, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] }
+      : { ...own, headless: false, viewport: null, args: [`--app=${url}`] });
+    context.setDefaultNavigationTimeout(LONG);   // the live app's first answer can be a cold start
+    return context;
   } catch (error) {
     if (/already in use|ProcessSingleton/i.test(error.message)) {
       throw new Error(`The profile ${options.profile} is open in another window (a --login window?): close it, then run again`);
@@ -747,9 +806,24 @@ function brief(error) {
   return waited ? `${lines[0]} (${waited.trim().replace(/^- /, "")})` : lines[0];
 }
 
+/** A shot's line in the summary: ok, RETAKE (it ran, but what it shows has to be taken again) or FAILED. */
+function summaryLine(r) {
+  const word = { ok: "ok", retake: "RETAKE", failed: "FAILED" }[r.status];
+  return `  ${r.shot.padEnd(9)} ${word.padEnd(6)}${r.videoPath ? `  ${r.videoPath}` : ""}${r.why ? `  (${r.why})` : ""}`;
+}
+/** Non-zero when any shot is to be taken again or failed. */
+const exitCodeOf = (results) => (results.every((r) => r.status === "ok") ? 0 : 1);
+
 async function record(shot, ctx) {
   const { page, recordly } = ctx;
   console.log(`\n${shot.name}`);
+  const failed = (why) => ({ shot: shot.name, status: "failed", why });
+  // A take left recording (this run's Ctrl+C missed, another script): this shot's start would be refused anyway.
+  if (recordly) {
+    let status;
+    try { status = await recordly.status(); } catch (error) { console.error(`  ${brief(error)}`); return failed(brief(error)); }
+    if (status.recording) { console.error(`  ${LEFT_RUNNING}`); return failed(LEFT_RUNNING); }
+  }
   // A dry run's picture of where the page ended, to look at instead of a recording.
   const picture = async (suffix = "") => {
     if (recordly) return;
@@ -763,27 +837,23 @@ async function record(shot, ctx) {
     await picture("-setup");
     forget();
     console.error(`  Setup failed, nothing recorded: ${brief(error)}`);
-    return { shot: shot.name, ok: false, error: `setup: ${brief(error)}` };
+    return failed(`setup: ${brief(error)}`);
   }
   const title = await page.title();
-  // After a good take, unrecorded: what the next shots need from it (the duct's camera).
+  // After a take that ran, unrecorded: what the next shots need from it (the duct's camera).
   const after = async () => {
     try { if (shot.after) await shot.after(page, ctx); } catch (error) { console.warn(`  After the take: ${brief(error)}`); }
   };
+  ctx.retakeWhy = null;
+  const verdict = (failure) => failure ? { status: "failed", why: brief(failure) }
+    : ctx.retakeWhy ? { status: "retake", why: ctx.retakeWhy } : { status: "ok" };
   if (!recordly) {
     console.log(`  [dry run] would record the window "${title}" with the agent cursor`);
-    try {
-      await shot.take(page, ctx);
-      console.log("  [dry run] would stop the take here");
-      await picture();
-      await after();
-      return { shot: shot.name, ok: true };
-    } catch (error) {
-      await picture();
-      forget();
-      console.error(`  Failed: ${brief(error)}`);
-      return { shot: shot.name, ok: false, error: brief(error) };
-    }
+    let failure = null;
+    try { await shot.take(page, ctx); console.log("  [dry run] would stop the take here"); } catch (error) { failure = error; }
+    await picture();
+    if (failure) { forget(); console.error(`  Failed: ${brief(failure)}`); } else await after();
+    return { shot: shot.name, ...verdict(failure) };
   }
   const { failure, result, cursor } = await runTake({ recordly, page, title, take: () => shot.take(page, ctx) });
   if (failure) forget();
@@ -794,32 +864,43 @@ async function record(shot, ctx) {
   if (result?.saveError) console.warn(`  saveError: ${result.saveError}`);
   if (cursor) console.log(`  cursor events: ${JSON.stringify(cursor)}`);
   if (failure) console.error(`  Failed${result ? " (the footage is kept)" : ""}: ${brief(failure)}`);
-  return { shot: shot.name, ok: !failure, error: failure && brief(failure), videoPath: result?.videoPath, projectPath: result?.projectPath };
+  return { shot: shot.name, ...verdict(failure), videoPath: result?.videoPath, projectPath: result?.projectPath };
+}
+
+/** Ctrl+C (or the console closing): stop the take, keeping its footage, close Chrome, exit 130. A second one exits now. */
+function onInterrupt(session) {
+  let exiting = false;
+  return (signal) => {
+    if (exiting) process.exit(130);
+    exiting = true;
+    console.error(`\n${signal}: ${live.starting || live.recording ? "stopping the take (its footage is kept)…" : "stopping"}`);
+    void interruptTake(live)
+      .then((result) => { if (result?.videoPath) console.error(`  videoPath: ${result.videoPath}\n  projectPath: ${result.projectPath}`); })
+      .finally(async () => { await session.context?.close().catch(() => undefined); process.exit(130); });
+  };
 }
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) { console.log(USAGE); return; }
   const { helper, chromium } = loadRecordly(options.recordly);
+  const session = { context: null };
+  const interrupted = onInterrupt(session);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, interrupted);
 
   // Fail fast, before a window opens, when Recordly isn't there or a take was left running.
   let recordly = null;
   if (!options.login && !options.dryRun) {
     recordly = await helper.connect();
-    if ((await recordly.status()).recording) {
-      throw new Error("Recordly is already recording a take (one left running?): stop or cancel it in Recordly, then run again");
-    }
+    if ((await recordly.status()).recording) throw new Error(LEFT_RUNNING);
   }
-  process.once("SIGINT", () => {
-    const stop = live.stop;
-    console.error("\nCtrl+C:", stop ? "stopping the take (its footage is kept)…" : "stopping");
-    void (stop ? stop() : Promise.resolve()).finally(() => process.exit(130));
-  });
 
   const url = options.login && !new URL(options.url).hash ? `${options.url}#owner` : options.url;   // #owner shows the gear
   const context = await launch(chromium, options, url);
+  session.context = context;
   try {
-    const page = await appPage(context, url, options.headless);
+    // The --app window's page (Recordly's helper finds it); headless has none, so the first page goes there at once.
+    const page = await helper.openAppPage(context, url, { timeoutMs: options.headless ? 1 : 5000 });
     if (options.login) {
       console.log("Sign in as owner, switch on the open-weights model and Show it built, then close the window");
       await new Promise((resolve) => { context.once("close", resolve); page.once("close", resolve); });
@@ -836,23 +917,24 @@ async function main() {
     const shots = selectShots(SHOTS, options.only);
     const downloads = path.join(path.dirname(options.profile), "orca-demo-downloads");
     const dryRunShots = path.join(path.dirname(options.profile), "orca-demo-dry-run");
-    const ctx = { page, recordly, url: options.url, filters: options.filters, downloads, dryRunShots,
-      click: (locator) => helper.glideClick(page, locator.first()), log: (line) => console.log(line) };
+    const ctx = { page, recordly, url: options.url, filters: options.filters, xray: options.xray, downloads, dryRunShots,
+      click: (locator) => helper.glideClick(page, locator.first()),
+      glide: (locator) => helper.glideTo(page, locator.first()),   // the cursor there, no click
+      retake: (why) => { ctx.retakeWhy = why; console.warn(`  Retake: ${why}`); },
+      log: (line) => console.log(line) };
     const results = [];
     for (const shot of shots) results.push(await record(shot, ctx));
 
     console.log(`\n${options.dryRun ? "Dry run" : "Takes"}:`);
-    for (const r of results) {
-      const where = r.videoPath ? `  ${r.videoPath}` : "";
-      console.log(`  ${r.shot.padEnd(9)} ${r.ok ? "ok    " : "FAILED"}${where}${r.ok ? "" : `  (${r.error})`}`);
-    }
-    if (results.some((r) => !r.ok)) process.exitCode = 1;
+    for (const r of results) console.log(summaryLine(r));
+    process.exitCode = exitCodeOf(results);
   } finally {
     await context.close().catch(() => undefined);
   }
 }
 
-module.exports = { SHOT_NAMES, SHOTS, USAGE, defaultProfile, parseArgs, selectShots, loadRecordly, startTake, runTake };
+module.exports = { SHOT_NAMES, SHOTS, USAGE, defaultProfile, parseArgs, selectShots, loadRecordly, startTake, runTake,
+  interruptTake, takeState, summaryLine, exitCodeOf };
 
 if (require.main === module) {
   main().catch((error) => {

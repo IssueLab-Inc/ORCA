@@ -55,7 +55,7 @@ Muse Image. Each is named once, with what it does.
 | 2:42–2:50 | A voice command; an AI agent asking ORCA for a fix | "Ask it out loud, or let your own AI agent drive it." |
 | 2:50–3:00 | The wordmark settles in the notch; Observe · Resolve · Check · Apply | "Each design worked. Now, together, they do. ORCA: AI you can trust to change real designs, because it checks every change." |
 
-### Proposed: where the filters go (Oct 31, for the owner to agree)
+### Proposed: where the filters go (Oct 31; the opening's agreed by the owner Nov 2)
 
 Filters, colours and the Properties panel came after the script was agreed ([filters.md](filters.md)). The script is
 already at about 2:55, so they go into two shots that exist, as pictures only: no new narration, no added time.
@@ -109,8 +109,8 @@ on, Chromium at 1440×900. Times are wall clock in the browser.
   visitor), so retakes don't run out.
 - Workings is cramped in the default bottom bar. Float Activity or open it in its own window, make it tall, and use Fit
   when a run ends.
-- If the filters shots are agreed: **Clear all** in Filters before #1, so the clash shots look as tested. Filters are
-  kept per set of models in the browser, so clear them between takes too.
+- The opening's filters are agreed (Nov 2): **Clear all** in Filters before #1, so the clash shots look as tested.
+  Filters are kept per set of models in the browser, so clear them between takes too.
 - Re-measure every number on the day. A number that comes out differently changes its line, never the other way.
 
 ### Recording the takes
@@ -132,32 +132,36 @@ from it.
    (without `--url` they go to a local server, `http://localhost:8765`).
    - Every shot: `node web/scripts/record-demo.cjs --url https://dodzikojo--orca-web.us-east.modal.run/#owner`
    - One shot again: add `--only duct`; several: `--only built,accept`
-   - The opening with the proposed filter beats: `--only open --filters`
+   - The opening without its filter beats: `--only open --no-filters`; without its X-ray: `--no-xray`. (`--filters`
+     still runs: it is the default now.)
 
 | Shot | Script | The take | Waits up to |
 |---|---|---|---|
-| `open` | 0:12–0:26 | Open the Northbank demo, the check, 464 listed, then Visual style: X-ray (the walls fade). With `--filters` instead: Filters, Colour by… Discipline, a Hide filter on Site and Architecture | 180 s to open |
-| `triage` | 0:26–0:40 | Triage all, until "N need a fix of 464"; Fit in Workings | 180 s |
-| `duct` | 0:40–1:12 | #1, Propose fixes, the verified options; Fit; Before, After | 300 s |
+| `open` | 0:12–0:26 | Open the Northbank demo, the check, 464 listed; Filters, Colour by… Discipline (the cursor goes to the list and the choice is set there: Chrome's own drop-down is a window of its own, which a window recording doesn't capture), a Hide filter on Site and Architecture, the views closing in; then Visual style: X-ray (the services between the floors) | 180 s to open |
+| `triage` | 0:26–0:40 | Triage all, until "N need a fix of 464"; Fit in Workings. RETAKE when the model left clashes unread | 180 s |
+| `duct` | 0:40–1:12 | #1, Propose fixes, the verified options; Fit; Before, After. RETAKE when no option verifies | 300 s |
 | `revision` | 1:12–1:22 | Northbank with `Northbank-MEP-Rev04.ifc` in place of MEP, from the camera the duct take ended on with a section box round #1, in X-ray: to set beside the duct take's After | 180 s to open |
 | `built` | 1:22–1:42 | Show it built on #1's first option, the picture; Fit; the wipe slider dragged across | 180 s |
-| `accept` | 1:42–1:54 | Accept this fix; Export (the IFC saved); Menu › Report, Build the report, Download (the PDF saved) | 300 s |
-| `cell-29` | 1:54–2:34 | #29, Propose fixes; Fit; Look for a better fix (Ask Muse Wonder when Spark found none); Fit. Says when Wonder's move isn't ranked first: take it again | 300 s each |
-| `cell-13` | 2:34–2:42 | #13, Propose fixes, then Ask Muse Wonder (as tested); fails the take if an option verifies | 300 s each |
+| `accept` | 1:42–1:54 | Accept this fix; Export (the IFC saved); Menu › Report, then (3 s on, its own zoom) Build the report, Download (the PDF saved) | 300 s |
+| `cell-29` | 1:54–2:34 | Starts on #29's row (the list filtered to it before the take); #29, Propose fixes; Fit; Look for a better fix (Ask Muse Wonder when Spark found none); Fit. RETAKE when Wonder's move isn't ranked first | 300 s each |
+| `cell-13` | 2:34–2:42 | #13, Propose fixes, then Ask Muse Wonder (as tested; kept, owner Nov 2). RETAKE when an option verifies or Wonder isn't offered | 300 s each |
 | `voice` | 2:42–2:50 | Chat: types "Isolate the services and colour them by system.", Send, Muse Spark's reply | 180 s |
 
 - **Setups are not recorded.** Before each take the script opens the models when the shot needs them afresh, clears
   Filters (**Clear all**) and floats Activity inside the page before the clash shots (never in its own window: a window
-  recording wouldn't see it), and puts Activity back in its bar for `open` and `voice`. The opening's filters stay for
-  `triage`.
+  recording wouldn't see it) with its Workings view chosen (turned on if it was off), and puts Activity back in its bar
+  for `open` and `voice`. The opening's filters stay for `triage`.
 - **Order.** Shots run in the order `open`, `triage`, `duct`, `built`, `accept`, `revision`, `cell-29`, `cell-13`,
   `voice`, whatever order `--only` gives: Northbank, its triage and #1's options carry from `duct` to `accept`, and
   `revision` uses the camera `duct` ended on (kept as the saved view "Demo: ORCA's fix for #1"). A shot run alone sets up
   what it needs, unrecorded: `accept` alone first runs triage and a proposal for #1.
-- **What it prints:** each take's `shot`, `videoPath` and `projectPath`, then a summary; it exits 1 if any shot failed.
-  A failure inside a take still stops the take (its footage is kept) and the next shot goes on. Ctrl+C stops the take
-  that is recording. The exported IFC and the PDF go to `%LOCALAPPDATA%\orca-demo-downloads` for the edit (the PDF's
-  pages are not in a take).
+- **What it prints:** each take's `shot`, `videoPath` and `projectPath`, then a summary where each shot is `ok`,
+  `RETAKE` (it ran, but what it shows has to be taken again, and why) or `FAILED` (and why); it exits 1 unless every
+  shot is `ok`. A failure inside a take still stops the take (its footage is kept) and the next shot goes on. A shot
+  whose turn comes while Recordly is still recording a take fails at once, before its setup. Ctrl+C stops the take that
+  is recording (or about to start), keeping its footage, then closes Chrome. The exported IFC and the PDF go to
+  `%LOCALAPPDATA%\orca-demo-downloads` for the edit (the PDF's pages are not in a take).
+- **The live app's first answer** after a quiet spell can be a cold start: the start page is waited for up to 180 s.
 - **Zooms:** clicks meant to get their own zoom are at least 3 s apart (Recordly merges clicks under 2.5 s apart into
   one). Only the cursor is drawn: typing shows as the text appearing.
 - **The window** is Chrome in app mode with a 1440 × 900 page, as tested, titled "ORCA · AI design coordination"; a

@@ -12,7 +12,11 @@ test("arguments: the defaults, shots by name, and refusals that say what to do",
   assert.equal(o.url, "http://localhost:8765");
   assert.equal(o.profile, path.join("C:", "Users", "x", "AppData", "Local", "orca-demo-profile"));
   assert.equal(o.only, null);
-  assert.equal(o.dryRun || o.headless || o.login || o.filters, false);
+  assert.equal(o.dryRun || o.headless || o.login, false);
+  assert.equal(o.filters && o.xray, true, "the opening's filter beats and X-ray are on unless turned off (owner, Nov 2)");
+  assert.equal(demo.parseArgs(["--no-filters"], {}).filters, false);
+  assert.equal(demo.parseArgs(["--no-xray"], {}).xray, false);
+  assert.equal(demo.parseArgs(["--filters"], {}).filters, true, "--filters still runs, as the default");
   assert.deepEqual(demo.parseArgs(["--only", "duct, built", "--filters"], {}).only, ["duct", "built"]);
   assert.equal(demo.parseArgs([], { RECORDLY_DIR: "D:\\Recordly" }).recordly, "D:\\Recordly");
   assert.throws(() => demo.parseArgs(["--only", "duct,nope"], {}), /No shot called nope/);
@@ -101,4 +105,59 @@ test("a final cursor flush that fails still stops the take; a take that never st
   assert.equal(s.started, false);
   assert.match(s.failure.message, /^conflict:/);
   assert.equal(s.result, null);
+});
+
+const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+
+test("Ctrl+C during a take detaches, then stops it once (the take's own end doesn't stop it again)", async () => {
+  const order = [];
+  const current = demo.takeState();
+  const going = deferred();
+  const running = demo.runTake({ recordly: fakeRecordly(order), page: {}, title: TITLE, log: quiet, current,
+    take: async () => { order.push("take"); await going.promise; } });
+  while (!order.includes("take")) await new Promise((r) => setTimeout(r, 1));
+  const stopped = await demo.interruptTake(current);
+  assert.deepEqual(stopped, { videoPath: "take.mp4", projectPath: "take.recordly" });
+  going.resolve();
+  const r = await running;
+  assert.deepEqual(order, ["start", "attach", "take", "detach", "stop"]);
+  assert.equal(r.result.videoPath, "take.mp4");
+});
+
+test("Ctrl+C while the start is in flight stops the take once it has started, before anything is clicked", async () => {
+  const order = [];
+  const starting = deferred();
+  const recordly = { ...fakeRecordly(order), start: () => { order.push("start"); return starting.promise; } };
+  const current = demo.takeState();
+  const running = demo.runTake({ recordly, page: {}, title: TITLE, log: quiet, current, take: async () => order.push("take") });
+  const interrupted = demo.interruptTake(current);
+  starting.resolve({});
+  assert.deepEqual(await interrupted, { videoPath: "take.mp4", projectPath: "take.recordly" });
+  const r = await running;
+  assert.deepEqual(order, ["start", "stop"]);
+  assert.match(r.failure.message, /Ctrl\+C/);
+
+  const refused = deferred();
+  const none = [];
+  const late = demo.takeState();
+  const failing = demo.runTake({ recordly: { ...fakeRecordly(none), start: () => refused.promise }, page: {}, title: TITLE, log: quiet,
+    current: late, take: async () => none.push("take") });
+  const nothing = demo.interruptTake(late);
+  refused.reject(new Error("conflict: A take is already recording; stop or cancel it first"));
+  assert.equal(await nothing, null);
+  await failing;
+  assert.deepEqual(none, []);
+  assert.equal(await demo.interruptTake(demo.takeState()), null, "nothing recording: nothing to stop");
+});
+
+test("the summary says RETAKE or FAILED with why, and either makes the exit code non-zero", () => {
+  const ok = { shot: "duct", status: "ok", videoPath: "duct.mp4" };
+  const again = { shot: "cell-29", status: "retake", why: "Muse Wonder's option isn't ranked first in this take", videoPath: "c.mp4" };
+  const broken = { shot: "built", status: "failed", why: "setup: #1 got no verified option this time: run it again" };
+  assert.match(demo.summaryLine(ok), /^ {2}duct {6}ok {6}duct\.mp4$/);
+  assert.match(demo.summaryLine(again), /cell-29 +RETAKE +c\.mp4 +\(Muse Wonder's option isn't ranked first in this take\)/);
+  assert.match(demo.summaryLine(broken), /built +FAILED +\(setup: #1 got no verified option/);
+  assert.equal(demo.exitCodeOf([ok]), 0);
+  assert.equal(demo.exitCodeOf([ok, again]), 1);
+  assert.equal(demo.exitCodeOf([ok, broken]), 1);
 });
