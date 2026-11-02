@@ -386,6 +386,8 @@ export function App() {
   const [triageFilter, setTriageFilterState] = useState<TriageKind | null>(null);
   // The list filtered to one pattern's or root cause's clashes (Insights). One filter at a time: either clears the other.
   const [listFocus, setListFocusState] = useState<{ label: string; ids: string[] } | null>(null);
+  // A clash row the tour points at: the list draws only the rows on screen, so it scrolls there first.
+  const [listReveal, setListReveal] = useState<string | null>(null);
   const setTriageFilter = (k: TriageKind | null) => { setTriageFilterState(k); if (k) setListFocusState(null); };
   const setListFocus = (f: { label: string; ids: string[] } | null) => { setListFocusState(f); if (f) setTriageFilterState(null); };
   useEffect(() => { setListFocusState(null); setLeftView("clashes"); }, [report?.id]);
@@ -3219,6 +3221,8 @@ export function App() {
       thumbTimer.current = null;
       if (thumbPaused.current || !viewer.current) return;
       if (viewer.current.lost) { thumbTimer.current = window.setTimeout(() => { thumbTimer.current = null; pumpThumbs(); }, 1000); return; }   // no context: wait for it
+      // The camera moving (a drag, a wheel, a flight): each thumbnail is a frame's work, so they wait until it rests.
+      if (viewer.current.moving) { thumbTimer.current = window.setTimeout(() => { thumbTimer.current = null; pumpThumbs(); }, 250); return; }
       const next = thumbQueue.current.pop();
       if (!next) return;
       const { report: r, matches: ms } = thumbSource.current;
@@ -3263,6 +3267,8 @@ export function App() {
     compare: setCompare,
     overview: () => { setViewPlan(false); viewer.current?.preview([]); viewer.current?.fitAll(); },
     reveal: (sel, el) => {
+      const row = /data-clash="([^"]+)"/.exec(sel)?.[1];
+      if (row && row !== "none") { setListReveal(row); setLeftView("clashes"); }
       const view = el?.closest("[data-left-view]")?.getAttribute("data-left-view");
       if (view === "clashes" || view === "insights") setLeftView(view);
       // Requirements and Report are in the menu on a desktop and a phone (a tablet keeps Report in its bar).
@@ -3612,7 +3618,7 @@ export function App() {
         {report
           ? <ReportList report={listReport ?? shownReport ?? report} naming={naming} matches={matches}
               thumbs={report.origin === "sightline" && matches ? thumbs : undefined} onThumb={needThumb}
-              focus={listFocus} onClearFocus={() => setListFocus(null)} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={(c) => { if (compact && tab === "chat") setTab("clash"); selectClash(c); }} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
+              focus={listFocus} onClearFocus={() => setListFocus(null)} reveal={listReveal} selected={viewPlan || activeContext ? null : clash?.id ?? null} onSelect={(c) => { if (compact && tab === "chat") setTab("clash"); selectClash(c); }} onImage={(c, index) => setLightbox({ clash: c, index })} fixes={fixes}
               reviewed={reviewed} checked={checked} busy={planning || proposing || !!running} triage={listTriage} triageFilter={triageFilter}
               proposing={running?.id ?? null} ready={readyCounts} panel={tab === "clash"} onViewProposal={viewProposal}
               isolating={isolating} onIsolate={isolateClash}

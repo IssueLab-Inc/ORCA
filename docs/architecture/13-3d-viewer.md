@@ -146,13 +146,25 @@ flowchart TD
 ```
 
 - **Renderer:** WebGL with antialiasing and `preserveDrawingBuffer: true` (captures read the visible canvas), pixel
-  ratio capped at 2, local clipping on. One `setAnimationLoop(frameTick)` renders every frame: it advances a camera
+  ratio capped at 2, local clipping on. Frames are drawn on demand ("Frames", below): `frameTick` advances a camera
   flight, updates `OrbitControls`, adjusts the clip range, and calls `drawFrame`, which places the DOM labels, keeps
   the marker's and the grips' size on screen, and draws each visible pane into its own rectangle of the one canvas
   (viewport and scissor), then the view cube (Panes and drawing views, below). With no models open (the start page,
   models loading) it draws one empty 3D view over the whole stage, whatever the layout: the panes' headers are hidden
   until models are drawn, and their backgrounds alone showed as patches of sky and paper behind the load card. The
   layout stays chosen; its panes come back with the models.
+- **Frames** (Nov 2): drawing every frame while nothing moved kept the page's thread busy on a big model (Snowdon
+  Towers' architecture, 204 MB, 6,604 elements: with the clash list's own costs, about 5 s of every 8 busy while
+  titles came in and nobody touched anything).
+  `redraw()` starts the frame loop (`setAnimationLoop`) and keeps it for `AWAKE_MS` (250 ms) after the last call;
+  `frameTick` keeps it while the controls' damping still moves the camera (`controls.update()` true), a flight runs,
+  the controls are held, auto-rotate is on, or a drawing pane has a picture still to draw (`drawingPending`: it waits
+  for a gesture to rest), then stops it. What calls `redraw`: every `Viewer` method (`wakeOnCalls` wraps each in the
+  constructor; an async one again when it settles), except `NOT_A_CHANGE` (questions such as `pickAt`, `boxOf`,
+  `pose`, and pictures such as `thumbClash`, `capture`, `snapshot`, which put the view back and draw it themselves:
+  nothing they call on the way asks for a frame, `hush`); any pointer, wheel or touch over the stage (capture phase:
+  the drawing views' and the cube's own handlers); the controls' `change`. Inside a frame it does nothing. `moving`
+  (a flight, the controls held, or the camera moved in the last 400 ms) tells `App` to hold thumbnails back.
 - **Layers:** layer 0 is the model, seen by every camera. Layer 1 holds what only the 3D view shows: the marker, the
   outlines drawn through everything (focus, hits, links, selection), the section box helper and its grips, and the
   measure. The 3D camera sees 0 and 1; a drawing view's camera only 0. Layers 2 to 6 (`CAP_LAYER`) hold the stencil
@@ -646,7 +658,11 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 
 - One draw call per batch, whatever the element count; a preview changes instance matrices, and focus meshes reuse
   the batches' GPU buffers. `applyMode` does walk every element of every model on each mode, focus or preview change.
-- The frame loop renders the 3D pane continuously (`setAnimationLoop`), not on demand. Drawing panes redraw their
+- Frames on demand (above). Measured Nov 2 in Chromium on an Intel Arc B580, Snowdon Towers' architecture with
+  ORCA's 2,471 clashes in the list, dev build, titles coming in, nothing touched: the page's thread was busy about
+  5 s of every 8 before (the render loop, a commit per frame, an intersection check per list row each frame, every row
+  re-rendered per title batch), 34 ms after; orbiting while list thumbnails were drawn went from 5 fps to 58. The 3D
+  view itself holds 60 fps there either way ([22](22-build-log.md), Nov 2). Drawing panes redraw their
   targets only when what they show changes, and composite only when their picture or place changes (measured Oct 30
   in Quad on Northbank: idle, no redraws; orbiting the 3D view, no redraws and no composites; panning a plan with 60
   pointer moves, no redraws while it goes on and one when it rests; ten wheel steps on a section, one redraw after; a
@@ -655,8 +671,9 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
   renders with software GL).
 - Thumbnails: `thumbClash` renders into the visible canvas, so `posed` renders the restored view before returning
   (checked Oct 28 by sampling the canvas between frames: the old build jumped 45 levels of brightness, the new one 0;
-  CLAUDE.md). `App` draws one queued thumbnail every 60 ms (waiting while the WebGL context is lost), newest request first, paused while a proposal, plan,
-  replay, reload or check runs ([12](12-web-app.md)).
+  CLAUDE.md). `App` draws one queued thumbnail every 60 ms (waiting while the WebGL context is lost, and while the
+  camera is `moving`: each one is a frame's work), newest request first, paused while a proposal, plan, replay, reload
+  or check runs ([12](12-web-app.md)).
 - Small models: `reach` and `sceneDiag` above, the marker's constant screen size and a near plane down to 0.5 mm
   (checked Oct 29 on a generated 110 mm load cell and on Northbank #1 and #40, which frame as before; CLAUDE.md).
 - Big models: web-ifc parses on the main thread. A 500 MB upload took about three minutes to draw with the page frozen
@@ -684,3 +701,5 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 - A new visual style, layout, view kind, clip plane, handle, annotation, or a change to the drawing style's passes, the
   stencil bits or the redraw key.
 - A change to what the capture guard lifts or restores ([docs/views.md](../views.md), "What must not change").
+- A change to when frames are drawn: `AWAKE_MS`, `NOT_A_CHANGE` (a new question or picture method belongs there; a
+  method that changes what is drawn never does), what keeps the loop going, or `moving`.

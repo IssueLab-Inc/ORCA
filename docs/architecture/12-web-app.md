@@ -48,7 +48,8 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `FiltersPanel.tsx` | The Filters panel ([docs/filters.md](../filters.md)): the list of filters (on, colour or action, name, count, up, down, zoom to them, delete; Show colours, The rest: Show · Grey · Hide, Colour by…), and the editor (models, classes and floors with counts, property conditions, Colour / By value / Hide / Isolate, swatches, Invert, the Value / Items / Colour table, the live count); with `check`, each row's What do these hit? and the Check clashes block under the list ([docs/filters.md](../filters.md), "Checks") | `FiltersPanel`, `blankRule`, `FiltersPanelProps` | `App` (the dock's Filters panel, or a sheet without the dock) |
 | `ProjectStart.tsx` | The blank project's drop zone (IFC/STEP models, or a Navisworks report or folder) | `ProjectStart` | `App` |
 | `ReportDoc.tsx` | The coordination report dialog (scope, all kept checks or only the one the list shows, a typed team name per model, build PDF and BCF) and the per-clash review block | `ReportDialog`, `ReviewBlock`, `reviewersOf` | `App` |
-| `ReportList.tsx` | The left pane over a report: Clashes / Insights tabs, impact bar, the report's line (tests, in the model, a "Naming n…" pill while titles land), the check picker (`picker`, from App), the search on its own row and the filters under it, each only when it would change the list (In the model when some clashes are not in the open models; by status once anything is fixed or reviewed: All, To fix, Fixed, Reviewed, also from the header's "N fixed" and "N reviewed" chips; "n shown"), the list with lazy thumbnails, each row's proposal (Proposing… while it runs, then "N fixes ready" or "No fix found", with View when it is not on screen: `proposing`, `ready`, `panel`, `onViewProposal`), and each row's quick actions on hover, keyboard focus or the selected row (`RowActions`: Isolate the clashing elements, pressed on the clash isolated now (`isolating`, `onIsolate`); Propose fixes when both elements are in the model and it may need one, Mark as not a clash, and its same-element clashes with their count, narrowing the list to the clashes sharing either element, `sameElements`, through `onFocus`) | `ReportList`, `sameElements`, `clashLabel`, `mm`, `linkState`, `Review` | `App`, `ClashPanel.tsx`, `ContextPlan.tsx`, `PlanPanel.tsx`, `ReportDoc.tsx` |
+| `ReportList.tsx` | The left pane over a report: Clashes / Insights tabs, impact bar, the report's line (tests, in the model, a "Naming n…" pill while titles land), the check picker (`picker`, from App), the search on its own row and the filters under it, each only when it would change the list (In the model when some clashes are not in the open models; by status once anything is fixed or reviewed: All, To fix, Fixed, Reviewed, also from the header's "N fixed" and "N reviewed" chips; "n shown"), the list with lazy thumbnails, drawing only the rows on screen (below,
+"The clash list draws what is on screen"; `rowWindow`, `reveal` scrolls to a clash not drawn yet), each row's proposal (Proposing… while it runs, then "N fixes ready" or "No fix found", with View when it is not on screen: `proposing`, `ready`, `panel`, `onViewProposal`), and each row's quick actions on hover, keyboard focus or the selected row (`RowActions`: Isolate the clashing elements, pressed on the clash isolated now (`isolating`, `onIsolate`); Propose fixes when both elements are in the model and it may need one, Mark as not a clash, and its same-element clashes with their count, narrowing the list to the clashes sharing either element, `sameElements`, through `onFocus`) | `ReportList`, `sameElements`, `clashLabel`, `mm`, `linkState`, `Review`, `rowWindow`, `FIRST_ROWS`, `OVERSCAN` | `App`, `ClashPanel.tsx`, `ContextPlan.tsx`, `PlanPanel.tsx`, `ReportDoc.tsx` |
 | `Requirements.tsx` | The requirements dialog: level cards, strictness, the check matrix, who moves, the kind of project (building or machine) and what is fixed in place, rules and Muse's audit, openings | `RequirementsDialog` | `App` |
 | `Sheet.tsx` | The phone's bottom sheet bar: handle, drag and flick, snap heights | `SheetBar` | `App` |
 | `Tour.tsx` | Both guided tours (steps, spotlight, "Show me", recorded-run offer) | `Tour`, `TourState`, `TourActions`, `TOUR`, `CELL`, `TOUR_QUESTION`, `BUILDING_STEPS`, `CELL_STEPS` | `App` |
@@ -542,9 +543,27 @@ dock panel, or the classic grid (where slot and host are `display: contents`). `
 - **Finding the control:** `find()` runs every 250 ms, takes the visible copy of the target (a phone has some
   twice), scrolls it into view for 1.5 s after it appears, and spotlights it (`tour-hole`). When no copy is visible
   it calls `actions.reveal(selector, el)` once: `App` switches the left pane's tab (`[data-left-view]`), and on phone
-  and tablet opens the drawer, the sheet's tab or the header menu that hides it.
+  and tablet opens the drawer, the sheet's tab or the header menu that hides it. A clash row (`[data-clash="…"]`) may
+  not be drawn at all (the list draws the rows on screen): `App` hands its id to the list (`listReveal`, `reveal`),
+  which scrolls to it, and it is drawn there.
 - **Card:** beside the target, else below or above; on a phone it spans the width at the top or bottom. On a touch
   screen its copy says tap instead of click. Escape ends the tour unless a dialog (`.about-dialog`) or About ORCA (`.orca-about`) is open.
+
+### The clash list draws what is on screen (`ReportList.tsx`)
+
+- **Why** (Nov 2): ORCA's check found 2,471 clashes on Snowdon Towers' architecture, and every row was drawn. Each
+  title batch, each list thumbnail landing (one every 60 ms) and each click re-rendered them all (0.3–0.6 s each in
+  the dev build), and each row's `LazyThumb` kept an intersection check that Chromium ran every frame: clicking a clash
+  took 1–6 s to answer, an element's Properties 2.5 s, and orbiting fell to 5 fps while thumbnails were drawn.
+- **How:** each group keeps its full height (`paddingTop` and `paddingBottom` of the rows not drawn, in rows of one
+  measured height: every row is one line) and draws the rows between the top and bottom of the visible part of the
+  list, and `OVERSCAN` (12) either side (`rowWindow`). The window is measured after every scroll (caught in the
+  capture phase, so a phone's sheet scrolling counts too), resize, group opened or closed (`toggle`) and change to the
+  list, in the list's own document and window (a pop-out). Before it is measured (and in tests) a group draws its
+  first `FIRST_ROWS` (60), as does a closed group or a hidden list.
+- **Scrolling to a clash:** the selected clash (and `reveal`, the tour's row) scrolls into view as before when its row
+  is drawn; when it is not, the list scrolls whatever holds it to where the row sits in its group (opening the group),
+  and the row is drawn there.
 
 ### Smaller modules
 

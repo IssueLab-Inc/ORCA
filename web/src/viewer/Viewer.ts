@@ -97,6 +97,16 @@ export interface Pane { spec: ViewSpec; el: HTMLDivElement; rect: Rect; pinned: 
 /** Classes that stay where they are (the server's FIXED_CLASSES): a clash's section runs along the other side. */
 const FIXED = /^Ifc(Beam|Column|Slab|Wall|WallStandardCase|Footing|Member|Plate)$/;
 
+/** How long the frames go on after the last thing that asked for one (docs/architecture/13-3d-viewer.md, "Frames"). */
+const AWAKE_MS = 250;
+/** Methods that change nothing on screen, so neither they nor what they call on the way draw a frame: drawing itself,
+ * questions about the scene, and pictures (each puts the view back and draws it itself when it is taken, a thumbnail
+ * every 60 ms or so). Leaving a question out only costs a few frames; listing a change here would leave the screen
+ * stale, so only these. */
+const NOT_A_CHANGE = new Set(["drawFrame", "pickAt", "snapPoint", "pose", "isShown", "has", "boxOf",
+  "ofClass", "ofLevel", "infoCounts", "paneToClash", "defaultSpec", "defaultCrop", "visiblePanes", "modelBox", "sceneDiag",
+  "rect3d", "activeCamera", "pane3dShown", "stats", "thumbClash", "capture", "captureClash", "captureBuilt", "snapshot", "png"]);
+
 export class Viewer {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -267,7 +277,63 @@ export class Viewer {
     this.buildMarker();
     this.resize.observe(host);
     this.fit();
+    // Frames on demand (docs/architecture/13-3d-viewer.md, "Frames"): drawing a big model sixty times a second while
+    // nothing moved kept the page's thread busy. Every method call draws for a moment (wakeOnCalls); so does any
+    // pointer, wheel or touch over the stage (the drawings' and the cube's own handlers) and every move of the camera.
+    this.wakeOnCalls();
+    for (const type of ["pointerdown", "pointermove", "pointerup", "wheel", "touchstart", "touchmove"])
+      host.addEventListener(type, () => this.redraw(), { capture: true, passive: true });
+    this.controls.addEventListener("start", () => { this.controlsHeld = true; });
+    this.controls.addEventListener("end", () => { this.controlsHeld = false; this.cameraMoved = performance.now(); });
+    this.controls.addEventListener("change", () => { this.cameraMoved = performance.now(); this.redraw(); });
+    this.redraw();
+  }
+
+  // ---------------------------------------------------------------- frames on demand
+
+  private looping = false;
+  private awakeUntil = 0;
+  private inFrame = false;
+  private hush = 0;   // inside a question or a picture (NOT_A_CHANGE)
+  private disposed = false;
+  /** A drawing pane still has a picture to draw (it waits for a gesture to rest): the frames go on until it has. */
+  private drawingPending = false;
+  private controlsHeld = false;
+  private cameraMoved = 0;
+
+  /** Every method of the viewer is a change to what is drawn, or may be: each call (and an async one again when it
+   * settles) draws for a moment. A question or a picture (NOT_A_CHANGE) draws nothing, nor does anything it calls on
+   * the way (a picture sets the pair, the mode and the camera, and puts them back). */
+  private wakeOnCalls() {
+    for (const name of Object.getOwnPropertyNames(Viewer.prototype)) {
+      const d = Object.getOwnPropertyDescriptor(Viewer.prototype, name);
+      if (["constructor", "redraw", "frameTick", "wakeOnCalls"].includes(name) || typeof d?.value !== "function") continue;
+      const method = d.value as (...a: unknown[]) => unknown;
+      (this as unknown as Record<string, unknown>)[name] = NOT_A_CHANGE.has(name)
+        ? (...args: unknown[]) => { this.hush++; try { return method.apply(this, args); } finally { this.hush--; } }
+        : (...args: unknown[]) => {
+          const out = method.apply(this, args);
+          this.redraw();
+          if (out instanceof Promise) out.then(() => this.redraw(), () => this.redraw());
+          return out;
+        };
+    }
+  }
+
+  /** Draw again, and go on drawing for a moment (`AWAKE_MS`): what changed may go on changing. Inside a frame it does
+   * nothing: what a frame calls changes nothing it has not drawn. */
+  redraw() {
+    if (this.inFrame || this.hush || this.disposed) return;
+    this.awakeUntil = Math.max(this.awakeUntil, performance.now() + AWAKE_MS);
+    if (this.looping) return;
+    this.looping = true;
     this.renderer.setAnimationLoop(() => this.frameTick());
+  }
+
+  /** The camera is moving, held, or moved a moment ago (a drag, a wheel, a flight): work that can wait (thumbnails)
+   * waits, so the view stays smooth. */
+  get moving(): boolean {
+    return !!this.flight || this.controlsHeld || performance.now() - this.cameraMoved < 400;
   }
 
   // ---------------------------------------------------------------- models
@@ -1930,6 +1996,7 @@ export class Viewer {
     const now = performance.now(), busy = view.held || view.quiet < 3 || now - view.lastMove < 150;
     const moved = !view.shown || !view.shown.center.equals(view.center) || view.shown.scale !== view.scale;
     const due = view.drawn !== content ? !busy || now - view.lastDraw > 200 : moved && !busy;
+    if (!due && (view.drawn !== content || moved)) this.drawingPending = true;   // drawn once the gesture rests
     if (due) {
       this.drawInto(view, rt, nrt);
       view.drawn = content;
@@ -2751,17 +2818,28 @@ export class Viewer {
 
   // ---------------------------------------------------------------- frame loop, labels, misc
 
+  /** One frame: a flight's step, the controls (their damping glides on after a drag), every pane. Then the frames
+   * stop once nothing has asked for one for `AWAKE_MS` and nothing is still moving or waiting to be drawn. */
   private frameTick() {
-    if (this.flight) {
-      const k = Math.min((performance.now() - this.flight.t0) / this.flight.ms, 1);
-      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;  // ease in-out
-      this.camera.position.lerpVectors(this.flight.from[0], this.flight.to[0], e);
-      this.controls.target.lerpVectors(this.flight.from[1], this.flight.to[1], e);
-      if (k >= 1) this.flight = null;
-    }
-    this.controls.update();
-    this.adjustClipRange();
-    this.drawFrame();
+    let moving = false;
+    this.inFrame = true;
+    try {
+      if (this.flight) {
+        moving = true;
+        const k = Math.min((performance.now() - this.flight.t0) / this.flight.ms, 1);
+        const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;  // ease in-out
+        this.camera.position.lerpVectors(this.flight.from[0], this.flight.to[0], e);
+        this.controls.target.lerpVectors(this.flight.from[1], this.flight.to[1], e);
+        if (k >= 1) this.flight = null;
+      }
+      if (this.controls.update()) { moving = true; this.cameraMoved = performance.now(); }
+      this.adjustClipRange();
+      this.drawingPending = false;
+      this.drawFrame();
+    } finally { this.inFrame = false; }
+    const now = performance.now();
+    if (moving || this.drawingPending || this.controls.autoRotate || this.controlsHeld) this.awakeUntil = Math.max(this.awakeUntil, now + AWAKE_MS);
+    if (now > this.awakeUntil) { this.looping = false; this.renderer.setAnimationLoop(null); }
   }
 
   /** Every pane: the 3D view rendered, each drawing view drawn when something changed and composited from its target;
@@ -2918,6 +2996,8 @@ export class Viewer {
   }
 
   dispose() {
+    this.disposed = true;
+    this.looping = false;
     this.renderer.setAnimationLoop(null);
     this.resize.disconnect();
     this.controls.dispose();
