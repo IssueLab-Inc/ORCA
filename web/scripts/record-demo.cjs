@@ -789,7 +789,7 @@ const LEFT_RUNNING = "Recordly is still recording a take (one left running?): st
 
 /** Chrome for the takes. Ctrl+C is this script's to handle (it stops the take first), not Playwright's. */
 async function launch(chromium, options, url) {
-  const own = { channel: "chrome", acceptDownloads: true, handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false };
+  const own = { channel: "chrome", chromiumSandbox: true, acceptDownloads: true, handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false };
   try {
     const context = await chromium.launchPersistentContext(options.profile, options.headless
       ? { ...own, headless: true, viewport: VIEWPORT, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] }
