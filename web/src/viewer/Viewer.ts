@@ -29,6 +29,8 @@ export function serverDeltaToViewer([dx, dy, dz]: number[]): THREE.Vector3 {
 export const serverPointToViewer = ([x, y, z]: number[]): THREE.Vector3 => pointToThree(x, y, z);
 
 type Found = { model: LoadedModel; el: LoadedElement };
+/** Models parsed and not yet shown (`Viewer.stage`), and the origin they were placed from. */
+export type Staged = { models: LoadedModel[]; origin: [number, number] | null };
 /** A model's batches: its solid mesh, and its see-through one when it has see-through elements. */
 const batches = (m: LoadedModel): THREE.BatchedMesh[] => (m.glass ? [m.mesh, m.glass] : [m.mesh]);
 const disposeBatches = (m: LoadedModel) => { for (const batch of batches(m)) batch.dispose(); };
@@ -338,31 +340,47 @@ export class Viewer {
 
   // ---------------------------------------------------------------- models
 
-  async load(files: Uint8Array[], names: string[] = [], isCurrent: () => boolean = () => true,
-    onDrawn?: (count: number, elements: number) => void) {
-    // Parse the entire replacement off-screen. A failed or superseded load leaves the usable scene intact.
-    const staged: LoadedModel[] = [];
-    // The first file picks the origin the models are drawn from; the rest are placed from it, so they stay aligned.
+  /** Parse files into models off screen, none shown yet (docs/architecture/13-3d-viewer.md, "Loading"): the first file
+   * picks the origin the models are drawn from, the rest are placed from it, so they stay aligned. Null when superseded
+   * (`isCurrent`), with what it made disposed; a file that fails disposes what it made and throws. `load` shows what it
+   * made; `drop` disposes it unused. The bytes are handed to the parser: the caller's arrays are empty after. */
+  async stage(files: Uint8Array[], isCurrent: () => boolean = () => true,
+    onDrawn?: (count: number, elements: number) => void): Promise<Staged | null> {
+    const models: LoadedModel[] = [];
     let at: [number, number] | null = null;
     try {
       for (const bytes of files) {
         const m = await loadIfc(bytes, at);
         at ??= m.origin ?? null;
-        staged.push(m);
-        if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
+        models.push(m);
+        if (!isCurrent()) { for (const m of models) disposeBatches(m); return null; }
         if (onDrawn) {
-          onDrawn(staged.length, staged.reduce((n, m) => n + m.stats.elements, 0));
-          // Parsing a file holds the thread: let the page paint the count before the next one starts.
+          onDrawn(models.length, models.reduce((n, m) => n + m.stats.elements, 0));
+          // Parsed on the page (no worker) a file holds the thread: let it paint the count before the next one starts.
           await new Promise((resolve) => setTimeout(resolve, 0));
-          if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
+          if (!isCurrent()) { for (const m of models) disposeBatches(m); return null; }
         }
       }
-    } catch (e) { for (const m of staged) disposeBatches(m); throw e; }
-    if (!isCurrent()) { for (const m of staged) disposeBatches(m); return; }
+    } catch (e) { for (const m of models) disposeBatches(m); throw e; }
+    return { models, origin: at };
+  }
+
+  /** Dispose models staged and never shown (an open that failed or was superseded after they were parsed). */
+  drop(staged: Staged | null | undefined) { for (const m of staged?.models ?? []) disposeBatches(m); }
+
+  /** Show `files` as the models, replacing the open ones. `early`: the same files already being staged (an upload
+   * parsed while it went up), used instead of parsing them again. */
+  async load(files: Uint8Array[], names: string[] = [], isCurrent: () => boolean = () => true,
+    onDrawn?: (count: number, elements: number) => void, early?: Promise<Staged | null>) {
+    // Parse the entire replacement off-screen. A failed or superseded load leaves the usable scene intact.
+    const staged = await (early ?? this.stage(files, isCurrent, onDrawn));
+    if (!staged) return;
+    if (!isCurrent()) { this.drop(staged); return; }
+    const at = staged.origin;
     this.preview([]);
     this.clearFocusCache();
     for (const m of this.models) { this.scene.remove(...batches(m)); disposeBatches(m); }
-    this.models = staged.map((m) => this.adopt(m));
+    this.models = staged.models.map((m) => this.adopt(m));
     setOrigin(at);
     this.pane3d.hidden = !this.models.length;
     for (const pane of this.panes) pane.el.hidden = !this.models.length;

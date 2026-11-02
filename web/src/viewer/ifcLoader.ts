@@ -1,14 +1,14 @@
-// Loads an IFC with web-ifc into ONE BatchedMesh: one draw call, but every element keeps its own
-// transform, colour and visibility. That is what makes "preview option 2" a single matrix update.
-// Curves are drawn with 24 sides and shaded smooth across facets within the crease (viewer/normals.ts).
-// See-through elements (a robot's safety zone, mesh guards, glazing) go in a second batch drawn after the solid one
-// without writing depth, so what is inside them still shows.
+// Loads an IFC into ONE BatchedMesh: one draw call, but every element keeps its own transform, colour and visibility.
+// That is what makes "preview option 2" a single matrix update. The parse (web-ifc, creased normals, placements from
+// the origin: viewer/ifcParse.ts) runs in a worker (viewer/ifcWorker.ts), so the page never stops while a big model is
+// read; only the batches are built here. See-through elements (a robot's safety zone, mesh guards, glazing) go in a
+// second batch drawn after the solid one without writing depth, so what is inside them still shows.
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { IfcAPI } from "web-ifc";
-import { creaseNormals, type Creased } from "./normals";
-import { pickOrigin, shiftFor } from "./origin";
+import type { IfcAPI } from "web-ifc";
+import { CIRCLE_SEGMENTS, type ParsedModel } from "./ifcParse";
 import { ROOM } from "./patch";
+
+export { CIRCLE_SEGMENTS };
 
 export interface LoadedElement {
   globalId: string;
@@ -33,123 +33,127 @@ export interface LoadedModel {
   origin: [number, number];
 }
 
-let api: IfcAPI | null = null;
+// ---------------------------------------------------------------- the worker
 
-async function ifcApi(): Promise<IfcAPI> {
-  if (!api) {
-    api = new IfcAPI();
-    api.SetWasmPath("/wasm/");
-    await api.Init();
-  }
-  return api;
+/** How long the worker stays after its last parse: a federation's files follow each other; then its memory goes back
+ * (web-ifc's WebAssembly heap only grows, to over a gigabyte for a 204 MB model). */
+const IDLE_MS = 15_000;
+type Reply = { ready?: true; id?: number; model?: ParsedModel; error?: string };
+let worker: { w: Worker; ready: Promise<boolean> } | null = null;
+let noWorker = false;   // it would not start (an old browser, a blocked script): every parse is on the page
+let idle = 0;
+let serial = 0;
+const waiting = new Map<number, { resolve: (m: ParsedModel) => void; reject: (e: Error) => void }>();
+
+/** The worker, started if need be; `ready` says whether its script runs (it says so first). */
+function startWorker() {
+  if (worker || noWorker) return worker;
+  let w: Worker;
+  try {
+    w = new Worker(new URL("./ifcWorker.ts", import.meta.url), { type: "module" });
+  } catch { noWorker = true; return null; }
+  let started: (ok: boolean) => void = () => undefined;
+  const ready = new Promise<boolean>((resolve) => { started = resolve; });
+  w.onmessage = (e: MessageEvent<Reply>) => {
+    if (e.data.ready) { started(true); return; }
+    const job = e.data.id != null ? waiting.get(e.data.id) : undefined;
+    if (!job) return;
+    waiting.delete(e.data.id!);
+    if (e.data.model) job.resolve(e.data.model); else job.reject(new Error(e.data.error ?? "The model could not be read."));
+    if (!waiting.size) { clearTimeout(idle); idle = window.setTimeout(stopWorker, IDLE_MS); }
+  };
+  // Before it said it was ready, the script never ran: parse on the page from now on. After, the worker died with the
+  // files it had (out of memory): those fail, the next parse starts a new one.
+  w.onerror = (e) => {
+    e.preventDefault();
+    started(false);
+    stopWorker();
+    for (const job of waiting.values()) job.reject(new Error("The model reader stopped (out of memory?). Open fewer or smaller models."));
+    waiting.clear();
+  };
+  worker = { w, ready };
+  ready.then((ok) => { if (!ok) noWorker = true; });
+  return worker;
 }
 
-/** Sides of a circle (round ducts, pipes, bars). web-ifc's default, 12, drew a round duct as a dodecagon; 24 keeps a
- * 600 mm duct within 3 mm of round. Measured Nov 1: Snowdon Towers' MEP and architecture files and Northbank parse no
- * slower; Snowdon's structure parses about 2 s slower, nearly all of it 14 rebar sweeps. */
-export const CIRCLE_SEGMENTS = 24;
+function stopWorker() {
+  clearTimeout(idle);
+  worker?.w.terminate();
+  worker = null;
+}
 
-/** Parse one IFC. `origin` (IFC plan metres): the point to place its elements from, so a federation shares one; null
- * picks it from this file's elements (`origin.pickOrigin`: zero near zero). */
-export async function loadIfc(bytes: Uint8Array, origin: [number, number] | null = null): Promise<LoadedModel> {
-  const t0 = performance.now();
-  const ifc = await ifcApi();
-  // No COORDINATE_TO_ORIGIN: federated discipline files share coordinates, and shifting each by its own
-  // offset would pull them apart. The viewer's own origin (below) is shared by every file of a load instead.
-  const modelId = ifc.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false, CIRCLE_SEGMENTS });
+/** web-ifc on the page, for when no worker starts: loaded only then. */
+let pageApi: Promise<IfcAPI> | null = null;
+async function parseHere(bytes: Uint8Array, origin: [number, number] | null): Promise<ParsedModel> {
+  const [{ IfcAPI: Api }, parse] = await Promise.all([import("web-ifc"), import("./ifcParse")]);
+  pageApi ??= (async () => { const ifc = new Api(); ifc.SetWasmPath("/wasm/"); await ifc.Init(); return ifc; })();
+  return parse.parseIfc(await pageApi, bytes, origin);
+}
 
-  type Part = { expressId: number; geometry: THREE.BufferGeometry; color: THREE.Color; alpha: number };
-  type Placed = { shape: Creased; matrix: THREE.Matrix4 };
-  // Placed first and baked once the origin is known: their placements decide it.
-  const found: { expressId: number; placed: Placed[]; color: THREE.Color; alpha: number }[] = [];
-  // Each geometry's triangles with creased normals, in its own coordinates: a type placed many times (a fitting, a
-  // window) is smoothed once. Kept for the parse only.
-  const smoothed = new Map<number, Creased>();
-  ifc.StreamAllMeshes(modelId, (flat) => {
-    const placedHere: Placed[] = [];
-    let color: THREE.Color | null = null;
-    let alpha = 1;
-    for (let i = 0; i < flat.geometries.size(); i++) {
-      const placed = flat.geometries.get(i);
-      let shape = smoothed.get(placed.geometryExpressID);
-      if (!shape) {
-        const g = ifc.GetGeometry(modelId, placed.geometryExpressID);
-        // Interleaved x, y, z, nx, ny, nz; web-ifc's normals are flat per facet, so only the positions are kept.
-        const verts = ifc.GetVertexArray(g.GetVertexData(), g.GetVertexDataSize());
-        const index = ifc.GetIndexArray(g.GetIndexData(), g.GetIndexDataSize());
-        const position = new Float32Array(verts.length / 2);
-        for (let k = 0, j = 0; k < verts.length; k += 6, j += 3) {
-          position[j] = verts[k]; position[j + 1] = verts[k + 1]; position[j + 2] = verts[k + 2];
-        }
-        g.delete();
-        shape = creaseNormals(position, index);
-        smoothed.set(placed.geometryExpressID, shape);
-      }
-      placedHere.push({ shape, matrix: new THREE.Matrix4().fromArray(placed.flatTransformation) });
-      if (!color) {
-        color = new THREE.Color(placed.color.x, placed.color.y, placed.color.z);
-        alpha = placed.color.w;
-      }
-    }
-    if (placedHere.length) found.push({ expressId: flat.expressID, placed: placedHere, color: color ?? new THREE.Color(0.8, 0.8, 0.8), alpha });
+/** Parse one IFC off the page's thread (on it when no worker starts). The bytes are handed to the worker, not copied:
+ * the caller's array is empty after (a view onto part of a buffer is copied first). */
+export async function parseIfc(bytes: Uint8Array, origin: [number, number] | null = null): Promise<ParsedModel> {
+  const started = startWorker();
+  if (!started || !(await started.ready) || worker !== started) return parseHere(bytes, origin);
+  clearTimeout(idle);
+  const whole = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
+  return new Promise<ParsedModel>((resolve, reject) => {
+    const id = ++serial;
+    waiting.set(id, { resolve, reject });
+    started.w.postMessage({ id, bytes: whole, origin }, [whole.buffer]);
   });
-  smoothed.clear();
+}
 
-  // Where to draw from: float32 vertices 418 km out step 31 mm, so each placement is taken relative to the origin in
-  // double precision before its vertices are written (web-ifc's placements are Y up: IFC x is [12], IFC y is −[14]).
-  const at = origin ?? pickOrigin(found.map((f) => f.placed[0].matrix.elements[12]), found.map((f) => -f.placed[0].matrix.elements[14]));
-  const shift = shiftFor(at);
-  const parts: Part[] = [];
-  for (const f of found) {
-    const pieces = f.placed.map(({ shape, matrix }) => {
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(shape.position.slice(), 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(shape.normal.slice(), 3));
-      geo.setIndex(new THREE.BufferAttribute(shape.index, 1));   // never changed: shared by every placement
-      // Bake the placement so each element's instance matrix starts as identity; previews are then deltas.
-      geo.applyMatrix4(shift.clone().multiply(matrix));
-      return geo;
-    });
-    const merged = pieces.length === 1 ? pieces[0] : mergeGeometries(pieces, false);
-    if (merged) parts.push({ expressId: f.expressId, geometry: merged, color: f.color, alpha: f.alpha });
-  }
-  found.length = 0;
+// ---------------------------------------------------------------- the batches
 
+/** The batches for a parsed model: solid and see-through elements, each element one geometry and one instance. */
+export function buildModel(p: ParsedModel): LoadedModel {
+  const alpha = (e: number) => p.colors[e * 4 + 3];
   const byGlobalId = new Map<string, LoadedElement>();
-  const batch = (list: Part[], byInstance: Map<number, LoadedElement>) => {
+  const batch = (list: number[], byInstance: Map<number, LoadedElement>) => {
     let vertexCount = 0;
     let indexCount = 0;
-    for (const p of list) {
-      vertexCount += p.geometry.getAttribute("position").count;
-      indexCount += p.geometry.getIndex()?.count ?? 0;
-    }
+    for (const e of list) { vertexCount += p.vertexCount[e]; indexCount += p.indexCount[e]; }
     const material = new THREE.MeshStandardMaterial({ metalness: 0, roughness: 0.85, side: THREE.DoubleSide });
     // Room for the pieces a kept fix adds (offset and route pieces, bends), so accepting one patches the batch in place
     // (viewer/patch.ts) instead of regrowing it the first time.
     const mesh = new THREE.BatchedMesh(list.length + ROOM.instances, vertexCount + ROOM.vertices, indexCount + ROOM.indices, material);
-    for (const p of list) {
-      const instanceId = mesh.addInstance(mesh.addGeometry(p.geometry));
-      mesh.setColorAt(instanceId, new THREE.Vector4(p.color.r, p.color.g, p.color.b, p.alpha));
-      const globalId: string = ifc.GetLine(modelId, p.expressId)?.GlobalId?.value ?? `#${p.expressId}`;
-      const el = { globalId, expressId: p.expressId, instanceId, mesh, baseColor: p.color, baseAlpha: p.alpha,
-        baseMatrix: new THREE.Matrix4() };
+    for (const e of list) {
+      const v0 = p.vertexStart[e] * 3, v1 = v0 + p.vertexCount[e] * 3, i0 = p.indexStart[e], i1 = i0 + p.indexCount[e];
+      const geo = new THREE.BufferGeometry();   // views onto the parsed arrays: the batch copies them in
+      geo.setAttribute("position", new THREE.BufferAttribute(p.position.subarray(v0, v1), 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(p.normal.subarray(v0, v1), 3));
+      geo.setIndex(new THREE.BufferAttribute(p.index.subarray(i0, i1), 1));
+      const instanceId = mesh.addInstance(mesh.addGeometry(geo));
+      const baseColor = new THREE.Color(p.colors[e * 4], p.colors[e * 4 + 1], p.colors[e * 4 + 2]);
+      mesh.setColorAt(instanceId, new THREE.Vector4(baseColor.r, baseColor.g, baseColor.b, alpha(e)));
+      const globalId = p.globalIds[e];
+      const el = { globalId, expressId: p.expressIds[e], instanceId, mesh, baseColor, baseAlpha: alpha(e), baseMatrix: new THREE.Matrix4() };
       byGlobalId.set(globalId, el);
       byInstance.set(instanceId, el);
-      p.geometry.dispose();
     }
     return { mesh, triangles: indexCount / 3 };
   };
   const SEE_THROUGH = 0.99;
+  const all = Array.from({ length: p.expressIds.length }, (_, e) => e);
   const byInstance = new Map<number, LoadedElement>();
   const glassByInstance = new Map<number, LoadedElement>();
-  const solid = batch(parts.filter((p) => p.alpha >= SEE_THROUGH), byInstance);
-  const seeThrough = parts.filter((p) => p.alpha < SEE_THROUGH);
+  const solid = batch(all.filter((e) => alpha(e) >= SEE_THROUGH), byInstance);
+  const seeThrough = all.filter((e) => alpha(e) < SEE_THROUGH);
   const glass = seeThrough.length ? batch(seeThrough, glassByInstance) : null;
-  ifc.CloseModel(modelId);
   return {
     mesh: solid.mesh, glass: glass?.mesh ?? null, byGlobalId, byInstance, glassByInstance,
-    stats: { elements: parts.length, triangles: solid.triangles + (glass?.triangles ?? 0),
-      parseMs: Math.round(performance.now() - t0) },
-    origin: at,
+    stats: { elements: all.length, triangles: solid.triangles + (glass?.triangles ?? 0), parseMs: 0 },
+    origin: p.origin,
   };
+}
+
+/** Parse one IFC (off the page's thread) and build its batches. `origin` (IFC plan metres): the point to place its
+ * elements from, so a federation shares one; null picks it from this file's elements (`origin.pickOrigin`: zero near
+ * zero). The bytes are handed over: the caller's array is empty after. */
+export async function loadIfc(bytes: Uint8Array, origin: [number, number] | null = null): Promise<LoadedModel> {
+  const t0 = performance.now();
+  const model = buildModel(await parseIfc(bytes, origin));
+  model.stats.parseMs = Math.round(performance.now() - t0);
+  return model;
 }

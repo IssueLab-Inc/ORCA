@@ -25,7 +25,8 @@ what a big model costs and how the upload copes. Code: `app._receive_models`, `a
    `done` or `error`. Refusals before the files are in stay plain HTTP errors. `POST /api/models/upload` is kept
    (one JSON answer).
 6. **Drawn from the visitor's own file**: an uploaded IFC is parsed from the `File` in the browser, not downloaded
-   back; only a STEP comes back (converted).
+   back; only a STEP comes back (converted). Since Nov 2 the parse starts with the upload, in a worker, so the models
+   are ready when the server has opened them ([13](architecture/13-3d-viewer.md), "Loading").
 
 ## Measuring elements
 

@@ -1,6 +1,7 @@
 # 13 · 3D viewer
 
-> **Covers:** `web/src/viewer/` (`Viewer.ts`, `ifcLoader.ts`, `normals.ts`, `origin.ts`, `patch.ts`, `views.ts`,
+> **Covers:** `web/src/viewer/` (`Viewer.ts`, `ifcLoader.ts`, `ifcParse.ts`, `ifcWorker.ts`, `normals.ts`, `origin.ts`,
+> `patch.ts`, `views.ts`,
 > `cube.ts`, `drawing.ts`, `annotate.ts`), and the viewer's controls in `web/src/ViewerToolbar.tsx`, `web/src/ViewPanes.tsx`, `web/src/App.tsx`,
 > `web/src/pilot.ts` · **Checked against code:** 2026-10-30 (`feature/drawing-views`) · **Deeper design:**
 > [docs/views.md](../views.md) (navigation, styles, visibility, drawing views), [docs/edits.md](../edits.md) ("Keeping
@@ -21,9 +22,11 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 
 | File | What it is | Main exports | Used by |
 |---|---|---|---|
-| `viewer/ifcLoader.ts` | Parses one IFC with web-ifc into a solid batch and an optional see-through batch | `loadIfc`, `CIRCLE_SEGMENTS`, `LoadedModel`, `LoadedElement` | `viewer/Viewer.ts`, `viewer/patch.ts` (types) |
-| `viewer/origin.ts` | The point the models are drawn from (IFC plan metres) and every IFC point's way into and out of the viewer | `origin`, `setOrigin`, `pickOrigin`, `shiftFor`, `pointToThree`, `pointToIfc`, `serverVerts`, `NEAR_M` | `viewer/ifcLoader.ts`, `viewer/Viewer.ts`, `viewer/drawing.ts`, `viewer/annotate.ts`, `viewer/measure.ts`, `viewer/patch.ts` |
-| `viewer/normals.ts` | Creased normals: smooth across facets within the crease angle, sharp beyond, a vertex split only where its triangles need different normals | `creaseNormals`, `creased`, `CREASE`, `CREASE_DEGREES`, type `Creased` | `viewer/ifcLoader.ts`, `viewer/patch.ts`, `viewer/Viewer.ts` |
+| `viewer/ifcLoader.ts` | Loads one IFC: asks the worker to parse it (on the page when no worker starts) and builds a solid batch and an optional see-through batch from what comes back | `loadIfc`, `parseIfc`, `buildModel`, `CIRCLE_SEGMENTS`, `LoadedModel`, `LoadedElement` | `viewer/Viewer.ts`, `viewer/patch.ts` (types) |
+| `viewer/ifcParse.ts` | The parse itself, run by the worker: web-ifc's tessellation, creased normals once per geometry, the origin, every placement baked from it, packed into a few typed arrays | `parseIfc`, `buffers`, `CIRCLE_SEGMENTS`, type `ParsedModel` | `viewer/ifcWorker.ts`, `viewer/ifcLoader.ts` |
+| `viewer/ifcWorker.ts` | The worker that parses IFCs off the page's thread, one request at a time, handing the arrays back without copying | (a worker script) | `viewer/ifcLoader.ts` |
+| `viewer/origin.ts` | The point the models are drawn from (IFC plan metres) and every IFC point's way into and out of the viewer | `origin`, `setOrigin`, `pickOrigin`, `shiftFor`, `pointToThree`, `pointToIfc`, `serverVerts`, `NEAR_M` | `viewer/ifcParse.ts`, `viewer/Viewer.ts`, `viewer/drawing.ts`, `viewer/annotate.ts`, `viewer/measure.ts`, `viewer/patch.ts` |
+| `viewer/normals.ts` | Creased normals: smooth across facets within the crease angle, sharp beyond, a vertex split only where its triangles need different normals | `creaseNormals`, `creased`, `CREASE`, `CREASE_DEGREES`, type `Creased` | `viewer/ifcParse.ts`, `viewer/patch.ts`, `viewer/Viewer.ts` |
 | `viewer/Viewer.ts` | The `Viewer` class: scene, camera, modes, focus, previews, picking, measuring, section box, captures | `Viewer`, `serverDeltaToViewer`, `serverPointToViewer`, `meetingZone`, types `Mesh`, `BuiltPiece`, `BuiltPasses`, `OptionShape`, `ViewMode`, `Preset`, `Side`, `Focus`, `Pick` | `App.tsx`, `pilot.ts`, `ViewerToolbar.tsx` (types), `web/spikes/built.ts` |
 | `viewer/views.ts` | The views' pure rules: layouts, plan view ranges and presets, clash defaults, section frames, compass, scales, view cube regions, camera history, visibility filters, the Esc steps | `paneRects`, `planRange`, `planPreset`, `planThrough`, `sectionFrame`, `sectionThrough`, `nearestScale`, `scaleBar`, `cubeRegion`, `CameraHistory`, `shownBy`, `escStep`, types `ViewSpec`, `Datums`, `Filters`, `Temporary`, `Pose` | `viewer/Viewer.ts`, `viewer/cube.ts`, `App.tsx`, `ViewerToolbar.tsx`, `api.ts` (types) |
 | `viewer/cube.ts` | The view cube: a labelled cube in the 3D view's corner, click a face, edge or corner (26 views), drag to orbit, Home | `ViewCube`, `CUBE_PX` | `viewer/Viewer.ts` |
@@ -60,19 +63,22 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 - Fix colours follow the clash convention: side A red `#d0342c`, side B green `#1f9d3a`, one element on both sides
   purple `#8e44ad`.
 
-## Loading (`ifcLoader.ts`)
+## Loading (`ifcLoader.ts`, `ifcParse.ts`, `ifcWorker.ts`)
 
 ```mermaid
 flowchart TD
-  open["App.open: bytes from the visitor's file or api.file"] --> load["Viewer.load(files, names, isCurrent)"]
-  load --> each["for each file: loadIfc(bytes)"]
-  each --> init["IfcAPI once, SetWasmPath /wasm/, Init"]
+  up["App.open, an upload of IFCs: Viewer.stage(the visitor's files) starts at once, beside the upload"] -.-> staged
+  open["App.open: bytes from the visitor's file or api.file"] --> load["Viewer.load(files, names, isCurrent, onDrawn, early?)"]
+  load --> each["Viewer.stage: for each file, loadIfc(bytes, the first file's origin)"]
+  each --> worker["parseIfc: the bytes handed to the worker (ifcWorker.ts)"]
+  worker --> init["IfcAPI once per worker, SetWasmPath /wasm/, Init"]
   init --> om["OpenModel with COORDINATE_TO_ORIGIN false"]
   om --> stream["StreamAllMeshes: one callback per element"]
   stream --> geo["each placed geometry: positions and index, creased normals (once per geometry), placement baked in"]
   geo --> merge["merge the element's pieces, colour and alpha from its first piece"]
   merge --> origin["after the stream: the origin (given, else the median placement), each placement baked from it"]
-  origin --> split{"alpha below 0.99?"}
+  origin --> pack["packed: a few long typed arrays, handed back without copying"]
+  pack --> split{"buildModel, on the page: alpha below 0.99?"}
   split -->|"no"| solid["solid BatchedMesh, sized for all parts plus ROOM"]
   split -->|"yes"| glass["glass BatchedMesh, only when the file has such parts"]
   solid --> maps["byGlobalId, byInstance, glassByInstance, stats"]
@@ -84,6 +90,20 @@ flowchart TD
   adopt --> stats["elements, triangles, parseMs back to App"]
 ```
 
+- **Off the page's thread** (Nov 2): the parse (web-ifc's open and tessellation, creased normals, placements) ran on
+  the page and held it about six seconds for Snowdon Towers' architecture (204 MB: open 1.5 s, tessellation 2.6 s,
+  normals 0.8 s, placing 0.6 s, in Node). It runs in a worker now (`ifcWorker.ts`, started by `ifcLoader.parseIfc`
+  and ended after `IDLE_MS`, 15 s, without a parse, which gives web-ifc's WebAssembly memory back). The bytes go to the
+  worker without a copy (the caller's array is empty after); the result is `ParsedModel`: per element its express id,
+  GlobalId, colour and where its vertices and triangles are in one `position`, `normal` and `index` array each, handed
+  back without a copy. Only `buildModel` (the batches, about 0.1 s) runs on the page. The worker says it is ready
+  before it is given anything: one whose script never runs (an old browser, a blocked script) leaves every parse on
+  the page (`parseHere`, web-ifc then loaded on demand); one that dies mid-parse fails that file (out of memory).
+- **An upload is parsed while it goes up** (Nov 2): `App.open` starts `Viewer.stage` on the visitor's own IFC files
+  beside the upload, so the models are ready when the server has opened them; it uses them if the server kept the
+  files as sent (same names and order: `localFile`), else parses again, and drops them (`Viewer.drop`) if the open
+  failed or was superseded. Measured in Chromium on Snowdon Towers' architecture: shown the moment the server
+  finished, where before it took 5.6 s more with the page frozen 5.3 s; the longest stall in the load is 0.4 s.
 - **One batch per file:** `BatchedMesh(parts + ROOM.instances, vertices + ROOM.vertices, indices + ROOM.indices)`.
   Each element is one instance (`addGeometry` then `addInstance`) whose matrix starts as identity, because the
   placement is baked into its geometry: a preview is then just a delta matrix.
@@ -105,10 +125,11 @@ flowchart TD
 - **Element records** (`LoadedElement`): GlobalId (from `GetLine(...).GlobalId`, else `#expressId`), express id,
   instance id, which batch (`mesh`), `baseColor`, `baseAlpha`, `baseMatrix`. `LoadedModel` keeps `byGlobalId` and,
   for picking, `byInstance` (solid batch) and `glassByInstance`.
-- **The wasm** comes from `/wasm/` (`web-ifc.wasm`, copied there by `web/scripts/copy-wasm.mjs`). One `IfcAPI` is
-  shared for the page's life; each model is closed after loading.
-- **`Viewer.load`** parses every file before touching the scene, so a failed or superseded load (the `isCurrent`
-  callback is `App`'s `sceneEpoch` check) disposes what it staged and leaves the usable scene as it was.
+- **The wasm** comes from `/wasm/` (`web-ifc.wasm`, copied there by `web/scripts/copy-wasm.mjs`). One `IfcAPI` per
+  worker (and one on the page only if no worker starts); each model is closed after its parse, also one that fails.
+- **`Viewer.load`** parses every file before touching the scene (`Viewer.stage`, or the `early` staging it is given),
+  so a failed or superseded load (the `isCurrent` callback is `App`'s `sceneEpoch` check) disposes what it staged and
+  leaves the usable scene as it was.
   **`Viewer.replace(index, bytes, isCurrent)`** swaps one file the same way (used when a kept fix cannot be patched).
   Both assign the viewer's own materials to the batches (`adopt`), reset the cached scene size and redraw.
 - **`Viewer.add(files, names, isCurrent)`** ([docs/add-and-remove-models.md](../add-and-remove-models.md)) parses each
@@ -676,8 +697,9 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
   or check runs ([12](12-web-app.md)).
 - Small models: `reach` and `sceneDiag` above, the marker's constant screen size and a near plane down to 0.5 mm
   (checked Oct 29 on a generated 110 mm load cell and on Northbank #1 and #40, which frame as before; CLAUDE.md).
-- Big models: web-ifc parses on the main thread. A 500 MB upload took about three minutes to draw with the page frozen
-  and a 1.4 GB JS heap (Oct 29, [docs/uploads.md](../uploads.md)); parsing in a Web Worker is the next step there.
+- Big models: web-ifc parses in a worker (Loading, above), so the page goes on; a 500 MB upload took about three
+  minutes to draw with the page frozen and a 1.4 GB JS heap when it parsed on the page (Oct 29,
+  [docs/uploads.md](../uploads.md)).
 - `package.json` lists `three-mesh-bvh`, but nothing in the viewer imports it at HEAD: picking uses three.js's own
   raycast on the batches.
 - **The host's size:** on a desktop the stage lives in the dock's Model panel ([docs/panels.md](../panels.md)); the
@@ -698,6 +720,7 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 - A new `reach` use, or a change to the building values or shares.
 - A new keyboard shortcut, mouse or touch gesture, or toolbar control.
 - A new file in `web/src/viewer/` (the docs-map test checks every file is named here or in 12).
+- A change to what runs in the worker, what `ParsedModel` carries, `IDLE_MS`, or when an upload is parsed early.
 - A new visual style, layout, view kind, clip plane, handle, annotation, or a change to the drawing style's passes, the
   stencil bits or the redraw key.
 - A change to what the capture guard lifts or restores ([docs/views.md](../views.md), "What must not change").
