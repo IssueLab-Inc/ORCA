@@ -165,14 +165,15 @@ async function record(browser, run, tmp) {
 
   if (run.check) {
     // Step 1: from the check to the list, named; the clip starts once the models are drawn (the check starts while
-    // the loading card is still up). Its part: the list and the 3D view beside it, 4:3 from the top left.
+    // the loading card is still up). Its part: the list and the 3D view beside it, 16:10 from the top left (the
+    // landing's player frame).
     await page.waitForTimeout(1000);
     const stop = await snapshots(ctx, page, path.join(tmp, "app"), t0);
     await page.getByRole("button", { name: run.open }).first().click(); mark("open");
     await page.getByText("ORCA is checking the models").first().waitFor({ timeout: 180000 }); mark("check");
     await page.getByText(/Loading \d+ models/).first().waitFor({ state: "hidden", timeout: 180000 }); mark("drawn");
     const v = page.viewportSize(), right = (await page.locator("main.stage").first().boundingBox()) ?? { x: 0, width: 700 };
-    const w = right.x + right.width, h = Math.min(v.height, Math.round(w * 3 / 4));
+    const w = right.x + right.width, h = Math.min(v.height, Math.round(w * 10 / 16));
     at.crops.list = { frac: [0, 0, w / v.width, h / v.height].map((n) => n.toFixed(4)).join(","), width: w };
     await page.waitForSelector("button.clash-main", { timeout: 180000, state: "attached" }); mark("listed");
     await page.waitForTimeout(12000); mark("named");

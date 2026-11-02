@@ -314,9 +314,13 @@ together and only from measured runs.
 ### Landing clips
 
 `fix-northbank.webp` (#1, the duct through the girder) and `fix-cell.webp` (#66, the air pipe into the conveyor's
-side rail) play on the demo cards (`DemoCard` → `Clip` in `About.tsx`). Each step of "What ORCA does" (`Step`) sits
-beside a clip of its own: `check.webp` (Northbank checked and its list appearing), `understand.webp` (the Clash panel
-while Muse Spark reads #1), `workings.webp` (#1's run in the Workings graph) and `keep.webp` (#1's fix kept). They are
+side rail) play on the demo cards (`DemoCard` → `Clip` in `About.tsx`). "What ORCA does" (`StepsPlayer`) shows its
+steps as tabs beside one 16:10 frame that plays the chosen step's clip: `check.webp` (Northbank checked and its list
+appearing), `understand.webp` (the Clash panel while Muse Spark reads #1), `workings.webp` (#1's run in the Workings
+graph) and `keep.webp` (#1's fix kept); a clip of another shape sits on a dotted ground. It moves on when a clip has
+played through (its length read from the file, `stepClips.ts`), until the visitor picks a step; it fetches nothing
+before it scrolls into view, then the clip on screen and the next, and plays each from a fresh object URL so it starts
+from its first frame. They are
 recorded by `capture-proposals.cjs --landing` ([18](18-testing-and-evals.md)) as animated WebP time-lapses of one part
 of the window each, so their words read at a card's width (the whole app, as in the README's clips, is too small
 there); the card and steps 2-4 come from one live proposal on #1. Each has a `-still.webp`, its last frame, shown

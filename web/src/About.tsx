@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowRight, Box, Check, RotateCcw, Cpu, Download, Eye, FolderOpen, ListChecks, MessageSquare, Play, ScanSearch, ShieldCheck, Sparkles, Upload, Compass } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLayout } from "./layout";
+import { loadClip } from "./stepClips";
 
 /**
  * What ORCA is and does, for people who have never heard of BIM or design coordination: the start page in the
@@ -134,35 +135,39 @@ export function About({ start, onAbout, triageOpen = false }: {
 
       <section>
         <h2 className="about-h">What ORCA does</h2>
-        <ol className="about-steps">
-          <Step n={1} icon={<ScanSearch size={18} aria-hidden />} title="Checks the models and sorts what it finds"
-            clip={{ src: "/demos/check", width: 1000, height: 751, caption: "Northbank's check, then its list: 464 clashes, numbered, being named.",
-              alt: "Northbank's three building models checked: ORCA lists each pair of models and each model against itself while it checks 1,961 elements, then the list appears, 464 clashes numbered and grouped by check, the supply air main through the girder first at -300 mm, and they are being named." }}>
-            ORCA checks every pair of models and each model against itself, and numbers each clash.{" "}
-            {triageOpen ? <><b>Muse Spark Open</b>, an open-weights model,</> : <b>Muse Spark</b>} names every one and gives
-            it a verdict: a real problem, by design, or a modelling mistake. Alike clashes (forty bolts in forty plates) are
-            read once.
-          </Step>
-          <Step n={2} icon={<Eye size={18} aria-hidden />} title="Understands a clash"
-            clip={{ src: "/demos/understand", width: 760, height: 790, caption: "Muse Spark on #1, sped up: the three pictures, its reasoning as it thinks, what it understood.",
-              alt: "The Clash panel for Northbank's #1 while Muse Spark works, sped up: the three pictures of the duct through the girder, then its reasoning as it thinks, then its understanding: the duct crosses the 1000 deep girder with 300 mm overlap, cannot shift as a whole without pulling apart its tees, and the girder has an opening on this line it can use." }}>
-            <b>Muse Spark</b> looks at three pictures of the clash and reads the model's own data: what each element is,
-            which way it runs, where the openings are. You can follow its reasoning as it thinks.
-          </Step>
-          <Step n={3} icon={<ShieldCheck size={18} aria-hidden />} title="Proposes fixes, and checks every one"
-            clip={{ src: "/demos/workings", width: 1000, height: 504, caption: <><b>Workings</b>, the same run: your request, Muse Spark's ideas, ORCA's checks, the rank. Every run draws its own in <b>Activity</b>.</>,
-              alt: "Workings replaying Northbank's run, sped up: one lane each for you, Muse Spark and ORCA. Your request and ORCA's brief go to Muse Spark, whose round replies with two ideas; ORCA checks the first in the model's geometry and it is verified, so ORCA stops there, ranks it and leaves one verified option, then kept." }}>
-            It suggests real edits: raising a duct through an opening in a beam, or trimming a member back where it runs into another. A geometry engine then tests each
-            one in the actual model: the clash is gone, there is room to spare, and nothing new is hit. Ideas that fail
-            go back with the reason. <b>You only see fixes that passed.</b>
-          </Step>
-          <Step n={4} icon={<Download size={18} aria-hidden />} title="You review and export"
-            clip={{ src: "/demos/keep", width: 1000, height: 625, caption: "Accept: the server tries the fix again, edits the model and checks it.",
-              alt: "Northbank's #1 after the fix, Before and After: overlap -300 mm, then clear by 50 mm. Accept is pressed: Applying the fix, then Fix kept in the model, checked again, and Export IFC counts one edit to download." }}>
-            Watch it try ideas live in the 3D view, compare before and after, accept the fix, and download the edited
-            model as an IFC file that any design tool can open.
-          </Step>
-        </ol>
+        <StepsPlayer steps={[
+          { icon: <ScanSearch size={18} aria-hidden />, title: "Checks the models and sorts what it finds",
+            clip: { src: "/demos/check", caption: "Northbank's check, then its list: 464 clashes, numbered, being named.",
+              alt: "Northbank's three building models checked: ORCA lists each pair of models and each model against itself while it checks 1,961 elements, then the list appears, 464 clashes numbered and grouped by check, the supply air main through the girder first at -300 mm, and they are being named." },
+            body: <>
+              ORCA checks every pair of models and each model against itself, and numbers each clash.{" "}
+              {triageOpen ? <><b>Muse Spark Open</b>, an open-weights model,</> : <b>Muse Spark</b>} names every one and gives
+              it a verdict: a real problem, by design, or a modelling mistake. Alike clashes (forty bolts in forty plates) are
+              read once.
+            </> },
+          { icon: <Eye size={18} aria-hidden />, title: "Understands a clash",
+            clip: { src: "/demos/understand", caption: "Muse Spark on #1, sped up: the three pictures, its reasoning as it thinks, what it understood.",
+              alt: "The Clash panel for Northbank's #1 while Muse Spark works, sped up: the three pictures of the duct through the girder, then its reasoning as it thinks, then its understanding: the duct crosses the 1000 deep girder with 300 mm overlap, cannot shift as a whole without pulling apart its tees, and the girder has an opening on this line it can use." },
+            body: <>
+              <b>Muse Spark</b> looks at three pictures of the clash and reads the model's own data: what each element is,
+              which way it runs, where the openings are. You can follow its reasoning as it thinks.
+            </> },
+          { icon: <ShieldCheck size={18} aria-hidden />, title: "Proposes fixes, and checks every one",
+            clip: { src: "/demos/workings", caption: <><b>Workings</b>, the same run: your request, Muse Spark's ideas, ORCA's checks, the rank. Every run draws its own in <b>Activity</b>.</>,
+              alt: "Workings replaying Northbank's run, sped up: one lane each for you, Muse Spark and ORCA. Your request and ORCA's brief go to Muse Spark, whose round replies with two ideas; ORCA checks the first in the model's geometry and it is verified, so ORCA stops there, ranks it and leaves one verified option, then kept." },
+            body: <>
+              It suggests real edits: raising a duct through an opening in a beam, or trimming a member back where it runs into another. A geometry engine then tests each
+              one in the actual model: the clash is gone, there is room to spare, and nothing new is hit. Ideas that fail
+              go back with the reason. <b>You only see fixes that passed.</b>
+            </> },
+          { icon: <Download size={18} aria-hidden />, title: "You review and export",
+            clip: { src: "/demos/keep", caption: "Accept: the server tries the fix again, edits the model and checks it.",
+              alt: "Northbank's #1 after the fix, Before and After: overlap -300 mm, then clear by 50 mm. Accept is pressed: Applying the fix, then Fix kept in the model, checked again, and Export IFC counts one edit to download." },
+            body: <>
+              Watch it try ideas live in the 3D view, compare before and after, accept the fix, and download the edited
+              model as an IFC file that any design tool can open.
+            </> },
+        ]} />
       </section>
 
       {onAbout && (
@@ -254,23 +259,109 @@ function Discipline({ colour, name, what }: { colour: string; name: string; what
   );
 }
 
-/** One step of "What ORCA does": what it does, beside a recorded run of it (`Clip`) with a line on what that shows. */
-interface StepClip { src: string; alt: string; width: number; height: number; caption: ReactNode }
-const STEP_CLIP_MAX_H = 430;   // px: a squarer clip (the Clash panel) is narrowed so no row towers over the rest
+/** One step of "What ORCA does" and the recorded run that shows it (web/public/demos/<src>.webp and <src>-still.webp). */
+interface StepItem { icon: ReactNode; title: string; body: ReactNode; clip: { src: string; alt: string; caption: ReactNode } }
 
-function Step({ n, icon, title, clip, children }: { n: number; icon: ReactNode; title: string; clip: StepClip; children: ReactNode }) {
+/** "What ORCA does": the steps as tabs beside one frame that plays the chosen step's recorded run. It moves on when a
+ * clip has played through (its length read from the file, `stepClips.ts`), until the visitor picks a step. Nothing is
+ * fetched before the section scrolls into view, then only the clip on screen and the next; each plays from a fresh
+ * object URL of its bytes, so it starts from its first frame every time its step comes round. Less motion: each clip's
+ * last frame, and no moving on. */
+function StepsPlayer({ steps }: { steps: StepItem[] }) {
+  const [active, setActive] = useState(0);
+  const [auto, setAuto] = useState(true);      // moving on by itself, until the visitor picks a step
+  const [seen, setSeen] = useState(false);     // scrolled into view
+  const [playing, setPlaying] = useState<{ src: string; url: string; ms: number | null } | null>(null);
+  const [started, setStarted] = useState(false);   // the playing clip has loaded: its time runs
+  const reduce = useReducedMotion();
+  const box = useRef<HTMLDivElement>(null);
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const step = steps[active];
+  // The effects follow the clips' paths, not the list: About draws a new list on every render.
+  const src = step.clip.src, next = steps[(active + 1) % steps.length].clip.src, count = steps.length;
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el || seen) return;
+    if (typeof IntersectionObserver === "undefined") { setSeen(true); return; }
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setSeen(true); }, { threshold: 0.3 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [seen]);
+
+  useEffect(() => {
+    if (!seen || reduce) return;
+    let live = true, url: string | null = null;
+    setStarted(false);
+    void loadClip(`${src}.webp`).then((c) => {
+      if (!live) return;
+      url = c ? URL.createObjectURL(c.blob) : null;
+      setPlaying({ src, url: url ?? `${src}.webp`, ms: c?.ms ?? null });
+      void loadClip(`${next}.webp`);
+    });
+    return () => {
+      live = false;
+      if (url) { const done = url; window.setTimeout(() => URL.revokeObjectURL(done), 1000); }   // once the next one shows
+    };
+  }, [seen, reduce, src, next]);
+
+  useEffect(() => {
+    if (!auto || reduce || !started || !playing?.ms || playing.src !== src) return;
+    const t = window.setTimeout(() => setActive((i) => (i + 1) % count), playing.ms);
+    return () => window.clearTimeout(t);
+  }, [auto, reduce, started, playing, src, count]);
+
+  const pick = (i: number, focus = false) => { setAuto(false); setActive(i); if (focus) tabs.current[i]?.focus(); };
+  const onKey = (e: ReactKeyboardEvent) => {
+    const d = ["ArrowDown", "ArrowRight"].includes(e.key) ? 1 : ["ArrowUp", "ArrowLeft"].includes(e.key) ? -1 : 0;
+    if (!d) return;
+    e.preventDefault();
+    pick((active + d + count) % count, true);
+  };
+  const live = !reduce && playing?.src === src ? playing : null;
   return (
-    <li className="step-row">
-      <div className="step">
-        <div className="step-icon" aria-hidden>{icon}<span>{n}</span></div>
-        <div><h3>{title}</h3><p>{children}</p></div>
+    <div className="steps-player" ref={box}>
+      <div className="steps-tabs" role="tablist" aria-label="What ORCA does, step by step" aria-orientation="vertical" onKeyDown={onKey}>
+        {steps.map((s, i) => {
+          const on = i === active;
+          return (
+            <div key={s.title} className={`steps-item${on ? " on" : ""}`}>
+              <button type="button" role="tab" id={`steps-tab-${i}`} aria-selected={on} aria-controls="steps-panel"
+                tabIndex={on ? 0 : -1} ref={(el) => { tabs.current[i] = el; }} onClick={() => pick(i)}>
+                <span className="step-icon" aria-hidden>{s.icon}<span>{i + 1}</span></span>
+                <b>{s.title}</b>
+              </button>
+              {on && <p className="steps-body">{s.body}</p>}
+              {on && auto && live?.ms && started &&
+                <span className="steps-progress" aria-hidden><i key={live.url} style={{ animationDuration: `${live.ms}ms` }} /></span>}
+            </div>
+          );
+        })}
       </div>
-      <figure className="step-clip" style={{ maxWidth: Math.round(STEP_CLIP_MAX_H * clip.width / clip.height) }}>
-        <Clip src={clip.src} alt={clip.alt} width={clip.width} height={clip.height} />
-        <figcaption className="hint">{clip.caption}</figcaption>
+      <figure className="steps-frame" role="tabpanel" id="steps-panel" aria-labelledby={`steps-tab-${active}`}>
+        <div className="steps-screen">
+          {live
+            ? <img key={live.url} src={live.url} alt={step.clip.alt} onLoad={() => setStarted(true)} />
+            : <img key={step.clip.src} src={`${step.clip.src}-still.webp`} alt={step.clip.alt} loading="lazy" decoding="async" />}
+        </div>
+        <figcaption className="hint">{step.clip.caption}</figcaption>
       </figure>
-    </li>
+    </div>
   );
+}
+
+/** The visitor asks for less motion (and changes their mind while the page is open). */
+function useReducedMotion(): boolean {
+  const query = "(prefers-reduced-motion: reduce)";
+  const [reduce, setReduce] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const q = window.matchMedia?.(query);
+    if (!q) return;
+    const on = () => setReduce(q.matches);
+    q.addEventListener("change", on);
+    return () => q.removeEventListener("change", on);
+  }, []);
+  return reduce;
 }
 
 /** Side view of the demo's clash: the girder in section (an I with a gap in its web where the opening is), the duct
