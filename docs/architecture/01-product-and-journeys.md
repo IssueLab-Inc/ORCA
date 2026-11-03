@@ -222,7 +222,7 @@ recommendation or a not-a-clash. Design: [docs/escalation.md](../escalation.md).
 
 When the owner has switched `built_views` on, a chosen option (and each verified plan fix) has **Show it built**: Muse
 Image restyles ORCA's own view of the fix as a presentation render, checked against the model before it is shown,
-with a wipe and **Lines from the model** (`BuiltView.tsx`). A kept fix shows "As it could look built", and the PDF's fix
+with a wipe dragged on the picture itself and **Lines from the model** (`BuiltView.tsx`). A kept fix shows "As it could look built", and the PDF's fix
 page gets the picture. Never for a trim or a cleanup. Design: [docs/show-it-built.md](../show-it-built.md).
 
 ### When the server lets go of the models

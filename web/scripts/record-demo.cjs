@@ -800,8 +800,8 @@ const SHOTS = [
       await sleep(GAP);
       await fitWorkings(page, ctx.click);
       await sleep(GAP);
-      // The wipe: to the middle, then dragged across ORCA's view and the picture, and back.
-      const slider = page.getByRole("slider", { name: /Wipe between/ }).first();
+      // The wipe, dragged on the picture itself (it is the slider): to the middle, across both sides, and back.
+      const slider = page.getByRole("slider", { name: /compare the illustration/ }).first();
       await ctx.click(slider);
       const box = await slider.boundingBox();
       const y = box.y + box.height / 2, x = (f) => box.x + box.width * f;
