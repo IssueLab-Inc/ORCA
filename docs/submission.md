@@ -48,5 +48,5 @@ for".
 > Onshape and Bonsai; then Revit and Inventor); photos, video and laser scans from site, aligned to the model and
 > segmented with SAM 3.1, so ORCA checks a fix against what is really there; and sign-in with saved projects.
 
-The README's "What's next" says the same, and the video's last shot proposes it as one line
+The README's "What's next" says the same, and the video's last shot carries it as a card under the notch
 ([demo-video.md](demo-video.md), 2:50). The detail: [20](architecture/20-decisions-limits-and-roadmap.md), "Later".
