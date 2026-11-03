@@ -333,9 +333,10 @@ export class Viewer {
   }
 
   /** The camera is moving, held, or moved a moment ago (a drag, a wheel, a flight): work that can wait (thumbnails)
-   * waits, so the view stays smooth. */
+   * waits, so the view stays smooth. The slow turn round a clash while ORCA works is not a move: it never rests, and
+   * any move of the user's ends it. */
   get moving(): boolean {
-    return !!this.flight || this.controlsHeld || performance.now() - this.cameraMoved < 400;
+    return !!this.flight || this.controlsHeld || (!this.controls.autoRotate && performance.now() - this.cameraMoved < 400);
   }
 
   // ---------------------------------------------------------------- models
@@ -905,14 +906,16 @@ export class Viewer {
     return mats;
   }
 
-  /** A slow turn around the current target, while the agent thinks. */
   /** Turn the view slowly round the clash while ORCA works on it (the pilot): the view first glides sideways to put the
    * clash in the middle, keeping its angle and distance, so the turn is round the clash, not wherever the camera's
-   * target was left. */
+   * target was left. A flight under way counts from where it lands: a proposal started just after its clash was picked
+   * (the golden path, a row's Propose fixes, the tour) turns round the clash framed, not from the whole model the flight
+   * set out from. */
   orbit(on: boolean) {
     if (on && !this.controls.autoRotate) {
-      const c = this.clashCentre(), t = this.controls.target;
-      if (c && c.distanceTo(t) > this.reach(0.01, 0.001)) this.flyTo(this.camera.position.clone().add(c.clone().sub(t)), c, true, false);
+      const c = this.clashCentre();
+      const [p, t] = this.flight ? this.flight.to : [this.camera.position, this.controls.target];
+      if (c && c.distanceTo(t) > this.reach(0.01, 0.001)) this.flyTo(p.clone().add(c.clone().sub(t)), c, true, false);
     }
     this.controls.autoRotate = on;
   }
@@ -1440,7 +1443,8 @@ export class Viewer {
     const zone = meetingZone(boxA, boxB);
     if (zone.isEmpty()) return null;
     const saved = { position: this.camera.position.clone(), target: this.controls.target.clone(), mode: this.mode,
-      focus: this.focus, flight: this.flight, marker: this.marker.visible, links: this.linkLayer.visible };
+      focus: this.focus, flight: this.flight, marker: this.marker.visible, links: this.linkLayer.visible,
+      hidden: this.hidden, moved: this.moved, overlay: this.overlay.visible, hits: this.hitLayer.visible };
     const pair = Object.values(this.focusMaterials);
     const shot = (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => {
       for (const m of pair) { m.transparent = seeThrough; m.opacity = seeThrough ? 0.6 : 1; m.depthWrite = !seeThrough; m.needsUpdate = true; }
@@ -1455,6 +1459,10 @@ export class Viewer {
       this.linkLayer.visible = false;   // the connection highlight is the viewer's, never the pictures'
       this.grips.visible = false;
       this.lifted = true;               // nor the user's style, filters, hides or selection
+      // Nor a preview on screen (an option, the idea ORCA is trying and what it hit): the model as it is, so a list
+      // thumbnail drawn while ORCA works on another clash shows its own clash.
+      this.hidden = new Set(); this.moved = new Map();
+      this.overlay.visible = false; this.hitLayer.visible = false;
       this.setFocus({ a, b });
       const [position, target] = this.zoneCamera(zone, boxA.clone().union(boxB));
       this.camera.position.copy(position);
@@ -1465,6 +1473,8 @@ export class Viewer {
       for (const m of pair) { m.transparent = false; m.opacity = 1; m.depthWrite = true; m.needsUpdate = true; }
       this.lifted = false;
       this.placeGrips();
+      this.hidden = saved.hidden; this.moved = saved.moved;
+      this.overlay.visible = saved.overlay; this.hitLayer.visible = saved.hits;
       this.focus = saved.focus;
       this.setMode(saved.mode);
       this.camera.position.copy(saved.position);

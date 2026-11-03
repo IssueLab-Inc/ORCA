@@ -75,6 +75,20 @@ test("the frames go on while the camera glides, a flight runs or a drawing still
   assert.equal(v.moving, false, "the camera has rested");
 });
 
+test("the pilot's slow turn round a clash is not a move thumbnails wait for; a flight or a drag is", () => {
+  // While ORCA works on a clash the view turns until it shows an idea: the list's thumbnails used to wait it out.
+  const { v } = viewer();
+  v.controls.autoRotate = true;
+  v.cameraMoved = performance.now();   // the turn moves the camera every frame
+  assert.equal(v.moving, false);
+  v.flight = { from: [], to: [], t0: 0, ms: 650 };
+  assert.equal(v.moving, true, "a flight (the pilot framing an idea) still holds them back");
+  v.flight = null; v.controlsHeld = true;
+  assert.equal(v.moving, true, "and so does the user's drag");
+  v.controlsHeld = false; v.controls.autoRotate = false;
+  assert.equal(v.moving, true, "the turn just ended: a moment's rest first");
+});
+
 test("an async change draws again when it settles; a disposed viewer never draws", async () => {
   const { v, loop, tick } = viewer();
   let settle;

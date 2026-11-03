@@ -185,7 +185,8 @@ flowchart TD
   `pose`, and pictures such as `thumbClash`, `capture`, `snapshot`, which put the view back and draw it themselves:
   nothing they call on the way asks for a frame, `hush`); any pointer, wheel or touch over the stage (capture phase:
   the drawing views' and the cube's own handlers); the controls' `change`. Inside a frame it does nothing. `moving`
-  (a flight, the controls held, or the camera moved in the last 400 ms) tells `App` to hold thumbnails back.
+  (a flight, the controls held, or the camera moved in the last 400 ms, not counting the pilot's slow turn, which
+  never rests and ends at any move of the user's) tells `App` to hold thumbnails back.
 - **Layers:** layer 0 is the model, seen by every camera. Layer 1 holds what only the 3D view shows: the marker, the
   outlines drawn through everything (focus, hits, links, selection), the section box helper and its grips, and the
   measure. The 3D camera sees 0 and 1; a drawing view's camera only 0. Layers 2 to 6 (`CAP_LAYER`) hold the stencil
@@ -327,7 +328,10 @@ every style.
 - **Flights:** `flyTo` animates position and target over 650 ms (cubic ease in-out), or jumps when `animate` is false
   or the visitor prefers reduced motion. `orbit(on)` turns `autoRotate` on (speed 0.6) while Muse thinks; turning it
   on first glides the view sideways so the clash is in the middle (its angle and distance kept), so the turn is round
-  the clash, not wherever the target was left.
+  the clash, not wherever the target was left. A flight under way counts from where it lands: a proposal started a
+  moment after its clash was picked (the golden path, a row's Propose fixes, the tour) lets the flight to the clash
+  finish and turns round it framed. Before Nov 3 the glide set out from where that flight was, the whole model, and
+  replaced it, so the golden path read the clash zoomed out.
 - **Framing a clash:** `focusClash(ids, point, label)` frames the zone where the two elements meet (`meetingZone` of
   their boxes), not the two whole elements, so a 16 m run crossing a beam frames the crossing. With one element and a
   point it frames a `reach(1, 0.2)` cube there; with only a point, a `reach(0.6, 0.15)` cube. It sets the marker
@@ -547,7 +551,9 @@ is never in a capture, and is in the Screenshot. Opening other models clears the
   a style, filters, a hide and orthographic on. `snapshot()` saves the whole layout: the canvas and each drawing
   pane's annotation canvas.
 - **`posed(a, b, take)`** (private) is shared by `captureClash` and `thumbClash`: it saves the camera, target, mode,
-  focus, flight and marker, focuses the pair, points the camera with `zoneCamera`, lets `take` render shots (the focus
+  focus, flight and marker, lifts any preview on screen (an option, the idea the pilot is trying and what it hit: the
+  preview's moves and hides, the overlay and the hit layer), so a thumbnail drawn while ORCA works on another clash
+  shows the model as it is, focuses the pair, points the camera with `zoneCamera`, lets `take` render shots (the focus
   materials see-through at 0.6 for A and C), then puts everything back and renders the restored view before
   returning. All in one task, so nothing changes on screen. The final render is the fix for thumbnails flashing: the
   canvas keeps its last frame, and a shot taken after the frame's own render used to show until the next frame.
@@ -693,8 +699,9 @@ requirements), whose own Esc must not also leave the clash). The toolbar shows e
 - Thumbnails: `thumbClash` renders into the visible canvas, so `posed` renders the restored view before returning
   (checked Oct 28 by sampling the canvas between frames: the old build jumped 45 levels of brightness, the new one 0;
   CLAUDE.md). `App` draws one queued thumbnail every 60 ms (waiting while the WebGL context is lost, and while the
-  camera is `moving`: each one is a frame's work), newest request first, paused while a proposal, plan, replay, reload
-  or check runs ([12](12-web-app.md)).
+  camera is `moving`: each one is a frame's work), newest request first, paused while models load or reload or a check
+  runs, not while ORCA works on a clash (a proposal, plan or replay: owner report, Nov 3, the rows stayed empty until
+  the golden path's proposal was done) ([12](12-web-app.md)).
 - Small models: `reach` and `sceneDiag` above, the marker's constant screen size and a near plane down to 0.5 mm
   (checked Oct 29 on a generated 110 mm load cell and on Northbank #1 and #40, which frame as before; CLAUDE.md).
 - Big models: web-ifc parses in a worker (Loading, above), so the page goes on; a 500 MB upload took about three

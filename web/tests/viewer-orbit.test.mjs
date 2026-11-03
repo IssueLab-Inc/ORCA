@@ -63,3 +63,46 @@ test("with no clash in focus and nothing selected, a drag turns about what is un
   assert.ok(!v.spin, "no pivot of its own");
   assert.equal(picked.length, 1, "it looks under the pointer");
 });
+
+/** A viewer with a clash round (2, 2, 2) on screen, for the pilot's slow turn. */
+function turning() {
+  const v = viewer();
+  const flights = [];
+  Object.assign(v, { models: [], focus: { a: null, b: null, group: {} }, flight: null, reach: () => 0.01,
+    lastClash: { ids: [], zone: new THREE.Box3(new THREE.Vector3(1, 1, 1), new THREE.Vector3(3, 3, 3)), point: null } });
+  v.controls.autoRotate = false;
+  const fly = Viewer.prototype.flyTo;
+  v.flyTo = function (position, target, animate, record) { flights.push({ position: position.clone(), target: target.clone() }); fly.call(this, position, target, false, record); };
+  return { v, flights };
+}
+
+test("the pilot's turn starts by gliding sideways to the clash, keeping the camera's angle and distance", () => {
+  const { v, flights } = turning();
+  const offset = v.camera.position.clone().sub(v.controls.target);
+  v.orbit(true);
+  assert.equal(v.controls.autoRotate, true);
+  assert.equal(flights.length, 1);
+  assert.deepEqual(flights[0].target.toArray(), [2, 2, 2]);
+  assert.ok(flights[0].position.clone().sub(flights[0].target).distanceTo(offset) < 1e-9, "the same angle and distance");
+});
+
+test("a proposal started while the camera still flies to its clash turns round the clash framed, not the model", () => {
+  // The golden path: its check picks the clash (a flight from the whole model in to the clash, 650 ms) and the
+  // proposal starts a moment later. The turn used to glide sideways from where the flight set out, cutting it off.
+  const { v, flights } = turning();
+  v.camera.position.set(200, 150, 200);   // the whole model in view
+  v.controls.target.set(0, 0, 0);
+  const framed = [new THREE.Vector3(5, 4, 5), new THREE.Vector3(2, 2, 2)];
+  v.flight = { from: [v.camera.position.clone(), v.controls.target.clone()], to: framed, t0: performance.now(), ms: 650 };
+  v.orbit(true);
+  assert.equal(flights.length, 0, "the flight to the clash goes on");
+  assert.equal(v.flight.to, framed);
+  assert.equal(v.controls.autoRotate, true);
+  // A flight elsewhere: the glide starts from where it lands.
+  v.controls.autoRotate = false;
+  v.flight = { from: [v.camera.position.clone(), v.controls.target.clone()], to: [new THREE.Vector3(10, 10, 10), new THREE.Vector3(8, 8, 8)], t0: 0, ms: 650 };
+  v.orbit(true);
+  assert.equal(flights.length, 1);
+  assert.deepEqual(flights[0].target.toArray(), [2, 2, 2]);
+  assert.deepEqual(flights[0].position.toArray(), [4, 4, 4], "the flight's own angle and distance");
+});

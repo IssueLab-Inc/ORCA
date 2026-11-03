@@ -274,7 +274,7 @@ All are functions inside `App`. Names confirmed at HEAD.
 | `reopenGone()` | The notice's button: reopen the same sample models (`open(sceneFiles)`; the visitor's own files go back to the file picker), then the same clashes: with the models still held, the list of their kept checks made again (`api.checks`, no run); else the check on screen run again (its tests, or the open models'); or the same sample report (`sampleReports`), or a line asking to import an uploaded report again. A Navisworks report the server still holds is kept. |
 | `drawBuilt`, `builtPasses`, `showBuilt`, `buildAccepted`, `redrawKept`, `builtFromChat`, `prepareReport` | Show it built ([docs/show-it-built.md](../show-it-built.md)): one request per key (`builtKey`), shared while drawing. |
 | `captureViews(report, clash, a, b)` | A/B/C pictures of a detected clash (`Viewer.captureClash`), saved with `api.saveView`; once per clash. |
-| `needThumb(c)`, `pumpThumbs()` | The list-thumbnail queue (below). |
+| `needThumb(c)`, `pumpThumbs()` | The list-thumbnail queue (below): one every 60 ms, newest first, waiting while the camera moves (`Viewer.moving`); `thumbPaused` while models load or a check runs, not while ORCA works on a clash, so the rows fill during a proposal ([13](13-3d-viewer.md), "Performance notes"). |
 | `retireDirectWork()`, `replaceChatWork()`, `resetWork()`, `clearManual()` | End work that newer work replaces. |
 
 ### Effects that load data
