@@ -1,4 +1,35 @@
-# ORCA
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/orca/png/lockups/orca-by-issuelab-white-1024w.png">
+    <img src="assets/brand/orca/png/lockups/orca-by-issuelab-navy-1024w.png" alt="ORCA by IssueLab" width="340">
+  </picture>
+</h1>
+
+> **Fixes, not just findings: the AI design coordinator for buildings and machines.**<br>
+> *Where teams' 3D designs collide, Muse Spark proposes a real edit to the model, ORCA proves it with geometry, and
+> only fixes that pass reach you. Observe. Resolve. Check. Apply.*
+
+[![Meta Global AI Hackathon: Startup track](https://img.shields.io/badge/Meta_Global_AI_Hackathon-Startup_Track-7B2FBE?style=for-the-badge&logo=meta&logoColor=white&labelColor=555555)](docs/submission.md)
+[![Meta Model API: 5 Muse models](https://img.shields.io/badge/Meta_Model_API-5_Muse_Models-0668E1?style=for-the-badge&logo=meta&logoColor=white&labelColor=555555)](docs/architecture/08-ai-models-prompts-and-spend.md)
+[![Open weights: Muse Spark Open](https://img.shields.io/badge/Open_Weights-Muse_Spark_Open-FF6F61?style=for-the-badge&labelColor=555555)](docs/architecture/08-ai-models-prompts-and-spend.md#the-models)
+[![Live demo on Modal](https://img.shields.io/badge/Live_Demo-Open_ORCA-2EA44F?style=for-the-badge&logo=modal&logoColor=white&labelColor=555555)](https://dodzikojo--orca-web.us-east.modal.run)
+[![ORCA: Observe, Resolve, Check, Apply](https://img.shields.io/badge/ORCA-Observe_%C2%B7_Resolve_%C2%B7_Check_%C2%B7_Apply-052640?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzODQgMzg0Ij48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg2NCA2NCkgc2NhbGUoMSkiPjxnIGZpbGw9IiNGRkZGRkYiPjxwYXRoIGQ9Ik0gMzEuMzUwMzggMjExLjkyMTcgQyAtMTIuNzA4NDYgMTYxLjE4MDcxIC0xMC4wMjcxOSA4NS4wMDc4NSAzNy40OTAzMyAzNy40OTAzMyBDIDg1LjAwNzg1IC0xMC4wMjcxOSAxNjEuMTgwNzEgLTEyLjcwODQ2IDIxMS45MjE3IDMxLjM1MDM4IEwgMTcyLjE0ODQyIDcxLjEyMzY2IEMgMTQzLjQ4NTQzIDQ4Ljg3NDk2IDEwMi43NDUzOSA1MS40MzEyMyA3Ny4wODgzMSA3Ny4wODgzMSBDIDUxLjQzMTIzIDEwMi43NDUzOSA0OC44NzQ5NiAxNDMuNDg1NDMgNzEuMTIzNjYgMTcyLjE0ODQyIFoiLz48cGF0aCBkPSJNIDIyNC42NDk2MiA0NC4wNzgzIEMgMjY4LjcwODQ2IDk0LjgxOTI5IDI2Ni4wMjcxOSAxNzAuOTkyMTUgMjE4LjUwOTY3IDIxOC41MDk2NyBDIDE3MC45OTIxNSAyNjYuMDI3MTkgOTQuODE5MjkgMjY4LjcwODQ2IDQ0LjA3ODMgMjI0LjY0OTYyIEwgODMuODUxNTggMTg0Ljg3NjM0IEMgMTEyLjUxNDU3IDIwNy4xMjUwNCAxNTMuMjU0NjEgMjA0LjU2ODc3IDE3OC45MTE2OSAxNzguOTExNjkgQyAyMDQuNTY4NzcgMTUzLjI1NDYxIDIwNy4xMjUwNCAxMTIuNTE0NTcgMTg0Ljg3NjM0IDgzLjg1MTU4IFoiLz48L2c+PC9nPjwvc3ZnPg==&labelColor=11161B)](#how-it-works)
+[![Fixes: verified by geometry](https://img.shields.io/badge/Every_Fix-Verified_by_Geometry-00897B?style=for-the-badge&labelColor=555555)](docs/architecture/07-fixes-and-edits.md)
+[![Formats: IFC, STEP, BCF, PDF](https://img.shields.io/badge/Formats-IFC_%C2%B7_STEP_%C2%B7_BCF_%C2%B7_PDF-5C6BC0?style=for-the-badge&labelColor=555555)](docs/architecture/14-files-in-and-out.md)
+[![MCP server with pairing links](https://img.shields.io/badge/MCP-Server_%2B_Pairing_Links-111111?style=for-the-badge&labelColor=555555)](docs/architecture/11-mcp-and-agent-links.md)
+[![React 19 and Vite](https://img.shields.io/badge/React_19-Vite_%2B_TypeScript-149ECA?style=for-the-badge&logo=react&logoColor=white&labelColor=555555)](docs/architecture/12-web-app.md)
+[![three.js and web-ifc viewer](https://img.shields.io/badge/three.js-web--ifc_Viewer-000000?style=for-the-badge&logo=threedotjs&logoColor=white&labelColor=555555)](docs/architecture/13-3d-viewer.md)
+[![FastAPI and IfcOpenShell](https://img.shields.io/badge/FastAPI-IfcOpenShell_0.9-009688?style=for-the-badge&logo=fastapi&logoColor=white&labelColor=555555)](docs/architecture/04-server-code-map.md)
+[![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=555555)](server/pyproject.toml)
+[![Server tests](https://img.shields.io/badge/pytest-934_Passing-2EA44F?style=for-the-badge&logo=pytest&logoColor=white&labelColor=555555)](#tests)
+[![Web tests](https://img.shields.io/badge/Web_Tests-288_Passing-2EA44F?style=for-the-badge&logo=nodedotjs&logoColor=white&labelColor=555555)](#tests)
+[![License: MIT](https://img.shields.io/badge/License-MIT-D4A72C?style=for-the-badge&labelColor=555555)](LICENSE)
+
+**[Open the live demo](https://dodzikojo--orca-web.us-east.modal.run)** · [See it work](#see-it-work) ·
+[Try it (judges)](#try-it-judges) · [Run locally](#run-locally) · [How it works](#how-it-works) ·
+[Architecture](docs/architecture/README.md)
+
+---
 
 **For the design coordinator, who makes every team's 3D design fit together, on a building or a machine.** Where two
 designs conflict, ORCA proposes a fix as a real edit to the model, and proves it with geometry before anyone sees it.
@@ -15,6 +46,35 @@ Built for the Meta Global AI Developer Hackathon (Oct 27 – Nov 4, 2026) by Iss
 synthetic baseline asset used to demonstrate and evaluate ORCA; it was not created during the challenge.**
 ORCA's application code was written during the event. See [BUILT_DURING_HACKATHON.md](BUILT_DURING_HACKATHON.md)
 for the full distinction between new work, baseline data and third-party dependencies.
+
+## At a glance
+
+- **Fixes, verified.** Every option is a real edit to the model's own elements, checked by geometry before anyone sees
+  it: the conflict gone, the clearance met, nothing new hit. A failed idea goes back to Muse Spark with the reason.
+  Seven fix kinds (move, offset with bends, trim, route, penetration, resize, seat) and fixes that combine them.
+- **Measured on an answer key.** On Northbank, every pair of models checked: 464 clashes in 1,732 elements in 4 s. The
+  duct raised through the girder's web opening in ~40 s to a verified fix, and 3 of 3 of the designer's own fixes
+  matched.
+- **Buildings and machines.** IFC models and STEP assemblies in; the edited IFC or STEP, PDF reports and BCF issues
+  out. Navisworks clash reports are read too.
+- **You keep the last word.** Before / After / Both in 3D, beside plans, sections and elevations; accept, undo,
+  export. Keeping runs the check again on the server, never trusting the page.
+- **Watch it work.** Workings draws each run as it happens: the brief, Muse Spark's ideas, ORCA's check on each, the
+  ranking.
+- **Bring your own agent.** An MCP server over the same operations, with pairing links, so Muse Code or any MCP client
+  fixes through the same geometry check.
+
+### Meta models at work
+
+| Model | Host | What it does in ORCA |
+|---|---|---|
+| **Muse Spark** | Meta Model API | Reads each clash from three pictures and the model data, proposes edits, and runs chat, root causes, plans and report text |
+| **Muse Spark Open** | Open weights on Baseten | Bulk triage of hundreds of clashes, clash titles, names for STEP parts (when switched on) |
+| **Muse Wonder** | Meta Model API | A second try on clashes Muse Spark could not fix, and the judges for Show it built |
+| **Muse Image** | Meta Model API | Show it built: a checked fix restyled as a picture of what will be built |
+| **Muse Voice Transcribe** | Meta Model API | Voice messages and live captions |
+
+How each call is made, with its prompt and budget: [08 · AI models, prompts and spend](docs/architecture/08-ai-models-prompts-and-spend.md).
 
 ## Who it's for
 
@@ -627,6 +687,9 @@ npm.cmd test --prefix web
 ```
 
 On macOS/Linux, use `npm` in place of `npm.cmd`.
+
+Last run (Nov 3): 934 server tests and 288 web tests passing, and the web build clean. The badges at the top
+carry those counts: change them only from a new run.
 
 The unit tests use synthetic models and scripted AI responses; they need no API keys or private demo files.
 Real-model [evals](evals/README.md) are separate and may need additional data and paid model calls.
