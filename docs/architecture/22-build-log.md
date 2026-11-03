@@ -2165,6 +2165,6 @@ header like other hackathon entries, with logos. The README now opens with the b
 proven before you see it." (owner's pick of the drafts, now in [docs/submission.md](../submission.md), "The hook"), and shields.io badges with Simple Icons logos (Meta, Modal, React,
 three.js, FastAPI, Python, pytest, Node.js) and one with ORCA's own split-O symbol, each linking to its doc. Under the
 existing opening: "At a glance" (six points, numbers from "Two demos") and "Meta models at work" (the five models from
-[08](08-ai-models-prompts-and-spend.md)). The test badges carry a measured run: 934 server tests, 288 web tests, web
+[08](08-ai-models-prompts-and-spend.md)). The test badges carry a measured run: 934 server tests, 289 web tests (after #123), web
 build clean (Nov 3, this branch); the Tests section says to change them only from a new run. Checked: the header
 rendered in light and dark in Chromium with GitHub's markdown styles; `test_docs_map.py` passes.
