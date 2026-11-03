@@ -3220,8 +3220,10 @@ export function App() {
     void explainPatterns(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, sceneId, patterns, verdicts, explaining, proposing, planning, replaying, busy]);
-  // Thumbnails wait while the viewer is busy with something the user is watching (a proposal, a plan, a reload).
-  thumbPaused.current = proposing || planning || replaying || !!busy || !!detecting;
+  // Thumbnails wait while the models or the list are changing (a load, a reload, a check). Not while ORCA works on a
+  // clash (a proposal, a plan, a replay): each is drawn in one task with the view put back and no preview in it, and the
+  // rows on screen should fill while people watch (the golden path proposes straight after its check).
+  thumbPaused.current = !!busy || !!detecting;
   useEffect(() => { setThumbs({}); thumbQueue.current = []; }, [report?.id]);
   useEffect(() => { if (!thumbPaused.current && thumbQueue.current.length) pumpThumbs(); });  // eslint-disable-line react-hooks/exhaustive-deps
   const thumbSource = useRef({ report, matches });
