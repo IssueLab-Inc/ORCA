@@ -1438,7 +1438,11 @@ export class Viewer {
 
   private posedShots<T>(a: string, b: string, take: (shot: (mode: ViewMode, seeThrough: boolean, side: number, type?: string) => string,
     turn: () => void) => T): T | null {
+    // Where the pair is in the model, as the shots draw it: not where a move previewed on screen has put one of them.
+    const previewed = this.moved;
+    this.moved = new Map();
     const boxA = this.boxOf([a]), boxB = this.boxOf([b]);
+    this.moved = previewed;
     if (boxA.isEmpty() || boxB.isEmpty()) return null;
     const zone = meetingZone(boxA, boxB);
     if (zone.isEmpty()) return null;
