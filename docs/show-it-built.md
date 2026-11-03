@@ -188,9 +188,9 @@ lines), the legend and what was taken away.
   cut, fix: {kind, moved, edit}, report_id?, clash_id?}`. Events: drawing, gate `{f, tile}`, judging `{verdicts}`,
   retry `{why}`, done `{image_url, scores, cut}`, failed `{why}`. Caps `SIGHTLINE_BUILT_PER_HOUR` / `_PER_DAY`; the
   owner has none.
-- **Clash panel** (an option, or an accepted fix): **Show it built** → the picture, a wipe slider against ORCA's view
-  and a "Lines from the model" overlay, so anyone can see it matches; what was cut away and the check's verdicts in
-  a tooltip. `web/src/BuiltView.tsx`.
+- **Clash panel** (an option, or an accepted fix): **Show it built** → the picture beside ORCA's view, with a wipe
+  dragged on the picture itself, and a "Lines from the model" overlay, so anyone can see it matches; what was cut away,
+  and the check's verdicts behind a "Checked against the model" chip. `web/src/BuiltView.tsx`.
 - **PDF, automatically for accepted fixes** (owner decision, Oct 29): on the fix page, beside "The model as it is"
   and "With the fix", a third picture "As it could look built (illustration)"; the report's evidence gains
   `built_img`. Only while the switch is on for that visitor; off, the PDF is as today.
@@ -245,8 +245,12 @@ Branch `feature/show-it-built`, one PR.
   judged, retry, then the result (`status` done with `image_url`, `lines_url`, `gate`, `verdicts`, `judge`; or failed
   with `why`). 403 when off, 422 for a trim or a bad picture, 429 for the caps or the budget.
 - **Page** (`web/src/BuiltView.tsx`): **Show it built** on the chosen option and on each verified fix in the Plan
-  panel; while it works the stage in words; then the picture over ORCA's view with a wipe slider, **Lines from the
-  model** drawn over it, the check in a tooltip, the label "Illustration by Muse Image from ORCA's model view. The
+  panel; while it works the stage in words; then the picture over ORCA's view, the illustration left of the wipe and
+  ORCA's view right of it, each side named and its name cut at the wipe with it. The picture is the control (Nov 3,
+  owner request): a press or drag on it moves the wipe (a finger only once it moves, and a swipe the browser takes as
+  a scroll puts it back; `touch-action: pan-y`), a handle on the wipe says so, the focused picture takes the arrow,
+  Page and Home/End keys (`role="slider"`), and it starts at half and half. Under it **Lines from the model** and a
+  "Checked against the model" chip with the outline match and the judges' verdicts in its tip, then the label "Illustration by Muse Image from ORCA's model view. The
   model is the record." and what the cutaway took away. A failed picture says so and keeps ORCA's views.
 - **Accept, automatically:** a single fix, a plan's fixes and a replayed tour fix are captured as proposed before they
   are kept, and drawn in the background (an option's picture already made is reused). The clash panel shows the kept

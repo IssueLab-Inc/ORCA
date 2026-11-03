@@ -1074,19 +1074,39 @@ a.src:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; bor
 .built.working, .built.failed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius);
   background: var(--raised); border: 1px solid var(--line); }
 .built.working p, .built.failed p { margin: 0; }
-.built-look { width: 100%; max-width: 360px; border-radius: 6px; opacity: .55; filter: saturate(.6); }
+.built-look { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; opacity: .55; filter: saturate(.6); }
 .built-stage { position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--line-soft);
   border: 1px solid var(--line); }
 .built-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .built-lines { mix-blend-mode: multiply; opacity: .9; pointer-events: none; }
+.built-side { position: absolute; inset: 0; }
 .built-wipe { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff;
   box-shadow: 0 0 0 1px rgba(16, 24, 40, .35); pointer-events: none; }
-.built-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-.built-slider { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 200px; color: var(--muted); font-size: 12px; }
-.built-slider input { flex: 1; }
+/* Drag on the picture (or click) to move the wipe; a sideways drag on a touch screen, so the panel still scrolls. */
+.built-stage.wiping { cursor: ew-resize; touch-action: pan-y; user-select: none; -webkit-user-select: none; outline: none; }
+.built-stage.wiping:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.built-knob { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; display: grid; place-items: center;
+  transform: translate(-50%, -50%); border-radius: 50%; background: #fff; color: var(--ink);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, .3), 0 0 0 1px rgba(16, 24, 40, .12); transition: transform .12s ease; }
+.built-stage.wiping:hover .built-knob, .built-stage.dragging .built-knob { transform: translate(-50%, -50%) scale(1.1); }
+@media (prefers-reduced-motion: reduce) { .built-knob { transition: none; } }
+/* Each side of the wipe says which it is, its name cut at the wipe with its picture. */
+.built-tag { position: absolute; top: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .88);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .18); color: var(--ink); font-size: 11px; font-weight: 600; line-height: 1.5;
+  white-space: nowrap; pointer-events: none; }
+.built-tag.left { left: 8px; }
+.built-tag.right { right: 8px; }
+.built-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; margin-top: 8px; }
 .built-tools .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
-.built figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 12px; }
-.built figcaption .hint { width: 100%; }
+.built-check { display: inline-flex; align-items: center; gap: 4px; color: var(--ok); font-size: 12px; font-weight: 600;
+  white-space: nowrap; cursor: help; border-radius: 4px; }
+.built-check svg:last-child { color: var(--muted); }
+/* The label is one block beside its icon, the icon on its first line. */
+.built figcaption { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; align-items: start;
+  margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.built figcaption > svg { margin-top: 2px; }
+.built figcaption p { margin: 0; }
+.built figcaption .hint { margin-top: 2px; }
 .chip.model { background: var(--bg); color: var(--muted); }
 .chip.model.wonder { background: var(--wonder-soft); color: var(--wonder); }
 .steps .chip.model { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; }
