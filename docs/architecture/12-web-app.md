@@ -694,11 +694,12 @@ No `sessionStorage` or IndexedDB is used.
   card's width (about 500 px); frames are the whole window, and each clip crops its part, so Northbank's run gives
   the card and steps 2-4. `--keep` keeps the frames and times, `--from <folder>` encodes them again without a
   new proposal, and `--gpu` draws with the graphics card instead of SwiftShader.
-- **`web/scripts/video-next-line.cjs`:** draws the demo video's what's-next card ([docs/demo-video.md](../demo-video.md),
-  "Production notes") with Playwright: the line in IBM Plex Sans from Google Fonts (as `index.html` loads it) on a white
-  card with the notch's corners, saved as a transparent PNG at twice the pixels to `docs/media/video/next-line.png`
-  (`--out` elsewhere). It stops without saving when Plex did not load, so no fallback font reaches the video. Not
-  served by the app.
+- **`web/scripts/video-cards.cjs`:** draws the demo video's cards ([docs/demo-video.md](../demo-video.md),
+  "Production notes") with Playwright: the what's-next line (`next-line.png`) and the four letter chips
+  (`chip-observe.png`, `chip-resolve.png`, `chip-check.png`, `chip-apply.png`), in IBM Plex Sans from Google Fonts (as
+  `index.html` loads it) on white cards with the notch's corners, saved as transparent PNGs at twice the pixels to
+  `docs/media/video/` (`--out` elsewhere). It stops without saving when Plex did not load, so no fallback font reaches
+  the video. Not served by the app.
 - **`web/scripts/record-demo.cjs`:** records the demo video's shots ([docs/demo-video.md](../demo-video.md),
   "Recording the takes"), each as its own take in Recordly, a desktop screen recorder outside this repository (AGPL-3.0)
   that draws the cursor from the script's clicks and zooms on each. It loads Recordly's Playwright helper and Playwright
@@ -741,5 +742,5 @@ No `sessionStorage` or IndexedDB is used.
 - A new or renamed panel, a change to the default layout, the side bars' buttons, what is saved, or how `setTab` and
   the dock follow each other (also [docs/panels.md](../panels.md)).
 - A new tour, act, `TourState` field, `TourActions` action or recording in `web/public/tour/`.
-- A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `capture-proposals.cjs`, `record-demo.cjs`, `video-next-line.cjs`, `web/public/`.
+- A change to the build: scripts, dependencies, the Vite proxy, `copy-wasm.mjs`, `capture-demos.cjs`, `capture-proposals.cjs`, `record-demo.cjs`, `video-cards.cjs`, `web/public/`.
 - The identity or motion library in `assets/brand/orca/`, or its adoption by the app.
