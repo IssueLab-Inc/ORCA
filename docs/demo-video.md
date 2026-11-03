@@ -8,6 +8,7 @@ Nov 2, after the owner tested the takes: the cell's beat is #22 with its fix ask
 and `cell-22` switch to four views on camera, Workings stays docked in its bar at full height, and the window is
 maximized. Nov 2: a "what's next" line proposed for the last shot (Script, 2:50), matching the README and
 [submission.md](submission.md); the live app is kept warm, so a take no longer meets a cold start after a quiet spell.
+Nov 3: the what's-next line is in the last shot (owner), as a card made for the edit (Production notes).
 
 ## What it has to do
 
@@ -57,7 +58,7 @@ Muse Image. Each is named once, with what it does.
 | 1:54–2:34 | The robot cell in four views; #22, a compressed-air pipe through one of the plant's columns; in Chat, "Find a fix for clash #22."; Muse Spark runs ORCA's fix agent, Workings drawing it; the verified fix in every view, then in the Clash panel (owner, Nov 2: in place of #29) | Draft, for the owner: "We built ORCA for buildings, our world. Then we gave it a robot cell from a factory floor: a different world, the same problem. Here an air pipe runs through one of the plant's columns. Just ask for a fix, in plain words. Muse Spark runs the same loop: it proposes changes, ORCA checks each against the whole cell, and only a fix that passes comes back. In this cell, ORCA found all 17 clashes we had planted." |
 | 2:34–2:42 | #13, the operator's screen: No verified fix, and what decides it | "And when nothing passes, ORCA changes nothing, and tells you what's in the way." |
 | 2:42–2:50 | A voice command; an AI agent asking ORCA for a fix | "Ask it out loud, or let your own AI agent drive it." |
-| 2:50–3:00 | The wordmark settles in the notch; Observe · Resolve · Check · Apply. Proposed (Nov 2, for the owner): for the last 4 s, a line of text under the wordmark, apart from the narration's captions: "Next: fixes that land in the designers' own tools, and checks against photos and scans of the site." | "Each design worked. Now, together, they do. ORCA: AI you can trust to change real designs, because it checks every change." |
+| 2:50–3:00 | The wordmark settles in the notch; Observe · Resolve · Check · Apply. For the last 4 s (2:56–3:00), the what's-next card under the notch (owner, Nov 3), clear of the captions: "**Next:** fixes that land in the designers' own tools, and checks against photos and scans of the site." (`docs/media/video/next-line.png`: Production notes) | "Each design worked. Now, together, they do. ORCA: AI you can trust to change real designs, because it checks every change." |
 
 ### Proposed: where the filters go (Oct 31; the opening's agreed by the owner Nov 2)
 
@@ -79,7 +80,7 @@ caption says so). The cell's clashes are called planted.
 
 | Criterion | Where |
 |---|---|
-| Impact | The firsthand problem; days of finding and arguing down to minutes; matching the later revision; the same loop in a factory; what's next (proposed) |
+| Impact | The firsthand problem; days of finding and arguing down to minutes; matching the later revision; the same loop in a factory; what's next |
 | Meta tooling | Four Muse models with four jobs, each visible in Workings: Spark Open sorts at scale, Spark reasons from three views and the numbers (and runs the fix agent when asked in Chat), Wonder takes a longer look when Spark finds nothing, Image paints a checked fix under Wonder's judges. The finding: Image can't design, so ORCA never lets it |
 | Technical depth | The geometry check after every idea; real edits to the real files; a refusal that explains itself (#13) |
 | Demo | Recorded live; waits sped up with a visible "4×" badge, never faked |
@@ -184,3 +185,10 @@ from it.
 - Captions burned in (judges often watch muted); light music, none under the key lines.
 - One clean take per beat; waits at 4× with a badge (triage, Show it built, Wonder).
 - Record the cell's #22 until the chat's run shows a verified fix (the script marks a take without one RETAKE).
+- **The what's-next card** (2:56–3:00): `docs/media/video/next-line.png`, made by `web/scripts/video-next-line.cjs`
+  in IBM Plex Sans from Google Fonts, the app's own type (it saves nothing in a fallback font; Plex is rarely installed
+  on Windows, so use the picture rather than a text layer). A white card with the notch's 14 px corners on a
+  transparent background, at twice the pixels: on a 1920 × 1080 timeline place it at 50% (752 × 127 px), centred under
+  the notch with its top about 16 px below the notch's lower edge, and fade it in over about 0.3 s. It sits at the top of
+  the frame, so the narration's captions keep the bottom. New words: edit `LINES` in the script and run
+  `node web/scripts/video-next-line.cjs` again.
