@@ -5,9 +5,9 @@
   </picture>
 </h1>
 
-> **Fixes, not just findings: the AI design coordinator for buildings and machines.**<br>
-> *Where teams' 3D designs collide, Muse Spark proposes a real edit to the model, ORCA proves it with geometry, and
-> only fixes that pass reach you. Observe. Resolve. Check. Apply.*
+> **Fixes, not just findings. Every fix proven before you see it.**<br>
+> *The AI design coordinator for buildings and machines: where teams' 3D designs collide, Muse Spark proposes a real
+> edit to the model, ORCA proves it with geometry, and only fixes that pass reach you. Observe. Resolve. Check. Apply.*
 
 [![Meta Global AI Hackathon: Startup track](https://img.shields.io/badge/Meta_Global_AI_Hackathon-Startup_Track-7B2FBE?style=for-the-badge&logo=meta&logoColor=white&labelColor=555555)](docs/submission.md)
 [![Meta Model API: 5 Muse models](https://img.shields.io/badge/Meta_Model_API-5_Muse_Models-0668E1?style=for-the-badge&logo=meta&logoColor=white&labelColor=555555)](docs/architecture/08-ai-models-prompts-and-spend.md)

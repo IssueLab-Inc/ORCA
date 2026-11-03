@@ -1,6 +1,6 @@
 # The submission text
 
-**Status (Nov 2):** drafts for the owner: the one-liner and what's next. The rest of the form is written at the
+**Status (Nov 3):** the hook is the owner's choice (Nov 3); the one-liner and what's next are drafts for the owner. The rest of the form is written at the
 freeze (Nov 3); submit Nov 4 before noon ET ([20](architecture/20-decisions-limits-and-roadmap.md), "The hackathon
 frame"). The video has its own script: [demo-video.md](demo-video.md).
 
@@ -14,19 +14,27 @@ frame"). The video has its own script: [demo-video.md](demo-video.md).
 - **Technical names are fine after that** (IFC, STEP, BCF, MCP), unlike the video's plain words.
 - **Every number is measured** and measured again on the day (CLAUDE.md, "Numbers people see are measured").
 
+## The hook
+
+> **Fixes, not just findings. Every fix proven before you see it.**
+
+For the tagline field, the README's header and anywhere one line has to carry ORCA (owner, Nov 3; it replaces the
+short form "When teams' 3D designs collide, ORCA proposes the fix and proves it before anyone sees it."). Two beats:
+the first sets ORCA against tools that stop at a list of problems found; the second is the promise, and it is true of
+the product, since nothing reaches the panel without passing the geometry check (conflict gone, clearance met, nothing
+new hit). It names no industry and does not say "clash", so it keeps the plain-words rule. It does not name the user,
+so the one-liner follows it wherever there is room for a second sentence.
+
 ## The one-liner
 
 > ORCA is for the design coordinator, who makes every team's 3D design fit together: where two designs conflict, it
 > proposes a fix as a real edit to the model, and proves the fix with geometry before anyone sees it.
 
-Short form, for a tagline field: **When teams' 3D designs collide, ORCA proposes the fix and proves it before anyone
-sees it.**
-
 "Design coordinator" is the user [01](architecture/01-product-and-journeys.md) names, and "who makes every team's 3D
 design fit together" says the job in words any industry reads: on a building the same person is often the BIM
 coordinator; on a machine, the engineer who owns the assembly. "Conflict" is the landing's word ("finds where they
 conflict"). Not "design coordination issues": it is vaguer, and it promises more than ORCA fixes (conflicts in space
-and room to spare, not missing information or code compliance). The README opens with the same sentence.
+and room to spare, not missing information or code compliance). The README's header carries the hook; its first paragraph is this sentence.
 
 ## Who it's for
 
