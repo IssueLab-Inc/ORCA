@@ -553,7 +553,8 @@ is never in a capture, and is in the Screenshot. Opening other models clears the
 - **`posed(a, b, take)`** (private) is shared by `captureClash` and `thumbClash`: it saves the camera, target, mode,
   focus, flight and marker, lifts any preview on screen (an option, the idea the pilot is trying and what it hit: the
   preview's moves and hides, the overlay and the hit layer), so a thumbnail drawn while ORCA works on another clash
-  shows the model as it is, focuses the pair, points the camera with `zoneCamera`, lets `take` render shots (the focus
+  shows the model as it is (the pair measured where it is in the model, not where a previewed move put it), focuses
+  the pair, points the camera with `zoneCamera`, lets `take` render shots (the focus
   materials see-through at 0.6 for A and C), then puts everything back and renders the restored view before
   returning. All in one task, so nothing changes on screen. The final render is the fix for thumbnails flashing: the
   canvas keeps its last frame, and a shot taken after the frame's own render used to show until the next frame.

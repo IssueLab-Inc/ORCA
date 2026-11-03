@@ -48,3 +48,23 @@ test("a preview on screen (the idea ORCA is trying, what it hit) never shows in 
   assert.equal(v.hidden, hidden); assert.equal(v.moved, moved);
   assert.equal(v.overlay.visible, true); assert.equal(v.hitLayer.visible, true);
 });
+
+test("a picture frames the pair where it is in the model, not where a previewed move has put one of them", () => {
+  const v = Object.create(Viewer.prototype);
+  const framed = [];
+  const at = (x) => new THREE.Box3(new THREE.Vector3(x, 0, 0), new THREE.Vector3(x + 1.1, 1, 1));
+  const moved = new Map([["a", new THREE.Matrix4().makeTranslation(0, 5, 0)]]);   // the idea ORCA is trying moves "a" up 5 m
+  Object.assign(v, {
+    linkLayer: new THREE.Group(), marker: new THREE.Group(), grips: new THREE.Group(), overlay: new THREE.Group(), hitLayer: new THREE.Group(),
+    hidden: new Set(), moved, sectionBox: null, focusMaterials: {}, mode: "xray", focus: null, flight: null,
+    camera: new THREE.PerspectiveCamera(), controls: { target: new THREE.Vector3(), update() {} },
+    renderer: { render() {} }, setMode() {}, setFocus() {}, adjustClipRange() {},
+    boxOf: ([g]) => { const b = at(g === "a" ? 0 : 1); return v.moved.has(g) ? b.translate(new THREE.Vector3(0, 5, 0)) : b; },
+    zoneCamera: (zone) => { framed.push(zone.clone()); return [new THREE.Vector3(5, 5, 5), new THREE.Vector3()]; },
+    png: () => "data:", fullCanvas: (take) => take(), drawFrame() {},
+  });
+  const shot = v.posed("a", "b", (shot) => shot("isolate", true, 192));
+  assert.equal(shot, "data:", "moved apart in the preview, they still meet in the model: there is a picture");
+  assert.deepEqual([framed[0].min.y, framed[0].max.y], [0, 1], "framed where they meet in the model");
+  assert.equal(v.moved, moved, "the preview is back afterwards");
+});
