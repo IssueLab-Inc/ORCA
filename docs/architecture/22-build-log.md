@@ -2161,8 +2161,8 @@ stayed in the isolation ("Now: no overlap here") and the camera stayed; Ctrl+Z, 
 
 **Nov 3, the README opens with the logo, a hook and badges** (README, header and "At a glance"). Owner request: a
 header like other hackathon entries, with logos. The README now opens with the brand kit's "ORCA by IssueLab" lockup
-(white in dark mode, navy in light, `assets/brand/orca/png/lockups/`), the hook "Fixes, not just findings: the AI
-design coordinator for buildings and machines", and shields.io badges with Simple Icons logos (Meta, Modal, React,
+(white in dark mode, navy in light, `assets/brand/orca/png/lockups/`), the hook "Fixes, not just findings. Every fix
+proven before you see it." (owner's pick of the drafts, now in [docs/submission.md](../submission.md), "The hook"), and shields.io badges with Simple Icons logos (Meta, Modal, React,
 three.js, FastAPI, Python, pytest, Node.js) and one with ORCA's own split-O symbol, each linking to its doc. Under the
 existing opening: "At a glance" (six points, numbers from "Two demos") and "Meta models at work" (the five models from
 [08](08-ai-models-prompts-and-spend.md)). The test badges carry a measured run: 934 server tests, 288 web tests, web
