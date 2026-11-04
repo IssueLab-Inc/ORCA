@@ -20,6 +20,9 @@ state ([12](12-web-app.md)); the server never sees the viewer, only pictures and
 
 ## Files
 
+Not the viewer: the landing's hero draws its own small three.js scene (`landing/heroScene.ts`, [12](12-web-app.md)), from
+numbers read out of Northbank, with its own WebGL context, given back when the landing goes.
+
 | File | What it is | Main exports | Used by |
 |---|---|---|---|
 | `viewer/ifcLoader.ts` | Loads one IFC: asks the worker to parse it (on the page when no worker starts) and builds a solid batch and an optional see-through batch from what comes back | `loadIfc`, `parseIfc`, `buildModel`, `CIRCLE_SEGMENTS`, `LoadedModel`, `LoadedElement` | `viewer/Viewer.ts`, `viewer/patch.ts` (types) |

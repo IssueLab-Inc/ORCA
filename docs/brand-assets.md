@@ -60,6 +60,10 @@ Adopted on Oct 30 (`claude/laughing-allen-29oggh`). The app does not import the 
   manifest, pinned tab, `og.png`); theme colour navy.
 - **Colour:** the app's accent is navy `#052640`, text ink `#11161B`, the background paper, lines and muted text the
   kit's. The viewer's own 3D colours (section box, measurements) are unchanged.
+- **Landing (Nov 4):** the page has its own header with the wordmark (20 px) beside its section links, so the notch steps
+  aside there (`.app.landing .notch`); the corner and the compact bar take the hero's night (`web/src/landing/landing.css`). The
+  hero's phase row (Observe, Resolve, Check, Apply) runs with a replay labelled as one: demonstration material, never live
+  status.
 - **Not used yet:** the `<orca-phase>` element (no Observe/Resolve/Check/Apply events are wired), social files other
   than `og.png`, and the video files.
 
