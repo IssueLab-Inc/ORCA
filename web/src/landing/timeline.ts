@@ -12,10 +12,6 @@
 export type Phase = "observe" | "resolve" | "check" | "apply";
 export type RunKey = "duct" | "tray" | "cw";
 
-export const PHASES: { id: Phase; word: string }[] = [
-  { id: "observe", word: "Observe" }, { id: "resolve", word: "Resolve" }, { id: "check", word: "Check" }, { id: "apply", word: "Apply" },
-];
-
 /** One loop of the replay, in seconds. */
 export const LOOP = 36;
 
@@ -96,7 +92,6 @@ export interface HeroFrame {
   runs: Record<RunKey, RunFrame>;
   whole: { lift: number; opacity: number; fail: number };  // the tray moved whole, and failing
   hits: number;          // what the failed idea hit, in magenta (0..1, pulsing)
-  exports: number;       // fixes kept so far
   finale: number;        // the closing line (0..1)
   fade: number;          // the picture dimmed at the loop's turn: out at its end, back in at its start (0..1)
 }
@@ -146,7 +141,6 @@ export function heroAt(time: number): HeroFrame {
       fail: ramp(t, w.fail, w.fail + 0.25),
     },
     hits: t >= w.fail && t < w.wholeGone[1] ? (0.65 + 0.35 * Math.cos((t - w.fail) * Math.PI * 2.4)) * (1 - ramp(t, w.wholeGone[0], w.wholeGone[1])) : 0,
-    exports: (["duct", "tray", "cw"] as const).filter((k) => t >= T[k].keep).length,
     finale: ramp(t, T.finale, T.finale + 0.6),
     fade: Math.max(ramp(t, T.fade[0], T.fade[1]), 1 - ramp(t, 0, 0.7)),
   };

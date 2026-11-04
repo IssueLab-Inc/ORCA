@@ -120,21 +120,10 @@
 .lp-hero-meta span { display: inline-flex; align-items: center; gap: 8px; }
 .lp-hero-meta span::before { content: ""; width: 5px; height: 5px; border-radius: 1px; background: var(--teal); transform: rotate(45deg); }
 
-/* The replay's heads-up display: phase, what it has kept, its log, the chapters */
+/* The replay's heads-up display: its log and the chapters */
 .lp-hud { pointer-events: none; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .lp-hud > * { pointer-events: auto; }
 .lp-hud > .lp-hud-window { pointer-events: none; flex: 1 1 auto; min-height: 120px; }
-.lp-hud-top { display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; }
-.lp-phases { display: flex; gap: 2px; margin: 0; padding: 4px; list-style: none; border-radius: 999px; background: rgba(5, 22, 38, .66); border: 1px solid var(--line-d);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-.lp-phases li { padding: 6px 12px; border-radius: 999px; font: 500 12px var(--mono); letter-spacing: .03em; color: var(--faint-d); transition: background .45s var(--ease), color .45s, box-shadow .45s; }
-.lp-phases li b { font-weight: 700; }
-.lp-phases li.on { background: var(--teal-2); color: #03222b; box-shadow: 0 0 26px rgba(95, 227, 242, .45); }
-.lp-export { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border-radius: 10px; font: 600 12.5px var(--sans); color: var(--faint-d);
-  background: rgba(5, 22, 38, .66); border: 1px solid var(--line-d); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: color .3s, border-color .3s; }
-.lp-export.on { color: #fff; border-color: rgba(95, 227, 242, .45); }
-.lp-export em { display: inline-flex; align-items: center; gap: 2px; padding: 1px 7px 1px 5px; border-radius: 999px; background: #fff; color: #1d7f47; font: 700 11.5px var(--sans); font-style: normal; animation: lp-pop .4s var(--ease); }
-@keyframes lp-pop { from { transform: scale(.6); opacity: 0; } }
 .lp-log { align-self: flex-end; width: 100%; max-width: 540px; margin: 0; padding: 14px 16px; list-style: none; display: flex; flex-direction: column; justify-content: flex-end; gap: 7px;
   min-height: 176px; border-radius: 14px; background: rgba(3, 15, 27, .72); border: 1px solid var(--line-d); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .6); }
@@ -606,7 +595,6 @@
   .lp-hero-copy { position: relative; }
   .lp-hero-copy::before { content: ""; position: absolute; z-index: -1; inset: -40px calc(-1 * var(--gutter)) -56px; background: linear-gradient(180deg, var(--night) 82%, rgba(4, 19, 33, 0)); }
   .lp-hud { gap: 10px; }
-  .lp-hud-top { justify-content: space-between; margin-top: 18px; }
   .lp-hud > .lp-hud-window { flex: none; height: clamp(300px, 74cqw, 520px); min-height: 0; }
   .lp-log { max-width: none; min-height: 0; }
   .lp-log li:not(:nth-last-child(-n+3)) { display: none; }
@@ -644,8 +632,6 @@
   .lp-stat { padding: 16px; }
   .lp-hero h1 { font-size: clamp(38px, 11.5cqw, 54px); }
   .lp-cta .lp-btn { flex: 1 1 100%; }
-  .lp-phases li { padding: 6px 9px; font-size: 11.5px; }
-  .lp-export { display: none; }
   .lp-tag.pin b, .lp-tag.pin em { display: none; }
   .lp-chapters button { padding: 7px 6px; }
   .lp-log li { grid-template-columns: 58px minmax(0, 1fr); font-size: 11.5px; }

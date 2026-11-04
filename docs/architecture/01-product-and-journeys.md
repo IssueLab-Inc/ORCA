@@ -49,8 +49,8 @@ proven before you see it.", the one-liner for the design coordinator and the way
 of ORCA fixing Northbank's three girder clashes, drawn from the models' own geometry: the check finds them, Muse
 Spark's idea grows out of each run in amber, the check turns it teal or shows what it hit in magenta (for the tray, the
 recorded round's whole lift fails on the return-air spigots and a core wall, as ORCA's check reports, and its offset
-passes), it is kept, and Export counts it, with the phase (Observe, Resolve, Check,
-Apply), a log of the recorded numbers, chapters and pause; it pauses off screen and stands still for less motion. Then:
+passes), and it is kept, with a log of the recorded numbers (each line tagged Observe, Resolve, Check
+or Apply), chapters and pause; it pauses off screen and stands still for less motion. Then:
 the problem (the teams' models coming together until their clashes light; the rework figure with its source), the
 loop as tabs beside one frame playing each step's recorded run, **Try the check yourself** (raise #1's duct by hand
 and see what the check says: through the web opening at +400 mm it passes with 50 mm all round, as recorded, and it
