@@ -72,16 +72,19 @@ export function Sandbox({ reduce }: { reduce: boolean }) {
   const state = c.verified ? "ok" : c.hits.length ? "bad" : "near";
   const girderHit = c.hits.find((h) => h.girder);
   const pct = (v: number) => `${((v - LO) / (HI - LO)) * 100}%`;
-  const dim = (x1: number, y1: number, x2: number, y2: number, text: string, side: "v" | "h") => (
+  /** A dimension line with its ticks, and its number (mm) set where it can be read: beside the duct, past what is
+   * beside it, so the four never sit on each other or on the duct. */
+  const dim = (x1: number, y1: number, x2: number, y2: number, gap: number, tx: number, ty: number, anchor: "start" | "end") => (
     <g className="lp-sb-dim">
       <line x1={x1} y1={y1} x2={x2} y2={y2} />
-      {side === "v"
-        ? <><line x1={x1 - 22} y1={y1} x2={x1 + 22} y2={y1} /><line x1={x2 - 22} y1={y2} x2={x2 + 22} y2={y2} />
-          <text x={x1 + 34} y={(y1 + y2) / 2 + 15}>{text}</text></>
-        : <><line x1={x1} y1={y1 - 22} x2={x1} y2={y1 + 22} /><line x1={x2} y1={y2 - 22} x2={x2} y2={y2 + 22} />
-          <text x={(x1 + x2) / 2} y={y1 - 34} textAnchor="middle">{text}</text></>}
+      {x1 === x2
+        ? <><line x1={x1 - 22} y1={y1} x2={x1 + 22} y2={y1} /><line x1={x2 - 22} y1={y2} x2={x2 + 22} y2={y2} /></>
+        : <><line x1={x1} y1={y1 - 22} x2={x1} y2={y1 + 22} /><line x1={x2} y1={y2 - 22} x2={x2} y2={y2 + 22} /></>}
+      <text x={tx} y={ty} textAnchor={anchor}>{Math.round(gap * 1000)}</text>
     </g>
   );
+  const midZ = (duct.z[0] + duct.z[1]) / 2, sideR = Math.min(g.right, 0.3), sideL = Math.min(g.left, 0.3);
+  const tick = X(duct.y[1]) - 90, rightOf = X(duct.y[1] + sideR) + 26, leftOf = X(duct.y[0] - sideL) - 26;
   const web = GIRDER.web.z;
   const holes = GIRDER.openings.filter((o) => o.y[1] > PLANE.y[0] && o.y[0] < PLANE.y[1]);
   const webPath = `M${X(PLANE.y[0])} ${Y(web[1])}H${X(PLANE.y[1])}V${Y(web[0])}H${X(PLANE.y[0])}Z`
@@ -123,19 +126,19 @@ export function Sandbox({ reduce }: { reduce: boolean }) {
           </g>
           {/* the room left round it */}
           {!c.hits.length && <>
-            {g.up < 1 && dim(X(-2.45) + 150, Y(duct.z[1] + g.up), X(-2.45) + 150, Y(duct.z[1]), mm(g.up), "v")}
-            {g.down < 1 && dim(X(-2.45) - 150, Y(duct.z[0]), X(-2.45) - 150, Y(duct.z[0] - g.down), mm(g.down), "v")}
-            {g.left < 0.3 && dim(X(duct.y[0] - g.left), Y(duct.z[1]) + 70, X(duct.y[0]), Y(duct.z[1]) + 70, mm(g.left), "h")}
-            {g.right < 0.3 && dim(X(duct.y[1]), Y(duct.z[1]) + 70, X(duct.y[1] + g.right), Y(duct.z[1]) + 70, mm(g.right), "h")}
+            {g.up < 0.6 && dim(tick, Y(duct.z[1] + g.up), tick, Y(duct.z[1]), g.up, rightOf, Y(duct.z[1] + g.up / 2) + 16, "start")}
+            {g.down < 0.6 && dim(tick, Y(duct.z[0]), tick, Y(duct.z[0] - g.down), g.down, rightOf, Y(duct.z[0] - g.down / 2) + 16, "start")}
+            {g.left < 0.3 && dim(X(duct.y[0] - g.left), Y(midZ), X(duct.y[0]), Y(midZ), g.left, leftOf, Y(midZ) + 16, "end")}
+            {g.right < 0.3 && dim(X(duct.y[1]), Y(midZ), X(duct.y[1] + g.right), Y(midZ), g.right, rightOf, Y(midZ) + 16, "start")}
           </>}
           {c.hits.length > 0 && <text x={X(-2.45)} y={Y(duct.z[1]) - 30} className="lp-sb-hitnote" textAnchor="middle">
             {girderHit ? `into the girder ${mm(-girderHit.depth, true)}` : `hits the ${c.newHits[0]?.toLowerCase()}`}</text>}
           <text x={W - 10} y={Y(7.925) + 14} className="lp-sb-label" textAnchor="end">Level 03 slab</text>
           <text x={W - 10} y={Y(6.72) - 18} className="lp-sb-label" textAnchor="end">Suspended ceiling</text>
-          <text x={X(-2.45)} y={Y(7.81) + 52} className="lp-sb-label" textAnchor="middle">girder web opening, 700 × 400</text>
-          <text x={10} y={Y(6.89) - 22} className="lp-sb-label">Transfer girder: its 20 mm web, face on</text>
+          {raise < 0.25 && <text x={X(-2.45)} y={Y(7.81) + 52} className="lp-sb-label" textAnchor="middle">girder web opening, 700 × 400</text>}
+          <text x={W - 10} y={Y(6.89) - 22} className="lp-sb-label" textAnchor="end">Transfer girder: its 20 mm web, face on</text>
         </svg>
-        <figcaption>Seen along the duct, at the girder. Drag the duct up or down.</figcaption>
+        <figcaption>Seen along the duct, at the girder; dimensions in mm. Drag the duct up or down.</figcaption>
       </figure>
 
       <div className="lp-sb-panel">
