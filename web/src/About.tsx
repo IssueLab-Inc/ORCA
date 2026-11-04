@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowRight, Bot, Check, ClipboardCheck, Compass, Cpu, FileSpreadsheet, FileText, Filter, FolderOpen, GitCompare,
+  Activity, ArrowRight, Check, ClipboardCheck, Compass, Cpu, FileSpreadsheet, FileText, Filter, FolderOpen, GitCompare,
   History, Image, Info, Layers, LayoutPanelLeft, Link2, ListFilter, Mic, PenTool, Play, Repeat, RotateCcw, ShieldCheck,
   Smartphone, Sparkles, SquarePlus, Target, TriangleAlert, Upload, Users, Wand2, Waypoints,
 } from "lucide-react";
@@ -10,7 +10,7 @@ import { Hero } from "./landing/Hero";
 import { Collide, Loop, type LoopStep } from "./landing/Story";
 import { Sandbox } from "./landing/Sandbox";
 import { ArtCombined, ArtMove, ArtOffset, ArtOpening, ArtResize, ArtRoute, ArtSeat, ArtTrim } from "./landing/FixArt";
-import { BuiltArt, ChatArt, EditArt, FilesArt, LanesArt, McpArt, PhoneArt, ReqArt, RootArt, Tile, TriageArt, ViewsArt } from "./landing/Bento";
+import { BuiltArt, ChatArt, EditArt, FilesArt, Formats, LanesArt, Logo, McpArt, NavisArt, PhoneArt, ReqArt, RootArt, Tile, TriageArt, ViewsArt } from "./landing/Bento";
 import { useCountUp, useReducedMotion, useReveal, useSeen, useSpy } from "./landing/motion";
 import "./landing/landing.css";
 
@@ -82,6 +82,8 @@ export function About({ start, onAbout, triageOpen = false }: {
       <Hero reduce={reduce}
         actions={{ disabled: !!start?.disabled, onGolden: start?.onGolden, onBlank: start?.onBlank, onDemos: () => to(start ? "demos" : "how") }}
         resume={start?.resume ? <ResumeCard r={start.resume} disabled={start.disabled} /> : undefined} />
+
+      <Formats />
 
       <section className="lp-sec lp-problem" id="problem" aria-labelledby="lp-problem-h">
         <div className="lp-wrap lp-split">
@@ -243,7 +245,7 @@ export function About({ start, onAbout, triageOpen = false }: {
             <Tile icon={<Layers size={16} />} title="Plans, sections, elevations" art={<ViewsArt />}>
               Beside the 3D view, up to four views at once; measuring in every view with snapping.
             </Tile>
-            <Tile cls="w2 dark" icon={<Bot size={16} />} title="Bring your own agent" art={<McpArt />}>
+            <Tile cls="w2 dark" icon={<Logo name="mcp" size={18} />} title="Bring your own agent" art={<McpArt />}>
               ORCA is an MCP server too. A pairing link lets Muse Code or any MCP client open models, check its own ideas,
               propose and apply fixes through the same geometry check, while your page follows along.
             </Tile>
@@ -261,7 +263,7 @@ export function About({ start, onAbout, triageOpen = false }: {
             <Tile icon={<Smartphone size={16} />} title="In the meeting, on any screen" art={<PhoneArt />}>
               The same app on a phone or tablet: the model on top, a sheet below with the one next step.
             </Tile>
-            <Tile icon={<FileSpreadsheet size={16} />} title="Already ran Navisworks?">
+            <Tile icon={<FileSpreadsheet size={16} />} title="Already ran Navisworks?" art={<NavisArt />}>
               Import its clash report, pictures and all, then triage and fix those clashes instead.
             </Tile>
           </div>
@@ -388,13 +390,13 @@ export function About({ start, onAbout, triageOpen = false }: {
           <h2 id="lp-words-h">New to this? Words you'll see</h2>
           <dl>
             <div><dt>BIM</dt><dd>Building Information Modelling: a 3D model where every object knows what it is.</dd></div>
-            <div><dt>IFC</dt><dd>The open file format for those models, readable by any design tool.</dd></div>
-            <div><dt>STEP</dt><dd>The open format mechanical CAD uses for machines and equipment.</dd></div>
+            <div><dt><Logo name="ifc" size={18} />IFC</dt><dd>The open file format for those models, readable by any design tool.</dd></div>
+            <div><dt><Logo name="step" size={18} />STEP</dt><dd>The open format mechanical CAD uses for machines and equipment.</dd></div>
             <div><dt>Clash</dt><dd>One place where two parts of the models conflict. Each has a number, like #3.</dd></div>
             <div><dt>Check</dt><dd>One pair of things checked against each other: two models, or one model against itself.</dd></div>
             <div><dt>Triage</dt><dd>Sorting the clashes a check found: a real problem, by design, a model error, or not physical.</dd></div>
             <div><dt>Clearance</dt><dd>The room left between two things once a clash is fixed: 25 mm unless asked for more.</dd></div>
-            <div><dt>BCF</dt><dd>An open format for issues on a model, which design tools read.</dd></div>
+            <div><dt><Logo name="bcf" size={18} />BCF</dt><dd>An open format for issues on a model, which design tools read.</dd></div>
           </dl>
           <div className="lp-colours" aria-label="Colours in the 3D view">
             <span><i style={{ background: "#d0342c" }} />Element A of a clash</span>
@@ -440,6 +442,11 @@ export function About({ start, onAbout, triageOpen = false }: {
             {onAbout && <button type="button" onClick={onAbout}>About ORCA</button>}
             <a href={REPO} target="_blank" rel="noopener noreferrer">Source on GitHub</a>
             <span>Built with Muse Spark, IfcOpenShell, three.js and IFC</span>
+          </p>
+          <p className="lp-foot-marks">
+            IFC and BCF are trademarks of buildingSMART International, and Navisworks of Autodesk. Their logos, and the
+            Model Context Protocol's, appear here only to name the formats and tools ORCA works with; ORCA is not
+            affiliated with or endorsed by them.
           </p>
         </div>
       </footer>

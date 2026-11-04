@@ -64,11 +64,32 @@ Adopted on Oct 30 (`claude/laughing-allen-29oggh`). The app does not import the 
   aside there (`.app.landing .notch`); the corner and the compact bar take the hero's night (`web/src/landing/landing.css`). The
   hero's log tags each line with its step (Observe, Resolve, Check, Apply), in a replay labelled as one: demonstration
   material, never live status. (It had a phase row and an Export count; both went on Nov 4: they looked like buttons.)
+- **Formats' logos on the landing (Nov 4):** see "Other people's logos", below.
 - **Not used yet:** the `<orca-phase>` element (no Observe/Resolve/Check/Apply events are wired), social files other
   than `og.png`, and the video files.
 
 Reduced motion stills Orbit, Settle and Reveal. Checked in Chromium at 1440×900 on Northbank (landing, loading card,
 working notch, loaded, menu, a selected clash); web tests and build in [22](architecture/22-build-log.md).
+
+## Other people's logos
+
+The landing names the formats and tools ORCA works with by their own logos (owner request, Nov 4: "use these logos at
+the relevant locations", with the files supplied). They are not ORCA's and not under this repository's MIT licence:
+
+| Logo | Whose | File (`web/public/logos/`) | Where on the landing |
+| --- | --- | --- | --- |
+| IFC | buildingSMART International | `ifc.png` | the strip under the hero, the hand-off tile, the glossary |
+| BCF | buildingSMART International | `bcf.png` | the strip, the hand-off tile, the glossary |
+| Navisworks | Autodesk | `navisworks.png` | the strip, the "Already ran Navisworks?" tile's picture |
+| MCP | the Model Context Protocol | `mcp.png` | the strip, the "Bring your own agent" tile's icon (white on the dark tile) |
+| STEP | none of its own: drawn for ORCA, a staircase block in isometric | `step.svg` | the strip, the hand-off tile, the glossary |
+| PDF | none of its own: drawn for ORCA, a page with its corner folded | `pdf.svg` | the strip, the hand-off tile |
+
+The supplied files were trimmed to their artwork, centred square and scaled to 192 px (Navisworks's white page made
+transparent round the icon, its white N kept); nothing else about them changed. They name the format beside words that
+say the same, so each has an empty `alt`. The footer says whose they are and that ORCA is not affiliated with or
+endorsed by them. The table of files and the strip's lines are `web/src/landing/logos.ts`; a web test checks every
+file is there.
 
 ## Provenance and validation
 

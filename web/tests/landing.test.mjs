@@ -196,3 +196,17 @@ test("the band that clears the opening is the one ORCA tells Muse Spark: +375 to
   assert.ok(near(band[0], 0.375) && near(band[1], 0.425), "the hands-on check agrees");
   assert.ok(timeline.LOG.some((l) => l.text.includes("+375 to +425 mm")), "and the replay says so");
 });
+
+const logos = await import(await compiled("../src/landing/logos.ts"));
+
+test("every logo the landing shows is a file in web/public/logos, and the strip names each format once", async () => {
+  const { existsSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  for (const [key, src] of Object.entries(logos.LOGO)) {
+    assert.match(src, /^\/logos\/[a-z]+\.(png|svg)$/, key);
+    assert.ok(existsSync(fileURLToPath(new URL(`../public${src}`, import.meta.url))), `${key}: ${src} is missing`);
+  }
+  const keys = logos.FORMATS.map((f) => f.key);
+  assert.deepEqual([...keys].sort(), Object.keys(logos.LOGO).sort());
+  for (const f of logos.FORMATS) assert.match(f.what, /\b(in|out|plugged in)$/, `${f.name} says which way it goes`);
+});
