@@ -1,10 +1,30 @@
-import { Box, Crop, MoveVertical, Redo2, Scissors, SquareDashed, Trash2, Undo2 } from "lucide-react";
+import { ArrowRight, Box, Crop, MoveVertical, Redo2, Scissors, SquareDashed, Trash2, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { FORMATS, LOGO, type LogoKey } from "./logos";
 
 /**
- * The small pictures on the landing's "Everything around the fix" tiles. Each is decoration beside words that say the
- * same (aria-hidden); they move with CSS only (landing.css, "Platform"), and stand still for less motion.
+ * The small pictures on the landing's "Everything around the fix" tiles, and the logos of what ORCA works with. Each is
+ * decoration beside words that say the same (aria-hidden, or an empty alt); they move with CSS only (landing.css,
+ * "Platform"), and stand still for less motion.
  */
+
+export function Logo({ name, size = 24 }: { name: LogoKey; size?: number }) {
+  return <img className={`lp-logo ${name}`} src={LOGO[name]} alt="" width={size} height={size} loading="lazy" decoding="async" draggable={false} />;
+}
+
+/** What ORCA reads and writes, each by its logo (`FORMATS`): the strip under the hero. */
+export function Formats() {
+  return (
+    <section className="lp-formats" aria-labelledby="lp-formats-h">
+      <div className="lp-wrap lp-formats-in lp-reveal">
+        <p id="lp-formats-h">Works with the files and tools your teams already use</p>
+        <ul>
+          {FORMATS.map((f) => <li key={f.key}><Logo name={f.key} size={34} /><span><b>{f.name}</b>{f.what}</span></li>)}
+        </ul>
+      </div>
+    </section>
+  );
+}
 
 export function Tile({ cls = "", icon, title, art, children }: { cls?: string; icon: ReactNode; title: string; art?: ReactNode; children: ReactNode }) {
   return (
@@ -130,12 +150,36 @@ export function McpArt() {
 }
 
 export function FilesArt() {
+  const files: [LogoKey, string, string][] = [["ifc", "IFC", "Edited models"], ["step", "STEP", "Written back"], ["pdf", "PDF", "Report, per team"], ["bcf", "BCF", "Issues, 2.1"]];
   return (
     <ul className="lp-files">
-      {[["IFC", "Edited models", "ifc"], ["STEP", "Written back", "step"], ["PDF", "Report, per team", "pdf"], ["BCF", "Issues, 2.1", "bcf"]].map(([ext, what, cls], i) => (
-        <li key={ext} className={cls} style={{ ["--i" as string]: i }}><b>{ext}</b><span>{what}</span></li>
+      {files.map(([key, ext, what], i) => (
+        <li key={ext} className={key} style={{ ["--i" as string]: i }}><Logo name={key} size={30} /><b>{ext}</b><span>{what}</span></li>
       ))}
     </ul>
+  );
+}
+
+/** A Navisworks clash report coming in: its XML and pictures, each clash given ORCA's #N (its own name kept) and triaged. */
+export function NavisArt() {
+  const rows: [string, string, string, string][] = [
+    ["Clash39", "#1", "Real problem", "real"],
+    ["Clash40", "#2", "By design", "design"],
+    ["Clash41", "#3", "Model error", "error"],
+  ];
+  return (
+    <div className="lp-navis">
+      <div className="lp-navis-src">
+        <Logo name="navisworks" size={38} />
+        <span className="lp-navis-file"><b>Clash report, XML</b>
+          <span className="lp-navis-pics">{[0, 1, 2].map((i) => <i key={i} style={{ ["--i" as string]: i }} />)}<em>and its pictures</em></span></span>
+      </div>
+      <ul className="lp-navis-rows">
+        {rows.map(([ref, n, verdict, cls], i) => (
+          <li key={ref} style={{ ["--i" as string]: i }}><s>{ref}</s><ArrowRight size={12} /><b>{n}</b><em className={cls}>{verdict}</em></li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
