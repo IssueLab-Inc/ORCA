@@ -43,9 +43,19 @@ inside lives in the docs it links to; the cross-layer sequence of each action is
 | **Teams with their own AI agent** | A pairing link: Muse Code or another MCP client checks and fixes through the same geometry check | [11](11-mcp-and-agent-links.md) |
 | Later: **site teams** | What was installed compared with what was designed, from photos and scans (SAM 3.1) | [20](20-decisions-limits-and-roadmap.md), "Later" |
 
-The landing page (`About`) is written for people who have never heard of BIM: what a clash is, the disciplines, a
-colour legend for the viewer and a short glossary ("Words you'll see"). **About ORCA** (`AboutOrca`) tells the longer
-story in six tabs, for anyone who wants more, judges included.
+The landing page (`About`, with `web/src/landing/`; Nov 4) shows ORCA working before anyone opens anything, and is
+written for people who have never heard of BIM. Its first screen is the hook, "Fixes, not just findings. Every fix
+proven before you see it.", the one-liner for the design coordinator and the ways in, beside a live 3D replay (sped up)
+of ORCA fixing Northbank's three girder clashes, drawn from the models' own geometry: the check finds them, Muse
+Spark's idea grows out of each run in amber, the check turns it teal or shows what it hit in magenta (the tray's whole
+move fails on the return-air spigots), it is kept, and Export counts it, with the phase (Observe, Resolve, Check,
+Apply), a log of the recorded numbers, chapters and pause; it pauses off screen and stands still for less motion. Then:
+the problem (the teams' models coming together until their clashes light; the rework figure with its source), the
+loop as tabs beside one frame playing each step's recorded run, **Try the check yourself** (raise #1's duct by hand
+and see what the check says: through the web opening at +400 mm it passes with 50 mm all round, as recorded, and it
+can ask for 25 mm or 50 mm), the kinds of fix, "The model proposes. Geometry decides." with the five models, everything
+around the fix, the two demos, who it is for, what is proven and what is not yet, words and the viewer's colours, and
+the close. **About ORCA** (`AboutOrca`) tells the longer story in six tabs, for anyone who wants more, judges included.
 
 **The hackathon framing.** ORCA was built for the Meta Global AI Developer Hackathon (Startup track, Oct 27 - Nov 4,
 2026), with only work written during the event. The headline is **verified model edits**: a fix is a real IFC edit,
@@ -68,7 +78,7 @@ zone has the whole stage.
 | **Northbank demo** | Demo card **Open the Northbank demo** (`data-tour=demo`) | `openDemo()` → `open(picked)` → `runDetect(null, id)` | Opens the default pick and checks it. The label is "Open the models" when the pick holds no Northbank file (`startLabel`). |
 | **Machine cell demo** | Demo card **Open the machine cell** (`data-tour=cell`) | `openDemo([cellSample])` | Opens `PC-03-Palletising-Cell-RevA.step` from `samples/` (`cellSample`, matched by name), converts it and checks it. The card shows only when that file is there. |
 | **Guided tours** | **Take the guided tour** / **Take the cell tour** on the cards; **Menu** › **Take the guided tour** once something is open | `startTour("northbank" \| "cell")` | `Tour` walks the real app (below). |
-| **Pick a demo** | Hero link | scrolls to `#demos` | The two `DemoCard`s: a recorded fix playing in the 3D view (`Clip`; its last frame for people who ask for less motion), what it is, what it shows, measured chips, Open and Tour. Further down, "What ORCA does" shows its steps as tabs beside one frame playing each step's recorded run (`StepsPlayer`): the check, Muse Spark reading the clash, Workings, the fix kept. It moves on as each clip ends, until the visitor picks a step. |
+| **Pick a demo** | Hero link, or **Demos** in the landing's header | scrolls to `#demos` | The two `DemoCard`s: a recorded fix playing in the 3D view (`Clip`; its last frame for people who ask for less motion), what it is, what it shows, measured chips, Open and Tour. Higher up, "How it works" shows Observe, Resolve, Check and Apply as tabs beside one frame playing each step's recorded run (`Loop`): the check, Muse Spark reading the clash, Workings, the fix kept. It moves on as each clip ends, until the visitor picks a step. |
 | **Resume** | **Pick up where you left off** card (`ResumeCard`), shown while the server still holds the session | `resumeSession` | Reopens the saved scene (`open(files, existing)`), its report, the fixes, and the agent link. **Start fresh** forgets it and revokes the link (`startFresh`). The session is kept in `localStorage` (`sightline.session`). |
 | **Blank project** | Hero **Use your own models** (`data-tour=blank`) | `setBlank(true)` → `ProjectStart` | A drop zone or **Choose files** for IFC/STEP (→ `openDemo(files)`: upload, open, check), **Import a report folder**, **Back to the demos**. |
 | **Models menu** | **Menu** › Models (the model's top right corner on a desktop) | `open()` / `openDemo(files)` | Tick sample files and **Open n models**, or **Upload models (IFC or STEP)…**. The default pick is the samples matching `(structure\|mep\|architecture\|site).ifc`. |

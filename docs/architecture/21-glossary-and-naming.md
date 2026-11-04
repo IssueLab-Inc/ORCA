@@ -241,7 +241,8 @@ Each was checked at HEAD.
 
 ### Wording
 
-- **"Design coordination"** is the job and its outputs: the landing's "An AI design coordinator for 3D models", the
+- **"Design coordination"** is the job and its outputs: the landing's "ORCA · AI design coordination" and "For the design
+  coordinator, who makes every team's 3D design fit together", the
   header's **Coordinate** menu ("Check the open models"), the Detect card "Coordinate the models", a run's report
   "Coordination · n models", the PDF "Design coordination report", the chat prompt's "design coordination app".
 - **"Clash"** is one geometric item. Code identifiers stay `clash` and `report`; BCF's TopicType stays "Clash".

@@ -314,8 +314,9 @@ together and only from measured runs.
 ### Landing clips
 
 `fix-northbank.webp` (#1, the duct through the girder) and `fix-cell.webp` (#66, the air pipe into the conveyor's
-side rail) play on the demo cards (`DemoCard` → `Clip` in `About.tsx`). "What ORCA does" (`StepsPlayer`) shows its
-steps as tabs beside one 16:10 frame that plays the chosen step's clip: `check.webp` (Northbank checked and its list
+side rail) play on the demo cards (`DemoCard` → `Clip` in `About.tsx`). "How it works" (`Loop` in
+`landing/Story.tsx`) shows Observe, Resolve, Check and Apply as tabs beside one 16:10 frame that plays the chosen step's
+clip: `check.webp` (Northbank checked and its list
 appearing), `understand.webp` (the Clash panel while Muse Spark reads #1), `workings.webp` (#1's run in the Workings
 graph) and `keep.webp` (#1's fix kept); a clip of another shape sits on a dotted ground. It moves on when a clip has
 played through (its length read from the file, `stepClips.ts`), until the visitor picks a step; it fetches nothing
@@ -326,6 +327,17 @@ of the window each, so their words read at a card's width (the whole app, as in 
 there); the card and steps 2-4 come from one live proposal on #1. Each has a `-still.webp`, its last frame, shown
 instead to people who ask for less motion (`prefers-reduced-motion`). The alt text describes the run on screen:
 rewrite it from the new run after a recapture.
+
+### The landing's own picture of the answer key
+
+The landing's hero replay and its "Try the check yourself" draw Northbank's Level 02 girder and the services round it
+from numbers read out of the sample models with IfcOpenShell (Nov 4), kept in `web/src/landing/northbank.ts`: the girder
+`TB-L02-01` (400 x 40 flanges, a 20 mm web 920 deep with six openings), the three answer-key runs (the supply air main
+600x300, the cable tray 300x100, the cold water main DN54) and their neighbours (the return air main and the hot water
+main, each already through an opening of its own; the secondary beams, the Level 03 slab, the ceiling and its lights,
+the supply branches and the return spigots). The fixes it shows are the recorded ones (README, "See it work": +400,
++250, +280 mm, clear by 50, 50 and 53 mm). `landing.test.mjs` checks that each run clears its own opening by the
+recorded amount and that the check gives 50 mm at +400 mm. If the models change, read the numbers again.
 
 ## Proposal clips (`docs/media/proposals/`)
 
