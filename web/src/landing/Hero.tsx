@@ -16,7 +16,7 @@ export interface HeroActions {
 /** The labels a frame shows, as a string that only changes when one does (so React redraws them rarely). */
 function labelState(f: HeroFrame): string {
   const pins = RUNS.map((r) => `${r.key}:${f.runs[r.key].pin}:${f.runs[r.key].clearance > 0.05 ? 1 : 0}`).join(",");
-  return `${pins}|hits:${f.hits > 0 ? 1 : 0}|girder:${f.t < 4.4 || f.finale > 0 ? 1 : 0}|exp:${f.exports}`;
+  return `${pins}|focus:${f.focus}|hits:${f.hits > 0 ? 1 : 0}|girder:${f.t < 4.4 || f.finale > 0 ? 1 : 0}|exp:${f.exports}`;
 }
 
 /**
@@ -155,12 +155,15 @@ export function Hero({ actions, reduce, resume }: { actions: HeroActions; reduce
         )}
         {live && <div className="lp-tags" aria-hidden>
           {RUNS.map((r) => {
-            const s = f.runs[r.key];
-            // a kept fix's pin says how far it moved and, while its chapter lasts, the room the check measured
+            const s = f.runs[r.key], quiet = f.focus !== "all" && f.focus !== r.key;
+            // a kept fix's pin says how far it moved and, while its chapter lasts, the room the check measured; the pins
+            // of the clashes not being told stay short, and each opens away from its neighbours (the tray's, north of
+            // the duct, to the right; the others to the left), so none covers another
             return label(`pin-${r.key}`, s.pin === "fixed"
               ? <><Check size={12} strokeWidth={3} aria-hidden />#{r.number} <b>{mm(r.fix.dz, true)}</b>
                 {s.clearance > 0.05 && <em>{mm(r.clear)} {r.key === "duct" ? "all round" : "clear"}</em>}</>
-              : <><i className="lp-ping" />#{r.number} <b>{mm(r.overlap, true)}</b></>, `pin ${s.pin}`, s.pin !== "hidden");
+              : <><i className="lp-ping" />#{r.number} <b>{mm(r.overlap, true)}</b></>,
+              `pin ${s.pin} ${r.key === "tray" ? "r" : "l"}${quiet ? " quiet" : ""}`, s.pin !== "hidden");
           })}
           {[0, 1, 2].map((i) => label(`hit-${i}`, <X size={12} strokeWidth={3} aria-hidden />, "hit", f.hits > 0))}
           {label("girder", <>TB-L02-01 · transfer girder, 1000 deep</>, "note", f.t < 4.4 || f.finale > 0)}

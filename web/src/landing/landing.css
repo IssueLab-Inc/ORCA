@@ -170,6 +170,12 @@
 .lp-tag.pin b { font-weight: 700; }
 .lp-ping { position: relative; width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: lp-ping 1.5s infinite; }
 @keyframes lp-ping { 0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .8); } 80%, 100% { box-shadow: 0 0 0 9px rgba(255, 255, 255, 0); } }
+.lp-tag.pin.r .lp-tag-in { transform: translate(-18px, calc(-100% - 12px)); }
+.lp-tag.pin.r .lp-tag-in::after { left: 18px; }
+.lp-tag.pin.l .lp-tag-in { transform: translate(calc(-100% + 18px), calc(-100% - 12px)); }
+.lp-tag.pin.l .lp-tag-in::after { left: calc(100% - 18px); }
+.lp-tag.pin.quiet b, .lp-tag.pin.quiet em { display: none; }
+.lp-tag.pin.quiet.on .lp-tag-in { opacity: .8; padding: 4px 8px; }
 .lp-tag.pin em { font-style: normal; font-weight: 500; padding-left: 8px; margin-left: 1px; border-left: 1px solid rgba(3, 33, 40, .35); }
 .lp-tag.hit .lp-tag-in { transform: translate(-50%, -50%) scale(.6); display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--magenta); color: #fff;
   box-shadow: 0 0 0 4px rgba(224, 64, 251, .25), 0 0 26px rgba(224, 64, 251, .75); }
