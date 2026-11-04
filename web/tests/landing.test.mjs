@@ -135,7 +135,7 @@ test("the replay opens on the check, then pins the three answer-key clashes", ()
   assert.ok(pinned.girder > 0.9, "the girder shows as the clash's element B");
 });
 
-test("each fix is tried, passes the check, then is kept and counted, in that order", () => {
+test("each fix is tried, passes the check, then is kept, in that order", () => {
   const T = timeline.T.duct;
   const trying = timeline.heroAt((T.lift[0] + T.lift[1]) / 2);
   assert.equal(trying.phase, "resolve");
@@ -146,7 +146,8 @@ test("each fix is tried, passes the check, then is kept and counted, in that ord
   assert.equal(timeline.heroAt(T.pass + 0.1).runs.duct.tone, "pass");
   const kept = timeline.heroAt(T.keep + 1);
   assert.equal(kept.phase, "apply");
-  assert.ok(kept.runs.duct.pin === "fixed" && kept.runs.duct.fixed === 1 && kept.exports === 1);
+  assert.ok(kept.runs.duct.pin === "fixed" && kept.runs.duct.fixed === 1);
+  assert.equal(kept.runs.tray.pin, "clash", "the next clash is still to come");
 });
 
 test("the tray's round: the whole lift fails on what it hits, then the round's offset passes", () => {
@@ -162,7 +163,6 @@ test("the tray's round: the whole lift fails on what it hits, then the round's o
 test("the replay ends on 3 of 3 at the recorded heights, and loops", () => {
   const end = timeline.heroAt(timeline.STILL);
   for (const k of ["duct", "tray", "cw"]) assert.equal(end.runs[k].pin, "fixed");
-  assert.equal(end.exports, 3);
   assert.equal(end.fade, 0, "the still frame is not dimmed");
   assert.match(timeline.logAt(timeline.STILL).at(-1).text, /3 of 3 .*\+400, \+250, \+280 mm/);
   assert.equal(timeline.heroAt(timeline.LOOP + 0.5).t, 0.5, "time wraps round the loop");

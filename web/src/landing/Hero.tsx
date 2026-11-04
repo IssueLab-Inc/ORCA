@@ -1,7 +1,7 @@
-import { ArrowDown, Check, Download, Pause, Play, Upload, X } from "lucide-react";
+import { ArrowDown, Check, Pause, Play, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { HeroScene, webglAvailable } from "./heroScene";
-import { CHAPTERS, LOOP, PHASES, STILL, chapterStill, heroAt, logAt, type HeroFrame, type LogLine, type Phase } from "./timeline";
+import { CHAPTERS, LOOP, STILL, chapterStill, heroAt, logAt, type HeroFrame, type LogLine } from "./timeline";
 import { RUNS } from "./northbank";
 import { mm } from "./check";
 
@@ -16,12 +16,12 @@ export interface HeroActions {
 /** The labels a frame shows, as a string that only changes when one does (so React redraws them rarely). */
 function labelState(f: HeroFrame): string {
   const pins = RUNS.map((r) => `${r.key}:${f.runs[r.key].pin}:${f.runs[r.key].clearance > 0.05 ? 1 : 0}`).join(",");
-  return `${pins}|focus:${f.focus}|hits:${f.hits > 0 ? 1 : 0}|girder:${f.t < 4.4 || f.finale > 0 ? 1 : 0}|exp:${f.exports}`;
+  return `${pins}|focus:${f.focus}|hits:${f.hits > 0 ? 1 : 0}|girder:${f.t < 4.4 || f.finale > 0 ? 1 : 0}`;
 }
 
 /**
  * The landing's first screen: the promise and the way in on the left; on the right (behind, on a wide screen) the
- * live 3D replay of ORCA fixing Northbank's three girder clashes, with its phase, its log and chapter buttons. The
+ * live 3D replay of ORCA fixing Northbank's three girder clashes, with its log and chapter buttons. The
  * replay pauses off screen; people who ask for less motion get its last frame, and the chapters as stills. Without
  * WebGL it shows a recorded frame of the real app instead.
  */
@@ -34,9 +34,9 @@ export function Hero({ actions, reduce, resume }: { actions: HeroActions; reduce
   const [gl] = useState(() => typeof document !== "undefined" && webglAvailable());
   const [failed, setFailed] = useState(false);
   const [playing, setPlaying] = useState(!reduce);
-  const [frame, setFrame] = useState<{ phase: Phase; chapter: number; log: LogLine[]; labels: string; f: HeroFrame }>(() => {
+  const [frame, setFrame] = useState<{ chapter: number; log: LogLine[]; labels: string; f: HeroFrame }>(() => {
     const f = heroAt(reduce ? STILL : 0);
-    return { phase: f.phase, chapter: f.chapter, log: logAt(f.t), labels: labelState(f), f };
+    return { chapter: f.chapter, log: logAt(f.t), labels: labelState(f), f };
   });
   const ctl = useRef({ t: reduce ? STILL : 0, drift: 0, playing: !reduce, visible: true, kick: () => {}, scene: null as HeroScene | null });
 
@@ -77,8 +77,8 @@ export function Hero({ actions, reduce, resume }: { actions: HeroActions; reduce
       scene.render(f, dt, c.drift);
       holder.style.opacity = String(1 - f.fade);
       place(f);
-      const sig = `${f.phase}|${f.chapter}|${logAt(f.t).length}:${logAt(f.t).at(-1)?.at}|${labelState(f)}`;
-      if (sig !== shown) { shown = sig; setFrame({ phase: f.phase, chapter: f.chapter, log: logAt(f.t), labels: labelState(f), f }); }
+      const sig = `${f.chapter}|${logAt(f.t).length}:${logAt(f.t).at(-1)?.at}|${labelState(f)}`;
+      if (sig !== shown) { shown = sig; setFrame({ chapter: f.chapter, log: logAt(f.t), labels: labelState(f), f }); }
       if (bar.current) {
         const ch = CHAPTERS[f.chapter], next = CHAPTERS[f.chapter + 1]?.at ?? LOOP;
         bar.current.style.setProperty("--p", String(Math.min(1, (f.t - ch.at) / (next - ch.at))));
@@ -192,13 +192,6 @@ export function Hero({ actions, reduce, resume }: { actions: HeroActions; reduce
         </div>
 
         <div className="lp-hud" aria-hidden={!live}>
-          {live && <div className="lp-hud-top">
-              <ol className="lp-phases" aria-label="Observe, Resolve, Check, Apply">
-                {PHASES.map((p) => <li key={p.id} className={frame.phase === p.id ? "on" : ""}><b>{p.word[0]}</b>{p.word.slice(1)}</li>)}
-              </ol>
-              <span className={`lp-export${f.exports ? " on" : ""}`}><Download size={13} aria-hidden /> Export IFC
-                {f.exports > 0 && <em key={f.exports}><Check size={10} strokeWidth={3} aria-hidden />{f.exports}</em>}</span>
-          </div>}
           <div className="lp-hud-window" ref={win} aria-hidden />
           {live && <>
             <ol className="lp-log" aria-live="off">
