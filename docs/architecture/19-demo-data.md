@@ -336,8 +336,15 @@ from numbers read out of the sample models with IfcOpenShell (Nov 4), kept in `w
 600x300, the cable tray 300x100, the cold water main DN54) and their neighbours (the return air main and the hot water
 main, each already through an opening of its own; the secondary beams, the Level 03 slab, the ceiling and its lights,
 the supply branches and the return spigots). The fixes it shows are the recorded ones (README, "See it work": +400,
-+250, +280 mm, clear by 50, 50 and 53 mm). `landing.test.mjs` checks that each run clears its own opening by the
-recorded amount and that the check gives 50 mm at +400 mm. If the models change, read the numbers again.
++250, +280 mm, clear by 50, 50 and 53 mm). What Muse Spark is told about #1's opening (`agent.py` from
+`edits.passages`: from z 7.380 to 7.780 m, a rise of +0.375 to +0.425 m clears it by 25 mm) is the band the hands-on
+check finds. The tray's round is the recorded root-cause plan's (`web/public/tour/girder-plan.json`, Oct 27: "Lift full
+tray run 250mm" failed, "Offset tray up 250mm through web opening" passed). Run through `verify.check` on Structure,
+MEP and Architecture (Nov 4): the whole tray lifted 250 mm hits a return spigot D250 (-249 mm) and Core wall E - Level 02
+(-200 mm), 57 elements checked; the whole cold water main lifted 280 mm hits a volume control damper (-200 mm); the whole
+duct lifted 400 mm passes with 50 mm (29 elements). `landing.test.mjs` checks that each run clears its own opening by
+the recorded amount, that the check gives 50 mm at +400 mm and the band Muse Spark is told. If the models change, read
+the numbers again.
 
 ## Proposal clips (`docs/media/proposals/`)
 

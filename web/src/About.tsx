@@ -1,6 +1,7 @@
 import {
-  Activity, ArrowRight, Bot, Check, ClipboardCheck, Compass, Cpu, FileSpreadsheet, FileText, FolderOpen, Image, Layers,
-  ListFilter, Mic, PenTool, Play, RotateCcw, ShieldCheck, Smartphone, Sparkles, Target, TriangleAlert, Upload, Users, Wand2,
+  Activity, ArrowRight, Bot, Check, ClipboardCheck, Compass, Cpu, FileSpreadsheet, FileText, Filter, FolderOpen, GitCompare,
+  History, Image, Info, Layers, LayoutPanelLeft, Link2, ListFilter, Mic, PenTool, Play, Repeat, RotateCcw, ShieldCheck,
+  Smartphone, Sparkles, SquarePlus, Target, TriangleAlert, Upload, Users, Wand2, Waypoints,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Wordmark } from "./Brand";
@@ -113,7 +114,7 @@ export function About({ start, onAbout, triageOpen = false }: {
         </div>
         <div className="lp-wrap lp-facts lp-reveal">
           <Fact value={464} reduce={reduce} label="clashes in about 4 s" note="One check of Northbank's three building models: every pair, and each against itself." />
-          <Fact value={1732} reduce={reduce} label="elements checked" note="Structure, services and architecture, with what meets on purpose left out (a door in its wall)." />
+          <Fact value={1732} reduce={reduce} label="elements checked" note="Structure, services and architecture; what is joined on purpose, like a door in its wall, is left out." />
           <Fact value={3} reduce={reduce} label="planted on one girder" note="The answer key ORCA is measured on: a duct, a cable tray and a water main through the Level 02 girder." />
         </div>
       </section>
@@ -167,6 +168,7 @@ export function About({ start, onAbout, triageOpen = false }: {
               <li><ShieldCheck size={18} aria-hidden /><span><b>Clearance is kept</b>25 mm, or what your requirements ask</span></li>
               <li><Layers size={18} aria-hidden /><span><b>Nothing new is hit</b>every open model, every new piece</span></li>
               <li><Check size={18} aria-hidden /><span><b>Support is kept</b>what it stands on stays under it</span></li>
+              <li><Link2 size={18} aria-hidden /><span><b>Joints are kept</b>what it is joined to comes with it, or it is refused</span></li>
             </ul>
           </div>
         </div>
@@ -239,15 +241,15 @@ export function About({ start, onAbout, triageOpen = false }: {
               take an opening.
             </Tile>
             <Tile icon={<Layers size={16} />} title="Plans, sections, elevations" art={<ViewsArt />}>
-              Up to four drawing views beside the 3D, measuring in every view with snapping, filters by any property.
+              Beside the 3D view, up to four views at once; measuring in every view with snapping.
             </Tile>
             <Tile cls="w2 dark" icon={<Bot size={16} />} title="Bring your own agent" art={<McpArt />}>
               ORCA is an MCP server too. A pairing link lets Muse Code or any MCP client open models, check its own ideas,
               propose and apply fixes through the same geometry check, while your page follows along.
             </Tile>
             <Tile icon={<PenTool size={16} />} title="Edit by hand, checked" art={<EditArt />}>
-              Push or pull a face, align, move, cut a void, split, clip, delete: each checked before Keep. One log for
-              fixes and hand edits.
+              Push or pull a face, align, move, cut a void, split, clip, delete: each checked before Keep, or asked of Muse
+              in words. One log of every edit, with undo, carried into the report, BCF and IFC.
             </Tile>
             <Tile icon={<Image size={16} />} title="Show it built" art={<BuiltArt />}>
               For people who don't read drawings: a verified fix painted as a picture of what will be built.
@@ -262,6 +264,21 @@ export function About({ start, onAbout, triageOpen = false }: {
             <Tile icon={<FileSpreadsheet size={16} />} title="Already ran Navisworks?">
               Import its clash report, pictures and all, then triage and fix those clashes instead.
             </Tile>
+          </div>
+          <div className="lp-also lp-reveal">
+            <p className="lp-kicker">And the rest of the toolkit</p>
+            <ul>
+              <Also icon={<Waypoints size={16} />} title="Explore a wider fix">Up to three complete arrangements of coordinated edits round a clash, each with its evidence and the reviews it needs before it can be accepted.</Also>
+              <Also icon={<Repeat size={16} />} title="Patterns">The same clash many times over, read once: by design (with the rule to add), a modelling error for its author, or a real problem to fix together.</Also>
+              <Also icon={<GitCompare size={16} />} title="Kept checks">Each check's latest run side by side in one list, one #N per clash; run again to see what was resolved and what is new.</Also>
+              <Also icon={<Filter size={16} />} title="Filters, and checks on them">Colour, hide or isolate by any property in every view, from the panel, chat, voice or an agent; then check a filter against everything, itself or another.</Also>
+              <Also icon={<Info size={16} />} title="Properties">Everything the model says about an element, with breadcrumbs to its storey, building and site, and a filter from any value.</Also>
+              <Also icon={<Link2 size={16} />} title="Joints">A move takes its fittings along and stretches what it runs along, or is refused; hold Alt to see what an element is joined to.</Also>
+              <Also icon={<SquarePlus size={16} />} title="Add or take out a model">Without opening again: a new model is checked at once and the numbering carries on; kept fixes stay.</Also>
+              <Also icon={<LayoutPanelLeft size={16} />} title="Panels your way">On a desktop, panels dock, collapse, float or open in a window of their own.</Also>
+              <Also icon={<Compass size={16} />} title="Guided tours">Both demos, told on the real app, with a recorded run standing in when a live one is slow.</Also>
+              <Also icon={<History size={16} />} title="Pick up where you left off">This browser's session reopens with its models, clashes, fixes and agent link.</Also>
+            </ul>
           </div>
         </div>
       </section>
@@ -351,7 +368,7 @@ export function About({ start, onAbout, triageOpen = false }: {
           <div className="lp-proof-more lp-reveal">
             <span><b>25 of 25</b> opening hosts judged right against an answer key</span>
             <span><b>150 MB</b> model through the page, opened in about 2 minutes</span>
-            <span><b>Every fix kind</b> verified on the demos' planted cases (resize on a test model)</span>
+            <span><b>Move, offset, trim, route and opening</b> verified on the demos' planted cases; resize on a test model</span>
           </div>
           <div className="lp-limits lp-reveal">
             <h3><TriangleAlert size={16} aria-hidden /> Said plainly: what it doesn't do yet</h3>
@@ -416,8 +433,8 @@ export function About({ start, onAbout, triageOpen = false }: {
           <div className="lp-foot-brand"><Wordmark height={22} /><span>by IssueLab · Observe. Resolve. Check. Apply.</span></div>
           <p>
             Northbank is a fictional three-storey office with its street and riverside, and PC-03 a fictional robot cell:
-            demo models built by IssueLab with planted problems that have a known answer. No real project data. Fixes are
-            limited to 20 per visitor an hour.
+            demo models built by IssueLab with planted problems that have a known answer. No real project data. On the live
+            demo, proposals are limited to 20 per visitor an hour.
           </p>
           <p className="lp-foot-links">
             {onAbout && <button type="button" onClick={onAbout}>About ORCA</button>}
@@ -443,14 +460,14 @@ const LOOP_STEPS: LoopStep[] = [
     points: [
       <><b>One to three fixes</b> that edit the real elements: new pieces, bends and fittings, ports joined back up.</>,
       <><b>Seven kinds of fix,</b> and fixes that combine them, within your coordination requirements.</>,
-      <><b>Its reasoning streams</b> as it thinks. A clash it can't fix gets a second, longer try on Muse Wonder.</>,
+      <><b>Its reasoning streams</b> as it thinks. When nothing passes, a second, longer try on Muse Wonder is a click away.</>,
     ],
     clip: { src: "/demos/understand", tall: true, caption: "Muse Spark on #1, sped up: the three pictures, its reasoning as it thinks, what it understood.",
       alt: "The Clash panel for Northbank's #1 while Muse Spark works, sped up: the three pictures of the duct through the girder, then its reasoning as it thinks, then its understanding: the duct crosses the 1000 deep girder with 300 mm overlap, cannot shift as a whole without pulling apart its tees, and the girder has an opening on this line it can use." } },
   { letter: "C", word: "Check", title: "Nothing reaches you unproven.",
     points: [
       <><b>Each idea is tried on the model,</b> checked against every open model, then undone.</>,
-      <><b>Four tests:</b> the clash is gone, there is clearance, nothing new is hit, and what it stands on still holds it.</>,
+      <><b>The tests:</b> the clash is gone, there is clearance, nothing new is hit, what it stands on still holds it, and every joint stays joined.</>,
       <><b>A failed idea goes back</b> to Muse Spark with why and what it hit. Workings draws every round as it happens.</>,
     ],
     clip: { src: "/demos/workings", caption: "Workings of the same run: your request, Muse Spark's ideas, ORCA's checks, the rank.",
@@ -459,7 +476,7 @@ const LOOP_STEPS: LoopStep[] = [
     points: [
       <><b>Before, After or Both</b> in 3D, beside plans, sections and elevations.</>,
       <><b>Accept, and the server checks again</b> before it keeps the fix: it never trusts the page. The model is patched in place, with undo and redo.</>,
-      <><b>Hand it back:</b> the edited IFC or STEP, a PDF report per team, and BCF issues.</>,
+      <><b>Hand it back:</b> the edited IFC or STEP, a PDF report (one per team if you like), and BCF issues.</>,
     ],
     clip: { src: "/demos/keep", caption: "Accept: the server tries the fix again, edits the model and checks it.",
       alt: "Northbank's #1 after the fix, Before and After: overlap -300 mm, then clear by 50 mm. Accept is pressed: Applying the fix, then Fix kept in the model, checked again, and Export IFC counts one edit to download." } },
@@ -520,6 +537,10 @@ function Model({ name, role, icon, tone, children }: { name: string; role: strin
       <p>{children}</p>
     </article>
   );
+}
+
+function Also({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return <li><span className="lp-also-icon" aria-hidden>{icon}</span><span><b>{title}</b>{children}</span></li>;
 }
 
 function Who({ title, children }: { title: string; children: ReactNode }) {

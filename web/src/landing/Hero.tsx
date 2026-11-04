@@ -217,17 +217,17 @@ export function Hero({ actions, reduce, resume }: { actions: HeroActions; reduce
                     {c.label}{frame.chapter === i && playing && <i aria-hidden />}</button>
                 ))}
               </div>
-              <p className="lp-hud-note">Replay, sped up, drawn from Northbank's own geometry. Drag to look round.</p>
+              <p className="lp-hud-note">ORCA's recorded runs on Northbank, retold in 3D on its own geometry, sped up. Drag to look round.</p>
             </div>
           </>}
         </div>
       </div>
       <p className="lp-sr">
-        A replay of ORCA on Northbank, a demo office building: the check finds 464 clashes in 1,732 elements; three real
+        ORCA's recorded runs on Northbank, a demo office building, retold: the check finds 464 clashes in 1,732 elements; three real
         ones are on one Level 02 transfer girder. Muse Spark proposes raising the supply air duct 400 mm through the
-        girder's web opening; the geometry check finds it clear by 50 mm all round, and it is kept. Moving the whole
-        cable tray fails on the return air spigots, so the stretch at the girder is offset 250 mm instead; the cold water
-        main is offset 280 mm. All three land at the designer's own heights.
+        girder's web opening; the geometry check finds it clear by 50 mm all round, and it is kept. For the cable tray,
+        lifting the whole run fails on the return air spigots and a core wall along it, and offsetting only the stretch
+        at the girder 250 mm passes; the cold water main is offset 280 mm. All three land at the designer's own heights.
       </p>
     </section>
   );

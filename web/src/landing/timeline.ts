@@ -2,7 +2,11 @@
  * The hero's replay of ORCA's loop on Northbank's answer key, as a pure function of time: what is lit, lifted, kept
  * and said at second t. heroScene.ts draws a frame from it and Hero.tsx writes its log and labels, so the picture and
  * the words cannot drift apart, and a test can read any moment. It is a demonstration, sped up (CLAUDE.md: the phase
- * cycle is demonstration material, never live status), told with the recorded runs' numbers (README, "See it work").
+ * cycle is demonstration material, never live status), told from ORCA's own records: the fixes and numbers of the
+ * recorded proposals (README, "See it work"), what Muse Spark is told about the opening (agent.py, from
+ * edits.passages: +0.375 to +0.425 m clears it by 25 mm), and the tray's round as the recorded root-cause plan has it
+ * (web/public/tour/girder-plan.json: "Lift full tray run 250mm" failed, "Offset tray up 250mm through web opening"
+ * passed), the whole lift's hits being those ORCA's check reports (the return-air spigots, the core wall; Nov 4).
  */
 
 export type Phase = "observe" | "resolve" | "check" | "apply";
@@ -15,7 +19,7 @@ export const PHASES: { id: Phase; word: string }[] = [
 /** One loop of the replay, in seconds. */
 export const LOOP = 36;
 
-/** When each run's story happens. The tray's first idea (the whole run moved) fails before its offset passes. */
+/** When each run's story happens. The tray's round has two ideas: the whole run lifted (it fails) and the offset. */
 export const T = {
   duct: { start: 4.6, read: 5.3, idea: 6.6, lift: [6.8, 8.2], check: 8.4, pass: 10.2, clear: 9.8, keep: 11.0, end: 14.4 },
   tray: { start: 14.4, wholeIdea: 15.0, wholeLift: [15.2, 16.2], wholeCheck: 16.4, fail: 17.1, back: 17.8, wholeGone: [18.6, 19.0],
@@ -44,7 +48,7 @@ export const LOG: LogLine[] = [
   { at: 2.5, phase: "observe", tone: "info", text: "464 clashes in 1,732 elements, in about 4 s" },
   { at: 3.3, phase: "observe", tone: "info", text: "Triage: #1, #2 and #3 are real, all on one girder" },
   { at: T.duct.start, phase: "observe", tone: "info", text: "#1 Supply air main 600×300 into the girder: −300 mm" },
-  { at: T.duct.read, phase: "observe", tone: "ai", text: "Muse Spark reads pictures A, B, C and the model: an opening in the web on this line, 700 × 400" },
+  { at: T.duct.read, phase: "observe", tone: "ai", text: "Muse Spark reads pictures A, B, C and the model: an opening in the web on this line, cleared by a rise of +375 to +425 mm" },
   { at: T.duct.idea, phase: "resolve", tone: "ai", text: "Idea: offset 1.40 m of the duct up 400 mm, with bends" },
   { at: T.duct.check, phase: "check", tone: "info", text: "Trying it in the model, checking every open model" },
   { at: 9.4, phase: "check", tone: "ok", text: "✓ Clash gone" },
@@ -52,11 +56,11 @@ export const LOG: LogLine[] = [
   { at: T.duct.pass, phase: "check", tone: "ok", text: "✓ Nothing new hit, checked against 21 elements" },
   { at: T.duct.keep, phase: "apply", tone: "ok", text: "Accepted: checked again on the server, kept in the model" },
   { at: T.tray.start, phase: "observe", tone: "info", text: "#2 Cable tray 300×100 into the girder: −100 mm" },
-  { at: T.tray.wholeIdea, phase: "resolve", tone: "ai", text: "Idea: move the whole tray up 250 mm" },
-  { at: T.tray.wholeCheck, phase: "check", tone: "info", text: "Trying it in the model" },
-  { at: T.tray.fail, phase: "check", tone: "fail", text: "✗ It hits the return-air spigots along its run" },
-  { at: T.tray.back, phase: "resolve", tone: "info", text: "Sent back to Muse Spark with what it hit, and why" },
-  { at: T.tray.idea, phase: "resolve", tone: "ai", text: "Idea 2: offset only the stretch at the girder, up 250 mm" },
+  { at: T.tray.wholeIdea, phase: "resolve", tone: "ai", text: "Muse Spark's round: lift the whole tray 250 mm, or offset only the stretch at the girder" },
+  { at: T.tray.wholeCheck, phase: "check", tone: "info", text: "Trying the whole lift in the model" },
+  { at: T.tray.fail, phase: "check", tone: "fail", text: "✗ It hits the return-air spigots, and a core wall further along" },
+  { at: T.tray.back, phase: "check", tone: "info", text: "The failed idea stays on record, with what it hit" },
+  { at: T.tray.idea, phase: "resolve", tone: "ai", text: "The round's other idea: offset only the stretch at the girder, up 250 mm" },
   { at: T.tray.check, phase: "check", tone: "info", text: "Trying it in the model" },
   { at: T.tray.pass, phase: "check", tone: "ok", text: "✓ Clash gone · 50 mm clear · nothing new hit (5 elements)" },
   { at: T.tray.keep, phase: "apply", tone: "ok", text: "Accepted and kept" },

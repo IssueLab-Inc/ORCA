@@ -47,14 +47,16 @@ The landing page (`About`, with `web/src/landing/`; Nov 4) shows ORCA working be
 written for people who have never heard of BIM. Its first screen is the hook, "Fixes, not just findings. Every fix
 proven before you see it.", the one-liner for the design coordinator and the ways in, beside a live 3D replay (sped up)
 of ORCA fixing Northbank's three girder clashes, drawn from the models' own geometry: the check finds them, Muse
-Spark's idea grows out of each run in amber, the check turns it teal or shows what it hit in magenta (the tray's whole
-move fails on the return-air spigots), it is kept, and Export counts it, with the phase (Observe, Resolve, Check,
+Spark's idea grows out of each run in amber, the check turns it teal or shows what it hit in magenta (for the tray, the
+recorded round's whole lift fails on the return-air spigots and a core wall, as ORCA's check reports, and its offset
+passes), it is kept, and Export counts it, with the phase (Observe, Resolve, Check,
 Apply), a log of the recorded numbers, chapters and pause; it pauses off screen and stands still for less motion. Then:
 the problem (the teams' models coming together until their clashes light; the rework figure with its source), the
 loop as tabs beside one frame playing each step's recorded run, **Try the check yourself** (raise #1's duct by hand
 and see what the check says: through the web opening at +400 mm it passes with 50 mm all round, as recorded, and it
-can ask for 25 mm or 50 mm), the kinds of fix, "The model proposes. Geometry decides." with the five models, everything
-around the fix, the two demos, who it is for, what is proven and what is not yet, words and the viewer's colours, and
+can ask for 25 mm or 50 mm), the kinds of fix and what "verified" means (joints kept among it), "The model proposes.
+Geometry decides." with the five models, everything around the fix and the rest of the toolkit (a wider fix, patterns,
+kept checks, filters and checks on them, properties, joints, adding a model, panels, tours, resume), the two demos, who it is for, what is proven and what is not yet, words and the viewer's colours, and
 the close. **About ORCA** (`AboutOrca`) tells the longer story in six tabs, for anyone who wants more, judges included.
 
 **The hackathon framing.** ORCA was built for the Meta Global AI Developer Hackathon (Startup track, Oct 27 - Nov 4,

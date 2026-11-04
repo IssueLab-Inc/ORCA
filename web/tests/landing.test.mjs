@@ -149,7 +149,7 @@ test("each fix is tried, passes the check, then is kept and counted, in that ord
   assert.ok(kept.runs.duct.pin === "fixed" && kept.runs.duct.fixed === 1 && kept.exports === 1);
 });
 
-test("the tray's whole move fails on what it hits before its offset passes", () => {
+test("the tray's round: the whole lift fails on what it hits, then the round's offset passes", () => {
   const T = timeline.T.tray;
   const fail = timeline.heroAt(T.fail + 0.3);
   assert.ok(fail.whole.opacity > 0.9 && fail.whole.fail > 0.9 && fail.hits > 0, "the whole move shows what it hit");
@@ -180,9 +180,19 @@ test("each chapter's still shows that chapter's kept fix", () => {
 
 test("the log's numbers are the recorded ones", () => {
   const text = timeline.LOG.map((l) => l.text).join("\n");
-  for (const n of ["464 clashes in 1,732 elements", "−300 mm", "−100 mm", "−77 mm", "700 × 400", "50 mm clear all round",
+  for (const n of ["464 clashes in 1,732 elements", "−300 mm", "−100 mm", "−77 mm", "+375 to +425 mm", "50 mm clear all round",
     "21 elements", "(5 elements)", "53 mm clear", "(15 elements)"]) assert.ok(text.includes(n), n);
   const runs = Object.fromEntries(scene.RUNS.map((r) => [r.key, r]));
   assert.deepEqual([runs.duct.fix.dz, runs.tray.fix.dz, runs.cw.fix.dz], [0.4, 0.25, 0.28]);
   assert.deepEqual([runs.duct.checked, runs.tray.checked, runs.cw.checked], [21, 5, 15]);
+});
+
+test("the band that clears the opening is the one ORCA tells Muse Spark: +375 to +425 mm at 25 mm", () => {
+  // agent.py, from edits.passages: bottom + half the duct's depth + the clearance, top - the same, less the run's height
+  const open = scene.GIRDER.openings.find((o) => o.y[0] < -2.45 && o.y[1] > -2.45 && o.z[0] > 7.3);
+  const duct = scene.RUNS[0], half = 0.15 + 0.025;
+  assert.ok(near(open.z[0] + half - duct.z, 0.375, 1e-9) && near(open.z[1] - half - duct.z, 0.425, 1e-9));
+  const [band] = check.passingBands(0.025);
+  assert.ok(near(band[0], 0.375) && near(band[1], 0.425), "the hands-on check agrees");
+  assert.ok(timeline.LOG.some((l) => l.text.includes("+375 to +425 mm")), "and the replay says so");
 });

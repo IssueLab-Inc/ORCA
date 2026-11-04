@@ -22,7 +22,7 @@
 [![FastAPI and IfcOpenShell](https://img.shields.io/badge/FastAPI-IfcOpenShell_0.9-009688?style=for-the-badge&logo=fastapi&logoColor=white&labelColor=555555)](docs/architecture/04-server-code-map.md)
 [![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=555555)](server/pyproject.toml)
 [![Server tests](https://img.shields.io/badge/pytest-934_Passing-2EA44F?style=for-the-badge&logo=pytest&logoColor=white&labelColor=555555)](#tests)
-[![Web tests](https://img.shields.io/badge/Web_Tests-312_Passing-2EA44F?style=for-the-badge&logo=nodedotjs&logoColor=white&labelColor=555555)](#tests)
+[![Web tests](https://img.shields.io/badge/Web_Tests-313_Passing-2EA44F?style=for-the-badge&logo=nodedotjs&logoColor=white&labelColor=555555)](#tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-D4A72C?style=for-the-badge&labelColor=555555)](LICENSE)
 
 **[Open the live demo](https://dodzikojo--orca-web.us-east.modal.run)** · [See it work](#see-it-work) ·
@@ -688,7 +688,7 @@ npm.cmd test --prefix web
 
 On macOS/Linux, use `npm` in place of `npm.cmd`.
 
-Last run (Nov 4): 934 server tests and 312 web tests passing, and the web build clean. The badges at the top
+Last run (Nov 4): 934 server tests and 313 web tests passing, and the web build clean. The badges at the top
 carry those counts: change them only from a new run.
 
 The unit tests use synthetic models and scripted AI responses; they need no API keys or private demo files.
