@@ -254,12 +254,13 @@ Generate a small synthetic model in a third terminal, starting in `ORCA/`:
 uv run --directory server --locked python -m sightline.fixtures ../samples/fixture-clash.ifc
 ```
 
-1. Refresh the page. In **Models**, select only `fixture-clash.ifc` and choose **Open 1 model**
-   (on a small screen, **Models** is inside **Menu**).
-2. Double-click **Supply duct 400x300** as element A, then **UB 406x178 beam** as element B.
+1. Refresh the page and open **Menu** (the ☰ button, top right). Under **Models**, the four Northbank files are
+   ticked already: untick them, tick only `fixture-clash.ifc`, and choose **Open 1 model**.
+2. Choose **Check 3 elements** in the left panel, then pick clash **#1** (the beam and the duct) in the list.
+   Or double-click **Supply duct 400x300** as element A, then **UB 406x178 beam** as element B.
 3. Expand **Try a move yourself**, enter **-0.80** in **Move A vertically (m)**, and choose **Check this move**.
-4. Expect **Clear**. A **-0.40** move clears the beam but hits the pipe. These checks preview moves; they do not
-   change the saved source file.
+4. Expect **Clear · nearest +50 mm**. A **-0.40** move clears the beam but hits the pipe. These checks preview moves;
+   they do not change the saved source file.
 
 ### Demo models for local use
 
@@ -289,8 +290,9 @@ already sets the API URL, model and reasoning effort. Write values **without quo
 
 The open-weights host is optional; leave its key empty for the simplest setup. Owner settings are optional too.
 Live AI calls need provider access and may incur charges; local proposal/chat caps are off unless configured.
-**Before submission: add the verified Meta API access/key-creation link and any contributor-access requirements.**
-Until then, the hosted demo is the way to evaluate the AI flow without arranging your own credentials.
+The key must come from Meta and have access to the models named in `.env` (`META_MODEL`); this README does not
+yet link to where to request one. Without such a key, use the [hosted demo](https://dodzikojo--orca-web.us-east.modal.run)
+to try proposals, chat and triage; everything else in this guide works locally without a key.
 All settings are documented in [the configuration reference](docs/architecture/15-requirements-settings-and-config.md).
 
 ### PDF system libraries
@@ -353,9 +355,12 @@ your working files; `git log --oneline HEAD..origin/main` shows commits not in y
 | Open models vanish ("Open them again") and the Python terminal shows `WatchFiles detected changes in '.venv\...'` | The server was started without `--reload-dir sightline`, so a package install restarted it. Restart it with the command above |
 | MCP client cannot connect through port 5173 | Use `http://127.0.0.1:8000/mcp` with the app's pairing token; Vite proxies `/api`, not `/mcp` |
 
-The owner confirmed Windows startup on Oct 31 after installing uv/Node.js and using `npm.cmd`. **Still to verify
-before submission:** complete clean installations on Windows, macOS and Ubuntu, including a browser geometry check,
-a live AI proposal and PDF export.
+**Where these steps have been tried:**
+- **Windows:** the owner confirmed startup on Oct 31, after installing uv and Node.js and using `npm.cmd`.
+- **Linux:** a fresh clone on Nov 5 (Node 22, uv) went through steps 1–4 as written: both servers, `/api/samples`,
+  and the browser check (**-0.80** Clear, **-0.40** hits the pipe). The server tests (934), web build and web tests
+  (314) also passed, and WeasyPrint found Pango.
+- **Not yet tried from a clean install:** macOS, and a live AI proposal and PDF export on any platform.
 
 ## Two demos
 
