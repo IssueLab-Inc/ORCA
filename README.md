@@ -290,9 +290,8 @@ already sets the API URL, model and reasoning effort. Write values **without quo
 
 The open-weights host is optional; leave its key empty for the simplest setup. Owner settings are optional too.
 Live AI calls need provider access and may incur charges; local proposal/chat caps are off unless configured.
-The key must come from Meta and have access to the models named in `.env` (`META_MODEL`); this README does not
-yet link to where to request one. Without such a key, use the [hosted demo](https://dodzikojo--orca-web.us-east.modal.run)
-to try proposals, chat and triage; everything else in this guide works locally without a key.
+Use your own Meta API key with access to the models named in `.env` (`META_MODEL`). Everything else in this guide
+works locally without a key.
 All settings are documented in [the configuration reference](docs/architecture/15-requirements-settings-and-config.md).
 
 ### PDF system libraries
