@@ -113,6 +113,7 @@ carries the decision today.
 | Nov 4 (feedback) | The hero's phase row (Observe, Resolve, Check, Apply) and its Export count go: "it gives the impression its clickable when its not", and the hero is cleaner without them. The log's tags carry each step | `landing/Hero.tsx`, `landing/landing.css`; [12](12-web-app.md) |
 | Nov 4 (feedback) | "The navisworks card has nothing in there": it gets a picture (a Navisworks report coming in, pictures and all, each clash given its #N and a verdict). And the formats' own logos go "at the relevant locations" (IFC, BCF, Navisworks and MCP as supplied; STEP and PDF drawn for ORCA): a strip under the hero, the hand-off tile, the agent tile, the glossary, with whose they are in the footer | `landing/Bento.tsx`, `landing/logos.ts`, `web/public/logos/`; [12](12-web-app.md), [docs/brand-assets.md](../brand-assets.md) |
 | Nov 5 | User accounts, after the hackathon: sign-in with Microsoft, Google, GitHub or an email link, no passwords; run by ORCA itself with a standard library and its own database, no hosted identity service; accounts, the admin role, preferences that follow the person and allowances per person first, saved projects designed with them and built next; signing in optional, signed-in people getting larger allowances than visitors; work on `feature/` branches behind a switch that is off, nothing to `main` or the live demo without the owner's word (judging under way) | [docs/accounts.md](../accounts.md); nothing in code yet |
+| Nov 5 | ORCA moves to Hetzner after judging: the app, its database and saved projects' files in Germany (Falkenstein, backups in Helsinki), Postgres run by ORCA on its own server; the live demo stays on Modal until then. Sign-in links are sent by Amazon SES in Frankfurt | [docs/accounts.md](../accounts.md); `deploy/modal_app.py` unchanged until the move, which gets a design of its own |
 | Oct 31 | More model formats wait until after the freeze, and come in only as models ORCA checks (converted to IFC on the server, like STEP), never as a view-only viewer; glTF/GLB first | Nothing in code yet; "Later", below |
 | Oct 31 | Later work to explore, beyond the hackathon: connectors into design tools (Inventor, Revit and others) so a kept fix lands in the designer's own model, and site data (photos, video, scans) aligned to the coordination model with SAM 3.1 | Nothing in code yet; "Later: connectors into design tools" and "Later: site data aligned to the model", below |
 
@@ -325,6 +326,10 @@ From CLAUDE.md and [docs/mcp.md](../mcp.md):
 - **User accounts and saved projects:** designed in [docs/accounts.md](../accounts.md) (Nov 5): sign-in with
   Microsoft, Google, GitHub or an email link, admins in place of the owner token, preferences that follow the person
   and allowances per person first; then saved projects, so models, edits and links survive a restart.
+- **Move to Hetzner after judging** (owner decision, Nov 5): one server in Falkenstein running the same single process,
+  Postgres on a second, files in Hetzner Object Storage, backups in Helsinki. It lifts Modal's 10-minute request cap
+  and its edge's hold on streams, and gives big models more than 4 GB; ORCA then runs its own updates, backups,
+  monitoring and HTTPS. A design of its own first ([17](17-deployment-and-operations.md) is rewritten with it).
 - **OAuth on `/mcp`,** so clients sign in instead of pasting a token (Muse Code supports OAuth 2.1 with
   `muse mcp login`; claude.ai's custom connectors expect it).
 - **STEP machines placed inside building models.**

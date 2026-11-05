@@ -15,6 +15,16 @@ Owner decisions (Nov 5, after the hackathon, while judging is under way):
   person gets allowances of their own, larger than a visitor's, and keeps their settings.
 - **Branches are `feature/…`**, as `AGENTS.md` says; nothing goes to `main` without the owner's word.
 
+Later the same day:
+
+- **ORCA moves to Hetzner after judging**: the app, its database and saved projects' files, in Germany. Until then
+  the live demo stays on Modal as judged. The move gets a design of its own (`deploy/`, doc
+  [17](architecture/17-deployment-and-operations.md)).
+- **Amazon SES in Frankfurt (`eu-central-1`) sends the sign-in links.**
+- Left to the design ("your choice"): Postgres run by ORCA on its own Hetzner Cloud server rather than a managed
+  service (Hetzner sells none); everything in **Falkenstein** (`fsn1`), on Hetzner's private network; backups in
+  **Helsinki** (`hel1`), another country, so one site's trouble cannot take both.
+
 ## Today
 
 ORCA has no accounts ([16](architecture/16-security-caps-and-cost.md), "Who is asking"):
@@ -115,7 +125,9 @@ sequenceDiagram
   It is in the address's fragment, which browsers never send, because mail scanners open links to check them and
   would spend a token in a plain URL. The page reads the fragment, clears it, and posts the token to
   `POST /api/auth/email/verify`, which starts the session.
-- The email is sent by a mail service the owner picks (open question 1); its key is a secret like the others.
+- The email is sent by Amazon SES in Frankfurt, through its SMTP endpoint (`email-smtp.eu-central-1.amazonaws.com`),
+  so the server needs only Python's own `smtplib` and could change service without a code change. The sending domain
+  gets SPF, DKIM and DMARC records, and the AWS account leaves SES's sandbox before the public can sign in.
 
 ### Linking sign-ins
 
@@ -179,9 +191,11 @@ overwrite each other unseen (a stale `PUT` answers 409 and the page merges by ke
 
 - **A database** for users, their ways to sign in, sessions, email-link tokens, preferences and roles, through
   SQLAlchemy with Alembic migrations. Locally a SQLite file (`server/.sightline.db`, gitignored), so a fresh clone needs
-  nothing new; in tests a temporary one. On the deploy, a hosted Postgres (open question 2): a database file on a Modal
-  Volume does not suit a database (Volumes commit and reload rather than behave as a local disk; to confirm against
-  Modal's guidance), and the Dict is a key-value store, not a place for tables.
+  nothing new; in tests a temporary one. On Hetzner, Postgres on its own small Cloud server in Falkenstein, reached
+  over the private network only, never the internet: a crash of the app server (IfcOpenShell on a big model can take
+  gigabytes) cannot take the database with it. Continuous WAL archiving and a nightly base backup go to Object Storage
+  in Helsinki, and a restore is tried before accounts go on for the public. Until the move there is no production
+  database: accounts stay off on Modal.
 - `SIGHTLINE_DATABASE_URL` says where; unset, the local file.
 - Tables (slices 2 to 4): `users` (id, name, email, team, role, created, last seen, disabled), `identities`
   (provider, subject, user, email and whether it was proven), `sessions` (token hash, user, created, last used,
@@ -216,7 +230,8 @@ lock stay; `owner` is true for an admin too.
 | `SIGHTLINE_DATABASE_URL` | The database; unset, `server/.sightline.db` |
 | `SIGHTLINE_SESSION_SECRET` | Signs `orca_auth` (a secret) |
 | `SIGHTLINE_MICROSOFT_CLIENT_ID` / `_SECRET`, `SIGHTLINE_GOOGLE_CLIENT_ID` / `_SECRET`, `SIGHTLINE_GITHUB_CLIENT_ID` / `_SECRET` | Each provider's app registration (secrets); a provider without both is not offered |
-| The mail service's settings | For email links (secrets; names follow the service chosen) |
+| `SIGHTLINE_SMTP_HOST`, `SIGHTLINE_SMTP_USER`, `SIGHTLINE_SMTP_PASSWORD` | SES's SMTP endpoint and its SMTP credentials (the user and password are secrets) |
+| `SIGHTLINE_MAIL_FROM` | The address sign-in links come from, on ORCA's own domain |
 | `SIGHTLINE_ADMINS` | The first admins' verified addresses |
 | `SIGHTLINE_SIGNED_IN_FACTOR` | How many times a visitor's per-hour caps a signed-in person gets (3) |
 | `SIGHTLINE_SIGNUPS_PER_HOUR` | New accounts per address per hour |
@@ -234,7 +249,9 @@ ever" was written for the hackathon build. Before accounts are switched on for t
 - **Your data**: download and delete (the routes above), deleting at once rather than marking;
 - how long things are kept: sessions and email tokens go when they expire; an account with no sign-in for a set time,
   if the owner wants;
-- where the database is (its region), said in the notice.
+- where things are, said in the notice: the database and saved files in Germany (Hetzner, Falkenstein), backups in
+  Finland (Helsinki), sign-in emails through AWS in Frankfurt; and what goes to the AI models: models' data,
+  clash pictures and chat text to Meta's API, and to Baseten when the open-weights model is on.
 
 Nothing about accounts goes into the repo, the tests, the evals or the demos: tests make their own users.
 
@@ -250,8 +267,10 @@ Nothing about accounts goes into the repo, the tests, the evals or the demos: te
 What saving means, so the slices above leave room for it:
 
 - **A project** belongs to a person and holds its models: the files as opened, and the latest edited IFC or STEP
-  (`Workspace.export` writes those already). Files go to object storage (a Modal Volume or an S3-compatible bucket:
-  open question 4); the database keeps the rows.
+  (`Workspace.export` writes those already). Files go to Hetzner Object Storage in Falkenstein (S3-compatible), in a
+  private bucket only the server reads, copied to Helsinki; the database keeps the rows.
+- **How much each person keeps** (proposed, for the owner to confirm): 5 projects and 2 GB; a project untouched for
+  12 months is warned of by email and deleted 30 days later.
 - **With it:** each kept check's latest run, the ids and #N numbers, titles, triage readings and captured views
   (`checks.Register`; clash ids hash the test and the pair, so they hold across a reload), the edit log's entries as a
   record, and what the page keeps per project today: saved views, filters, sign-offs, the requirements, the fixes.
@@ -275,7 +294,7 @@ One PR each, on `feature/` branches, the switch off until the owner turns it on.
 2. **`feature/accounts-sign-in`.** The database and migrations; Microsoft, Google and GitHub sign-in; sessions;
    `/api/me`; sign out and sign out everywhere; the admin role; `SIGHTLINE_ACCOUNTS`. The page's sign-in dialog and
    account menu.
-3. **`feature/accounts-email`.** Email links, once the mail service is chosen.
+3. **`feature/accounts-email`.** Email links through SES (SMTP); a local run prints the link instead of sending it.
 4. **`feature/accounts-preferences`.** Preferences that follow the person, the profile's name and team on sign-offs,
    **Agent links**, **Your data**.
 5. **`feature/accounts-allowances`.** Caps per person, the factor for signed-in people, the sign-up cap, the refusal's
@@ -308,9 +327,17 @@ entry in [22](architecture/22-build-log.md).
 
 ## Open questions for the owner
 
-1. **Which mail service sends sign-in links** (and from which address)? Needed for slice 3 only.
-2. **Which hosted Postgres**, and in which region? Needed before accounts go on the deploy, not to build.
-3. **The personal-data rule** that replaces "No customer data, ever", and who writes the privacy notice and terms.
-   Needed before accounts go on for the public.
-4. **Where saved projects' files live**, and how much each person may keep. Needed for the saved projects spec.
-5. **Organisations and teams:** a project shared by a team, with roles. Later, unless the owner wants it sooner.
+Decided Nov 5: the mail service (SES, Frankfurt), the hosting (Hetzner after judging), the database (self-run
+Postgres in Falkenstein) and where files live (Hetzner Object Storage). Still open:
+
+1. **ORCA's own domain.** The providers' return addresses, the email links and SES's sending domain need it; the Modal
+   address goes with the move. Needed for slice 2's provider registrations on the deploy (local sign-in works without).
+2. **When judging ends**, which is when the move can start.
+3. **The personal-data rule** that replaces "No customer data, ever". Proposed: "No customer data in the repo, tests,
+   evals, logs or demos. Personal data and people's models only in the production database and storage, as the
+   privacy notice says." And the facts the privacy notice and terms need: the legal entity's name, registered address
+   and country, a privacy contact address, whether ORCA is for businesses only, and whether it is free or a beta. ORCA
+   drafts both; a lawyer reviews them before accounts go on for the public.
+4. **How much each person keeps:** the numbers proposed under "Saved projects".
+5. **Organisations and teams.** Proposed: later, but every saved project belongs to a workspace and every person gets
+   a personal one from the start, so a team is a shared workspace and nothing moves when teams come.

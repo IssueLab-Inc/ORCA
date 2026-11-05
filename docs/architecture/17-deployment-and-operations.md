@@ -12,7 +12,8 @@ ORCA's public demo runs on Modal as one container that serves the built web app 
 says exactly what `deploy/modal_app.py` builds and why, how to deploy and check a deploy, how to run ORCA locally, and
 how the running server behaves: what its streams need from Modal's edge, what a restart loses, and how memory and disk
 are kept in bounds. Env vars are listed in full in [15](15-requirements-settings-and-config.md); caps and budgets in
-[16](16-security-caps-and-cost.md).
+[16](16-security-caps-and-cost.md). **Planned:** ORCA moves to Hetzner after judging (owner decision, Nov 5;
+[20](20-decisions-limits-and-roadmap.md), [docs/accounts.md](../accounts.md)); until then this is the live deploy.
 
 ## Deployment topology
 
