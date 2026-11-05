@@ -242,7 +242,7 @@ Next, in order.
    Muse Image cannot design a fix (Oct 29: it redraws the geometry and invents numbers); it only restyles one.
 7. Freeze Nov 3, record video; submit Nov 4 before noon ET.
 
-Later (not in the hackathon build): user accounts and saved projects; STEP machines placed inside building models;
+Later (not in the hackathon build): user accounts and saved projects (designed Nov 5: `docs/accounts.md`); STEP machines placed inside building models;
 offsets and trims on meshed STEP parts; more model formats, glTF/GLB first, converted to IFC like STEP; connectors
 into design tools (Inventor, Revit and others); site data aligned to the coordination model with SAM 3.1 (all Oct 31,
 `docs/architecture/20-decisions-limits-and-roadmap.md`).

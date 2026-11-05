@@ -172,8 +172,8 @@ on the PC-03 cell:
 
 ## Later
 
-- **Accounts:** GitHub sign-in on top of links, so projects and links survive a restart. Today `owner.cookie_ok`
-  becomes "signed in as an allowed login".
+- **Accounts:** designed in [accounts.md](accounts.md) (Nov 5): sign-in with Microsoft, Google, GitHub or an email
+  link; a link made by a signed-in person is theirs, charged to their allowance and listed in their menu.
 - **Saved projects:** persistence on Modal.
 - **OAuth on `/mcp`:** so clients sign in instead of pasting a token. Muse Code already supports OAuth 2.1 for remote
   servers (`muse mcp login <server>`, with dynamic client registration), and claude.ai's custom connectors expect it.

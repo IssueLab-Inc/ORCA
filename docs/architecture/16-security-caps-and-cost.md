@@ -109,7 +109,9 @@ sequenceDiagram
   workers and model-call pools.
 - **The page** shows the gear only once unlocked, or on a page opened with `#owner` (`Owner.tsx`). The owner's own
   settings are kept in `localStorage` (`sightline.owner`); the token is not.
-- **Later:** GitHub sign-in would replace `cookie_ok` with "signed in as an allowed login"; the rest stays.
+- **Later:** accounts, designed in [docs/accounts.md](../accounts.md) (Nov 5): sign-in with Microsoft, Google, GitHub
+  or an email link, and admins as the owner (`owner.is_owner()` true for a signed-in admin); the token stays as a
+  way in for local runs. The rest of the gates stay.
 
 What the owner gets that visitors do not:
 

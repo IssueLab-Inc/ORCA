@@ -112,6 +112,7 @@ carries the decision today.
 | Nov 4 (request) | A new landing, to replace "the current hackathony feel" and "fully convey what ORCA is capable of end to end": it shows ORCA working before anything opens, a live 3D replay of the answer key drawn from the models' own geometry (the check, Muse Spark's idea, the geometry check, kept and exported, with the recorded numbers, labelled a replay and sped up), and a check to try by hand on #1 (simplified to the plane that decides it, and said so); then the problem, the loop, the kinds of fix, "The model proposes. Geometry decides.", everything around the fix, the demos, who it is for, what is proven and what is not. It keeps the Nov 2 decision: the loop is tabs beside one frame, one screen high. No hackathon wording on the page (About ORCA and the README carry it); its numbers are the measured ones | `About.tsx`, `web/src/landing/`; [01](01-product-and-journeys.md), [12](12-web-app.md), [19](19-demo-data.md) |
 | Nov 4 (feedback) | The hero's phase row (Observe, Resolve, Check, Apply) and its Export count go: "it gives the impression its clickable when its not", and the hero is cleaner without them. The log's tags carry each step | `landing/Hero.tsx`, `landing/landing.css`; [12](12-web-app.md) |
 | Nov 4 (feedback) | "The navisworks card has nothing in there": it gets a picture (a Navisworks report coming in, pictures and all, each clash given its #N and a verdict). And the formats' own logos go "at the relevant locations" (IFC, BCF, Navisworks and MCP as supplied; STEP and PDF drawn for ORCA): a strip under the hero, the hand-off tile, the agent tile, the glossary, with whose they are in the footer | `landing/Bento.tsx`, `landing/logos.ts`, `web/public/logos/`; [12](12-web-app.md), [docs/brand-assets.md](../brand-assets.md) |
+| Nov 5 | User accounts, after the hackathon: sign-in with Microsoft, Google, GitHub or an email link, no passwords; run by ORCA itself with a standard library and its own database, no hosted identity service; accounts, the admin role, preferences that follow the person and allowances per person first, saved projects designed with them and built next; signing in optional, signed-in people getting larger allowances than visitors; work on `feature/` branches behind a switch that is off, nothing to `main` or the live demo without the owner's word (judging under way) | [docs/accounts.md](../accounts.md); nothing in code yet |
 | Oct 31 | More model formats wait until after the freeze, and come in only as models ORCA checks (converted to IFC on the server, like STEP), never as a view-only viewer; glTF/GLB first | Nothing in code yet; "Later", below |
 | Oct 31 | Later work to explore, beyond the hackathon: connectors into design tools (Inventor, Revit and others) so a kept fix lands in the designer's own model, and site data (photos, video, scans) aligned to the coordination model with SAM 3.1 | Nothing in code yet; "Later: connectors into design tools" and "Later: site data aligned to the model", below |
 
@@ -321,8 +322,9 @@ Recorded after the final review of Show it built (Oct 30) and still true in the 
 
 From CLAUDE.md and [docs/mcp.md](../mcp.md):
 
-- **User accounts and saved projects:** GitHub sign-in on top of links, so projects and links survive a restart
-  (`owner.cookie_ok` then becomes "signed in as an allowed login"); persistence on Modal.
+- **User accounts and saved projects:** designed in [docs/accounts.md](../accounts.md) (Nov 5): sign-in with
+  Microsoft, Google, GitHub or an email link, admins in place of the owner token, preferences that follow the person
+  and allowances per person first; then saved projects, so models, edits and links survive a restart.
 - **OAuth on `/mcp`,** so clients sign in instead of pasting a token (Muse Code supports OAuth 2.1 with
   `muse mcp login`; claude.ai's custom connectors expect it).
 - **STEP machines placed inside building models.**

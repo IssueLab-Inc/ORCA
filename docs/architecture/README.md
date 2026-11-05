@@ -11,7 +11,7 @@ How this set relates to the other docs:
 
 - **`CLAUDE.md` and `AGENTS.md`** hold the rules, the traps and the current status. They point here for how things
   work.
-- **The feature designs in [`docs/`](../)** ([connections](../connections.md), [detection](../detection.md), [edits](../edits.md),
+- **The feature designs in [`docs/`](../)** ([accounts](../accounts.md), [connections](../connections.md), [detection](../detection.md), [edits](../edits.md),
   [escalation](../escalation.md), [filters](../filters.md), [mcp](../mcp.md), [measure](../measure.md), [mobile](../mobile.md), [panels](../panels.md), [requirements](../requirements.md),
   [show-it-built](../show-it-built.md), [step](../step.md), [uploads](../uploads.md), [views](../views.md), [voice](../voice.md),
   [workings](../workings.md)) hold
