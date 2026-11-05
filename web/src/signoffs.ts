@@ -1,13 +1,14 @@
 // Review sign-offs, kept in this browser (no login yet): clash id → each team's review. The PDF stays DRAFT until every
 // page has a review from every team involved, so a report must only ever see its own.
 import type { Report, Signoff } from "./api";
+import { FAMILIES, getJSON, removeItem, setItem } from "./prefs";
 
 export type Signoffs = Record<string, Signoff[]>;
 type Scoped = Pick<Report, "title" | "sources" | "origin">;
 
-const PREFIX = "sightline.signoffs:";
+const PREFIX = FAMILIES.signoffs.prefix;
 /** Until Oct 30 the key was the report's title, which every detection run shares ("Coordination · 4 models"). */
-const TITLE_KEYED = "sightline.signoffs.";
+const TITLE_KEYED = FAMILIES.signoffsByTitle.prefix;
 
 /** Which report a page is on, for keeping its sign-offs (and for starting its evidence afresh when that changes).
  * - A detection run: the models it checked. Its sign-offs are kept per clash (below), so this only says when the page
@@ -27,7 +28,7 @@ const perClash = (scope: string) => scope.startsWith("run:");
 const clashKey = (id: string) => `${PREFIX}clash:${id}`;
 
 function read(key: string): unknown {
-  try { return JSON.parse(localStorage.getItem(key) ?? "null"); } catch { return null; }
+  return getJSON(key);
 }
 const isMap = (v: unknown): v is Signoffs => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -51,18 +52,17 @@ export function loadSignoffs(scope: string | null, ids: string[]): Signoffs {
 /** Clashes with no review left are dropped, and an imported report's key when none has any. */
 export function saveSignoffs(scope: string | null, all: Signoffs) {
   if (!scope) return;
-  try {
-    if (perClash(scope)) {
-      for (const [id, l] of Object.entries(all)) {
-        if (l.length) localStorage.setItem(clashKey(id), JSON.stringify(l));
-        else localStorage.removeItem(clashKey(id));
-      }
-      return;
+  // A private window keeps nothing: prefs.ts never throws.
+  if (perClash(scope)) {
+    for (const [id, l] of Object.entries(all)) {
+      if (l.length) setItem(clashKey(id), JSON.stringify(l));
+      else removeItem(clashKey(id));
     }
-    const kept = Object.fromEntries(Object.entries(all).filter(([, l]) => l.length));
-    if (Object.keys(kept).length) localStorage.setItem(PREFIX + scope, JSON.stringify(kept));
-    else localStorage.removeItem(PREFIX + scope);
-  } catch { /* private window */ }
+    return;
+  }
+  const kept = Object.fromEntries(Object.entries(all).filter(([, l]) => l.length));
+  if (Object.keys(kept).length) setItem(PREFIX + scope, JSON.stringify(kept));
+  else removeItem(PREFIX + scope);
 }
 
 /** Sign-offs kept under the report's title before Oct 30 move to where they belong now: only the clashes this report
@@ -80,8 +80,6 @@ export function migrateTitleKeyed(report: Scoped & Pick<Report, "clashes"> | nul
   const now = loadSignoffs(scope, Object.keys(moving));
   saveSignoffs(scope, { ...loadSignoffs(scope, [...ids]), ...Object.fromEntries(Object.entries(moving).filter(([id]) => !now[id])) });
   const rest = Object.fromEntries(Object.entries(old).filter(([id]) => !(id in moving)));
-  try {
-    if (Object.keys(rest).length) localStorage.setItem(oldKey, JSON.stringify(rest));
-    else localStorage.removeItem(oldKey);
-  } catch { /* private window */ }
+  if (Object.keys(rest).length) setItem(oldKey, JSON.stringify(rest));
+  else removeItem(oldKey);
 }

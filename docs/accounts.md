@@ -1,6 +1,7 @@
 # User accounts, sign-in and preferences
 
-**Status:** design, not built. Owner decisions of Nov 5 below. The build goes on `feature/` branches, one PR per slice
+**Status:** design; slice 1 built (Nov 5, `feature/accounts-identity`: who is asking, and every browser key in
+one registry, with no change in behaviour). Owner decisions of Nov 5 below. The build goes on `feature/` branches, one PR per slice
 ("Slices", at the end), each behind a switch that is off until the owner turns it on, so `main` and the live demo
 stay as judged until the owner says otherwise.
 
@@ -290,7 +291,10 @@ One PR each, on `feature/` branches, the switch off until the owner turns it on.
 
 1. **`feature/accounts-identity`, no change in behaviour.** The middleware sets an identity; `who(request)` replaces
    the nine `client_id` calls; `web/src/prefs.ts` takes over every storage key (still the browser only). The existing
-   suites pass unchanged.
+   suites pass unchanged. **Built Nov 5:** `server/sightline/identity.py` (`Identity`, `who`), set by `_OwnerContext`
+   for HTTP and WebSocket and carried by `owner.spawn` / `submit`; `web/src/prefs.ts` with the registry (`KEYS`,
+   `REGISTRY`, `FAMILIES`) and the only storage calls in `web/src`; the web tests that compile a module using it map
+   `./prefs` as they map any dependency (no assertion changed).
 2. **`feature/accounts-sign-in`.** The database and migrations; Microsoft, Google and GitHub sign-in; sessions;
    `/api/me`; sign out and sign out everywhere; the admin role; `SIGHTLINE_ACCOUNTS`. The page's sign-in dialog and
    account menu.

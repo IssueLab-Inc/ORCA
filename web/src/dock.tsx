@@ -7,6 +7,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { Activity as Pulse, AppWindow, Box, Info, List, ListFilter, LocateFixed, MessageSquare, Network, PanelBottomClose, PanelBottomOpen,
   PanelLeftClose, PanelRight, PanelRightClose, PictureInPicture2, Undo2, X, type LucideIcon } from "lucide-react";
 import { LogIcon } from "./editIcons";
+import { storage } from "./prefs";
 import { EDGE_GROUP, EDGE_SIZE, PANELS, PANEL_IDS, PROPS_KEY, homeOf as defaultHome, readPropsHome, isPanel, readLayout, showSteps, titleOf, writeLayout,
   type Edge, type PanelId, type PropsHome, type SavedLayout, type Where } from "./dockLayout";
 
@@ -105,8 +106,6 @@ const TOUR_TAG: Partial<Record<PanelId, string>> = { plan: "tab-plan", chat: "ta
 const THEME: DockviewTheme = { name: "orca", className: "dockview-theme-orca", colorScheme: "light" };
 const SAVE_MS = 400;
 const RIGHT: PanelId[] = ["clash", "plan", "chat"];
-
-const storage = () => { try { return window.localStorage; } catch { return null; } };
 
 /** Properties lives where it was last put: floating (the default) or docked in the right side bar. */
 let propsHome: PropsHome = readPropsHome(storage());

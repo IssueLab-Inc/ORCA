@@ -1,6 +1,7 @@
 import { Bot, Check, Copy, Eye, EyeOff, LoaderCircle, Plug, Unplug, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AgentLink } from "./api";
+import { pref } from "./prefs";
 
 /** One thing the agent did, as the page shows it. */
 export interface AgentLogEntry { at: number; tool: string; text: string }
@@ -15,8 +16,8 @@ export function AgentDialog({ link, log, now, creating, error, canCreate, onCrea
 }) {
   const [tab, setTab] = useState<"muse-code" | "claude-code" | "claude-desktop" | "other" | "local">("muse-code");
   // The client settings are for the first time; after that only the token changes, so they fold away.
-  const [setupOpen, setSetupOpen] = useState(() => { try { return !localStorage.getItem(SETUP_KEY); } catch { return true; } });
-  useEffect(() => { if (link) { try { localStorage.setItem(SETUP_KEY, "1"); } catch { /* private window */ } } }, [link]);
+  const [setupOpen, setSetupOpen] = useState(() => !pref.get("agentSetup"));
+  useEffect(() => { if (link) pref.set("agentSetup", "1"); }, [link]);
   const snippets = link ? {
     "muse-code": JSON.stringify({ schema_version: 1, mcpServers: { orca: { transport: "streamable_http", url: link.mcp_url,
       headers: { Authorization: `Bearer ${link.token}` }, mode: "optional" } } }, null, 2),
@@ -112,8 +113,6 @@ function ExpiryChip({ link, now }: { link: AgentLink; now: number }) {
       · {s < 1800 ? "expiring soon: " : ""}{timeLeft(link, now)} left</span>
   );
 }
-
-const SETUP_KEY = "sightline.agent.setup";
 
 /** One value to copy on its own line: the token (masked unless shown) or the server URL. */
 function CopyField({ label, value, secret = false }: { label: string; value: string; secret?: boolean }) {

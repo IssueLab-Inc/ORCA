@@ -1,5 +1,6 @@
 /** The desktop's panels and the layout saved for them (docs/panels.md): what each panel is, where it lives by
  * default, which saved layouts can be loaded, and what showing a panel takes. Pure: `dock.tsx` does the drawing. */
+import { KEYS } from "./prefs";
 
 export type PanelId = "model" | "clashes" | "filters" | "clash" | "plan" | "chat" | "edits" | "activity" | "properties";
 export type Edge = "left" | "right" | "bottom";
@@ -29,11 +30,11 @@ export const PANE = { left: [240, 640, 310], right: [300, 720, 380] } as const;
 export const EDGE_GROUP: Record<Edge, string> = { left: "edge-left", right: "edge-right", bottom: "edge-bottom" };
 export const EDGE_SIZE: Record<Edge, readonly [number, number, number]> = { ...PANE, bottom: [80, 480, 120] };
 
-/** Where the layout is kept in this browser, and the switch back to the classic layout. */
-export const LAYOUT_KEY = "sightline.dock.v1";
-export const CLASSIC_KEY = "sightline.dock.classic";
+/** Where the layout is kept in this browser, and the switch back to the classic layout (prefs.ts names every key). */
+export const LAYOUT_KEY = KEYS.dockLayout;
+export const CLASSIC_KEY = KEYS.dockClassic;
 /** Where Properties lives: floating over the model (the default) or docked in the right side bar, as last put there. */
-export const PROPS_KEY = "sightline.dock.properties";
+export const PROPS_KEY = KEYS.dockProperties;
 export type PropsHome = "float" | "right";
 export function readPropsHome(storage: Pick<Storage, "getItem"> | null): PropsHome {
   try { return storage?.getItem(PROPS_KEY) === "right" ? "right" : "float"; } catch { return "float"; }

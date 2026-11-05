@@ -32,10 +32,10 @@ from starlette.requests import HTTPConnection
 from starlette.routing import Route
 
 from . import (agents, built, chat, checks, context_planner, demos, detect, document, domains, edits, escalation,
-               faces, journal, manual, mcp_server, meta_client, owner, plans, property_edits, requirements, settings, spend,
-               step, titles, triage, voice_live)
+               faces, identity, journal, manual, mcp_server, meta_client, owner, plans, property_edits, requirements,
+               settings, spend, step, titles, triage, voice_live)
 from .meta_client import escalation_info, labels as model_labels, transcribe, triage_model, triage_model_info
-from .limits import ProposeLimit, client_id, env_float, env_int
+from .limits import ProposeLimit, env_float, env_int
 from .service import MODEL_SUFFIXES, MODELS, StaleLayout, Workspace, project_name
 
 # The repo's .env was read on the package's first import (sightline/__init__.py), before any module read a setting.
@@ -43,7 +43,8 @@ app = FastAPI(title="ORCA")
 
 
 class _OwnerContext:
-    """Each request knows whether it is the owner's (the signed cookie) and carries the owner's settings (owner.py)."""
+    """Each request knows who is asking (identity.py), whether it is the owner's (the signed cookie), and carries the
+    owner's settings (owner.py)."""
 
     def __init__(self, inner):
         self.inner = inner
@@ -51,6 +52,13 @@ class _OwnerContext:
     async def __call__(self, scope, receive, send):
         if scope["type"] not in ("http", "websocket"):
             return await self.inner(scope, receive, send)
+        me = identity.enter(identity.of_scope(scope))
+        try:
+            await self._owned(scope, receive, send)
+        finally:
+            identity.leave(me)
+
+    async def _owned(self, scope, receive, send):
         headers = dict(scope.get("headers") or [])
         jar = SimpleCookie()
         try:
@@ -248,7 +256,7 @@ def escalation_refused(who: str, exempt: bool) -> tuple[int, str] | None:
 
 def _escalation_check(request: HTTPConnection) -> Callable[[], str | None]:
     """`escalation_refused` for this request, for work that decides later (automatic second tries, chat)."""
-    who = client_id(request.headers, request.client.host if request.client else None)
+    who = identity.who(request)
     exempt = owner.no_caps()
 
     def check() -> str | None:
@@ -348,7 +356,7 @@ def _take(limit: ProposeLimit, request: HTTPConnection) -> str | None:
     """One use of a demo cap for this visitor: why not, or None. The owner has none (unless they switch them on)."""
     if owner.no_caps():
         return None
-    return limit.take(client_id(request.headers, request.client.host if request.client else None))
+    return limit.take(identity.who(request))
 
 
 class Unlock(BaseModel):
@@ -366,7 +374,7 @@ def owner_unlock(body: Unlock, request: Request, response: Response):
     if not owner.available():
         raise HTTPException(404, "No owner is configured on this server.")
     if not owner.check_token(body.token.strip()):
-        refused = unlock_limit.take(client_id(request.headers, request.client.host if request.client else None))
+        refused = unlock_limit.take(identity.who(request))
         raise HTTPException(429 if refused else 403, refused or "That is not the owner token.")
     response.set_cookie(owner.COOKIE, owner.cookie_value(), max_age=owner.DAYS * 86400, httponly=True, secure=True,
                         samesite="strict", path="/api")
@@ -866,7 +874,7 @@ def _refuse_escalation(request: HTTPConnection, scene_id: str, body: "Propose") 
     recommend = ws.fix_settings(scene_id, body.element_a, body.element_b).get("recommend")
     if recommend:
         raise HTTPException(409, f"Nothing may be edited here ({recommend}), so there is no second try to make.")
-    r = escalation_refused(client_id(request.headers, request.client.host if request.client else None),
+    r = escalation_refused(identity.who(request),
                            owner.no_caps())
     if r:
         raise HTTPException(*r)
@@ -992,7 +1000,7 @@ def context_stream(scene_id: str, body: ContextObjective, request: Request):
         objective = context_planner.validate_objective(ws, scene_id, body.model_dump(exclude_none=True))
     except context_planner.ContextError as exc:
         raise HTTPException(exc.status, str(exc))
-    who = client_id(request.headers, request.client.host if request.client else None)
+    who = identity.who(request)
     refused = None if owner.no_caps() else propose_limit.take_many(who, 3)
     if refused:
         raise HTTPException(429, refused)
@@ -1648,8 +1656,8 @@ def _unread(report, doc, facts: dict, carried: dict, scope: str | None, rerun: b
 
 
 def _visitor(request) -> str | None:
-    """Who is asking (`limits.client_id`, as for the caps), or None without a request (an MCP tool's own call)."""
-    return client_id(request.headers, request.client.host if request.client else None) if request is not None else None
+    """Who is asking (`identity.who`, as for the caps), or None without a request (an MCP tool's own call)."""
+    return identity.who(request) if request is not None else None
 
 
 @app.get("/api/reports/{report_id}/triage")
@@ -1915,7 +1923,7 @@ def plan_stream(scene_id: str, body: PlanRequest, request: Request):
     newline-delimited JSON, then {"type": "plan", ...}. Each clash pair costs one proposal from the allowance."""
     _scene(scene_id)
     _report(body.report_id)
-    who = client_id(request.headers, request.client.host if request.client else None)
+    who = identity.who(request)
     if body.hub:
         n = 1  # the cause; the fixes are charged only if the cause calls for edits (see plans.build_root_cause)
     else:
@@ -1973,7 +1981,7 @@ def chat_turn(body: ChatTurn, request: Request):
         raise HTTPException(429, refused)
     c = _chat_for(request)
     # Capture identity/bypass on this request, never on the shared Chat/session.
-    who = client_id(request.headers, request.client.host if request.client else None)
+    who = identity.who(request)
     no_caps = owner.no_caps()
     allowed = lambda: None if no_caps else propose_limit.take(who)
     allowed_many = lambda n: None if no_caps else propose_limit.take_many(who, n)
@@ -2216,7 +2224,7 @@ def create_link(body: LinkContext, request: Request):
     refused = _take(link_limit, request)
     if refused:
         raise HTTPException(429, refused)
-    who = client_id(request.headers, request.client.host if request.client else None)
+    who = identity.who(request)
     token, link = links.create(who, owner.no_caps(), chat.Context(body.scene_id, body.report_id, body.clash_id,
                                                                   list(body.fixed), [f.model_dump() for f in body.filters],
                                                                   body.filter_view.model_dump(), body.check))

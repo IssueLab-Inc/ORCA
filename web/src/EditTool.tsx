@@ -12,8 +12,8 @@ import { EditPanel } from "./EditPanel";
 import { alignDistance, alsoGroups, EDIT_TOOLS, effects, faceRef, keepLabel, OFFER, offsetWays, pointDistance, signedMm, SNAP_WORDS, toolForKey, toolState, typeChoice,
   type EditToolId } from "./viewer/edit";
 import type { FacePick, Viewer } from "./viewer/Viewer";
+import { pref } from "./prefs";
 
-const CARRY_KEY = "orca.edit.carry";
 const SNAP_ON_PICK_M = 0.3;   // a snapped point further than this from the face picked is on something else
 const ICON: Record<EditToolId, LucideIcon> = { push_pull: PushPullIcon, align: AlignIcon, move: MoveIcon, void: VoidIcon,
   cut_by: CutByIcon, split: SplitIcon, remove_section: RemoveSectionIcon, clip: ClipIcon, delete: DeleteIcon,
@@ -89,8 +89,8 @@ export const EditTool = forwardRef<EditToolHandle, {
   const element = face?.element ?? pick?.globalId ?? null;
   /** Take joined parts along (`carry`): off by default, so an edit changes the face or element picked only (owner
    * decision, Nov 1); remembered for the visit. */
-  const [joined, setJoined] = useState(() => { try { return sessionStorage.getItem(CARRY_KEY) === "1"; } catch { return false; } });
-  useEffect(() => { try { sessionStorage.setItem(CARRY_KEY, joined ? "1" : "0"); } catch { /* private window */ } }, [joined]);
+  const [joined, setJoined] = useState(() => pref.get("editCarry") === "1");
+  useEffect(() => { pref.set("editCarry", joined ? "1" : "0"); }, [joined]);
   const along = () => (joined ? { carry: true } : {});
   /** Apply to the type (`scope: "type"`): the shape or section its type gives changes for every element of the type,
    * each checked. Off by default and again for each element, so a type's other elements never change by accident. */

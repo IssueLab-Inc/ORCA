@@ -1,6 +1,6 @@
 # 04 · Server code map
 
-> **Covers:** `server/sightline/*.py` (35 modules), `server/sightline/demos/`, `server/sightline/domain_packs/`, `server/pyproject.toml`,
+> **Covers:** `server/sightline/*.py` (44 modules), `server/sightline/demos/`, `server/sightline/domain_packs/`, `server/pyproject.toml`,
 > `server/tests/` · **Checked against code:** 2026-10-30 (`fix/hardcoded-defaults`: `demos.py`, what stays, settings) · **Deeper design:** the feature docs linked
 > from each module below ([detection](../detection.md), [edits](../edits.md), [escalation](../escalation.md),
 > [mcp](../mcp.md), [requirements](../requirements.md), [show-it-built](../show-it-built.md), [step](../step.md),
@@ -30,7 +30,7 @@ imports made inside functions, which are drawn dotted below).
 | Report jobs | `triage.py`, `titles.py`, `built.py` | Bulk verdicts, Muse titles, Show it built pictures: work over a whole report or one picture, no scene edits |
 | Documents and inputs | `reports.py`, `document.py` | Navisworks XML in; PDF and BCF out |
 | Geometry | `scene.py`, `verify.py`, `edits.py`, `detect.py`, `step.py`, `context_eval.py` | The federated IFC scene, the geometric check, model edits, ORCA's own detection, STEP conversion, whole-arrangement checks |
-| Policy and request context | `requirements.py`, `settings.py`, `owner.py`, `limits.py`, `spend.py`, `domains.py`, `demos.py` | Coordination requirements, settings for everyone, the owner's context, demo caps, the Muse Wonder budget, a scene's domain and what stays in place by default, the demo projects |
+| Policy and request context | `requirements.py`, `settings.py`, `owner.py`, `identity.py`, `limits.py`, `spend.py`, `domains.py`, `demos.py` | Coordination requirements, settings for everyone, the owner's context, who is asking, demo caps, the Muse Wonder budget, a scene's domain and what stays in place by default, the demo projects |
 | Model client | `meta_client.py` | Chat completions, Responses, transcription; model choice, effort, usage and price |
 | Test support | `fixtures.py` | Small synthetic IFC models for tests and spikes |
 
@@ -119,6 +119,7 @@ Three edges go "up" and are worth knowing before you add an import:
 | `fixtures.py` | Test support | Synthetic IFC models: clash, run, joint, context, detection, route, penetration, resize, edit and parametric fixtures |
 | `faces.py` | Geometry | The faces of an element's body as a person points at them: a pick (point and normal) resolved to a cap, a rectangle's side, a round face, an I-section's flank or an outline's edge, named in words ("east end", "north face", "top"), with what each allows ([docs/manual-edits.md](../manual-edits.md)) |
 | `hosts.py` | Fix agent | Which hosts may take an opening: hard rules, requirements, Muse's reading by kind, hole limits |
+| `identity.py` | Policy | Who is asking, once per request: `Identity` (the address, a user id once accounts exist), set by `_OwnerContext`; `who` for caps, a triage run's starter and a link's creator ([docs/accounts.md](../accounts.md)) |
 | `journal.py` | State | The edit log: one `Entry` per kept edit (agent fixes, plans, wider fixes, hand edits), who and which clash, the fix a hand edit follows, undo and redo over each file's transactions ([docs/manual-edits.md](../manual-edits.md)) |
 | `limits.py` | Policy | `ProposeLimit`: rolling per-visitor and per-day caps; `client_id` |
 | `manual.py` | Operations | Hand edits as ops (push/pull, align, move, and the rest as they are built): `resolve`, the requirements' `gate`, ORCA's rules as warnings, `check` in a trial (cleared, new, worse, nearest), `apply` checked again and kept through the edit log, the clash measured again ([docs/manual-edits.md](../manual-edits.md)) |
@@ -741,6 +742,19 @@ owner's settings from `X-Sightline-Settings` in context variables. Imports nothi
 - **Rules:** the header is read only when the cookie checks out; work that leaves the request's thread must use
   `spawn` or `submit` or it loses the owner's settings (and the requirements).
 
+### `identity.py`: who is asking
+
+One identity per request, for everything counted per visitor ([docs/accounts.md](../accounts.md), slice 1). Today
+it is the address `limits.client_id` gives; a signed-in person's user id comes with accounts.
+
+- **Main symbols:** `Identity` (`address`, `user_id`, `key`: `u:<id>` for a person, else the address), `of_scope`,
+  `of`, `enter`, `leave`, `current`, `who`.
+- **Imports:** `limits.py` (`client_id`). **Imported by:** `app.py`.
+- **Rules:** `_OwnerContext` sets it for every HTTP request and WebSocket and leaves it when the request ends;
+  `owner.spawn` and `owner.submit` carry it into workers with the owner's settings. `who(conn)` is the identity in
+  force, else one read from `conn` exactly as `client_id` reads it, else None (no request: an MCP tool's own call,
+  the stdio server). Routes call `identity.who(request)`, never `client_id` directly.
+
 ### `limits.py`: demo caps
 
 Rolling caps per visitor per hour and for everyone per day, in memory, and how every number setting is read.
@@ -749,7 +763,7 @@ Imports nothing from the package.
 - **Main symbols:** `ProposeLimit` (`from_env`, `escalate_from_env`, `chat_from_env`, `take`, `take_many`,
   `take_all`, `refusal`), `client_id` (the peer, or with `SIGHTLINE_TRUST_FORWARDED=N` the N-th `X-Forwarded-For`
   entry from the right), `trusted_hops`, `env_int`, `env_float`.
-- **Imported by:** `app.py`, `context_planner.py`, `scene.py`, `service.py`, `step.py`.
+- **Imported by:** `app.py`, `context_planner.py`, `identity.py`, `scene.py`, `service.py`, `step.py`.
 - **Rules:** `take_many` and `take_all` count all or nothing; correct only with one server process (the Modal app
   runs one container); a number setting is read with `env_int` / `env_float`, so unset or empty is its default and
   anything else that is not a number raises. Every cap and its meaning: [16](16-security-caps-and-cost.md).

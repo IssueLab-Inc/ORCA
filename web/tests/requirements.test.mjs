@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { compiled } from "./app-host.mjs";
 
-const req = await import(await compiled("../src/reqFile.ts"));
+const req = await import(await compiled("../src/reqFile.ts", { "./prefs": await compiled("../src/prefs.ts") }));
 
 const doc = () => ({
   format: "orca-requirements/1", name: "Northbank coordination", version: 1, level: 3, strictness: "balanced",

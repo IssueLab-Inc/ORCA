@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { appHost, compiled } from "./app-host.mjs";
 
-const s = await import(await compiled("../src/signoffs.ts", {}));
+const s = await import(await compiled("../src/signoffs.ts", { "./prefs": await compiled("../src/prefs.ts") }));
 
 /** A browser's localStorage, enough for the page: a Map behind the Storage methods it calls. */
 function storage(entries = {}) {

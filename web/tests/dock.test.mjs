@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { compiled } from "./app-host.mjs";
 
-const dock = await import(await compiled("../src/dockLayout.ts"));
+const dock = await import(await compiled("../src/dockLayout.ts", { "./prefs": await compiled("../src/prefs.ts") }));
 
 /** A layout as dockview's toJSON writes it: the model in the grid, the side bars, and what floats or pops out. */
 function layout({ grid = ["model"], left = ["clashes"], right = ["clash", "plan", "chat"], bottom = ["activity"], floating = [], popout = [] } = {}) {

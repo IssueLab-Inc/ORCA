@@ -379,7 +379,7 @@ class Job:
         `prior_audit`: the by-design rules' audit of the run before under the same rules, kept by a run that asks the
         model nothing (it makes no audit call of its own). `after`: a run under way this one waits for, then
         `prepare` gives the seed and `only` as they stand then, so nothing the first run read is asked again.
-        `starter`: the visitor who started the run (`limits.client_id`, the one its proposal was charged to), who alone
+        `starter`: the visitor who started the run (`identity.who`, the one its proposal was charged to), who alone
         may stop it besides the site's owner (`may_stop`)."""
         self.starter = starter
         self.report, self.model, self.info, self.workers = report, model, info, workers

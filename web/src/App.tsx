@@ -50,20 +50,18 @@ import { DockHost, SlotHost, inSlot, usePanelSlots, type DockHandle } from "./do
 import { FiltersPanel, blankRule } from "./FiltersPanel";
 import { ElementCard, type CardActions } from "./ElementCard";
 import { EMPTY as NO_FILTERS, applied, complete, evaluate, legend, matching, migrate, prepare, shareable, withBy, zoomTarget, type FacetIndex, type FilterState, type Rule } from "./filters";
-import { CLASSIC_KEY, PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
+import { PANE, PANELS, isPanel, type PanelId } from "./dockLayout";
 import { runs, type Origin, type RunHandle, type RunKind } from "./runlog";
+import { familyKey, getItem, getJSON, KEYS, pref, setJSON } from "./prefs";
 import type { Peek } from "./workingsGraph";
 import type * as THREE from "three";
 
 type Stats = { elements: number; triangles: number; parseMs: number };
 /** Workings in the Activity panel (docs/workings.md): on or off, and the view the panel shows (Workings by default). */
-const WORKINGS_KEY = "sightline.workings";
 type WorkingsSetting = { on: boolean; view: ActivityView };
 function readWorkings(): WorkingsSetting {
-  try {
-    const w = JSON.parse(localStorage.getItem(WORKINGS_KEY) ?? "null") as WorkingsSetting | null;
-    if (w && typeof w.on === "boolean" && (w.view === "steps" || w.view === "work")) return w;
-  } catch { /* a private window: the default */ }
+  const w = pref.getJSON<WorkingsSetting>("workings");   // null in a private window: the default
+  if (w && typeof w.on === "boolean" && (w.view === "steps" || w.view === "work")) return w;
   return { on: true, view: "work" };
 }
 /** The bottom bar's height for Workings: it grows to this for a run when it is shorter than WORKINGS_SHORT. */
@@ -72,14 +70,14 @@ const WORKINGS_HEIGHT = 380, WORKINGS_SHORT = 240;
 type SavedView = { name: string; pose: Pose; ortho: boolean; style: VisualStyle; mode: ViewMode; filters: Filters;
   section: [number[], number[]] | null; rules?: FilterState };
 type ViewsStore = { home: Pose | null; saved: SavedView[] };
-const viewsKey = (files: string[]) => `sightline.views.${projectName(files)}`;
+const viewsKey = (files: string[]) => familyKey("views", projectName(files));
 /** Each set of models keeps its filters (docs/filters.md). */
-const filtersKey = (files: string[]) => `sightline.filters.${projectName(files)}`;
+const filtersKey = (files: string[]) => familyKey("filters", projectName(files));
 function loadViews(files: string[]): ViewsStore {
-  try { return { home: null, saved: [], ...JSON.parse(localStorage.getItem(viewsKey(files)) ?? "{}") }; } catch { return { home: null, saved: [] }; }
+  return { home: null, saved: [], ...(getJSON<Partial<ViewsStore>>(viewsKey(files)) ?? {}) };
 }
 function saveViews(files: string[], store: ViewsStore) {
-  try { localStorage.setItem(viewsKey(files), JSON.stringify(store)); } catch { /* private window: views last this visit */ }
+  setJSON(viewsKey(files), store);   // a private window: views last this visit
 }
 type Tab = "clash" | "plan" | "chat";
 /** Text to the clipboard: the Clipboard API, else a hidden text area and the copy command (an older browser, or a page
@@ -102,7 +100,7 @@ export function App() {
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
   // Side panel widths: dragged by their inner edge, remembered in this browser, double-click to reset.
-  const [widths, setWidths] = useState(() => ({ left: stored("sightline.left-w", 310), right: stored("sightline.right-w", 380) }));
+  const [widths, setWidths] = useState(() => ({ left: stored("leftWidth", 310), right: stored("rightWidth", 380) }));
   const [resizing, setResizing] = useState<"left" | "right" | null>(null);
   // Phones and tablets (layout.ts, docs/mobile.md): the clash list in a bottom sheet's tab (phone) or a drawer (tablet),
   // how far the phone's sheet is pulled up, and the header's menu. The sheet follows what happens (see `followed`).
@@ -140,7 +138,7 @@ export function App() {
   const editPick = useRef<{ element: string; face: string | null; pick?: { point: number[]; normal: number[] } } | null>(null);
   // Free navigation (docs/views.md): every clash picked takes the views to it unless turned off; visibility filters and
   // what is hidden for now (viewing only); saved views and Home per project, in this browser.
-  const [fly, setFly] = useState(() => { try { return localStorage.getItem("sightline.views.fly") !== "0"; } catch { return true; } });
+  const [fly, setFly] = useState(() => pref.get("fly") !== "0");
   const [filters, setFilters] = useState<Filters>({ classes: [], levels: [] });
   const [temporary, setTemporary] = useState<Temporary>({ hidden: [], isolated: null });
   // A row's Isolate: only the clashing elements are drawn, and each clash opened after is isolated in turn, until the
@@ -168,17 +166,18 @@ export function App() {
   };
   const sectionTo = useRef<THREE.Box3 | null>(null);
   // Views beside the 3D one (docs/views.md): Single, Two or Quad, kept per browser; a phone shows one, a tablet two.
-  const [viewLayout, setViewLayout] = useState<Layout>(() => { try { return (localStorage.getItem("sightline.views.layout") as Layout) || "single"; } catch { return "single"; } });
+  const [viewLayout, setViewLayout] = useState<Layout>(() => (pref.get("viewLayout") as Layout | null) || "single");
   const [drawingsShow, setDrawingsShow] = useState<DrawingsShow>("filtered");
   const [modelNames, setModelNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ globalId: string; info: Record<string, unknown> | null } | null>(null);
   // What the model says about the selected element (properties.py): the Properties panel, or the card's All properties.
   const [elementProps, setElementProps] = useState<{ gid: string; data: ElementProperties | null; loading: boolean } | null>(null);
   // Measuring (docs/measure.md): the viewer keeps the measurements; snapping is kept in this browser.
-  const [snapping, setSnapping] = useState(() => { try { return localStorage.getItem("sightline.measure.snap") !== "0"; } catch { return true; } });
+  const [snapping, setSnapping] = useState(() => pref.get("snap") !== "0");
   const measureFrame = useRef(0);
   const [measureAt, setMeasureAt] = useState<{ x: number; y: number } | null>(() => {
-    try { const v = JSON.parse(localStorage.getItem("sightline.measure.at") ?? "null"); return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? v : null; } catch { return null; }
+    const v = pref.getJSON<{ x: number; y: number }>("measureAt");
+    return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? v : null;
   });
   const down = useRef<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -270,7 +269,7 @@ export function App() {
   const slots = usePanelSlots();
   const dock = useRef<DockHandle | null>(null);
   const dockedNow = useRef(false);
-  const [classic, setClassic] = useState(() => { try { return localStorage.getItem(CLASSIC_KEY) === "1"; } catch { return false; } });
+  const [classic, setClassic] = useState(() => pref.get("dockClassic") === "1");
   const [popouts, setPopouts] = useState<Window[]>([]);
   /** Switch the right-hand panel: on a desktop the dock shows it too (opens its side bar, brings its window forward). */
   const setTab = (t: Tab) => { setTabState(t); if (dockedNow.current) dock.current?.show(t); };
@@ -558,16 +557,16 @@ export function App() {
   }, [ruleView]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!modelNames.length) return;
-    try { localStorage.setItem(filtersKey(modelNames), JSON.stringify(filterState)); } catch { /* kept for this visit */ }
+    setJSON(filtersKey(modelNames), filterState);   // a private window: kept for this visit
   }, [filterState]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { viewer.current?.setTemporary(temporary); }, [temporary]);
-  useEffect(() => { try { localStorage.setItem("sightline.views.fly", fly ? "1" : "0"); } catch { /* kept for this visit */ } }, [fly]);
+  useEffect(() => { pref.set("fly", fly ? "1" : "0"); }, [fly]);
   const shownLayout: Layout = layout === "phone" ? "single" : layout === "tablet" && viewLayout === "quad" ? "two" : viewLayout;
   useEffect(() => { viewer.current?.setLayout(shownLayout); }, [shownLayout, stats]);
-  useEffect(() => { try { localStorage.setItem("sightline.views.layout", viewLayout); } catch { /* kept for this visit */ } }, [viewLayout]);
-  useEffect(() => { try { localStorage.setItem(CLASSIC_KEY, classic ? "1" : "0"); } catch { /* kept for this visit */ } }, [classic]);
+  useEffect(() => { pref.set("viewLayout", viewLayout); }, [viewLayout]);
+  useEffect(() => { pref.set("dockClassic", classic ? "1" : "0"); }, [classic]);
   const [workings, setWorkings] = useState<WorkingsSetting>(readWorkings);
-  useEffect(() => { try { localStorage.setItem(WORKINGS_KEY, JSON.stringify(workings)); } catch { /* kept for this visit */ } }, [workings]);
+  useEffect(() => { pref.setJSON("workings", workings); }, [workings]);
   // The tour reads the main page: panels in their own windows come back for it.
   useEffect(() => { if (touring) dock.current?.gather(); }, [touring]);
   useEffect(() => { viewer.current?.setDrawingsShow(drawingsShow); }, [drawingsShow]);
@@ -577,8 +576,7 @@ export function App() {
     const store = loadViews(modelNames);
     setSavedViews(store.saved);
     viewer.current?.setHome(store.home);
-    let kept: unknown = null;
-    try { kept = JSON.parse(localStorage.getItem(filtersKey(modelNames)) ?? "null"); } catch { /* none kept */ }
+    const kept: unknown = getJSON(filtersKey(modelNames));   // null: none kept
     const restored = migrate(kept);
     restoredFilters.current = restored;
     setFilterState(restored);
@@ -626,9 +624,9 @@ export function App() {
   useEffect(() => { viewer.current?.setMeasuring(tool.measure); viewsChanged(); }, [tool.measure]);
   useEffect(() => {
     viewer.current?.setSnap(snapping);
-    try { localStorage.setItem("sightline.measure.snap", snapping ? "1" : "0"); } catch { /* kept for this visit */ }
+    pref.set("snap", snapping ? "1" : "0");
   }, [snapping]);
-  useEffect(() => { try { if (measureAt) localStorage.setItem("sightline.measure.at", JSON.stringify(measureAt)); } catch { /* kept for this visit */ } }, [measureAt]);
+  useEffect(() => { if (measureAt) pref.setJSON("measureAt", measureAt); }, [measureAt]);
 
   // A clock for the live status lines while an agent works.
   const working = (!!progress && progress.phase !== "done") || !!running || (!!planRun && planRun.phase !== "done")
@@ -1398,7 +1396,7 @@ export function App() {
    * filters' index, the clash matches, the tests a check would run). The filters on screen carry over to the new set. */
   function adoptFiles(scene: OpenedScene, drawn: Stats | null) {
     const files = scene.files;
-    try { localStorage.setItem(filtersKey(shortNames(files)), JSON.stringify(filterState)); } catch { /* kept for this visit */ }
+    setJSON(filtersKey(shortNames(files)), filterState);
     setSceneFiles(files); setModelNames(shortNames(files)); setStepFiles(Object.values(scene.step ?? {}));
     sceneRevision.current = scene.revision ?? null; sceneLayout.current = scene.layout ?? null;
     if (drawn) setStats(drawn);
@@ -2899,10 +2897,8 @@ export function App() {
   }, [agentLink?.token]);
 
   // ------------------------------------------------------------------ the saved session (resume after a reload)
-  const SESSION_KEY = "sightline.session";
   useEffect(() => {  // on arrival: is there a session the server still holds?
-    let saved: SavedSession | null = null;
-    try { saved = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null"); } catch { saved = null; }
+    const saved = pref.getJSON<SavedSession>("session");
     if (!saved?.scene_id) return;
     const s = saved;
     void (async () => {
@@ -2917,7 +2913,7 @@ export function App() {
                                          clock_offset: state.server_time - Date.now() / 1000 } : null;
         setResumable({ saved: { ...s, link, fixes: { ...s.fixes, ...(state?.applied ?? {}) } },
                        info, clashes: r ? r.clashes.length : null });
-      } catch { try { localStorage.removeItem(SESSION_KEY); } catch { /* private window */ } }
+      } catch { pref.remove("session"); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2925,7 +2921,7 @@ export function App() {
     if (!sceneId) return;
     const s: SavedSession = { scene_id: sceneId, report_id: report?.id ?? null, files: sceneFiles, fixes,
                               link: agentLink, saved_at: Date.now() / 1000, check: viewCheck };
-    try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* private window: no resume */ }
+    pref.setJSON("session", s);   // a private window: no resume
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sceneId, report?.id, sceneFiles, fixes, agentLink?.token, viewCheck]);
   /** Reopen the saved session: the same models (with the fixes applied on the server), its clashes, its fixes, and
@@ -2957,7 +2953,7 @@ export function App() {
   function startFresh() {
     const link = resumable?.saved.link;
     if (link) void api.revokeLink(link.token).catch(() => undefined);
-    try { localStorage.removeItem(SESSION_KEY); } catch { /* private window */ }
+    pref.remove("session");
     setResumable(null);
   }
 
@@ -3313,7 +3309,7 @@ export function App() {
     ask: (send) => { setTab("chat"); setChatAsk((q) => ({ text: TOUR_QUESTION, send, n: (q?.n ?? 0) + 1 })); },
     signoff: () => {
       let name = "Guest reviewer";
-      try { name = localStorage.getItem("sightline.reviewer") || name; } catch { /* private window */ }
+      name = pref.get("reviewer") || name;
       if (tourDuct) addSignoff(tourDuct.id, { team: "MEP", name, decision: "approve", note: "Reviewed in the guided tour", at: new Date().toISOString() });
     },
   };
@@ -4163,12 +4159,12 @@ function contextEvidence(p: ContextProposal, checks: ContextProposal["checks"], 
 const clampPane = (side: "left" | "right", w: number, other = 0) =>
   Math.round(Math.max(Math.min(w, PANE[side][1], window.innerWidth - other - 360), PANE[side][0]));
 
-function stored(key: string, fallback: number) {
-  try { const v = Number(localStorage.getItem(key)); return v > 0 ? clampPane(key.includes("left") ? "left" : "right", v) : fallback; } catch { return fallback; }
+function stored(key: "leftWidth" | "rightWidth", fallback: number) {
+  try { const v = Number(getItem(KEYS[key])); return v > 0 ? clampPane(key === "leftWidth" ? "left" : "right", v) : fallback; } catch { return fallback; }
 }
 
 function remember(side: "left" | "right", w: number) {
-  try { localStorage.setItem(`sightline.${side}-w`, String(w)); } catch { /* private window: not remembered */ }
+  pref.set(side === "left" ? "leftWidth" : "rightWidth", String(w));   // a private window: not remembered
 }
 
 

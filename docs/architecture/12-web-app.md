@@ -82,6 +82,7 @@ only through `api.ts`, mostly as NDJSON streams, and draws the models through th
 | `layout.ts` | Desktop / tablet / phone by width, touch detection, sheet snapping, `follow()` | `useLayout`, `layoutFor`, `useCoarse`, `isCoarse`, `follow`, `nearestSnap`, `nextSnap`, `SNAPS`, `PHONE_MAX`, `TABLET_MAX` | `App`, `Sheet.tsx`, `About.tsx` |
 | `noClash.ts` | Why a reported clash needs no fix (same element, not physical, a touch, no overlap, by design), and triage as shown (`shownVerdicts`: what is settled in this browser over the model's verdict; a fixed clash keeps its own) | `noClash`, `shownVerdicts`, `oneElement`, `sameWhy`, `NoClash` | `App`, `ReportList.tsx`, `ClashPanel.tsx` |
 | `pilot.ts` | Lets the fix agent drive the viewer while it works; its status names the idea on screen (`step`), for Workings | `Pilot`, `PilotStatus` | `App` |
+| `prefs.ts` | Every key the page keeps in the browser, in one registry with its scope (person, device, project, tab: [docs/accounts.md](../accounts.md)), and the only reads and writes of `localStorage` and `sessionStorage`, which never throw | `KEYS`, `REGISTRY`, `FAMILIES`, `familyKey`, `pref`, `storage`, `getItem`, `setItem`, `removeItem`, `getJSON`, `setJSON` | `App`, `Owner.tsx`, `Chat.tsx`, `Triage.tsx`, `Agent.tsx`, `ReportDoc.tsx`, `EditTool.tsx`, `dock.tsx`, `dockLayout.ts`, `reqFile.ts`, `signoffs.ts` |
 | `reqFile.ts` | Requirements files in the browser: load/save, upload/download, cell edits, add rules, the domain and the classes fixed in place (`setDomain`, `setStays`) | `load`, `save`, `shortLabel`, `addByDesign`, `addPenetration`, `hasByDesign`, `hasPenetration`, `setCell`, `setMover`, … | `App`, `Requirements.tsx` |
 | `signoffs.ts` | Where review sign-offs are kept in the browser (a detected clash by its id, an imported report by its title and files), and moving the old title-keyed ones over | `signoffScope`, `loadSignoffs`, `saveSignoffs`, `migrateTitleKeyed`, `Signoffs` | `App` |
 | `ui.tsx` | Shared UI bits: `IconButton`, `Popover` (a `note` of what is set now goes on the trigger's name and tip and marks it `set`; kept inside its window, or the dock panel that clips it (`roomFor`): it moves left or up, and scrolls inside when taller, so it never makes the page scroll or gets cut off; Esc closes only the menu; it listens on its own document, so it works in a pop-out window; on a phone its sheet renders into the body, above the bottom sheet), and the tooltip layer (`Tooltips`, one per document: the page and each pop-out window) | `IconButton`, `Popover`, `Tooltips` | `App`, `Owner.tsx`, `ViewerToolbar.tsx` |
@@ -642,12 +643,14 @@ matrix as a list, the left pane's tabs, and the blank project. Near the top, one
 
 ## Browser storage
 
-Everything is `localStorage`, read and written inside `try` (a private window just loses it). Keys keep the old
-`sightline.` prefix on purpose. What they mean as state: [05](05-domain-model-and-state.md).
+Every key goes through `prefs.ts` (`pref.get` / `set` for the fixed keys, `familyKey` for the per-project ones), which
+never throws: a private window just loses them. A test (`web/tests/prefs.test.mjs`) fails when anything else in
+`web/src` touches `localStorage` or `sessionStorage`, or names a key the registry lacks. Keys keep the old `sightline.`
+prefix on purpose. What they mean as state: [05](05-domain-model-and-state.md).
 
 | Key | Written by | Holds |
 |---|---|---|
-| `sightline.session` | `App` (`SESSION_KEY`) | `SavedSession`: scene id, report id, files, fixes, agent link, time, the check the list showed; read on load for "Pick up where you left off" |
+| `sightline.session` | `App` (`pref` `session`) | `SavedSession`: scene id, report id, files, fixes, agent link, time, the check the list showed; read on load for "Pick up where you left off" |
 | `sightline.left-w`, `sightline.right-w` | `App` (`stored`, `remember`) | Dragged pane widths in the classic layout (clamped by `PANE`); the dock's default side bar widths |
 | `sightline.dock.v1` | `dockLayout.ts` (`writeLayout`), for `DockHost` | `{ v: 1, layout }`: the dock's layout (dockview's `toJSON`), pop-out panels put back in their bars |
 | `sightline.dock.properties` | `dock.tsx` (`setPropsHome`; read by `dockLayout.readPropsHome`) | `float` or `right`: where Properties opens |
@@ -665,8 +668,10 @@ Everything is `localStorage`, read and written inside `try` (a private window ju
 | `sightline.filters.<project>` | `App` (`filtersKey`) | `FilterState`: the filters for this set of models (`filters.migrate` reads it back) |
 | `sightline.measure.snap` | `App` | Snapping while measuring, on or off (default on) |
 | `sightline.measure.at` | `App` | Where the Measure panel was dragged to (`{x, y}` in the stage) |
+| `sightline.workings` | `App` (`readWorkings`) | `{on, view}`: Workings on or off and the Activity panel's view |
+| `orca.edit.carry` | `EditTool.tsx` | In `sessionStorage`, this tab only: whether the Edit tool takes what an element is joined to along |
 
-No `sessionStorage` or IndexedDB is used.
+No IndexedDB is used.
 
 ## Build, assets and tests
 

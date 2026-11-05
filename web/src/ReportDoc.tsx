@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, type CheckSummary, type DocEvent, type Evidence, type ModelTeam, type Report, type ReportClash, type Signoff, type Team, type TriageVerdict } from "./api";
 import type { Review } from "./ReportList";
 import { aiName } from "./aiNames";
+import { pref } from "./prefs";
 
 type Scope = "combined" | "team" | "model";
 
@@ -20,13 +21,13 @@ export function ReviewBlock({ clash, teams, signoffs, onAdd, onRemove }: {
 }) {
   const reviewers = reviewersOf(clash, teams);
   const [team, setTeam] = useState<Team>(reviewers[0]);
-  const [name, setName] = useState(() => { try { return localStorage.getItem("sightline.reviewer") ?? ""; } catch { return ""; } });
+  const [name, setName] = useState(() => pref.get("reviewer") ?? "");
   const [note, setNote] = useState("");
   useEffect(() => { setTeam(reviewers.find((t) => !signoffs.some((s) => s.team === t)) ?? reviewers[0]); setNote(""); },
     [clash.id]);  // eslint-disable-line react-hooks/exhaustive-deps
   const add = (decision: Signoff["decision"]) => {
     if (!name.trim()) return;
-    try { localStorage.setItem("sightline.reviewer", name.trim()); } catch { /* private window */ }
+    pref.set("reviewer", name.trim());
     onAdd({ team, name: name.trim(), decision, note: note.trim(), at: new Date().toISOString() });
     setNote("");
   };

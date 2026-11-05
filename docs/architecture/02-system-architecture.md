@@ -247,10 +247,11 @@ manager starts in the app's lifespan (`_lifespan`). Each tool call runs inside `
   escalation and one proposal (`take_all`) and claims the day's Muse Wonder budget (`spend.claim`);
 - the work answers JSON, or streams NDJSON through `_ndjson`.
 
-**Who the caller is.** There are no accounts:
-- a visitor is an address: `limits.client_id` takes the peer address (on Modal that is the visitor: its edge strips
-  `X-Forwarded-For`), or behind N trusted proxies (`SIGHTLINE_TRUST_FORWARDED=N`) the N-th `X-Forwarded-For` entry
-  from the right ([16](16-security-caps-and-cost.md));
+**Who the caller is.** There are no accounts yet ([docs/accounts.md](../accounts.md)):
+- a visitor is an address: `_OwnerContext` sets the request's identity (`identity.py`) and routes ask
+  `identity.who(request)`, which is `limits.client_id`: the peer address (on Modal that is the visitor: its edge
+  strips `X-Forwarded-For`), or behind N trusted proxies (`SIGHTLINE_TRUST_FORWARDED=N`) the N-th `X-Forwarded-For`
+  entry from the right ([16](16-security-caps-and-cost.md));
 - the owner is a signed cookie;
 - an agent is a link token, charged to the visitor who made the link (`Link.visitor`; `Link.owner` skips caps).
 

@@ -63,9 +63,10 @@ async function appHost() {
   const kinds = await compiled("../src/fixKinds.ts", {});
   const uploads = await compiled("../src/uploads.ts", {});
   const links = await compiled("../src/links.ts", {});
-  const signoffs = await compiled("../src/signoffs.ts", {});
+  const prefs = await compiled("../src/prefs.ts", {});
+  const signoffs = await compiled("../src/signoffs.ts", { "./prefs": prefs });
   const aboutRoute = await compiled("../src/aboutRoute.ts", {});
-  const dockLayout = await compiled("../src/dockLayout.ts", {});
+  const dockLayout = await compiled("../src/dockLayout.ts", { "./prefs": prefs });
   const fileNames = await compiled("../src/names.ts", {});
   const aiNames = await compiled("../src/aiNames.ts", {});
   const views = await compiled("../src/viewer/views.ts", { three: import.meta.resolve("three") });
@@ -73,7 +74,7 @@ async function appHost() {
   const filtersModule = await compiled("../src/filters.ts", {});
   const dependencies = { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"), react, "lucide-react": icons,
     "./api": api, "./chatRequest": ownership, "./ContextPlan": context, "./fixKinds": kinds, "./uploads": uploads, "./sceneModels": await compiled("../src/sceneModels.ts", {}), "./links": links,
-    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./names": fileNames, "./aiNames": aiNames, "./filters": filtersModule, "./checks": await compiled("../src/checks.ts", { "./filters": filtersModule }), "./runlog": await compiled("../src/runlog.ts", {}), "./viewer/views": views };
+    "./signoffs": signoffs, "./aboutRoute": aboutRoute, "./dockLayout": dockLayout, "./names": fileNames, "./aiNames": aiNames, "./filters": filtersModule, "./checks": await compiled("../src/checks.ts", { "./filters": filtersModule }), "./runlog": await compiled("../src/runlog.ts", {}), "./viewer/views": views, "./prefs": prefs };
   for (const name of ["./Activity", "./Chat", "./ReportDoc", "./Owner", "./Tour", "./About", "./AboutOrca", "./Agent", "./ClashPanel", "./PlanPanel", "./Insights", "./Triage", "./Detect", "./ReportList", "./noClash", "./ui", "./pilot", "./viewer/Viewer", "./ViewerToolbar", "./Requirements", "./ProjectStart", "./reqFile", "./layout", "./Sheet", "./AppMenu", "./BuiltView", "./ViewPanes", "./dock", "./MeasurePanel", "./Properties", "./FiltersPanel", "./ElementCard", "./Brand", "./EditPanel", "./EditTool", "./editIcons"]) dependencies[name] = mocks;
   const { App } = await import(await compiled("../src/App.tsx", dependencies, true));
   let tree;

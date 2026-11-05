@@ -1,6 +1,6 @@
 # 16 · Security, caps and cost controls
 
-> **Covers:** `server/sightline/owner.py`, `server/sightline/limits.py`, `server/sightline/spend.py`, the token side
+> **Covers:** `server/sightline/owner.py`, `server/sightline/identity.py`, `server/sightline/limits.py`, `server/sightline/spend.py`, the token side
 > of `server/sightline/agents.py`, the gates in `server/sightline/app.py` (`_OwnerContext`, `_take`,
 > `escalation_refused`, `built_stream`, `_receive_models`, `_McpGate`, `mcp_hooks`), `voice_live.same_origin` and
 > `voice_live.handshake`, `meta_client.load_env` and `PRICES`, the budget in `server/sightline/built.py`,
@@ -41,9 +41,11 @@ memory, disk and time any one request can take. Environment variables are listed
 
 ### Visitors
 
-ORCA has no accounts. A visitor is an address: `limits.client_id(headers, peer)` returns the socket's peer address,
-else "unknown". Everything per visitor (caps, a link's creator) keys on it. Visitors behind one address share their
-caps.
+ORCA has no accounts yet ([docs/accounts.md](../accounts.md)). A visitor is an address: `limits.client_id(headers,
+peer)` returns the socket's peer address, else "unknown". `_OwnerContext` puts it in the request's identity
+(`identity.py`), which `owner.spawn` and `owner.submit` carry into workers, and every route asks `identity.who(request)`
+for it. Everything per visitor (caps, a triage run's starter, a link's creator) keys on it. Visitors behind one address
+share their caps. With accounts, `who` becomes `u:<user id>` for a signed-in person; nothing else changes.
 
 - **On Modal the peer is the visitor.** Measured on Oct 30 with a throwaway app on the same `@modal.asgi_app()`
   setup: Modal's edge strips any `X-Forwarded-For` a client sends (one value, a list, junk, two header lines), adds

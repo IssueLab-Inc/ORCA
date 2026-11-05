@@ -4,7 +4,7 @@
 > `triage.py`, `titles.py`, `chat.py`, `agents.py`, `requirements.py`, `settings.py`, `limits.py`, `spend.py`,
 > `built.py`, `document.py`, `app.py` (its module-level stores), and the browser storage in `web/src/` (`App.tsx`,
 > `Owner.tsx`, `Chat.tsx`, `Triage.tsx`, `Agent.tsx`, `ReportDoc.tsx`, `reqFile.ts`, `signoffs.ts`) ·
-> **Checked against code:** 2026-10-30 (`104fda9`) · **Deeper design:** [docs/detection.md](../detection.md),
+> **Checked against code:** 2026-10-30 (`104fda9`); the browser's storage 2026-11-05 (`feature/accounts-identity`) · **Deeper design:** [docs/detection.md](../detection.md),
 > [docs/requirements.md](../requirements.md), [docs/mcp.md](../mcp.md), [docs/escalation.md](../escalation.md),
 > [docs/uploads.md](../uploads.md)
 
@@ -609,8 +609,10 @@ under the key `settings`. It is the only server state that survives a restart or
 
 ### The browser
 
-`localStorage` only; there is no `sessionStorage` or IndexedDB. Every access is wrapped so a private window simply
-does without.
+Every read and write goes through `web/src/prefs.ts`, which names each key once with its scope (whether it will
+follow the person, stay with the device, belong to a project or last one tab: [docs/accounts.md](../accounts.md),
+"Preferences") and never throws, so a private window simply does without. Everything is `localStorage` but one
+`sessionStorage` key; there is no IndexedDB.
 
 | Key | Written by | Holds |
 |---|---|---|
@@ -626,11 +628,12 @@ does without.
 | `sightline.views.fly` | `App.tsx` | Fly to clash on or off (`"1"` / `"0"`, default on) |
 | `sightline.views.layout` | `App.tsx` | The view layout (`single`, `two`, `quad`); a phone shows Single and a tablet at most Two whatever is kept |
 | `sightline.measure.snap`, `sightline.measure.at` | `App.tsx` | Snapping while measuring (default on), and where the Measure panel was dragged to |
-| `sightline.workings` | `App.tsx` | Workings on or off in the Activity panel (`"0"` / `"1"`, default on) and the view it shows ([docs/workings.md](../workings.md)) |
+| `sightline.workings` | `App.tsx` | `{on, view}`: Workings on or off in the Activity panel (default on) and the view it shows (`work` or `steps`) ([docs/workings.md](../workings.md)) |
 | `sightline.dock.properties` | `dock.tsx` (`setPropsHome`) | Where the Properties panel opens: floating or the right side bar ([docs/panels.md](../panels.md)) |
-| `sightline.dock.v1`, `sightline.dock.classic` | `dockLayout.ts` (`saveLayout`, called by `dock.tsx`) | The desktop's panel layout (dockview's `toJSON`) and whether the Classic layout is on ([docs/panels.md](../panels.md)) |
+| `sightline.dock.v1`, `sightline.dock.classic` | `dockLayout.ts` (`writeLayout`, called by `dock.tsx`); the switch by `App.tsx` | The desktop's panel layout (dockview's `toJSON`) and whether the Classic layout is on ([docs/panels.md](../panels.md)) |
 | `sightline.views.<project>` | `App.tsx` (`saveViews`) | `{home, saved}`: the Home pose and the saved views (pose, projection, style, mode, filters, section box, and the filter rules as `rules`) for a set of models, keyed by `About.projectName` |
 | `sightline.filters.<project>` | `App.tsx` (`filtersKey`) | `{v: 1, rules, colours, greyRest}`: the filters for a set of models ([docs/filters.md](../filters.md)) |
+| `orca.edit.carry` (`sessionStorage`) | `EditTool.tsx` | Whether the Edit tool takes what an element is joined to along (`"1"` / `"0"`), for this tab only |
 
 The browser also holds the `sightline_owner` cookie (HttpOnly, Secure, SameSite=Strict, path `/api`, 30 days),
 which scripts cannot read. Everything else on the page (the open report, verdicts, `reviewed` marks, plans, clash views,

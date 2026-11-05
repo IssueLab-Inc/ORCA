@@ -1,9 +1,10 @@
 /** Coordination requirements in the browser (server: requirements.py; docs/requirements.md): kept in this browser,
  *  downloaded and uploaded as a file, edited a cell at a time. Pure functions, so the panel and App share them. */
 import type { Domain, Pattern, PatternVerdict, ReqCheck, ReqMover, ReqPenRule, Requirements, Strictness } from "./api";
+import { KEYS, storage } from "./prefs";
 
 export const FORMAT = "orca-requirements/1";
-const STORE = "sightline.requirements";
+const STORE = KEYS.requirements;
 export const STRICTNESS: Strictness[] = ["lenient", "relaxed", "balanced", "strict", "exacting"];
 export const STRICTNESS_NAME: Record<Strictness, string> = {
   lenient: "Lenient", relaxed: "Relaxed", balanced: "Balanced", strict: "Strict", exacting: "Exacting",
@@ -13,24 +14,20 @@ export const LEVEL_NAME: Record<number, string> = { 1: "Concept", 2: "Developed"
 /** What this browser keeps: the file, and whether it is in use (off is ORCA's defaults, the file stays). */
 export interface Saved { doc: Requirements; enabled: boolean }
 
-export function load(storage: Pick<Storage, "getItem"> | null = safeStorage()): Saved | null {
+export function load(store: Pick<Storage, "getItem"> | null = storage()): Saved | null {
   try {
-    const raw = storage?.getItem(STORE);
+    const raw = store?.getItem(STORE);
     if (!raw) return null;
     const v = JSON.parse(raw) as Saved;
     return v && v.doc && v.doc.format === FORMAT ? { doc: v.doc, enabled: !!v.enabled } : null;
   } catch { return null; }  // private window, or something else wrote the key
 }
 
-export function save(saved: Saved | null, storage: Pick<Storage, "setItem" | "removeItem"> | null = safeStorage()) {
+export function save(saved: Saved | null, store: Pick<Storage, "setItem" | "removeItem"> | null = storage()) {
   try {
-    if (saved) storage?.setItem(STORE, JSON.stringify(saved));
-    else storage?.removeItem(STORE);
+    if (saved) store?.setItem(STORE, JSON.stringify(saved));
+    else store?.removeItem(STORE);
   } catch { /* private window */ }
-}
-
-function safeStorage(): Storage | null {
-  try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
 }
 
 /** "L3 · Strict": the level and strictness, short. */

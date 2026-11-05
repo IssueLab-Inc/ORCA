@@ -124,7 +124,7 @@ async function chatHost(owner, pageEvents) {
   const input = await readFile(new URL("../src/Chat.tsx", import.meta.url), "utf8");
   let { outputText } = ts.transpileModule(input, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX } });
   for (const [name, url] of Object.entries({ react: mockReact, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
-    "lucide-react": mockIcons, "./api": mockApi, "./voice": mockVoice })) outputText = outputText.replaceAll(`from "${name}"`, `from ${JSON.stringify(url)}`);
+    "lucide-react": mockIcons, "./api": mockApi, "./voice": mockVoice, "./prefs": await transpiled("../src/prefs.ts") })) outputText = outputText.replaceAll(`from "${name}"`, `from ${JSON.stringify(url)}`);
   const { ChatPanel } = await import(moduleUrl(outputText));
   let tree;
   const render = () => {

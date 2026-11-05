@@ -3,14 +3,14 @@ import { useEffect, useState } from "react";
 import { api, setOwnerSettings, type Effort, type EscalationMode, type EveryoneSettings, type OwnerSettings, type SettingsState } from "./api";
 import { Popover } from "./ui";
 import { aiName } from "./aiNames";
+import { pref } from "./prefs";
 
-const KEY = "sightline.owner";
 const EFFORTS: Effort[] = ["minimal", "low", "medium", "high"];
 /** Second tries on Muse Wonder (docs/escalation.md): off, offered as a button, or automatic after no fix. */
 const ESCALATION: [EscalationMode, string][] = [["off", "Off"], ["button", "Offered (a button)"], ["auto", "Automatic after no fix"]];
 
 function stored(): OwnerSettings {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? "{}") as OwnerSettings; } catch { return {}; }
+  return pref.getJSON<OwnerSettings>("owner") ?? {};
 }
 
 /**
@@ -49,7 +49,7 @@ export function OwnerSettingsMenu({ onChange, onEveryone, note }: { onChange: (s
 
   const change = (next: OwnerSettings) => {
     setSettings(next);
-    try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* private window */ }
+    pref.setJSON("owner", next);   // a private window: for this visit
   };
   const saveEveryone = async (changes: Partial<EveryoneSettings>) => {
     setError(null); setSaved(null);

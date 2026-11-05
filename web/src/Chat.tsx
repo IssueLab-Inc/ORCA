@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type ChatEvent, type FilterView, type SharedFilter } from "./api";
 import type { ChatRequest, ChatRequestOwner } from "./chatRequest";
 import { LiveVoice, type LiveVoiceError, MAX_SECONDS, type VoiceMode, VoiceRecorder } from "./voice";
+import { pref } from "./prefs";
 
 /** One step the assistant took, shown under its answer. */
 export interface Step { name: string; args: Record<string, unknown>; summary?: string }
@@ -101,7 +102,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask, voiceModel = "v
     { state: "idle", since: 0, level: 0 });
   const [caption, setCaption] = useState("");
   const [speaking, setSpeaking] = useState(false);
-  const [handsFree, setHandsFree] = useState(() => { try { return localStorage.getItem("sightline.voice.handsfree") === "1"; } catch { return false; } });
+  const [handsFree, setHandsFree] = useState(() => pref.get("handsFree") === "1");
   const [queue, setQueue] = useState<string[]>([]);  // hands-free sentences said while ORCA was still answering
   const live = useRef<LiveVoice | null>(null);
   const recorder = useRef<VoiceRecorder | null>(null);
@@ -138,7 +139,7 @@ export function ChatPanel({ context, onEvent, owner, ready, ask, voiceModel = "v
   function toggleHandsFree() {
     const on = !handsFree;
     setHandsFree(on);
-    try { localStorage.setItem("sightline.voice.handsfree", on ? "1" : "0"); } catch { /* private window */ }
+    pref.set("handsFree", on ? "1" : "0");
   }
 
   async function startVoice(mode: VoiceMode) {

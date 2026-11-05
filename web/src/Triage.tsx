@@ -2,6 +2,7 @@ import { Brain, ChevronDown, CircleCheck, ClipboardCheck, Flag, Info, RotateCcw,
 import { useEffect, useState } from "react";
 import type { TriageKind, TriageModel, TriageVerdict } from "./api";
 import { aiName } from "./aiNames";
+import { pref } from "./prefs";
 
 export const TRIAGE: Record<TriageKind, { label: string; cls: string; tip: string; colour: string; long: string }> = {
   real_clash: { label: "real", cls: "bad", tip: "A real clash: something has to move", colour: "var(--fail)", long: "Real problem" },
@@ -37,10 +38,10 @@ function ruleBreakdown(vs: TriageVerdict[]) {
 
 const ORDER: TriageKind[] = ["real_clash", "modelling_error", "by_design", "non_physical", "unknown"];
 
-const COMPACT = "sightline.triage.compact";
 /** The user's choice of a compact card ("1"/"0"), or null when they have not chosen (compact once a run is done). */
 function storedCompact(): boolean | null {
-  try { const v = localStorage.getItem(COMPACT); return v == null ? null : v === "1"; } catch { return null; }
+  const v = pref.get("triageCompact");
+  return v == null ? null : v === "1";
 }
 
 export interface TriageRun extends Omit<TriageModel, "requirements"> {
@@ -91,7 +92,7 @@ export function TriageCard({ run, results, now, filter, onFilter, onRun, onStop,
   const toggle = () => {
     if (forceCompact) { setOpenedAnyway(compact); return; }  // for this filter only; the stored choice stays
     setChosen(!compact);
-    try { localStorage.setItem(COMPACT, compact ? "0" : "1"); } catch { /* private window */ }
+    pref.set("triageCompact", compact ? "0" : "1");
   };
   const about = run ? `${state === "done" ? `${seconds} s · ` : ""}${byRule} by rule · ${model || "starting"}` : "";
 
